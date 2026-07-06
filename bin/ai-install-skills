@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# Install the Claude skills and global system instructions from this repo onto
+# the current machine, so every Claude Code session loads them automatically.
+#
+#   ai-install-skills            # install/refresh skills + global CLAUDE.md
+#   ai-install-skills --dry-run  # show what would be copied
+#
+# - Skills:  skills/claude/<name>/  ->  ~/.claude/skills/<name>/
+# - Global:  templates/system/CLAUDE-global.md -> ~/.claude/CLAUDE.md
+#   (only if ~/.claude/CLAUDE.md is absent; otherwise prints a diff hint —
+#   never clobbers local edits, same philosophy as install.sh)
+#
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+DRY_RUN="${1:-}"
+
+run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
+
+echo "Installing skills from $REPO_ROOT/skills/claude -> $CLAUDE_HOME/skills"
+run mkdir -p "$CLAUDE_HOME/skills"
+count=0
+for d in "$REPO_ROOT"/skills/claude/*/; do
+  name="$(basename "$d")"
+  [[ -f "$d/SKILL.md" ]] || continue
+  run rm -rf "$CLAUDE_HOME/skills/$name"
+  run cp -a "$d" "$CLAUDE_HOME/skills/$name"
+  count=$((count+1))
+  echo "  + $name"
+done
+echo "$count skills installed."
+
+GLOBAL_SRC="$REPO_ROOT/templates/system/CLAUDE-global.md"
+GLOBAL_DST="$CLAUDE_HOME/CLAUDE.md"
+if [[ ! -f "$GLOBAL_DST" ]]; then
+  run cp "$GLOBAL_SRC" "$GLOBAL_DST"
+  echo "Installed global instructions -> $GLOBAL_DST"
+  echo "NOTE: append this machine's section from templates/system/machine-atlas.md"
+else
+  if cmp -s "$GLOBAL_SRC" "$GLOBAL_DST"; then
+    echo "Global CLAUDE.md already up to date."
+  else
+    echo "~/.claude/CLAUDE.md exists and differs (may contain machine-specific"
+    echo "additions) — NOT overwriting. Compare with:"
+    echo "  diff \"$GLOBAL_DST\" \"$GLOBAL_SRC\""
+  fi
+fi
