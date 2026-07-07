@@ -8,6 +8,7 @@ the others live where noted.
 
 | Skill | What it does | Say this |
 |---|---|---|
+| ⚙ `wrap-up` | **The one-phrase closer.** Chains docs update → secrets sweep → handoff-safe state → push & verify, then one closing report. | **"wrap up"** |
 | ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
 | ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
 | ⚙ `secrets-to-1password` | Sweeps the session for credentials, stores them in the `vibe_coding` vault with rich notes. | "secrets sweep" / "any secrets not in 1password?" |
