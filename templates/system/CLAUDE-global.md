@@ -56,7 +56,12 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 13. Add unit tests for the code you create.
 14. **Verify UI work visually** (serve + screenshot against the requirement)
     before reporting done. "The live site looks exactly the same" has happened
-    too many times.
+    too many times. When the frontend needs a backend to reach the screen (e.g.
+    login), do NOT hand-fumble it: serve the local UI with a **dev-server proxy
+    to the deployed sandbox** (relative `/api/*` URLs + `--proxy-config`) so the
+    browser only ever talks to `localhost` and CORS never blocks it. Prefer a
+    committed one-command script (dflow: `yarn start:preview`). Full recipe:
+    `docs/future-visual-testing.md`.
 15. GitHub is the source of truth. Change code in the repo → push → let
     CI/Coolify/Cloud Build deploy. Never live-edit a server.
 16. Never replace system binaries; config file edits are append-only; Claude
