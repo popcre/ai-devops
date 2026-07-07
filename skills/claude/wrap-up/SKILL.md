@@ -25,8 +25,12 @@ doesn't apply, say so in the report.
    rich notes.
 3. **Handoff-safe state** — every touched repo: no mystery untracked files,
    no half-done merges. If work is unfinished, create/update HANDOFF.md to the
-   fresh-developer standard (`handoff-writer` skill). If HANDOFF.md describes
-   work that is now complete, delete it.
+   full `handoff-standard.md` and RUN ITS SELF-AUDIT GATE — a stranger who
+   walked in off the street must be able to continue with no questions, as
+   effectively as you can right now, including knowing what was tried and
+   failed. A three-sentence handoff is a failure; expand until the audit
+   passes (use the `handoff-writer` skill). If HANDOFF.md describes work that
+   is now complete, delete it.
 4. **Ship & verify** — commit and push everything per each repo's rules
    (dflow → `dflow-ship`: PR to develop; hetz apps → `deploy-and-verify`:
    Actions/GHCR/Coolify + live SHA check; everything else → main). Confirm

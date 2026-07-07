@@ -87,6 +87,16 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
     sweep secrets to 1Password; leave every repo handoff-safe (no mystery
     untracked files). Never say "done" if anything still needs
     commit/merge/apply.
-24. Deprecated systems — delete vestiges on sight, never build on them:
+24. **Handoff quality (non-negotiable).** Write EVERY HANDOFF.md / handoff for a
+    developer who walked in off the street this morning with ZERO knowledge of
+    the app, this session, this chat, or what was tried and failed. Follow
+    `templates/system/handoff-standard.md`: the 9 sections including the
+    mandatory "what we tried that did NOT work" section. Before showing it, run
+    the self-audit gate — could that stranger continue with NO questions, as
+    effectively as you can right now? If not, expand and re-grade. Default to
+    too much; too-short costs Albert a whole session. He must NEVER have to ask
+    "is this comprehensive enough for a fresh developer?" — you already answered
+    it. A three-sentence handoff is a failure.
+25. Deprecated systems — delete vestiges on sight, never build on them:
     Twenty CRM (gone), Directus (replaced by hosted supabase.com), plane
     (renamed poppim), openmanus (removed).

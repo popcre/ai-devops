@@ -82,6 +82,50 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
 - **Deprecated — delete vestiges on sight:** Twenty CRM, Directus (replaced by
   hosted supabase.com), plane (renamed poppim), openmanus.
 
+## HANDOFF quality standard (non-negotiable, every session)
+
+Albert starts new sessions with clean context windows; the handoff is the ONLY
+memory carried forward. Skimpy handoffs are his #1 pain — they trap him in long
+sessions. This is a hard standard.
+
+**Mindset:** write EVERY handoff for a developer who walked in off the street
+this morning. They have ZERO knowledge of the application, of what this session
+was trying to do, of anything discussed here, and of what was tried and failed.
+When this chat is gone, it's gone. Make that stranger able to continue as
+effectively as you can right now. Default to TOO MUCH — too-long costs minutes,
+too-short costs Albert a whole session. Never symmetric; always err long.
+
+**Required structure** (never drop a section; write "N/A" + why if truly
+inapplicable):
+
+1. **What this application is** — plain English: what it does, who uses it, why
+   it exists; repos, stack, where it runs (URLs/hosts). Assume zero knowledge.
+2. **What we set out to do this session, and why** — goal in business + technical
+   terms, and what triggered it.
+3. **Current state** — what works (verified how), what's half-done and its EXACT
+   state (file:line), what's not started; committed/pushed/deployed? which
+   branch/environment?
+4. **Everything we tried that did NOT work** — the most-skipped, most-important
+   section. Each dead end: what, why it seemed right, how it failed, why. Stops
+   the next session repeating your hours of mistakes.
+5. **Root causes and key findings** — with file:line and non-obvious discoveries.
+6. **Exact next steps** — numbered, executable without judgment calls, each with
+   a verification gate ("you'll know it worked when ___").
+7. **Constraints and gotchas** in force.
+8. **Access and environment** — authenticated CLIs/MCPs, which env/branch/URL,
+   where secrets live (1Password vault name, never values).
+9. **Open questions and risks** — decisions made and why, with dates.
+
+**Mandatory self-audit gate — run BEFORE showing the handoff.** Grade it: (1)
+could a street newcomer continue with NO questions? (2) as effectively as you
+can right now? (3) did you include what failed and why? (4) is every next step
+concrete + verifiable? (5) is every term/path/URL explained? If any "no," expand
+and re-grade. Only then present it, and state the self-audit passed. Albert must
+NEVER have to ask "is this comprehensive enough for a fresh developer?" — you
+already answered it. A three-sentence handoff is a failure. Write it to a repo
+file (HANDOFF.md / fix_<topic>.md), commit and push; delete HANDOFF.md only when
+its work is truly complete.
+
 ## Environment
 
 Per-machine facts (paths, NAS quirks, project refs, SSH aliases) live in

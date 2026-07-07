@@ -12,7 +12,7 @@ the others live where noted.
 | ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
 | ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
 | ⚙ `secrets-to-1password` | Sweeps the session for credentials, stores them in the `vibe_coding` vault with rich notes. | "secrets sweep" / "any secrets not in 1password?" |
-| ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt: problem, background, everything tried and why it failed, exact next steps. | "write the handoff" / "give me a prompt for a new session" |
+| ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt per `handoff-standard.md`, with a mandatory self-audit gate so it's never skimpy. | "write the handoff" / "give me a prompt for a new session" |
 
 ## dflow (DesignFlow PLM)
 
