@@ -32,18 +32,30 @@ for d in "$REPO_ROOT"/skills/claude/*/; do
 done
 echo "$count skills installed."
 
-GLOBAL_SRC="$REPO_ROOT/templates/system/CLAUDE-global.md"
-GLOBAL_DST="$CLAUDE_HOME/CLAUDE.md"
-if [[ ! -f "$GLOBAL_DST" ]]; then
-  run cp "$GLOBAL_SRC" "$GLOBAL_DST"
-  echo "Installed global instructions -> $GLOBAL_DST"
-  echo "NOTE: append this machine's section from templates/system/machine-atlas.md"
-else
-  if cmp -s "$GLOBAL_SRC" "$GLOBAL_DST"; then
-    echo "Global CLAUDE.md already up to date."
+install_global() {
+  local src="$1" dst="$2" label="$3"
+  if [[ ! -f "$dst" ]]; then
+    run mkdir -p "$(dirname "$dst")"
+    run cp "$src" "$dst"
+    echo "Installed $label -> $dst"
+    echo "NOTE: append this machine's section from templates/system/machine-atlas.md"
+  elif cmp -s "$src" "$dst"; then
+    echo "$label already up to date."
   else
-    echo "~/.claude/CLAUDE.md exists and differs (may contain machine-specific"
-    echo "additions) — NOT overwriting. Compare with:"
-    echo "  diff \"$GLOBAL_DST\" \"$GLOBAL_SRC\""
+    echo "$dst exists and differs (may contain machine-specific additions)"
+    echo "— NOT overwriting. Compare with:  diff \"$dst\" \"$src\""
   fi
+}
+
+install_global "$REPO_ROOT/templates/system/CLAUDE-global.md" \
+               "$CLAUDE_HOME/CLAUDE.md" "Claude global instructions"
+
+# Codex (ChatGPT Codex CLI) reads ~/.codex/AGENTS.md the way Claude reads
+# ~/.claude/CLAUDE.md. Install the Codex edition if Codex is set up here.
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+if [[ -d "$CODEX_HOME" ]]; then
+  install_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" \
+                 "$CODEX_HOME/AGENTS.md" "Codex global instructions"
+else
+  echo "No $CODEX_HOME directory — skipping Codex global instructions."
 fi

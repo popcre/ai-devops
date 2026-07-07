@@ -1,0 +1,53 @@
+# Skills map — every skill, what it does, when to use it
+
+One-page reference. Say the trigger phrase naturally, or force a skill with
+`/skill-name`. Skills marked ⚙ install automatically via `bin/ai-install-skills`;
+the others live where noted.
+
+## Session rituals (the everyday ones)
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
+| ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
+| ⚙ `secrets-to-1password` | Sweeps the session for credentials, stores them in the `vibe_coding` vault with rich notes. | "secrets sweep" / "any secrets not in 1password?" |
+| ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt: problem, background, everything tried and why it failed, exact next steps. | "write the handoff" / "give me a prompt for a new session" |
+
+## dflow (DesignFlow PLM)
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `dflow-session-start` | Syncs develop → your sandbox branch across all six repos; loads the standing dflow rules (branch policy, AG-Grid MCP, unit tests). | "pull develop into sandbox-albert" — or it fires automatically at dflow session start |
+| ⚙ `dflow-ship` | Tests → commit → push → PR to develop → watches the Cloud Build deploy → verifies the sandbox site. | "push and commit" / "ship it" |
+| ⚙ `design-handoff-implement` | Implements a Claude Design zip in the real stack, phase by phase, with visual verification. | attach the zip + "read the README in full" |
+
+## Infrastructure & deploys
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `deploy-and-verify` | Ships hetz apps (poppim/popcrm/popdam/monitor/hiclaw): Actions → GHCR → Coolify, with both known Coolify quirks baked in; verifies the live build SHA. | "push and commit" (in those repos) / "the live site didn't change" |
+| ⚙ `cicd-rules-audit` | Audits a repo's CI/CD against your full operating rules (embedded verbatim); fixes violations. | "audit CI/CD against our rules" |
+| ⚙ `shared-db-change` | The proper way to change the shared supabase backend: migration discipline, shared-db authoring, correct project refs, type regeneration. | fires on any shared-backend DB change; "make db changes the proper way" |
+| `synology-sharesync-stuck-triage` | Diagnoses/repairs stuck Synology Drive ShareSync between the two NASes, including the move-rename-move-back unstick. | "check ShareSync health" / "a file is stuck syncing" (installed on 916; in the synology-monitor repo) |
+
+## Quality & analysis
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; one subagent per repo; writes bugs.md. | "read the entire codebase and tell me if you find any bugs" |
+| `designflow-e2e-tester` | AI-driven end-to-end/visual testing of the dflow app. | "run the E2E tester" (lives in designflow-frontend/.claude/skills) |
+
+## Meta
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `claude-transcript-backup` | Finds all Claude Code transcripts on the machine, backs them up to claude_chats/<machine>. | "back up my Claude transcripts" |
+| ⚙ `ai-development-pipeline` | The staged 7-step multi-model workflow (Opus plans/reviews, Codex implements/tests). | "run this through the pipeline" |
+
+## Always-on (not skills — loaded every session)
+
+| Asset | What it covers |
+|---|---|
+| `~/.claude/CLAUDE.md` (from `templates/system/CLAUDE-global.md`) | Plain English, do-it-yourself, access-first, no band-aids, no silent failures, branch policies, verify-before-done, deprecated-systems list |
+| Machine section (from `templates/system/machine-atlas.md`) | This machine's paths, quirks, SSH aliases, project refs, MCP endpoints |
+| `~/.codex/AGENTS.md` (from `templates/system/AGENTS-global-codex.md`) | Same rules, Codex edition, with ritual summaries inline |

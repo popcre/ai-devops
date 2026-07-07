@@ -36,6 +36,7 @@ Windows (PowerShell): run the same script via Git Bash
 | "read the entire codebase and tell me if you find any bugs" | `repo-bug-audit` — say "audit the codebase" |
 | "find all Claude Code transcripts on this machine → claude_chats/<machine>" | `claude-transcript-backup` |
 | The full "CI/CD/DevOps Operating Rules" paste (8+ times) | `cicd-rules-audit` — say "audit CI/CD against our rules" |
+| The "AI TASK SPEC: Repository Documentation Maintenance" paste (new apps / big changes) | `repo-docs-overhaul` — say "do a full documentation overhaul" |
 | "I'm not a programmer… plain English… you do it… no band-aids… verify before done" | `templates/system/CLAUDE-global.md` — always loaded, no trigger needed |
 | Re-explaining hosts, paths, quirks, NAS facts, Coolify quirks each session | `templates/system/machine-atlas.md` appended to each machine's CLAUDE.md |
 
