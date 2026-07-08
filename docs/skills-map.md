@@ -14,6 +14,12 @@ the others live where noted.
 | ⚙ `secrets-to-1password` | Sweeps the session for credentials, stores them in the `vibe_coding` vault with rich notes. | "secrets sweep" / "any secrets not in 1password?" |
 | ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt per `handoff-standard.md`, with a mandatory self-audit gate so it's never skimpy. | "write the handoff" / "give me a prompt for a new session" |
 
+## Project setup
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `new-app-setup` | One-time briefing for a brand-new project: access-first credential request, container naming, docs/CI-CD standards (cross-references repo-docs-overhaul and cicd-rules-audit), DB choice, and initial file-count/cleanup pass. | "new project" / "set up a brand new app" |
+
 ## dflow (DesignFlow PLM)
 
 | Skill | What it does | Say this |

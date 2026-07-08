@@ -37,6 +37,7 @@ Windows (PowerShell): run the same script via Git Bash
 | "find all Claude Code transcripts on this machine → claude_chats/<machine>" | `claude-transcript-backup` |
 | The full "CI/CD/DevOps Operating Rules" paste (8+ times) | `cicd-rules-audit` — say "audit CI/CD against our rules" |
 | The "AI TASK SPEC: Repository Documentation Maintenance" paste (new apps / big changes) | `repo-docs-overhaul` — say "do a full documentation overhaul" |
+| The full "POP Creations — New Project Standard" paste at the start of a brand-new engagement | `new-app-setup` — say "new project" / "set up a brand new app" |
 | "I'm not a programmer… plain English… you do it… no band-aids… verify before done" | `templates/system/CLAUDE-global.md` — always loaded, no trigger needed |
 | Re-explaining hosts, paths, quirks, NAS facts, Coolify quirks each session | `templates/system/machine-atlas.md` appended to each machine's CLAUDE.md |
 
