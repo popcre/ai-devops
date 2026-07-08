@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Docs Update"
+  short_description: "Update only durable markdown docs"
+  default_prompt: "Use $codex-docs-update to update only the markdown files that need durable knowledge from this task."

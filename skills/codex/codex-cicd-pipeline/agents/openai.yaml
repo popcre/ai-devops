@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CI/CD Pipeline"
+  short_description: "Apply GitHub GHCR Coolify pipeline rules"
+  default_prompt: "Use $codex-cicd-pipeline to audit or create the GitHub to GHCR to deployment-platform CI/CD path."

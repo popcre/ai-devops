@@ -52,6 +52,11 @@ the others live where noted.
 |---|---|---|
 | ⚙ `codex-github-ship` | Syncs with GitHub, commits, pushes, creates/updates PRs when appropriate, and verifies CI/deploy/live SHA. | "push and commit" / "sync this repo with github.com" |
 | ⚙ `codex-session-closeout` | Codex wrap-up: durable docs, handoff quality gate, secret hygiene, git/deploy evidence. | "wrap up" / "update the .md files" |
+| ⚙ `codex-docs-update` | Updates only durable markdown docs for an existing project/task/session, without closeout, secrets, git, or deploy steps. | "update only the .md files" / "document this" |
+| ⚙ `codex-repo-docs-overhaul` | Creates/rebuilds the standard AGENTS.md + docs set for a new repo or big application change. | "create the standard .md files" / "full documentation overhaul" |
+| ⚙ `codex-dflow-plm` | Codex rules for DesignFlow PLM start/end rituals: sandbox sync, AG-Grid rules, PR to develop for Uma. | "DesignFlow session" / "sandbox-albert" |
+| ⚙ `codex-new-application` | New POP app bootstrap: repo, docs, tests, CI/CD, Hetz/Coolify deployment path when needed. | "set up a new application" |
+| ⚙ `codex-cicd-pipeline` | Creates/audits GitHub → GHCR → deployment-platform pipeline rules. | "audit CI/CD" / "deploying from GitHub" |
 | ⚙ `codex-context-optimizer` | Reduces token use by loading only needed docs, compressing repeated prompts, and creating reusable context. | "reduce my token usage" / "read only what you need" |
 | ⚙ `codex-transcript-miner` | Finds/scrubs/analyzes Codex transcripts and promotes repeated prompts into skills/templates. | "analyze my Codex chats" / "find all Codex transcripts" |
 | ⚙ `ai-reviewer` | Read-only Codex second-opinion review saved under `.ai/reviews/`. | "run a Codex review" |

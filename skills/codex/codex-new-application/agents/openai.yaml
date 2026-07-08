@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex New Application"
+  short_description: "Create a new app with docs and deploy"
+  default_prompt: "Use $codex-new-application to set up a new application repo, documentation, CI/CD, and deployment path."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Repo Docs Overhaul"
+  short_description: "Build AGENTS and repo docs from spec"
+  default_prompt: "Use $codex-repo-docs-overhaul to create or refresh the full markdown documentation set for this repo."

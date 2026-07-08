@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex DesignFlow PLM"
+  short_description: "DesignFlow session start and ship rules"
+  default_prompt: "Use $codex-dflow-plm for this DesignFlow PLM session: sync sandbox branches, follow AG-Grid rules, and ship via PR."
