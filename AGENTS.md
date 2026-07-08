@@ -82,6 +82,7 @@ non-code area is `claude_chats/` — archived session transcripts (data, not cod
 | `skills/` | Claude + Codex skill scaffolding (`SKILL.md`) | project-owned scaffolding |
 | `mcp/` | Future MCP wrapper placeholder | project-owned scaffolding |
 | `claude_chats/` | **~219 MB** of archived Claude Code session transcripts (`.jsonl`) across machines, plus `sync.sh` and its own `README.md` | archived data (sensitive — see below) |
+| `codex_chats/` | Archived Codex session transcripts (`.jsonl`) across machines, plus its own `README.md` | archived data (scrubbed, still sensitive — see below) |
 | `README.md`, `AGENTS.md`, `CLAUDE.md` | Top-level docs | docs |
 
 `claude_chats/` is a cross-machine backup of `~/.claude/projects/` (machines:
@@ -188,6 +189,8 @@ with `.claudeignore` / `.cursorignore`.
 - **`claude_chats/`** — **the big one.** ~219 MB of archived session transcripts
   that will blow out any AI context window and may contain live secrets. Never
   load it. (Tracked in git as a backup; excluded from AI context only.)
+- **`codex_chats/`** — archived Codex session transcripts. Scrubbed before
+  commit, but still large and sensitive. Never load it into AI context.
 - `.git/` — version-control internals
 - `.ai/runs/`, `.ai/tmp/`, `.ai/reviews/` — run/review artifacts (generated inside
   target repos; never source-of-truth here)

@@ -12,6 +12,9 @@
 # huge, and may contain live secrets. See claude_chats/README.md.
 claude_chats/
 
+# Archived Codex session transcripts. Tracked as backup data only.
+codex_chats/
+
 # Run/review artifacts (generated inside target repos, never source-of-truth)
 .ai/runs/
 .ai/tmp/
