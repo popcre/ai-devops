@@ -46,6 +46,16 @@ the others live where noted.
 | ⚙ `ai-development-pipeline` | The staged 7-step multi-model workflow (Opus plans/reviews, Codex implements/tests). | "run this through the pipeline" |
 | ⚙ `codex-handoff` | Hand a build/ops/verification task to Codex (GPT-5.x): self-contained brief → run autonomously (background) → verify its work. Falls back to `codex exec` when the codex-cli MCP can't find the binary. | "use codex to…" / "have codex do X" |
 
+## Codex-native skills
+
+| Skill | What it does | Say this |
+|---|---|---|
+| ⚙ `codex-github-ship` | Syncs with GitHub, commits, pushes, creates/updates PRs when appropriate, and verifies CI/deploy/live SHA. | "push and commit" / "sync this repo with github.com" |
+| ⚙ `codex-session-closeout` | Codex wrap-up: durable docs, handoff quality gate, secret hygiene, git/deploy evidence. | "wrap up" / "update the .md files" |
+| ⚙ `codex-context-optimizer` | Reduces token use by loading only needed docs, compressing repeated prompts, and creating reusable context. | "reduce my token usage" / "read only what you need" |
+| ⚙ `codex-transcript-miner` | Finds/scrubs/analyzes Codex transcripts and promotes repeated prompts into skills/templates. | "analyze my Codex chats" / "find all Codex transcripts" |
+| ⚙ `ai-reviewer` | Read-only Codex second-opinion review saved under `.ai/reviews/`. | "run a Codex review" |
+
 ## Always-on (not skills — loaded every session)
 
 | Asset | What it covers |

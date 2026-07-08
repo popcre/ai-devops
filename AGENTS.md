@@ -52,8 +52,9 @@ Then load additional docs only when relevant:
 | Edit the staged prompt templates | `AGENTS.md`, `templates/prompts/*`, `docs/architecture.md` | Deployment/config docs |
 | Onboard an application repo to the workflow | `AGENTS.md`, `docs/repo-onboarding.md`, `templates/repo-docs/*` | Deployment docs |
 | Back up / sync Claude Code transcripts | `AGENTS.md`, `claude_chats/README.md`, `claude_chats/sync.sh`, `skills/claude/claude-transcript-backup/SKILL.md` | Do not open the transcript `.jsonl` files themselves |
-| Install or update Claude skills / global instructions on a machine | `AGENTS.md`, `docs/skills-usage-guide.md`, `bin/ai-install-skills`, `templates/system/*` | Transcript data |
-| Change a standing AI behavior rule (branch policy, plain-English, verify-before-done, etc.) | `templates/system/CLAUDE-global.md`, `templates/system/machine-atlas.md`, affected `skills/claude/*/SKILL.md` | Unrelated docs |
+| Analyze Codex transcripts or repeated Codex prompts | `AGENTS.md`, `docs/codex-chat-analysis.md`, `docs/codex-skills-usage-guide.md`, `skills/codex/codex-transcript-miner/SKILL.md` | Raw transcript `.jsonl` unless the analysis task requires them |
+| Install or update Claude/Codex skills / global instructions on a machine | `AGENTS.md`, `docs/skills-usage-guide.md`, `docs/codex-skills-usage-guide.md`, `bin/ai-install-skills`, `templates/system/*` | Transcript data |
+| Change a standing AI behavior rule (branch policy, plain-English, verify-before-done, etc.) | `templates/system/CLAUDE-global.md`, `templates/system/AGENTS-global-codex.md`, `templates/system/machine-atlas.md`, affected `skills/claude/*/SKILL.md` or `skills/codex/*/SKILL.md` | Unrelated docs |
 | Work on future MCP wrapper | `AGENTS.md`, `docs/future-mcp-wrapper.md`, `mcp/README.md` | Unrelated docs |
 | Work on future visual testing | `AGENTS.md`, `docs/future-visual-testing.md`, `templates/repo-docs/docs-ai-visual-testing.md` | Unrelated docs |
 | Investigate a bug in a tool | `AGENTS.md`, `docs/development.md`, the specific `bin/` script, `HANDOFF.md` if present, Critical incidents section below | Unrelated docs |
@@ -77,7 +78,7 @@ non-code area is `claude_chats/` — archived session transcripts (data, not cod
 | `config/*.env.example` | Seed templates copied to `/etc/ai-devops/` on install | project-owned config templates |
 | `templates/prompts/` | The seven staged prompt templates (01–07) | project-owned templates |
 | `templates/repo-docs/` | Doc add-ons to drop into onboarded app repos | project-owned templates |
-| `templates/system/` | Global standing instructions (`CLAUDE-global.md`) + per-machine environment atlas, installed to each machine's `~/.claude/CLAUDE.md` | project-owned templates |
+| `templates/system/` | Global standing instructions (`CLAUDE-global.md`, `AGENTS-global-codex.md`) + per-machine environment atlas, installed to each machine's AI config | project-owned templates |
 | `docs/` | Restore, setup, onboarding, and future-feature docs | docs |
 | `skills/` | Claude + Codex skill scaffolding (`SKILL.md`) | project-owned scaffolding |
 | `mcp/` | Future MCP wrapper placeholder | project-owned scaffolding |

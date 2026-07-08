@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex GitHub Ship"
+  short_description: "Sync, push, PR, and verify deploys"
+  default_prompt: "Use $codex-github-ship to sync this repo with GitHub, push the work, and verify CI or deploy state."

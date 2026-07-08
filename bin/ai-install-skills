@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
-# Install the Claude skills and global system instructions from this repo onto
-# the current machine, so every Claude Code session loads them automatically.
+# Install the Claude/Codex skills and global system instructions from this repo
+# onto the current machine, so AI coding sessions load them automatically.
 #
 #   ai-install-skills            # install/refresh skills + global CLAUDE.md
 #   ai-install-skills --dry-run  # show what would be copied
 #
-# - Skills:  skills/claude/<name>/  ->  ~/.claude/skills/<name>/
+# - Claude skills:  skills/claude/<name>/ -> ~/.claude/skills/<name>/
+# - Codex skills:   skills/codex/<name>/  -> ~/.codex/skills/<name>/
 # - Global:  templates/system/CLAUDE-global.md -> ~/.claude/CLAUDE.md
 #   (only if ~/.claude/CLAUDE.md is absent; otherwise prints a diff hint —
 #   never clobbers local edits, same philosophy as install.sh)
@@ -54,6 +55,19 @@ install_global "$REPO_ROOT/templates/system/CLAUDE-global.md" \
 # ~/.claude/CLAUDE.md. Install the Codex edition if Codex is set up here.
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 if [[ -d "$CODEX_HOME" ]]; then
+  echo "Installing Codex skills from $REPO_ROOT/skills/codex -> $CODEX_HOME/skills"
+  run mkdir -p "$CODEX_HOME/skills"
+  codex_count=0
+  for d in "$REPO_ROOT"/skills/codex/*/; do
+    name="$(basename "$d")"
+    [[ -f "$d/SKILL.md" ]] || continue
+    run rm -rf "$CODEX_HOME/skills/$name"
+    run cp -a "$d" "$CODEX_HOME/skills/$name"
+    codex_count=$((codex_count+1))
+    echo "  + $name"
+  done
+  echo "$codex_count Codex skills installed."
+
   install_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" \
                  "$CODEX_HOME/AGENTS.md" "Codex global instructions"
 else

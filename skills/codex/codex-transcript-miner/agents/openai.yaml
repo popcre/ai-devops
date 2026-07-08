@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Transcript Miner"
+  short_description: "Mine Codex chats for reusable workflows"
+  default_prompt: "Use $codex-transcript-miner to analyze Codex chats for repeated prompts, workflow templates, and skills."

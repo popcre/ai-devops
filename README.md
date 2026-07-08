@@ -75,6 +75,10 @@ High-level roles:
 The exact CLI flags for each model live in `/etc/ai-devops/models.env` and can be
 edited per machine (see `docs/model-setup.md`).
 
+Codex-specific repeated workflows now live in `skills/codex/`; see
+[`docs/codex-skills-usage-guide.md`](docs/codex-skills-usage-guide.md) and
+[`docs/codex-chat-analysis.md`](docs/codex-chat-analysis.md).
+
 ---
 
 ## Fresh server install

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Context Optimizer"
+  short_description: "Shrink prompts and load only needed docs"
+  default_prompt: "Use $codex-context-optimizer to prime this task with minimal docs and reduce repeated prompt context."

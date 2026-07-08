@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Session Closeout"
+  short_description: "Docs, handoff, secrets, git closeout"
+  default_prompt: "Use $codex-session-closeout to wrap up this session with docs, handoff, secrets, git, and verification safe."
