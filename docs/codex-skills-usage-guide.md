@@ -40,3 +40,14 @@ file.
 When you notice yourself pasting the same Codex instruction for the third time,
 turn it into one of three things: a Codex skill, a repo `AGENTS.md` rule, or a
 machine-atlas fact. Do not let repeated prompt text remain only in chat history.
+
+## Windows install/update
+
+On any Windows computer, paste this into PowerShell:
+
+```powershell
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+```
+
+That one command clones or pulls this repo, installs Claude and Codex skills,
+and seeds global instruction files without overwriting local edits.

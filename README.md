@@ -96,6 +96,18 @@ ai-devops doctor
 
 Full step-by-step: [`docs/restore-from-zero.md`](docs/restore-from-zero.md).
 
+## Windows computer install
+
+On any Windows vibe-coding computer, run this in PowerShell. It handles both
+new computers and computers where the repo already exists:
+
+```powershell
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+```
+
+Codex prompt version:
+[`templates/prompts/install-ai-devops-windows-codex.md`](templates/prompts/install-ai-devops-windows-codex.md).
+
 ---
 
 ## Update process
