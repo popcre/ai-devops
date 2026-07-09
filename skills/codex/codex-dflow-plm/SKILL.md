@@ -43,6 +43,12 @@ Default Windows parent path: `C:\repos\dflow`.
 - For AG-Grid work, use the AG-Grid MCP `search_docs`; Angular 35.1.0 is the
   latest version exposed there for docs lookup.
 - Add unit tests for functions/code created.
+- For browser-facing fixes, verify the exact user flow in Playwright or a
+  controlled browser before calling it fixed. Assert meaningful page content,
+  not only route changes or wrapper visibility. For routed detail pages, verify
+  a stable heading/body section renders, no blank page is shown, and the browser
+  has no relevant console errors, page errors, failed API responses, or toast
+  text.
 - Keep changes on the user branch.
 - Do not paste or document database passwords. Any read-only database access
   belongs in 1Password or approved local secret storage, never in prompts,
