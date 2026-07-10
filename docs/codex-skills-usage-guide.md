@@ -35,7 +35,8 @@ file.
 - `codex-docs-update`: doc-only durable markdown update, with no closeout side
   effects.
 - `codex-repo-docs-overhaul`: standard new-repo/big-change documentation system.
-- `codex-dflow-plm`: DesignFlow PLM sandbox branch, AG-Grid, and Uma PR rules.
+- `codex-dflow-plm`: DesignFlow PLM sandbox branch, AG-Grid, browser-proof
+  verification for UI fixes, and Uma PR rules.
 - `codex-new-application`: brand-new app setup, docs, CI/CD, and optional
   Hetz/Coolify deploy path.
 - `codex-cicd-pipeline`: GitHub/GHCR/Coolify CI/CD creation and audit rules.
