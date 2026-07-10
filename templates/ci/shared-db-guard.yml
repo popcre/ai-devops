@@ -1,19 +1,25 @@
 name: shared-db guard
 
-# Fails a PR that makes a DATABASE/schema change inside an app repo instead of in
-# the canonical u2giants/shared-db. The shared supabase.com project is used by
+# Fails a change that makes a DATABASE/schema change inside an app repo instead of
+# in the canonical u2giants/shared-db. The shared supabase.com project is used by
 # CRM/DAM/PM-PIM/PLM, so app-side DDL causes drift and can break other apps.
 #
 # HOW TO USE: copy this file to `.github/workflows/shared-db-guard.yml` in each
 # shared-DB-consuming repo. Self-contained on purpose (no cross-org reusable
 # workflow, since these repos span the `popcre` and `u2giants` orgs).
 #
-# TO OVERRIDE for a legitimate exception (legacy retirement / owner-approved
-# emergency): add the label `db-change-approved` to the PR. The job then passes
-# but still prints what it flagged.
+# Runs on BOTH pull_request and push, so it protects PR-flow repos (designflow:
+# sandbox-albert -> develop) AND main-only direct-commit repos (popcrm-web,
+# poppim-web, popdam).
+#
+# OVERRIDE for a legitimate exception (legacy retirement / owner-approved
+# emergency, immediately re-authored in shared-db):
+#   - PR flow: add the label `db-change-approved` to the PR.
+#   - Push flow: put `[db-change-approved]` in the commit message.
 
 on:
   pull_request:
+  push:
 
 permissions:
   contents: read
@@ -28,22 +34,41 @@ jobs:
 
       - name: Flag app-side DB/schema changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HAS_OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'db-change-approved') }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'db-change-approved') }}
         run: |
           set -euo pipefail
+          EMPTY_TREE="$(git hash-object -t tree /dev/null)"
 
-          # Files changed in this PR, excluding the vendored shared-db/ copy
-          # (that folder is auto-synced FROM shared-db and is legitimate) and
-          # excluding test fixtures.
-          mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+          if [ "$EVENT" = "pull_request" ]; then
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+            OVERRIDE="$HAS_LABEL"
+          else
+            HEAD="$PUSH_AFTER"; BASE="${PUSH_BEFORE:-}"
+            # first push to a branch has an all-zero "before"; fall back to parent.
+            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE="$(git rev-parse "${HEAD}^" 2>/dev/null || echo "$EMPTY_TREE")"
+            fi
+            # push override: commit message contains [db-change-approved]
+            if git log -1 --format='%B' "$HEAD" | grep -qiF '[db-change-approved]'; then
+              OVERRIDE=true
+            else
+              OVERRIDE=false
+            fi
+          fi
+
+          # Files changed, excluding the vendored shared-db/ copy (auto-synced FROM
+          # shared-db, legitimate) and test fixtures.
+          mapfile -t changed < <(git diff --name-only "$BASE" "$HEAD" \
             | grep -viE '(^|/)shared-db/' \
             | grep -viE '(^|/)(tests?|__tests__|spec|e2e|fixtures)/' || true)
 
           flagged=""
 
-          # 1) New/changed migration files authored outside shared-db/.
           for f in "${changed[@]:-}"; do
             [ -z "$f" ] && continue
             case "$f" in
@@ -52,10 +77,9 @@ jobs:
             esac
           done
 
-          # 2) DDL / RLS / policy statements ADDED (+ lines) anywhere but shared-db/.
           ddl='ALTER TABLE|CREATE TABLE|DROP TABLE|ALTER COLUMN|ADD COLUMN|DROP COLUMN|CREATE +(UNIQUE +)?INDEX|DROP INDEX|CREATE POLICY|CREATE TRIGGER|CREATE (MATERIALIZED +)?VIEW|CREATE SCHEMA|CREATE TYPE|CREATE FUNCTION'
           if [ "${#changed[@]}" -gt 0 ]; then
-            added=$(git diff "$BASE_SHA" "$HEAD_SHA" -- "${changed[@]}" \
+            added=$(git diff "$BASE" "$HEAD" -- "${changed[@]}" \
               | grep -E '^\+' | grep -v '^\+\+\+' \
               | grep -iEn "$ddl" || true)
             if [ -n "$added" ]; then
@@ -79,11 +103,12 @@ jobs:
           echo "See the 'shared-db-change' / 'codex-shared-db-change' skill."
           echo
           echo "Legitimate exception (legacy retirement / approved emergency):"
-          echo "add the PR label 'db-change-approved'."
+          echo "  - PR:   add the label 'db-change-approved'"
+          echo "  - push: put '[db-change-approved]' in the commit message"
 
-          if [ "$HAS_OVERRIDE" = "true" ]; then
+          if [ "$OVERRIDE" = "true" ]; then
             echo
-            echo "Override label present -> passing, but the above was flagged."
+            echo "Override present -> passing, but the above was flagged."
             exit 0
           fi
           exit 1
