@@ -1,0 +1,89 @@
+name: shared-db guard
+
+# Fails a PR that makes a DATABASE/schema change inside an app repo instead of in
+# the canonical u2giants/shared-db. The shared supabase.com project is used by
+# CRM/DAM/PM-PIM/PLM, so app-side DDL causes drift and can break other apps.
+#
+# HOW TO USE: copy this file to `.github/workflows/shared-db-guard.yml` in each
+# shared-DB-consuming repo. Self-contained on purpose (no cross-org reusable
+# workflow, since these repos span the `popcre` and `u2giants` orgs).
+#
+# TO OVERRIDE for a legitimate exception (legacy retirement / owner-approved
+# emergency): add the label `db-change-approved` to the PR. The job then passes
+# but still prints what it flagged.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Flag app-side DB/schema changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HAS_OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'db-change-approved') }}
+        run: |
+          set -euo pipefail
+
+          # Files changed in this PR, excluding the vendored shared-db/ copy
+          # (that folder is auto-synced FROM shared-db and is legitimate) and
+          # excluding test fixtures.
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+            | grep -viE '(^|/)shared-db/' \
+            | grep -viE '(^|/)(tests?|__tests__|spec|e2e|fixtures)/' || true)
+
+          flagged=""
+
+          # 1) New/changed migration files authored outside shared-db/.
+          for f in "${changed[@]:-}"; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              */migrations/*|*/supabase/migrations/*|migrations/*|supabase/migrations/*)
+                flagged="${flagged}\n  migration file outside shared-db/: $f" ;;
+            esac
+          done
+
+          # 2) DDL / RLS / policy statements ADDED (+ lines) anywhere but shared-db/.
+          ddl='ALTER TABLE|CREATE TABLE|DROP TABLE|ALTER COLUMN|ADD COLUMN|DROP COLUMN|CREATE +(UNIQUE +)?INDEX|DROP INDEX|CREATE POLICY|CREATE TRIGGER|CREATE (MATERIALIZED +)?VIEW|CREATE SCHEMA|CREATE TYPE|CREATE FUNCTION'
+          if [ "${#changed[@]}" -gt 0 ]; then
+            added=$(git diff "$BASE_SHA" "$HEAD_SHA" -- "${changed[@]}" \
+              | grep -E '^\+' | grep -v '^\+\+\+' \
+              | grep -iEn "$ddl" || true)
+            if [ -n "$added" ]; then
+              flagged="${flagged}\n  DDL added outside shared-db/:\n$(echo "$added" | sed 's/^/    /' | head -20)"
+            fi
+          fi
+
+          if [ -z "$flagged" ]; then
+            echo "OK: no app-side database/schema changes detected."
+            exit 0
+          fi
+
+          echo "=============================================================="
+          echo "DATABASE CHANGE DETECTED IN AN APP REPO"
+          echo "=============================================================="
+          echo -e "$flagged"
+          echo
+          echo "All shared-Supabase schema/DDL changes must be authored in the"
+          echo "canonical repo: https://github.com/u2giants/shared-db"
+          echo "(branch + PR + timestamped migration, preview-first, AI merges)."
+          echo "See the 'shared-db-change' / 'codex-shared-db-change' skill."
+          echo
+          echo "Legitimate exception (legacy retirement / approved emergency):"
+          echo "add the PR label 'db-change-approved'."
+
+          if [ "$HAS_OVERRIDE" = "true" ]; then
+            echo
+            echo "Override label present -> passing, but the above was flagged."
+            exit 0
+          fi
+          exit 1

@@ -72,9 +72,14 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
   `u2giants/shared-db`); sweep new secrets into 1Password with rich notes;
   leave no repo with mystery untracked files. [full: session-docs-update,
   secrets-to-1password]
-- **DB changes:** DDL via migration only, authored/mirrored in
-  `u2giants/shared-db`; matching timestamps; regenerate types.
-  [full: shared-db-change]
+- **DB changes = `u2giants/shared-db`, always.** Any schema/DDL change to the
+  shared supabase backend (`<removed-protected-project-ref>`) — column/table/view/RPC/
+  trigger/RLS/seed/migration or cross-app data contract — is authored in
+  `u2giants/shared-db` (branch + PR, preview-first, AI merges) BEFORE app code.
+  NEVER add app-repo migrations (e.g. Sequelize `models/db.js` startup DDL) and
+  NEVER run direct `ALTER`/`CREATE`/`DROP` against the shared DB. App-repo docs
+  that still teach an inline-migration pattern are stale — shared-db wins.
+  Matching timestamps; regenerate types after. [full: codex-shared-db-change]
 - **Deploy verify (hetz apps):** Actions green → GHCR image → Coolify (services
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).

@@ -79,6 +79,15 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
     sessions; never clobber it silently.
 20. State the target repo and branch before any merge/push.
 
+> **Database = `u2giants/shared-db`, always.** Any schema/DDL change to the shared
+> supabase backend (`<removed-protected-project-ref>`) — column/table/view/RPC/trigger/RLS/
+> seed/migration or cross-app data contract — is authored in `u2giants/shared-db`
+> (branch + PR, preview-first, you merge it) BEFORE app code. NEVER add app-repo
+> migrations (e.g. a Sequelize `models/db.js` startup `ALTER`/`CREATE`) and NEVER
+> run direct `ALTER`/`CREATE`/`DROP` (psql/MCP) against the shared DB. If an app
+> repo's own docs still teach an inline-migration pattern, they are stale —
+> shared-db wins. [full: shared-db-change]
+
 ## Session protocol
 
 21. **Start:** read `AGENTS.md` (the router) first, then only the docs it points
