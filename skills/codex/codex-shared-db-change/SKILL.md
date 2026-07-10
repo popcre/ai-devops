@@ -1,6 +1,6 @@
 ---
 name: codex-shared-db-change
-description: Discipline for ANY change to the shared supabase.com backend from an app repo. Use before making db/schema/column/table/view/RPC/trigger/RLS/seed/migration or cross-app data-contract changes in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam, directus, monitor), or when the user says "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", or "all db work goes through shared-db". Codex has no auto-loaded skills, so read this whenever a task touches the database.
+description: Discipline for ANY change to the shared supabase.com backend from an app repo. Use before making db/schema/column/table/view/RPC/trigger/RLS/seed/migration or cross-app data-contract changes in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam), or when the user says "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", or "all db work goes through shared-db". Codex has no auto-loaded skills, so read this whenever a task touches the database.
 ---
 
 # codex-shared-db-change

@@ -27,7 +27,7 @@ git commit -m "ci: enforce shared-db as the source of DB changes"
 
 Consuming repos: `designflow-backend`, `designflow-bff`, `designflow-frontend`,
 `designflow-item-master`, `designflow-tracking`, `designflow-data-syncing`,
-`popcrm-web`, `poppim-web`, `popdam`, `directus`.
+`popcrm-web`, `poppim-web`, `popdam`. (Directus is deprecated — do not include it.)
 
 ### Override
 
