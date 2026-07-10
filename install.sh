@@ -7,6 +7,9 @@
 #   - Copies config/*.env.example into /etc/ai-devops ONLY if the real file
 #     does not already exist (never overwrites real config).
 #   - Symlinks bin/* into /usr/local/bin.
+#   - Installs Claude + Codex skills into ~/.claude/skills and ~/.codex/skills
+#     (force-updated), and seeds ~/.claude/CLAUDE.md / ~/.codex/AGENTS.md only if
+#     missing. Run as your normal user (not sudo) so skills land in your home.
 #   - Runs `ai-devops doctor` at the end.
 #
 # Safe to re-run (idempotent). Uses sudo for system paths.
@@ -99,6 +102,48 @@ for src in "$REPO_ROOT"/bin/*; do
     warn "  $dest exists and is not a symlink; leaving it untouched"
   fi
 done
+
+# --------------------------------------------------------------------------
+# 4.5 Claude + Codex skills (force-update) and global instruction files
+#     (seed only if missing). Mirrors bin/install-ai-devops-windows.ps1 so the
+#     same skill payload reaches Ubuntu machines, not just Windows.
+#     Skills go into the invoking user's home (run this as your normal user,
+#     NOT via sudo, so they don't land under /root).
+# --------------------------------------------------------------------------
+install_skills() {
+  local src_root="$1" dest_root="$2" label="$3" n=0 d name
+  if [ ! -d "$src_root" ]; then warn "No $label skills at $src_root"; return; fi
+  mkdir -p "$dest_root"
+  for d in "$src_root"/*/; do
+    [ -f "${d}SKILL.md" ] || continue
+    name="$(basename "$d")"
+    rm -rf "${dest_root:?}/$name"
+    cp -r "$d" "$dest_root/$name"
+    n=$((n+1))
+  done
+  info "  installed $n $label skill(s) into $dest_root"
+}
+
+seed_global() {
+  local src="$1" dest="$2" label="$3"
+  if [ ! -f "$src" ]; then warn "Missing source for $label: $src"; return; fi
+  mkdir -p "$(dirname "$dest")"
+  if [ -f "$dest" ]; then
+    info "  $label exists; not overwriting ($dest)"
+  else
+    cp "$src" "$dest"; info "  seeded $label -> $dest"
+  fi
+}
+
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  warn "Running as root via sudo; skills would land under /root. Re-run as your normal user for per-user skill install."
+fi
+info "Installing Claude + Codex skills into \$HOME"
+install_skills "$REPO_ROOT/skills/claude" "$HOME/.claude/skills" "Claude"
+install_skills "$REPO_ROOT/skills/codex" "$HOME/.codex/skills" "Codex"
+info "Seeding global instruction files (only if missing)"
+seed_global "$REPO_ROOT/templates/system/CLAUDE-global.md" "$HOME/.claude/CLAUDE.md" "Claude global instructions"
+seed_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$HOME/.codex/AGENTS.md" "Codex global instructions"
 
 # --------------------------------------------------------------------------
 # 5. Doctor
