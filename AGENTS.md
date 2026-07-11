@@ -67,7 +67,8 @@ Then load additional docs only when relevant:
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
 
 `HANDOFF.md` is required reading **whenever it exists** — it means work is in
-progress. It is currently **absent** (no work in progress).
+progress. It is currently **present**: config-consolidation Phase 1 shipped, with
+Phase 2/3 and first-memory-push follow-through pending.
 
 ## Repository structure
 
@@ -375,4 +376,6 @@ email.)_
 | open | Config-consolidation **Phase 2** | Fold the Dropbox SSH + MCP scripts into `bin/`, pulling secrets from the scoped `vibe_coding` 1Password service account (incl. the `916-alien` SSH key). Rotate the currently-plaintext tokens as they move. |
 | open | Config-consolidation **Phase 3** | Retire Dropbox scripts; one-command per-machine onboarding; track the ~5 portable `config.toml` prefs. |
 
-No work is currently in progress or blocked, so there is **no** `HANDOFF.md`.
+Config-consolidation follow-through is in progress, so **`HANDOFF.md` is present** —
+read it for the exact next steps (first memory push, propagate to other machines,
+Phase 2/3).
