@@ -48,6 +48,8 @@ Then load additional docs only when relevant:
 | Quick repo orientation | `README.md`, `AGENTS.md` | Deep docs under `docs/` unless task requires them |
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
 | Add or change configuration, env vars, or model commands | `AGENTS.md`, `docs/configuration.md`, `docs/model-setup.md` (model commands) | Unrelated architecture docs |
+| Understand where machine config lives (skills, SSH, MCP, gcloud, memory, secrets) | `AGENTS.md`, `docs/config-inventory.md` | Unrelated architecture docs |
+| Plan/track converging all machine config onto ai-devops | `AGENTS.md`, `docs/config-consolidation-proposal.md`, `docs/config-inventory.md` | Unrelated docs |
 | Change install/update/uninstall or restore flow | `AGENTS.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, `install.sh`/`update.sh`/`uninstall.sh` | Local-only dev docs unless the dev workflow also changes |
 | Install/update AI DevOps on a Windows coding computer | `AGENTS.md`, `bin/install-ai-devops-windows.ps1`, `docs/codex-skills-usage-guide.md`, `templates/prompts/install-ai-devops-windows-codex.md` | Linux restore docs unless also touching server install |
 | Edit the staged prompt templates | `AGENTS.md`, `templates/prompts/*`, `docs/architecture.md` | Deployment/config docs |
@@ -83,6 +85,7 @@ non-code area is `claude_chats/` — archived session transcripts (data, not cod
 | `templates/system/` | Global standing instructions (`CLAUDE-global.md`, `AGENTS-global-codex.md`) + per-machine environment atlas, installed to each machine's AI config | project-owned templates |
 | `docs/` | Restore, setup, onboarding, and future-feature docs | docs |
 | `skills/` | Claude + Codex skill scaffolding (`SKILL.md`) | project-owned scaffolding |
+| `memory/` | Cross-machine Claude auto-memory (per-project `MEMORY.md` + fact files), synced by `bin/ai-sync-memory`. **Secret-free** — see `memory/README.md` | project-owned data (git-tracked) |
 | `mcp/` | Future MCP wrapper placeholder | project-owned scaffolding |
 | `claude_chats/` | **~219 MB** of archived Claude Code session transcripts (`.jsonl`) across machines, plus `sync.sh` and its own `README.md` | archived data (sensitive — see below) |
 | `codex_chats/` | Archived Codex session transcripts (`.jsonl`) across machines, plus its own `README.md` | archived data (scrubbed, still sensitive — see below) |
@@ -162,7 +165,7 @@ names.
 | Toolkit home | `/worksp/ai-devops` | fixed convention | **Never** `/opt/ai-devops`. Referenced by all scripts/docs |
 | Machine config dir | `/etc/ai-devops/` | `install.sh`, `server.env` | Holds real `models.env` + `server.env` (not in repo) |
 | Log dir | `/var/log/ai-devops/` | `install.sh`, `server.env` | Created on install; currently unused by scripts |
-| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task` |
+| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |
@@ -368,5 +371,8 @@ email.)_
 | open | Automated visual testing (Playwright) | Design sketched in `docs/future-visual-testing.md`; manual for now |
 | open | App-repo onboarding helper | `docs/repo-onboarding.md` describes manual steps; `ai-onboard-repo` helper not built |
 | done | Initial toolkit scaffold + install + doctor green | Completed in commit `f39315d` |
+| done | Config-consolidation **Phase 1** | `sync-dotfiles` skill (Claude + Codex), `bin/ai-gcloud-dflow`, `bin/ai-sync-memory` + `memory/` tree. See `docs/config-consolidation-proposal.md`. |
+| open | Config-consolidation **Phase 2** | Fold the Dropbox SSH + MCP scripts into `bin/`, pulling secrets from the scoped `vibe_coding` 1Password service account (incl. the `916-alien` SSH key). Rotate the currently-plaintext tokens as they move. |
+| open | Config-consolidation **Phase 3** | Retire Dropbox scripts; one-command per-machine onboarding; track the ~5 portable `config.toml` prefs. |
 
 No work is currently in progress or blocked, so there is **no** `HANDOFF.md`.

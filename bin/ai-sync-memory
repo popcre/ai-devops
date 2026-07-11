@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Sync Claude Code auto-memory between this machine and the ai-devops repo.
+#
+# Memory lives per-project on each machine at:
+#     $CLAUDE_HOME/projects/<slug>/memory/
+# where <slug> encodes the working-copy PATH (e.g. C--repos-dflow). That slug
+# DIFFERS per machine (C: on one box, D: on another), so the same logical
+# project would otherwise never unify. We canonicalize <slug> to a project key:
+#     C--repos-dflow, D--repos-dflow  ->  dflow
+# Exceptions can be pinned in  memory/project-map.tsv  (one "slug<TAB>project"
+# per line, '#' comments allowed).
+#
+# In the repo, memory is stored at:  memory/<project>/
+#
+#   ai-sync-memory push [--dry-run]   # machine memory  -> repo   (commit/push is a separate step)
+#   ai-sync-memory pull [--dry-run]   # repo memory     -> machine (only for projects that already exist locally)
+#
+# Memory is SECRET-FREE by policy (facts, not credentials), so it is git-tracked
+# directly. Never let a secret into a memory file.
+set -euo pipefail
+
+DIRECTION="${1:-}"
+DRY_RUN="${2:-}"
+CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MEM_REPO="$REPO_ROOT/memory"
+MAP_FILE="$MEM_REPO/project-map.tsv"
+
+run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
+
+usage() { echo "usage: ai-sync-memory {push|pull} [--dry-run]" >&2; exit 2; }
+
+# Canonical project key for a per-machine slug.
+canonical() {
+  local slug="$1" mapped
+  if [[ -f "$MAP_FILE" ]]; then
+    mapped="$(awk -F'\t' -v s="$slug" '!/^#/ && $1==s {print $2; exit}' "$MAP_FILE")"
+    if [[ -n "$mapped" ]]; then echo "$mapped"; return; fi
+  fi
+  # default heuristic: drop everything up to and including the last "repos-"
+  if [[ "$slug" == *repos-* ]]; then echo "${slug##*repos-}"; else echo "$slug"; fi
+}
+
+case "$DIRECTION" in
+  push)
+    run mkdir -p "$MEM_REPO"
+    n=0
+    for md in "$CLAUDE_HOME"/projects/*/memory; do
+      [[ -d "$md" ]] || continue
+      slug="$(basename "$(dirname "$md")")"
+      proj="$(canonical "$slug")"
+      dest="$MEM_REPO/$proj"
+      run mkdir -p "$dest"
+      run cp -a "$md/." "$dest/"
+      echo "  push  $slug  ->  memory/$proj"
+      n=$((n+1))
+    done
+    echo "$n project memory folder(s) copied into the repo. Review, then commit+push ai-devops."
+    ;;
+  pull)
+    [[ -d "$MEM_REPO" ]] || { echo "No memory/ tree in repo yet — nothing to pull."; exit 0; }
+    for pd in "$MEM_REPO"/*/; do
+      [[ -d "$pd" ]] || continue
+      proj="$(basename "$pd")"
+      matched=0
+      for md in "$CLAUDE_HOME"/projects/*/memory; do
+        [[ -d "$(dirname "$md")" ]] || continue
+        slug="$(basename "$(dirname "$md")")"
+        if [[ "$(canonical "$slug")" == "$proj" ]]; then
+          run mkdir -p "$md"
+          run cp -a "$pd." "$md/"
+          echo "  pull  memory/$proj  ->  $slug"
+          matched=1
+        fi
+      done
+      [[ $matched -eq 0 ]] && echo "  skip  memory/$proj  (no local project dir on this machine yet)"
+    done
+    ;;
+  *) usage ;;
+esac

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# Point the gcloud CLI at the dflow GCP project + region on this machine.
+# Idempotent; safe to re-run. Requires gcloud already installed and authed.
+#
+#   ai-gcloud-dflow            # apply
+#   ai-gcloud-dflow --dry-run  # show what would run
+#
+# There is only ONE dflow GCP project. An old "dflow-plm" name is stale/empty —
+# ignore it. Cloud Build/Run here are 2nd-gen REGIONAL (us-east4); the global
+# gcloud surface returns misleading empty results, hence these regional defaults.
+# See the designflow-frontend AGENTS.md "Verifying a deploy from the CLI" note.
+set -euo pipefail
+
+PROJECT="lithe-breaker-323913"
+REGION="us-east4"
+DRY_RUN="${1:-}"
+
+run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
+
+if ! command -v gcloud >/dev/null 2>&1; then
+  echo "gcloud not found on PATH — nothing to do on this machine." >&2
+  exit 0
+fi
+
+run gcloud config set project            "$PROJECT"
+run gcloud config set run/region         "$REGION"   # Cloud Run
+run gcloud config set builds/region      "$REGION"   # Cloud Build
+run gcloud config set artifacts/location "$REGION"   # Artifact Registry
+run gcloud config set compute/region     "$REGION"   # catch-all fallback
+
+echo "gcloud pointed at dflow: project=$PROJECT region=$REGION"
