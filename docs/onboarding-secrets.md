@@ -127,8 +127,14 @@ from Claude Code, and these are *verified* limitations:
 
 It also restores the **916-alien SSH key** from 1Password
 (`op://vibe_coding/916-alien SSH key/...`) to `~\.ssh\916-alien` (+ `.pub`) with
-a user-only ACL, so `ssh vps` works immediately — the private key is written
-straight from 1Password at runtime and never stored in the repo.
+a user-only ACL, and installs the managed **SSH host aliases**
+(`config/ssh-config.template` → `~/.ssh/ai-devops.conf`, `Include`d from
+`~/.ssh/config` at the end so any existing entry still wins), so `ssh vps`,
+`ssh vps2` (same box), `ssh seafile`, etc. work immediately. The tunnel-backed
+hosts connect via `cloudflared` (installed by the script) so they work on any
+network without Tailscale — the same path on Windows and Linux. The private key
+is written straight from 1Password at runtime and never stored in the repo; the
+config is non-secret (hostnames + the public key path only).
 
 `bin/setup-machine.ps1` wires all three servers (supabase stdio + the two
 remotes) with **no token written to disk**, using two launchers:

@@ -16,8 +16,10 @@ What it does (idempotent — safe to re-run):
   5. Writes a launcher  ...\ai-devops\mcp-launch.cmd  that reads the token from
      the file and runs each MCP server under `op run --env-file mcp.env`, so
      secrets resolve at launch and NO secret is ever written into the config.
-  6. Restores the 916-alien SSH key from 1Password to ~\.ssh\916-alien (+ .pub),
-     user-only ACL, so `ssh vps` works immediately on a new machine.
+  6. Restores the 916-alien SSH key from 1Password to ~\.ssh\916-alien (+ .pub)
+     and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
+     from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
+     immediately. Uses cloudflared so it works on any network without Tailscale.
   7. Best-effort: wires all MCP servers into Claude Desktop's
      claude_desktop_config.json (backed up first) — supabase (stdio) plus the
      two remotes (devops-mcp, synology-monitor) via the mcp-remote shim. No
@@ -88,6 +90,10 @@ if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$nul
 
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
 if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
+
+# cloudflared — used by the SSH config's ProxyCommand so `ssh vps` works on any network.
+if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) { Ensure-Winget "Cloudflare.cloudflared" "cloudflared" }
+if (Get-Command cloudflared -ErrorAction SilentlyContinue) { Ok "cloudflared" } else { Warn "cloudflared not found; `ssh vps` (tunnel) will not work until it is installed." }
 
 # --------------------------------------------------------------------------
 # 2. Repo + skills + global files (delegates to the existing installer)
@@ -209,6 +215,35 @@ if ($LASTEXITCODE -eq 0 -and $priv) {
 }
 
 # --------------------------------------------------------------------------
+# 5c. SSH config — host aliases (ssh vps / vps2 / coolify / seafile / ...)
+# --------------------------------------------------------------------------
+# Installed as ~/.ssh/ai-devops.conf and Included from ~/.ssh/config at the END,
+# so any host you already define keeps winning; only NEW aliases (e.g. vps2) are
+# added. Never clobbers your existing config.
+Step "SSH config (host aliases: vps, vps2, coolify, seafile, ...)"
+$sshTmpl   = Join-Path $RepoPath "config\ssh-config.template"
+$aidevConf = Join-Path $sshDir "ai-devops.conf"
+$mainConf  = Join-Path $sshDir "config"
+if (Test-Path $sshTmpl) {
+  New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
+  Copy-Item $sshTmpl $aidevConf -Force
+  try { icacls $aidevConf /inheritance:r | Out-Null; icacls $aidevConf /grant:r "$($env:USERNAME):(R,W)" | Out-Null } catch {}
+  $incLine = "Include ai-devops.conf"
+  if (-not (Test-Path $mainConf)) {
+    Set-Content -Path $mainConf -Value $incLine -Encoding ascii
+    try { icacls $mainConf /inheritance:r | Out-Null; icacls $mainConf /grant:r "$($env:USERNAME):(R,W)" | Out-Null } catch {}
+    Ok "Created ~/.ssh/config with Include ai-devops.conf"
+  } elseif (Select-String -Path $mainConf -SimpleMatch "ai-devops.conf" -Quiet) {
+    Ok "~/.ssh/config already includes ai-devops.conf"
+  } else {
+    Add-Content -Path $mainConf -Value "`n# ai-devops managed host aliases (existing entries above still win)`n$incLine"
+    Ok "Added 'Include ai-devops.conf' to ~/.ssh/config (appended; your entries win)"
+  }
+} else {
+  Warn "Missing $sshTmpl — skipping SSH config."
+}
+
+# --------------------------------------------------------------------------
 # 6. Best-effort: wire MCP servers into Claude Desktop config
 # --------------------------------------------------------------------------
 if ($SkipDesktopMcp) {
@@ -274,11 +309,13 @@ Write-Host "  references : $McpEnv"
 Write-Host "  launcher   : $Launcher"
 Write-Host "  remote launcher: $RemoteLauncher"
 Write-Host "  ssh key    : $keyPath (+ .pub)"
+Write-Host "  ssh config : $aidevConf (Included from ~/.ssh/config)"
 Write-Host ""
 Write-Host "Validate on this machine:" -ForegroundColor Cyan
 Write-Host "  1. Run:  op run --env-file `"$McpEnv`" -- cmd /c echo ok"
 Write-Host "     (should print 'ok' with no auth error)"
 Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/designflow-mcp/devops_token"
 Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
-Write-Host "  3. Fully quit and reopen Claude Desktop."
-Write-Host "  4. Confirm all three MCPs show connected: supabase, devops-mcp, synology-monitor."
+Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
+Write-Host "  4. Fully quit and reopen Claude Desktop."
+Write-Host "  5. Confirm all three MCPs show connected: supabase, devops-mcp, synology-monitor."
