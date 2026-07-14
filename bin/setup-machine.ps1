@@ -16,7 +16,9 @@ What it does (idempotent — safe to re-run):
   5. Writes a launcher  ...\ai-devops\mcp-launch.cmd  that reads the token from
      the file and runs each MCP server under `op run --env-file mcp.env`, so
      secrets resolve at launch and NO secret is ever written into the config.
-  6. Best-effort: wires all MCP servers into Claude Desktop's
+  6. Restores the 916-alien SSH key from 1Password to ~\.ssh\916-alien (+ .pub),
+     user-only ACL, so `ssh vps` works immediately on a new machine.
+  7. Best-effort: wires all MCP servers into Claude Desktop's
      claude_desktop_config.json (backed up first) — supabase (stdio) plus the
      two remotes (devops-mcp, synology-monitor) via the mcp-remote shim. No
      token is ever written into the config; only URLs and op:// references.
@@ -175,6 +177,38 @@ Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
 
 # --------------------------------------------------------------------------
+# 5b. Restore the 916-alien SSH key (Windows dev machines -> hetz VPS)
+# --------------------------------------------------------------------------
+# Reads the private + public key from 1Password at runtime (via op) and writes
+# them to ~\.ssh with a user-only ACL. Private keys need LF newlines and a
+# trailing newline, so we write bytes explicitly rather than via Set-Content.
+Step "SSH key: 916-alien (Windows dev machines -> hetz VPS)"
+$sshDir  = Join-Path $HOME ".ssh"
+$keyPath = Join-Path $sshDir "916-alien"
+$privRef = "op://vibe_coding/916-alien SSH key/private key"
+$pubRef  = "op://vibe_coding/916-alien SSH key/public key"
+$priv = & op read $privRef 2>$null
+if ($LASTEXITCODE -eq 0 -and $priv) {
+  New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
+  # op read returns lines as an array; rejoin with LF and guarantee trailing LF.
+  $privText = (($priv -join "`n") -replace "`r`n", "`n")
+  if (-not $privText.EndsWith("`n")) { $privText += "`n" }
+  [System.IO.File]::WriteAllText($keyPath, $privText)
+  try {
+    icacls $keyPath /inheritance:r | Out-Null
+    icacls $keyPath /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+  } catch { Warn "Wrote key but could not tighten ACL: $_" }
+  $pub = & op read $pubRef 2>$null
+  if ($LASTEXITCODE -eq 0 -and $pub) {
+    [System.IO.File]::WriteAllText("$keyPath.pub", ((($pub -join " ").Trim()) + "`n"))
+  }
+  Ok "Restored $keyPath (+ .pub), user-only ACL"
+} else {
+  Warn "Could not read '$privRef' from 1Password — skipping SSH key restore."
+  Warn "  (Item missing, or the service-account token lacks access. Not fatal.)"
+}
+
+# --------------------------------------------------------------------------
 # 6. Best-effort: wire MCP servers into Claude Desktop config
 # --------------------------------------------------------------------------
 if ($SkipDesktopMcp) {
@@ -239,6 +273,7 @@ Write-Host "  token file : $TokenFile   (user-only)"
 Write-Host "  references : $McpEnv"
 Write-Host "  launcher   : $Launcher"
 Write-Host "  remote launcher: $RemoteLauncher"
+Write-Host "  ssh key    : $keyPath (+ .pub)"
 Write-Host ""
 Write-Host "Validate on this machine:" -ForegroundColor Cyan
 Write-Host "  1. Run:  op run --env-file `"$McpEnv`" -- cmd /c echo ok"

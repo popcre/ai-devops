@@ -125,6 +125,11 @@ from Claude Code, and these are *verified* limitations:
   `op read`s it in memory just before starting `mcp-remote`; only the URL and
   the `op://` reference ever appear in the config or the script.
 
+It also restores the **916-alien SSH key** from 1Password
+(`op://vibe_coding/916-alien SSH key/...`) to `~\.ssh\916-alien` (+ `.pub`) with
+a user-only ACL, so `ssh vps` works immediately — the private key is written
+straight from 1Password at runtime and never stored in the repo.
+
 `bin/setup-machine.ps1` wires all three servers (supabase stdio + the two
 remotes) with **no token written to disk**, using two launchers:
 `mcp-launch.cmd` (injects env for stdio servers) and `mcp-remote-launch.cmd`
