@@ -77,7 +77,7 @@ Windows-only, admin PowerShell, idempotent. It:
   |---|---|---|---|
   | `github.com` | GitHub | git | uses its OWN key `~/.ssh/id_ed25519` (not 916-alien) |
   | `coolify` / `vps` / `hetzner` | Hetzner VPS `<removed-protected-address>` | root | Coolify host; CF fallback `ssh-coolify.designflow.app` |
-  | `vps2` | same Hetzner box | ai | adds `LocalForward 8787` (Headroom tunnel) |
+  | `vps2` | same Hetzner box | ai | `LocalForward 8787 <removed-protected-address>:8787` — optional Headroom tunnel fallback; see [`headroom.md`](headroom.md) |
   | `edgesynology1` / `edge1` | NAS `<removed-protected-address>` | ahazan | LAN preferred, Tailscale `<removed-protected-address>` fallback |
   | `edgesynology2` / `edge2` | NAS `<removed-protected-address>` port 1904 | ahazan | port 22 blocks command exec |
   | `backupwiz` / `wiz` | DigitalOcean `<removed-protected-address>` | root | CF fallback `ssh-backupwiz.designflow.app` |

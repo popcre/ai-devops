@@ -49,6 +49,7 @@ Then load additional docs only when relevant:
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
 | Add or change configuration, env vars, or model commands | `AGENTS.md`, `docs/configuration.md`, `docs/model-setup.md` (model commands) | Unrelated architecture docs |
 | Understand where machine config lives (skills, SSH, MCP, gcloud, memory, secrets) | `AGENTS.md`, `docs/config-inventory.md` | Unrelated architecture docs |
+| Anything about the Headroom token-compression proxy (find it, fix it, route a machine through it, see savings, turn it off) | `AGENTS.md`, `docs/headroom.md` | Unrelated architecture docs |
 | Plan/track converging all machine config onto ai-devops | `AGENTS.md`, `docs/config-consolidation-proposal.md`, `docs/config-inventory.md` | Unrelated docs |
 | Change install/update/uninstall or restore flow | `AGENTS.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, `install.sh`/`update.sh`/`uninstall.sh` | Local-only dev docs unless the dev workflow also changes |
 | Install/update AI DevOps on a Windows coding computer | `AGENTS.md`, `bin/install-ai-devops-windows.ps1`, `docs/codex-skills-usage-guide.md`, `templates/prompts/install-ai-devops-windows-codex.md` | Linux restore docs unless also touching server install |
