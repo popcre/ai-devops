@@ -162,22 +162,17 @@ fi
 # --------------------------------------------------------------------------
 # 4c. Memory auto-sync (keep Claude memories in sync across machines)
 # --------------------------------------------------------------------------
-# Runs the safe two-way sync now (seed), and schedules it every 30 min via the
-# user's crontab. ai-memory-sync uses an isolated clone + a secret gate, so it
-# never touches this checkout and never uploads anything that looks like a secret.
-info "Memory auto-sync"
-"$BIN_TARGET/ai-memory-sync" pull >/dev/null 2>&1 || "$REPO_ROOT/bin/ai-memory-sync" pull >/dev/null 2>&1 || true
-if command -v crontab >/dev/null 2>&1; then
-  if crontab -l 2>/dev/null | grep -qF "ai-memory-sync"; then
-    info "  cron already scheduled"
-  else
-    ( crontab -l 2>/dev/null; echo "*/30 * * * * $BIN_TARGET/ai-memory-sync >/dev/null 2>&1" ) | crontab - \
-      && info "  scheduled: sync memory every 30 min" \
-      || warn "  could not add crontab entry; run 'ai-memory-sync' manually"
-  fi
-else
-  info "  crontab not available; run 'ai-memory-sync' manually or add a timer"
-fi
+# Runs the safe two-way sync once now (seed). ai-memory-sync uses an isolated
+# clone + a secret gate, so it never touches this checkout and never uploads
+# anything that looks like a secret.
+#
+# SCHEDULING (the recurring cron) is NOT added here on purpose: a cron is
+# host-level state, which on ansible-managed Ubuntu hosts belongs in
+# /worksp/ansible (the `cron_glue` role / `cron_glue_entries`), so it stays
+# tracked and reproducible. Windows machines (not ansible-managed) schedule it
+# via the Scheduled Task in bin/setup-machine.ps1.
+info "Memory auto-sync (one-time seed; schedule is owned by ansible cron_glue)"
+"$BIN_TARGET/ai-memory-sync" >/dev/null 2>&1 || "$REPO_ROOT/bin/ai-memory-sync" >/dev/null 2>&1 || true
 
 # --------------------------------------------------------------------------
 # 5. Doctor
