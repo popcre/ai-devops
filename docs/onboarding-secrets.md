@@ -118,16 +118,21 @@ from Claude Code, and these are *verified* limitations:
   launcher (`~/.config/ai-devops/mcp-launch.cmd`), and no secret is ever written
   into the config.
 - **npx needs a `cmd /c` wrapper** to spawn on Windows.
-- **Remote/HTTP MCP servers** (`devops-mcp`, `synology-monitor`) cannot be
-  scripted into the config reliably; they are added once via
-  **Settings → Connectors → Add custom connector**.
+- **Remote/HTTP MCP servers** (`devops-mcp`, `synology-monitor`) run through the
+  `mcp-remote` stdio shim. Note that `mcp-remote` **also** does not expand
+  `${VAR}` in `--header` (verified — its parser stores the header value
+  verbatim). So the bearer token is resolved to a real value by a launcher that
+  `op read`s it in memory just before starting `mcp-remote`; only the URL and
+  the `op://` reference ever appear in the config or the script.
 
-`bin/setup-machine.ps1` does the reliable parts (tools, repo, skills, token
-file, `mcp.env`, launcher, and best-effort wiring of the stdio `supabase`
-server) and prints a short **validation checklist** for the parts that can only
-be confirmed on the machine itself. The Desktop-config step is best-effort and
-was authored, not executed, from a Linux box — always confirm in the app that
-the `supabase` MCP shows connected after running it.
+`bin/setup-machine.ps1` wires all three servers (supabase stdio + the two
+remotes) with **no token written to disk**, using two launchers:
+`mcp-launch.cmd` (injects env for stdio servers) and `mcp-remote-launch.cmd`
+(builds the bearer header for remote servers). It prints a **validation
+checklist** for the parts that can only be confirmed on the machine itself. The
+Desktop-config step is best-effort and was authored, not executed, from a Linux
+box — always confirm in the app that all three MCPs show connected after running
+it.
 
 ## What lives where (boundary with Ansible)
 

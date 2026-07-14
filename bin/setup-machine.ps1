@@ -16,18 +16,19 @@ What it does (idempotent — safe to re-run):
   5. Writes a launcher  ...\ai-devops\mcp-launch.cmd  that reads the token from
      the file and runs each MCP server under `op run --env-file mcp.env`, so
      secrets resolve at launch and NO secret is ever written into the config.
-  6. Best-effort: wires the STDIO MCP servers (e.g. supabase) into Claude
-     Desktop's claude_desktop_config.json (backed up first).
+  6. Best-effort: wires all MCP servers into Claude Desktop's
+     claude_desktop_config.json (backed up first) — supabase (stdio) plus the
+     two remotes (devops-mcp, synology-monitor) via the mcp-remote shim. No
+     token is ever written into the config; only URLs and op:// references.
 
-IMPORTANT — Claude Desktop limitations you must know (verified against docs):
-  - Claude Desktop does NOT expand ${VAR} placeholders in its config. That is
-    why we inject real values via `op run` at launch instead of placeholders.
-  - REMOTE / HTTP MCP servers (devops-mcp, synology-monitor) cannot be wired
-    from the config file reliably; add them once via the app's
-    Settings -> Connectors -> "Add custom connector" UI. This script prints the
-    URLs and (locked) tokens location for that one-time manual step.
+IMPORTANT — Claude Desktop limitations you must know (verified):
+  - Claude Desktop does NOT expand ${VAR} in its config, and neither does
+    mcp-remote in --header. So tokens are resolved to real values by `op` at
+    launch (inside a launcher .cmd), not by placeholder substitution.
+  - MSIX sandbox does not inherit setx env vars and can strip `env` blocks, so
+    the token is read from a file by the launcher, never set as a system var.
   - This script's Desktop-config step is BEST-EFFORT and could not be tested on
-    Linux; after running, verify in Claude Desktop that the supabase MCP shows
+    Linux; after running, verify in Claude Desktop that all three MCPs show
     connected. A validation checklist is printed at the end.
 
 Flags:
@@ -62,6 +63,7 @@ $CfgDir    = Join-Path $HOME ".config\ai-devops"
 $TokenFile = Join-Path $CfgDir "op-service-account"
 $McpEnv    = Join-Path $CfgDir "mcp.env"
 $Launcher  = Join-Path $CfgDir "mcp-launch.cmd"
+$RemoteLauncher = Join-Path $CfgDir "mcp-remote-launch.cmd"
 
 # --------------------------------------------------------------------------
 # 1. Base tools: git, op, node/npx
@@ -145,24 +147,40 @@ Ok "Installed mcp.env (op:// references only, no secrets)"
 # 5. Launcher that injects secrets at MCP-server start
 # --------------------------------------------------------------------------
 Step "MCP launcher -> $Launcher"
-$launcherBody = @"
+$launcherBody = @'
 @echo off
 rem [ai-devops] read the vault-locked service-account token from the user file,
 rem then run the given MCP server under op with the central reference env-file.
 rem No secret is stored in claude_desktop_config.json.
 set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
 op run --no-masking --env-file="%USERPROFILE%\.config\ai-devops\mcp.env" -- %*
-"@
+'@
 Set-Content -Path $Launcher -Value $launcherBody -Encoding ascii
 Ok "Wrote $Launcher"
 
+# A second launcher for REMOTE/HTTP MCP servers. mcp-remote does NOT expand
+# ${VAR} in --header, so the bearer token must be a real value before it runs.
+# This reads the vault-locked token, `op read`s the bearer token IN MEMORY, and
+# passes it to mcp-remote. Args carry the URL + the op:// reference only; the
+# token itself is never written to disk or into claude_desktop_config.json.
+#   %1 = server URL,  %2 = op:// reference to the bearer token
+$remoteBody = @'
+@echo off
+setlocal
+set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
+for /f "usebackq delims=" %%T in (`op read %2`) do set "TOK=%%T"
+npx -y mcp-remote %1 --header "Authorization: Bearer %TOK%"
+'@
+Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
+Ok "Wrote $RemoteLauncher"
+
 # --------------------------------------------------------------------------
-# 6. Best-effort: wire stdio MCP servers into Claude Desktop config
+# 6. Best-effort: wire MCP servers into Claude Desktop config
 # --------------------------------------------------------------------------
 if ($SkipDesktopMcp) {
   Step "Skipping Claude Desktop config (-SkipDesktopMcp)"
 } else {
-  Step "Wiring stdio MCP servers into Claude Desktop (best-effort)"
+  Step "Wiring MCP servers into Claude Desktop (best-effort)"
   # The Store/MSIX install keeps the REAL config here (the "Edit Config" button
   # opens the wrong %APPDATA% copy — do not use it).
   $msix = Join-Path $env:LOCALAPPDATA "Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json"
@@ -182,25 +200,34 @@ if ($SkipDesktopMcp) {
     if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
 
     # supabase (stdio, npx). command=cmd /c launcher ... so the .cmd + npx.cmd
-    # both run through a shell (spawn cannot run batch files directly).
+    # both run through a shell (spawn cannot run batch files directly). op run
+    # injects SUPABASE_ACCESS_TOKEN (from mcp.env) into the server's environment.
     $cfg["mcpServers"]["supabase"] = @{
       command = "cmd"
       args = @("/c", $Launcher, "cmd", "/c", "npx", "-y",
                "@supabase/mcp-server-supabase@latest", "--project-ref", $SupabaseProjectRef)
     }
 
+    # devops-mcp + synology-monitor (remote/HTTP). Wired via the mcp-remote shim
+    # under the remote launcher, so the bearer token is resolved from 1Password
+    # at launch — never written into this config. Only the URL + op:// ref appear.
+    $cfg["mcpServers"]["devops-mcp"] = @{
+      command = "cmd"
+      args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
+               "op://vibe_coding/designflow-mcp/devops_token")
+    }
+    $cfg["mcpServers"]["synology-monitor"] = @{
+      command = "cmd"
+      args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
+               "op://vibe_coding/designflow-mcp/nas_token")
+    }
+
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
-    Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm the 'supabase' MCP shows connected."
+    Ok "Wired: supabase (stdio), devops-mcp + synology-monitor (remote) — no tokens in the file"
+    Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
+    Warn "  all three MCPs (supabase, devops-mcp, synology-monitor) show connected."
   }
-
-  Step "Remote MCP servers (manual, one time)"
-  Note "Claude Desktop cannot script remote/HTTP MCPs. Add these via"
-  Note "  Settings -> Connectors -> Add custom connector:"
-  Note "    devops-mcp        https://mcp.designflow.app/mcp"
-  Note "    synology-monitor  https://nas-mcp.designflow.app/mcp"
-  Note "  Their bearer tokens are DEVOPS_MCP_TOKEN / NAS_MCP_TOKEN in 1Password"
-  Note "  (vibe_coding vault, item 'designflow-mcp'). Never paste them into files."
 }
 
 # --------------------------------------------------------------------------
@@ -211,10 +238,12 @@ Write-Host "Setup summary:"
 Write-Host "  token file : $TokenFile   (user-only)"
 Write-Host "  references : $McpEnv"
 Write-Host "  launcher   : $Launcher"
+Write-Host "  remote launcher: $RemoteLauncher"
 Write-Host ""
 Write-Host "Validate on this machine:" -ForegroundColor Cyan
 Write-Host "  1. Run:  op run --env-file `"$McpEnv`" -- cmd /c echo ok"
 Write-Host "     (should print 'ok' with no auth error)"
-Write-Host "  2. Fully quit and reopen Claude Desktop."
-Write-Host "  3. Confirm the 'supabase' MCP shows connected in Claude Desktop."
-Write-Host "  4. Add the two remote connectors via the UI (see above), if not already present."
+Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/designflow-mcp/devops_token"
+Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
+Write-Host "  3. Fully quit and reopen Claude Desktop."
+Write-Host "  4. Confirm all three MCPs show connected: supabase, devops-mcp, synology-monitor."
