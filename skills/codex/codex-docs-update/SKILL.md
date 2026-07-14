@@ -41,6 +41,30 @@ Do not:
 | `docs/deployment.md` | Deploy/release/environment/rollback workflow |
 | `HANDOFF.md` | Temporary continuation state only when work is unfinished |
 
+## Mandatory HANDOFF.md Completeness Gate
+
+Whenever `HANDOFF.md` exists or this skill creates it, do not report the
+documentation update complete until this gate passes:
+
+1. Reread `HANDOFF.md` and every related Markdown file it relies on as if the
+   current conversation had been erased. Do not use chat context to fill gaps.
+2. Ask yourself exactly:
+
+   > If I were to erase this session and start a brand new one with no knowledge
+   > of what we discussed and no context here it would be able to pick up where
+   > you left off with ALL the relevant knowledge you have about this session and
+   > application from handoff.md and related .md files? Nothing relevant is left
+   > out?
+
+3. Answer honestly. If the answer is not an unqualified **yes**, revise
+   `HANDOFF.md` and the appropriate related Markdown files to add every missing
+   fact, decision, failed attempt, exact state, path, identifier, constraint,
+   risk, and executable next step with a verification gate.
+4. Reread and ask the question again. Repeat until the answer is **yes**.
+
+This is a revision loop, not a checklist acknowledgment. Never claim the docs
+update is complete merely because the question was asked.
+
 ## Final Report
 
 Report:
@@ -49,3 +73,6 @@ Report:
 - why each change matters for future sessions,
 - docs intentionally not changed,
 - verification source used.
+
+When `HANDOFF.md` is present, also state that the mandatory completeness gate
+passed.
