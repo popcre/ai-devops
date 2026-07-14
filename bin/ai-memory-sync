@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# ai-memory-sync — keep Claude auto-memory in sync across machines, safely and
+# hands-off. Pulls everyone else's memories down and pushes this machine's up,
+# through the ai-devops repo as the hub.
+#
+#   ai-memory-sync              # full two-way sync (pull incoming, push outgoing)
+#   ai-memory-sync pull         # incoming only (safe: never writes to the repo)
+#   ai-memory-sync --dry-run    # show what would happen, change nothing
+#
+# SAFE BY DESIGN:
+#   - Works in an ISOLATED clone at ~/.cache/ai-devops-memory, so it never
+#     touches your live ai-devops checkout or any work in progress there.
+#   - Before any push, scans the memory files for credential patterns
+#     (ops_/ghp_/AKIA/JWT/PRIVATE KEY/...). If ANYTHING looks like a secret it
+#     ABORTS the upload and logs it — memory is supposed to be facts, not
+#     credentials, so this can only mean something needs a human look.
+#   - Only ever commits the memory/ subtree; nothing else.
+#
+# Reuses the isolated clone's own bin/ai-sync-memory for the machine<->hub copy
+# (it canonicalizes per-machine project slugs via memory/project-map.tsv).
+set -uo pipefail
+
+REPO_URL="${AI_DEVOPS_REPO_URL:-https://github.com/u2giants/ai-devops.git}"
+HUB="${AI_MEMORY_HUB:-$HOME/.cache/ai-devops-memory}"
+LOG="${AI_MEMORY_LOG:-$HOME/.cache/ai-memory-sync.log}"
+MODE="${1:-sync}"
+DRY=""
+[ "$MODE" = "--dry-run" ] && { DRY="--dry-run"; MODE="sync"; }
+[ "${2:-}" = "--dry-run" ] && DRY="--dry-run"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$1" | tee -a "$LOG" >&2; }
+
+command -v git >/dev/null 2>&1 || { log "git not found; cannot sync memory."; exit 1; }
+mkdir -p "$(dirname "$LOG")"
+
+# --- 1. Isolated hub clone (kept pristine; never your dev checkout) ---------
+if [ ! -d "$HUB/.git" ]; then
+  log "Cloning memory hub -> $HUB"
+  [ -n "$DRY" ] || git clone -q "$REPO_URL" "$HUB" || { log "clone failed"; exit 1; }
+fi
+if [ -z "$DRY" ]; then
+  # Reset to a clean base = current origin/main. Any leftover uncommitted memory
+  # is safe to discard: it is regenerated from this machine's live memory below.
+  git -C "$HUB" fetch -q origin main || { log "fetch failed (offline?) — skipping."; exit 0; }
+  git -C "$HUB" reset -q --hard origin/main
+fi
+
+SYNC="$HUB/bin/ai-sync-memory"
+[ -x "$SYNC" ] || SYNC="bash $HUB/bin/ai-sync-memory"
+
+# pull-only mode: bring incoming down and stop (note: overwrites local memory
+# with the hub copy for projects that exist on both — that is the point of pull).
+if [ "$MODE" = "pull" ]; then
+  log "Pull incoming memory (hub -> machine)"
+  $SYNC pull $DRY 2>&1 | tee -a "$LOG" >&2
+  log "pull-only done."; exit 0
+fi
+
+# --- 2. OUTGOING FIRST: machine -> hub working tree. Uploading before pulling
+#        guarantees this machine's newest edits are captured, never clobbered by
+#        the incoming copy. -----------------------------------------------------
+log "Stage outgoing memory (machine -> hub)"
+$SYNC push $DRY 2>&1 | tee -a "$LOG" >&2
+
+if [ -n "$DRY" ]; then log "[dry-run] would secret-scan, commit, push, then pull incoming."; exit 0; fi
+
+if git -C "$HUB" diff --quiet -- memory/ && git -C "$HUB" diff --cached --quiet -- memory/; then
+  log "No local memory changes to upload."
+else
+  # --- 3. Secret gate: refuse to upload anything that looks like a credential ---
+  SECRET_RE='ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
+  if grep -rEIl "$SECRET_RE" "$HUB/memory" 2>/dev/null | grep -q .; then
+    log "!! SECRET-LOOKING CONTENT in memory — UPLOAD ABORTED. Files:"
+    grep -rEIl "$SECRET_RE" "$HUB/memory" 2>/dev/null | tee -a "$LOG" >&2
+    log "!! Review those files (remove the credential) then re-run. Nothing was pushed."
+    exit 2
+  fi
+
+  # --- 4. Commit only memory/, push with retry on remote advance -------------
+  HOST="$(hostname 2>/dev/null || echo machine)"
+  git -C "$HUB" add -A memory/
+  if git -C "$HUB" -c user.email="u2giants@users.noreply.github.com" -c user.name="Albert Hazan" \
+       commit -q -m "memory sync from $HOST"; then
+    pushed=0
+    for attempt in 1 2 3; do
+      if git -C "$HUB" push -q origin HEAD:main 2>>"$LOG"; then
+        log "Memory uploaded (attempt $attempt)."; pushed=1; break
+      fi
+      log "push rejected; integrating remote and retrying ($attempt)"
+      git -C "$HUB" pull -q --rebase origin main 2>>"$LOG" || { log "rebase failed; commit kept local."; break; }
+    done
+    [ "$pushed" = 1 ] || log "push failed after retries; commit is local in $HUB (retries next run)."
+  fi
+fi
+
+# --- 5. INCOMING LAST: hub -> this machine, now that our edits are safely up.
+git -C "$HUB" reset -q --hard origin/main 2>/dev/null
+log "Pull incoming memory (hub -> machine)"
+$SYNC pull 2>&1 | tee -a "$LOG" >&2
+log "Sync complete."

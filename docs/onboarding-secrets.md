@@ -145,6 +145,32 @@ Desktop-config step is best-effort and was authored, not executed, from a Linux
 box — always confirm in the app that all three MCPs show connected after running
 it.
 
+## Memories in sync across machines
+
+Claude's auto-memory (facts it learns per project) is kept in sync across every
+machine through the ai-devops repo as the hub, by `bin/ai-memory-sync` (built on
+the consolidation effort's `bin/ai-sync-memory`). It runs automatically — every
+30 minutes via cron on Ubuntu and a Scheduled Task on Windows — so you never
+think about it.
+
+It is safe by design:
+
+- **Isolated clone.** It works in `~/.cache/ai-devops-memory`, never your live
+  `/worksp/ai-devops` checkout, so it can't disturb work in progress.
+- **Secret gate.** Before any upload it scans the memory files for credential
+  patterns (`ops_`, `ghp_`, `AKIA`, JWTs, `PRIVATE KEY`, …). If anything looks
+  like a secret it **aborts the upload** and logs the file — memory is meant to
+  be facts, not credentials. Sync resumes once the file is cleaned.
+- **Upload-before-download ordering + file-level union.** Each fact is its own
+  file, and the copy never deletes, so machines' facts merge rather than
+  overwrite; this machine's newest edits are captured before incoming is applied.
+- **Conflict-tolerant push.** Only the `memory/` subtree is committed; pushes
+  retry with rebase if another machine pushed first.
+
+`ai-memory-sync pull` does incoming-only (safe). A brand-new machine has nothing
+to sync until you have actually opened a project there (memory is stored per
+project by folder location) — after that it stays matched to your other machines.
+
 ## What lives where (boundary with Ansible)
 
 Per the host-change boundary, **installing host packages** (the `op` CLI,

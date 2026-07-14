@@ -300,6 +300,28 @@ if ($SkipDesktopMcp) {
 }
 
 # --------------------------------------------------------------------------
+# 8. Memory auto-sync — keep Claude memories in sync across machines
+# --------------------------------------------------------------------------
+# ai-memory-sync is a bash script (isolated clone + secret gate); run it through
+# Git bash on a 30-minute schedule. Seeds once now, then a Scheduled Task keeps
+# it going.
+Step "Memory auto-sync (every 30 min)"
+$gitBash = "C:\Program Files\Git\bin\bash.exe"
+if (Test-Path $gitBash) {
+  # Windows path -> Git-bash POSIX path: C:\a\b -> /c/a/b
+  $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\\','/')
+  $syncScript = "$posix/bin/ai-memory-sync"
+  # Seed once now.
+  & $gitBash -lc "'$syncScript' pull" 2>$null
+  $tr = '"' + $gitBash + '" -lc "''' + $syncScript + '''"'
+  schtasks /Create /TN "ai-memory-sync" /SC MINUTE /MO 30 /TR $tr /F /RL LIMITED 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { Ok "Scheduled task 'ai-memory-sync' every 30 min" }
+  else { Warn "Could not create the scheduled task; run '$syncScript' from Git bash to sync manually." }
+} else {
+  Warn "Git bash not found (install Git) — memory sync not scheduled."
+}
+
+# --------------------------------------------------------------------------
 # Done + validation checklist
 # --------------------------------------------------------------------------
 Step "Done"
