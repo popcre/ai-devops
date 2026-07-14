@@ -67,8 +67,9 @@ Then load additional docs only when relevant:
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
 
 `HANDOFF.md` is required reading **whenever it exists** — it means work is in
-progress. It is currently **present**: config-consolidation Phase 1 shipped, with
-Phase 2/3 and first-memory-push follow-through pending.
+progress. It is currently **present**: config-consolidation Phase 1 shipped and
+the first memory push completed; rollout to the remaining machines and Phases
+2–3 are pending.
 
 ## Repository structure
 

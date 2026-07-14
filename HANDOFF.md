@@ -1,4 +1,4 @@
-# HANDOFF — machine-config consolidation onto ai-devops (2026-07-10)
+# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-14)
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
@@ -40,10 +40,14 @@ This handoff is the **live state + next steps**; those docs are the reference.
 
 ## 3. Current state — what is true right now
 
-**Phase 1 is DONE, committed, pushed.** Commits on `main` (pushed to origin):
+**Phase 1 implementation and the first real memory push are DONE, committed,
+and pushed.** Relevant commits on `main`:
 - `28c44bc` — Phase 1 build (skill, gcloud helper, memory sync, docs)
 - `e64c7cf` — this HANDOFF + AGENTS.md "HANDOFF present" notes
-- (plus a docs-comprehensiveness pass — see git log for the latest SHA)
+- `28d23d1` — comprehensive config-consolidation docs and handoff pass
+- `c6c6ee3` — first real memory push from `916-alien` into `memory/`
+- `1c7df3b` — mandatory fresh-session completeness loop added to both the Claude
+  and Codex Markdown-update skills
 
 **Files this session created/changed in ai-devops:**
 | File | What |
@@ -56,15 +60,22 @@ This handoff is the **live state + next steps**; those docs are the reference.
 | `docs/config-inventory.md` | the full scatter map (paths, SSH aliases, MCP list, 1Password item titles) |
 | `docs/config-consolidation-proposal.md` | the 3-phase plan w/ implementation detail |
 | `AGENTS.md` | structure/commands/pending-work rows + HANDOFF-present notes |
+| `skills/claude/session-docs-update/SKILL.md` | Claude docs updater now must reread and revise handoffs until the fresh-session completeness question passes |
+| `skills/codex/codex-docs-update/SKILL.md` | Codex twin of the same mandatory revision loop |
 
 **Verified:** `ai-gcloud-dflow --dry-run` prints the 5 correct commands;
 `ai-sync-memory push --dry-run` maps this machine's 4 projects (dflow, oracle,
 ansible, 1password-mcp) → `memory/<project>/`; `ai-install-skills` installed the
 new skills to `~/.claude/skills` + `~/.codex/skills` without clobbering globals.
 
-**NOT done:** the first real `ai-sync-memory push` (so `memory/` has README +
-project-map but **no actual memory files yet**); propagation to the other 4
-machines; Phases 2 and 3.
+**Verified on 2026-07-14:** `memory/` now contains real project memory from
+`916-alien` (commit `c6c6ee3`); the Windows installer refreshed all 16 Claude
+skills and 12 Codex toolkit skills on machine `AL8960OFC`; both installed docs
+skills exactly match their repository sources; both skill packages pass
+`quick_validate.py`.
+
+**NOT done:** propagation and memory collection on every remaining machine;
+Phases 2 and 3.
 
 **Script git mode note:** `bin/ai-gcloud-dflow` and `bin/ai-sync-memory` are
 tracked `100644` (not `+x`). This MATCHES the existing `bin/ai-install-skills`
@@ -90,6 +101,11 @@ not "fix" it in isolation.
   ai-devops's installer machinery and would need a 1.5 GB clone as a subfolder.
   **Do not revisit it.**
 - **`yarn` not on PATH** (Windows, both bash and PowerShell) — use `corepack yarn`.
+- **Git initially auto-selected `albert@popcre.com` for the 2026-07-14 skill
+  commit.** That violates this repo's noreply-author rule. The commit was amended
+  before push, repo-local `user.name`/`user.email` were corrected, and the pushed
+  commit `1c7df3b` has author `Albert Hazan
+  <u2giants@users.noreply.github.com>`. Do not reintroduce the old identity.
 
 ## 5. Root causes and key findings
 
@@ -116,23 +132,22 @@ not "fix" it in isolation.
 
 ## 6. Exact next steps (in order, each with a verification gate)
 
-1. **First real memory push** (on this machine): `cd` to the repo, then
-   `bin/ai-sync-memory push`; review, `git add memory/`, commit (noreply email +
-   `Co-Authored-By: Claude Opus 4.8` trailer), `git push origin main`.
-   ✅ *Worked when:* `memory/{dflow,oracle,ansible,1password-mcp}/` contain
-   `MEMORY.md` + fact files on `origin/main`. (Or just say "sync my dotfiles".)
-2. **Propagate Phase 1 to the other 4 machines** (916, 4837, 2 servers): on each,
-   pull ai-devops and run the installer — `./update.sh` (Ubuntu) or
-   `bin/install-ai-devops-windows.ps1` (Windows), or at minimum `bin/ai-install-skills`.
-   ✅ *Worked when:* `~/.claude/skills/sync-dotfiles/SKILL.md` exists there and
-   `bin/ai-gcloud-dflow --dry-run` prints the 5 gcloud commands.
-3. **Phase 2** (when Albert asks — see proposal §Phase 2): build the 1Password
+1. **Propagate Phase 1 to each remaining machine and collect its memory.** On
+   each machine, pull ai-devops; run `./update.sh` on Ubuntu or
+   `bin/install-ai-devops-windows.ps1` on Windows; run `bin/ai-sync-memory pull`,
+   then `bin/ai-sync-memory push`; review and commit only new secret-free memory.
+   Do not assume the old "other 4 machines" count is still exact: record each
+   completed machine in this handoff as rollout proceeds.
+   ✅ *Worked when:* the sync skill exists in both installed skill directories,
+   `bin/ai-gcloud-dflow --dry-run` prints the five expected commands on Windows,
+   machine-only memory is present on `origin/main`, and `git status` is clean.
+2. **Phase 2** (when Albert asks — see proposal §Phase 2): build the 1Password
    secret-plumbing helper first (2a), then fold the Dropbox SSH (2b) and MCP (2c)
    scripts into `bin/`, then rotate exposed tokens (2d). **Add the `916-alien` key
    to the `vibe_coding` vault first — it isn't there yet.**
    ✅ *Worked when:* a fresh machine is fully configured from ai-devops alone,
    secrets pulled from 1Password, `git grep` finds no token in the repo.
-4. **Phase 3** — retire the Dropbox scripts (stub → point at ai-devops), one-command
+3. **Phase 3** — retire the Dropbox scripts (stub → point at ai-devops), one-command
    onboarding docs, track the ~5 portable `config.toml` prefs.
    ✅ *Worked when:* Dropbox is no longer a config source and this HANDOFF can be
    deleted (project complete).
@@ -154,7 +169,9 @@ not "fix" it in isolation.
 ## 8. Access and environment
 
 - **GitHub:** `gh` CLI authed as `u2giants`. Repo `u2giants/ai-devops`, branch
-  `main`, checkout `C:\repos\ai-devops` on t16.
+  `main`, checkout `C:\repos\ai-devops` on Windows machine `AL8960OFC` during
+  the 2026-07-14 closeout. Do not infer the marketing nickname from the hostname;
+  the shared Windows atlas section covers `916`, `t16`, and `4837`.
 - **gcloud:** authed as `u2giants@gmail.com`; defaulted on t16 to project
   `lithe-breaker-323913` / region `us-east4` (via `ai-gcloud-dflow`). Cloud Build
   is 2nd-gen regional — always pass `--region=us-east4`.
@@ -182,7 +199,11 @@ not "fix" it in isolation.
   here, but for multi-session work use git worktrees to avoid collisions.
 
 ---
-_Self-audit (per `templates/system/handoff-standard.md`) passed: a fresh developer
-can execute §6 without questions; failed approaches are in §4; every path,
-identifier, alias, and 1Password item is defined or pointed to; each next step has
+_Mandatory completeness gate passed after rereading this handoff with the linked
+docs and no reliance on chat context. Honest answer: **yes** to: "If I were to
+erase this session and start a brand new one with no knowledge of what we
+discussed and no context here it would be able to pick up where you left off
+with ALL the relevant knowledge you have about this session and application from
+handoff.md and related .md files? Nothing relevant is left out?" Failed
+approaches are in §4, exact current state is in §3, and every next step in §6 has
 a verification gate. Delete this file only when all three phases are complete._

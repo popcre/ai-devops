@@ -41,9 +41,9 @@ never-clobber semantics. Do not revisit chezmoi.
 
 | Item | Deliverable | State |
 |---|---|---|
-| `sync-dotfiles` skill | `skills/claude/sync-dotfiles/SKILL.md` + `skills/codex/codex-sync-dotfiles/SKILL.md` | done; installed on t16 |
+| `sync-dotfiles` skill | `skills/claude/sync-dotfiles/SKILL.md` + `skills/codex/codex-sync-dotfiles/SKILL.md` | done; installed on t16 and `916-alien` |
 | gcloud dflow defaults | `bin/ai-gcloud-dflow` | done; dry-run verified |
-| Memory sync | `bin/ai-sync-memory` + `memory/` tree + `memory/project-map.tsv` | done; dry-run verified. **First real push not yet run** (see HANDOFF §6.1) |
+| Memory sync | `bin/ai-sync-memory` + `memory/` tree + `memory/project-map.tsv` | done; dry-run verified; first real push from `916-alien` committed in `c6c6ee3` |
 | Docs | this file + `config-inventory.md` + AGENTS.md rows | done |
 
 **What "sync my dotfiles" does now:** pull ai-devops → `ai-sync-memory pull` →
@@ -52,13 +52,13 @@ Directions: skills/instructions are repo→machine (repo is source of truth);
 memory is two-way (git-merged); gcloud is apply-only. Full procedure in the
 skill file.
 
-**Exit criteria (met except first push):** "sync my dotfiles" on any machine
+**Exit criteria (met for implementation and first push):** "sync my dotfiles" on any machine
 pulls latest skills + instructions + memory and pushes local changes; gcloud is
 correct everywhere the tool is installed.
 
-**Follow-through still owed on Phase 1** (in HANDOFF §6): (1) run the first real
-`ai-sync-memory push` to populate `memory/`; (2) run the installer on the other
-4 machines so they get the skill + `ai-gcloud-dflow`.
+**Follow-through still owed on Phase 1** (in HANDOFF §6): run the installer and
+memory sync on the remaining machines so each receives the skill and
+`ai-gcloud-dflow`, then contributes any machine-only memory to the hub.
 
 ---
 
@@ -127,7 +127,7 @@ describe the single path; `HANDOFF.md` can be deleted (project complete).
 ---
 
 ## Suggested ordering & effort
-- Phase 1 follow-through (first push + propagate): ~30 min, do next.
+- Phase 1 follow-through (propagate + collect remaining machine memory): do next.
 - Phase 2a helper: the keystone — build and test in isolation first.
 - Phase 2b/2c: after 2a; test each on ONE machine before rolling out.
 - Phase 3: only after Phase 2 is proven on all machines.
