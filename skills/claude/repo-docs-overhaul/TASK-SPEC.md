@@ -420,4 +420,7 @@ After committing and pushing, final response MUST include:
 
 - ...
 If no documentation changes were required, final response MUST say so and explain why.
-Is Handoff.md comprehensive enough that a brand new fresh developer with no knowledge of this project and no context into what we did and what’s left to do would be able to pick up where you left off and not skip a beat? Is it detailed enough that they would be able to continue as well as you with all you knowledge from this session?
+
+Then answer this, honestly: Is HANDOFF.md comprehensive enough that a brand-new fresh developer with no knowledge of this project and no context into what was done and what's left could pick up where you left off and not skip a beat — could they continue as effectively as you can right now, with every relevant detail and nuance?
+
+Answer it by the rule in `templates/system/handoff-standard.md` → section "Answering 'is it comprehensive enough?'" (use the `handoff-writer` skill): re-read the file, grade it against the comprehensiveness checklist, and if every item passes answer **"Yes"** with the evidence. Answer "No" ONLY if you can name a SPECIFIC missing checklist item — then fix exactly that and answer "Yes." Never reflexively answer "No, I'll improve it"; "more detail is always possible" is not a deficiency.

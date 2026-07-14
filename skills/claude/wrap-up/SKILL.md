@@ -29,7 +29,9 @@ doesn't apply, say so in the report.
    walked in off the street must be able to continue with no questions, as
    effectively as you can right now, including knowing what was tried and
    failed. A three-sentence handoff is a failure; expand until the audit
-   passes (use the `handoff-writer` skill). If HANDOFF.md describes work that
+   passes (use the `handoff-writer` skill). Once it passes, if asked whether the
+   handoff is comprehensive enough, answer "Yes" with evidence — do not
+   reflexively answer "No, I'll fix it." If HANDOFF.md describes work that
    is now complete, delete it.
 4. **Ship & verify** — commit and push everything per each repo's rules
    (dflow → `dflow-ship`: PR to develop; hetz apps → `deploy-and-verify`:

@@ -94,6 +94,48 @@ State in your closing message that the self-audit passed. Albert should never
 again have to ask "is this comprehensive enough for a fresh developer?" — you
 must have already answered it yourself.
 
+## Comprehensiveness checklist (objective — every item must be YES)
+
+This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
+always be more detailed" is NOT an item on this list — do not treat it as one.
+
+- [ ] All 9 sections present (or "N/A" + reason).
+- [ ] A street-newcomer could continue WITHOUT asking a single question.
+- [ ] They could continue as effectively as you can right now — every non-obvious
+      thing learned this session is written down.
+- [ ] The failed attempts / dead ends are included, with why they failed.
+- [ ] Every next step is concrete and has a "you'll know it worked when ___" gate.
+- [ ] Every term, identifier, path, URL, and commit SHA a newcomer wouldn't know
+      is defined or referenced.
+- [ ] Commit / push / deploy status is explicit for each piece of work.
+- [ ] Secrets are referenced by location only (vault/item), never by value.
+- [ ] In a multi-workstream handoff, YOUR workstream's section clears every bar
+      above (you need not re-audit other sessions' sections, but do not claim the
+      whole file passes if yours is thin).
+
+## Answering "is it comprehensive enough?" (do NOT reflex-answer "No")
+
+The recurring failure this standard exists to end: when asked whether the handoff
+is comprehensive / thorough / detailed enough, the answer comes back "No, I'll fix
+it" EVERY time — regardless of whether the handoff is actually deficient. That
+reflex is the bug. When asked:
+
+1. Re-read the actual handoff file first. Never answer from memory — it may already
+   be complete.
+2. Grade it once against the comprehensiveness checklist above — the fixed bar, not a vibe.
+3. If every item passes, answer "Yes." Say it plainly and show the evidence (map
+   each audit dimension to the section that satisfies it). Then stop — do not invent
+   work or append "but I could add more."
+4. Answer "No" ONLY if you can name a SPECIFIC missing checklist item — a real gap a
+   newcomer would trip on. Name it, fix exactly that, re-grade, then answer "Yes."
+5. Never answer "No, I'll improve it" as a reflex or a hedge. "More detail is always
+   possible" is not a deficiency. Padding a passing handoff wastes the user's time
+   and trains them to keep asking. A truthful "Yes" is the goal — reach it by making
+   the handoff good, then saying so.
+
+The bar for "Yes": a stranger could continue as effectively as you can right now.
+If that is true, the answer is Yes — say it.
+
 ## Anti-patterns (these are why past handoffs were too skimpy)
 
 - Assuming the reader knows what the app does, or what "the RFQ issue" refers to.
