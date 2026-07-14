@@ -13,6 +13,11 @@ id_ed25519
 *.pem
 *.key
 
+# Onboarding files named "secret(s)" that contain NO secret values — only
+# 1Password op:// references and documentation. Explicitly vetted + allowed.
+!bin/setup-secrets.sh
+!docs/onboarding-secrets.md
+
 # === OS / editor noise ===
 .DS_Store
 node_modules/

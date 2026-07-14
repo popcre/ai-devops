@@ -146,6 +146,20 @@ seed_global "$REPO_ROOT/templates/system/CLAUDE-global.md" "$HOME/.claude/CLAUDE
 seed_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$HOME/.codex/AGENTS.md" "Codex global instructions"
 
 # --------------------------------------------------------------------------
+# 4b. Secrets + Claude launcher (interactive only)
+# --------------------------------------------------------------------------
+# Wires the vault-locked 1Password service-account token, the central mcp.env
+# reference file, and the transparent `claude` launcher. Runs only in an
+# interactive terminal (it may prompt once for the token). In automation, run
+# `setup-secrets.sh` by hand, or pass OP_SERVICE_ACCOUNT_TOKEN in the env.
+info "Secrets wiring (1Password service account + claude launcher)"
+if [ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+  "$REPO_ROOT/bin/setup-secrets.sh" || warn "setup-secrets.sh did not complete; run it by hand later."
+else
+  info "  Non-interactive shell — skipping. Run: setup-secrets.sh"
+fi
+
+# --------------------------------------------------------------------------
 # 5. Doctor
 # --------------------------------------------------------------------------
 info "Running ai-devops doctor"

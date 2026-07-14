@@ -52,6 +52,7 @@ Then load additional docs only when relevant:
 | Plan/track converging all machine config onto ai-devops | `AGENTS.md`, `docs/config-consolidation-proposal.md`, `docs/config-inventory.md` | Unrelated docs |
 | Change install/update/uninstall or restore flow | `AGENTS.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, `install.sh`/`update.sh`/`uninstall.sh` | Local-only dev docs unless the dev workflow also changes |
 | Install/update AI DevOps on a Windows coding computer | `AGENTS.md`, `bin/install-ai-devops-windows.ps1`, `docs/codex-skills-usage-guide.md`, `templates/prompts/install-ai-devops-windows-codex.md` | Linux restore docs unless also touching server install |
+| Set up a new machine's secrets / 1Password / MCP tokens / `claude` launcher | `AGENTS.md`, `docs/onboarding-secrets.md`, `config/mcp.env.example`, `bin/setup-secrets.sh` (Ubuntu), `bin/setup-machine.ps1` (Windows) | Model/prompt docs unless also changing the workflow |
 | Edit the staged prompt templates | `AGENTS.md`, `templates/prompts/*`, `docs/architecture.md` | Deployment/config docs |
 | Onboard an application repo to the workflow | `AGENTS.md`, `docs/repo-onboarding.md`, `templates/repo-docs/*` | Deployment docs |
 | Back up / sync Claude Code transcripts | `AGENTS.md`, `claude_chats/README.md`, `claude_chats/sync.sh`, `skills/claude/claude-transcript-backup/SKILL.md` | Do not open the transcript `.jsonl` files themselves |

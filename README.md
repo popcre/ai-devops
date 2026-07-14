@@ -15,6 +15,50 @@ Ubuntu server if the current one dies.
 
 ---
 
+## Set up a new machine (start here)
+
+Goal: on a brand-new computer, run **one script**, paste **one code once**, and
+then Claude works everywhere with all passwords filled in automatically. You do
+not need to know any of the details — just follow the three lines for your
+computer type.
+
+You will be asked once for a **service-account code** (it starts with `ops_`).
+It comes from 1Password (`vibe_coding` vault, item *"vibe_coding-service-account"*,
+field *op_service_account_token*). This one code is locked so it can only ever
+read that one vault — nothing else.
+
+### Windows computer (Claude Desktop)
+
+Open **PowerShell 7** and paste this one line:
+
+```powershell
+$p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p}; pwsh -ExecutionPolicy Bypass -File "$p\bin\setup-machine.ps1"
+```
+
+It sets everything up and asks you to paste the code once. When it finishes,
+follow the short checklist it prints (fully close and reopen Claude Desktop; if
+it lists two "connectors" to add, add them once in Settings → Connectors).
+
+### Ubuntu server (hetz and others) — Claude Code
+
+```bash
+git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+cd /worksp/ai-devops
+./install.sh
+```
+
+`install.sh` asks you to paste the code once, then wires everything up. After it
+finishes, open a new terminal and just run `claude` in any app folder — the
+tokens fill in by themselves.
+
+> Already set the machine up and just want to (re)wire secrets? Run
+> `setup-secrets.sh` (Ubuntu) or `bin\setup-machine.ps1` (Windows) again — both
+> are safe to re-run.
+
+How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md).
+
+---
+
 ## Where this lives
 
 This system lives at:
