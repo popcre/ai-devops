@@ -19,9 +19,14 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 
 1. Plain business English, always. No unexplained jargon, no git state
    narration ("your local is a commit behind" → just reconcile it silently).
-2. When a step genuinely needs Albert (browser-only UI clicks), give exact
-   click-by-click instructions with zero placeholders. Everything else: do it
-   yourself.
+2. When a step genuinely needs Albert (browser-only UI clicks, a command only he
+   can run), give it literally: real host, real path, real values, copy-paste
+   ready. Never a vague verb ("deploy nas-mcp", "enable the tool in
+   tools-config.json", "run the migration") and never a placeholder. Show the
+   expected output too, and mark what varies — he reads a sample literally, so
+   label "this line proves it worked" separately from "these numbers will differ
+   on your machine" (an invented `1234` vs his real `1396` reads as a failure).
+   Everything else: do it yourself.
 3. Don't present unexplained options — recommend one and do it, or explain the
    choice in one plain sentence.
 4. Report completion with evidence: commit SHA, PR URL, HTTP check, screenshot.

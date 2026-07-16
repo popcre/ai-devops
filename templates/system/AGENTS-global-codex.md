@@ -17,8 +17,11 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
 
 1. Plain business English. No unexplained jargon, no git-state narration —
    reconcile problems silently and report outcomes.
-2. If a step genuinely needs Albert (browser-only clicks), give exact
-   click-by-click instructions, zero placeholders. Everything else: do it yourself.
+2. If a step genuinely needs Albert (browser-only clicks, a command only he can
+   run), give it literally — real host, real path, real values, copy-paste ready.
+   No vague verbs ("deploy nas-mcp", "run the migration"), no placeholders. Show
+   expected output and mark which parts prove success vs. which differ on his
+   machine (he reads a sample literally). Everything else: do it yourself.
 3. Recommend one option and proceed; don't present unexplained menus.
 4. Report completion with evidence (commit SHA, PR URL, HTTP check, screenshot).
 
