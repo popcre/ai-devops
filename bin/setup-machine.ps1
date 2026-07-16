@@ -317,6 +317,49 @@ if ($SkipDesktopMcp) {
 }
 
 # --------------------------------------------------------------------------
+# 7. Claude Code (CLI) MCP config — same token-free treatment
+# --------------------------------------------------------------------------
+# Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.
+# It historically stored the trigger + 1password tokens there in plaintext. Wrap
+# both in the op launcher so no token sits in the file. All other servers (and all
+# other settings keys) are preserved untouched. Runs regardless of -SkipDesktopMcp
+# (that flag is about Claude Desktop only).
+Step "Token-free MCP for Claude Code (~/.claude/settings.json)"
+$ccSettings = Join-Path $HOME ".claude\settings.json"
+if (Test-Path $ccSettings) {
+  Copy-Item $ccSettings "$ccSettings.aidevops.bak" -Force
+  $cc = $null
+  try { $cc = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable } catch { $cc = $null }
+  if ($cc -and $cc.ContainsKey("mcpServers")) {
+    $changed = $false
+    if ($cc["mcpServers"].ContainsKey("trigger")) {
+      $cc["mcpServers"]["trigger"] = @{
+        command = "cmd"
+        args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
+      }
+      $changed = $true
+    }
+    if ($cc["mcpServers"].ContainsKey("1password")) {
+      $cc["mcpServers"]["1password"] = @{
+        command = "cmd"
+        args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
+      }
+      $changed = $true
+    }
+    if ($changed) {
+      ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
+      Ok "Rewired trigger + 1password token-free (backup: $ccSettings.aidevops.bak)"
+    } else {
+      Ok "No trigger/1password entries needed conversion"
+    }
+  } else {
+    Warn "No mcpServers block in $ccSettings — skipping"
+  }
+} else {
+  Note "No ~/.claude/settings.json (Claude Code not configured here) — skipping"
+}
+
+# --------------------------------------------------------------------------
 # 8. Memory auto-sync — keep Claude memories in sync across machines
 # --------------------------------------------------------------------------
 # ai-memory-sync is a bash script (isolated clone + secret gate); run it through
