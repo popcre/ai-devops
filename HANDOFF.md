@@ -1,4 +1,4 @@
-# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-15)
+# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-16)
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
@@ -119,7 +119,66 @@ tracked `100644` (not `+x`). This MATCHES the existing `bin/ai-install-skills`
 (Windows-authored; execution handled by `install.sh`/git-bash). Not a bug — do
 not "fix" it in isolation.
 
+### 3b. Codex PATH + `codex-cli` MCP state (authoritative, 2026-07-16)
+
+Separate workstream, same consolidation goal: Codex is now set up **by these
+scripts**, not by hand or by the Dropbox scripts.
+
+| Thing | State |
+|---|---|
+| Codex PATH (Windows) | **Fixed on t16 only.** `bin/setup-machine.ps1` step "Codex PATH" prepends `%USERPROFILE%\.codex\packages\standalone\current\bin` (real package bin) ahead of the broken `…\Programs\OpenAI\Codex\bin` junction, then verifies with a real sandboxed write. **916 and 4837 still need the script run.** |
+| `codex-cli` MCP (Windows) | Wired by `setup-machine.ps1` to the **absolute** `codex.exe` + `mcp-server`. Replaces the third-party `@cexll/codex-mcp-server` npx wrapper that was previously in-flight here. |
+| `codex-cli` MCP (Ubuntu) | Wired by `bin/setup-secrets.sh` into `~/.claude/settings.json` via `python3`, preserving all other servers/keys. **Written + logic-tested in Ubuntu 26.04 (WSL), but NOT yet run on the real `hetz` server.** |
+| `ai-devops doctor` | Now proves the Codex sandbox with a real `--sandbox workspace-write` write (`check_codex_sandbox`). Tested both ways: passes on a good install, fails with cause+fix on the broken junction path. |
+| Upstream | Not our bug to fix. [openai/codex#32655](https://github.com/openai/codex/issues/32655) — we commented confirming 0.144.5 reproduces. |
+
+**Verified on t16:** bare `codex` resolves to the real package bin and
+`codex exec --sandbox workspace-write` writes files; the native MCP `codex` tool
+was called end-to-end and wrote a file. **Not verified:** the MCP entries as seen
+by a restarted Claude Desktop / Claude Code (requires an app restart), and
+anything on 916 / 4837 / `hetz`.
+
+**Trade-off recorded:** dropping the third-party wrapper loses `changeMode`
+(structured OLD/NEW patch output), `fetch-chunk`, `batch-codex` (parallel task
+delegation) and `brainstorm`. All are reproducible by prompting the native `codex`
+tool. If a future session needs structured patch output, this is the decision to
+revisit — see AGENTS.md → Intentional quirks.
+
 ## 4. Everything we tried that did NOT work (don't repeat these)
+
+- **Trusting `codex --version` / `codex login status` as proof Codex works.** Both
+  pass, and exit 0, on a machine where **every** sandboxed write silently fails.
+  This is the single most expensive mistake of 2026-07-16. Presence is not
+  capability — only a real `workspace-write` write proves it (now what
+  `ai-devops doctor` does).
+- **Concluding "the helpers are missing" from a directory listing.** `find -type f`
+  showed `…\Programs\OpenAI\Codex\bin` as empty, so the helpers looked absent. They
+  were not — `find` does not traverse the **junction**. The package was complete all
+  along. Use `Get-Item <dir> | Select LinkType,Target` (PowerShell) to see what a
+  Windows dir really is.
+- **Concluding the 1Password MCP `op_run` "env injection is broken".** It is not.
+  `argv:["bash",…]` on Windows spawns **WSL** bash, and WSL does not inherit the
+  injected Windows env, so vars arrive empty. Native children (cmd `%VAR%`,
+  PowerShell `$env:VAR`, `node`) get them fine, and `op://` refs resolve and are
+  redacted correctly. One `pwd` (→ `/mnt/c/...`) would have shown this in seconds.
+- **`codex update` from Git Bash.** Fails on an msys `tar` vs `C:` path clash. Use
+  the official PowerShell installer in **native** PowerShell
+  (`irm https://chatgpt.com/codex/install.ps1 | iex`).
+- **Backgrounding codex with `nohup … &` inside an already-backgrounded task.** The
+  wrapper exits instantly, the harness reports "completed, exit 0", and codex is
+  orphaned having done nothing. An exit code is not evidence work happened — check
+  the working tree.
+- **Trusting PowerShell 5.1's legacy `PSParser` as a syntax check.** It reported 25
+  errors in `setup-machine.ps1`; the real parser reports **0**. The script is
+  pwsh-7-only by design (HEAD already failed 5.1 the same way). Use
+  `[System.Management.Automation.Language.Parser]::ParseFile`.
+- **Guarding on `command -v python3`.** On Windows that matches the Store *stub*,
+  which satisfies presence and then fails on use. `setup-secrets.sh` now probes
+  `python3 -c 'import json'` instead. (Same lesson as the `--version` trap, found in
+  our own code.)
+- **Filing a fresh upstream issue without searching first.** The bug already had 8+
+  open reports on `openai/codex`. A 9th adds noise; a comment confirming a newer
+  version adds signal.
 
 - **Verifying the dflow deploy via GLOBAL gcloud.** `gcloud builds triggers list`
   returned `[]` and `gcloud builds list` showed only stale 2024 builds → looked
@@ -169,6 +228,26 @@ not "fix" it in isolation.
 
 ## 6. Exact next steps (in order, each with a verification gate)
 
+0. **Roll the Codex fix out to the 3 remaining machines** (t16 is done; `916`,
+   `4837`, and `hetz` are NOT). This is first because until it runs, `codex exec`
+   on those boxes may silently do nothing.
+   - **Windows (`916`, `4837`):** pull ai-devops, then run
+     `bin/setup-machine.ps1 -RepoPath C:\repos\ai-devops` (pwsh 7 — the script does
+     **not** parse under Windows PowerShell 5.1 and has no `#requires` to tell you
+     so). It prepends the real Codex package bin to the user PATH, wires the
+     `codex-cli` MCP to the absolute `codex.exe` + `mcp-server`, and self-verifies.
+   - **Ubuntu (`hetz`):** pull ai-devops, run `bin/setup-secrets.sh`. Its new
+     `codex-cli` step is **untested on the real server** — it was only logic-tested
+     in Ubuntu 26.04 under WSL. If `codex` is not installed there, the step warns
+     and skips by design.
+   ✅ *Worked when:* on each machine, in a **new** terminal, `ai-devops doctor`
+   prints `ok codex sandbox can write (workspace-write verified end-to-end)` — not
+   merely `codex responds to --version`, which proves nothing (see §4). Then
+   restart Claude Desktop / Claude Code and confirm `codex-cli` shows connected.
+   ⚠️ *If doctor prints `codex sandbox CANNOT write`:* it will name the resolved
+   binary and the fix; do not "fix" it by copying helpers into the shim `bin` —
+   that must be redone on every Codex upgrade. Put the real package bin first on
+   PATH instead.
 1. **Propagate Phase 1 to each remaining machine and collect its memory.** On
    each machine, pull ai-devops; run `./update.sh` on Ubuntu or
    `bin/install-ai-devops-windows.ps1` on Windows; run `bin/ai-sync-memory pull`,

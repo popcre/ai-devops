@@ -49,6 +49,7 @@ Then load additional docs only when relevant:
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
 | Add or change configuration, env vars, or model commands | `AGENTS.md`, `docs/configuration.md`, `docs/model-setup.md` (model commands) | Unrelated architecture docs |
 | Understand where machine config lives (skills, SSH, MCP, gcloud, memory, secrets) | `AGENTS.md`, `docs/config-inventory.md` | Unrelated architecture docs |
+| **Codex "works" but `codex exec` changes nothing / sandbox helper not found / wiring the `codex-cli` MCP** | `AGENTS.md` (→ Critical incidents 2026-07-16 + Intentional quirks), `docs/config-inventory.md` (→ "Codex: PATH + MCP"), `templates/system/machine-atlas.md` (→ junction trap), `bin/setup-machine.ps1` (Windows), `bin/setup-secrets.sh` (Ubuntu) | Model/prompt docs |
 | Anything about the Headroom token-compression proxy (find it, fix it, route a machine through it, see savings, turn it off) | `AGENTS.md`, `docs/headroom.md` | Unrelated architecture docs |
 | Plan/track converging all machine config onto ai-devops | `AGENTS.md`, `docs/config-consolidation-proposal.md`, `docs/config-inventory.md` | Unrelated docs |
 | Change install/update/uninstall or restore flow | `AGENTS.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, `install.sh`/`update.sh`/`uninstall.sh` | Local-only dev docs unless the dev workflow also changes |
@@ -271,6 +272,55 @@ Do not change because:
 Re-introducing Fable would reference a model that is going away. Use Opus 4.8
 (high reasoning) for the planning and final-review stages.
 
+### `codex-cli` MCP uses Codex's own `mcp-server`, not a third-party wrapper
+
+Looks like:
+A third-party npx package (`@cexll/codex-mcp-server`) would give more tools, so
+using Codex's own server is a downgrade.
+
+Actually:
+`bin/setup-machine.ps1` (Windows) and `bin/setup-secrets.sh` (Ubuntu) wire
+`codex-cli` to the **absolute** codex binary + `mcp-server`. That exposes exactly
+two tools — `codex` (prompt, model, sandbox, approval-policy, cwd, config,
+base/developer-instructions) and `codex-reply` (thread continuation, which the
+wrapper does not appear to offer at all). Verified end-to-end 2026-07-16: a
+`tools/call` with `sandbox=workspace-write` really writes files.
+
+Why:
+No third-party supply chain and no `npx` download in the hot path; version-locked
+to the CLI it ships with; and — decisively — a wrapper *shells out to* `codex`
+resolved from PATH, which re-introduces the junction bug below. Pinning the
+absolute binary cannot resolve to the wrong codex.
+
+Do not change because:
+Swapping back to a wrapper reintroduces both the supply-chain surface and the
+PATH-resolution failure. The trade-off was made knowingly: we gave up the
+wrapper's `changeMode`/`fetch-chunk`, `batch-codex` and `brainstorm` tools, all of
+which are reproducible by prompting the native `codex` tool.
+
+### `ai-devops doctor` runs Codex for real instead of asking `--version`
+
+Looks like:
+`doctor` should just check that `codex` exists and answers `--version` — cheap and
+fast, like every other liveness check.
+
+Actually:
+`check_codex_sandbox()` creates a temp dir, runs a real
+`codex exec --sandbox workspace-write`, and asserts the file exists. It costs a
+real (small) model call and a few seconds.
+
+Why:
+On 2026-07-16 a machine had codex passing `--version`, passing
+`codex login status`, and exiting 0 — while **every** sandboxed write silently
+failed and `codex exec` changed nothing. A `--version` probe is structurally
+incapable of seeing that failure mode. Presence is not capability; only exercising
+the capability proves it.
+
+Do not change because:
+Reverting to a `--version` check restores a green light over a broken tool, which
+is worse than no check at all. If the cost matters, gate it behind a flag — do not
+delete it.
+
 ### Reviews are read-only by design
 
 Looks like:
@@ -357,8 +407,64 @@ Full first-time / disaster restore steps:
 
 ## Critical incidents
 
-No critical incidents have occurred. This section is intentionally kept for future
-use.
+### 2026-07-16 — Codex on Windows: healthy-looking, silently non-functional
+
+**Impact:** every sandboxed `codex exec` on t16 wrote nothing while reporting
+success. An AI session handed Codex an 8-item implementation task; Codex changed
+zero files and the run still exited 0. Cost roughly a full session, most of it
+spent misdiagnosing.
+
+**Symptom:**
+`windows sandbox: orchestrator_helper_launch_failed: setup refresh failed to
+launch helper: helper=codex-windows-sandbox-setup.exe, error=program not found`
+— while `codex --version` and `codex login status` both succeeded and exited 0.
+
+**Root cause (upstream, not a bad install):** the standalone installer puts
+`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` on PATH. That directory is a
+**junction** to `%USERPROFILE%\.codex\packages\standalone\current\bin` — only
+`bin` is linked, so the package's sibling `codex-resources\` (holding the sandbox
+helper) is unreachable from it. Codex resolves the helper relative to the invoked
+exe, so via that PATH entry it cannot launch it. The package itself is complete
+and passes the installer's own `Test-PackageContentsAreComplete`. Proven A/B: same
+binary, same version 0.144.5, same flags — fails via the junction, succeeds via
+`…\.codex\packages\standalone\current\bin\codex.exe`. Filed upstream:
+[openai/codex#32655](https://github.com/openai/codex/issues/32655) (we confirmed
+0.144.5; see also #30829, #32359, #28457 — a regression tracked since 0.132/0.138).
+
+**Fix:** `bin/setup-machine.ps1` step "Codex PATH" prepends the real package bin
+to the user PATH (`current` is a junction the updater re-points, so it survives
+upgrades) and then verifies with a real sandboxed write.
+
+**Prevention:** `ai-devops doctor` now proves the sandbox with a real
+`workspace-write` instead of asking `--version`. Run it on every machine after any
+Codex install/upgrade.
+
+**Lessons worth keeping (these are why it took so long):**
+1. **Presence is not capability.** `--version`, `login status`, and exit 0 were all
+   green while the tool was broken. Every one of our checks asked the wrong
+   question. Health checks must exercise the capability.
+2. **An empty result is not proof a tool is broken.** The same session first
+   misdiagnosed the 1Password MCP `op_run` as "env injection is broken" — actually
+   `argv:["bash",…]` on Windows resolves to **WSL** bash, whose isolated Linux env
+   does not inherit the injected Windows env. One `pwd` (returning `/mnt/c/...`)
+   would have ended it immediately. Establish platform, resolved executable, shell,
+   cwd, and env boundary *before* blaming the tool.
+3. **Know how your tools lie.** `find -type f` showed an "empty" dir because it does
+   not traverse junctions; that was read as "helpers are missing" and sent the
+   diagnosis down a wrong path. PowerShell
+   `Get-Item <dir> | Select LinkType,Target` shows the truth.
+4. **Verify the verifier.** Two "syntax errors" and one "broken probe" during the
+   fix were false alarms from the wrong tool (PowerShell 5.1's legacy `PSParser`;
+   a hand-rolled test harness). Confirm a failure is real before acting on it.
+5. **Check for duplicates before filing.** The bug already had 8+ open upstream
+   issues; a 9th would have been noise. Commenting with a new-version repro added
+   signal instead.
+
+_(One noteworthy setup detail, not an incident: the very first push to GitHub was
+rejected by GitHub's email-privacy protection because the commit used a private
+`@gmail.com` address. Resolved by setting the repo-local git email to the
+`@users.noreply.github.com` form. Future commits should keep using the noreply
+email.)_
 
 _(One noteworthy setup detail, not an incident: the very first push to GitHub was
 rejected by GitHub's email-privacy protection because the commit used a private

@@ -44,6 +44,38 @@ tools run via git-bash on Windows).
 | **gcloud config** (`%APPDATA%\gcloud` / `~/.config/gcloud`) | Default project/region for `gcloud` | ⚠️ per-machine; set by `bin/ai-gcloud-dflow` | Contains auth tokens — never git-sync the dir |
 | **1Password `vibe_coding` vault** | The actual secrets (tokens, keys, DB creds, logins) | ✅ centralized (the one thing done right) | **Yes — the source of truth** |
 | **`/etc/ai-devops/*.env`** (Ubuntu) | Real workflow model commands + paths | ❌ machine-local by design (never committed) | Non-secret command strings |
+| **User `PATH` → Codex** (Windows) | Which `codex.exe` a terminal resolves — and therefore whether `codex exec` can write at all | ✅ `bin/setup-machine.ps1` step "Codex PATH" prepends `%USERPROFILE%\.codex\packages\standalone\current\bin` | No |
+| **`codex-cli` MCP entry** (Claude Desktop config + `~/.claude/settings.json`) | Lets Claude call Codex as a tool (`codex`, `codex-reply`) instead of shelling out | ✅ Windows: `bin/setup-machine.ps1`; Ubuntu: `bin/setup-secrets.sh` | No — Codex carries its own `codex login`, so it is **not** wrapped in the op launcher and never touches `mcp.env` |
+
+## Codex: PATH + MCP (added 2026-07-16)
+
+Two related facts that are easy to get wrong, both now automated.
+
+**1. Which `codex.exe` PATH resolves decides whether Codex works at all.**
+On Windows the standalone installer puts `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`
+on PATH, but that dir is a **junction** to
+`%USERPROFILE%\.codex\packages\standalone\current\bin`. Only `bin` is linked, so the
+package's sibling `codex-resources\` (which holds
+`codex-windows-sandbox-setup.exe`) is unreachable from it, and every sandboxed
+`codex exec` fails with `program not found` — **while `codex --version` and
+`codex login status` still exit 0**. `setup-machine.ps1` fixes this by putting the
+real package bin first on the user PATH (`current` is a junction the updater
+re-points, so it survives upgrades) and then *proving* it with a real write.
+Upstream bug: [openai/codex#32655](https://github.com/openai/codex/issues/32655).
+
+**2. The `codex-cli` MCP uses Codex's own `codex mcp-server`, not a wrapper.**
+Native is version-locked to the CLI, needs no `npx` download, adds no third-party
+supply chain, and — because we pin the **absolute** binary — cannot resolve to a
+broken shim. (A wrapper shells out to `codex` from PATH, re-introducing fact 1.)
+It exposes `codex` (prompt, model, sandbox, approval-policy, cwd, config,
+base/developer-instructions) and `codex-reply` (thread continuation). Trade-off
+accepted: we gave up the third-party wrapper's `changeMode`/`fetch-chunk`,
+`batch-codex` and `brainstorm` tools; all are reproducible by prompting `codex`.
+
+**Verify, never assume:** `ai-devops doctor` performs a real
+`--sandbox workspace-write` write and fails loudly if Codex cannot write. A
+`--version` probe cannot see this failure mode — that is exactly why it stayed
+hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every machine.
 
 ## Detail per location
 
