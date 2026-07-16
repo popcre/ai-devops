@@ -1,8 +1,16 @@
 <#
 setup-machine.ps1 — one-script new-machine setup for a Windows coding computer.
 
-Run in PowerShell:
-  powershell -ExecutionPolicy Bypass -File .\bin\setup-machine.ps1
+Run in PowerShell 7 (pwsh) — NOT Windows PowerShell 5.1:
+  pwsh -ExecutionPolicy Bypass -File .\bin\setup-machine.ps1
+
+  `powershell` is 5.1 and this script throws on it (see the version guard below).
+  Install pwsh with: winget install Microsoft.PowerShell
+
+NOT fully unattended: step 3 prompts once with Read-Host for the 1Password
+service-account token, unless -Token is passed or the token file already exists
+at %USERPROFILE%\.config\ai-devops\op-service-account. An automated/AI session
+will BLOCK there.
 
 What it does (idempotent — safe to re-run):
   1. Ensures git, the 1Password CLI (op), and (best-effort) Node/npx are present.
