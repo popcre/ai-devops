@@ -11,10 +11,18 @@
 #      this repo's config/mcp.env.example (op:// references, never values).
 #   4. Installs a managed shell snippet ~/.config/ai-devops/shellrc that:
 #        - exports OP_SERVICE_ACCOUNT_TOKEN from the locked-down file, and
-#        - defines a transparent `claude` launcher that runs
-#            op run --env-file ~/.config/ai-devops/mcp.env -- claude
-#          so every app's .mcp.json ${...} placeholder fills itself at launch.
+#        - resolves each op:// reference in mcp.env into this shell's environment
+#          (via `op read`, never overwriting a value that is already set).
 #      and makes ~/.bashrc and ~/.profile source it (one include line).
+#      There is NO `claude` launcher/wrapper: every CLI in the session (claude,
+#      supabase, scripts, ...) is authorized by the exported environment, so
+#      nothing shadows or re-invokes `claude`. (This header previously described
+#      an `op run --env-file ... -- claude` launcher; that was never what the code
+#      does, and the stale text caused a real misdiagnosis on 2026-07-16 — the
+#      launcher was reasoned about as a rollout risk that does not exist.)
+#      Cost to know: the snippet runs one `op read` per reference in mcp.env on
+#      every interactive shell start (a network round-trip each), and the resolved
+#      secrets live in that shell's environment.
 #   5. Comments out any legacy RAW `export OP_SERVICE_ACCOUNT_TOKEN=ops_...`
 #      lines and old per-app op-read blocks left in ~/.bashrc (with a backup),
 #      so the only copy of the token on disk is the locked-down file.
