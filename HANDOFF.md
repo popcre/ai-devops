@@ -1,4 +1,4 @@
-# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-14)
+# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-15)
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
@@ -40,6 +40,42 @@ This handoff is the **live state + next steps**; those docs are the reference.
 
 ## 3. Current state — what is true right now
 
+> **2026-07-15 update (read first).** Since this section was first written, **Phase 2
+> was built and pushed** on 2026-07-14 afternoon (commits `5868f19`→`26c176f`) and
+> then **adopted + verified on machine `t16` on 2026-07-15**. The Phase-1-era text
+> below is kept for history; the authoritative Phase-2 state is in **§3a** just under it.
+
+### 3a. Phase 2 state (authoritative, 2026-07-15)
+
+**Built and committed (2a/2b/2c):**
+- **[`bin/setup-machine.ps1`](bin/setup-machine.ps1)** — one-script Windows onboarding:
+  base tools, skills/globals, service-account **token file**
+  (`~/.config/ai-devops/op-service-account`, user-only), **`mcp.env`** (`op://`
+  refs), MCP **launchers**, **916-alien key** restored from 1Password, **SSH
+  aliases** (`~/.ssh/ai-devops.conf`, `Include`d), Claude Desktop MCP wiring
+  (`-SkipDesktopMcp` skips it), memory-sync scheduled task.
+- **[`bin/setup-secrets.sh`](bin/setup-secrets.sh)** — Ubuntu secret-plumbing half.
+- **[`config/mcp.env.example`](config/mcp.env.example)** + **[`config/ssh-config.template`](config/ssh-config.template)** — committed, secret-free (`op://` refs / public host data only).
+- **1Password:** the `916-alien SSH key` item now exists in `vibe_coding` (added 2026-07-14).
+
+**Adopted + VERIFIED on t16 (2026-07-15):** token installed straight from vault →
+locked-down file (never materialized in the session); `mcp.env` matches repo;
+secrets resolve from the token file; `~/.ssh/config` includes `ai-devops.conf`;
+**`ssh vps whoami` → `root`**. Ran with `-SkipDesktopMcp`, so **t16's Claude
+Desktop MCP config was deliberately NOT changed** (pending Albert's go-ahead).
+
+**Still open in Phase 2:**
+- **t16 Claude Desktop MCP migration** — held for explicit approval (it rewrites
+  the live daily-driver MCP config; the script backs up to `*.aidevops.bak` first).
+- **2d token rotation** — the two MCP bearers look already rotated (`designflow-mcp`
+  item tagged `mcp-rotation`, updated 2026-07-14 17:20); the **Trigger PAT** looks
+  NOT yet rotated (last updated 2026-07-09). Needs Albert's approval to rotate.
+- **Rollout to 916, 4837, and the Ubuntu servers** — not yet done.
+
+The rest of this file (Phase-1 history) is unchanged below.
+
+---
+
 **Phase 1 implementation and the first real memory push are DONE, committed,
 and pushed.** Relevant commits on `main`:
 - `28c44bc` — Phase 1 build (skill, gcloud helper, memory sync, docs)
@@ -74,8 +110,9 @@ skills and 12 Codex toolkit skills on machine `AL8960OFC`; both installed docs
 skills exactly match their repository sources; both skill packages pass
 `quick_validate.py`.
 
-**NOT done:** propagation and memory collection on every remaining machine;
-Phases 2 and 3.
+**NOT done (as of the Phase-1 writing; see §3a for the current Phase-2 truth):**
+propagation and memory collection on every remaining machine; Phase 3. *(Phase 2
+was subsequently built + verified on t16 — §3a.)*
 
 **Script git mode note:** `bin/ai-gcloud-dflow` and `bin/ai-sync-memory` are
 tracked `100644` (not `+x`). This MATCHES the existing `bin/ai-install-skills`
@@ -141,12 +178,18 @@ not "fix" it in isolation.
    ✅ *Worked when:* the sync skill exists in both installed skill directories,
    `bin/ai-gcloud-dflow --dry-run` prints the five expected commands on Windows,
    machine-only memory is present on `origin/main`, and `git status` is clean.
-2. **Phase 2** (when Albert asks — see proposal §Phase 2): build the 1Password
-   secret-plumbing helper first (2a), then fold the Dropbox SSH (2b) and MCP (2c)
-   scripts into `bin/`, then rotate exposed tokens (2d). **Add the `916-alien` key
-   to the `vibe_coding` vault first — it isn't there yet.**
+2. **Phase 2** — 2a/2b/2c DONE (see §3a). Remaining:
+   (a) **Migrate t16's Claude Desktop MCP config** — re-run
+   `bin/setup-machine.ps1 -RepoPath C:\repos\ai-devops` *without* `-SkipDesktopMcp`
+   (needs Albert's OK; it backs up the config first). Then fully quit + reopen
+   Claude Desktop and confirm supabase, devops-mcp, synology-monitor connect.
+   (b) **2d token rotation** — verify/rotate the Trigger PAT (the MCP bearers
+   appear already rotated); Albert-approved, click-through.
+   (c) **Roll out** to 916, 4837, Ubuntu servers.
    ✅ *Worked when:* a fresh machine is fully configured from ai-devops alone,
-   secrets pulled from 1Password, `git grep` finds no token in the repo.
+   secrets pulled from 1Password, `git grep` finds no token in the repo. *(Verified
+   on t16 2026-07-15: `ssh vps whoami`→root, all `mcp.env` refs resolve from the
+   token file, repo secret-free.)*
 3. **Phase 3** — retire the Dropbox scripts (stub → point at ai-devops), one-command
    onboarding docs, track the ~5 portable `config.toml` prefs.
    ✅ *Worked when:* Dropbox is no longer a config source and this HANDOFF can be

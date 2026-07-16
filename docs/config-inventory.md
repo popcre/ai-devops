@@ -142,7 +142,7 @@ that already exist in the vault:
 | NAS monitor token | `nas-monitor-secrets` |
 | Trigger PAT | `Trigger.dev Personal Access Token (management)` |
 | SSH (existing server logins) | `hetz-ai-ssh`, `ci-deploy-ssh` |
-| **`916-alien` SSH private key** | **NOT yet in 1Password — Phase 2 must add it** (currently only in the Dropbox script) |
+| **`916-alien` SSH key** | ✅ now in 1Password as item **`916-alien SSH key`** (SshKey category; `private key` / `public key` fields; added 2026-07-14). Restored to `~/.ssh/916-alien` by the Phase 2 setup scripts. |
 
 ## Security landmines (why naive git-sync is unsafe)
 1. **`master_setupsshwindows.ps1` stores the `916-alien` private key in plaintext**

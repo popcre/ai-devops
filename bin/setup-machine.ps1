@@ -20,10 +20,12 @@ What it does (idempotent — safe to re-run):
      and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
      from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
      immediately. Uses cloudflared so it works on any network without Tailscale.
-  7. Best-effort: wires all MCP servers into Claude Desktop's
-     claude_desktop_config.json (backed up first) — supabase (stdio) plus the
-     two remotes (devops-mcp, synology-monitor) via the mcp-remote shim. No
-     token is ever written into the config; only URLs and op:// references.
+  7. Best-effort: wires MCP servers into Claude Desktop's
+     claude_desktop_config.json (backed up first) — supabase, trigger and
+     1password (stdio, via the op launcher) plus devops-mcp and synology-monitor
+     (remote, via the mcp-remote shim). No token is ever written into the config;
+     only URLs and op:// references. Other servers already present (ag-grid,
+     playwright, vercel, recall-ai, ...) are preserved untouched.
 
 IMPORTANT — Claude Desktop limitations you must know (verified):
   - Claude Desktop does NOT expand ${VAR} in its config, and neither does
@@ -291,11 +293,26 @@ if ($SkipDesktopMcp) {
                "op://vibe_coding/designflow-mcp/nas_token")
     }
 
+    # trigger (stdio, npx). Wrapped in the launcher so `op` injects
+    # TRIGGER_ACCESS_TOKEN (from mcp.env) at launch — no token in this config.
+    $cfg["mcpServers"]["trigger"] = @{
+      command = "cmd"
+      args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
+    }
+
+    # 1password (stdio, npx). The launcher reads the vault-locked service-account
+    # token from the user file into OP_SERVICE_ACCOUNT_TOKEN — which is exactly the
+    # var this MCP needs — so no token is written into this config either.
+    $cfg["mcpServers"]["1password"] = @{
+      command = "cmd"
+      args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
+    }
+
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
-    Ok "Wired: supabase (stdio), devops-mcp + synology-monitor (remote) — no tokens in the file"
+    Ok "Wired token-free: supabase, devops-mcp, synology-monitor, trigger, 1password — no tokens in the file"
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
-    Warn "  all three MCPs (supabase, devops-mcp, synology-monitor) show connected."
+    Warn "  these MCPs show connected: supabase, devops-mcp, synology-monitor, trigger, 1password."
   }
 }
 

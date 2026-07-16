@@ -1,7 +1,8 @@
 # Proposal — converge all machine config onto ai-devops (phased)
 
-**Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`); Phases 2–3 PLANNED,
-not started.
+**Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`). **Phase 2 built
+2026-07-14** (commits `5868f19`→`26c176f`): 2a/2b/2c shipped; 2d (token rotation)
+still open. **Adopted + verified on t16 2026-07-15.** Phase 3 PLANNED, not started.
 **Companion docs:** [`config-inventory.md`](config-inventory.md) (the current
 scattered state, with all paths/aliases/1Password item titles) and
 [`../HANDOFF.md`](../HANDOFF.md) (live next steps).
@@ -62,13 +63,26 @@ memory sync on the remaining machines so each receives the skill and
 
 ---
 
-## Phase 2 — fold in the Dropbox scripts (medium risk) — PLANNED
+## Phase 2 — fold in the Dropbox scripts (medium risk) — 2a/2b/2c SHIPPED, 2d OPEN
 
-The two Dropbox scripts are already imperative PowerShell — a natural fit next to
-`bin/install-ai-devops-windows.ps1`. The hard part is **secret plumbing**: today
-they embed secrets; the migrated versions must pull from 1Password.
+**Built 2026-07-14** (commits `5868f19`→`26c176f`), adopted + verified on t16
+2026-07-15. Delivered as two unified onboarding scripts rather than direct ports:
+- **[`bin/setup-machine.ps1`](../bin/setup-machine.ps1)** (Windows) — base tools,
+  skills/globals install, service-account token file, `mcp.env`, MCP launchers,
+  916-alien key restore, SSH aliases, Claude Desktop MCP wiring, memory-sync task.
+- **[`bin/setup-secrets.sh`](../bin/setup-secrets.sh)** (Ubuntu) — the secret
+  plumbing half (token file, `mcp.env`, shell snippet, legacy cleanup, verify).
 
-### 2a. Secret-plumbing helper (build first)
+Below is the original design; ✅/⬜ marks what's done. The one hard part —
+**secret plumbing** — is solved: nothing embeds a secret; everything pulls from
+1Password at launch via the vault-locked service account.
+
+### 2a. Secret-plumbing helper (build first) — ✅ SHIPPED
+Chosen approach: **`op` CLI + a vault-locked service-account token file**
+(`~/.config/ai-devops/op-service-account`, chmod 600 / user-only ACL) plus a
+committed **`config/mcp.env.example`** of `op://` references. Ubuntu resolves them
+via `op run --env-file mcp.env`; Windows via generated `.cmd` launchers. Answers
+open decision #4 in favor of the `op` CLI.
 A small helper (bash + PowerShell parity) that reads a named 1Password item from
 the `vibe_coding` vault and writes it to a machine-local path, never echoing the
 value. Design options:
@@ -78,7 +92,15 @@ value. Design options:
 Acceptance: `helper get "<item title>" <dest-path>` writes the secret with correct
 perms and prints only "wrote <dest> (N bytes)".
 
-### 2b. SSH setup → `bin/`
+### 2b. SSH setup → `bin/` — ✅ SHIPPED (Windows)
+Delivered as steps 5b/5c of `setup-machine.ps1` + committed
+[`config/ssh-config.template`](../config/ssh-config.template) (installed as
+`~/.ssh/ai-devops.conf`, `Include`d at the end so existing entries win). The
+916-alien key is pulled from the `916-alien SSH key` 1Password item (added to the
+vault first, as required). Cloudflared is the primary path so `ssh vps` works on
+any network. Ubuntu SSH parity (open decision #3) still deferred.
+Original plan below.
+
 Move `master_setupsshwindows.ps1` into `bin/ai-setup-ssh-windows.ps1` (+ an
 Ubuntu equivalent if the servers need the alias set — open question). Changes:
 - Host-alias blocks become repo-tracked (they're non-secret).
@@ -90,7 +112,14 @@ Ubuntu equivalent if the servers need the alias set — open question). Changes:
 Acceptance: on a fresh Windows box, running it produces a working `~/.ssh/config`
 + key with correct perms, `ssh coolify` connects, and no secret is in the repo.
 
-### 2c. MCP setup → `bin/`
+### 2c. MCP setup → `bin/` — ✅ SHIPPED (Claude Desktop)
+Delivered as step 6 of `setup-machine.ps1`: supabase (stdio) + devops-mcp and
+synology-monitor (remote, via the `mcp-remote` shim) are wired with **no token in
+the config** — the launchers resolve `op://` bearer tokens at launch. Verified
+that Claude Desktop does not expand `${VAR}`, so tokens are resolved to real
+values by `op` inside the launcher, not by placeholder substitution.
+Original plan below.
+
 Move `setup-claude-mcps.ps1` / `setup-codex-mcps.ps1` into `bin/`. The MCP server
 shapes become repo-tracked; **all tokens are pulled from 1Password** by the 2a
 helper (items: `vibe_coding-service-account`, `devops-mcp-client-tokens`,
@@ -99,9 +128,15 @@ helper (items: `vibe_coding-service-account`, `devops-mcp-client-tokens`,
 Acceptance: running it writes `~/.claude/settings.json` with working MCP servers,
 tokens sourced live, and the repo contains no token.
 
-### 2d. Hygiene — rotate exposed tokens
+### 2d. Hygiene — rotate exposed tokens — ⬜ OPEN (partially done?)
 The Trigger PAT and the two MCP bearer tokens sat in plaintext in `settings.json`
 (and in an archived transcript). Rotate them as they move to 1Password sourcing.
+**Status 2026-07-15:** the `designflow-mcp` item (which now holds the devops-mcp
+and NAS bearer tokens) was updated 2026-07-14 17:20 and tagged `mcp-rotation`,
+suggesting the two MCP bearers were already rotated. The **Trigger PAT**
+(`Trigger.dev Personal Access Token (management)`) was last updated 2026-07-09 —
+**appears NOT yet rotated.** Confirm with Albert before rotating (rotation can
+break live integrations; needs his approval + click-through).
 
 **Exit criteria:** a fresh machine is fully configured (SSH + MCP + skills +
 instructions + gcloud + memory) from ai-devops alone, all secrets sourced from
