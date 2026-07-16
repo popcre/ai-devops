@@ -22,7 +22,12 @@ MODE="${1:-}"
 MODELS_ENV="/etc/ai-devops/models.env"
 
 # Default Codex command; overridden by CODEX_CMD in models.env if set.
-CODEX_CMD="codex exec --skip-git-repo-check"
+# model_reasoning_effort is pinned per Albert's standing rule (2026-07-16):
+# GPT-5.6 runs at low|medium ONLY — never high, never none/minimal. It is passed
+# explicitly rather than left to the config default, because an unset effort has
+# been observed to start a run at `none`. If you override CODEX_CMD in
+# models.env, keep an explicit low/medium effort in it.
+CODEX_CMD="codex exec --skip-git-repo-check -c model_reasoning_effort=medium"
 # shellcheck source=/dev/null
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV" 2>/dev/null || true
 

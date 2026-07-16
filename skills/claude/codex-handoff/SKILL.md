@@ -88,6 +88,7 @@ export PATH="$PATH:/c/Users/<user>/AppData/Local/Programs/OpenAI/Codex/bin"
 SP="<scratchpad-dir>"
 codex exec \
   --dangerously-bypass-approvals-and-sandbox \  # non-interactive: no one can answer prompts
+  -c model_reasoning_effort='medium' \            # REQUIRED — low|medium only, never high/none
   -C "C:\\path\\to\\repo" \                       # working root
   -o "$SP/codex-report.md" \                      # final message → file
   --color never \
@@ -96,6 +97,15 @@ codex exec \
 ```
 
 Notes on the flags:
+- `-c model_reasoning_effort='medium'` is **not optional**. Albert's standing rule
+  (2026-07-16): GPT-5.6 runs at `low` or `medium` ONLY — never `high`, never
+  `none`/`minimal`. Pass it explicitly every time; omitting it is not safe,
+  because an unset effort has been observed to start a run at `none` (the header
+  prints `reasoning effort: none`). Use `low` for mechanical grinding, `medium`
+  for anything needing judgement. After launching, read the header line
+  `reasoning effort:` in the stdout log and kill the run if it says anything
+  other than low/medium. If the task looks like it needs `high`, split it or
+  tighten the brief — do not raise the dial.
 - `--dangerously-bypass-approvals-and-sandbox` runs fully autonomous with machine
   access. It IS powerful — that is exactly why the brief must scope the task,
   forbid commit/push unless asked, and hand Codex a **restore checklist** for any

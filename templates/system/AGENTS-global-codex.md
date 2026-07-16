@@ -42,6 +42,19 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
     before). NEVER touch Claude's config files, and Claude setup scripts must
     never touch Codex's.
 
+## AI model settings (hard rule)
+
+**GPT-5.6 runs at `low` or `medium` reasoning effort ONLY — never `high`, never
+`none`/`minimal`.** Albert's standing directive, 2026-07-16; applies on every
+machine (Windows and Ubuntu) and in every session.
+
+`model_reasoning_effort` in `~/.codex/config.toml` must stay `low`/`medium`, and
+any `codex exec -c model_reasoning_effort=…` must pass `low` or `medium`
+explicitly — leaving it unset is not safe, since an unset effort has been seen to
+start a run at `none`. Check the run header (`reasoning effort: …`) and stop a
+run that says anything else. If a task looks like it needs `high`, split it or
+hand it back; do not raise the dial.
+
 ## Engineering standards
 
 11. No band-aids — root-cause, permanent, fewest-moving-parts fixes. Label any

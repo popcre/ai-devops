@@ -104,12 +104,19 @@ export PATH="$PATH:/c/Users/<user>/AppData/Local/Programs/OpenAI/Codex/bin"
 SP="<scratchpad-dir>"
 codex exec \
   -s read-only \                    # opinion, not a work order — sandbox-enforced
+  -c model_reasoning_effort='medium' \  # REQUIRED — low|medium only, never high/none
   -C "C:\\path\\to\\repo" \
   -o "$SP/codex-opinion.md" \       # final message → file
   --color never \
   - < "$SP/codex-brief.md" \
   > "$SP/codex-stdout.log" 2>&1
 ```
+
+`-c model_reasoning_effort` is **not optional**: Albert's standing rule
+(2026-07-16) is GPT-5.6 at `low` or `medium` ONLY, never `high` or `none`. Pass
+it explicitly — an unset effort has been observed to start a run at `none`.
+Judgement work like a second opinion wants `medium`. Check the `reasoning
+effort:` line in the stdout header and kill the run if it says anything else.
 
 Never paste a secret value into the brief. If Codex needs a credential, point it
 at 1Password (`op`, vault `vibe_coding`) — and note that `-s read-only` blocks
@@ -143,6 +150,7 @@ cd "C:/path/to/repo"                      # resume has no -C
 SID="$(grep -oE 'session id: [0-9a-f-]+' "$SP/codex-stdout.log" | awk '{print $3}')"
 codex exec resume "$SID" \
   -c sandbox_mode="read-only" \           # resume has no -s
+  -c model_reasoning_effort='medium' \    # low|medium only — carry the rule into the resume too
   -o "$SP/codex-rebuttal.md" \
   - < "$SP/claude-rebuttal.md" \
   > "$SP/codex-rebuttal-stdout.log" 2>&1

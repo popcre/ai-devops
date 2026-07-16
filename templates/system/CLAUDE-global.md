@@ -49,6 +49,25 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 9. Long operations: run as background tasks that write incremental results to
    files, so partial work survives a crashed session and the chat stays light.
 
+## AI model settings (hard rule — check before every Codex call)
+
+**GPT-5.6 (Codex) runs at `low` or `medium` reasoning effort ONLY. Never `high`,
+never `none`/`minimal`.** Albert's standing directive, 2026-07-16, and it applies
+on every machine (Windows and Ubuntu) and in every session.
+
+This binds everywhere the dial can be turned:
+- `codex exec -c model_reasoning_effort=…` — pass `low` or `medium` explicitly.
+  Passing nothing is NOT safe: an unset effort has been observed to start a run
+  at `none` (the header prints `reasoning effort: none`), which the rule forbids
+  just as much as `high`.
+- `~/.codex/config.toml` (`model_reasoning_effort`) — must stay `low`/`medium`.
+- Any skill, script, or MCP wiring that launches Codex.
+
+Always read the run header Codex prints (`reasoning effort: …`) and confirm it
+says `low` or `medium` before letting a run continue. If a task looks like it
+needs `high`, it doesn't — split the task, tighten the brief, or hand it back.
+Do not raise the dial.
+
 ## Engineering standards
 
 10. **No band-aids. Ever.** Root-cause, permanent, fewest-moving-parts fixes
