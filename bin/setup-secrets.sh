@@ -240,6 +240,55 @@ fi
 # --------------------------------------------------------------------------
 # 6. Verify every reference resolves (PASS/FAIL only, never a value)
 # --------------------------------------------------------------------------
+info "Token-free check: raw OP token inside ~/.claude/settings.json"
+# The stated goal is that the ONLY copy of the service-account token on disk is the
+# locked-down file ($TOKEN_FILE, chmod 600). Claude Code's settings.json can also
+# carry it under "env", and step 5 above only cleaned ~/.bashrc — so a raw token was
+# surviving there unnoticed (found on hetz 2026-07-16).
+#
+# Why it matters even though settings.json is chmod 600 like the token file: a
+# config file is FAR more likely to be dumped, pasted into a chat, copied, or backed
+# up than a dotfile named op-service-account. That is not hypothetical — an AI
+# session leaked this exact token into its own transcript on 2026-07-16 by printing
+# settings.json.
+#
+# Safe to remove because the managed shellrc already exports OP_SERVICE_ACCOUNT_TOKEN
+# from $TOKEN_FILE in ~/.bashrc AND ~/.profile, so any shell-launched `claude` still
+# gets it. TRADE-OFF, know this: a claude launched WITHOUT shell init (non-interactive
+# `ssh host claude ...`, systemd, cron) would no longer see the token and will fail to
+# authenticate — loudly, not silently. If you need that, keep the entry and accept the
+# second copy.
+CC_SETTINGS_TOKEN="$HOME/.claude/settings.json"
+if [ ! -f "$CC_SETTINGS_TOKEN" ]; then
+  ok "no settings.json yet — nothing to clean"
+elif ! python3 -c 'import json' >/dev/null 2>&1; then
+  warn "python3 unusable — cannot check $CC_SETTINGS_TOKEN for a raw token"
+else
+  CC_SETTINGS_TOKEN="$CC_SETTINGS_TOKEN" python3 - <<'PY'
+import json, os, shutil, sys
+path = os.environ["CC_SETTINGS_TOKEN"]
+try:
+    with open(path) as fh:
+        cfg = json.load(fh)
+except Exception as exc:                      # noqa: BLE001 - report, never clobber
+    print(f"  [WARN] could not parse {path} ({exc}); left untouched")
+    sys.exit(0)
+env = cfg.get("env")
+if not isinstance(env, dict) or "OP_SERVICE_ACCOUNT_TOKEN" not in env:
+    print("  ok no raw OP_SERVICE_ACCOUNT_TOKEN in settings.json")
+    sys.exit(0)
+shutil.copy2(path, path + ".aidevops.tokenclean.bak")
+del env["OP_SERVICE_ACCOUNT_TOKEN"]
+if not env:
+    cfg.pop("env", None)                      # don't leave an empty env block
+with open(path, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+print("  ok removed raw OP_SERVICE_ACCOUNT_TOKEN from settings.json")
+print(f"  ok backup: {path}.aidevops.tokenclean.bak  (DELETE IT — it still holds the token)")
+PY
+fi
+
 info "codex-cli MCP for Claude Code (~/.claude/settings.json)"
 # Wire Codex's OWN `codex mcp-server` (official, stdio) so Claude can call Codex as
 # a tool instead of shelling out. Deliberately NOT the third-party npx wrapper:
