@@ -232,6 +232,61 @@ fi
 # --------------------------------------------------------------------------
 # 6. Verify every reference resolves (PASS/FAIL only, never a value)
 # --------------------------------------------------------------------------
+info "codex-cli MCP for Claude Code (~/.claude/settings.json)"
+# Wire Codex's OWN `codex mcp-server` (official, stdio) so Claude can call Codex as
+# a tool instead of shelling out. Deliberately NOT the third-party npx wrapper:
+# native is version-locked to the CLI, needs no npx download, carries no extra
+# supply chain, and — because we pin the absolute binary — cannot resolve to the
+# wrong codex. It needs NO secret (Codex carries its own `codex login` session),
+# so it is not wrapped in the op launcher and never touches mcp.env.
+CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+CC_SETTINGS="$HOME/.claude/settings.json"
+if [ -z "$CODEX_BIN" ]; then
+  warn "codex not found on PATH — codex-cli MCP NOT configured."
+  warn "  Install Codex, run: codex login, then re-run this script."
+# Probe that python3 actually RUNS, not merely that something named python3 is on
+# PATH: a stub/shim (e.g. Windows' Store alias) satisfies `command -v` and then
+# fails on use. Presence != capability — that mistake is what this whole fix is about.
+elif ! python3 -c 'import json' >/dev/null 2>&1; then
+  warn "python3 present but not usable — cannot safely edit $CC_SETTINGS; skipped."
+else
+  mkdir -p "$(dirname "$CC_SETTINGS")"
+  [ -f "$CC_SETTINGS" ] && cp "$CC_SETTINGS" "$CC_SETTINGS.aidevops.bak"
+  if CODEX_BIN="$CODEX_BIN" CC_SETTINGS="$CC_SETTINGS" python3 - <<'PY'
+import json, os, sys
+path = os.environ["CC_SETTINGS"]
+try:
+    with open(path) as fh:
+        cfg = json.load(fh)
+except FileNotFoundError:
+    cfg = {}
+except json.JSONDecodeError:
+    sys.stderr.write("existing settings.json is not valid JSON; refusing to overwrite\n")
+    sys.exit(1)
+if not isinstance(cfg, dict):
+    sys.stderr.write("settings.json root is not an object; refusing\n")
+    sys.exit(1)
+# Preserve every other server and every other settings key.
+cfg.setdefault("mcpServers", {})["codex-cli"] = {
+    "command": os.environ["CODEX_BIN"],
+    "args": ["mcp-server"],
+    # Codex jobs run long; don't let the MCP call time out at the default.
+    "env": {"MCP_TOOL_TIMEOUT": "3600000"},
+}
+with open(path, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+PY
+  then
+    ok "codex-cli MCP -> native mcp-server ($CODEX_BIN)"
+    warn "Restart Claude Code, then confirm codex-cli shows connected."
+    warn "  Prove its sandbox can actually write:  ai-devops doctor"
+  else
+    warn "Could not update $CC_SETTINGS — left unchanged (backup: $CC_SETTINGS.aidevops.bak)"
+  fi
+fi
+
+echo
 info "Verifying references resolve from 1Password (no values printed)"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[dry-run] would verify each op:// reference resolves"

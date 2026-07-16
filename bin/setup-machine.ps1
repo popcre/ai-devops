@@ -348,30 +348,43 @@ if ($SkipDesktopMcp) {
     # unreachable and EVERY sandboxed write fails ("program not found") while
     # --version and `codex login status` still pass. Verified 2026-07-16: the same
     # binary fails via the junction and succeeds via the real package bin.
+    # Use Codex's OWN `codex mcp-server` (official, stdio) rather than a third-party
+    # npx wrapper. Verified 2026-07-16 end-to-end: exposes `codex` (prompt, model,
+    # sandbox, approval-policy, cwd, config, *-instructions) and `codex-reply`
+    # (thread continuation), and a tools/call with sandbox=workspace-write really
+    # writes files. Why native:
+    #   - no third-party supply chain and no npx download in the hot path;
+    #   - version-locked to the CLI it ships with;
+    #   - a wrapper shells out to `codex` resolved from PATH, which re-introduces
+    #     the junction bug above; pointing at the absolute exe cannot resolve wrong.
+    # Trade-off accepted: we lose the wrapper's changeMode/batch/brainstorm extras,
+    # which are reproducible by prompting the `codex` tool.
     $codexBin = Get-CodexBin
     $codexExe = if ($codexBin) { Join-Path $codexBin "codex.exe" } else { $null }
-    $npmBin   = Join-Path $env:APPDATA "npm"
-    $codexEnv = @{
-      # Codex jobs run long; don't let the MCP call time out at the default.
-      MCP_TOOL_TIMEOUT = "3600000"
-      PATH = "$codexBin;$npmBin;" +
-             [Environment]::GetEnvironmentVariable("PATH","User") + ";" +
-             [Environment]::GetEnvironmentVariable("PATH","Machine")
-    }
-    # Only pin the binary path when the standalone exe really exists. Pinning it at a
-    # missing exe is what silently broke this MCP before; when Codex is npm-global,
-    # leave it unset and let it resolve through the PATH above.
+    # Codex jobs run long; don't let the MCP call time out at the default.
+    $codexEnv = @{ MCP_TOOL_TIMEOUT = "3600000" }
+
     if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
-      $codexEnv["CODEX_CLI_PATH"]    = $codexExe
-      $codexEnv["CODEX_BINARY_PATH"] = $codexExe
-    } elseif (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-      Warn "Codex CLI not found (no standalone exe, nothing named 'codex' on PATH)."
-      Warn "  The codex-cli MCP will not start until you install Codex and run: codex login"
-    }
-    $cfg["mcpServers"]["codex-cli"] = @{
-      command = "cmd"
-      args = @("/c", "npx", "-y", "@cexll/codex-mcp-server")
-      env  = $codexEnv
+      # Absolute path: the MSIX sandbox does not inherit the user PATH, and an
+      # absolute exe also sidesteps PATH resolution picking a broken shim.
+      $cfg["mcpServers"]["codex-cli"] = @{
+        command = $codexExe
+        args    = @("mcp-server")
+        env     = $codexEnv
+      }
+      Ok "codex-cli MCP -> native mcp-server ($codexExe)"
+    } elseif ($cmd = Get-Command codex -ErrorAction SilentlyContinue) {
+      # No standalone package (e.g. npm-global install). Use what's on PATH, but say
+      # so plainly — we have not proven this one's sandbox can write.
+      $cfg["mcpServers"]["codex-cli"] = @{
+        command = $cmd.Source
+        args    = @("mcp-server")
+        env     = $codexEnv
+      }
+      Warn "codex-cli MCP -> $($cmd.Source) (non-standalone; run 'ai-devops doctor' to prove its sandbox can write)"
+    } else {
+      Warn "Codex CLI not found — codex-cli MCP NOT configured."
+      Warn "  Install Codex, run: codex login, then re-run this script."
     }
 
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
