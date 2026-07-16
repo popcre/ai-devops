@@ -195,7 +195,7 @@ SSH→sudo→bash — nested quoting mangles the `awk` that extracts the session
 Still pending **Albert's explicit go-ahead**, because these are files this session
 did not create.
 
-#### Open bug (found 2026-07-16): every `ssh vps` from Git Bash litters a `NUL` file
+#### ✅ FIXED 2026-07-16: every `ssh vps` from Git Bash littered a `NUL` file
 
 **Symptom:** a junk file named `NUL` (~294 bytes, containing Windows `ping`
 output) keeps appearing in whatever directory you run `ssh` from — including this
@@ -222,20 +222,55 @@ Note the machine atlas mandates Git's ssh for automation (the Windows-MCP
 PowerShell sandbox can't capture SSH output — ConPTY exit 255), so the
 file-creating path is the **normal** path here, not an edge case.
 
-**NOT fixed this session — needs a decision, because there is no single portable
-redirect:** `>NUL` is right for cmd.exe (Windows OpenSSH runs `Match exec` via
-cmd), `>/dev/null` is right for msys sh, and each breaks under the other. The
-pre-existing `~/.ssh/config` sidesteps it by using **no redirect at all**
-(`!exec "ping -n 1 -w 800 <removed-protected-address>"`), trading junk files for ping noise on
-every connect. Options, cheapest first: (a) drop the redirect — noisy but
-harmless and portable; (b) point the probe at a tiny wrapper script that is quiet
-in both shells; (c) leave it and `.gitignore` the `NUL` — a band-aid that only
-hides it in this one repo while it keeps littering every other directory.
+**The fix: the redirect was deleted outright — it was suppressing nothing.**
+The premise that it silenced ping was simply wrong. **OpenSSH already sends
+`Match exec` stdin/stdout/stderr to the null device and keeps only the exit
+status**, so the redirect bought zero noise reduction while creating junk under
+sh. Proven before changing anything: a probe containing an explicit
+`echo LEAKED_STDOUT_MARKER` produced **no output at all** through ssh. Codex
+independently confirmed the same, citing OpenSSH's `readconf.c` — which also
+extends the guarantee to Ubuntu's portable OpenSSH, not just this Git Bash build.
 
-Left alone deliberately: this is Albert's live SSH routing (breaking it means
-losing server access), and `bin/setup-secrets.sh` — which installs this config on
-Ubuntu — is **still uncommitted from a concurrent session**. Don't rewrite it
-underneath that work.
+Applied to [`config/ssh-config.template`](config/ssh-config.template) (all 8
+probe lines) **and** to the live `~/.ssh/ai-devops.conf` on `t16`
+(backup: `~/.ssh/ai-devops.conf.pre-nulfix.bak`). **Verified after the change:**
+`ssh vps` connects as `root`; **no** `NUL` file appears; captured stdout is
+exactly the remote command's output with no ping noise; `ssh -G edge1` still
+resolves to the Tailscale IP `<removed-protected-address>`, so Tailscale-first routing is
+intact. A header comment now explains why the redirect must never come back.
+
+**Not yet applied to `916`/`4837`** — their `~/.ssh/ai-devops.conf` still has the
+old redirect and will keep littering until `bin/setup-machine.ps1` re-runs there
+(or the one-line `sed` below is applied):
+`sed -i 's/ >NUL 2>&1"$/"/' ~/.ssh/ai-devops.conf`
+
+#### ⚠️ Landmine this uncovered: the ping probe is Windows-only syntax
+
+Found by the Codex second opinion, missed on the first pass, then **verified on
+`hetz`**. The probe flags mean different things per OS:
+
+| | `-n 1` | `-w 800` |
+|---|---|---|
+| **Windows** | one echo request | 800 **millisecond** timeout |
+| **Linux** | `-n` = no reverse DNS; it takes **no** number (count is `-c`) | 800 **second** deadline |
+
+So `ping -n 1 -w 800 <ip>` on Ubuntu does **not** probe quickly — it **hangs**
+(verified: killed by a `timeout` after 12s, exit 124, no output). The correct
+Linux form is `ping -n -c 1 -W 1 <ip>`.
+
+**Currently latent, and must stay that way until fixed:** `ai-devops.conf` is
+**not installed** on `hetz` (verified absent for both `root` and `ai`), so nothing
+is broken today. But **"rollout to the Ubuntu servers" is pending work (§3a)** —
+installing this template on Ubuntu as-is would stall **every ssh connection on
+that box for up to 800 seconds** before it even chose a route. That is a
+lock-yourself-out-shaped bug.
+
+**Before any Ubuntu rollout:** have the installer emit the Linux probe form
+(`ping -n -c 1 -W 1 <ip>`) rather than shipping this file verbatim. `Match exec`
+has no OS conditional, so the per-OS installers are the right place to branch:
+`bin/setup-machine.ps1` (Windows) and `bin/setup-secrets.sh` (Ubuntu, which does
+not install any ssh config today). Do **not** "fix" it by making one line serve
+both — the flags are genuinely incompatible.
 
 **Gotcha for anyone driving `hetz` over SSH:** you land as `root`, but the repo is
 `ai:ai` at `/worksp/ai-devops` and skills belong to `/home/ai/.claude/skills`. Run
@@ -378,11 +413,17 @@ revisit — see AGENTS.md → Intentional quirks.
    binary and the fix; do not "fix" it by copying helpers into the shim `bin` —
    that must be redone on every Codex upgrade. Put the real package bin first on
    PATH instead.
-0b. **TO-DO — delete `hetz`'s 3 orphaned skills.** Ready to execute; the only
-   thing outstanding is **Albert's explicit go-ahead** (they are files no session
-   here created). The replacement path was **verified working on `hetz` on
+0b. ✅ **DONE 2026-07-16 — `hetz`'s 3 orphaned skills are deleted.** Albert gave
+   the go-ahead after the alternate path was verified. Removed
+   `codex-consult`, `codex-code-review`, `codex-plan-review` from
+   `/home/ai/.claude/skills`. **Gate passed:** the directory now holds **18**
+   skills and `diff` against `skills/claude/` in the repo is **identical**;
+   `codex-second-opinion` is present and working there. Nothing below needs doing
+   — kept for the reasoning and for the blind-prune warning, which still stands.
+
+   The replacement path was **verified working on `hetz` on
    2026-07-16** — the full evidence table is in **§3c → "The alternate path"**.
-   Nothing is lost by removing them:
+   Nothing was lost by removing them:
    `codex-consult` → `codex-second-opinion` (already installed there; the whole
    opinion+rebuttal loop was run end-to-end), `codex-code-review` →
    `ai-codex-review diff-review`, `codex-plan-review` → `ai-codex-review plan-review`.
