@@ -246,9 +246,9 @@ if ($LASTEXITCODE -eq 0 -and $priv) {
 # --------------------------------------------------------------------------
 # 5c. SSH config — host aliases (ssh vps / vps2 / coolify / seafile / ...)
 # --------------------------------------------------------------------------
-# Installed as ~/.ssh/ai-devops.conf and Included from ~/.ssh/config at the END,
-# so any host you already define keeps winning; only NEW aliases (e.g. vps2) are
-# added. Never clobbers your existing config.
+# Installed as ~/.ssh/ai-devops.conf and Included FIRST from ~/.ssh/config.
+# OpenSSH uses the first value it finds for each setting, so placing this Include
+# last allowed stale blocks left by the old Dropbox script to override it.
 Step "SSH config (host aliases: vps, vps2, coolify, seafile, ...)"
 $sshTmpl   = Join-Path $RepoPath "config\ssh-config.template"
 $aidevConf = Join-Path $sshDir "ai-devops.conf"
@@ -262,11 +262,17 @@ if (Test-Path $sshTmpl) {
     Set-Content -Path $mainConf -Value $incLine -Encoding ascii
     try { icacls $mainConf /inheritance:r | Out-Null; icacls $mainConf /grant:r "$($env:USERNAME):(R,W)" | Out-Null } catch {}
     Ok "Created ~/.ssh/config with Include ai-devops.conf"
-  } elseif (Select-String -Path $mainConf -SimpleMatch "ai-devops.conf" -Quiet) {
-    Ok "~/.ssh/config already includes ai-devops.conf"
   } else {
-    Add-Content -Path $mainConf -Value "`n# ai-devops managed host aliases (existing entries above still win)`n$incLine"
-    Ok "Added 'Include ai-devops.conf' to ~/.ssh/config (appended; your entries win)"
+    $mainText = [System.IO.File]::ReadAllText($mainConf)
+    $withoutManagedInclude = [regex]::Replace(
+      $mainText,
+      '(?im)^\s*#\s*ai-devops managed host aliases[^\r\n]*\r?\n\s*Include\s+ai-devops\.conf\s*\r?\n?|^\s*Include\s+ai-devops\.conf\s*\r?\n?',
+      ''
+    ).TrimStart("`r", "`n")
+    $newMainText = if ($withoutManagedInclude) { "$incLine`r`n`r`n$withoutManagedInclude" } else { "$incLine`r`n" }
+    [System.IO.File]::WriteAllText($mainConf, $newMainText, [System.Text.Encoding]::ASCII)
+    try { icacls $mainConf /inheritance:r | Out-Null; icacls $mainConf /grant:r "$($env:USERNAME):(R,W)" | Out-Null } catch {}
+    Ok "Placed 'Include ai-devops.conf' first in ~/.ssh/config (managed aliases are authoritative)"
   }
 } else {
   Warn "Missing $sshTmpl — skipping SSH config."
