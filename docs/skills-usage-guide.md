@@ -30,7 +30,8 @@ Windows (PowerShell): run the same script via Git Bash
 | "push and commit… update the PR for sandbox-albert with develop" | `dflow-ship` — say "ship it" or "push and commit" |
 | "is everything pushed? the live site is still running the old commit" | `deploy-and-verify` (hetz apps) — deploy verification with the Coolify quirks baked in |
 | "pull the repo and re-read the .md files for the proper way to make db changes" | `shared-db-change` — automatic for any shared-backend change |
-| "are there any secrets not in 1password? put them in with good notes" | `secrets-to-1password` — say "secrets sweep" (also runs inside session-docs-update) |
+| "are there any secrets not in 1password? put them in with good notes" | `secrets-to-1password` — say "secrets sweep" (also runs inside session-docs-update and wrap-up) |
+| "save this key / put these credentials in 1password with notes a future session can use" | `secrets-to-1password` — same skill, single-entry mode |
 | "make it comprehensive enough that a brand new fresh developer…" | `handoff-writer` — say "write the handoff" |
 | "@design.zip read the README in full… recreate these screens in our stack" | `design-handoff-implement` — attach the zip |
 | "read the entire codebase and tell me if you find any bugs" | `repo-bug-audit` — say "audit the codebase" |

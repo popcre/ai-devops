@@ -18,6 +18,15 @@ id_ed25519
 !bin/setup-secrets.sh
 !docs/onboarding-secrets.md
 
+# The secrets-to-1password skill: instructions only, no secret values. The
+# `**/*secret*` rule above matches the DIRECTORY name, and git will not descend
+# into an excluded directory — so the directory must be un-ignored before its
+# contents can be. Without both lines, `git add` silently refuses the skill and
+# it never reaches GitHub: that is exactly how this skill went missing once
+# already, documented in five places but committed in none.
+!skills/claude/secrets-to-1password/
+!skills/claude/secrets-to-1password/**
+
 # === OS / editor noise ===
 .DS_Store
 node_modules/

@@ -11,7 +11,7 @@ the others live where noted.
 | ⚙ `wrap-up` | **The one-phrase closer.** Chains docs update → secrets sweep → handoff-safe state → push & verify, then one closing report. | **"wrap up"** |
 | ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
 | ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
-| ⚙ `secrets-to-1password` | Sweeps the session for credentials, stores them in the `vibe_coding` vault with rich notes. | "secrets sweep" / "any secrets not in 1password?" |
+| ⚙ `secrets-to-1password` | Sweeps the session for credentials — or stores one you hand it — in the `vibe_coding` vault: searchable title, tags, and notes detailed enough for a future session that's never seen the entry to find and use it. Checks for an existing entry first, and never stores a truncated value or reveals a live one to compare. | "secrets sweep" / "any secrets not in 1password?" / "save this key" |
 | ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt per `handoff-standard.md`, with a mandatory self-audit gate so it's never skimpy. | "write the handoff" / "give me a prompt for a new session" |
 
 ## Project setup
