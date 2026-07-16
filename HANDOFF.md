@@ -138,6 +138,44 @@ was called end-to-end and wrote a file. **Not verified:** the MCP entries as see
 by a restarted Claude Desktop / Claude Code (requires an app restart), and
 anything on 916 / 4837 / `hetz`.
 
+### 3c. Skill distribution — audited 2026-07-16 (`hetz` was 4 commits stale)
+
+Triggered by a plain question ("is a new skill automatically on all my machines?").
+The answer is **no**, and the audit found real drift. Durable rules are now in
+`docs/skills-usage-guide.md` ("How skills reach each machine") and the
+`ai-install-skills` quirk in `AGENTS.md`; the state as of this session:
+
+| Machine | State on 2026-07-16 |
+|---|---|
+| `t16` | Current. Repo at `e07a1a8`; 18 Claude + 12 Codex skills installed. |
+| `hetz` | **Was 4 commits behind** (`b0f368b`, skills last installed 2026-07-09 — missing `secrets-to-1password` + `sync-dotfiles` entirely). **Fixed this session:** pulled to `e07a1a8` and re-ran `ai-install-skills` as user `ai`. Now 18 skills + 3 orphans (below). |
+| `916`, `4837` | **Not checked, not synced.** Assume stale. |
+
+**Mechanism (verified, not assumed):** no cron entry and no systemd timer on
+`hetz` touches skills; `git pull` + `bin/ai-install-skills` only ever run when a
+human/session triggers them (usually via the `sync-dotfiles` skill). Adding a skill
+needs **no wiring** — the installer globs `skills/claude/*/` — but a commit reaches
+a machine only when that machine syncs.
+
+**Orphan finding (`hetz`):** `/home/ai/.claude/skills` carried 3 skills that have
+**never existed in this repo** — `codex-consult`, `codex-code-review`,
+`codex-plan-review` (all dated 2026-07-04, predating the repo's skill tree).
+`ai-install-skills` never prunes, so they survive every sync. **`codex-consult` is
+broken**: its `allowed-tools` shells out to a `codex-consult` binary that is not on
+PATH. It also overlaps semantically with the new `codex-second-opinion`, so a
+session on `hetz` could match the broken skill instead. **Left in place
+deliberately** — they are not this session's to delete; awaiting Albert's
+go/no-go. Next action: confirm, then `rm -rf` those 3 dirs under
+`/home/ai/.claude/skills`.
+
+**Gotcha for anyone driving `hetz` over SSH:** you land as `root`, but the repo is
+`ai:ai` at `/worksp/ai-devops` and skills belong to `/home/ai/.claude/skills`. Run
+`sudo -u ai -H bash -lc '…'`, or the install silently targets `/root` and git
+refuses with `dubious ownership`.
+
+**Unchanged by this session:** the `codex-cli` MCP is still **NOT** wired on `hetz`
+(§3b) — `bin/setup-secrets.sh` has still never run there. Only skills were synced.
+
 **Trade-off recorded:** dropping the third-party wrapper loses `changeMode`
 (structured OLD/NEW patch output), `fetch-chunk`, `batch-codex` (parallel task
 delegation) and `brainstorm`. All are reproducible by prompting the native `codex`
@@ -248,6 +286,21 @@ revisit — see AGENTS.md → Intentional quirks.
    binary and the fix; do not "fix" it by copying helpers into the shim `bin` —
    that must be redone on every Codex upgrade. Put the real package bin first on
    PATH instead.
+0b. **Decide the fate of `hetz`'s 3 orphaned skills** (§3c) — small, but it is a
+   live trap. `codex-consult`, `codex-code-review`, `codex-plan-review` in
+   `/home/ai/.claude/skills` exist on no other tracked surface and are absent from
+   this repo; `codex-consult` calls a binary that isn't installed, and it competes
+   for triggers with `codex-second-opinion`. They were left alone this session
+   because deleting files this session did not create needs Albert's OK.
+   - **Ask Albert first.** If he confirms they are dead: `ssh vps` then
+     `sudo -u ai rm -rf /home/ai/.claude/skills/{codex-consult,codex-code-review,codex-plan-review}`.
+   - If any turns out to be wanted, it belongs in `skills/claude/` in this repo —
+     not machine-local, where the next audit will flag it again.
+   ✅ *Worked when:* `ls /home/ai/.claude/skills | wc -l` returns **18**, matching
+   `ls skills/claude | wc -l` in the repo.
+   ⚠️ *Do not* "solve" this by adding a blind prune to `ai-install-skills` — it
+   would also delete legitimately machine-local skills such as
+   `synology-sharesync-stuck-triage` on 916. Any prune must be opt-in.
 1. **Propagate Phase 1 to each remaining machine and collect its memory.** On
    each machine, pull ai-devops; run `./update.sh` on Ubuntu or
    `bin/install-ai-devops-windows.ps1` on Windows; run `bin/ai-sync-memory pull`,

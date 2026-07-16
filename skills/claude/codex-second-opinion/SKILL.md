@@ -30,17 +30,38 @@ argument.
 | Codex to *build/run/prove* something autonomously | `codex-handoff` |
 | A canned read-only Codex pass over the current git diff → `.ai/reviews/` | `ai-codex-review` (via the `ai-reviewer` skill) |
 
-## Transport
+## Transport — prefer the MCP, fall back to the CLI
 
-Use `codex exec` directly. The `codex-cli` MCP wrapper fails on Albert's Windows
-machines with a false **"Codex CLI Not Found"** (it only looks for the npm-global
-package; Codex is installed standalone). Don't retry the MCP — fall back
-immediately. See `codex-handoff` for the full transport note.
+**Check for the `codex-cli` MCP first** (`mcp__codex-cli__codex` /
+`mcp__codex-cli__codex-reply`). Since 2026-07-16 it is wired to Codex's **own**
+`codex mcp-server` — not the old third-party npx wrapper — by
+`bin/setup-machine.ps1` (Windows → Claude **Desktop**) and `bin/setup-secrets.sh`
+(Ubuntu → Claude Code `~/.claude/settings.json`). It maps onto this skill exactly:
 
-Find the binary rather than hardcoding it (`where codex` / `command -v codex`).
-On the Windows machines it's typically:
-`C:\Users\<user>\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`.
-Confirm with `codex --version` (expect `codex-cli <ver>`).
+| Step | MCP tool | Args that matter |
+|---|---|---|
+| 2 — opinion | `codex` | `prompt`, `sandbox="read-only"`, `cwd` |
+| 4 — rebuttal | `codex-reply` | continues the same thread — no re-sending the brief |
+
+`codex-reply` is thread continuation, which is precisely the rebuttal round; use
+it rather than reconstructing context.
+
+**If the MCP isn't present, use `codex exec` — this is normal, not a fault.** The
+wiring is per-surface: Claude Code on Windows has no `codex-cli` MCP (the Windows
+script targets Claude Desktop), so a Windows Claude Code session lands on the CLI
+path below every time. Confirm with `claude mcp list`.
+
+Historical note, so nobody "re-fixes" this: the **old third-party wrapper** failed
+with a false **"Codex CLI Not Found"**. That is not evidence the current native
+MCP is broken — don't let an old transcript talk you out of trying the MCP. If
+the native one ever does fail, don't retry it; fall back and say so.
+
+For the CLI path, find the binary rather than hardcoding it (`where codex` /
+`command -v codex`), and confirm with `codex --version` (expect `codex-cli <ver>`).
+Do **not** hardcode `…\Programs\OpenAI\Codex\bin` on Windows — that visible path
+is a junction, and Codex's sandbox helper is unreachable through it, so every
+sandboxed write fails while `--version` still passes. See the junction incident in
+`AGENTS.md`.
 
 ## Step 1 — commit to your own position FIRST
 
@@ -167,7 +188,9 @@ Then say what you recommend doing about it.
   stubbornness. Both are failures of the same thing: arguing from the evidence.
 - **Softening Codex's disagreement** when reporting it, because you'd rather be
   right.
-- Retrying the `codex-cli` MCP after "Codex CLI Not Found".
+- Skipping the `codex-cli` MCP because an old transcript says it's broken — that
+  was the retired third-party wrapper, not today's native `codex mcp-server`.
+- Hardcoding the junction path `…\Programs\OpenAI\Codex\bin` on Windows.
 - Running the debate with write access (`--dangerously-bypass-approvals-and-sandbox`
   or `-s workspace-write`) — an opinion round has no business editing the repo.
 - Inlining a giant prompt on the command line instead of a brief file.

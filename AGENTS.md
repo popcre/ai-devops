@@ -321,6 +321,56 @@ Reverting to a `--version` check restores a green light over a broken tool, whic
 is worse than no check at all. If the cost matters, gate it behind a flag — do not
 delete it.
 
+### `ai-install-skills` installs but never prunes — orphans live forever
+
+Looks like:
+`bin/ai-install-skills` syncs `skills/claude/` to `~/.claude/skills`, so a machine's
+skill set should mirror the repo.
+
+Actually:
+It only ever `rm -rf`s the specific skill names it is **about to copy**, then copies
+them. A skill directory on the machine with **no counterpart in the repo is never
+touched**. Verified 2026-07-16 on `hetz`: `/home/ai/.claude/skills` held 21 skills —
+the repo's 18 plus 3 orphans (`codex-consult`, `codex-code-review`,
+`codex-plan-review`, all dated 2026-07-04) that have **never existed in this repo**.
+`codex-consult` is actively broken: it shells out to a `codex-consult` binary that
+is not on PATH.
+
+Why:
+The one-way repo→machine copy is deliberate (a local edit must never be captured
+back). Pruning was simply never implemented — nobody noticed, because an orphan
+fails only when a session actually triggers it.
+
+Future sessions should:
+Treat "the skill is installed" as **no evidence** it came from the repo. When a
+machine behaves oddly, diff `ls ~/.claude/skills` against `ls skills/claude/` in the
+repo. Orphans are worse than clutter: `codex-consult` overlaps semantically with
+`codex-second-opinion`, so a session on `hetz` could match the broken one. If a
+prune step is ever added, it must be opt-in (`--prune`) — a blind prune would delete
+legitimately machine-local skills like `synology-sharesync-stuck-triage`.
+
+### `codex exec resume` takes different flags from `codex exec`
+
+Looks like:
+`resume` is `exec` plus a session id, so the flags carry over.
+
+Actually:
+`codex exec resume` **rejects** `-s/--sandbox`, `-C/--cd`, and `--color`
+(`error: unexpected argument '-s' found`). Verified against codex-cli 0.144.5 on
+2026-07-16. It does accept `-c`, `-m`, `-o`, `--json`, `--last`. To resume
+read-only, pass `-c sandbox_mode="read-only"` and `cd` to the repo first.
+
+Why:
+Upstream CLI surface; nothing we control.
+
+Future sessions should:
+Copy `exec` flags onto `resume` and it fails immediately and loudly — which is the
+good case. The dangerous case is the sandbox: a mistyped `-c` key does **not**
+error, it silently falls back to the config default. Always confirm the run header
+prints `sandbox: read-only`. Prefer the explicit session id (the header of the
+first run prints `session id: <uuid>`) over `--last`, which silently picks the
+newest session for the cwd and can grab the wrong one.
+
 ### Reviews are read-only by design
 
 Looks like:

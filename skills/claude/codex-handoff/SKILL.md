@@ -1,6 +1,6 @@
 ---
 name: codex-handoff
-description: Hand a substantial implementation, ops, or verification task off to Codex (GPT-5.x) and drive it to completion, then verify its work. Use whenever the user says "use codex", "have codex do X", "hand this off to codex", "use the codex-cli MCP", "delegate this to gpt-5", or wants a second engine to build/run/prove something autonomously — especially long tasks worth running in the background. Also use when the codex-cli MCP errors with "Codex CLI Not Found": this skill is the working path.
+description: Hand a substantial implementation, ops, or verification task off to Codex (GPT-5.x) and drive it to completion, then verify its work. Use whenever the user says "use codex", "have codex do X", "hand this off to codex", "use the codex-cli MCP", "delegate this to gpt-5", or wants a second engine to build/run/prove something autonomously — especially long tasks worth running in the background. For Codex's opinion on reasoning rather than work to execute, use codex-second-opinion instead.
 ---
 
 # codex-handoff
@@ -15,25 +15,41 @@ loop so the handoff is self-contained and the result is never trusted blind.
 ## Trigger phrases
 
 - "use codex to…", "have codex do…", "hand this off to codex", "let codex build it"
-- "use the codex-cli MCP to…" (see the transport note — the MCP is usually broken here)
+- "use the codex-cli MCP to…" (see the transport note — the MCP is native now)
 - "delegate this to gpt-5 / the other model"
 - any long implementation or prod-ops task the user wants run in the background
 
-## Transport: use `codex exec` directly, not the MCP
+## Transport: `codex exec`, or the native MCP where it's wired
 
-The `codex-cli` MCP wrapper on Albert's Windows machines usually fails with
-**"Codex CLI Not Found — install with npm install -g @openai/codex"**. That is a
-false negative: it only looks for the npm-global package, but Codex is installed
-via the standalone installer. The repo's own `bin/ai-codex-review` already drives
-Codex with `codex exec` for the same reason. So:
+**Superseded 2026-07-16 — read this before trusting an older transcript.** The
+"Codex CLI Not Found — install with `npm install -g @openai/codex`" failure came
+from the **third-party npx wrapper**, which has been retired. `codex-cli` is now
+wired to Codex's **own** `codex mcp-server` (tools: `codex`, `codex-reply`) by
+`bin/setup-machine.ps1` (Windows → Claude **Desktop**) and `bin/setup-secrets.sh`
+(Ubuntu → Claude Code). See the quirk in `AGENTS.md`.
 
-1. **Try the `mcp__codex-cli__ask-codex` MCP tool first only if the user named it.**
-   If it returns "Codex CLI Not Found", do NOT retry it — fall back to the CLI.
-2. **Find the binary** (don't hardcode — Albert has several machines):
-   `where codex` / `command -v codex`. The standalone install is typically
-   `C:\Users\<user>\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`. Add that
-   `bin` dir to `PATH` for the call if `codex` isn't already resolvable.
+Practically, for long autonomous handoffs `codex exec` is still the right
+transport — it backgrounds cleanly, captures a report with `-o`, and survives a
+dead session, none of which an MCP call does. Use the MCP for short interactive
+exchanges (and see `codex-second-opinion` for the debate loop, which uses
+`codex-reply` for its rebuttal round). Note that Claude Code on Windows has no
+`codex-cli` MCP at all — the Windows script targets Claude Desktop — so a Windows
+Claude Code session correctly lands on `codex exec` every time.
+
+1. **Find the binary** (don't hardcode — Albert has several machines):
+   `where codex` / `command -v codex`.
+2. **Windows: never use `…\AppData\Local\Programs\OpenAI\Codex\bin`.** That
+   visible path is a **junction**, and Codex resolves its sandbox helper relative
+   to the exe at `<exe_dir>\..\codex-resources\` — which does not exist through
+   the junction. The result is the 2026-07-16 incident: `--version` and
+   `codex login status` both pass while **every sandboxed write silently fails**
+   and `codex exec` changes nothing. This bites hard here, because handoffs run
+   with write access. Resolve the real package `bin` the way
+   `bin/setup-machine.ps1`'s `Get-CodexBin` does.
 3. Confirm it runs: `codex --version` (expect `codex-cli <ver>`).
+4. **Prove it can write** before trusting a handoff — presence is not capability.
+   `ai-devops doctor` does exactly this (real `codex exec --sandbox
+   workspace-write` into a temp dir), and it exists because of that incident.
 
 ## Write a self-contained brief (this is the whole game)
 
