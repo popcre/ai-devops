@@ -23,9 +23,10 @@ What it does (idempotent — safe to re-run):
   7. Best-effort: wires MCP servers into Claude Desktop's
      claude_desktop_config.json (backed up first) — supabase, trigger and
      1password (stdio, via the op launcher) plus devops-mcp and synology-monitor
-     (remote, via the mcp-remote shim). No token is ever written into the config;
-     only URLs and op:// references. Other servers already present (ag-grid,
-     playwright, vercel, recall-ai, ...) are preserved untouched.
+     (remote, via the mcp-remote shim), plus codex-cli (stdio, no launcher — it
+     has no token, only a PATH to the codex binary). No token is ever written into
+     the config; only URLs and op:// references. Other servers already present
+     (ag-grid, playwright, vercel, recall-ai, ...) are preserved untouched.
 
 IMPORTANT — Claude Desktop limitations you must know (verified):
   - Claude Desktop does NOT expand ${VAR} in its config, and neither does
@@ -56,6 +57,32 @@ $ErrorActionPreference = "Stop"
 if ($PSVersionTable.PSVersion.Major -lt 7) {
   throw "Run this with PowerShell 7 (pwsh), not Windows PowerShell 5.1. Install: winget install Microsoft.PowerShell"
 }
+# Resolve the directory holding a USABLE codex.exe — one whose sandbox helper is
+# reachable. Prefer the real standalone package bin
+# (~\.codex\packages\standalone\current\bin) over the visible junction
+# (…\Programs\OpenAI\Codex\bin): only `bin` is junctioned, so from the visible
+# path Codex resolves <exe_dir>\..\codex-resources\ to a directory that does not
+# exist and cannot launch codex-windows-sandbox-setup.exe. `current` is itself a
+# junction that the Codex updater re-points, so this stays correct across upgrades.
+# Returns $null when no standalone install is present (npm-global is then used).
+function Get-CodexBin {
+  $candidates = @(
+    (Join-Path $env:USERPROFILE ".codex\packages\standalone\current\bin"),
+    (Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin")
+  )
+  foreach ($dir in $candidates) {
+    $exe = Join-Path $dir "codex.exe"
+    if (Test-Path -LiteralPath $exe) {
+      # Only trust a dir whose sandbox helper is actually reachable.
+      $helper = Join-Path (Split-Path $dir -Parent) "codex-resources\codex-windows-sandbox-setup.exe"
+      if ((Test-Path -LiteralPath $helper) -or (Test-Path -LiteralPath (Join-Path $dir "codex-windows-sandbox-setup.exe"))) {
+        return $dir
+      }
+    }
+  }
+  return $null
+}
+
 function Step($m){ Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Note($m){ Write-Host "    $m" }
 function Ok($m){   Write-Host "    ok $m" -ForegroundColor Green }
@@ -308,11 +335,100 @@ if ($SkipDesktopMcp) {
       args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
     }
 
+    # codex-cli (stdio, npx). Deliberately NOT wrapped in the op launcher: Codex
+    # carries its own `codex login` session, so there is no token to inject. What it
+    # does need is to FIND the codex binary — the MSIX sandbox does not inherit the
+    # user PATH, so hand it an explicit PATH covering both install shapes
+    # (standalone installer and npm-global).
+    #
+    # CRITICAL — use Get-CodexBin, NOT …\Programs\OpenAI\Codex\bin. That visible
+    # path is a JUNCTION to the package's bin\, and its parent has no sibling
+    # codex-resources\ directory. Codex looks for its sandbox helper at
+    # <exe_dir>\..\codex-resources\, so through the junction the helper is
+    # unreachable and EVERY sandboxed write fails ("program not found") while
+    # --version and `codex login status` still pass. Verified 2026-07-16: the same
+    # binary fails via the junction and succeeds via the real package bin.
+    $codexBin = Get-CodexBin
+    $codexExe = if ($codexBin) { Join-Path $codexBin "codex.exe" } else { $null }
+    $npmBin   = Join-Path $env:APPDATA "npm"
+    $codexEnv = @{
+      # Codex jobs run long; don't let the MCP call time out at the default.
+      MCP_TOOL_TIMEOUT = "3600000"
+      PATH = "$codexBin;$npmBin;" +
+             [Environment]::GetEnvironmentVariable("PATH","User") + ";" +
+             [Environment]::GetEnvironmentVariable("PATH","Machine")
+    }
+    # Only pin the binary path when the standalone exe really exists. Pinning it at a
+    # missing exe is what silently broke this MCP before; when Codex is npm-global,
+    # leave it unset and let it resolve through the PATH above.
+    if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
+      $codexEnv["CODEX_CLI_PATH"]    = $codexExe
+      $codexEnv["CODEX_BINARY_PATH"] = $codexExe
+    } elseif (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+      Warn "Codex CLI not found (no standalone exe, nothing named 'codex' on PATH)."
+      Warn "  The codex-cli MCP will not start until you install Codex and run: codex login"
+    }
+    $cfg["mcpServers"]["codex-cli"] = @{
+      command = "cmd"
+      args = @("/c", "npx", "-y", "@cexll/codex-mcp-server")
+      env  = $codexEnv
+    }
+
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
-    Ok "Wired token-free: supabase, devops-mcp, synology-monitor, trigger, 1password — no tokens in the file"
+    Ok "Wired token-free: supabase, devops-mcp, synology-monitor, trigger, 1password, codex-cli — no tokens in the file"
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
-    Warn "  these MCPs show connected: supabase, devops-mcp, synology-monitor, trigger, 1password."
+    Warn "  these MCPs show connected: supabase, devops-mcp, synology-monitor, trigger, 1password, codex-cli."
+  }
+}
+
+# --------------------------------------------------------------------------
+# 6b. Codex on PATH — make `codex exec` actually able to write
+# --------------------------------------------------------------------------
+# The standalone installer puts …\Programs\OpenAI\Codex\bin on PATH, but that dir
+# is a JUNCTION to the package's bin\ and its parent has no codex-resources\
+# sibling. Codex resolves its sandbox helper at <exe_dir>\..\codex-resources\, so
+# via that PATH entry every sandboxed write fails with "program not found" — while
+# `codex --version` and `codex login status` still succeed. That combination
+# (healthy-looking, silently non-functional) cost a full debugging session on
+# 2026-07-16. Fix: put the real package bin FIRST on the user PATH. `current` is a
+# junction the updater re-points, so this survives Codex upgrades.
+Step "Codex PATH (sandbox-capable binary first)"
+$codexRealBin = Get-CodexBin
+if (-not $codexRealBin) {
+  Warn "No sandbox-capable standalone Codex found; leaving PATH alone."
+  Warn "  If you use codex, install it and re-run this script."
+} else {
+  $userPath = [Environment]::GetEnvironmentVariable("PATH","User")
+  $entries  = @($userPath -split ';' | Where-Object { $_ -ne '' })
+  if ($entries.Count -gt 0 -and $entries[0].TrimEnd('\') -ieq $codexRealBin.TrimEnd('\')) {
+    Ok "already first on user PATH ($codexRealBin)"
+  } else {
+    # Drop any existing copy, then prepend, so it always wins.
+    $kept = $entries | Where-Object { $_.TrimEnd('\') -ine $codexRealBin.TrimEnd('\') }
+    [Environment]::SetEnvironmentVariable("PATH", ((@($codexRealBin) + $kept) -join ';'), "User")
+    Ok "prepended to user PATH: $codexRealBin"
+    Note "Open a NEW terminal for this to take effect."
+  }
+  # Prove it: a real sandboxed write. --version cannot detect this failure mode.
+  $probe = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-probe-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $probe -Force | Out-Null
+  try {
+    Push-Location $probe
+    & (Join-Path $codexRealBin "codex.exe") exec --sandbox workspace-write --skip-git-repo-check `
+        -c model_reasoning_effort='low' `
+        'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.' *> $null
+    Pop-Location
+    if (Test-Path -LiteralPath (Join-Path $probe "probe.txt")) {
+      Ok "verified: codex sandbox can write"
+    } else {
+      Warn "codex sandbox still cannot write — `codex exec` will silently do nothing."
+      Warn "  Check: $codexRealBin\..\codex-resources\codex-windows-sandbox-setup.exe"
+    }
+  } catch {
+    Warn "codex sandbox probe could not run: $($_.Exception.Message)"
+  } finally {
+    Remove-Item -Recurse -Force $probe -ErrorAction SilentlyContinue
   }
 }
 
