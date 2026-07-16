@@ -159,16 +159,83 @@ human/session triggers them (usually via the `sync-dotfiles` skill). Adding a sk
 needs **no wiring** — the installer globs `skills/claude/*/` — but a commit reaches
 a machine only when that machine syncs.
 
-**Orphan finding (`hetz`):** `/home/ai/.claude/skills` carried 3 skills that have
+**Orphan finding (`hetz`):** `/home/ai/.claude/skills` carries 3 skills that have
 **never existed in this repo** — `codex-consult`, `codex-code-review`,
 `codex-plan-review` (all dated 2026-07-04, predating the repo's skill tree).
 `ai-install-skills` never prunes, so they survive every sync. **`codex-consult` is
-broken**: its `allowed-tools` shells out to a `codex-consult` binary that is not on
-PATH. It also overlaps semantically with the new `codex-second-opinion`, so a
-session on `hetz` could match the broken skill instead. **Left in place
-deliberately** — they are not this session's to delete; awaiting Albert's
-go/no-go. Next action: confirm, then `rm -rf` those 3 dirs under
-`/home/ai/.claude/skills`.
+broken**: its `allowed-tools` shells out to a `codex-consult` binary that is **not
+on PATH**, so the skill fails the moment anything triggers it. It also overlaps
+semantically with `codex-second-opinion`, so a session on `hetz` could match the
+broken skill instead of the working one. The other two are unowned duplicates of
+`ai-codex-review` modes.
+
+#### The alternate path — what replaces the 3 orphans, and proof it works
+
+Nothing is lost by deleting them: every capability has a maintained,
+repo-tracked replacement. **Verified end-to-end on `hetz` (as user `ai`) on
+2026-07-16** — this is the gate that had to pass before removal became a to-do.
+
+| Orphan (machine-local, unowned) | Replacement (repo-tracked) | Verified on `hetz` |
+|---|---|---|
+| `codex-consult` — "ask Codex for read-only advice" | **`codex-second-opinion`** skill (installed there now). Strictly better: Claude commits to its own position first, then a rebuttal round. | ✅ Full loop ran: `codex exec -s read-only` returned an opinion (header showed `sandbox: read-only`, `model: gpt-5.6-sol`), then `codex exec resume <sid> -c sandbox_mode="read-only"` continued **the same session** (resume echoed back the identical session id) and Codex answered the rebuttal. |
+| `codex-code-review` | **`ai-codex-review diff-review`** | ✅ `/usr/local/bin/ai-codex-review` present (symlink → `/worksp/ai-devops/bin/ai-codex-review`); `diff-review` listed in its modes. |
+| `codex-plan-review` | **`ai-codex-review plan-review`** | ✅ Same binary; `plan-review` listed in its modes. |
+
+Supporting facts confirmed on `hetz` at the same time: `codex` resolves to
+`/usr/local/bin/codex` (→ `/opt/codex/codex`), reports `codex-cli 0.144.5`, and
+`codex login status` returns **"Logged in using ChatGPT"** — so the replacement
+path has working auth and is not theoretical.
+
+**Reproduce the check before deleting** (it is cheap, ~2 small model calls, and
+leaves nothing behind). Pipe a script rather than nesting quotes through
+SSH→sudo→bash — nested quoting mangles the `awk` that extracts the session id
+(that bit us this session; the fix is `ssh vps 'sudo -u ai -H bash -s' < script.sh`).
+
+**Conclusion: the gate passed.** Removal is now a real to-do — see §6 step 0b.
+Still pending **Albert's explicit go-ahead**, because these are files this session
+did not create.
+
+#### Open bug (found 2026-07-16): every `ssh vps` from Git Bash litters a `NUL` file
+
+**Symptom:** a junk file named `NUL` (~294 bytes, containing Windows `ping`
+output) keeps appearing in whatever directory you run `ssh` from — including this
+repo root, where it shows up as `?? NUL` in `git status` and looks like a mystery
+artifact. Delete it and it comes straight back.
+
+**Root cause (reproduced, not guessed):** [`config/ssh-config.template`](config/ssh-config.template)
+— committed in `d29af7a`, installed to `~/.ssh/ai-devops.conf`, which
+`~/.ssh/config` pulls in via `Include ai-devops.conf` on line 1 — probes the
+Tailscale route with:
+
+```
+Match host coolify,vps,hetzner !exec "ping -n 1 -w 800 <removed-protected-address> >NUL 2>&1"
+```
+
+`>NUL` discards output **only in cmd.exe**. Git Bash's ssh
+(`C:\Program Files\Git\usr\bin\ssh.exe`) runs `Match exec` through msys `/bin/sh`,
+where `NUL` is an ordinary filename — so the redirect *creates a file* instead of
+discarding. Every aliased host (`vps`, `edge1/2`, `wiz`, `comp`, `seafile`,
+`auth`, `vps2`) has the same line, so any of them triggers it. Verified: a clean
+temp dir + one `ssh vps true` → a `NUL` file appears.
+
+Note the machine atlas mandates Git's ssh for automation (the Windows-MCP
+PowerShell sandbox can't capture SSH output — ConPTY exit 255), so the
+file-creating path is the **normal** path here, not an edge case.
+
+**NOT fixed this session — needs a decision, because there is no single portable
+redirect:** `>NUL` is right for cmd.exe (Windows OpenSSH runs `Match exec` via
+cmd), `>/dev/null` is right for msys sh, and each breaks under the other. The
+pre-existing `~/.ssh/config` sidesteps it by using **no redirect at all**
+(`!exec "ping -n 1 -w 800 <removed-protected-address>"`), trading junk files for ping noise on
+every connect. Options, cheapest first: (a) drop the redirect — noisy but
+harmless and portable; (b) point the probe at a tiny wrapper script that is quiet
+in both shells; (c) leave it and `.gitignore` the `NUL` — a band-aid that only
+hides it in this one repo while it keeps littering every other directory.
+
+Left alone deliberately: this is Albert's live SSH routing (breaking it means
+losing server access), and `bin/setup-secrets.sh` — which installs this config on
+Ubuntu — is **still uncommitted from a concurrent session**. Don't rewrite it
+underneath that work.
 
 **Gotcha for anyone driving `hetz` over SSH:** you land as `root`, but the repo is
 `ai:ai` at `/worksp/ai-devops` and skills belong to `/home/ai/.claude/skills`. Run
@@ -311,21 +378,38 @@ revisit — see AGENTS.md → Intentional quirks.
    binary and the fix; do not "fix" it by copying helpers into the shim `bin` —
    that must be redone on every Codex upgrade. Put the real package bin first on
    PATH instead.
-0b. **Decide the fate of `hetz`'s 3 orphaned skills** (§3c) — small, but it is a
-   live trap. `codex-consult`, `codex-code-review`, `codex-plan-review` in
-   `/home/ai/.claude/skills` exist on no other tracked surface and are absent from
-   this repo; `codex-consult` calls a binary that isn't installed, and it competes
-   for triggers with `codex-second-opinion`. They were left alone this session
-   because deleting files this session did not create needs Albert's OK.
-   - **Ask Albert first.** If he confirms they are dead: `ssh vps` then
-     `sudo -u ai rm -rf /home/ai/.claude/skills/{codex-consult,codex-code-review,codex-plan-review}`.
-   - If any turns out to be wanted, it belongs in `skills/claude/` in this repo —
-     not machine-local, where the next audit will flag it again.
-   ✅ *Worked when:* `ls /home/ai/.claude/skills | wc -l` returns **18**, matching
-   `ls skills/claude | wc -l` in the repo.
+0b. **TO-DO — delete `hetz`'s 3 orphaned skills.** Ready to execute; the only
+   thing outstanding is **Albert's explicit go-ahead** (they are files no session
+   here created). The replacement path was **verified working on `hetz` on
+   2026-07-16** — the full evidence table is in **§3c → "The alternate path"**.
+   Nothing is lost by removing them:
+   `codex-consult` → `codex-second-opinion` (already installed there; the whole
+   opinion+rebuttal loop was run end-to-end), `codex-code-review` →
+   `ai-codex-review diff-review`, `codex-plan-review` → `ai-codex-review plan-review`.
+   `codex-consult` is **actively broken** (calls a `codex-consult` binary that is
+   not on PATH) and competes for triggers with `codex-second-opinion`, so leaving
+   it is the riskier option.
+   - **Run (after Albert says go):**
+     ```bash
+     ssh vps 'sudo -u ai rm -rf \
+       /home/ai/.claude/skills/codex-consult \
+       /home/ai/.claude/skills/codex-code-review \
+       /home/ai/.claude/skills/codex-plan-review'
+     ```
+   - **Optional re-prove first** (~2 small model calls, ~1 min): re-run the §3c
+     check. Pipe a script — `ssh vps 'sudo -u ai -H bash -s' < test.sh` — do not
+     nest quotes.
+   ✅ *Worked when:* `ssh vps 'ls /home/ai/.claude/skills | wc -l'` returns **18**,
+   matching `ls skills/claude | wc -l` in the repo, and a `hetz` session asking
+   "run this by codex" matches `codex-second-opinion`.
+   ↩️ *Rollback:* none needed — they are unowned, untracked, and reproducible from
+   nothing. If one turns out to be wanted, author it properly in `skills/claude/`
+   in this repo, where `ai-install-skills` distributes it; do **not** recreate it
+   machine-local, or the next audit flags it again.
    ⚠️ *Do not* "solve" this by adding a blind prune to `ai-install-skills` — it
-   would also delete legitimately machine-local skills such as
-   `synology-sharesync-stuck-triage` on 916. Any prune must be opt-in.
+   would also delete legitimately machine-local skills (`t16` has
+   `designflow-e2e-tester`; 916 has `synology-sharesync-stuck-triage`). Any prune
+   must be opt-in (`--prune`).
 1. **Propagate Phase 1 to each remaining machine and collect its memory.** On
    each machine, pull ai-devops; run `./update.sh` on Ubuntu or
    `bin/install-ai-devops-windows.ps1` on Windows; run `bin/ai-sync-memory pull`,
