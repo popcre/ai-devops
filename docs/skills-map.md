@@ -51,6 +51,7 @@ the others live where noted.
 | ⚙ `claude-transcript-backup` | Finds all Claude Code transcripts on the machine, backs them up to claude_chats/<machine>. | "back up my Claude transcripts" |
 | ⚙ `ai-development-pipeline` | The staged 7-step multi-model workflow (Opus plans/reviews, Codex implements/tests). | "run this through the pipeline" |
 | ⚙ `codex-handoff` | Hand a build/ops/verification task to Codex (GPT-5.x): self-contained brief → run autonomously (background) → verify its work. Falls back to `codex exec` when the codex-cli MCP can't find the binary. | "use codex to…" / "have codex do X" |
+| ⚙ `codex-second-opinion` | A debate, not a delegation: Claude commits to its own position first, Codex judges the material independently (read-only), Claude reports both and where it agrees — and on real disagreement argues back for one round and reports who moved. Ends in Agreed / Codex conceded / Claude conceded / Still split (with the crux). | "run this by codex and tell me if you agree" / "what does codex think" |
 | ⚙ `sync-dotfiles` | Syncs this machine's AI config with the ai-devops hub: pulls the latest skills, global instructions and memory and installs them, sets the dflow gcloud defaults, and pushes local memory changes back. No chezmoi — ai-devops is the single hub. | "sync my dotfiles" / "pull the latest skills" |
 
 ## Codex-native skills
