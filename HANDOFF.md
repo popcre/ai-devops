@@ -147,9 +147,9 @@ The answer is **no**, and the audit found real drift. Durable rules are now in
 
 | Machine | State on 2026-07-16 |
 |---|---|
-| `t16` | Current. Repo at `e07a1a8`; 18 Claude + 12 Codex skills installed. |
-| `hetz` | **Was 4 commits behind** (`b0f368b`, skills last installed 2026-07-09 — missing `secrets-to-1password` + `sync-dotfiles` entirely). **Fixed this session:** pulled to `e07a1a8` and re-ran `ai-install-skills` as user `ai`. Now 18 skills + 3 orphans (below). |
-| `916`, `4837` | **Not checked, not synced.** Assume stale. |
+| `t16` | Current with `origin/main` (`ceafd1b`, this session's last docs commit); 18 repo skills + `designflow-e2e-tester` = 19 installed, + 12 Codex skills. |
+| `hetz` | **Was 4 commits behind** at `b0f368b` — skills last installed **2026-07-09**, missing `secrets-to-1password` and `sync-dotfiles` entirely. **Fixed this session:** pulled to `ceafd1b` and re-ran `ai-install-skills` as user `ai`; verified `git rev-list --count HEAD..origin/main` = 0. Now 18 repo skills + 3 orphans = 21. |
+| `916`, `4837` | **Not checked, not synced — assume stale.** Nobody has verified them. To check without touching anything: compare `git -C <repo> rev-list --count HEAD..origin/main` and `ls ~/.claude/skills` against `ls skills/claude` in the repo. |
 
 **Mechanism (verified, not assumed):** no cron entry and no systemd timer on
 `hetz` touches skills; `git pull` + `bin/ai-install-skills` only ever run when a
@@ -172,6 +172,29 @@ go/no-go. Next action: confirm, then `rm -rf` those 3 dirs under
 `ai:ai` at `/worksp/ai-devops` and skills belong to `/home/ai/.claude/skills`. Run
 `sudo -u ai -H bash -lc '…'`, or the install silently targets `/root` and git
 refuses with `dubious ownership`.
+
+**Two harmless-looking states on `hetz` that are NOT bugs — don't "fix" them:**
+- `git status` in `/worksp/ai-devops` is permanently dirty with **mode-only**
+  changes (`100644 → 100755`) on `bin/ai-install-skills` and
+  `bin/install-ai-devops-windows.ps1`, from `install.sh` chmod'ing them on Ubuntu.
+  The repo tracks these `100644` **intentionally** (see the "Script git mode note"
+  above). Mode changes don't block `git pull --ff-only`. Leave them; do not commit
+  the mode flip from `hetz`.
+- **A machine having more skills than the repo is not automatically drift.** `t16`
+  carries 19 (repo's 18 + `designflow-e2e-tester`), which is *legitimately*
+  machine-local. This is the concrete reason a blind prune in `ai-install-skills`
+  would be destructive. Judge orphans case by case; `hetz`'s 3 are orphans because
+  they're broken and unowned, not merely because they're extra.
+
+**Self-inflicted trap, recorded so the next session doesn't repeat it:** running
+`git fetch` on `/worksp/ai-devops` **as root** (even with `-c
+safe.directory=…`) writes root-owned objects into `.git/objects`, after which
+every `sudo -u ai git pull` dies with `insufficient permission for adding an
+object to repository database`. It happened this session (48 root-owned objects)
+and was repaired with `chown -R ai:ai /worksp/ai-devops/.git`. `safe.directory`
+silences the ownership *warning* but does not make root's writes `ai`-owned — the
+two are unrelated. **Never run git as root in that checkout;** always
+`sudo -u ai -H bash -lc '…'`.
 
 **Unchanged by this session:** the `codex-cli` MCP is still **NOT** wired on `hetz`
 (§3b) — `bin/setup-secrets.sh` has still never run there. Only skills were synced.
