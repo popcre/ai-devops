@@ -18,6 +18,16 @@ id_ed25519
 !bin/setup-secrets.sh
 !docs/onboarding-secrets.md
 
+# Memory notes (memory/**/*.md) document things *about* credentials — incident
+# records, access paths, rotation to-dos — so their filenames routinely contain
+# "secret"/"token"/"private". The rules above match FILENAMES, not content, so
+# they silently dropped exactly the notes most worth keeping (including a
+# pending-rotation incident record that never reached the hub) while providing
+# no real protection: a live key inside a normally-named .md sails through
+# untouched. Memory is secret-free by policy and bin/ai-sync-memory gates on
+# content. Scoped to *.md so a stray .env/.pem/.key under memory/ stays ignored.
+!memory/**/*.md
+
 # The secrets-to-1password skill: instructions only, no secret values. The
 # `**/*secret*` rule above matches the DIRECTORY name, and git will not descend
 # into an excluded directory — so the directory must be un-ignored before its
