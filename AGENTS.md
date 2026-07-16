@@ -61,6 +61,7 @@ Then load additional docs only when relevant:
 | Analyze Codex transcripts or repeated Codex prompts | `AGENTS.md`, `docs/codex-chat-analysis.md`, `docs/codex-skills-usage-guide.md`, `skills/codex/codex-transcript-miner/SKILL.md` | Raw transcript `.jsonl` unless the analysis task requires them |
 | Install or update Claude/Codex skills / global instructions on a machine | `AGENTS.md`, `docs/skills-usage-guide.md`, `docs/codex-skills-usage-guide.md`, `bin/ai-install-skills`, `templates/system/*` | Transcript data |
 | Add or update Codex workflow skills | `AGENTS.md`, `docs/codex-skills-usage-guide.md`, affected `skills/codex/*/SKILL.md`, `docs/skills-map.md` | Raw chat/docx prompt sources unless needed |
+| Write a skill `description:`, or check whether a skill actually fires on real prompts | `AGENTS.md`, `docs/skill-trigger-eval.md`, `tools/skill-trigger-eval/` | skill-creator's bundled `scripts/run_loop.py` — it is Unix-only AND tests a mechanism that no longer triggers; see the doc |
 | Change a standing AI behavior rule (branch policy, plain-English, verify-before-done, etc.) | `templates/system/CLAUDE-global.md`, `templates/system/AGENTS-global-codex.md`, `templates/system/machine-atlas.md`, affected `skills/claude/*/SKILL.md` or `skills/codex/*/SKILL.md` | Unrelated docs |
 | Work on future MCP wrapper | `AGENTS.md`, `docs/future-mcp-wrapper.md`, `mcp/README.md` | Unrelated docs |
 | Work on future visual testing | `AGENTS.md`, `docs/future-visual-testing.md`, `templates/repo-docs/docs-ai-visual-testing.md` | Unrelated docs |

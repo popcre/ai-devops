@@ -27,6 +27,16 @@ id_ed25519
 !skills/claude/secrets-to-1password/
 !skills/claude/secrets-to-1password/**
 
+# Trigger-eval prompt sets (tools/skill-trigger-eval): fabricated user prompts
+# used to measure whether a skill fires. No secret values — deliberately, since
+# a prompt only needs to *mention* a credential to test triggering. Here
+# `**/*secret*` matches the FILENAME rather than the directory, so unlike the
+# skill above a single file-level negation is enough.
+!tools/skill-trigger-eval/*secret*.eval.json
+
+# Per-run output from that tool — regenerated on every run, never worth tracking.
+tools/skill-trigger-eval/*.results.json
+
 # === OS / editor noise ===
 .DS_Store
 node_modules/
@@ -38,3 +48,7 @@ node_modules/
 
 # === Machine-local AI permissions ===
 .claude/settings.local.json
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc
