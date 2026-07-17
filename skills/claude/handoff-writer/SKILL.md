@@ -1,6 +1,6 @@
 ---
 name: handoff-writer
-description: Write a fresh-developer-grade handoff (HANDOFF.md or fix_*.md), OR judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a fix_*.md", "give me a detailed prompt for the new chat", "wrap up", OR asks whether HANDOFF.md is thorough / detailed / comprehensive enough for a fresh developer to pick up and not skip a beat. This skill is self-contained. The handoff must pass the concrete self-audit BELOW before it is shown, so that the answer to "is it comprehensive enough?" is already a truthful Yes.
+description: Write a fresh-developer-grade handoff (HANDOFF.md or fix_*.md), OR judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a fix_*.md", "give me a detailed prompt for the new chat", OR asks whether HANDOFF.md is thorough / detailed / comprehensive enough for a fresh developer to pick up and not skip a beat. This skill is self-contained. The handoff must pass the concrete self-audit BELOW before it is shown, so that the answer to "is it comprehensive enough?" is already a truthful Yes. NOTE: do not trigger on a bare "wrap up" — that belongs to the `wrap-up` skill, which calls this skill only for its handoff step.
 ---
 
 # handoff-writer
@@ -23,7 +23,7 @@ truthful, and (2) when asked, verify against the concrete checklist and answer
 - "put that plan in handoff.md" / "write a comprehensive handoff.md"
 - "write a fix_<topic>.md"
 - "give me a very detailed prompt to give another ai session"
-- "this session's context window is getting full" / any "wrap up"
+- "this session's context window is getting full"
 - **The verification question** — any form of "is HANDOFF.md thorough / detailed /
   comprehensive / complete enough?", "does it have every relevant detail and
   nuance?", "could a fresh developer continue as well as you?" → go to

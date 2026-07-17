@@ -1,6 +1,6 @@
 ---
 name: deploy-and-verify
-description: Ship and verify a deploy for the Coolify/GHCR apps on the hetz VPS (poppim-web, popcrm-web, popdam3, monitor, hiclaw). Use when the user says "push and commit", "the live site is still running the old commit", "site looks exactly like it did before", or "there are no new actions on github.com".
+description: Ship and verify a deploy for the hetz/Coolify/GHCR apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw). Use when the user says "push and commit", "is everything pushed and committed?", "the live site is still running the old commit", "site looks exactly like it did before", or "there are no new actions on github.com" WHEN WORKING IN ONE OF THOSE hetz app repos (deploy path: GitHub → Actions → GHCR → Coolify, single-branch main). For the dflow repos (popcre/designflow-*, branch sandbox-albert) use `dflow-ship` instead — same phrases, different pipeline (Cloud Build + PR to develop).
 ---
 
 # deploy-and-verify
@@ -9,6 +9,12 @@ The u2giants apps deploy GitHub → Actions → GHCR → Coolify. Two known quir
 have repeatedly made deploys *look* broken; this skill bakes in the fixes.
 
 ## Trigger phrases
+
+**Only when the working copy is a hetz/Coolify app repo** (poppim-web,
+popcrm-web, popdam3, monitor, hiclaw — deploy via GHCR + Coolify on branch
+`main`). If it's a dflow repo (`popcre/designflow-*`, branch `sandbox-albert`),
+use `dflow-ship` instead — same phrases, different pipeline. When in doubt,
+check `git remote -v`.
 
 - "push and commit" / "is everything pushed and committed?"
 - "the live site is still running the old commit <sha>"

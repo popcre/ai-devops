@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: One-phrase end-of-session closer. Use when the user says "wrap up", "close out this session", "we're done here", or "end of session". Chains the four closing rituals: docs update, secrets sweep, handoff-safe state, and push verification — then gives a single plain-English closing report.
+description: One-phrase end-of-session closer. Use when the user says "wrap up", "wrap it up", "dflow wrap up", "wrap up dflow", "close out this session", "we're done here", or "end of session" — ANY "wrap up" variant, including project-prefixed ones like "dflow wrap up", routes HERE, not to a ship-only skill. Chains the four closing rituals: docs update FIRST, then secrets sweep, handoff-safe state, and push verification — then gives a single plain-English closing report. This skill OWNS "wrap up"; it delegates the ship step to the project ship skill (dflow → dflow-ship) but never the other way around.
 ---
 
 # wrap-up
@@ -12,7 +12,14 @@ doesn't apply, say so in the report.
 ## Trigger phrases
 
 - "wrap up" / "wrap it up"
+- "dflow wrap up" / "wrap up dflow" / "dflow wrap-up" (project-prefixed — still THIS skill)
 - "close out this session" / "we're done here" / "end of session"
+
+> Any message containing "wrap up" belongs to this skill, even when a project
+> name is attached. Do NOT route "dflow wrap up" to `dflow-ship` — `dflow-ship`
+> is only Step 4 (ship & verify) of this skill's chain, and it does not update
+> the .md docs. Running it alone silently skips the docs step. This skill runs
+> docs FIRST, then calls `dflow-ship` for the ship step.
 
 ## The chain
 
