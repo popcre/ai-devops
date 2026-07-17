@@ -76,9 +76,12 @@ later session doesn't contradict them).
 
 ## Mandatory self-audit gate (do this BEFORE showing the handoff)
 
-After drafting, grade your OWN handoff against these questions. If the honest
-answer to any is "no," expand the handoff and re-grade. Do NOT present the
-handoff to Albert until all are "yes":
+After drafting, grade your OWN handoff against these questions. **Write an
+answer to every question and cite the handoff section(s) that prove the answer.**
+Do not merely acknowledge that the questions were asked. If an answer exposes
+any missing or weak detail, add it to `HANDOFF.md`, reread the affected sections,
+and answer all questions again. Do NOT present the handoff to Albert until every
+answer is an evidence-backed "yes" and every identified gap has been closed:
 
 1. Could a developer who walked in off the street — with zero knowledge of this
    app, this session, and this chat — pick up and continue **without asking me a
@@ -89,6 +92,23 @@ handoff to Albert until all are "yes":
 4. Is every next step concrete enough to execute without guessing, each with a
    way to verify it worked?
 5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
+
+Then ask and answer these three final synthesis questions exactly:
+
+1. **Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+   knowledge of this project and no context about what we did or what remains
+   could pick up where I left off and not skip a beat?**
+2. **Is it detailed enough that they could continue as well as I could right
+   now, with all my knowledge from this session and all relevant background
+   about what we are trying to accomplish?**
+3. **Is every single relevant detail—background, goals, intended outcome,
+   current state, failed attempts, decisions, constraints, risks, exact next
+   actions, and verification evidence—present for the implementing agent to
+   execute flawlessly?**
+
+For each answer, name the supporting sections and any gap found. A found gap
+must be fixed before re-running the entire audit. Preserve the final answers in
+the closing report or at the end of `HANDOFF.md` so the audit is inspectable.
 
 State in your closing message that the self-audit passed. Albert should never
 again have to ask "is this comprehensive enough for a fresh developer?" — you

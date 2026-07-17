@@ -93,6 +93,23 @@ the user MUST already pass; do not show a draft you know is thin and plan to
 improve after they push back. In your closing message, state that the self-audit
 passed and name what makes it comprehensive (which section covers each dimension).
 
+Write and answer the following three questions, citing the handoff sections that
+support each answer:
+
+1. Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+   project knowledge and no session context could pick up where I left off and
+   not skip a beat?
+2. Is it detailed enough that they could continue as well as I could right now,
+   with all my session knowledge and the relevant background and purpose?
+3. Is every single relevant detail needed for flawless execution included:
+   background, goals, intended outcome, current state, failures, decisions,
+   constraints, risks, exact next actions, and verification evidence?
+
+Do not accept a bare "yes." For each answer, name the supporting sections and
+any gap discovered. Fix every gap in the handoff, then reread and repeat the
+whole audit until all three answers are evidence-backed yeses. Preserve the
+final answers in the closing report or at the end of the handoff.
+
 ## Answering the verification question (Mode B — the reflex this skill fixes)
 
 When the user asks whether the handoff is comprehensive/detailed/thorough enough:

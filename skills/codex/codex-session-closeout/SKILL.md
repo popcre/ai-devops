@@ -15,7 +15,11 @@ ask whether the handoff is good enough, or separately ask for git/deploy status.
    focused fix note. Do not rebuild all docs unless the user asked.
 2. **Handoff gate.** If work is unfinished, write or update `HANDOFF.md` so a
    fresh developer can continue without chat context. Include what was tried and
-   failed, current branch/state, exact next steps, and verification gates. If
+   failed, current branch/state, exact next steps, and verification gates. Run
+   the evidence-backed three-question audit in
+   `templates/system/handoff-standard.md`: answer each question with supporting
+   section references, close every gap found, and repeat until all answers are
+   yes. A bare "yes" does not pass. If
    work is complete and `HANDOFF.md` is obsolete, delete it.
 3. **Secret hygiene.** Search this session and diffs for new credentials,
    tokens, connection strings, passwords, private URLs with embedded tokens, or

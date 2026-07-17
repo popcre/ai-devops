@@ -41,19 +41,24 @@ documentation update complete until this gate passes:
 
 1. Reread `HANDOFF.md` and every related Markdown file it relies on as if the
    current conversation had been erased. Do not use chat context to fill gaps.
-2. Ask yourself exactly:
-
-   > If I were to erase this session and start a brand new one with no knowledge
-   > of what we discussed and no context here it would be able to pick up where
-   > you left off with ALL the relevant knowledge you have about this session and
-   > application from handoff.md and related .md files? Nothing relevant is left
-   > out?
-
-3. Answer honestly. If the answer is not an unqualified **yes**, revise
+2. Write and answer these three questions, citing the handoff sections that
+   support each answer:
+   - Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+     project knowledge and no session context could pick up where I left off and
+     not skip a beat?
+   - Is it detailed enough that they could continue as well as I could right
+     now, with all my session knowledge and the relevant background and purpose?
+   - Is every single relevant detail needed for flawless execution included:
+     background, goals, intended outcome, current state, failures, decisions,
+     constraints, risks, exact next actions, and verification evidence?
+3. Do not accept a bare **yes**. Name the evidence and every gap found. If any
+   answer is not an evidence-backed **yes**, revise
    `HANDOFF.md` and the appropriate related Markdown files to add every missing
    fact, decision, failed attempt, exact state, path, identifier, constraint,
    risk, and executable next step with a verification gate.
-4. Reread and ask the question again. Repeat until the answer is **yes**.
+4. Reread and answer all three questions again. Repeat until every answer is an
+   evidence-backed **yes**. Preserve the final answers in the closing report or
+   at the end of `HANDOFF.md` so the audit is inspectable.
 
 This is a revision loop, not a checklist acknowledgment. Never claim the docs
 update is complete merely because the question was asked.
