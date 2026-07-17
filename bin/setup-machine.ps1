@@ -28,13 +28,18 @@ What it does (idempotent — safe to re-run):
      and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
      from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
      immediately. Uses cloudflared so it works on any network without Tailscale.
-  7. Best-effort: wires MCP servers into Claude Desktop's
-     claude_desktop_config.json (backed up first) — supabase, trigger and
-     1password (stdio, via the op launcher) plus devops-mcp and synology-monitor
-     (remote, via the mcp-remote shim), plus codex-cli (stdio, no launcher — it
-     has no token, only a PATH to the codex binary). No token is ever written into
-     the config; only URLs and op:// references. Other servers already present
-     (ag-grid, playwright, vercel, recall-ai, ...) are preserved untouched.
+  7. Wires the FULL MCP server set into BOTH Claude Desktop's
+     claude_desktop_config.json and Claude Code's ~/.claude/settings.json (each
+     backed up first). The set is defined exactly once, in step 5d, and both
+     surfaces merge it — so a server added there reaches every surface on every
+     machine, and a fresh machine ends up matching an established one.
+       - stdio via the op launcher : supabase (--read-only), trigger, 1password
+       - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
+       - no secret, plain npx      : playwright, ag-grid, vercel (browser OAuth)
+       - codex-cli                 : native `codex mcp-server`, absolute exe
+     No token is ever written into either config; only URLs and op:// references.
+     Servers we do not define (the Windows-MCP extension, anything hand-added)
+     and all other settings keys are preserved untouched.
 
 IMPORTANT — Claude Desktop limitations you must know (verified):
   - Claude Desktop does NOT expand ${VAR} in its config, and neither does
@@ -132,6 +137,21 @@ if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn
 if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) { Ensure-Winget "Cloudflare.cloudflared" "cloudflared" }
 if (Get-Command cloudflared -ErrorAction SilentlyContinue) { Ok "cloudflared" } else { Warn "cloudflared not found; `ssh vps` (tunnel) will not work until it is installed." }
 
+# uv — required by the Windows-MCP Claude Desktop extension (installed from the
+# Extensions UI, see the checklist at the end). Without uv that extension fails to
+# start. winget first; fall back to Astral's installer, which is what the legacy
+# Dropbox script used.
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Ensure-Winget "astral-sh.uv" "uv" }
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+  Note "uv not available via winget; using Astral's installer."
+  try {
+    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+    $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path","User")
+  } catch { Warn "uv install failed: $($_.Exception.Message)" }
+}
+if (Get-Command uv -ErrorAction SilentlyContinue) { Ok "uv" } else { Warn "uv not found; the Windows-MCP extension will not start until it is installed." }
+
 # --------------------------------------------------------------------------
 # 2. Repo + skills + global files (delegates to the existing installer)
 # --------------------------------------------------------------------------
@@ -208,16 +228,161 @@ Ok "Wrote $Launcher"
 # This reads the vault-locked token, `op read`s the bearer token IN MEMORY, and
 # passes it to mcp-remote. Args carry the URL + the op:// reference only; the
 # token itself is never written to disk or into claude_desktop_config.json.
-#   %1 = server URL,  %2 = op:// reference to the bearer token
+#   %1 = server URL,  %2 = op:// reference to the bearer token,
+#   %3+ = optional extra flags passed straight through to mcp-remote
+#         (recall-ai needs --transport http-first; devops/synology pass none,
+#          for which EXTRA stays empty and the command is byte-identical to
+#          the previous two-argument form).
 $remoteBody = @'
 @echo off
 setlocal
 set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
 for /f "usebackq delims=" %%T in (`op read %2`) do set "TOK=%%T"
-npx -y mcp-remote %1 --header "Authorization: Bearer %TOK%"
+set "EXTRA="
+for /f "tokens=2,*" %%a in ("%*") do set "EXTRA=%%b"
+npx -y mcp-remote %1 --header "Authorization: Bearer %TOK%" %EXTRA%
 '@
 Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
+
+# --------------------------------------------------------------------------
+# 5d. The MCP server set — ONE definition, used by BOTH Claude Desktop and Code
+# --------------------------------------------------------------------------
+# Defined once, deliberately. Claude Desktop and Claude Code keeping separate
+# hand-maintained server lists is the root cause of every gap this script has
+# had: a server wired into one silently never existed in the other, and servers
+# this script did not define survived only on machines that happened to already
+# have them (created by the legacy Dropbox script) while being absent on any new
+# machine. Both consumers below merge THIS hashtable, so anything added here
+# reaches every surface on every machine. Add new servers HERE and nowhere else.
+Step "Building the MCP server set"
+$McpServers = [ordered]@{}
+
+# supabase (stdio, npx). command=cmd /c launcher ... so the .cmd + npx.cmd both
+# run through a shell (spawn cannot run batch files directly). op run injects
+# SUPABASE_ACCESS_TOKEN (from mcp.env) into the server's environment.
+#
+# --read-only is NOT optional. Every schema/DDL/RLS change to the shared DB is
+# authored in u2giants/shared-db (branch + PR), never through this MCP. The flag
+# enforces that rule; --project-ref caps the blast radius to the one project.
+# The legacy Dropbox script had --read-only; it was dropped when this script took
+# over, leaving the MCP write-capable against shared production.
+$McpServers["supabase"] = @{
+  command = "cmd"
+  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y",
+           "@supabase/mcp-server-supabase@latest", "--read-only",
+           "--project-ref", $SupabaseProjectRef)
+}
+
+# devops-mcp + synology-monitor (remote/HTTP). Wired via the mcp-remote shim under
+# the remote launcher, so the bearer token is resolved from 1Password at launch —
+# never written into the config. Only the URL + op:// ref appear.
+$McpServers["devops-mcp"] = @{
+  command = "cmd"
+  args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
+           "op://vibe_coding/designflow-mcp/devops_token")
+}
+$McpServers["synology-monitor"] = @{
+  command = "cmd"
+  args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
+           "op://vibe_coding/designflow-mcp/nas_token")
+}
+
+# recall-ai (remote/HTTP). Same treatment. Until 2026-07-17 this token was
+# hard-coded in plaintext in claude_desktop_config.json — the LAST plaintext
+# secret left after the Phase 2 token-free pass, which missed it because nothing
+# ever rewrote the recall-ai entry. --transport preserves the flag the working
+# config used; the launcher passes %3+ through to mcp-remote untouched.
+$McpServers["recall-ai"] = @{
+  command = "cmd"
+  args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
+           "op://vibe_coding/6dqxnqdx2nwcuyeppvsb6nvkoq/password",
+           "--transport", "http-first")
+}
+
+# trigger (stdio, npx). Wrapped in the launcher so `op` injects
+# TRIGGER_ACCESS_TOKEN (from mcp.env) at launch — no token in the config.
+$McpServers["trigger"] = @{
+  command = "cmd"
+  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
+}
+
+# 1password (stdio, npx). The launcher reads the vault-locked service-account
+# token from the user file into OP_SERVICE_ACCOUNT_TOKEN — exactly the var this
+# MCP needs — so no token is written into the config either.
+$McpServers["1password"] = @{
+  command = "cmd"
+  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
+}
+
+# playwright / ag-grid — plain npx stdio servers, no secret of any kind.
+# vercel is remote but authenticates with an interactive OAuth flow that
+# mcp-remote opens in a browser, so it needs no token either — and must NOT go
+# through the remote launcher, which would force a bearer header onto it.
+$McpServers["playwright"] = @{
+  command = "cmd"
+  args = @("/c", "npx", "-y", "@playwright/mcp@latest")
+}
+$McpServers["ag-grid"] = @{
+  command = "cmd"
+  args = @("/c", "npx", "-y", "ag-mcp")
+}
+$McpServers["vercel"] = @{
+  command = "cmd"
+  args = @("/c", "npx", "-y", "mcp-remote@latest", "https://mcp.vercel.com")
+}
+
+# codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
+# its own `codex login` session, so there is no token to inject.
+#
+# CRITICAL — use Get-CodexBin, NOT …\Programs\OpenAI\Codex\bin. That visible path
+# is a JUNCTION to the package's bin\, and its parent has no sibling
+# codex-resources\ directory. Codex looks for its sandbox helper at
+# <exe_dir>\..\codex-resources\, so through the junction the helper is unreachable
+# and EVERY sandboxed write fails ("program not found") while --version and
+# `codex login status` still pass. Verified 2026-07-16: the same binary fails via
+# the junction and succeeds via the real package bin.
+# Use Codex's OWN `codex mcp-server` (official, stdio) rather than a third-party
+# npx wrapper. Verified 2026-07-16 end-to-end: exposes `codex` (prompt, model,
+# sandbox, approval-policy, cwd, config, *-instructions) and `codex-reply`
+# (thread continuation), and a tools/call with sandbox=workspace-write really
+# writes files. Why native:
+#   - no third-party supply chain and no npx download in the hot path;
+#   - version-locked to the CLI it ships with;
+#   - a wrapper shells out to `codex` resolved from PATH, which re-introduces the
+#     junction bug above; pointing at the absolute exe cannot resolve wrong.
+# Trade-off accepted: we lose the wrapper's changeMode/batch/brainstorm extras,
+# which are reproducible by prompting the `codex` tool.
+$codexBin = Get-CodexBin
+$codexExe = if ($codexBin) { Join-Path $codexBin "codex.exe" } else { $null }
+# Codex jobs run long; don't let the MCP call time out at the default.
+$codexEnv = @{ MCP_TOOL_TIMEOUT = "3600000" }
+
+if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
+  # Absolute path: the MSIX sandbox does not inherit the user PATH, and an
+  # absolute exe also sidesteps PATH resolution picking a broken shim.
+  $McpServers["codex-cli"] = @{
+    command = $codexExe
+    args    = @("mcp-server")
+    env     = $codexEnv
+  }
+  Ok "codex-cli -> native mcp-server ($codexExe)"
+} elseif ($cmd = Get-Command codex -ErrorAction SilentlyContinue) {
+  # No standalone package (e.g. npm-global install). Use what's on PATH, but say
+  # so plainly — we have not proven this one's sandbox can write.
+  $McpServers["codex-cli"] = @{
+    command = $cmd.Source
+    args    = @("mcp-server")
+    env     = $codexEnv
+  }
+  Warn "codex-cli -> $($cmd.Source) (non-standalone; run 'ai-devops doctor' to prove its sandbox can write)"
+} else {
+  Warn "Codex CLI not found — codex-cli MCP NOT configured."
+  Warn "  Install Codex, run: codex login, then re-run this script."
+}
+
+$McpServerList = ($McpServers.Keys -join ", ")
+Ok "Server set: $McpServerList"
 
 # --------------------------------------------------------------------------
 # 5b. Restore the 916-alien SSH key (Windows dev machines -> hetz VPS)
@@ -311,101 +476,15 @@ if ($SkipDesktopMcp) {
     }
     if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
 
-    # supabase (stdio, npx). command=cmd /c launcher ... so the .cmd + npx.cmd
-    # both run through a shell (spawn cannot run batch files directly). op run
-    # injects SUPABASE_ACCESS_TOKEN (from mcp.env) into the server's environment.
-    $cfg["mcpServers"]["supabase"] = @{
-      command = "cmd"
-      args = @("/c", $Launcher, "cmd", "/c", "npx", "-y",
-               "@supabase/mcp-server-supabase@latest", "--project-ref", $SupabaseProjectRef)
-    }
-
-    # devops-mcp + synology-monitor (remote/HTTP). Wired via the mcp-remote shim
-    # under the remote launcher, so the bearer token is resolved from 1Password
-    # at launch — never written into this config. Only the URL + op:// ref appear.
-    $cfg["mcpServers"]["devops-mcp"] = @{
-      command = "cmd"
-      args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
-               "op://vibe_coding/designflow-mcp/devops_token")
-    }
-    $cfg["mcpServers"]["synology-monitor"] = @{
-      command = "cmd"
-      args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
-               "op://vibe_coding/designflow-mcp/nas_token")
-    }
-
-    # trigger (stdio, npx). Wrapped in the launcher so `op` injects
-    # TRIGGER_ACCESS_TOKEN (from mcp.env) at launch — no token in this config.
-    $cfg["mcpServers"]["trigger"] = @{
-      command = "cmd"
-      args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
-    }
-
-    # 1password (stdio, npx). The launcher reads the vault-locked service-account
-    # token from the user file into OP_SERVICE_ACCOUNT_TOKEN — which is exactly the
-    # var this MCP needs — so no token is written into this config either.
-    $cfg["mcpServers"]["1password"] = @{
-      command = "cmd"
-      args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
-    }
-
-    # codex-cli (stdio, npx). Deliberately NOT wrapped in the op launcher: Codex
-    # carries its own `codex login` session, so there is no token to inject. What it
-    # does need is to FIND the codex binary — the MSIX sandbox does not inherit the
-    # user PATH, so hand it an explicit PATH covering both install shapes
-    # (standalone installer and npm-global).
-    #
-    # CRITICAL — use Get-CodexBin, NOT …\Programs\OpenAI\Codex\bin. That visible
-    # path is a JUNCTION to the package's bin\, and its parent has no sibling
-    # codex-resources\ directory. Codex looks for its sandbox helper at
-    # <exe_dir>\..\codex-resources\, so through the junction the helper is
-    # unreachable and EVERY sandboxed write fails ("program not found") while
-    # --version and `codex login status` still pass. Verified 2026-07-16: the same
-    # binary fails via the junction and succeeds via the real package bin.
-    # Use Codex's OWN `codex mcp-server` (official, stdio) rather than a third-party
-    # npx wrapper. Verified 2026-07-16 end-to-end: exposes `codex` (prompt, model,
-    # sandbox, approval-policy, cwd, config, *-instructions) and `codex-reply`
-    # (thread continuation), and a tools/call with sandbox=workspace-write really
-    # writes files. Why native:
-    #   - no third-party supply chain and no npx download in the hot path;
-    #   - version-locked to the CLI it ships with;
-    #   - a wrapper shells out to `codex` resolved from PATH, which re-introduces
-    #     the junction bug above; pointing at the absolute exe cannot resolve wrong.
-    # Trade-off accepted: we lose the wrapper's changeMode/batch/brainstorm extras,
-    # which are reproducible by prompting the `codex` tool.
-    $codexBin = Get-CodexBin
-    $codexExe = if ($codexBin) { Join-Path $codexBin "codex.exe" } else { $null }
-    # Codex jobs run long; don't let the MCP call time out at the default.
-    $codexEnv = @{ MCP_TOOL_TIMEOUT = "3600000" }
-
-    if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
-      # Absolute path: the MSIX sandbox does not inherit the user PATH, and an
-      # absolute exe also sidesteps PATH resolution picking a broken shim.
-      $cfg["mcpServers"]["codex-cli"] = @{
-        command = $codexExe
-        args    = @("mcp-server")
-        env     = $codexEnv
-      }
-      Ok "codex-cli MCP -> native mcp-server ($codexExe)"
-    } elseif ($cmd = Get-Command codex -ErrorAction SilentlyContinue) {
-      # No standalone package (e.g. npm-global install). Use what's on PATH, but say
-      # so plainly — we have not proven this one's sandbox can write.
-      $cfg["mcpServers"]["codex-cli"] = @{
-        command = $cmd.Source
-        args    = @("mcp-server")
-        env     = $codexEnv
-      }
-      Warn "codex-cli MCP -> $($cmd.Source) (non-standalone; run 'ai-devops doctor' to prove its sandbox can write)"
-    } else {
-      Warn "Codex CLI not found — codex-cli MCP NOT configured."
-      Warn "  Install Codex, run: codex login, then re-run this script."
-    }
-
+    # Merge the ONE server set defined in step 5d. Servers already present that we
+    # do not define (Windows-MCP extension entries, anything hand-added) are left
+    # untouched — this only ever adds or refreshes our own.
+    foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
-    Ok "Wired token-free: supabase, devops-mcp, synology-monitor, trigger, 1password, codex-cli — no tokens in the file"
+    Ok "Wired token-free: $McpServerList — no tokens in the file"
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
-    Warn "  these MCPs show connected: supabase, devops-mcp, synology-monitor, trigger, 1password, codex-cli."
+    Warn "  these MCPs show connected: $McpServerList."
   }
 }
 
@@ -463,43 +542,31 @@ if (-not $codexRealBin) {
 # 7. Claude Code (CLI) MCP config — same token-free treatment
 # --------------------------------------------------------------------------
 # Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.
-# It historically stored the trigger + 1password tokens there in plaintext. Wrap
-# both in the op launcher so no token sits in the file. All other servers (and all
-# other settings keys) are preserved untouched. Runs regardless of -SkipDesktopMcp
-# (that flag is about Claude Desktop only).
+# It gets the SAME server set (step 5d) rather than its own list: this section used
+# to only rewrite trigger + 1password *if they already existed*, so it converted
+# tokens but never created a server. On a new machine that left Claude Code with
+# nothing, and any server added to Desktop silently never reached it. Servers we do
+# not define (Windows-MCP, claude-in-chrome, ...) and all other settings keys are
+# preserved untouched. Runs regardless of -SkipDesktopMcp (that flag is about
+# Claude Desktop only).
 Step "Token-free MCP for Claude Code (~/.claude/settings.json)"
 $ccSettings = Join-Path $HOME ".claude\settings.json"
+$cc = @{}
 if (Test-Path $ccSettings) {
   Copy-Item $ccSettings "$ccSettings.aidevops.bak" -Force
-  $cc = $null
-  try { $cc = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable } catch { $cc = $null }
-  if ($cc -and $cc.ContainsKey("mcpServers")) {
-    $changed = $false
-    if ($cc["mcpServers"].ContainsKey("trigger")) {
-      $cc["mcpServers"]["trigger"] = @{
-        command = "cmd"
-        args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
-      }
-      $changed = $true
-    }
-    if ($cc["mcpServers"].ContainsKey("1password")) {
-      $cc["mcpServers"]["1password"] = @{
-        command = "cmd"
-        args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
-      }
-      $changed = $true
-    }
-    if ($changed) {
-      ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
-      Ok "Rewired trigger + 1password token-free (backup: $ccSettings.aidevops.bak)"
-    } else {
-      Ok "No trigger/1password entries needed conversion"
-    }
-  } else {
-    Warn "No mcpServers block in $ccSettings — skipping"
+  try { $cc = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable } catch {
+    Warn "$ccSettings is not valid JSON; leaving it alone. Fix or delete it and re-run."
+    $cc = $null
   }
 } else {
-  Note "No ~/.claude/settings.json (Claude Code not configured here) — skipping"
+  New-Item -ItemType Directory -Force -Path (Split-Path $ccSettings) | Out-Null
+  Note "No ~/.claude/settings.json yet — creating one."
+}
+if ($null -ne $cc) {
+  if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
+  foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
+  ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
+  Ok "Claude Code wired token-free: $McpServerList"
 }
 
 # --------------------------------------------------------------------------
@@ -542,5 +609,11 @@ Write-Host "     (should print 'ok' with no auth error)"
 Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/designflow-mcp/devops_token"
 Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
 Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
-Write-Host "  4. Fully quit and reopen Claude Desktop."
-Write-Host "  5. Confirm all three MCPs show connected: supabase, devops-mcp, synology-monitor."
+Write-Host "  4. Fully quit and reopen Claude Desktop (MCP servers only re-read config on a full restart)."
+Write-Host "  5. Confirm these MCPs show connected: $McpServerList"
+Write-Host ""
+Write-Host "One manual step this script cannot do for you:" -ForegroundColor Yellow
+Write-Host "  Windows-MCP is a Claude Desktop EXTENSION, not a config entry, so it must be"
+Write-Host "  installed from the UI: Settings -> Extensions -> 'Windows MCP' -> Install,"
+Write-Host "  then fully quit and reopen Claude Desktop. (Its dependency, uv, is already"
+Write-Host "  installed by this script.)"

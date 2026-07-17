@@ -23,10 +23,17 @@
 #      Cost to know: the snippet runs one `op read` per reference in mcp.env on
 #      every interactive shell start (a network round-trip each), and the resolved
 #      secrets live in that shell's environment.
-#   5. Comments out any legacy RAW `export OP_SERVICE_ACCOUNT_TOKEN=ops_...`
+#   5. Installs two MCP launchers (~/.config/ai-devops/mcp-launch.sh and
+#      mcp-remote-launch.sh) so each MCP server resolves its own secrets at
+#      launch, independent of whether the session sourced .bashrc.
+#   6. Merges the FULL MCP server set into ~/.claude/settings.json — the same set
+#      bin/setup-machine.ps1 installs on Windows, so every machine and both
+#      surfaces agree. Only our own mcpServers keys are touched; permissions,
+#      hooks, plugins and any other server are preserved untouched.
+#   7. Comments out any legacy RAW `export OP_SERVICE_ACCOUNT_TOKEN=ops_...`
 #      lines and old per-app op-read blocks left in ~/.bashrc (with a backup),
 #      so the only copy of the token on disk is the locked-down file.
-#   6. Verifies every reference resolves (prints PASS/FAIL, never a value).
+#   8. Verifies every reference resolves (prints PASS/FAIL, never a value).
 #
 # Usage:
 #   setup-secrets.sh                 # set up / refresh
@@ -44,8 +51,13 @@ CFG_DIR="${AI_DEVOPS_CONFIG:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
 SHELLRC="$CFG_DIR/shellrc"
+LAUNCH_SH="$CFG_DIR/mcp-launch.sh"
+REMOTE_SH="$CFG_DIR/mcp-remote-launch.sh"
 EXAMPLE="$REPO_ROOT/config/mcp.env.example"
 VAULT="vibe_coding"
+CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+# The one shared POP production project. Overridable, never hard-coded downstream.
+SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF:-<removed-protected-project-ref>}"
 
 DRY_RUN=0
 DO_LEGACY=1
@@ -208,6 +220,158 @@ ensure_include "$HOME/.bashrc"
 ensure_include "$HOME/.profile"
 
 # --------------------------------------------------------------------------
+# 4b. MCP launchers (mirror of the Windows setup-machine.ps1 launchers)
+# --------------------------------------------------------------------------
+# The shell snippet above authorizes interactive shells, but Claude Code can be
+# started from places that never source .bashrc. These launchers make each MCP
+# server resolve its own secrets at launch, so a server never depends on how the
+# session happened to start, and no token is written into any config file.
+info "MCP launchers -> $LAUNCH_SH, $REMOTE_SH"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[dry-run] would write $LAUNCH_SH and $REMOTE_SH"
+else
+  cat > "$LAUNCH_SH" <<EOF
+#!/usr/bin/env sh
+# [ai-devops] managed by setup-secrets.sh — do not edit by hand.
+# Runs an MCP server under 'op run' with the central reference env-file, so every
+# reference in mcp.env resolves at launch. No secret lands in any config file.
+if [ -s "$TOKEN_FILE" ]; then
+  OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
+  export OP_SERVICE_ACCOUNT_TOKEN
+fi
+exec op run --no-masking --env-file="$MCP_ENV" -- "\$@"
+EOF
+  chmod 755 "$LAUNCH_SH"
+  ok "Wrote $LAUNCH_SH"
+
+  cat > "$REMOTE_SH" <<EOF
+#!/usr/bin/env sh
+# [ai-devops] managed by setup-secrets.sh — do not edit by hand.
+# \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
+# mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
+# before it runs: resolve it in memory here and pass it straight through.
+if [ -s "$TOKEN_FILE" ]; then
+  OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
+  export OP_SERVICE_ACCOUNT_TOKEN
+fi
+URL="\$1"; REF="\$2"; shift 2
+TOK="\$(op read "\$REF")" || {
+  echo "ai-devops: FAILED to resolve \$REF from 1Password — not starting \$URL" >&2
+  exit 1
+}
+[ -n "\$TOK" ] || {
+  echo "ai-devops: \$REF resolved EMPTY — not starting \$URL" >&2
+  exit 1
+}
+exec npx -y mcp-remote "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
+EOF
+  chmod 755 "$REMOTE_SH"
+  ok "Wrote $REMOTE_SH"
+fi
+
+# --------------------------------------------------------------------------
+# 4c. The MCP server set for Claude Code (same set as Windows)
+# --------------------------------------------------------------------------
+# Ubuntu previously wired NO servers at all: this script only handled secrets and
+# left server definitions to each app's own .mcp.json, so a machine ended up with
+# whatever happened to be there (hetz: 'github' for root, 'codex-cli' for ai) and
+# nothing else. This installs the same set bin/setup-machine.ps1 installs on
+# Windows, so every machine and both surfaces agree.
+#
+# Only the mcpServers keys we define are touched. permissions, hooks,
+# enabledPlugins, extraKnownMarketplaces and any server we do not define are
+# preserved exactly as found.
+info "MCP servers -> $CLAUDE_SETTINGS"
+CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+[ -n "$CODEX_BIN" ] || warn "codex not found on PATH — codex-cli MCP will be skipped."
+
+# Probe that python3 actually RUNS, not merely that something named python3 is on
+# PATH: a stub/shim (e.g. Windows' Store alias) satisfies `command -v` and then
+# fails on use. Presence != capability.
+if ! python3 -c 'import json' >/dev/null 2>&1; then
+  warn "python3 present but not usable — cannot safely edit $CLAUDE_SETTINGS; skipped."
+  warn "  No MCP servers were wired. Install a working python3 and re-run."
+elif [ "$DRY_RUN" -eq 1 ]; then
+  echo "[dry-run] would merge the MCP server set into $CLAUDE_SETTINGS"
+else
+  mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+  [ -f "$CLAUDE_SETTINGS" ] && cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.aidevops.bak"
+  python3 - "$CLAUDE_SETTINGS" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
+import json, os, sys
+
+path, launch, remote, supa_ref, codex = sys.argv[1:6]
+
+cfg = {}
+if os.path.exists(path):
+    try:
+        with open(path) as fh:
+            cfg = json.load(fh)
+    except Exception as exc:
+        # Never silently rebuild a config we failed to read — that would delete
+        # the user's permissions/hooks. Fail loudly and change nothing.
+        sys.stderr.write("ai-devops: %s is not valid JSON (%s).\n" % (path, exc))
+        sys.stderr.write("ai-devops: refusing to overwrite it. Fix or move it, then re-run.\n")
+        sys.exit(1)
+
+servers = {
+    # stdio + secrets: launched under `op run`, which injects the mcp.env refs.
+    # --read-only is mandatory: all shared-DB schema work goes through the
+    # u2giants/shared-db repo (branch + PR), never through this MCP.
+    "supabase": {"command": launch, "args": [
+        "npx", "-y", "@supabase/mcp-server-supabase@latest",
+        "--read-only", "--project-ref", supa_ref]},
+    "trigger": {"command": launch, "args": [
+        "npx", "-y", "trigger.dev@latest", "mcp"]},
+    "1password": {"command": launch, "args": [
+        "npx", "-y", "@u2giants/1password-mcp"]},
+
+    # remote/HTTP: the launcher resolves the bearer token from 1Password in
+    # memory, so only the URL + op:// reference appear here.
+    "devops-mcp": {"command": remote, "args": [
+        "https://mcp.designflow.app/mcp",
+        "op://vibe_coding/designflow-mcp/devops_token"]},
+    "synology-monitor": {"command": remote, "args": [
+        "https://nas-mcp.designflow.app/mcp",
+        "op://vibe_coding/designflow-mcp/nas_token"]},
+    "recall-ai": {"command": remote, "args": [
+        "https://us-east-1.recall.ai/mcp",
+        "op://vibe_coding/6dqxnqdx2nwcuyeppvsb6nvkoq/password",
+        "--transport", "http-first"]},
+
+    # no secret at all. vercel authenticates via mcp-remote's browser OAuth flow,
+    # so it must NOT go through the remote launcher (that would force a header).
+    "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+    "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
+    "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@latest",
+                                              "https://mcp.vercel.com"]},
+}
+
+# codex-cli: Codex carries its own `codex login` session, so no launcher and no
+# token. Absolute path, not "codex", so it cannot resolve to a different binary.
+if codex:
+    servers["codex-cli"] = {
+        "command": codex,
+        "args": ["mcp-server"],
+        "env": {"MCP_TOOL_TIMEOUT": "3600000"},
+    }
+
+cfg.setdefault("mcpServers", {}).update(servers)
+with open(path, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+print("  ok wired: " + ", ".join(servers))
+PY
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok "Merged the MCP server set into $CLAUDE_SETTINGS"
+    [ -f "$CLAUDE_SETTINGS.aidevops.bak" ] && ok "Backup: $CLAUDE_SETTINGS.aidevops.bak"
+  else
+    warn "Did NOT wire MCP servers (see the error above). Nothing was changed."
+  fi
+fi
+
+# --------------------------------------------------------------------------
 # 5. Legacy cleanup: neutralize raw tokens / old per-app blocks in ~/.bashrc
 # --------------------------------------------------------------------------
 if [ "$DO_LEGACY" -eq 1 ]; then
@@ -289,59 +453,10 @@ print(f"  ok backup: {path}.aidevops.tokenclean.bak  (DELETE IT — it still hol
 PY
 fi
 
-info "codex-cli MCP for Claude Code (~/.claude/settings.json)"
-# Wire Codex's OWN `codex mcp-server` (official, stdio) so Claude can call Codex as
-# a tool instead of shelling out. Deliberately NOT the third-party npx wrapper:
-# native is version-locked to the CLI, needs no npx download, carries no extra
-# supply chain, and — because we pin the absolute binary — cannot resolve to the
-# wrong codex. It needs NO secret (Codex carries its own `codex login` session),
-# so it is not wrapped in the op launcher and never touches mcp.env.
-CODEX_BIN="$(command -v codex 2>/dev/null || true)"
-CC_SETTINGS="$HOME/.claude/settings.json"
-if [ -z "$CODEX_BIN" ]; then
-  warn "codex not found on PATH — codex-cli MCP NOT configured."
-  warn "  Install Codex, run: codex login, then re-run this script."
-# Probe that python3 actually RUNS, not merely that something named python3 is on
-# PATH: a stub/shim (e.g. Windows' Store alias) satisfies `command -v` and then
-# fails on use. Presence != capability — that mistake is what this whole fix is about.
-elif ! python3 -c 'import json' >/dev/null 2>&1; then
-  warn "python3 present but not usable — cannot safely edit $CC_SETTINGS; skipped."
-else
-  mkdir -p "$(dirname "$CC_SETTINGS")"
-  [ -f "$CC_SETTINGS" ] && cp "$CC_SETTINGS" "$CC_SETTINGS.aidevops.bak"
-  if CODEX_BIN="$CODEX_BIN" CC_SETTINGS="$CC_SETTINGS" python3 - <<'PY'
-import json, os, sys
-path = os.environ["CC_SETTINGS"]
-try:
-    with open(path) as fh:
-        cfg = json.load(fh)
-except FileNotFoundError:
-    cfg = {}
-except json.JSONDecodeError:
-    sys.stderr.write("existing settings.json is not valid JSON; refusing to overwrite\n")
-    sys.exit(1)
-if not isinstance(cfg, dict):
-    sys.stderr.write("settings.json root is not an object; refusing\n")
-    sys.exit(1)
-# Preserve every other server and every other settings key.
-cfg.setdefault("mcpServers", {})["codex-cli"] = {
-    "command": os.environ["CODEX_BIN"],
-    "args": ["mcp-server"],
-    # Codex jobs run long; don't let the MCP call time out at the default.
-    "env": {"MCP_TOOL_TIMEOUT": "3600000"},
-}
-with open(path, "w") as fh:
-    json.dump(cfg, fh, indent=2)
-    fh.write("\n")
-PY
-  then
-    ok "codex-cli MCP -> native mcp-server ($CODEX_BIN)"
-    warn "Restart Claude Code, then confirm codex-cli shows connected."
-    warn "  Prove its sandbox can actually write:  ai-devops doctor"
-  else
-    warn "Could not update $CC_SETTINGS — left unchanged (backup: $CC_SETTINGS.aidevops.bak)"
-  fi
-fi
+# NOTE: codex-cli used to be wired by its own separate step here. It is now part of
+# the one server set in step 4c, so this step was removed: two steps writing the
+# same key to the same file is exactly the drift this script is fixing. The old one
+# also hard-coded ~/.claude/settings.json and so ignored $CLAUDE_SETTINGS.
 
 echo
 info "Verifying references resolve from 1Password (no values printed)"
