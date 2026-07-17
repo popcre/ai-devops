@@ -1,8 +1,139 @@
-# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-16)
+# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-17)
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
 > here would make you ask a question, the answer is somewhere below.
+
+---
+
+## ⭐ 0. RESUME HERE (2026-07-17) — finish the Codex "silent no-op" rollout to **916** (and diagnose **4837**)
+
+> **This section is self-contained.** You can do the 916 job from this section
+> alone; the rest of the file is background. A scheduled cloud reminder fires
+> **Mon 2026-07-20 19:15 America/New_York** pointing you here.
+
+### 0.1 The bug, in one paragraph (you have zero context — read this)
+
+**Codex** is the OpenAI CLI (`codex`), used as this shop's implementation/second-
+opinion engine. On these machines it hit a nasty failure: **`codex exec` silently
+writes nothing while `codex --version` and `codex login status` both succeed and
+exit 0.** So every "is codex ok?" check said yes while codex was actually dead. It
+bit **two Windows machines two different ways**, so **do not assume a cause —
+diagnose**:
+- **t16:** PATH resolved `codex` through a **junction** (`…\AppData\Local\Programs\OpenAI\Codex\bin`) that Windows can't traverse to reach codex's sandbox helper (`codex-windows-sandbox-setup.exe`). Fixed by putting the **real** package bin (`%USERPROFILE%\.codex\packages\standalone\current\bin`) first on the user PATH.
+- **4837:** codex was simply **too old** (`0.142.5`) to run its configured model (`gpt-5.6-terra` → error *"requires a newer version of Codex"*). Upgraded to `0.144.5`. **But it STILL fails** — see §0.5.
+
+### 0.2 Where every machine stands RIGHT NOW (2026-07-17)
+
+| Machine | Tailscale name / IP | Codex sandbox works? | `codex-cli` MCP wired? | Notes |
+|---|---|---|---|---|
+| **t16** (`albt16`, this session's box) | `albt16` / 100.96.221.71 | ✅ **YES, verified** (real `workspace-write` wrote a file, in an interactive session) | ✅ yes — Claude Desktop config now has `codex-cli` (9→10 servers). **Restart Claude Desktop to load it.** | Fully done. |
+| **hetz** (Ubuntu VPS, `ssh vps`) | — | ✅ **YES, verified** via `ai-devops doctor` | ✅ yes | Fixed via Ansible (`u2giants/ansible` PR **#5** AppArmor + **#6** standalone-canonical, both merged+applied). Linux cause was different: bubblewrap blocked by `kernel.apparmor_restrict_unprivileged_userns=1`. |
+| **4837** (`al8960ofc`, domain acct `iml\ahazan2`) | `al8960ofc` / <removed-protected-address> | ❌ **NO — still broken after upgrade+PATH fix.** See §0.5. | ❌ not wired | Reachable now: **SSH port 22 open**, auth with the `916-alien` key (no password). Version + PATH fixed; sandbox write is **denied** even interactively. |
+| **916** (`916-alien`) | `916-alien` / <removed-protected-address> | ❓ **UNKNOWN — never checked.** As of 2026-07-16 it was **OFFLINE** (Tailscale "last seen ~1d ago"). | ❌ not wired | **This is the 916 job.** Do §0.4. |
+
+### 0.3 What is DONE and must NOT be re-litigated
+
+- **op_run 1Password MCP hardened → `@u2giants/1password-mcp` v2.6.0**, released to npm. (Separate but same-night workstream; full handoff in repo `u2giants/1Password-MCP` → `handoff.md`. One small open defect there: the `wsl` shell token can't execute — planned 2.6.1.)
+- **`ai-devops doctor` now proves the sandbox** with a real `--sandbox workspace-write` write (`bin/ai-devops` → `check_codex_sandbox()`), instead of trusting `--version`. **Use it** — it is the honest health check. It found the hetz problem on its first run.
+- **`bin/setup-machine.ps1`** (Windows) contains `Get-CodexBin` (picks the sandbox-capable bin) + a "Codex PATH" step that prepends it, and wires the `codex-cli` MCP to the **absolute** `codex.exe` + `mcp-server` (native, not the third-party `@cexll/codex-mcp-server` wrapper).
+- **`bin/setup-secrets.sh`** (Ubuntu) wires `codex-cli` into `~/.claude/settings.json` and strips the raw OP token out of it.
+- **Upstream is filed, not ours to fix:** [openai/codex#32655](https://github.com/openai/codex/issues/32655) (we confirmed 0.144.5 reproduces the junction bug). The 4837 write-denial (§0.5) may be a *different* upstream bug — cf. openai/codex **#26438** (`SetTokenInformation(TokenDefaultDacl) failed: 1344 — every command fails before start in workspace-write`).
+
+### 0.4 The 916 job — exact steps (each with a "you'll know it worked when")
+
+**Precondition:** 916 must be **powered on** (it was offline). Confirm with
+`tailscale status | grep 916-alien` from any on machine → must show *not* "offline".
+**Access note:** t16 will likely be **OFF** when you do this (Albert said so). The
+`916-alien` SSH private key lives at `C:\Users\ahazan2\.ssh\916-alien` **on t16**,
+and also in **1Password** `vibe_coding` → item **"916-alien SSH key"**. So either
+work **at 916's own keyboard** (simplest, and required for the real sandbox test —
+see the ⚠️ below), or SSH in from whatever machine is on using that key.
+
+1. **Reach 916 and get a shell.** At the keyboard, or:
+   `ssh -i <916-alien key> ahazan2@<removed-protected-address>` (user is likely `ahazan2`; on a
+   domain box it may present as `iml\ahazan2`).
+   ✅ *Worked when:* `hostname` returns the 916 host.
+2. **Diagnose codex — do NOT assume t16's or 4837's cause.** Run (native PowerShell):
+   - `codex --version` → is it **≥ 0.144.5**? (If older → step 3.)
+   - `(Get-Command codex).Source` → does it resolve to a junction/npm shim, or the real bin?
+   - `Test-Path $env:USERPROFILE\.codex\packages\standalone\current\bin\codex.exe` → is the real standalone present?
+   ✅ *Worked when:* you can state which of the two causes (old version / bad PATH / both / neither) applies.
+3. **If too old:** upgrade with the **official installer in NATIVE PowerShell** (the Git-Bash `codex update` path is broken — see §4):
+   `$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex`
+   ✅ *Worked when:* `codex --version` (via the real bin) prints ≥ 0.144.5.
+4. **Fix the PATH** so bare `codex` resolves to a sandbox-capable bin. Easiest is to
+   run the repo script (it contains `Get-CodexBin` + the PATH step):
+   `pwsh -ExecutionPolicy Bypass -File C:\repos\ai-devops\bin\setup-machine.ps1 -RepoPath C:\repos\ai-devops`
+   ⚠️ **This script BLOCKS on a `Read-Host` for the 1Password token if the token
+   file is missing** (`%USERPROFILE%\.config\ai-devops\op-service-account`). Check
+   first. If missing and you're an AI session, **do not** hang: either pass
+   `-Token <ops_… from 1Password vibe_coding>` or **skip the full script** and just
+   prepend the PATH manually:
+   `[Environment]::SetEnvironmentVariable("PATH", "$env:USERPROFILE\.codex\packages\standalone\current\bin;" + [Environment]::GetEnvironmentVariable("PATH","User"), "User")`
+   ✅ *Worked when:* in a **new** shell, `(Get-Command codex).Source` is the
+   `…\.codex\packages\standalone\current\bin\codex.exe` path.
+5. **VERIFY THE SANDBOX — interactively, at 916's keyboard, NOT over SSH.** ⚠️ Codex's
+   Windows sandbox manipulates logon tokens and behaves differently under an SSH
+   *network* logon than an interactive desktop session; a failure over SSH is **not**
+   proof of a real bug (this cost this session hours on 4837). Run:
+   `codex exec --sandbox workspace-write --skip-git-repo-check "create a file called ok.txt containing OK"`
+   ✅ *Worked when:* `ok.txt` actually appears in the cwd. If yes → **916 is DONE for the codex fix.**
+   ❌ *If it says "workspace write operation was denied" / "Failed to write file"* → 916 has the **same deeper bug as 4837** → go to §0.5.
+6. **Wire the `codex-cli` MCP** (only after step 5 is green). Running
+   `setup-machine.ps1` without `-SkipDesktopMcp` does it; or verify the
+   `codex-cli` entry appears in `…\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`
+   pointing at the absolute `codex.exe` + `mcp-server`. **Restart Claude Desktop** after.
+   ✅ *Worked when:* the config is valid JSON, `codex-cli` present, prior servers intact, backup `*.aidevops.bak` made.
+7. **Record the outcome** in this §0.2 table (flip 916's row) and, if 916 also hits
+   the write-denial, add its evidence to §0.5.
+
+### 0.5 OPEN, UNSOLVED — the 4837 (and maybe 916) sandbox **write-denial**
+
+**Symptom (reproduced by Albert INTERACTIVELY on 4837, 2026-07-17 — not an SSH
+artifact):**
+```
+apply patch: failed
+C:\Users\ahazan2\ok.txt
+ERROR codex_core::tools::router: error=Exit code: 1
+Failed to write file C:\Users\ahazan2\ok.txt
+codex: I couldn't create `C:\Users\ahazan2\ok.txt`: the workspace write operation was denied.
+```
+This is **after** the version upgrade (0.144.5) and PATH fix both succeeded, so it
+is a **third, distinct** failure from t16's junction and hetz's bubblewrap. **Not
+yet diagnosed.** Leads for the next session (in priority order):
+1. **Read the real sandbox log right after a failed run:**
+   `Get-Content $env:USERPROFILE\.codex\.sandbox\sandbox.<today>.log -Tail 40`.
+   On 4837 an earlier run's log showed the helper resolving fine (no "program not
+   found"), so this is a **write/ACL denial**, not a missing helper.
+2. **Domain-profile hypothesis:** 4837's account is **domain** (`iml\ahazan2`).
+   Codex's sandbox grants write ACLs to a restricted local sandbox user on the
+   workdir; that may fail when the workdir is a domain user's profile
+   (`C:\Users\ahazan2`). Test by running codex from a **local, non-profile** dir
+   the sandbox user can own (e.g. `C:\codex-scratch`).
+3. **EDR/AV hypothesis:** corporate endpoint protection on 4837 blocking the
+   sandbox helper's write. Check Windows Defender / any EDR quarantine logs around
+   the run time.
+4. **Upstream match:** compare the exact log error against openai/codex issues,
+   especially **#26438** (TokenDefaultDacl 1344) and the Windows-sandbox family
+   linked from #32655. If it matches, it's upstream — file/confirm, don't hand-hack.
+⚠️ **Do NOT** "fix" this by disabling the sandbox (`--dangerously-bypass-approvals-and-sandbox`)
+as a default — that removes the protection on a work machine. Diagnose it.
+
+### 0.6 Traps this session fell into (so you don't) — see §4 for the full list
+
+- **Presence ≠ capability.** `--version`/`login status`/exit 0 were all green while
+  codex was dead. Only a real sandbox **write** proves it. Use `ai-devops doctor`.
+- **An empty result is not proof a tool is broken.** Establish platform / resolved
+  exe / shell / cwd / logon-type BEFORE concluding. Testing codex's sandbox over
+  SSH gave false "BROKEN" readings for hours — the SSH network logon was the
+  confound, not codex.
+- **`find -type f` does not traverse Windows junctions** — it shows an "empty" dir
+  and reads as "files missing." Use `Get-Item <dir> | Select LinkType,Target`.
+- **`codex update` from Git Bash fails** (msys `tar` vs `C:` path). Use the native
+  PowerShell installer (§0.4 step 3).
+- **`setup-machine.ps1` needs pwsh 7** and has no `#requires`, so under Windows
+  PowerShell 5.1 it dies with cryptic parse errors, not a clear message.
 
 ## 1. What this application is
 
@@ -119,7 +250,12 @@ tracked `100644` (not `+x`). This MATCHES the existing `bin/ai-install-skills`
 (Windows-authored; execution handled by `install.sh`/git-bash). Not a bug — do
 not "fix" it in isolation.
 
-### 3b. Codex PATH + `codex-cli` MCP state (authoritative, 2026-07-16)
+### 3b. Codex PATH + `codex-cli` MCP state
+
+> ⚠️ **Superseded by §0 (2026-07-17) for live machine status.** §0's table is the
+> current truth (t16 ✅ incl. MCP; hetz ✅ fixed+verified; 4837 upgraded but
+> sandbox-denied; 916 unknown/offline). The rows below are the 2026-07-16 snapshot,
+> kept for the reasoning; where they disagree with §0, **§0 wins.**
 
 Separate workstream, same consolidation goal: Codex is now set up **by these
 scripts**, not by hand or by the Dropbox scripts.
