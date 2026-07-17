@@ -62,3 +62,9 @@ node_modules/
 # Python bytecode from tools/
 __pycache__/
 *.pyc
+
+# Transcripts moved to the PRIVATE repo u2giants/ai-devops-transcripts (2026-07-17)
+# after live credentials were found in them while THIS repo was public. Never
+# re-add them here. sync.sh uses a plain `git add`, so these entries block it.
+/claude_chats/
+/codex_chats/

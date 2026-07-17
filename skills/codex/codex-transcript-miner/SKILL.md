@@ -1,3 +1,9 @@
+> **STOP — transcripts moved to a private repo (2026-07-17).** Live credentials
+> (including the 1Password service-account token) were found in committed
+> transcripts while `u2giants/ai-devops` was PUBLIC. Transcripts now live in the
+> PRIVATE repo `u2giants/ai-devops-transcripts` (git submodule). Do NOT commit
+> `claude_chats/` or `codex_chats/` into ai-devops — `.gitignore` blocks them.
+
 ---
 name: codex-transcript-miner
 description: Find, scrub, back up, and analyze Codex transcript archives for repeated prompts and reusable workflows. Use when the user asks to find local Codex chats, sync codex_chats, analyze repeated Codex tasks, mine prompts, create skills from chat history, or reduce token use from old sessions.

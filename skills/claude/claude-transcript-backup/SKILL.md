@@ -1,3 +1,9 @@
+> **STOP — transcripts moved to a private repo (2026-07-17).** Live credentials
+> (including the 1Password service-account token) were found in committed
+> transcripts while `u2giants/ai-devops` was PUBLIC. Transcripts now live in the
+> PRIVATE repo `u2giants/ai-devops-transcripts` (git submodule). Do NOT commit
+> `claude_chats/` or `codex_chats/` into ai-devops — `.gitignore` blocks them.
+
 ---
 name: claude-transcript-backup
 description: Find all local Claude Code session transcripts on this machine and back them up to u2giants/ai-devops under claude_chats/<machine>. Use when the user says "find all the Local Claude Code session transcripts everywhere on this entire machine" or "put all of these into claude_chats".
