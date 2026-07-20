@@ -4,6 +4,236 @@
 > ZERO prior context — every path, alias, and identifier is defined. If anything
 > here would make you ask a question, the answer is somewhere below.
 
+## Security incident workstream — transcript exposure (updated 2026-07-20)
+
+### S1. What this system is and why this incident exists
+
+`https://mon.designflow.app/` is the live Synology Monitor application. Its web
+and MCP components run through Coolify on the Hetzner server (`hetz`); NAS agents
+run on `edgesynology1` and `edgesynology2`. The private repository
+`u2giants/ai-devops-transcripts` is mounted in this checkout as the `transcripts/`
+submodule and preserves historical AI transcripts. Before it became private,
+production credentials appeared in public `u2giants/synology-monitor` history
+and transcript history. Making the repository private stopped new public access
+but did not invalidate values that had already escaped. The intended outcome is
+to inventory every exposed credential, identify its owner and consumers, rotate
+each approved atomic group without downtime, prove the old value is rejected,
+and request removal of unreachable secret-bearing GitHub history.
+
+### S2. Completed and verified rotations — do not repeat
+
+All six originally confirmed-live Synology Monitor values were rotated in three
+approved atomic groups. Every replacement was created in 1Password vault
+`vibe_coding` before propagation; raw values never belong in Git or this file.
+
+1. **Edge1 NAS API secret + signing key:** updated the canonical
+   `nas-monitor-secrets` item, Coolify production/preview values for
+   `nas-monitor-web` and `nas-mcp`, and the Edge1 NAS agent. New bearer returned
+   HTTP 200 and old bearer 401; the harmless signed check returned 200 with the
+   new signing key and 403 with the old one. Both Coolify deployments and the
+   NAS health check passed. The NAS env file is `root:root`, mode 600.
+2. **Edge2 NAS API secret + signing key:** updated the same consumer classes and
+   recreated only the Edge2 `nas-api` container. New bearer returned 200 and old
+   bearer 401; new signing returned 200 and old signing 403. Albert's constrained
+   manual compose command produced `SAFE CHECK PASSED: nas-api recreated; health
+   HTTP 200`. Both Coolify deployments and relay health/catalog/preview passed.
+3. **Relay bearer + admin secret:** updated canonical 1Password fields and the
+   relay runtime. Health, authenticated catalog, and read-only preview returned
+   200; the old bearer returned 401. The admin secret has no safe read-only admin
+   endpoint, so it was verified by protected canonical/runtime equality and by
+   proving it differed from the old value; no write was performed merely to test
+   it.
+
+Full consumer names, deployment IDs, permissions, cleanup evidence, and exact
+test results are in
+[`docs/security-incident-credential-rotation-2026-07.md`](docs/security-incident-credential-rotation-2026-07.md).
+Direct root SSH remains disabled. The approved `916-alien` key works for NAS
+users `ahazan` and `ai`; no DSM scheduled task named "Temporary Codex edge1
+rotation access" ever existed or ran.
+
+### S3. Wider transcript audit — exact current state
+
+The audit is **open**. It scanned 1,281 transcript files. A deliberately broad
+first pass produced 836 candidates and is not a verdict. Exact in-memory
+comparison of 89 concealed fields across 47 scoped 1Password items found 61
+current fields represented in the archive. The authoritative classification is
+[`docs/transcript-leak-audit-2026-07-19.md`](docs/transcript-leak-audit-2026-07-19.md),
+not the raw candidate count.
+
+Confirmed live and exposed:
+
+- Six MCP credentials: `designflow-mcp/devops_token`,
+  `designflow-mcp/nas_token`, and the `codex`, `chatgpt`, `gemini`, and `claude`
+  fields in `devops-mcp-client-tokens`. Each returned HTTP 200 to a non-mutating
+  MCP initialization request.
+- Current OpenAI, DeepSeek, and DashScope provider keys.
+- Five historical OpenRouter keys were found: four returned HTTP 200 and one
+  returned 401. The four live keys are associated by transcript context with
+  Restore Wizard, Hiclaw, Synology Monitor, and Railway production, but none
+  matches the current Oracle OpenRouter item in 1Password. Ownership must be
+  proved before rotation.
+- Three historical Google-shaped keys were found: one is still accepted and two
+  are rejected. The live one does not match the current Gemini field.
+- The active `1Password Service Account Token - hetzner_vps` appears exactly in
+  the archive and is active. A standing rule forbids casually rotating or even
+  suggesting rotation of this bootstrap credential. This is an explicit owner
+  exception: Albert must decide how to reconcile that rule with confirmed
+  exposure before anyone changes it.
+- Current Cloudflare fields appear in the archive and back active tunnels:
+  `cloudflare-tunnel-tokens/cloudflare_tunnel_token`,
+  `cloudflare-tunnel-tokens/cf_gw_tunnel_token`, and
+  `cf-tunnel-hetz/password`. Treat them as live pending a provider-side status
+  check and rotate them only as a coordinated Cloudflare/Coolify group.
+
+Confirmed rejected or not current: four GitHub-shaped tokens returned 401; the
+Vercel candidate returned 403; two Trigger PAT candidates do not match the
+current 1Password management PAT; current Anthropic and Gemini values are
+present but return 401; one OpenRouter and two Google candidates are rejected;
+the current `916-alien` private key does not exactly match archive private-key
+material. Rejection evidence does not erase Git history; keep the Support
+cleanup open.
+
+Current vault fields present in the archive but still awaiting safe service-side
+verification include ClickUp account/API/MCP and Cloudflare D1 credentials;
+Coldlion ERP API; Coolify application/database passwords; DesignFlow sandbox DB,
+PLM master-data API, and frontend test login; `hetz-ai-ssh` password; npm publish
+token; POP CRM live login and worker Supabase service role; Recall.ai; Brevo;
+Oracle current/old Supabase database URLs and passwords; Synology Monitor
+Supabase database password; shared POP production service role; shared-DB preview
+branch URLs/JWT/service role; and concealed fields in the
+`vibe_coding-service-account` item. Supabase anonymous keys and the Logo.dev
+publishable key are public-by-design and need classification, not blind
+rotation. `nas-monitor-secrets/mcp_bearer_token_LEAKED_DO_NOT_USE` is an
+intentional dead quarantine field. Deprecated Directus entries must be proved
+unused and deleted, never reactivated.
+
+Eleven archive files contain private-key blocks. The current `916-alien` key is
+not an exact match, but the other keys still require in-memory fingerprint and
+authorized-host mapping. Never write raw private keys to a report. The `popdam`
+NAS SSH password remains **UNKNOWN**; do not test it by attempting a login. Find
+an authoritative safe source or perform an approved precautionary reset.
+
+Safe report copies exist on `hetz` under `/home/ai/rotation/`, owned by `ai` and
+mode 600: `transcript-leak-audit.md`, `vault-exposure-inventory.json`,
+`transcript-candidate-index.md`, and `rotation-completion-report.md`.
+`codex-verification-report.md` and `ROTATION-HANDOFF.md` also exist there but
+were previously mode 664/644; confirm whether they still need to exist and
+tighten or remove them through the authorized path if they contain sensitive
+metadata. Do not copy raw candidate contexts into Git.
+
+### S4. Failed approaches and traps — do not repeat
+
+- A database-URI metadata parser overran escaped JSON newlines and exposed
+  neighboring environment text in tool output. Its temporary output
+  `C:\tmp\metadata-inventory.txt` was deleted immediately and none of its
+  database classifications are trusted. Compare only known item/field values in
+  memory and emit identifiers/verdicts, never values or surrounding context.
+- A 1Password `item_get` on an SSH-key item returned the private key plaintext
+  because the field type itself is secret-bearing. Do not fetch SSH-key items
+  wholesale. Use a protected operation that derives only public fingerprints.
+- The broad 836-candidate scanner intentionally over-matches. Do not interpret
+  that count as 836 live secrets or hand raw candidate JSON to another model.
+- The first Edge2 relay replacement produced malformed environment formatting
+  and a restart loop. Recovery used a protected Docker-inspect snapshot before
+  promotion. Future rotations must stage `_next`, validate exact formatting,
+  snapshot current runtime references, and have rollback ready.
+- The first Edge2 signing check had a CRLF construction error; fixing line
+  endings made the harmless signed check pass. Do not conclude a key is bad from
+  an unvalidated request-construction script.
+- The stale Edge2 sudo password prevented automation. Albert ran one constrained
+  `docker-compose ... --force-recreate nas-api` command; do not broaden this into
+  persistent root SSH or an invented DSM task.
+
+### S5. Exact next steps — approval-gated, in this order
+
+No additional rotations were authorized by the completed audit. Before each
+wave, present Albert one atomic group, its consumers, rollback, and verification
+plan, and obtain explicit approval. New values must enter 1Password first.
+
+1. **Finish classification without mutation.** Safely verify every one of the 61
+   matched current fields, identify the owners/consumers for four live
+   OpenRouter keys and the one live historical Google key, derive public
+   fingerprints for the 11 private-key blocks in memory, and resolve the source
+   of the unknown `popdam` password without authentication probing. **Gate:**
+   every field has one verdict—live, rejected, public-by-design, deprecated and
+   unused, or unknown with a named owner/action—and no raw value is in a report.
+2. **MCP wave.** Rotate the five `devops-mcp` client tokens as one coordinated
+   group, then rotate the independent `nas-mcp` bearer. Stage replacements in
+   1Password, update Coolify/server consumers, refresh each client from `op://`,
+   verify non-mutating initialization, then revoke old values. **Gate:** every
+   new client gets HTTP 200, every old token gets 401/403, and canonical/runtime
+   protected equality passes.
+3. **Billable-provider wave.** After ownership mapping, separately rotate
+   OpenAI, DeepSeek, DashScope, the four live OpenRouter keys, and the live
+   historical Google key at their providers. Put each replacement in a `_next`
+   1Password field before updating applications, Trigger jobs, Coolify, and
+   Railway; promote only after a harmless provider request. **Gate:** new keys
+   work in every mapped consumer, old keys are rejected, billing/error telemetry
+   is normal, and `_next`/rollback artifacts are removed.
+4. **Cloudflare wave.** Map each of the three exposed fields to its tunnel and
+   container, create scoped replacements, update Coolify consumers, verify all
+   public routes, then revoke old tokens. **Gate:** tunnel health and every
+   mapped URL pass on new values and old tokens no longer authenticate.
+5. **Database/service-role wave.** Group credentials by database and consumer;
+   for the shared Supabase backend, follow the `u2giants/shared-db` governance
+   procedure before application changes. Rotate passwords/service roles without
+   mixing unrelated databases. **Gate:** all applications pass read/write smoke
+   tests appropriate to their role, old credentials are rejected, and generated
+   types/contracts remain synchronized where applicable.
+6. **Business-service wave.** Rotate ClickUp, Coldlion, Brevo, Recall.ai, npm,
+   DesignFlow PLM/application logins, and other confirmed-live business fields
+   as separate owner-aware groups. Delete unused Directus vestiges. **Gate:**
+   each service's harmless API/login/publish dry-run succeeds with the new value,
+   the old value is rejected or the unused integration is deleted, and consumers
+   match 1Password.
+7. **SSH/password cleanup.** Map private-key fingerprints to authorized hosts,
+   revoke only identified compromised keys, and resolve/reset `popdam` with an
+   approved recovery path. Preserve `916-alien` as the only intended key for
+   `ahazan`, `root`, and `ai` where policy allows, but do not enable direct root
+   SSH merely for convenience. **Gate:** authorized users connect using intended
+   keys, compromised fingerprints are absent from `authorized_keys`, and no
+   password guessing occurred.
+8. **Bootstrap exception.** Ask Albert for an explicit decision on the exposed
+   1Password service-account token. Do not rotate it under the ordinary wave
+   procedure. **Gate:** the decision, rationale, dependencies, and—if approved—
+   a separate recovery/runbook are documented before any change.
+9. **GitHub residue.** Continue GitHub Support sensitive-data removal requests
+   for unreachable `u2giants/ai-devops` history and secret-bearing
+   `u2giants/synology-monitor` history. **Gate:** Support confirms removal or
+   provides a documented alternative, while both repositories remain private
+   where required.
+10. **Close the incident only after proof.** Rerun the exact-match audit against
+    current canonical fields and the historical corpus, then update both incident
+    docs. **Gate:** no accepted credential remains represented in reachable
+    history; every old rotated value is rejected; unknown/private-key cases are
+    resolved; temporary artifacts are gone; and the final report contains only
+    identifiers and evidence, never secret values.
+
+### S6. Access, constraints, and risks
+
+- GitHub CLI is authenticated. Remote operational access is through the existing
+  authenticated tooling and SSH aliases described in §8; use Git's SSH binary on
+  Windows because the PowerShell sandbox cannot capture normal OpenSSH output.
+- Secrets live only in 1Password vault `vibe_coding`. Never put a value in chat,
+  commands, files, Git, or reports. Use protected injection/equality checks.
+- Rotation always requires Albert's explicit approval for the exact atomic
+  group. Minimize Albert's work: ask him only for a browser/provider action that
+  authenticated automation genuinely cannot perform, and give exact clicks.
+- Production checks must be non-mutating unless a separately approved operation
+  requires a write. Never perform a destructive admin action solely as a test.
+- The largest risks are unidentified owners for historical provider keys,
+  downtime from rotating shared consumers out of order, disabling the bootstrap
+  path before a replacement exists, and treating a public identifier as a secret
+  or a rejected secret as removed from history.
+
+### S7. Incident Git/deploy state
+
+The three Synology Monitor rotation groups are live and verified; no application
+code change was required for those rotations. The audit and rotation records are
+durable Markdown in this repository and are included in the 2026-07-20 closeout
+commit that contains this statement (the final closeout report records its SHA).
+No further credential waves have been started or deployed.
+
 ---
 
 ## ⭐ 0. RESUME HERE (2026-07-17) — finish the Codex "silent no-op" rollout to **916** (and diagnose **4837**)
@@ -668,3 +898,32 @@ with ALL the relevant knowledge you have about this session and application from
 handoff.md and related .md files? Nothing relevant is left out?" Failed
 approaches are in §4, exact current state is in §3, and every next step in §6 has
 a verification gate. Delete this file only when all three phases are complete._
+
+### 2026-07-20 completeness audit — credential incident
+
+After rereading this entire handoff and both incident reports without relying on
+chat context, the mandatory documentation gate passes:
+
+1. **Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+   knowledge of this project and no context about what we did or what remains
+   could pick up where I left off and not skip a beat? Yes.** Incident §S1
+   defines the product, repositories, hosts, URL, exposure, and intended outcome;
+   §S2 records completed work and proof; §S3 gives the full open inventory and
+   report locations; the original machine-consolidation workstream remains fully
+   documented in §§0–9. No gap was found in the final reread.
+2. **Is it detailed enough that they could continue as well as I could right
+   now, with all my knowledge from this session and all relevant background about
+   what we are trying to accomplish? Yes.** Incident §S3 preserves counts,
+   classifications, owners known and unknown, rejected values, key/password
+   unknowns, and safe artifacts. §S4 preserves every material failure and why;
+   §S6 preserves access, approval, secret-handling, and production constraints.
+   The two linked incident reports supply deployment IDs and test evidence. No
+   gap was found in the final reread.
+3. **Is every single relevant detail—background, goals, intended outcome,
+   current state, failed attempts, decisions, constraints, risks, exact next
+   actions, and verification evidence—present for the implementing agent to
+   execute flawlessly? Yes.** Incident §§S1–S7 cover each dimension explicitly;
+   §S5 contains ten ordered actions and a concrete success gate for every one.
+   Raw credentials and hashes are intentionally excluded as required, not
+   missing. The audit is correctly marked open until all §S5 gates pass. No gap
+   was found in the final reread.
