@@ -33,6 +33,19 @@ cd /worksp/ai-devops
 
 Idempotent — safe to re-run.
 
+Skill-only maintenance supports preview and a recoverable legacy migration:
+
+```bash
+ai-install-skills --dry-run
+ai-install-skills --migrate-obsolete
+```
+
+On Windows, `bin/install-ai-devops-windows.ps1 -SkillsDryRun` previews only skill
+operations and skips repository, tool, global-file, and login work. Add
+`-MigrateObsolete` to preview moving the retired ShareSync skill into quarantine;
+a normal run with `-MigrateObsolete` performs that move. Neither installer prunes
+other machine-local skills.
+
 ## Update
 
 ```bash

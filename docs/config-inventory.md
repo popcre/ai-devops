@@ -46,6 +46,7 @@ tools run via git-bash on Windows).
 | **`/etc/ai-devops/*.env`** (Ubuntu) | Real workflow model commands + paths | ❌ machine-local by design (never committed) | Non-secret command strings |
 | **User `PATH` → Codex** (Windows) | Which `codex.exe` a terminal resolves — and therefore whether `codex exec` can write at all | ✅ `bin/setup-machine.ps1` step "Codex PATH" prepends `%USERPROFILE%\.codex\packages\standalone\current\bin` | No |
 | **`codex-cli` MCP entry** (Claude Desktop config + `~/.claude/settings.json`) | Lets Claude call Codex as a tool (`codex`, `codex-reply`) instead of shelling out | ✅ Windows: `bin/setup-machine.ps1`; Ubuntu: `bin/setup-secrets.sh` | No — Codex carries its own `codex login`, so it is **not** wrapped in the op launcher and never touches `mcp.env` |
+| **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine and checked by Windows setup | No repo secret — Kimi carries its own interactive login |
 
 ## Codex: PATH + MCP (added 2026-07-16)
 
@@ -153,6 +154,11 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   (this session). The remaining wrinkle: per-machine path slugs
   (`C--repos-dflow` vs `D--repos-dflow`) — canonicalized to one key. See
   `memory/README.md`.
+- **Kimi Code CLI** — the skill is now repo-owned under `skills/shared/` and
+  installs into both Claude and Codex/ChatGPT. The CLI binary and login remain
+  machine-local: verify with `kimi --version` and `kimi -p "reply with OK"`.
+  If auth fails, run `kimi login` and complete the device flow once; do not
+  attempt to automate authentication inside a delegated coding prompt.
 - **gcloud defaults** — per-machine. Correct dflow values: project
   `lithe-breaker-323913`, region `us-east4` (Cloud Run/Build/Artifacts/Compute).
   Set via `bin/ai-gcloud-dflow`. **Why regional matters:** Cloud Build here is

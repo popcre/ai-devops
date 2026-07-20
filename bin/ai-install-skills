@@ -3,11 +3,12 @@
 # Install the Claude/Codex skills and global system instructions from this repo
 # onto the current machine, so AI coding sessions load them automatically.
 #
-#   ai-install-skills            # install/refresh skills + global CLAUDE.md
-#   ai-install-skills --dry-run  # show what would be copied
+#   ai-install-skills                      # install/refresh skills + globals
+#   ai-install-skills --dry-run            # show actions without changing files
+#   ai-install-skills --migrate-obsolete   # quarantine the retired ShareSync skill
 #
-# - Claude skills:  skills/claude/<name>/ -> ~/.claude/skills/<name>/
-# - Codex skills:   skills/codex/<name>/  -> ~/.codex/skills/<name>/
+# - Claude skills:  skills/claude/<name>/ + skills/shared/<name>/ -> ~/.claude/skills/<name>/
+# - Codex skills:   skills/codex/<name>/ + skills/shared/<name>/ -> ~/.codex/skills/<name>/
 # - Global:  templates/system/CLAUDE-global.md -> ~/.claude/CLAUDE.md
 #   (only if ~/.claude/CLAUDE.md is absent; otherwise prints a diff hint —
 #   never clobbers local edits, same philosophy as install.sh)
@@ -16,22 +17,111 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
-DRY_RUN="${1:-}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+DRY_RUN=false
+MIGRATE_OBSOLETE=false
 
-run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
+usage() {
+  cat <<'EOF'
+Usage: ai-install-skills [--dry-run] [--migrate-obsolete]
+
+  --dry-run            Show every planned action without changing files.
+  --migrate-obsolete   Move synology-sharesync-stuck-triage out of active
+                       skill directories into a recoverable quarantine.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    --migrate-obsolete) MIGRATE_OBSOLETE=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+run() { if $DRY_RUN; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; else "$@"; fi }
+
+skill_names() {
+  local root="$1" d
+  [[ -d "$root" ]] || return 0
+  for d in "$root"/*/; do
+    [[ -f "$d/SKILL.md" ]] && basename "$d"
+  done
+}
+
+check_shared_collisions() {
+  local shared_root="$REPO_ROOT/skills/shared" client_root label name
+  [[ -d "$shared_root" ]] || return 0
+  for label in claude codex; do
+    client_root="$REPO_ROOT/skills/$label"
+    while IFS= read -r name; do
+      if [[ -f "$client_root/$name/SKILL.md" ]]; then
+        echo "ERROR: shared skill '$name' also exists in skills/$label; refusing to overwrite it." >&2
+        return 1
+      fi
+    done < <(skill_names "$shared_root")
+  done
+}
+
+count_skills() { skill_names "$1" | awk 'END { print NR + 0 }'; }
 
 echo "Installing skills from $REPO_ROOT/skills/claude -> $CLAUDE_HOME/skills"
+check_shared_collisions
 run mkdir -p "$CLAUDE_HOME/skills"
-count=0
 for d in "$REPO_ROOT"/skills/claude/*/; do
   name="$(basename "$d")"
   [[ -f "$d/SKILL.md" ]] || continue
   run rm -rf "$CLAUDE_HOME/skills/$name"
   run cp -a "$d" "$CLAUDE_HOME/skills/$name"
-  count=$((count+1))
   echo "  + $name"
 done
-echo "$count skills installed."
+claude_count="$(count_skills "$REPO_ROOT/skills/claude")"
+
+install_skill_tree() {
+  local src_root="$1" dst_root="$2" label="$3"
+  [[ -d "$src_root" ]] || return 0
+  for d in "$src_root"/*/; do
+    [[ -f "$d/SKILL.md" ]] || continue
+    local name
+    name="$(basename "$d")"
+    run rm -rf "$dst_root/$name"
+    run cp -a "$d" "$dst_root/$name"
+    echo "  + $name ($label)"
+  done
+}
+
+install_skill_tree "$REPO_ROOT/skills/shared" "$CLAUDE_HOME/skills" "shared"
+shared_count="$(count_skills "$REPO_ROOT/skills/shared")"
+echo "$claude_count Claude skills + $shared_count shared skills installed for Claude."
+
+migrate_obsolete_skill() {
+  local client_home="$1" label="$2"
+  local old="$client_home/skills/synology-sharesync-stuck-triage"
+  local quarantine_root="$client_home/skills-quarantine"
+  local quarantine="$quarantine_root/synology-sharesync-stuck-triage"
+
+  [[ -d "$old" ]] || return 0
+  echo "WARNING: obsolete $label skill remains active at $old and overlaps synology-sharesync-triage." >&2
+  if ! $MIGRATE_OBSOLETE; then
+    echo "         Re-run with --migrate-obsolete to move it into recoverable quarantine." >&2
+    return 0
+  fi
+  if [[ ! -f "$REPO_ROOT/skills/shared/synology-sharesync-triage/SKILL.md" ]]; then
+    echo "ERROR: replacement shared skill is missing; refusing to quarantine $old." >&2
+    return 1
+  fi
+  if [[ -e "$quarantine" ]]; then
+    echo "ERROR: quarantine destination already exists: $quarantine" >&2
+    return 1
+  fi
+  run mkdir -p "$quarantine_root"
+  run mv "$old" "$quarantine"
+  echo "  quarantined obsolete $label skill -> $quarantine"
+}
+
+migrate_obsolete_skill "$CLAUDE_HOME" "Claude"
 
 install_global() {
   local src="$1" dst="$2" label="$3"
@@ -53,20 +143,21 @@ install_global "$REPO_ROOT/templates/system/CLAUDE-global.md" \
 
 # Codex (ChatGPT Codex CLI) reads ~/.codex/AGENTS.md the way Claude reads
 # ~/.claude/CLAUDE.md. Install the Codex edition if Codex is set up here.
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 if [[ -d "$CODEX_HOME" ]]; then
   echo "Installing Codex skills from $REPO_ROOT/skills/codex -> $CODEX_HOME/skills"
   run mkdir -p "$CODEX_HOME/skills"
-  codex_count=0
   for d in "$REPO_ROOT"/skills/codex/*/; do
     name="$(basename "$d")"
     [[ -f "$d/SKILL.md" ]] || continue
     run rm -rf "$CODEX_HOME/skills/$name"
     run cp -a "$d" "$CODEX_HOME/skills/$name"
-    codex_count=$((codex_count+1))
     echo "  + $name"
   done
-  echo "$codex_count Codex skills installed."
+  codex_count="$(count_skills "$REPO_ROOT/skills/codex")"
+
+  install_skill_tree "$REPO_ROOT/skills/shared" "$CODEX_HOME/skills" "shared"
+  echo "$codex_count Codex skills + $shared_count shared skills installed for Codex."
+  migrate_obsolete_skill "$CODEX_HOME" "Codex"
 
   install_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" \
                  "$CODEX_HOME/AGENTS.md" "Codex global instructions"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Synology ShareSync Triage"
+  short_description: "Diagnose and narrowly repair ShareSync stalls"
+  default_prompt: "Use $synology-sharesync-triage to diagnose this ShareSync stall with exact evidence and recommend the narrowest safe fix."

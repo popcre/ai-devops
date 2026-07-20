@@ -1,6 +1,7 @@
 # Codex skills usage guide
 
-Codex now has repo-owned skills under `skills/codex/`. Install them on a
+Codex now has repo-owned skills under `skills/codex/`, plus cross-client skills
+under `skills/shared/`. Install them on a
 machine with:
 
 ```bash
@@ -47,6 +48,14 @@ file.
 - `codex-transcript-miner`: transcript discovery, safe analysis, repeated prompt
   mining, and skill recommendations.
 - `ai-reviewer`: existing read-only Codex second-opinion review skill.
+- `synology-sharesync-triage`: proves and narrowly repairs Synology Drive
+  ShareSync stalls using NAS state, logs, and SQLite evidence.
+- `kimi-code-delegation`: delegates scoped coding tasks to Kimi Code CLI in
+  headless mode, using plan-then-execute prompts and local verification.
+
+The installer fails before copying when a shared skill name collides with a
+client-specific skill. It warns about the retired ShareSync skill without
+touching it; `--migrate-obsolete` performs the explicit, recoverable quarantine.
 
 ## Maintenance rule
 

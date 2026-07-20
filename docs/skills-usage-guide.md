@@ -24,7 +24,7 @@ Windows (PowerShell): run the same script via Git Bash
 ## How skills reach each machine (there is no automatic push)
 
 Adding a skill needs **no wiring**: `bin/ai-install-skills` globs
-`skills/claude/*/` and installs any directory containing a `SKILL.md`. Commit it
+`skills/claude/*/` plus `skills/shared/*/` and installs any directory containing a `SKILL.md`. Commit it
 and every machine picks it up **the next time that machine runs the installer**.
 
 That last clause is the whole story. Distribution is **pull-based and manually
@@ -54,6 +54,11 @@ Per-machine notes:
 Orphaned skills are never pruned — see the `ai-install-skills` quirk in
 `AGENTS.md`.
 
+Shared/client name collisions fail before anything is copied. The retired
+`synology-sharesync-stuck-triage` skill is detected but left active by default;
+use `--migrate-obsolete` to move only that exact directory into recoverable
+quarantine after reviewing a `--dry-run`.
+
 ## What replaces what
 
 | You used to type… | Now covered by |
@@ -78,8 +83,13 @@ Orphaned skills are never pruned — see the `ai-install-skills` quirk in
 
 ## Related existing assets
 
-- `synology-sharesync-stuck-triage` skill (NAS ShareSync repair) — already
-  deployed on 916; referenced by the machine atlas.
+- `synology-sharesync-triage` (NAS ShareSync diagnosis and targeted repair) is
+  repo-owned under `skills/shared/`, so the same source installs into Claude and
+  Codex/ChatGPT on every configured machine.
+- `kimi-code-delegation` (headless Kimi Code CLI delegation) is repo-owned under
+  `skills/shared/`. It is a skill/instruction package, not an MCP server or
+  Ansible role; the dev-machine setup scripts install the skill and check whether
+  the local `kimi` CLI is available.
 - The 7-stage pipeline (`skills/claude/ai-development-pipeline`,
   `templates/prompts/01–07`) is unchanged and complements these: these skills
   automate the *rituals around* coding sessions; the pipeline governs staged

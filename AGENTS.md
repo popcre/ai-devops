@@ -91,6 +91,7 @@ non-code area is `claude_chats/` — archived session transcripts (data, not cod
 | `templates/system/` | Global standing instructions (`CLAUDE-global.md`, `AGENTS-global-codex.md`) + per-machine environment atlas, installed to each machine's AI config | project-owned templates |
 | `docs/` | Restore, setup, onboarding, and future-feature docs | docs |
 | `skills/` | Claude + Codex skill scaffolding (`SKILL.md`) | project-owned scaffolding |
+| `tests/` | Dependency-free Bash and PowerShell installer behavior tests | project-owned tests |
 | `memory/` | Cross-machine Claude auto-memory (per-project `MEMORY.md` + fact files), synced by `bin/ai-sync-memory`. **Secret-free** — see `memory/README.md` | project-owned data (git-tracked) |
 | `mcp/` | Future MCP wrapper placeholder | project-owned scaffolding |
 | `claude_chats/` | **~219 MB** of archived Claude Code session transcripts (`.jsonl`) across machines, plus `sync.sh` and its own `README.md` | archived data (sensitive — see below) |
@@ -118,6 +119,7 @@ Our custom code lives here:
 - `templates/` — prompt templates and repo-doc add-ons
 - `docs/` — documentation
 - `skills/`, `mcp/` — skill/MCP scaffolding
+- `tests/` — dependency-free installer behavior tests
 - `claude_chats/` — transcript archive + `sync.sh` (owned, but data — edit only
   the script/README, never hand-edit transcript `.jsonl` files)
 
@@ -348,7 +350,12 @@ machine behaves oddly, diff `ls ~/.claude/skills` against `ls skills/claude/` in
 repo. Orphans are worse than clutter: `codex-consult` overlaps semantically with
 `codex-second-opinion`, so a session on `hetz` could match the broken one. If a
 prune step is ever added, it must be opt-in (`--prune`) — a blind prune would delete
-legitimately machine-local skills like `synology-sharesync-stuck-triage`.
+legitimately machine-local skills. Repo-owned cross-client skills live under
+`skills/shared/` and install into both Claude and Codex. The one sanctioned
+migration is explicit and recoverable: `--migrate-obsolete` (Bash) or
+`-MigrateObsolete` (PowerShell) moves only the retired
+`synology-sharesync-stuck-triage` directory outside the active skills root after
+the replacement exists. Default installs warn but never move or delete it.
 
 ### `codex exec resume` takes different flags from `codex exec`
 

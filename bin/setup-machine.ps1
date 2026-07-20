@@ -539,6 +539,27 @@ if (-not $codexRealBin) {
 }
 
 # --------------------------------------------------------------------------
+# 6c. Kimi Code CLI — optional local delegation target
+# --------------------------------------------------------------------------
+# Kimi delegation is distributed as a shared skill (`skills/shared/kimi-code-delegation`).
+# It is not an MCP server and has no repo-stored secret. The only machine setup is
+# proving that the local CLI exists; auth is the user's interactive `kimi` login.
+Step "Kimi Code CLI (optional delegation target)"
+if (Get-Command kimi -ErrorAction SilentlyContinue) {
+  try {
+    $kimiVersion = (& kimi --version 2>$null) -join " "
+    if ([string]::IsNullOrWhiteSpace($kimiVersion)) { Ok "kimi found" }
+    else { Ok "kimi found: $kimiVersion" }
+    Note "Verify auth when needed with: kimi -p `"reply with OK`""
+  } catch {
+    Warn "kimi exists but `kimi --version` failed: $($_.Exception.Message)"
+  }
+} else {
+  Warn "Kimi Code CLI not found; the kimi-code-delegation skill is installed, but local Kimi jobs will not run."
+  Warn "  Install Kimi Code CLI and run `kimi login` once, then re-run this script."
+}
+
+# --------------------------------------------------------------------------
 # 7. Claude Code (CLI) MCP config — same token-free treatment
 # --------------------------------------------------------------------------
 # Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.

@@ -43,7 +43,19 @@ and `README.md` to list it.
 
 ## Testing
 
-There is no automated test suite for the toolkit. Verify manually:
+Installer behavior has lightweight, dependency-free tests:
+
+```bash
+bash tests/test-ai-install-skills.sh
+```
+
+```powershell
+pwsh -File tests/test-install-ai-devops-windows.ps1
+```
+
+The tests use temporary repositories and temporary Claude/Codex homes. They
+cover shared-skill installation, counts, dry-run safety, source-name collisions,
+and opt-in quarantine of the retired ShareSync skill. Also verify manually:
 
 - `bash -n` on every changed script (fast syntax gate).
 - `ai-devops doctor` should stay green for required checks (warnings are OK when

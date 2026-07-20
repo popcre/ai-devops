@@ -35,7 +35,7 @@ the others live where noted.
 | ⚙ `deploy-and-verify` | Ships hetz apps (poppim/popcrm/popdam/monitor/hiclaw): Actions → GHCR → Coolify, with both known Coolify quirks baked in; verifies the live build SHA. | "push and commit" (in those repos) / "the live site didn't change" |
 | ⚙ `cicd-rules-audit` | Audits a repo's CI/CD against your full operating rules (embedded verbatim); fixes violations. | "audit CI/CD against our rules" |
 | ⚙ `shared-db-change` | The proper way to change the shared supabase backend: migration discipline, shared-db authoring, correct project refs, type regeneration. | fires on any shared-backend DB change; "make db changes the proper way" |
-| `synology-sharesync-stuck-triage` | Diagnoses/repairs stuck Synology Drive ShareSync between the two NASes, including the move-rename-move-back unstick. | "check ShareSync health" / "a file is stuck syncing" (installed on 916; in the synology-monitor repo) |
+| ⚙ `synology-sharesync-triage` | Diagnoses and narrowly repairs Synology Drive ShareSync stalls using pairing, log, hash, and queue evidence. Shared by Claude and Codex/ChatGPT. | "check ShareSync health" / "a file is stuck syncing" |
 
 ## Quality & analysis
 
@@ -52,6 +52,7 @@ the others live where noted.
 | ⚙ `ai-development-pipeline` | The staged 7-step multi-model workflow (Opus plans/reviews, Codex implements/tests). | "run this through the pipeline" |
 | ⚙ `codex-handoff` | Hand a build/ops/verification task to Codex (GPT-5.x): self-contained brief → run autonomously (background) → verify its work. Falls back to `codex exec` when the codex-cli MCP can't find the binary. | "use codex to…" / "have codex do X" |
 | ⚙ `codex-second-opinion` | A debate, not a delegation: Claude commits to its own position first, Codex judges the material independently (read-only), Claude reports both and where it agrees — and on real disagreement argues back for one round and reports who moved. Ends in Agreed / Codex conceded / Claude conceded / Still split (with the crux). | "run this by codex and tell me if you agree" / "what does codex think" |
+| ⚙ `kimi-code-delegation` | Delegates scoped coding tasks to Kimi Code CLI in headless mode, with two-call planning, accurate prompt-mode permissions, session resume, and Windows/Ubuntu quoting notes. Shared by Claude and Codex/ChatGPT. | "use Kimi" / "delegate this to Kimi" |
 | ⚙ `sync-dotfiles` | Syncs this machine's AI config with the ai-devops hub: pulls the latest skills, global instructions and memory and installs them, sets the dflow gcloud defaults, and pushes local memory changes back. No chezmoi — ai-devops is the single hub. | "sync my dotfiles" / "pull the latest skills" |
 
 ## Codex-native skills

@@ -927,3 +927,169 @@ chat context, the mandatory documentation gate passes:
    Raw credentials and hashes are intentionally excluded as required, not
    missing. The audit is correctly marked open until all §S5 gates pass. No gap
    was found in the final reread.
+
+---
+
+## Shared-skill installer safety completion — 2026-07-20
+
+### 1. What this application is
+
+`u2giants/ai-devops` is Albert's private, main-branch toolkit for restoring and
+distributing AI coding configuration across Windows development computers and
+Ubuntu coding servers. It is not a hosted application. The affected components
+are the Bash and PowerShell skill installers, repo-owned Claude/Codex skill
+packages, machine setup guidance, and dependency-free installer tests. Skills
+install into each user's `~/.claude/skills` and `~/.codex/skills` directories.
+
+### 2. What this session set out to do, and why
+
+The working tree contained a useful but unfinished shared-skills feature plus two
+bad root-level artifacts. The goal was to make `skills/shared/` safely install
+into both Claude and Codex without breaking machine-local skills, correct an
+inaccurate Kimi delegation skill, preserve the new evidence-first Synology
+ShareSync workflow, and make the behavior testable on both supported platforms.
+Albert explicitly asked Codex and Kimi to debate the recommendations until they
+agreed, then asked Codex to implement that consensus.
+
+### 3. Current state
+
+Implementation is complete in the feature commit containing this section on
+`main`. It was built from incident-documentation commit `b446ed2`, then rebased
+without conflict over concurrent memory-sync commit `c224dc3` before push.
+
+- `bin/ai-install-skills` installs and accurately counts client-specific plus
+  shared skills, fails before copying on source-name collisions, supports
+  `--dry-run`, and supports recoverable `--migrate-obsolete` quarantine.
+- `bin/install-ai-devops-windows.ps1` implements the same safeguards with
+  `-ClaudeHome`, `-CodexHome`, `-SkillsDryRun`, and `-MigrateObsolete`.
+- Default installation never moves or deletes the retired machine-local
+  `synology-sharesync-stuck-triage`; it warns until the owner opts in. Opt-in
+  migration is gated on the new `synology-sharesync-triage` source existing and
+  moves the old directory outside the active scan root into `skills-quarantine`.
+- `skills/shared/kimi-code-delegation/SKILL.md` now matches Kimi Code CLI 0.27.0
+  and the current official docs: prompt mode rejects `--auto`, `-y`, and
+  `--plan`, already handles regular approvals, resumes with `-c`/`-S`, and uses
+  explicit read-path instructions instead of asserting headless `@path`
+  injection.
+- `skills/shared/synology-sharesync-triage/` contains the evidence-first workflow,
+  UI metadata, and five focused references. Database row deletion remains
+  approval-gated and backup-first.
+- `tests/test-ai-install-skills.sh` and
+  `tests/test-install-ai-devops-windows.ps1` exercise the real installers in
+  temporary repositories/homes. Both passed all five groups: absent shared tree,
+  dual-client install/counts, zero-change preview, Claude and Codex collision
+  failure before mutation, and warn/preview/opt-in quarantine migration.
+- Both skill folders passed `quick_validate.py`; Bash syntax, PowerShell parser,
+  live Bash `--dry-run`, live Windows `-SkillsDryRun`, and `git diff --check`
+  passed. The optional `shellcheck` binary is not installed, so no shellcheck
+  result is claimed.
+- The untracked duplicate `setup-ssh-windows-fixed.ps1` and junk `NUL` file were
+  removed after proving nothing referenced the duplicate. The canonical
+  `config/ssh-config.template` remains the only SSH alias source.
+- No credentials were rotated, no external system or machine skill directory was
+  changed, and no deployment was performed as part of this feature repair.
+
+### 4. Everything tried that did not work
+
+1. The original root `setup-ssh-windows-fixed.ps1` looked like a repaired helper
+   but reintroduced `>NUL 2>&1` in every Windows OpenSSH `Match exec` probe. Git
+   Bash treats `NUL` as an ordinary filename, and the existing junk `NUL` file
+   contained the probe output. The duplicate was discarded; the canonical
+   template already documents and fixes the root cause.
+2. The original Kimi skill recommended `kimi --auto -p`, `-C`, `--thinking`, and
+   `--system-prompt`. Kimi 0.27.0 rejected the permission/plan combinations and
+   did not expose the latter flags. The skill was rewritten from current CLI
+   help and official command/interaction documentation.
+3. A first attempt to combine `kimi --plan -p` during the review failed with
+   `Cannot combine --prompt with --plan`. This proved that headless planning
+   requires two prompt-mode calls, which is now documented.
+4. The initial PowerShell unit test used array splatting for named parameters;
+   PowerShell treated values positionally and rejected `CodexHome`. It was
+   corrected to hashtable splatting, after which the full suite passed.
+5. PowerShell could not remove the reserved `NUL` pathname with an ordinary
+   `Remove-Item`, and `apply_patch` could not treat it as a normal file. Git
+   Bash removed the exact verified repo-root path successfully.
+6. Full-script PowerShell `-WhatIf` was considered and rejected: partial support
+   would falsely imply git pulls, tool installation, global-file writes, and
+   login work were all simulated. `-SkillsDryRun` is deliberately scoped and
+   skips those phases instead.
+
+### 5. Root causes and key findings
+
+- Shared skills were copied after client-specific skills into the same
+  destination with no collision preflight, so a future duplicate name could
+  silently replace client-specific behavior. Both installers now compare
+  `skills/shared` against `skills/claude` and `skills/codex` before any skill
+  destination mutation.
+- The installer intentionally does not prune machine-local skills. Replacing the
+  old Synology name in documentation would therefore leave both old and new
+  triggers active on 916. The solution is warning by default plus explicit,
+  recoverable quarantine—not silent deletion or general pruning.
+- Kimi's current official command reference says `--prompt` cannot combine with
+  `--yolo`, `--auto`, or `--plan`, and prompt mode already uses automatic
+  permissions with static deny rules. The old skill's approval-stall guidance
+  was backwards for 0.27.0.
+- Working-copy LF/CRLF warnings were not a defect: `git diff --check` passed.
+  Broad normalization was correctly avoided to keep the change minimal.
+
+### 6. Exact next steps
+
+1. On each target machine, pull `origin/main` and preview skill installation:
+   Bash/Git Bash: `ai-install-skills --dry-run`; Windows PowerShell installer:
+   `bin/install-ai-devops-windows.ps1 -RepoPath C:\repos\ai-devops -SkillsDryRun`.
+   **Gate:** output reports shared counts and says no files changed.
+2. On 916, preview the exact obsolete-skill quarantine by adding
+   `--migrate-obsolete` or `-MigrateObsolete` to the preview command.
+   **Gate:** output names only `synology-sharesync-stuck-triage`, the replacement
+   source exists, and the old directory is still present after preview.
+3. After Albert approves that machine-local migration, run the corresponding
+   real installer with the migration flag once.
+   **Gate:** the old directory exists under `skills-quarantine`, is absent from
+   the active `skills` root, and `synology-sharesync-triage/SKILL.md` is installed
+   for both configured clients.
+4. Continue the older machine-config consolidation and credential-incident next
+   steps in the main handoff sections above; this feature does not complete or
+   supersede those workstreams.
+
+### 7. Constraints and gotchas
+
+- Never generalize `--migrate-obsolete` into automatic pruning. Unknown local
+  skills belong to the machine owner.
+- A quarantine destination collision is a loud error; do not overwrite the
+  preserved copy.
+- `-SkillsDryRun` previews only skill work by design. It is not an alias for
+  whole-script `-WhatIf`.
+- Kimi flags are version-sensitive; run `kimi --help` before changing the shared
+  skill again and use current official documentation.
+- ShareSync database repair remains destructive and requires explicit approval,
+  exact-path proof, verified backups, and restart-on-failure handling.
+
+### 8. Access and environment
+
+- Work occurred in `C:\repos\ai-devops`, repo `u2giants/ai-devops`, branch
+  `main`, with git author `Albert Hazan <u2giants@users.noreply.github.com>`.
+- GitHub `origin/main` advanced from incident commit `b446ed2` to independent
+  memory-sync commit `c224dc3` during implementation. The feature commit was
+  rebased over it; the file sets did not overlap.
+- Local Kimi Code CLI 0.27.0 was authenticated and used read-only for the design
+  debate. Official docs checked: `kimi-command.html` and `interaction.html` on
+  `www.kimi.com/code/docs`.
+- PowerShell 7 and Git for Windows Bash ran the two test suites. No 1Password,
+  NAS, VPS, Supabase, Coolify, or other production access was needed.
+
+### 9. Open questions and risks
+
+- Rollout to 916 is intentionally still pending because it changes a real
+  machine-local skill directory and requires the explicit migration choice.
+- Kimi's CLI may change; the skill is correct for verified 0.27.0/current docs,
+  not guaranteed forever.
+- The broader credential incident and machine-config consolidation remain open
+  exactly as documented above. This feature introduced no new credential action.
+
+### Shared-skill handoff self-audit
+
+Passed on 2026-07-20 after rereading this section against the implementation and
+test output: a fresh developer can identify the application, purpose, exact
+state, failed approaches, root causes, verification evidence, remaining rollout,
+access boundary, and risks without this chat. Every remaining step has a concrete
+success gate, and no secret value or unexplained path is required.
