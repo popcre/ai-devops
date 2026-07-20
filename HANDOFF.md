@@ -1093,3 +1093,43 @@ test output: a fresh developer can identify the application, purpose, exact
 state, failed approaches, root causes, verification evidence, remaining rollout,
 access boundary, and risks without this chat. Every remaining step has a concrete
 success gate, and no secret value or unexplained path is required.
+
+Evidence-backed checklist:
+
+1. **Could a street-newcomer continue without asking a question? Yes.** Sections
+   1–3 define the toolkit, affected components, reason for the work, exact
+   behavior shipped, commit relationship, and verification evidence.
+2. **Could they continue as effectively as this session? Yes.** Sections 4–5
+   preserve every material failure, the reasoning behind rejected approaches,
+   and the non-obvious Kimi, OpenSSH, collision, and orphan-skill findings.
+3. **Are failed attempts and their causes included? Yes.** Section 4 records the
+   broken duplicate SSH script, invalid Kimi flags, rejected prompt/plan
+   combination, PowerShell splatting failure, reserved `NUL` deletion failures,
+   and rejected partial `-WhatIf` design.
+4. **Is every next step concrete and verifiable? Yes.** Section 6 gives four
+   ordered rollout steps; each ends with an explicit gate describing the
+   expected no-change preview or installed/quarantined filesystem state.
+5. **Are unfamiliar terms, identifiers, paths, and access explained? Yes.**
+   Sections 1, 3, 7, and 8 define both clients' install paths, quarantine,
+   repository/branch/commits, Kimi version/docs, tools used, and systems that
+   were deliberately not accessed.
+
+Final synthesis audit:
+
+1. **Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+   knowledge of this project and no context about what we did or what remains
+   could pick up where I left off and not skip a beat? Yes.** Shared-skill
+   sections 1–9 supply the complete standalone background, implementation state,
+   failures, findings, rollout procedure, constraints, environment, and risks;
+   no gap was found.
+2. **Is it detailed enough that they could continue as well as I could right
+   now, with all my knowledge from this session and all relevant background about
+   what we are trying to accomplish? Yes.** Sections 3–6 preserve the tested
+   behavior, all dead ends and design decisions, and exact next commands/gates;
+   no gap was found.
+3. **Is every single relevant detail—background, goals, intended outcome,
+   current state, failed attempts, decisions, constraints, risks, exact next
+   actions, and verification evidence—present for the implementing agent to
+   execute flawlessly? Yes.** Those dimensions map respectively to sections
+   1–2, 2, 3, 4, 5 and 7, 9, 6, and 3. The only unfinished activity is the
+   explicitly approval-gated machine rollout; no gap was found.
