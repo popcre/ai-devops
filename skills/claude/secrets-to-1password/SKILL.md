@@ -101,7 +101,7 @@ Good, from the vault:
 - `Designflow - Azure Graph client secret (AZURE_CLIENT_SECRET)`
 - `logo.dev publishable token - popcrm-web`
 
-Bad: `directus-secrets`, `api key`, `token`, `new entry` — no app, no
+Bad: `backend-secrets`, `api key`, `token`, `new entry` — no app, no
 environment, nothing to search on.
 
 Include the qualifier whenever more than one of a thing can exist: prod vs

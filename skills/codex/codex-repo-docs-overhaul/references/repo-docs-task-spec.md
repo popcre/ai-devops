@@ -32,7 +32,7 @@ This applies even when the implementation happened inside an app repo. App repos
 For backend-relevant work, MUST document in `u2giants/shared-db`:
 - What changed: tables, columns, views, RPCs, triggers, functions, RLS policies, realtime publications, storage assumptions, worker/backend behavior, generated database types, app-facing API contracts, or data-flow changes.
 - Why it changed: product need, collision risk, bug, migration constraint, compatibility reason, operational assumption, or cross-app dependency.
-- Who is affected: CRM, DAM, PM/PIM, Directus/PLM, workers, scripts, shared admin tooling, or more than one app.
+- Who is affected: CRM, DAM, PM/PIM, PLM, workers, scripts, shared admin tooling, or more than one app.
 - Where the durable implementation lives: migration filenames, SQL files, scripts, API view/RPC names, worker files, generated type files, and relevant app repo commits if known.
 - What was verified: `scripts/check-sql.sh`, Supabase dry-runs, preview branch pushes, app builds, smoke tests, RLS/role tests, data-parity checks, worker tests, or why verification could not be completed.
 - What remains risky or unfinished: production promotion status, data backfills, RLS gaps, app screens not migrated, deprecated contracts, rollback notes, open questions, or follow-up migrations.

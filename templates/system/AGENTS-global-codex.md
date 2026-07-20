@@ -100,8 +100,8 @@ hand it back; do not raise the dial.
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).
   [full: deploy-and-verify]
-- **Deprecated — delete vestiges on sight:** Twenty CRM, Directus (replaced by
-  hosted supabase.com), plane (renamed poppim), openmanus.
+- **Deprecated — delete vestiges on sight:** retired CRM/CMS stacks, the
+  pre-rename PM repo, and openmanus.
 
 ## HANDOFF quality standard (non-negotiable, every session)
 

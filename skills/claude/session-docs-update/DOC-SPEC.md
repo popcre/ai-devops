@@ -56,7 +56,7 @@ At minimum, document in `u2giants/shared-db`:
 
 - Why it changed, including the product need, collision risk, bug, migration constraint, compatibility reason, or cross-app dependency.
 
-- Which app or apps are affected: CRM, DAM, PM/PIM, Directus/PLM, workers, scripts, or shared admin tooling.
+- Which app or apps are affected: CRM, DAM, PM/PIM, PLM, workers, scripts, or shared admin tooling.
 
 - Where the durable implementation lives: migration filenames, SQL files, scripts, API views/RPC names, worker files, generated type files, and relevant app repo commits if known.
 

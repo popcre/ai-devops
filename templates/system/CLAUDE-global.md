@@ -136,5 +136,4 @@ Do not raise the dial.
     "is this comprehensive enough for a fresh developer?" — you already answered
     it. A three-sentence handoff is a failure.
 25. Deprecated systems — delete vestiges on sight, never build on them:
-    Twenty CRM (gone), Directus (replaced by hosted supabase.com), plane
-    (renamed poppim), openmanus (removed).
+    retired CRM/CMS stacks, the pre-rename PM repo, and openmanus.

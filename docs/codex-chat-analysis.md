@@ -13,7 +13,7 @@ Built from `codex_chats/` after syncing `main` from GitHub on 2026-07-08.
 ## What Albert uses Codex for most
 
 1. **Implementation and fixing in app repos.** Most active repos/cwds were
-   `popcrm-web`, `theoracle`, `poppim-web`, `popdam3`, `directus`,
+   `popcrm-web`, `theoracle`, `poppim-web`, `popdam3`, and the retired backend,
    `shared-db`, `compshop`, and `synology-monitor`.
 2. **GitHub shipping.** "push and commit" alone appeared 40 times; variants like
    "commit and push", "is everything pushed and committed?", and PR creation
@@ -23,7 +23,7 @@ Built from `codex_chats/` after syncing `main` from GitHub on 2026-07-08.
 4. **Infrastructure/NAS/sync work.** Synology, Seafile/ShareSync, SSH, Docker,
    service health, backup/restore, and server triage are recurring.
 5. **Database/Supabase/data migration work.** `shared-db`, Supabase migrations,
-   table/schema questions, Directus migration, and data verification recur.
+   table/schema questions, backend migrations, and data verification recur.
 6. **UI/product changes with verification.** Tooltips, buttons, admin pages,
    visual checks, and "why does the live site still look old?" recur.
 7. **AI workflow design.** Codex is used to improve Codex/Claude handoffs,
