@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=https://aka.ms/configuration-dsc-schema/0.2
+properties:
+  resources:
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: Git
+    directives: { description: Install Git for Windows }
+    settings: { id: Git.Git, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: PowerShell
+    directives: { description: Install PowerShell 7 }
+    settings: { id: Microsoft.PowerShell, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: NodeJS
+    directives: { description: Install the current Node.js LTS release }
+    settings: { id: OpenJS.NodeJS.LTS, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: Python
+    directives: { description: Install Python 3.13 }
+    settings: { id: Python.Python.3.13, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: GitHubCLI
+    directives: { description: Install the GitHub CLI }
+    settings: { id: GitHub.cli, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: VSCode
+    directives: { description: Install Visual Studio Code }
+    settings: { id: Microsoft.VisualStudioCode, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: OnePasswordCLI
+    directives: { description: Install the 1Password CLI; secrets are retrieved later at runtime }
+    settings: { id: AgileBits.1Password.CLI, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: GoogleCloudSDK
+    directives: { description: Install the Google Cloud SDK }
+    settings: { id: Google.CloudSDK, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: AzureCLI
+    directives: { description: Install the Azure CLI }
+    settings: { id: Microsoft.AzureCLI, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: Cloudflared
+    directives: { description: Install cloudflared for SSH tunnel aliases }
+    settings: { id: Cloudflare.cloudflared, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: Tailscale
+    directives: { description: Install Tailscale; interactive sign-in remains a user action }
+    settings: { id: Tailscale.Tailscale, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: WSL
+    directives: { description: Install Windows Subsystem for Linux }
+    settings: { id: Microsoft.WSL, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: Ubuntu
+    dependsOn: [WSL]
+    directives: { description: Install Ubuntu for WSL; first-run account creation remains interactive }
+    settings: { id: Canonical.Ubuntu, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: ClaudeCode
+    directives: { description: Install the supported Claude Code package }
+    settings: { id: Anthropic.ClaudeCode, source: winget }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: CodexDesktop
+    directives: { description: Install the Codex Windows desktop app from Microsoft Store }
+    settings: { id: 9PLM9XGG6VKS, source: msstore }
+  - resource: Microsoft.Windows.Developer/EnableLongPathSupport
+    id: EnableLongPaths
+    directives:
+      description: Enable Win32 long paths for development repositories
+      allowPrerelease: true
+      securityContext: elevated
+    settings: { Ensure: Present }
+  configurationVersion: 0.2.0

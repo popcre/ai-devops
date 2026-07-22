@@ -27,15 +27,28 @@ It comes from 1Password (`vibe_coding` vault, item *"vibe_coding-service-account
 field *op_service_account_token*). This one code is locked so it can only ever
 read that one vault — nothing else.
 
-### Windows computer (Claude Desktop)
+### Windows development computer (Claude Desktop, Codex, and dev tools)
 
-Open **PowerShell 7** and paste this one line:
+Open the built-in **PowerShell** and paste this one line. The bootstrap requests
+Administrator permission itself and installs PowerShell 7 as part of the run:
 
 ```powershell
-$p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p}; pwsh -ExecutionPolicy Bypass -File "$p\bin\setup-machine.ps1"
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p}; powershell -NoProfile -ExecutionPolicy Bypass -File "$p\bin\bootstrap-windows-dev.ps1" -RepoPath $p
 ```
 
-It sets everything up and asks you to paste the code once. When it finishes,
+This is the normal entrypoint for a **new Windows computer**. It may also
+reconcile an existing computer, but as of 2026-07-17 the complete workflow has
+not yet been run twice on a disposable Windows 11 machine. Until that live gate
+passes, use `-TestOnly` on an established machine such as 4837 and do not apply
+it there merely to test it. See
+[the Windows desired-state guide](docs/windows-winget-configuration.md) for
+ownership, expected changes, recovery, and rollout gates.
+
+It installs the complete Windows dev-tool set, configures Tailscale-only
+OpenSSH, prepares Ubuntu/WSL as an Ansible controller, configures AI DevOps,
+and asks you to paste the code once. If Windows requires a reboot, rerun the
+same line afterward; completed stages are reconciled rather than repeated.
+When it finishes,
 follow the short checklist it prints (fully close and reopen Claude Desktop; if
 it lists two "connectors" to add, add them once in Settings → Connectors).
 
@@ -55,7 +68,7 @@ tokens fill in by themselves.
 > `setup-secrets.sh` (Ubuntu) or `bin\setup-machine.ps1` (Windows) again — both
 > are safe to re-run.
 
-How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md).
+How and why this works: [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md). Full Windows desired-state setup: [`docs/windows-winget-configuration.md`](docs/windows-winget-configuration.md).
 
 ---
 

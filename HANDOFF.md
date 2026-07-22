@@ -1,8 +1,136 @@
-# HANDOFF — machine-config consolidation onto ai-devops (updated 2026-07-17)
+# HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-22)
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
 > here would make you ask a question, the answer is somewhere below.
+
+
+## Current priority: minimum-touch Windows + Ansible provisioning
+
+### 1. What this repository is
+
+`u2giants/ai-devops` is Albert's private, Git-backed source of truth for AI
+coding-machine setup and recovery. It contains installers and managed
+configuration for Claude/Codex skills, global instructions, SSH/MCP wiring,
+machine memory, and the staged multi-model workflow. The companion
+`C:\repos\ansible` / `u2giants/ansible` repository enforces desired state across
+Windows and Ubuntu computers after a secure first connection exists.
+
+### 2. Goal and reason for this work
+
+Albert rejected continuing to juggle brittle one-off scripts for packages,
+SSH, MCP servers, dotfiles, and skills. The goal is the fewest-touch design: one
+Windows entrypoint builds the first local machine, establishes
+Tailscale/OpenSSH, installs a WSL Ansible controller, retrieves secrets only
+from 1Password at runtime, and enables Ansible to enforce the same state across
+other computers.
+
+### 3. Exact current state
+
+Source exists locally but is **uncommitted, unpushed, and not applied
+end-to-end**. The main entrypoint is `bin/bootstrap-windows-dev.ps1`;
+`.config/configuration.winget` declares Windows packages/settings; internal
+scripts reconcile package exceptions, Tailscale/OpenSSH/WinRM, WSL/Ansible, AI
+configuration, and verification. `config/916-alien.pub` contains only the
+public key. The old batch/helper pair is transitional and must not receive new
+behavior.
+
+The Ansible repo has `dev_windows` and `dev_ubuntu` roles,
+`playbooks/dev-computers.yml`, a static test playbook, opt-in inventory, and
+`docs/dev-computers.md`. Real hosts remain commented out, secret application
+defaults off, and no target was contacted.
+
+Read-only/static evidence on 4837: every new PowerShell file parses; native
+WinGet validation returned `Validation found no issues`; the Windows
+direct-assertion structural test reported PASS; Ansible YAML parsed with
+PyYAML; and `git diff --check` plus secret-pattern scans passed in both repos.
+4837's older Pester wrapper reports zero formal cases even though the direct
+assertions ran. This proves source structure, not clean-machine integration or
+second-run idempotency.
+
+### 4. What did not work and why
+
+- WinRM HTTPS was initially configured. Literal IP listener addresses are
+  invalid, its IP filter requires a range rather than CIDR, and authentication
+  still needed Windows credentials instead of `916-alien`. WinRM was rejected
+  in favor of SSH over Tailscale.
+- `Add-WindowsCapability` appeared hung for over ten minutes installing OpenSSH
+  on 4837 and remained `NotPresent` after interruption. A later/manual install
+  succeeded. Windows servicing remains a live risk; fallback is Settings >
+  System > Optional features.
+- Ansible cannot run natively on Windows or create its own first connection.
+  The local bootstrap now installs WSL Ansible and Tailscale/OpenSSH first.
+- WinGet schema v3 validation failed on WinGet 1.29.280 because built-in
+  resources were not discovered. Schema 0.2 validates and remains intentional.
+- Pester's `-Output Detailed` was unsupported on 4837. An older-compatible
+  invocation ran the direct-assertion test successfully.
+
+### 5. Root causes and durable findings
+
+- Minimum touch needs two layers: local bootstrap breaks the first-connection
+  cycle; WinGet/DSC and Ansible enforce desired state afterward.
+- Idempotent by design is not proven safe. Normal mode may update versions or
+  repair owned state; a working but noncompliant setting can change.
+- GitHub access, Tailscale enrollment, 1Password authorization, and possibly a
+  Windows reboot are unavoidable identity/OS boundaries.
+- Administrator SSH keys belong in
+  `C:\ProgramData\ssh\administrators_authorized_keys` with SYSTEM and
+  Administrators ACLs. SSH passwords stay off; WinRM stays disabled.
+- Secrets remain in 1Password vault `vibe_coding` and runtime storage. Git may
+  contain the public key and `op://` references, never private keys/tokens.
+
+### 6. Exact next steps and gates
+
+1. Review and commit/push both repos only when Albert asks. **Gate:** author is
+   `Albert Hazan <u2giants@users.noreply.github.com>` and GitHub contains the
+   reviewed source before a fresh machine clones it.
+2. Run the README bootstrap on a disposable clean Windows 11 VM/PC. Complete
+   only GitHub, Tailscale, and 1Password authentication; reboot/rerun if asked.
+   **Gate:** PASS report, key-only Tailscale SSH, WinRM off, working WSL
+   Ansible, and AI tools/skills/MCPs working without secret output.
+3. Immediately rerun without changes. **Gate:** no unintended changes,
+   duplicate blocks/keys, service/firewall churn, or failed checks. Otherwise
+   restore the clean snapshot, fix source, and repeat.
+4. From WSL run Galaxy installation, `ansible-lint`, syntax/static checks, and
+   prove both roles on disposable Windows and Ubuntu targets. **Gate:** all
+   checks exit zero and second applies have zero unintended changes.
+5. Only then run `bootstrap-windows-dev.ps1 -TestOnly` on 4837. **Gate:** Albert
+   reviews every difference and explicitly approves owned changes before apply.
+6. Retire Dropbox launchers after proving no shortcut depends on them. **Gate:**
+   GitHub + 1Password recover a new machine without another setup source.
+
+### 7. Constraints and gotchas
+
+- Do not trial applying mode on 4837; it is the working reference machine.
+- Do not claim live success from static checks or continue after DRIFT/nonzero.
+- Do not overwrite dirty repos, enable SSH passwords, broaden firewall rules,
+  re-enable WinRM, manufacture Tailscale auth keys, or commit secrets.
+- Ansible runs in Ubuntu/WSL, never native Windows. Real inventory stays
+  commented until disposable proof succeeds.
+- OpenSSH/WSL capabilities may require the Optional Features UI and/or reboot.
+- Normal mode may update packages/repos; `-TestOnly` inspects established PCs.
+
+### 8. Access and environment
+
+- Current source machine: Windows 11 `AL8960OFC` / 4837, user
+  `IML\ahazan2`, Tailscale IPv4 `<removed-protected-address>`.
+- Checkouts: `C:\repos\ai-devops` and `C:\repos\ansible`; private `u2giants`
+  repos, main-only under standing rules.
+- 4837 has working OpenSSH over Tailscale using `916-alien`; WinRM is disabled.
+- Secrets: 1Password vault `vibe_coding`, scoped runtime access only.
+
+### 9. Open questions and risks
+
+- Clean-machine integration and second-run behavior remain the largest risks.
+- Root-first WSL Ubuntu automation can vary by OS release and is unproven.
+- Package IDs/installers may change; revalidate all managers during live proof.
+- Tailscale ACL policy is external; the firewall allows tailnet sources within
+  `100.64.0.0/10` that Tailscale policy permits.
+- This documentation-only request did not authorize commit or push.
+
+The older consolidation history below remains relevant. Where it calls
+SSH/MCP/one-command onboarding future Phase 2/3 work, this section supersedes
+it: source now exists locally, while live proof and rollout remain unfinished.
 
 ## Security incident workstream — transcript exposure (updated 2026-07-20)
 

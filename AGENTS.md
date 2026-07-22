@@ -53,8 +53,9 @@ Then load additional docs only when relevant:
 | Anything about the Headroom token-compression proxy (find it, fix it, route a machine through it, see savings, turn it off) | `AGENTS.md`, `docs/headroom.md` | Unrelated architecture docs |
 | Plan/track converging all machine config onto ai-devops | `AGENTS.md`, `docs/config-consolidation-proposal.md`, `docs/config-inventory.md` | Unrelated docs |
 | Change install/update/uninstall or restore flow | `AGENTS.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, `install.sh`/`update.sh`/`uninstall.sh` | Local-only dev docs unless the dev workflow also changes |
-| Install/update AI DevOps on a Windows coding computer | `AGENTS.md`, `bin/install-ai-devops-windows.ps1`, `docs/codex-skills-usage-guide.md`, `templates/prompts/install-ai-devops-windows-codex.md` | Linux restore docs unless also touching server install |
+| Install/update AI DevOps on a Windows coding computer | `AGENTS.md`, `.config/configuration.winget` (packages/settings), `bin/bootstrap-windows-dev.ps1` (single entry point), `bin/configure-windows-bootstrap-access.ps1` (Tailscale/OpenSSH), `bin/configure-wsl-ansible-controller.ps1`, `bin/setup-machine.ps1` (AI/secret wiring), `bin/verify-windows-dev.ps1`, `docs/windows-winget-configuration.md` | `bin/run_me_setup_dev_comp.bat` and `bin/setup_dev_computer_internal.ps1` are transitional only; Linux restore docs unless also touching server install |
 | Set up a new machine's secrets / 1Password / MCP tokens / `claude` launcher | `AGENTS.md`, `docs/onboarding-secrets.md`, `config/mcp.env.example`, `bin/setup-secrets.sh` (Ubuntu), `bin/setup-machine.ps1` (Windows) | Model/prompt docs unless also changing the workflow |
+| Enable secure Windows remote setup over Tailscale / SSH | `AGENTS.md`, `docs/windows-openssh-tailscale.md` | Do not enable LAN/public SSH, password logins, broad default firewall rules, or WinRM |
 | Edit the staged prompt templates | `AGENTS.md`, `templates/prompts/*`, `docs/architecture.md` | Deployment/config docs |
 | Onboard an application repo to the workflow | `AGENTS.md`, `docs/repo-onboarding.md`, `templates/repo-docs/*` | Deployment docs |
 | Back up / sync Claude Code transcripts | `AGENTS.md`, `claude_chats/README.md`, `claude_chats/sync.sh`, `skills/claude/claude-transcript-backup/SKILL.md` | Do not open the transcript `.jsonl` files themselves |
@@ -71,9 +72,11 @@ Then load additional docs only when relevant:
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
 
 `HANDOFF.md` is required reading **whenever it exists** — it means work is in
-progress. It is currently **present**: config-consolidation Phase 1 shipped and
-the first memory push completed; rollout to the remaining machines and Phases
-2–3 are pending.
+progress. It is currently **present**. The immediate unfinished work is proving
+the Windows minimum-touch bootstrap on a disposable Windows 11 machine and then
+proving a second run makes no unintended changes. Older config-consolidation
+rollout work is also recorded there. Do not apply the unproven bootstrap to an
+established workstation merely as a test.
 
 ## Repository structure
 

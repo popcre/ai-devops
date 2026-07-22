@@ -1,0 +1,4 @@
+interface:
+  display_name: "Qwen Code"
+  short_description: "Invoke Qwen Code for independent analysis and implementation"
+  default_prompt: "Use Qwen Code to handle this task with the correct local CLI and safety controls."

@@ -53,6 +53,7 @@ the others live where noted.
 | ⚙ `codex-handoff` | Hand a build/ops/verification task to Codex (GPT-5.x): self-contained brief → run autonomously (background) → verify its work. Falls back to `codex exec` when the codex-cli MCP can't find the binary. | "use codex to…" / "have codex do X" |
 | ⚙ `codex-second-opinion` | A debate, not a delegation: Claude commits to its own position first, Codex judges the material independently (read-only), Claude reports both and where it agrees — and on real disagreement argues back for one round and reports who moved. Ends in Agreed / Codex conceded / Claude conceded / Still split (with the crux). | "run this by codex and tell me if you agree" / "what does codex think" |
 | ⚙ `kimi-code-delegation` | Delegates scoped coding tasks to Kimi Code CLI in headless mode, with two-call planning, accurate prompt-mode permissions, session resume, and Windows/Ubuntu quoting notes. Shared by Claude and Codex/ChatGPT. | "use Kimi" / "delegate this to Kimi" |
+| ⚙ `qwen-code` | Invokes the installed Qwen Code CLI for an independent review, codebase analysis, or explicitly delegated implementation using the real local flags, captured output, and read-only review guardrails. | "ask Qwen" / "run this by Qwen" / "use Qwen Code" |
 | ⚙ `sync-dotfiles` | Syncs this machine's AI config with the ai-devops hub: pulls the latest skills, global instructions and memory and installs them, sets the dflow gcloud defaults, and pushes local memory changes back. No chezmoi — ai-devops is the single hub. | "sync my dotfiles" / "pull the latest skills" |
 
 ## Codex-native skills
@@ -70,6 +71,7 @@ the others live where noted.
 | ⚙ `codex-context-optimizer` | Reduces token use by loading only needed docs, compressing repeated prompts, and creating reusable context. | "reduce my token usage" / "read only what you need" |
 | ⚙ `codex-transcript-miner` | Finds/scrubs/analyzes Codex transcripts and promotes repeated prompts into skills/templates. | "analyze my Codex chats" / "find all Codex transcripts" |
 | ⚙ `ai-reviewer` | Read-only Codex second-opinion review saved under `.ai/reviews/`. | "run a Codex review" |
+| ⚙ `codex-qwen-code` | Codex-native Qwen Code integration for independent reviews, analysis, and explicitly delegated implementation, with local CLI validation and captured evidence. | "ask Qwen" / "run this by Qwen" / "use Qwen Code" |
 | ⚙ `codex-sync-dotfiles` | Codex edition of `sync-dotfiles`: pulls the latest skills, global instructions and memory from the ai-devops hub and installs them, then pushes local memory back. | "sync my dotfiles" / "sync my config" |
 
 ## Always-on (not skills — loaded every session)
