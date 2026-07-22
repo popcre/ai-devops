@@ -1368,6 +1368,11 @@ No production application or shared-cloud resource was modified.
    and found no Windows `C:\home\...` path, so remote setup did not run. A
    backtick-escaped dollar sign preserved remote Bash substitution; setup and
    the GLM probe then passed.
+10. The first final Hetz reconciliation found multiple Windows-only files dirty
+    by mode after an otherwise successful update. `install.sh` had run
+    `chmod +x bin/*` and symlinked every file, including `.ps1` and `.bat` files.
+    The permanent fix commits the Bash GLM launcher as executable and links only
+    files already executable in Git; it never mutates source modes at install.
 
 ### 5. Root causes and key findings
 

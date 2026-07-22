@@ -28,7 +28,9 @@ cd /worksp/ai-devops
 2. Creates `/etc/ai-devops/` and `/var/log/ai-devops/`.
 3. Seeds `/etc/ai-devops/models.env` and `server.env` from the examples **only if
    absent** (never overwrites real config).
-4. Symlinks every file in `bin/` into `/usr/local/bin/`.
+4. Symlinks executable Unix entrypoints in `bin/` into `/usr/local/bin/`.
+   Windows-only `.ps1`/`.bat` files are not chmodded or linked, so an update
+   leaves the Git checkout clean.
 5. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects

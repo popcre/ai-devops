@@ -88,10 +88,9 @@ install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env"
 # --------------------------------------------------------------------------
 # 4. Symlink bin/* into /usr/local/bin
 # --------------------------------------------------------------------------
-info "Symlinking scripts into $BIN_TARGET"
-chmod +x "$REPO_ROOT"/bin/* 2>/dev/null || true
+info "Symlinking Unix entrypoints into $BIN_TARGET"
 for src in "$REPO_ROOT"/bin/*; do
-  [ -f "$src" ] || continue
+  [ -f "$src" ] && [ -x "$src" ] || continue
   name="$(basename "$src")"
   dest="$BIN_TARGET/$name"
   # Only replace if missing or already points into this repo.
