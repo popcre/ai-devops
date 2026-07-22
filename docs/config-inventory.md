@@ -165,6 +165,13 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   2nd-gen regional; a global `gcloud builds list` returns stale/empty results and
   misleads you into thinking nothing deploys. Always pass
   `--project=lithe-breaker-323913 --region=us-east4`.
+
+- **Production GCP safety** — the global Claude/Codex instructions installed on
+  every machine prohibit AI mutation of production/shared infrastructure and
+  specifically protect all `*-prod` Cloud Build triggers in
+  `lithe-breaker-323913` / `us-east4`. This is a behavioral backstop, not an IAM
+  boundary: developer AI sessions still require a dedicated read-only identity,
+  never Albert's personal Owner/Editor or Terraform-admin credentials.
 - **Portable Codex prefs** — the ~5 lines above; not yet templated (Phase 3).
 
 ## Where secrets live (1Password `vibe_coding` — titles only)

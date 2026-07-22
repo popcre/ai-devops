@@ -67,6 +67,26 @@ hand it back; do not raise the dial.
 16. GitHub is the source of truth — repo → CI → server; never live-edit a server.
 17. Never replace system binaries.
 
+## Production infrastructure safety (absolute rule)
+
+AI sessions on every computer are **read-only for production and shared cloud
+infrastructure by default**, regardless of the current repository. Never run
+`terraform apply`, `terragrunt apply`, `terraform destroy`, or a mutating
+`gcloud` command against production/shared resources using Albert's personal
+credentials.
+
+In project `lithe-breaker-323913`, region `us-east4`, never disable, delete,
+recreate, or rewrite any `*-prod` Cloud Build trigger—including
+`popcre-frontend-prod`, `popcre-core-prod`, `popcre-bff-prod`,
+`popcre-item-prod`, `popcre-tracking-prod`, and `popcre-sync-prod`—unless Albert
+explicitly names the exact resource and exact action in the current chat.
+Broad requests such as “fix deploys,” “update infra,” or “apply Terraform” are
+not approval. Reading state/logs and producing a reviewed plan are allowed.
+
+Never give an AI session Owner/Editor or Terraform-admin credentials to bypass
+this rule. If privileged personal credentials are active, do not use them for
+agent automation; stop and switch to the dedicated read-only AI identity.
+
 ## Git & branches
 
 18. Default: main-only, no branches, for all `u2giants` app repos.
