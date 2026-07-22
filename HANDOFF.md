@@ -27,8 +27,10 @@ other computers.
 
 ### 3. Exact current state
 
-Source exists locally but is **uncommitted, unpushed, and not applied
-end-to-end**. The main entrypoint is `bin/bootstrap-windows-dev.ps1`;
+`ai-devops` source is **committed and pushed** to `main`
+([3e1d5d3](https://github.com/u2giants/ai-devops/commit/3e1d5d3)). `ansible`
+source is still **uncommitted, unpushed**. Neither is **applied end-to-end**.
+The main entrypoint is `bin/bootstrap-windows-dev.ps1`;
 `.config/configuration.winget` declares Windows packages/settings; internal
 scripts reconcile package exceptions, Tailscale/OpenSSH/WinRM, WSL/Ansible, AI
 configuration, and verification. `config/916-alien.pub` contains only the
@@ -81,7 +83,8 @@ second-run idempotency.
 
 ### 6. Exact next steps and gates
 
-1. Review and commit/push both repos only when Albert asks. **Gate:** author is
+1. `ai-devops` is committed and pushed. `ansible` still needs review and
+   commit/push (only when Albert asks). **Gate:** author is
    `Albert Hazan <u2giants@users.noreply.github.com>` and GitHub contains the
    reviewed source before a fresh machine clones it.
 2. Run the README bootstrap on a disposable clean Windows 11 VM/PC. Complete
@@ -126,7 +129,6 @@ second-run idempotency.
 - Package IDs/installers may change; revalidate all managers during live proof.
 - Tailscale ACL policy is external; the firewall allows tailnet sources within
   `100.64.0.0/10` that Tailscale policy permits.
-- This documentation-only request did not authorize commit or push.
 
 The older consolidation history below remains relevant. Where it calls
 SSH/MCP/one-command onboarding future Phase 2/3 work, this section supersedes
