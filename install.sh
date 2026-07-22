@@ -104,46 +104,17 @@ for src in "$REPO_ROOT"/bin/*; do
 done
 
 # --------------------------------------------------------------------------
-# 4.5 Claude + Codex skills (force-update) and global instruction files
-#     (seed only if missing). Mirrors bin/install-ai-devops-windows.ps1 so the
-#     same skill payload reaches Ubuntu machines, not just Windows.
+# 4.5 Claude + Codex skills and global instruction files. Delegate to the one
+#     tested installer so client-specific skills, shared skills, collision
+#     protection, and recoverable obsolete-skill handling cannot drift here.
 #     Skills go into the invoking user's home (run this as your normal user,
 #     NOT via sudo, so they don't land under /root).
 # --------------------------------------------------------------------------
-install_skills() {
-  local src_root="$1" dest_root="$2" label="$3" n=0 d name
-  if [ ! -d "$src_root" ]; then warn "No $label skills at $src_root"; return; fi
-  mkdir -p "$dest_root"
-  for d in "$src_root"/*/; do
-    [ -f "${d}SKILL.md" ] || continue
-    name="$(basename "$d")"
-    rm -rf "${dest_root:?}/$name"
-    cp -r "$d" "$dest_root/$name"
-    n=$((n+1))
-  done
-  info "  installed $n $label skill(s) into $dest_root"
-}
-
-seed_global() {
-  local src="$1" dest="$2" label="$3"
-  if [ ! -f "$src" ]; then warn "Missing source for $label: $src"; return; fi
-  mkdir -p "$(dirname "$dest")"
-  if [ -f "$dest" ]; then
-    info "  $label exists; not overwriting ($dest)"
-  else
-    cp "$src" "$dest"; info "  seeded $label -> $dest"
-  fi
-}
-
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
   warn "Running as root via sudo; skills would land under /root. Re-run as your normal user for per-user skill install."
 fi
 info "Installing Claude + Codex skills into \$HOME"
-install_skills "$REPO_ROOT/skills/claude" "$HOME/.claude/skills" "Claude"
-install_skills "$REPO_ROOT/skills/codex" "$HOME/.codex/skills" "Codex"
-info "Seeding global instruction files (only if missing)"
-seed_global "$REPO_ROOT/templates/system/CLAUDE-global.md" "$HOME/.claude/CLAUDE.md" "Claude global instructions"
-seed_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$HOME/.codex/AGENTS.md" "Codex global instructions"
+"$REPO_ROOT/bin/ai-install-skills"
 
 # --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
@@ -153,7 +124,7 @@ seed_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" "$HOME/.codex/A
 # interactive terminal (it may prompt once for the token). In automation, run
 # `setup-secrets.sh` by hand, or pass OP_SERVICE_ACCOUNT_TOKEN in the env.
 info "Secrets wiring (1Password service account + claude launcher)"
-if [ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+if [ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
   "$REPO_ROOT/bin/setup-secrets.sh" || warn "setup-secrets.sh did not complete; run it by hand later."
 else
   info "  Non-interactive shell — skipping. Run: setup-secrets.sh"

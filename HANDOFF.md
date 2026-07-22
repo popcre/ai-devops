@@ -1290,8 +1290,9 @@ explicitly directed this session to find and test it before implementation.
 
 ### 3. Current state
 
-Implementation is complete locally on `main` and awaits the commit/push that
-contains this section. No production or shared-cloud resource was modified.
+Implementation was committed and pushed to `main` as `f6a413b`; a follow-up
+installer-hardening commit containing the final state in this section follows.
+No production application or shared-cloud resource was modified.
 
 - `bin/ai-glm-agent` and `bin/ai-glm-agent.ps1` are Bash and PowerShell launchers.
   Both default to exact model `glm-5.2`, use Z.ai's Anthropic-compatible Coding
@@ -1321,6 +1322,10 @@ contains this section. No production or shared-cloud resource was modified.
   also passed.
 - The pre-existing dirty `transcripts` submodule belongs to another workstream
   and was not modified or staged by this work.
+- Focused rollout is complete on this Windows machine and Hetz. Both local
+  Claude/Codex skill roots contain `ask-glm`; Hetz resolves
+  `/usr/local/bin/ai-glm-agent`; and both machines passed exact GLM-5.2
+  repository-tool probes. The remaining two Windows computers are pending.
 
 ### 4. Everything tried that did not work
 
@@ -1347,6 +1352,22 @@ contains this section. No production or shared-cloud resource was modified.
    before validation.
 6. The skill validator could not decode smart quotation marks under its Windows
    code page. The shared skill now uses portable ASCII punctuation.
+7. Hetz `update.sh` exposed two pre-existing Ubuntu installer gaps. `install.sh`
+   duplicated old skill-copy logic and omitted `skills/shared`, then skipped
+   secret refresh during non-interactive SSH despite an existing protected token
+   file. The immediate rollout used `ai-install-skills` plus `setup-secrets.sh`;
+   the permanent fix makes `install.sh` delegate to the canonical tested skill
+   installer and treats an existing token file as sufficient for non-interactive
+   secret refresh.
+8. Focused Windows bootstrap verification tried to parse `op whoami` JSON, but
+   that output contains both `url` and `URL`, which PowerShell treats as duplicate
+   case-insensitive keys. Plain-text `SERVICE_ACCOUNT` matching verified the
+   identity without ambiguous JSON parsing.
+9. The first Hetz secret-refresh SSH command used Bash-style backslash escaping
+   for `$(cat ...)` inside a PowerShell string. PowerShell expanded it locally
+   and found no Windows `C:\home\...` path, so remote setup did not run. A
+   backtick-escaped dollar sign preserved remote Bash substitution; setup and
+   the GLM probe then passed.
 
 ### 5. Root causes and key findings
 
@@ -1366,22 +1387,10 @@ contains this section. No production or shared-cloud resource was modified.
 
 ### 6. Exact next steps
 
-1. Commit and push the files in this GLM section to `u2giants/ai-devops` `main`,
-   excluding the unrelated dirty `transcripts` submodule. **Gate:** GitHub `main`
-   resolves to the reported commit and local tracked GLM files are clean.
-2. On this Windows machine, update the managed reference file and install shared
-   skills using the focused existing installers; do not run the unproven full
-   Windows bootstrap. **Gate:** both installed skill directories contain
-   `ask-glm/SKILL.md`, the managed `mcp.env` contains the Z.ai reference (never
-   its value), and a real launcher call returns exact `glm-5.2`.
-3. Pull/update Hetz and let `install.sh`/`setup-secrets.sh` run the built-in live
-   probe. **Gate:** setup prints `GLM-5.2 coding agent verified`,
-   `/usr/local/bin/ai-glm-agent` resolves into this repo, and a read-only review
-   creates a substantive `.ai/reviews/` report without changing the repo.
-4. Roll the same GitHub commit to the remaining two Windows computers through
+1. Roll the final GitHub commit to the remaining two Windows computers through
    their normal ai-devops setup. **Gate:** each prints the live capability pass
    and both Claude and Codex respond to “ask GLM” by invoking exact GLM-5.2.
-5. Forward-test the installed skill from a fresh Claude or Codex session on a
+2. Forward-test the installed skill from a fresh Claude or Codex session on a
    harmless repository question. **Gate:** the parent clearly distinguishes
    GLM's answer from its own judgment and review mode leaves `git status`
    unchanged.
@@ -1411,8 +1420,8 @@ contains this section. No production or shared-cloud resource was modified.
   processes; plaintext never entered model context.
 - Z.ai Coding endpoint: `https://api.z.ai/api/coding/paas/v4`; Claude Code agent
   endpoint: `https://api.z.ai/api/anthropic`. The latter is the launcher route.
-- Hetz is reached through the existing `vps` SSH alias. No Hetz mutation had
-  occurred at the time this section was written.
+- Hetz was updated as user `ai` through `/worksp/ai-devops`; `setup-secrets.sh`
+  printed `GLM-5.2 coding agent verified through Claude Code and Z.ai`.
 
 ### 9. Open questions and risks
 
