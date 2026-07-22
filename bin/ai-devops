@@ -156,7 +156,7 @@ cmd_doctor() {
   check_file "$SERVER_ENV" "server.env" req
 
   c_head "Companion scripts"
-  for s in ai-codex-review ai-workspace-status ai-model-call ai-run-task; do
+  for s in ai-codex-review ai-workspace-status ai-model-call ai-run-task ai-glm-agent; do
     if have "$s"; then
       c_ok "$s available ($(command -v "$s"))"
     else

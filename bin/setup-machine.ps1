@@ -615,6 +615,21 @@ if (Test-Path $gitBash) {
 # --------------------------------------------------------------------------
 # Done + validation checklist
 # --------------------------------------------------------------------------
+Step "GLM coding-agent capability"
+$glmLauncher = Join-Path $RepoPath "bin\ai-glm-agent.ps1"
+$glmProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-glm-probe-" + [guid]::NewGuid() + ".txt")
+try {
+  if (-not (Test-Path -LiteralPath $glmLauncher)) { throw "Missing GLM launcher: $glmLauncher" }
+  & op run --env-file $McpEnv -- pwsh -NoProfile -File $glmLauncher -Mode review -Output $glmProbe `
+    "Reply with exactly GLM_AGENT_OK and nothing else."
+  if ($LASTEXITCODE -ne 0) { throw "GLM launcher exited $LASTEXITCODE." }
+  $glmProbeText = (Get-Content -Raw -LiteralPath $glmProbe).Trim()
+  if ($glmProbeText -ne "GLM_AGENT_OK") { throw "GLM returned an unexpected probe response." }
+  Ok "GLM-5.2 coding agent verified end-to-end through Claude Code and Z.ai"
+} finally {
+  Remove-Item -LiteralPath $glmProbe -Force -ErrorAction SilentlyContinue
+}
+
 Step "Done"
 Write-Host "Setup summary:"
 Write-Host "  token file : $TokenFile   (user-only)"
@@ -632,6 +647,7 @@ Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
 Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
 Write-Host "  4. Fully quit and reopen Claude Desktop (MCP servers only re-read config on a full restart)."
 Write-Host "  5. Confirm these MCPs show connected: $McpServerList"
+Write-Host "  6. Ask Claude or Codex: 'Ask GLM for a read-only second opinion.'"
 Write-Host ""
 Write-Host "One manual step this script cannot do for you:" -ForegroundColor Yellow
 Write-Host "  Windows-MCP is a Claude Desktop EXTENSION, not a config entry, so it must be"

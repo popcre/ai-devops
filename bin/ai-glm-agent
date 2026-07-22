@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Run GLM as a Claude Code coding agent without changing normal Claude settings.
+
+set -euo pipefail
+
+MODEL="${ZAI_GLM_MODEL:-glm-5.2}"
+MODE="review"
+PROMPT_FILE=""
+OUT_FILE=""
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+MCP_ENV="$CFG_DIR/mcp.env"
+
+usage() {
+  cat <<'EOF'
+Usage: ai-glm-agent [--mode review|implement] [--model MODEL]
+                    [--prompt-file FILE] [--output FILE] [PROMPT...]
+
+Defaults to a read-only review. If neither PROMPT nor --prompt-file is given,
+the prompt is read from stdin. GLM runs through Claude Code with repository,
+file-search, terminal, test, and multi-step agent capabilities.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --mode) MODE="${2:-}"; shift 2 ;;
+    --model) MODEL="${2:-}"; shift 2 ;;
+    --prompt-file) PROMPT_FILE="${2:-}"; shift 2 ;;
+    --output) OUT_FILE="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "Error: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+case "$MODE" in review|implement) ;; *) echo "Error: --mode must be review or implement." >&2; exit 2 ;; esac
+[ -n "$MODEL" ] || { echo "Error: model cannot be empty." >&2; exit 2; }
+
+if [ -z "${ZAI_API_KEY:-}" ]; then
+  command -v op >/dev/null 2>&1 || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
+  [ -s "$TOKEN_FILE" ] || { echo "Error: missing 1Password service-account token file: $TOKEN_FILE" >&2; exit 1; }
+  [ -f "$MCP_ENV" ] || { echo "Error: missing managed 1Password reference file: $MCP_ENV" >&2; exit 1; }
+  export OP_SERVICE_ACCOUNT_TOKEN
+  OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
+  reexec=(run --env-file "$MCP_ENV" -- "$0" --mode "$MODE" --model "$MODEL")
+  [ -n "$PROMPT_FILE" ] && reexec+=(--prompt-file "$PROMPT_FILE")
+  [ -n "$OUT_FILE" ] && reexec+=(--output "$OUT_FILE")
+  reexec+=("$@")
+  exec op "${reexec[@]}"
+fi
+
+command -v claude >/dev/null 2>&1 || { echo "Error: Claude Code CLI is required to host the GLM agent." >&2; exit 1; }
+PYTHON=""
+if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  PYTHON="python"
+elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  PYTHON="python3"
+fi
+[ -n "$PYTHON" ] || { echo "Error: Python is required to validate the GLM result." >&2; exit 1; }
+
+if [ -n "$PROMPT_FILE" ]; then
+  [ -f "$PROMPT_FILE" ] || { echo "Error: prompt file not found: $PROMPT_FILE" >&2; exit 1; }
+  PROMPT="$(<"$PROMPT_FILE")"
+elif [ "$#" -gt 0 ]; then
+  PROMPT="$*"
+elif [ ! -t 0 ]; then
+  PROMPT="$(cat)"
+else
+  echo "Error: provide a prompt, --prompt-file, or stdin." >&2; exit 2
+fi
+[ -n "$PROMPT" ] || { echo "Error: prompt is empty." >&2; exit 2; }
+
+# Isolate GLM from normal Anthropic login/config and from a parent Claude Code
+# process. An inherited ANTHROPIC_API_KEY caused a proven false 401 during setup.
+unset CLAUDECODE ANTHROPIC_API_KEY
+export ANTHROPIC_AUTH_TOKEN="$ZAI_API_KEY"
+export ANTHROPIC_BASE_URL="${ZAI_ANTHROPIC_BASE_URL:-https://api.z.ai/api/anthropic}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export CLAUDE_CONFIG_DIR="${ZAI_CLAUDE_CONFIG_DIR:-$CFG_DIR/glm-claude}"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+PERMISSION_MODE="plan"
+[ "$MODE" = "implement" ] && PERMISSION_MODE="auto"
+RAW_FILE="$(mktemp)"
+RESULT_FILE="$(mktemp)"
+trap 'rm -f "$RAW_FILE" "$RESULT_FILE"' EXIT
+if ! printf '%s' "$PROMPT" | claude -p --model "$MODEL" \
+    --permission-mode "$PERMISSION_MODE" --setting-sources project,local \
+    --no-session-persistence --output-format json >"$RAW_FILE"; then
+  echo "Error: GLM agent process failed." >&2
+  cat "$RAW_FILE" >&2
+  exit 1
+fi
+
+mapfile -t RESPONSE_META < <("$PYTHON" - "$RAW_FILE" "$RESULT_FILE" <<'PY' | tr -d '\r'
+import json
+import pathlib
+import sys
+
+response = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8-sig"))
+models = list((response.get("modelUsage") or {}).keys())
+print(models[0] if models else "")
+print("true" if response.get("is_error", True) else "false")
+pathlib.Path(sys.argv[2]).write_text(str(response.get("result") or ""), encoding="utf-8")
+PY
+)
+ACTUAL_MODEL="${RESPONSE_META[0]:-}"
+IS_ERROR="${RESPONSE_META[1]:-true}"
+RESULT="$(<"$RESULT_FILE")"
+[ "$IS_ERROR" = "false" ] || { echo "Error: GLM agent returned an error: $RESULT" >&2; exit 1; }
+[ "$ACTUAL_MODEL" = "$MODEL" ] || {
+  echo "Error: requested model '$MODEL' but Z.ai returned '${ACTUAL_MODEL:-unknown}'. No fallback accepted." >&2; exit 1;
+}
+
+if [ -n "$OUT_FILE" ]; then
+  mkdir -p "$(dirname "$OUT_FILE")"
+  printf '%s\n' "$RESULT" >"$OUT_FILE"
+  echo "GLM $ACTUAL_MODEL result written to: $OUT_FILE" >&2
+else
+  printf '%s\n' "$RESULT"
+fi

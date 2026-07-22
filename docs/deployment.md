@@ -29,7 +29,10 @@ cd /worksp/ai-devops
 3. Seeds `/etc/ai-devops/models.env` and `server.env` from the examples **only if
    absent** (never overwrites real config).
 4. Symlinks every file in `bin/` into `/usr/local/bin/`.
-5. Runs `ai-devops doctor`.
+5. Installs the shared `ask-glm` skill for Claude and Codex. Secret setup injects
+   the Z.ai Coding Plan key from 1Password and proves a real GLM-5.2 Claude Code
+   agent call; it never changes normal Claude/Codex authentication.
+6. Runs `ai-devops doctor`.
 
 Idempotent — safe to re-run.
 

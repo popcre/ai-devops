@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ask GLM"
+  short_description: "Delegate work to the GLM coding agent"
+  default_prompt: "Use $ask-glm to get a read-only GLM second opinion on this task."

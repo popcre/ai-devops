@@ -486,6 +486,22 @@ done < "$MCP_ENV"
 
 echo
 if [ "$fail" -eq 0 ]; then
+  if command -v claude >/dev/null 2>&1 && [ -x "$REPO_ROOT/bin/ai-glm-agent" ]; then
+    info "Verifying GLM coding agent end-to-end"
+    glm_probe="$(mktemp)"
+    if "$REPO_ROOT/bin/ai-glm-agent" --mode review --output "$glm_probe" \
+        "Reply with exactly GLM_AGENT_OK and nothing else." >/dev/null &&
+        [ "$(tr -d '\r\n' <"$glm_probe")" = "GLM_AGENT_OK" ]; then
+      ok "GLM-5.2 coding agent verified through Claude Code and Z.ai"
+    else
+      rm -f "$glm_probe"
+      warn "GLM coding-agent capability check failed"
+      exit 1
+    fi
+    rm -f "$glm_probe"
+  else
+    warn "Claude Code is missing; GLM agent cannot be capability-tested yet."
+  fi
   info "Secrets wiring complete. Open a new terminal (or: source ~/.bashrc),"
   info "then run 'claude' in any app folder — placeholders fill automatically."
 else

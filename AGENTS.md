@@ -11,7 +11,7 @@ workflow**. It is a small set of Bash CLI scripts, prompt templates, docs, and
 skill/MCP scaffolding — **not** an application, service, or web app.
 
 - **What it does:** installs CLI helpers (`ai-devops`, `ai-workspace-status`,
-  `ai-codex-review`, `ai-model-call`, `ai-run-task`) that drive a staged coding
+  `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm-agent`) that drive a staged coding
   workflow: plan → plan-review → implement → diff-review → test → security-review
   → final-review.
 - **Who uses it:** the repo owner (Albert, GitHub `u2giants`) and AI coding
@@ -176,7 +176,7 @@ names.
 | Toolkit home | `/worksp/ai-devops` | fixed convention | **Never** `/opt/ai-devops`. Referenced by all scripts/docs |
 | Machine config dir | `/etc/ai-devops/` | `install.sh`, `server.env` | Holds real `models.env` + `server.env` (not in repo) |
 | Log dir | `/var/log/ai-devops/` | `install.sh`, `server.env` | Created on install; currently unused by scripts |
-| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
+| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm-agent`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |
@@ -404,9 +404,10 @@ exists to provide.
 
 No secrets live in this repo. The variables below are **non-secret** command
 strings and paths. Real values live in `/etc/ai-devops/*.env` (machine-local) and
-are seeded from `config/*.env.example`. The only true credentials are the
-Claude/Codex/gh **login sessions**, which are stored by those CLIs
-(`~/.claude`, `~/.codex`, `~/.config/gh`) — never in this repo.
+are seeded from `config/*.env.example`. Claude/Codex/gh login sessions are stored
+by those CLIs (`~/.claude`, `~/.codex`, `~/.config/gh`). The GLM Coding Plan key
+lives only in 1Password item `GLM z.ai API`; the repo distributes its `op://`
+reference and injects it only into an isolated `ai-glm-agent` child process.
 
 | Variable | Purpose | Stored where | Required in dev | Required in prod |
 |---|---|---|---|---|

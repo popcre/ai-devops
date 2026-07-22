@@ -1263,3 +1263,172 @@ Final synthesis audit:
    execute flawlessly? Yes.** Those dimensions map respectively to sections
    1–2, 2, 3, 4, 5 and 7, 9, 6, and 3. The only unfinished activity is the
    explicitly approval-gated machine rollout; no gap was found.
+
+---
+
+## GLM-5.2 coding-agent integration — 2026-07-22
+
+### 1. What this application is
+
+`u2giants/ai-devops` is Albert's private, Git-backed toolkit for installing and
+restoring a multi-model AI coding workflow on three Windows 11 computers and an
+Ubuntu server named Hetz. Albert works through Claude Desktop/Claude Code and
+Codex Desktop/CLI; he does not use an IDE or administer the machines manually.
+The new component, `ai-glm-agent`, lets either Claude or Codex delegate work to
+Z.ai GLM-5.2 while preserving the repository search, terminal, testing, editing,
+and multi-step tools supplied by Claude Code. It is a local command and shared
+skill, not a hosted application or production service.
+
+### 2. What we set out to do, and why
+
+Albert wanted GLM-5.2 as a genuine third coding agent because routing GLM through
+Qwen Code was unreliable. The goal was one natural-language trigger—“ask GLM”—
+with no per-machine settings to remember, no loss of coding-agent capability,
+and no replacement of the existing Anthropic Claude or OpenAI Codex models. The
+Z.ai Coding Plan key already existed in 1Password item `GLM z.ai API`; Albert
+explicitly directed this session to find and test it before implementation.
+
+### 3. Current state
+
+Implementation is complete locally on `main` and awaits the commit/push that
+contains this section. No production or shared-cloud resource was modified.
+
+- `bin/ai-glm-agent` and `bin/ai-glm-agent.ps1` are Bash and PowerShell launchers.
+  Both default to exact model `glm-5.2`, use Z.ai's Anthropic-compatible Coding
+  Plan endpoint, isolate `CLAUDE_CONFIG_DIR`, clear inherited Anthropic API
+  credentials and `CLAUDECODE`, use read-only Claude Code `plan` permissions for
+  reviews, use `auto` only for explicitly requested implementation, disable
+  session persistence, and reject any returned-model mismatch.
+- `config/mcp.env.example` contains only the Z.ai `op://` reference plus the
+  non-secret model and endpoint. No resolved API key was printed, written, or
+  committed. Windows and Ubuntu secret setup copy this managed file.
+- `skills/shared/ask-glm/` installs into both Claude and Codex and triggers on
+  “ask GLM,” “run this by GLM,” GLM-5.2 review, analysis, or explicit delegation.
+- `bin/setup-machine.ps1` and `bin/setup-secrets.sh` now perform a real
+  `GLM_AGENT_OK` end-to-end capability probe after 1Password wiring. This proves
+  the API, exact model, Claude Code agent host, and output validation rather than
+  merely checking that commands exist.
+- Live protected evidence on this Windows machine: both Z.ai model-list routes
+  returned `glm-5.2`; a Coding Plan chat-completion request requested and
+  returned `glm-5.2`; an isolated Claude Code request reported only
+  `modelUsage.glm-5.2`; and GLM used repository tools to read `README.md` and
+  returned its exact H1, `# AI DevOps Toolkit`.
+- `tests/test-ai-glm-agent.ps1` and `.sh` passed. They prove review/implementation
+  permission modes, positional prompt handling, inherited-key clearing, endpoint
+  isolation, and strict fallback rejection. The real shared-skill Bash and
+  PowerShell installer suites passed all five existing behavior groups. The
+  skill validator, PowerShell parsers, Bash syntax checks, and `git diff --check`
+  also passed.
+- The pre-existing dirty `transcripts` submodule belongs to another workstream
+  and was not modified or staged by this work.
+
+### 4. Everything tried that did not work
+
+1. The first Claude Code→Z.ai test returned HTTP 401 even though the same key had
+   just succeeded against Z.ai's raw API. This machine already exposed an
+   `ANTHROPIC_API_KEY`; Claude Code preferred it over `ANTHROPIC_AUTH_TOKEN`.
+   Clearing only the process environment was insufficient because normal user
+   Claude settings reintroduced provider state. The durable fix is both clearing
+   inherited credentials and using a dedicated `CLAUDE_CONFIG_DIR` with only
+   project/local setting sources. The next agent test succeeded.
+2. The first PowerShell launcher tool-use test failed with “Prompt is empty.” A
+   `ValueFromRemainingArguments` parameter without an explicit position dropped
+   positional prompt text after named options. Adding `Position = 0` fixed it;
+   the regression suite now covers the exact invocation.
+3. The first Bash implementation used `jq` for result validation. Git Bash on
+   this machine lacks `jq`, despite Ubuntu having it. The launcher was changed to
+   use the Python dependency already managed on both platforms.
+4. Windows exposes a broken Microsoft Store `python3` alias ahead of the working
+   Python executable. Selecting by `command -v` alone chose the broken alias.
+   The launcher now capability-tests `python --version`, then `python3`, instead
+   of trusting path presence.
+5. Windows Python emitted CRLF metadata into Bash `mapfile`; exact boolean/model
+   comparisons treated `false\r` as a mismatch. The parser output is normalized
+   before validation.
+6. The skill validator could not decode smart quotation marks under its Windows
+   code page. The shared skill now uses portable ASCII punctuation.
+
+### 5. Root causes and key findings
+
+- A raw OpenAI-compatible API wrapper would provide text generation but not a
+  coding-agent tool loop. Hosting GLM inside Claude Code preserves repository,
+  terminal, tests, editing, and multi-step behavior with fewer moving parts.
+- Provider isolation is mandatory. Merely setting `ANTHROPIC_BASE_URL` and an
+  auth token can be defeated by inherited or user-setting credentials. See the
+  explicit environment cleanup and config isolation in both launchers.
+- Z.ai's public documentation lagged its live service: documentation listed
+  GLM-5.1, while both live endpoints on 2026-07-22 listed and successfully served
+  `glm-5.2`. Runtime exact-model verification is therefore the authority and
+  silent fallback is forbidden.
+- The Coding Plan does not use consumer OAuth. Its API key can still be
+  maintenance-free for Albert because 1Password remains canonical and setup
+  injects the key at runtime on every machine.
+
+### 6. Exact next steps
+
+1. Commit and push the files in this GLM section to `u2giants/ai-devops` `main`,
+   excluding the unrelated dirty `transcripts` submodule. **Gate:** GitHub `main`
+   resolves to the reported commit and local tracked GLM files are clean.
+2. On this Windows machine, update the managed reference file and install shared
+   skills using the focused existing installers; do not run the unproven full
+   Windows bootstrap. **Gate:** both installed skill directories contain
+   `ask-glm/SKILL.md`, the managed `mcp.env` contains the Z.ai reference (never
+   its value), and a real launcher call returns exact `glm-5.2`.
+3. Pull/update Hetz and let `install.sh`/`setup-secrets.sh` run the built-in live
+   probe. **Gate:** setup prints `GLM-5.2 coding agent verified`,
+   `/usr/local/bin/ai-glm-agent` resolves into this repo, and a read-only review
+   creates a substantive `.ai/reviews/` report without changing the repo.
+4. Roll the same GitHub commit to the remaining two Windows computers through
+   their normal ai-devops setup. **Gate:** each prints the live capability pass
+   and both Claude and Codex respond to “ask GLM” by invoking exact GLM-5.2.
+5. Forward-test the installed skill from a fresh Claude or Codex session on a
+   harmless repository question. **Gate:** the parent clearly distinguishes
+   GLM's answer from its own judgment and review mode leaves `git status`
+   unchanged.
+
+### 7. Constraints and gotchas
+
+- Never put the Z.ai key in Git, Claude settings, Codex config, prompts, reports,
+  command arguments, or transcripts. Only its `op://` reference belongs here.
+- Never globally redirect the normal `claude` command to Z.ai. GLM variables
+  belong only to the isolated child process.
+- Reviews remain read-only. Use implementation mode only when Albert explicitly
+  delegates editing, then independently inspect and test the diff.
+- Do not accept a model fallback. A request for GLM-5.2 must return GLM-5.2 or
+  fail loudly.
+- Do not run the still-unproven minimum-touch Windows bootstrap on an established
+  computer merely to roll out GLM.
+- Production/shared-cloud access remains read-only unless Albert explicitly
+  names an exact resource and mutation in the current chat.
+
+### 8. Access and environment
+
+- Repo: `C:\repos\ai-devops`, GitHub `u2giants/ai-devops`, branch `main`.
+- Current Windows machine has Claude Code 2.1.217, PowerShell 7, Git Bash,
+  Python 3.14, and the 1Password MCP connector.
+- Secret source: 1Password vault `vibe_coding`, item `GLM z.ai API`, concealed
+  field `credential`. The protected connector resolved it only inside test
+  processes; plaintext never entered model context.
+- Z.ai Coding endpoint: `https://api.z.ai/api/coding/paas/v4`; Claude Code agent
+  endpoint: `https://api.z.ai/api/anthropic`. The latter is the launcher route.
+- Hetz is reached through the existing `vps` SSH alias. No Hetz mutation had
+  occurred at the time this section was written.
+
+### 9. Open questions and risks
+
+- Z.ai may change Coding Plan model availability or Claude Code protocol
+  compatibility. Exact-model and live capability checks are the protection;
+  update the repo-owned model setting only after a verified replacement exists.
+- Claude Code permission semantics can evolve. The tests assert the selected
+  modes, while a live harmless tool-use test verifies real behavior.
+- Remaining rollout depends on each machine having its normal ai-devops
+  1Password service-account wiring and Claude Code installed. Setup fails loudly
+  or warns when either prerequisite is absent.
+
+### GLM handoff self-audit
+
+Passed on 2026-07-22. A street-new developer can identify the system and user,
+the exact objective, files and security model, verified live state, every failed
+approach and root cause, concrete rollout commands/gates, constraints, access,
+and remaining risks without this chat. Every next step has an observable gate;
+no secret value or unexplained external dependency is required.

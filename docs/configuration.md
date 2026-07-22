@@ -47,6 +47,21 @@ for how to adapt the exact flags to your installed CLIs (they may differ).
 
 None. There are no feature flags in this toolkit.
 
+## GLM coding-agent settings
+
+The cross-platform GLM launcher reads these managed entries from
+`~/.config/ai-devops/mcp.env`, seeded from `config/mcp.env.example`:
+
+| Variable | Purpose | Default/source |
+|---|---|---|
+| `ZAI_GLM_MODEL` | Exact model required from Z.ai | `glm-5.2` |
+| `ZAI_ANTHROPIC_BASE_URL` | Isolated Claude Code provider endpoint | `https://api.z.ai/api/anthropic` |
+| `ZAI_API_KEY` | Coding Plan authentication | 1Password reference only; never plaintext |
+
+These settings do not alter normal Claude or Codex configuration. Change the
+model or endpoint in the repo example and rerun machine setup; never hard-code
+the key.
+
 ## Changing configuration
 
 1. Edit the real file directly: `sudoedit /etc/ai-devops/models.env` (or

@@ -47,6 +47,18 @@ tools run via git-bash on Windows).
 | **User `PATH` → Codex** (Windows) | Which `codex.exe` a terminal resolves — and therefore whether `codex exec` can write at all | ✅ `bin/setup-machine.ps1` step "Codex PATH" prepends `%USERPROFILE%\.codex\packages\standalone\current\bin` | No |
 | **`codex-cli` MCP entry** (Claude Desktop config + `~/.claude/settings.json`) | Lets Claude call Codex as a tool (`codex`, `codex-reply`) instead of shelling out | ✅ Windows: `bin/setup-machine.ps1`; Ubuntu: `bin/setup-secrets.sh` | No — Codex carries its own `codex login`, so it is **not** wrapped in the op launcher and never touches `mcp.env` |
 | **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine and checked by Windows setup | No repo secret — Kimi carries its own interactive login |
+| **GLM coding agent** (`ai-glm-agent`) | Lets Claude or Codex delegate reviews or scoped implementation to Z.ai GLM through Claude Code's repository/terminal tools | ✅ repo-owned launcher + shared skill; Windows/Ubuntu secret setup performs a real capability probe | Z.ai key stays in 1Password; only an `op://` reference is distributed |
+
+## GLM: isolated Claude Code host
+
+`ai-glm-agent` uses Claude Code as the agent runtime but sends only that child
+process to Z.ai's Anthropic-compatible Coding Plan endpoint. It clears inherited
+Anthropic credentials, uses an isolated Claude config directory, requests the
+configured GLM model explicitly, and checks Claude Code's returned model record.
+Normal `claude`, Claude Desktop, and Codex sessions remain on their existing
+providers. Review mode is read-only (`plan`); implementation mode is available
+only when explicitly requested. Canonical secret: `GLM z.ai API/credential` in
+the `vibe_coding` vault.
 
 ## Codex: PATH + MCP (added 2026-07-16)
 

@@ -12,6 +12,22 @@ roles, adapting CLI flags, and how the scripts use the commands.
   final product/architecture review.
 - **GPT-5.5 / Codex** — coding, implementation, testing, fixing.
 - **Opus** — independent review throughout (plan, diff, security, final).
+- **GLM-5.2** — optional independent full coding agent invoked by either Claude
+  or Codex through `ai-glm-agent`; defaults to read-only review.
+
+## GLM configuration
+
+GLM is deliberately separate from the staged `models.env` commands because the
+same launcher runs on Windows and Ubuntu. Its non-secret defaults live in the
+managed `~/.config/ai-devops/mcp.env` copied from `config/mcp.env.example`:
+
+- `ZAI_GLM_MODEL=glm-5.2`
+- `ZAI_ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
+- `ZAI_API_KEY=op://vibe_coding/GLM z.ai API/credential`
+
+The last line is a 1Password reference, not a key. Do not put the resolved value
+in this repo or in Claude/Codex settings. The launcher refuses silent fallback
+when Z.ai returns a different model.
 
 ## Important: the exact flags may differ on your machine
 
