@@ -335,9 +335,21 @@ plan, and obtain explicit approval. New values must enter 1Password first.
    earlier read-only token and a since-deleted SA caused a detour (see the
    `op whoami`-decodes-locally gotcha). Runbook: `docs/onboarding-secrets.md`
    "Rotating the bootstrap service-account token"; full record:
-   `op-account-migration-2026-07` memory + `docs/config-inventory.md`. Remaining:
-   other machines (916, 4837, Ubuntu servers) still hold the old-account token and
-   must be re-synced on next setup run / manually.
+   `op-account-migration-2026-07` memory + `docs/config-inventory.md`.
+
+   **Per-machine rollout status (as of 2026-07-23):**
+   - **al8960ofc (this Windows box)** — DONE: token re-synced into the
+     `op-service-account` file, the `OP_SERVICE_ACCOUNT_TOKEN` User env var, and the
+     literal-token MCP configs (`~/.claude/settings.json`, `~/.codex/config.toml`,
+     Claude Desktop). **Still needs an app restart** so the MCP processes reload it.
+   - **hetz / vps2 (`ai@hetz`)** — DONE 2026-07-23: its token file held the
+     *deleted* SA (403); replaced with the live token, `/worksp/ai-devops` pulled,
+     `bin/setup-secrets.sh` re-run, all six `op://` refs verified resolving.
+   - **4837** — DONE by Albert (2026-07-23).
+   - **916** — PENDING: powered off until ~2026-07-28; Albert will re-sync it when
+     it is back. Follow the runbook (token file/env + `bin/setup-machine.ps1`).
+   - Other Ubuntu servers (seafile, comp, backupwiz, …) — re-sync on next setup run
+     if/when they use the token; not yet checked.
 9. **GitHub residue.** Continue GitHub Support sensitive-data removal requests
    for unreachable `u2giants/ai-devops` history and secret-bearing
    `u2giants/synology-monitor` history. **Gate:** Support confirms removal or
