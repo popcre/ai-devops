@@ -44,11 +44,14 @@ For the do-this-now steps, see the **"Set up a new machine"** section of
    `~/.config/ai-devops/mcp.env` on each machine. Add a new placeholder to one
    file → every app and machine picks it up.
 
-4. **Resolve from 1Password at session start, never store resolved secrets.**
-   A single vault-locked token turns the `op://` references into real values
-   when a session starts — on Ubuntu into the shell environment on login, on
-   Windows into each MCP server's environment via `op run` at launch. No
-   resolved secret is ever written to disk.
+4. **Resolve once, with a single-flight guard.** One `op run --env-file`
+   resolves the shared set at session start. Ubuntu keeps it in the login-shell
+   environment. Windows shares a 15-minute, per-user DPAPI-encrypted cache; an
+   OS mutex permits only one refresh while parallel MCP startups wait. Plaintext
+   values exist only in child-process memory and never in MCP configuration.
+
+Agents must serialize direct `op read`, `op run`, and 1Password MCP calls.
+Parallel repository work is fine; parallel vault access is not.
 
 The `ZAI_API_KEY` reference follows the same rule. `ai-glm-agent` resolves it
 only when launching an isolated GLM child process. The key is not copied into
@@ -104,8 +107,8 @@ other than the explicitly requested model.
 - `bin/setup-secrets.sh` stores the token, drops `mcp.env`, and installs a
   managed shell snippet (`~/.config/ai-devops/shellrc`, sourced by `~/.bashrc`
   and `~/.profile`; POSIX-safe so it also works under `dash`).
-- On login the snippet loads the vault-locked token, then reads `mcp.env` and
-  resolves each `op://` reference into the shell environment (it never
+- On login the snippet loads the vault-locked token, then resolves all of
+  `mcp.env` with one `op run` into the shell environment (it never
   overwrites a value you set yourself). So every app's `.mcp.json` `${...}`
   placeholder — and every other CLI (`supabase`, scripts) — is authorized with
   no special launcher. You just run `claude`.

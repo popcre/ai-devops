@@ -21,9 +21,9 @@ What it does (idempotent — safe to re-run):
      (Not an environment variable: the Store/MSIX Claude Desktop sandbox does
      not inherit user env vars, and can strip env blocks from its config.)
   4. Installs the central reference file  ...\ai-devops\mcp.env  (op:// refs).
-  5. Writes a launcher  ...\ai-devops\mcp-launch.cmd  that reads the token from
-     the file and runs each MCP server under `op run --env-file mcp.env`, so
-     secrets resolve at launch and NO secret is ever written into the config.
+  5. Writes MCP launchers backed by one single-flight `op run --env-file`
+     refresh. Parallel MCP startups wait on an OS mutex and reuse a 15-minute
+     DPAPI-encrypted, user-scoped cache instead of hammering 1Password.
   6. Restores the 916-alien SSH key from 1Password to ~\.ssh\916-alien (+ .pub)
      and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
      from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
@@ -110,6 +110,7 @@ $TokenFile = Join-Path $CfgDir "op-service-account"
 $McpEnv    = Join-Path $CfgDir "mcp.env"
 $Launcher  = Join-Path $CfgDir "mcp-launch.cmd"
 $RemoteLauncher = Join-Path $CfgDir "mcp-remote-launch.cmd"
+$SecretLauncher = Join-Path $RepoPath "bin\mcp-secret-launch.ps1"
 
 # --------------------------------------------------------------------------
 # 1. Base tools: git, op, node/npx
@@ -212,42 +213,28 @@ Ok "Installed mcp.env (op:// references only, no secrets)"
 # 5. Launcher that injects secrets at MCP-server start
 # --------------------------------------------------------------------------
 Step "MCP launcher -> $Launcher"
-$launcherBody = @'
+$launcherBody = @"
 @echo off
-rem [ai-devops] read the vault-locked service-account token from the user file,
-rem then run the given MCP server under op with the central reference env-file.
-rem No secret is stored in claude_desktop_config.json.
-set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
-op run --no-masking --env-file="%USERPROFILE%\.config\ai-devops\mcp.env" -- %*
-'@
+rem [ai-devops] one single-flight 1Password refresh, then DPAPI cache reuse.
+pwsh -NoProfile -File "$SecretLauncher" -Mode Stdio -- %*
+"@
 Set-Content -Path $Launcher -Value $launcherBody -Encoding ascii
 Ok "Wrote $Launcher"
 
 # A second launcher for REMOTE/HTTP MCP servers. mcp-remote does NOT expand
 # ${VAR} in --header, so the bearer token must be a real value before it runs.
-# This reads the vault-locked token, `op read`s the bearer token IN MEMORY, and
-# passes it to mcp-remote. Args carry the URL + the op:// reference only; the
+# The shared launcher decrypts the already-resolved environment IN MEMORY and
+# passes the selected value to mcp-remote. Args carry only the URL + reference;
 # token itself is never written to disk or into claude_desktop_config.json.
 #   %1 = server URL,  %2 = op:// reference to the bearer token,
 #   %3+ = optional extra flags passed straight through to mcp-remote
 #         (recall-ai needs --transport http-first; devops/synology pass none,
 #          for which EXTRA stays empty and the command is byte-identical to
 #          the previous two-argument form).
-$remoteBody = @'
+$remoteBody = @"
 @echo off
-setlocal
-set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
-for /f "usebackq delims=" %%T in (`op read %2`) do set "TOK=%%T"
-rem Fail loudly on an empty/unreadable token instead of starting the server with a
-rem blank Bearer header (op read of a blank field returns "" with exit 0).
-if not defined TOK (
-  echo ai-devops: %2 resolved EMPTY - not starting %1 1>&2
-  exit /b 1
-)
-set "EXTRA="
-for /f "tokens=2,*" %%a in ("%*") do set "EXTRA=%%b"
-npx -y mcp-remote %1 --header "Authorization: Bearer %TOK%" %EXTRA%
-'@
+pwsh -NoProfile -File "$SecretLauncher" -Mode Remote -Url %1 -SecretRef %2 -- %3 %4 %5 %6 %7 %8 %9
+"@
 Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
 

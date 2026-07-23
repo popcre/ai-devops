@@ -16,6 +16,7 @@ id_ed25519
 # Onboarding files named "secret(s)" that contain NO secret values — only
 # 1Password op:// references and documentation. Explicitly vetted + allowed.
 !bin/setup-secrets.sh
+!bin/mcp-secret-launch.ps1
 !docs/onboarding-secrets.md
 
 # Memory notes (memory/**/*.md) document things *about* credentials — incident

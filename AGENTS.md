@@ -427,6 +427,12 @@ There are **no** API keys, tokens, or passwords in the **toolkit code or config
 templates**. Model access comes from the Claude/Codex CLI login sessions, not
 from env vars here.
 
+All direct 1Password access is serialized. Agents and scripts must never fan
+out `op read`, `op run`, or 1Password MCP calls in parallel. Shared MCP secrets
+are resolved as one environment and reused; Windows launchers enforce this with
+an OS mutex and DPAPI-encrypted short-lived cache, while Ubuntu resolves once in
+the login shell and locks any fallback refresh.
+
 > ⚠️ **`claude_chats/` may contain live secrets.** The archived transcripts are
 > raw session logs including full tool outputs, so they can embed API tokens,
 > credentials, or private data that were on screen during those sessions (this

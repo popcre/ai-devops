@@ -11,8 +11,8 @@
 #      this repo's config/mcp.env.example (op:// references, never values).
 #   4. Installs a managed shell snippet ~/.config/ai-devops/shellrc that:
 #        - exports OP_SERVICE_ACCOUNT_TOKEN from the locked-down file, and
-#        - resolves each op:// reference in mcp.env into this shell's environment
-#          (via `op read`, never overwriting a value that is already set).
+#        - resolves all op:// references in one `op run` invocation (never
+#          overwriting a value that is already set).
 #      and makes ~/.bashrc and ~/.profile source it (one include line).
 #      There is NO `claude` launcher/wrapper: every CLI in the session (claude,
 #      supabase, scripts, ...) is authorized by the exported environment, so
@@ -20,9 +20,8 @@
 #      an `op run --env-file ... -- claude` launcher; that was never what the code
 #      does, and the stale text caused a real misdiagnosis on 2026-07-16 — the
 #      launcher was reasoned about as a rollout risk that does not exist.)
-#      Cost to know: the snippet runs one `op read` per reference in mcp.env on
-#      every interactive shell start (a network round-trip each), and the resolved
-#      secrets live in that shell's environment.
+#      Cost to know: one shared refresh runs per interactive shell start, and the
+#      resolved secrets live in that shell's environment.
 #   5. Installs two MCP launchers (~/.config/ai-devops/mcp-launch.sh and
 #      mcp-remote-launch.sh) so each MCP server resolves its own secrets at
 #      launch, independent of whether the session sourced .bashrc.
@@ -175,20 +174,18 @@ if [ -s "$TOKEN_FILE" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
 fi
 
-_aidevops_export_if_unset() {
-  # \$1 = var name, \$2 = op:// reference. Never overwrites an existing value.
-  eval "_aidev_cur=\\\${\$1:-}"
-  [ -n "\$_aidev_cur" ] && return 0
-  eval "export \$1=\"\\\$(op read \"\$2\" 2>/dev/null)\""
-}
-
 if command -v op >/dev/null 2>&1 && [ -n "\${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ -f "$MCP_ENV" ]; then
-  while IFS='=' read -r _aidev_name _aidev_ref; do
-    case "\$_aidev_name" in ''|\\#*) continue ;; esac
-    case "\$_aidev_ref"  in op://*) ;; *) continue ;; esac
-    _aidevops_export_if_unset "\$_aidev_name" "\$_aidev_ref"
-  done < "$MCP_ENV"
-  unset _aidev_name _aidev_ref _aidev_cur
+  _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
+  _aidev_exports="\$(op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+import os, shlex, sys
+for name in sys.argv[1:]:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit("empty 1Password value: " + name)
+    print("export %s=%s" % (name, shlex.quote(value)))
+' \$_aidev_names 2>/dev/null)" && eval "\$_aidev_exports" ||
+    echo "ai-devops: one-shot 1Password environment refresh failed" >&2
+  unset _aidev_names _aidev_exports
 fi
 # <<< ai-devops secrets <<<
 EOF
@@ -234,13 +231,16 @@ else
   cat > "$LAUNCH_SH" <<EOF
 #!/usr/bin/env sh
 # [ai-devops] managed by setup-secrets.sh — do not edit by hand.
-# Runs an MCP server under 'op run' with the central reference env-file, so every
-# reference in mcp.env resolves at launch. No secret lands in any config file.
+# Reuses the one-shot shell environment. The fallback is locked so simultaneous
+# non-login MCP startups cannot create a parallel 1Password request storm.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
 fi
-exec op run --no-masking --env-file="$MCP_ENV" -- "\$@"
+if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; then
+  exec "\$@"
+fi
+exec flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- "\$@"
 EOF
   chmod 755 "$LAUNCH_SH"
   ok "Wrote $LAUNCH_SH"
@@ -256,8 +256,14 @@ if [ -s "$TOKEN_FILE" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN
 fi
 URL="\$1"; REF="\$2"; shift 2
-TOK="\$(op read "\$REF")" || {
-  echo "ai-devops: FAILED to resolve \$REF from 1Password — not starting \$URL" >&2
+case "\$REF" in
+  op://vibe_coding/designflow-mcp/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
+  op://vibe_coding/designflow-mcp/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
+  op://vibe_coding/6dqxnqdx2nwcuyeppvsb6nvkoq/password) TOK="\${RECALL_AI_MCP_TOKEN:-}" ;;
+  *) TOK= ;;
+esac
+[ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
+  echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }
 [ -n "\$TOK" ] || {

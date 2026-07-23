@@ -36,6 +36,8 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
 8. Secrets: 1Password, vault `vibe_coding` ONLY. Never rotate a credential
    without approval; never write secret values into files/commits; don't
    suggest rotating the 1Password service-account token.
+   Serialize all 1Password reads. Never fan out `op read`, `op run`, or
+   1Password MCP calls in parallel; fetch a shared environment once and reuse it.
 9. Long operations: background them and write incremental results to files.
 10. **Config hygiene:** Codex config is `~/.codex/config.toml` — edits are
     append-only and must be valid TOML (a duplicate key has corrupted it

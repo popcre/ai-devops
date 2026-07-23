@@ -46,6 +46,8 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
    Never rotate an existing credential without approval. Never paste secret
    values into files, docs, or commits. Don't suggest rotating the 1Password
    service-account token.
+   Serialize all 1Password reads. Never fan out `op read`, `op run`, or
+   1Password MCP calls in parallel; fetch a shared environment once and reuse it.
 9. Long operations: run as background tasks that write incremental results to
    files, so partial work survives a crashed session and the chat stays light.
 
