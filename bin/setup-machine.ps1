@@ -238,6 +238,12 @@ $remoteBody = @'
 setlocal
 set /p OP_SERVICE_ACCOUNT_TOKEN=<"%USERPROFILE%\.config\ai-devops\op-service-account"
 for /f "usebackq delims=" %%T in (`op read %2`) do set "TOK=%%T"
+rem Fail loudly on an empty/unreadable token instead of starting the server with a
+rem blank Bearer header (op read of a blank field returns "" with exit 0).
+if not defined TOK (
+  echo ai-devops: %2 resolved EMPTY - not starting %1 1>&2
+  exit /b 1
+)
 set "EXTRA="
 for /f "tokens=2,*" %%a in ("%*") do set "EXTRA=%%b"
 npx -y mcp-remote %1 --header "Authorization: Bearer %TOK%" %EXTRA%

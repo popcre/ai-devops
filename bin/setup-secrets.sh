@@ -476,10 +476,15 @@ while IFS= read -r line; do
     *) continue ;;
   esac
   name="${line%%=*}"
-  if op read "$ref" >/dev/null 2>&1; then
+  # Reject an EMPTY resolved value, not just a nonzero exit. `op read` of a blank
+  # 1Password field returns "" with exit 0 (a silent empty) — that is exactly what
+  # sent the GLM launcher into an unbounded re-exec loop. Treat empty as FAIL so
+  # a mis-pointed reference is caught here, at setup, not at runtime.
+  val="$(op read "$ref" 2>/dev/null)"
+  if [ -n "$val" ]; then
     ok "PASS  $name"
   else
-    warn "FAIL  $name  ($ref)"
+    warn "FAIL  $name  ($ref)  — resolved EMPTY or unreadable"
     fail=1
   fi
 done < "$MCP_ENV"
