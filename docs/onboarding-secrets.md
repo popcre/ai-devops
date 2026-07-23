@@ -71,7 +71,9 @@ The `op` tool can be used two ways:
   under the hood.
 
 So "using op" here does **not** mean exposing all credentials. The token can
-only ever read `vibe_coding`.
+only ever touch `vibe_coding` — but it does need **Read + Write** on that vault,
+not read-only: the `secrets-to-1password` skill creates and edits items, and a
+read-only token breaks it silently (see the rotation gotchas below).
 
 ## The chicken-and-egg bootstrap (the one secret that can't come from 1Password)
 
@@ -236,7 +238,15 @@ changes, every machine-local raw copy must be updated by hand:
   (`op_service_account_token` **and** `credential`), which need a read-write SA.
 
 MCP processes cache the token at startup — **restart** Claude Code / Claude
-Desktop / Codex after updating.
+Desktop / Codex after updating. On Windows, also delete the DPAPI resolved-secrets
+cache `~/.config/ai-devops/mcp-secrets.dpapi.json` so the next launch re-resolves
+with the new token instead of serving the (up to 15-minute) stale cache.
+
+Codex's `~/.codex/config.toml` also carries some **downstream** tokens as
+hardcoded VALUES (the `trigger`, `devops-mcp`, `synology` bearers), not `op://`
+refs. An account migration can leave these stale even though the SA token is
+fixed — refresh them from the current 1Password values too (`recall-ai` happened
+to be unchanged on 2026-07-22).
 
 ### If the rotation moves to a NEW 1Password account (2026-07-22)
 
