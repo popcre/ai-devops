@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grok CLI"
+  short_description: "Locate and safely delegate work to Grok"
+  default_prompt: "Use $grok-cli to get a read-only Grok second opinion on this task."

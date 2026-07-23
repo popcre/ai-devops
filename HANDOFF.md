@@ -1469,3 +1469,146 @@ the exact objective, files and security model, verified live state, every failed
 approach and root cause, concrete rollout commands/gates, constraints, access,
 and remaining risks without this chat. Every next step has an observable gate;
 no secret value or unexplained external dependency is required.
+
+---
+
+## Grok Build CLI shared skill — 2026-07-23
+
+### 1. What this application is
+
+`u2giants/ai-devops` is Albert's private backup-and-restore toolkit for a
+multi-model coding workflow. It distributes scripts, global instructions, and
+skills to Claude and Codex on Windows and Ubuntu; it is not a hosted service.
+This change adds a shared `grok-cli` skill so either parent agent can locate and
+safely invoke xAI's Grok Build coding CLI as an independent reviewer or,
+only when explicitly authorized, an implementation agent.
+
+### 2. What we set out to do, and why
+
+Albert asked where Grok CLI was installed, requested a reusable skill explaining
+how to find and use it, and required the implementation to be based on Grok's
+documentation. The goal was to eliminate future rediscovery and prevent unsafe
+assumptions about model names, permission flags, or Windows sandbox support.
+
+### 3. Current state
+
+- The installed command resolves to
+  `C:\Users\ahazan2\.grok\bin\grok.exe`; `%USERPROFILE%\.grok\bin` is first on
+  the User PATH. `grok --version` reports `0.2.111 (94172f2aa4) [stable]`.
+- This is Grok's managed native install, not npm, winget, or a registered MSI.
+  `~/.grok/config.toml` records `[cli] installer = "internal"`;
+  `~/.grok/downloads/grok-windows-x86_64.exe` is the downloaded binary.
+- Version-matched docs live at `~/.grok/README.md` and
+  `~/.grok/docs/user-guide/`. The implementation was checked against getting
+  started, project rules, headless mode, subagents, sessions, sandbox, plan
+  mode, and permissions/safety chapters plus live command help.
+- `skills/shared/grok-cli/SKILL.md` now documents executable discovery, local
+  doc routing, `grok inspect`, dynamic model discovery, a deny-based read-only
+  invocation, session resume, and isolated-worktree implementation.
+  `agents/openai.yaml` supplies the Codex UI metadata.
+- The map and inventory docs now list the new shared skill and machine-local
+  `~/.grok` state. The canonical skill was installed into both
+  `~/.claude/skills/grok-cli` and `~/.codex/skills/grok-cli`.
+- `grok doctor` reported zero issues. `grok inspect` proved this repository is
+  trusted and that project/global instructions are loaded. `grok models`
+  reported the available live model rather than the skill hard-coding one.
+- The skill validator and both Bash and PowerShell shared-skill installer suites
+  passed. Grok itself reviewed the skill against its bundled docs and returned
+  `PASS` with no factual correction.
+- The pre-existing modification to `templates/system/CLAUDE-global.md` belongs
+  to another workstream and was not edited or staged for this work.
+
+### 4. Everything tried that did not work
+
+1. The first read-only Grok review exceeded the two-minute process timeout and
+   was terminated without stdout. It had created session
+   `019f8f77-da68-75c1-8afb-a2bbed39822c` and made no repository change. Resuming
+   that exact session with a one-turn "return findings now" instruction produced
+   the complete `PASS` result in 27 seconds. This demonstrates why an exact
+   session ID is safer than retrying from scratch or using ambiguous
+   `--continue`.
+2. A Claude-only `~/.claude/skills/grok-cli` file already appeared on the
+   machine during investigation. It was not repository-owned, was absent from
+   Codex, and oversimplified permission-mode behavior. The canonical
+   `skills/shared/grok-cli` source replaced it through the normal dual-client
+   installer.
+3. Grok emitted a non-fatal automatic-worktree-GC warning that neither
+   `GROK_HOME` nor the process environment's `HOME` was set. PowerShell's
+   `$HOME` variable still resolved the actual install and all requested commands
+   succeeded. No global environment change was justified for this skill task.
+
+### 5. Root causes and key findings
+
+- Grok ships its complete, version-matched documentation locally. The skill
+  therefore directs agents to `~/.grok/docs/user-guide/` and live `--help`
+  instead of copying a large, quickly stale command reference.
+- Grok's OS sandbox guide lists Linux and macOS enforcement, not Windows.
+  A Windows read-only review must not claim protection from
+  `--sandbox read-only`; the tested command instead uses explicit
+  `--deny Edit --deny Bash`, disables subagents, memory, and web access, and
+  allows only read/search operations.
+- The headless `--permission-mode` parser accepts several compatibility values,
+  but the bundled permissions guide says only `default` and
+  `bypassPermissions` change policy through that CLI flag. The read-only recipe
+  uses `default` plus explicit denials rather than relying on `dontAsk`.
+- `--worktree=<name>` must use the equals form when paired with positional
+  prompting so the worktree option cannot swallow prompt text. Explicit
+  implementation defaults to this isolated path and still requires independent
+  diff and test verification.
+- `~/.grok/auth.json` contains credentials. The skill names it only as a file
+  never to read or print; no credential value entered the repository or chat.
+
+### 6. Exact next steps
+
+1. Commit and push the Grok skill and documentation changes on `main`, excluding
+   the unrelated `templates/system/CLAUDE-global.md` modification. **Gate:** the
+   pushed commit contains only `skills/shared/grok-cli`, the four documentation
+   files, and this handoff section.
+2. Roll out through the normal ai-devops installer on the remaining machines.
+   **Gate:** both Claude and Codex skill roots contain `grok-cli`; where the CLI
+   is installed, `grok --version`, `grok doctor`, and a harmless deny-based
+   read-only prompt succeed.
+3. If Grok flags change in a future release, read that machine's bundled
+   headless and permissions chapters before updating the shared skill. **Gate:**
+   the skill validator, both installer suites, and a Grok self-review pass.
+
+### 7. Constraints and gotchas
+
+- Never read, print, copy, sync, or commit `~/.grok/auth.json`.
+- Never hard-code a Grok model; run `grok models`.
+- Never use `--always-approve` for reviews. Use it only after explicit
+  implementation delegation, preferably inside a Grok-managed worktree.
+- Do not claim the Grok OS sandbox protects Windows.
+- Preserve other sessions' dirty files and verify every Grok-authored diff.
+- Grok may load both `AGENTS.md` and compatible Claude instruction files; use
+  `grok inspect` to see the effective set before delegation.
+
+### 8. Access and environment
+
+- Work occurred in `C:\repos\ai-devops`, repo `u2giants/ai-devops`, branch
+  `main`, using PowerShell 7 and Git for Windows Bash.
+- Grok Build 0.2.111 is authenticated with grok.com through its existing local
+  credential cache. No login, logout, credential rotation, 1Password access,
+  cloud resource, database, NAS, VPS, or production system was used.
+- Grok's home is `C:\Users\ahazan2\.grok`; repository-owned shared skills are
+  installed through `bin/ai-install-skills`.
+
+### 9. Open questions and risks
+
+- Grok's flags and permission behavior can change with updates; bundled docs and
+  live help remain the authority.
+- Windows lacks the documented kernel sandbox enforcement. Explicit permission
+  denials reduce the agent tool surface but are not an OS security boundary.
+- The source of the transient Claude-only Grok skill was not established. It is
+  no longer authoritative because the normal installer replaced it from Git.
+- Automatic worktree GC's missing-environment warning remains non-fatal and was
+  not expanded into a machine-configuration change without evidence of impact.
+
+### Grok skill handoff self-audit
+
+Passed on 2026-07-23. A developer with no chat context can identify the toolkit,
+the Grok install and docs, the requested outcome, exact implemented and
+installed state, the timed-out review and recovery, all safety findings,
+verification evidence, remaining rollout, access boundaries, and risks. Every
+next step has an observable gate, all unfamiliar paths and controls are
+explained, and no credential value is required.

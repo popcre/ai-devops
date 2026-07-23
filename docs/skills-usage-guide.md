@@ -90,6 +90,9 @@ quarantine after reviewing a `--dry-run`.
   `skills/shared/`. It is a skill/instruction package, not an MCP server or
   Ansible role; the dev-machine setup scripts install the skill and check whether
   the local `kimi` CLI is available.
+- `grok-cli` (xAI Grok Build discovery, documentation, and safe delegation) is
+  repo-owned under `skills/shared/`. The CLI, login, and version-matched docs
+  remain machine-local under `~/.grok/`.
 - The 7-stage pipeline (`skills/claude/ai-development-pipeline`,
   `templates/prompts/01–07`) is unchanged and complements these: these skills
   automate the *rituals around* coding sessions; the pipeline governs staged

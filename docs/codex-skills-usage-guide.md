@@ -52,6 +52,8 @@ file.
   ShareSync stalls using NAS state, logs, and SQLite evidence.
 - `kimi-code-delegation`: delegates scoped coding tasks to Kimi Code CLI in
   headless mode, using plan-then-execute prompts and local verification.
+- `grok-cli`: locates the installed Grok Build CLI, reads its version-matched
+  local docs, and delegates read-only reviews or explicitly authorized edits.
 
 The installer fails before copying when a shared skill name collides with a
 client-specific skill. It warns about the retired ShareSync skill without
