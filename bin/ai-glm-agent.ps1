@@ -13,10 +13,18 @@ $tokenFile = Join-Path $cfgDir "op-service-account"
 $mcpEnv = Join-Path $cfgDir "mcp.env"
 
 if ([string]::IsNullOrWhiteSpace($env:ZAI_API_KEY)) {
+    # Loud-failure guard against an infinite re-exec loop: if we have ALREADY
+    # re-exec'd under `op run` and ZAI_API_KEY is still empty, the reference in
+    # mcp.env resolved to an empty string (e.g. it points at a blank 1Password
+    # field — `op` returns "" with exit 0). Do NOT re-exec again; fail loudly.
+    if (-not [string]::IsNullOrWhiteSpace($env:AI_GLM_REEXEC)) {
+        throw "ZAI_API_KEY resolved EMPTY from $mcpEnv after 'op run'. The ZAI_API_KEY op:// reference points at a blank field; fix it in config/mcp.env.example."
+    }
     if (-not (Get-Command op -ErrorAction SilentlyContinue)) { throw "1Password CLI (op) is required." }
     if (-not (Test-Path -LiteralPath $tokenFile)) { throw "Missing 1Password service-account token file: $tokenFile" }
     if (-not (Test-Path -LiteralPath $mcpEnv)) { throw "Missing managed 1Password reference file: $mcpEnv" }
     $env:OP_SERVICE_ACCOUNT_TOKEN = (Get-Content -Raw -LiteralPath $tokenFile).Trim()
+    $env:AI_GLM_REEXEC = "1"
     $childArgs = @("run", "--env-file", $mcpEnv, "--", "pwsh", "-NoProfile", "-File", $PSCommandPath, "-Mode", $Mode, "-Model", $Model)
     if ($PromptFile) { $childArgs += @("-PromptFile", $PromptFile) }
     if ($Output) { $childArgs += @("-Output", $Output) }

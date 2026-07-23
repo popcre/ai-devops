@@ -39,10 +39,21 @@ case "$MODE" in review|implement) ;; *) echo "Error: --mode must be review or im
 [ -n "$MODEL" ] || { echo "Error: model cannot be empty." >&2; exit 2; }
 
 if [ -z "${ZAI_API_KEY:-}" ]; then
+  # Loud-failure guard against an infinite re-exec loop: if we have ALREADY
+  # re-exec'd under `op run` and ZAI_API_KEY is still empty, the reference in
+  # mcp.env resolved to an empty string (e.g. it points at a 1Password field
+  # that is blank — `op` returns "" with exit 0, a silent empty). Do NOT re-exec
+  # again; that spawns processes without bound. Fail loudly instead.
+  if [ -n "${AI_GLM_REEXEC:-}" ]; then
+    echo "Error: ZAI_API_KEY resolved EMPTY from $MCP_ENV after 'op run'." >&2
+    echo "       The ZAI_API_KEY op:// reference points at a blank field. Fix the" >&2
+    echo "       reference in config/mcp.env.example (use the field that holds the key)." >&2
+    exit 1
+  fi
   command -v op >/dev/null 2>&1 || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
   [ -s "$TOKEN_FILE" ] || { echo "Error: missing 1Password service-account token file: $TOKEN_FILE" >&2; exit 1; }
   [ -f "$MCP_ENV" ] || { echo "Error: missing managed 1Password reference file: $MCP_ENV" >&2; exit 1; }
-  export OP_SERVICE_ACCOUNT_TOKEN
+  export OP_SERVICE_ACCOUNT_TOKEN AI_GLM_REEXEC=1
   OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
   reexec=(run --env-file "$MCP_ENV" -- "$0" --mode "$MODE" --model "$MODEL")
   [ -n "$PROMPT_FILE" ] && reexec+=(--prompt-file "$PROMPT_FILE")
