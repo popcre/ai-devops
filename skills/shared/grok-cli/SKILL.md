@@ -60,6 +60,25 @@ Default to a read-only call for questions, planning, debugging, audits, and
 second opinions. Use implementation mode only when the user explicitly asks
 Grok to edit or implement.
 
+## Headless permission trap (the #1 delegation failure)
+
+In headless mode (`--single`/`-p`, `agent`), a tool call that would prompt is
+**cancelled and reported to the model — it never pauses for input**. So Grok's
+read-only context pass succeeds (reads/searches auto-approve), then the first
+repo/git command is cancelled and the run dies mid-task.
+
+Compounding trap: the `--permission-mode` flag only honors `bypassPermissions`
+and `default`. Passing `auto`, `dontAsk`, `acceptEdits`, or `plan` to that flag
+is **accepted but silently does nothing** — you fall back to `default`
+(prompt-for-everything), which in headless mode cancels every non-read-only call.
+`--permission-mode auto` is NOT a working way to grant tool execution.
+
+To let a headless run actually execute commands, use ONE of: narrow `--allow`
+rules (e.g. `--allow 'Bash(git *)'`), `--always-approve` (only for explicit
+implementation, ideally inside `--worktree`), or `defaultMode: "dontAsk"` in
+`.claude/settings.json` **plus** allow rules. See
+`~/.grok/docs/user-guide/22-permissions-and-safety.md` and `14-headless-mode.md`.
+
 ## Run a read-only review
 
 Use headless mode with explicit tool denials:
