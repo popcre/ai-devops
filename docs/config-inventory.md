@@ -188,6 +188,22 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
 
 ## Where secrets live (1Password `vibe_coding` — titles only)
 
+> **2026-07-22 account migration.** The 1Password service account moved from
+> `my.1password.com` to **`popcreations.1password.com`** (vault `vibe_coding`, new
+> vault id `pimcaogmxxzoafh7lsluj6uxkq`). The vault holds the same items but under
+> **new UUIDs**, so every UUID-pinned `op://vibe_coding/<UUID>/…` reference had to
+> be re-pointed. They are now **name-based** (`op://vibe_coding/<title>/<field>`)
+> everywhere the title allows — the migration-proof form — with a UUID kept only
+> where the title has parentheses (the Trigger management PAT), which `op` rejects
+> in a reference. Also fixed in the same pass: the GLM key lives in the item's
+> `api key` field, not `credential` (which resolves to 0 bytes — a silent-empty).
+> The live token is machine-local (`OP_SERVICE_ACCOUNT_TOKEN` env var / the
+> `op-service-account` file), not the vault; see `docs/onboarding-secrets.md`
+> "Rotating the bootstrap service-account token" and the
+> `op-account-migration-2026-07` memory. Gotcha: `op whoami` decodes the token
+> locally, so it can show a deleted SA while real calls 403 — prove write with a
+> real `op item create`/`delete`.
+
 For Phase 2, installers will pull these instead of embedding them. Relevant items
 that already exist in the vault:
 

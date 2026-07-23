@@ -323,10 +323,21 @@ plan, and obtain explicit approval. New values must enter 1Password first.
    SSH merely for convenience. **Gate:** authorized users connect using intended
    keys, compromised fingerprints are absent from `authorized_keys`, and no
    password guessing occurred.
-8. **Bootstrap exception.** Ask Albert for an explicit decision on the exposed
-   1Password service-account token. Do not rotate it under the ordinary wave
-   procedure. **Gate:** the decision, rationale, dependencies, and—if approved—
-   a separate recovery/runbook are documented before any change.
+8. **Bootstrap exception — DONE 2026-07-22.** Albert rotated the exposed
+   1Password service-account token, and the rotation **moved to a new 1Password
+   account** (`popcreations.1password.com`, off `my.1password.com`). Because the
+   vault items were re-created under new UUIDs, all UUID-pinned `op://` references
+   were re-pointed to name-based form (UUID kept only for the parenthesised
+   Trigger PAT), the GLM ref was fixed to the `api key` field, and the token was
+   re-synced into every machine-local store (`op-service-account` file, env var,
+   and the literal-token MCP configs) on al8960ofc; vault backup fields refreshed.
+   The new SA is read-write (Integration ID `OEO2NT4575H6XPSVHZE7AQXPZM`); an
+   earlier read-only token and a since-deleted SA caused a detour (see the
+   `op whoami`-decodes-locally gotcha). Runbook: `docs/onboarding-secrets.md`
+   "Rotating the bootstrap service-account token"; full record:
+   `op-account-migration-2026-07` memory + `docs/config-inventory.md`. Remaining:
+   other machines (916, 4837, Ubuntu servers) still hold the old-account token and
+   must be re-synced on next setup run / manually.
 9. **GitHub residue.** Continue GitHub Support sensitive-data removal requests
    for unreachable `u2giants/ai-devops` history and secret-bearing
    `u2giants/synology-monitor` history. **Gate:** Support confirms removal or

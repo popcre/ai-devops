@@ -23,7 +23,7 @@ managed `~/.config/ai-devops/mcp.env` copied from `config/mcp.env.example`:
 
 - `ZAI_GLM_MODEL=glm-5.2`
 - `ZAI_ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
-- `ZAI_API_KEY=op://vibe_coding/GLM z.ai API/credential`
+- `ZAI_API_KEY=op://vibe_coding/GLM z.ai API/api key`
 
 The last line is a 1Password reference, not a key. Do not put the resolved value
 in this repo or in Claude/Codex settings. The launcher refuses silent fallback

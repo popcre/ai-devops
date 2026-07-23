@@ -409,6 +409,24 @@ by those CLIs (`~/.claude`, `~/.codex`, `~/.config/gh`). The GLM Coding Plan key
 lives only in 1Password item `GLM z.ai API`; the repo distributes its `op://`
 reference and injects it only into an isolated `ai-glm-agent` child process.
 
+> ⚠️ **1Password account = `popcreations.1password.com` (since 2026-07-22).** The
+> scoped service account was migrated off `my.1password.com`; the `vibe_coding`
+> vault re-created every item under **new UUIDs**. All `op://` references are now
+> **name-based** (`op://vibe_coding/<title>/<field>`). Two deliberate UUID
+> exceptions remain — do **not** "fix" them to name-based: (1) the Trigger PAT
+> (parentheses in the title, which `op` rejects in a reference); (2) the
+> **recall-ai** ref in `bin/setup-machine.ps1` / `bin/setup-secrets.sh`, which is
+> passed **inline** through the mcp-remote launcher (a space in the ref breaks the
+> launcher's arg/`op read` parsing). Name-based is safe only for refs resolved via
+> `op run --env-file` (the mcp.env path). The GLM key is in the `api key` field,
+> not `credential` (empty →
+> silent-empty). Rotating the bootstrap `OP_SERVICE_ACCOUNT_TOKEN` does **not**
+> auto-propagate — update the machine-local token file/env var/embedded configs by
+> hand and restart the apps. `op whoami` decodes the token locally, so it can
+> report a **deleted** SA while real calls return `(403) Service Account Deleted` —
+> prove a token with a real `op item create`/`delete`, never `whoami`. Full detail:
+> `docs/onboarding-secrets.md`, `docs/config-inventory.md`.
+
 | Variable | Purpose | Stored where | Required in dev | Required in prod |
 |---|---|---|---|---|
 | `AI_DEVOPS_HOME` | Toolkit checkout path (`/worksp/ai-devops`) | `models.env`, `server.env` | yes | yes |

@@ -214,8 +214,53 @@ Ansible (Windows boxes, ad-hoc servers) are covered too.
 - **Never** write a real secret value into any repo or config file. Only `op://`
   references (`config/mcp.env.example`) or the single locked-down token file.
 - Add a new app placeholder by adding one line to `config/mcp.env.example`.
-- To rotate a token: change it in 1Password. Nothing else to do — every machine
-  picks it up on the next launch.
+- To rotate a **referenced** secret (anything an `op://` line points at — Supabase
+  PAT, MCP bearers, GLM key, …): change it in 1Password. Nothing else to do —
+  every machine picks it up on the next launch. This "nothing else to do" rule
+  applies **only** to referenced secrets, **not** to the bootstrap
+  service-account token itself (see below).
+
+## Rotating the bootstrap service-account token (the exception)
+
+The `OP_SERVICE_ACCOUNT_TOKEN` is the one credential that **cannot** come from
+1Password (chicken-and-egg), so rotating it does **not** auto-propagate. When it
+changes, every machine-local raw copy must be updated by hand:
+
+- the token file `%USERPROFILE%\.config\ai-devops\op-service-account` (Windows) /
+  `~/.config/ai-devops/op-service-account` (Ubuntu);
+- on machines still using the older literal-token model, the raw token embedded
+  in the `1password` MCP entry of `~/.claude/settings.json`, `~/.codex/config.toml`,
+  and `%APPDATA%\Claude\claude_desktop_config.json`;
+- the OS env var `OP_SERVICE_ACCOUNT_TOKEN` if a machine sets one (al8960ofc does);
+- the vault backup fields on item `vibe_coding-service-account`
+  (`op_service_account_token` **and** `credential`), which need a read-write SA.
+
+MCP processes cache the token at startup — **restart** Claude Code / Claude
+Desktop / Codex after updating.
+
+### If the rotation moves to a NEW 1Password account (2026-07-22)
+
+The service account was migrated from `my.1password.com` to
+`popcreations.1password.com` (vault `vibe_coding`, id `pimcaogmxxzoafh7lsluj6uxkq`).
+Two things bite here that a same-account rotation does not:
+
+- **Every UUID-pinned `op://vibe_coding/<UUID>/…` reference breaks** — the new
+  account re-created the items under new UUIDs. Fix: prefer **name-based**
+  references (`op://vibe_coding/<item title>/<field>`), which survive account
+  migrations. Name-based refs (even with spaces in the title *and* field label)
+  resolve fine via `op run --env-file` — verified. Keep a UUID **only** in two
+  cases: (a) the title contains parentheses, which `op` rejects in any reference
+  (`invalid character '('`) — e.g. the Trigger management PAT; (b) the ref is
+  passed **inline** through the mcp-remote launcher (`recall-ai` in
+  `bin/setup-machine.ps1` / `bin/setup-secrets.sh`), where a space would break the
+  launcher's argument / `op read` parsing.
+- **`op whoami` lies after a delete.** It decodes the token **locally**, so it
+  keeps showing a deleted service account's Integration ID while every real
+  server call returns `(403) Service Account Deleted`. Always prove the token
+  with a real `op item create` + `delete`, never `whoami`.
+
+The full re-pointing done in this migration (and the read-only-then-read-write
+SA saga) is recorded in the `op-account-migration-2026-07` memory.
 
 ## Known follow-ups (not done by this tooling)
 
