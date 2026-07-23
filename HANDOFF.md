@@ -1515,6 +1515,7 @@ assumptions about model names, permission flags, or Windows sandbox support.
 - The skill validator and both Bash and PowerShell shared-skill installer suites
   passed. Grok itself reviewed the skill against its bundled docs and returned
   `PASS` with no factual correction.
+- The feature is committed and pushed to `origin/main` as `f149c9e`.
 - The pre-existing modification to `templates/system/CLAUDE-global.md` belongs
   to another workstream and was not edited or staged for this work.
 
@@ -1560,15 +1561,11 @@ assumptions about model names, permission flags, or Windows sandbox support.
 
 ### 6. Exact next steps
 
-1. Commit and push the Grok skill and documentation changes on `main`, excluding
-   the unrelated `templates/system/CLAUDE-global.md` modification. **Gate:** the
-   pushed commit contains only `skills/shared/grok-cli`, the four documentation
-   files, and this handoff section.
-2. Roll out through the normal ai-devops installer on the remaining machines.
+1. Roll out through the normal ai-devops installer on the remaining machines.
    **Gate:** both Claude and Codex skill roots contain `grok-cli`; where the CLI
    is installed, `grok --version`, `grok doctor`, and a harmless deny-based
    read-only prompt succeed.
-3. If Grok flags change in a future release, read that machine's bundled
+2. If Grok flags change in a future release, read that machine's bundled
    headless and permissions chapters before updating the shared skill. **Gate:**
    the skill validator, both installer suites, and a Grok self-review pass.
 
