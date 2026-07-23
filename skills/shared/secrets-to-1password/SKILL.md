@@ -1,6 +1,6 @@
 ---
 name: secrets-to-1password
-description: Sweep a session for credentials and store them in the vibe_coding 1Password vault with a descriptive title, searchable tags, and notes detailed enough for a future AI session that has never seen the entry to find it and use it. Use whenever a secret, credential, token, API key, password, connection string, SSH key, or login needs saving, stashing, or backing up; whenever the user says "secrets sweep", "any secrets not in 1password?", "put this in 1Password", "save this key", "store these credentials"; whenever a credential appears mid-session that isn't stored yet; whenever you're about to write a secret into a .env, doc, or scratch file instead; and as the secrets step of wrap-up and session-docs-update. Also use when updating or correcting an existing 1Password entry.
+description: Store anything in the vibe_coding 1Password vault with a descriptive title, searchable tags, and notes detailed enough for a future AI session that has never seen the entry to find it, know what it is for, and use it without asking a single question. Use for EVERY create or update in the 1Password MCP (`note_create`, `password_create`, `item_edit`) — whether it is a secret (credential, token, API key, password, connection string, SSH key, login) or a plain non-secret information/config/reference note. Use whenever the user says "secrets sweep", "any secrets not in 1password?", "put this in 1Password", "save this key", "store these credentials", "add this note to the vault", "update that entry"; whenever a credential appears mid-session that isn't stored yet; whenever you're about to write a secret into a .env, doc, or scratch file instead; and as the secrets step of wrap-up and session-docs-update.
 ---
 
 # secrets-to-1password
@@ -18,9 +18,17 @@ database (production)` is findable and self-explanatory. `coolify-secrets`, with
 no tags and no notes, tells a future session nothing — it's a mystery blob
 someone has to open and reverse-engineer. Write the first kind.
 
-## Two ways in
+Shared by Claude and Codex/ChatGPT — the standard is identical in both. Claude
+loads this skill automatically on the triggers above; Codex auto-loads nothing,
+so read this file whenever a task will write to the 1Password MCP.
 
-This skill runs in either mode; the standard below is identical for both.
+## Three ways in
+
+This skill runs in any of these modes; the title/tags/notes standard below is
+identical for all three, and applies to **every** create or update you make
+through the MCP. If you are about to call `note_create`, `password_create`, or
+`item_edit`, you are in this skill — there is no "quick save" path that skips
+the standard.
 
 - **Sweep** (from `wrap-up`, `session-docs-update`, or "secrets sweep"): scan the
   session for any credential that appeared — pasted in chat, printed by a
@@ -30,6 +38,13 @@ This skill runs in either mode; the standard below is identical for both.
   silent — "no secrets found" is a real result; silence reads as a skipped step.
 - **Single entry** ("save this key"): you already have the one credential. Skip
   the scan and go straight to the rules.
+- **Information entry** ("add this to the vault"): a note with no secret in it at
+  all — a host layout, an account map, an endpoint list, "how service X is
+  wired". These earn exactly the same discipline. Non-secret does not mean
+  low-effort: an untitled, untagged, note-less info blob is just as useless to a
+  future session as a mystery credential. The only difference is that the
+  value-safety rules (3–5 below) have nothing to bite on, and every field can be
+  plaintext `text` rather than `concealed`.
 
 ## Hard rules
 
@@ -100,8 +115,9 @@ Good, from the vault:
 - `Supabase DB Direct URL - The Oracle (CURRENT PROD, theoracle, <removed-protected-project-ref>)`
 - `Designflow - Azure Graph client secret (AZURE_CLIENT_SECRET)`
 - `logo.dev publishable token - popcrm-web`
+- Info entry: `Hetz server layout - which apps run where (Coolify vs Ansible)`
 
-Bad: `backend-secrets`, `api key`, `token`, `new entry` — no app, no
+Bad: `backend-secrets`, `api key`, `token`, `notes`, `new entry` — no app, no
 environment, nothing to search on.
 
 Include the qualifier whenever more than one of a thing can exist: prod vs
@@ -117,7 +133,7 @@ angle lands on the entry:
 - **service**: `supabase`, `github`, `cloudflare`, `azure`, `trigger.dev`
 - **app/scope**: `popcrm`, `poppim`, `popdam`, `designflow`, `the-oracle`, `shared-db`, `hetz`
 - **environment**: `production`, `sandbox`, `preview`, `local-env`
-- **purpose**: `runtime-secrets`, `migrations`, `ci`, `github-actions`, `browser-test`, `api`, `read-only`, `ai-session`
+- **purpose**: `runtime-secrets`, `migrations`, `ci`, `github-actions`, `browser-test`, `api`, `read-only`, `reference`, `ai-session`
 
 Reuse existing vault tags rather than inventing synonyms — `item_list` shows
 what's already in use. A fresh tag nobody else uses helps no one find anything.
@@ -162,6 +178,11 @@ Each block earns its place:
   by exact title so the reader can jump straight there.
 - **Provenance** with an absolute date explains why it exists and how stale it
   might be. "Recently" or "last session" is meaningless to a stranger.
+
+For a **pure information entry**, use the same shape minus the concealed fields:
+what it is, the identifiers, what a future session would use it for, ownership,
+and provenance. The "use cases" block matters most here — an info note nobody can
+tell the purpose of is the fastest thing in the vault to rot.
 
 Put non-secret values in plaintext `text` fields (they're readable via
 `item_get` without `reveal`, so future sessions can orient without exposing

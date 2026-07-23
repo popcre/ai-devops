@@ -70,6 +70,22 @@ says `low` or `medium` before letting a run continue. If a task looks like it
 needs `high`, it doesn't — split the task, tighten the brief, or hand it back.
 Do not raise the dial.
 
+## No `terraform apply` against prod (hard rule — added 2026-07-22)
+
+**Never run `terraform apply`/`destroy` against a production Google Cloud project
+— above all `lithe-breaker-323913` — under Albert's personal gcloud credentials.**
+Albert does not use Terraform; the infra Terraform is his developer's. An AI
+session applying it with Albert's local `gcloud` auth silently reconciles prod to
+whatever the (possibly stale) config says. On 2026-07-20 exactly this disabled 4
+prod Cloud Build triggers (`popcre-core/item/sync/tracking-prod`).
+
+- `terraform plan` (read-only) is fine to inspect drift. **`apply`/`destroy`
+  against prod needs Albert's explicit, per-run confirmation** — never unprompted,
+  never as a side effect of another task. If a task seems to need it, stop and ask.
+- A Cloud Monitoring alert (`PROD Cloud Build trigger DISABLED` in
+  `lithe-breaker-323913`) emails Albert whenever any `*-prod` trigger is set
+  `disabled=true`. Do not delete it.
+
 ## Engineering standards
 
 10. **No band-aids. Ever.** Root-cause, permanent, fewest-moving-parts fixes
