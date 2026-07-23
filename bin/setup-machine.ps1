@@ -289,7 +289,7 @@ $McpServers["synology-monitor"] = @{
 $McpServers["recall-ai"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
-           "op://vibe_coding/6dqxnqdx2nwcuyeppvsb6nvkoq/password",
+           "op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password",
            "--transport", "http-first")
 }
 
