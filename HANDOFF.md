@@ -50,6 +50,47 @@ PyYAML; and `git diff --check` plus secret-pattern scans passed in both repos.
 assertions ran. This proves source structure, not clean-machine integration or
 second-run idempotency.
 
+### 3b. In-flight (2026-07-23): 1Password MCP rate-limit hardening — NOT yet committed
+
+A separate, mostly-complete workstream that makes section 3's "committed and
+pushed" claim **stale**: `ai-devops` now has **uncommitted** changes.
+
+**Background/goal:** the shared 1Password service account was locked out by a
+"parallel initialization storm" — the deployed MCP launcher re-resolved ~11
+`op://` refs on every MCP-server start, ×every window/server/subagent ×5 machines,
+overrunning the per-hour cap. Goal: cap 1Password to ≤1 refresh/15 min/machine
+without new always-on infrastructure. Full detail (fresh-developer grade):
+[docs/mcp-1password-rate-limit-hardening.md](docs/mcp-1password-rate-limit-hardening.md).
+
+**Current state — done + verified on t16 only:**
+- `bin/mcp-secret-launch.ps1` (modified): single-flight mutex + 15-min DPAPI
+  cache; `$CommandArgs` now `[Parameter(Position = 0, ValueFromRemainingArguments)]`.
+- `bin/setup-machine.ps1` (modified): generated launchers drop the `--` separator;
+  new step calls the Codex fix.
+- `bin/configure-codex-1password.ps1` (new, untracked): routes Codex's
+  `config.toml` 1Password block through the launcher, removes its plaintext token,
+  preserves `.tools.*` guards.
+- t16: caching launcher deployed, launcher `--`/positional bug fixed, cold/warm
+  cache behavior verified (warm launch = 0 op calls), Codex block token-free.
+
+**Exact next actions (in order):**
+1. Commit the 3 files above + the doc/AGENTS/config-inventory/memory updates, and
+   push to `main` (repo rule: `@users.noreply.github.com` email; commit only when
+   Albert asks — he has not yet).
+2. On **each other machine** (916, 4837, both dflow boxes, any Ubuntu): `git pull`
+   ai-devops, then re-run `bin/setup-machine.ps1` to replace the storming
+   2026-07-17 launcher. The on-disk `.cmd` lags the repo until this is run.
+3. Verify per machine with the cold/warm cache check in the doc's "Verifying"
+   section (warm-launch cache mtime must be unchanged).
+
+**Do not regress:** never restore a per-launch `op run --env-file`; keep
+`Position = 0`; keep the launchers passing `%*` with no `--`.
+
+**Secondary / not done:** remove the two network-backed resources from the
+`@u2giants/1password-mcp` fork + add loud 429 handling (defense-in-depth, not the
+primary fix); strip the still-inline `trigger`/`recall-ai` plaintext tokens from
+`~/.codex/config.toml` via the same launcher pattern.
+
 ### 4. What did not work and why
 
 - WinRM HTTPS was initially configured. Literal IP listener addresses are

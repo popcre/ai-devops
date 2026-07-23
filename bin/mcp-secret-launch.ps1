@@ -3,7 +3,13 @@ param(
   [ValidateSet('Stdio','Remote','Capture')][string]$Mode = 'Stdio',
   [string]$Url = '',
   [string]$SecretRef = '',
-  [Parameter(ValueFromRemainingArguments = $true)][string[]]$CommandArgs
+  # Position=0 is load-bearing: it makes CommandArgs the ONLY positional param,
+  # which forces -Url/-SecretRef to bind by NAME only. Without it, a Stdio child
+  # like `cmd /c npx ...` has its leading `cmd` and `/c` silently swallowed into
+  # -Url/-SecretRef (positional), and the launcher then runs `npx` bare instead of
+  # through cmd. It also lets the .cmd callers drop the `--` separator, which
+  # PowerShell's `-File` mode mis-parses as an empty/ambiguous parameter name.
+  [Parameter(Position = 0, ValueFromRemainingArguments = $true)][string[]]$CommandArgs
 )
 
 $ErrorActionPreference = 'Stop'

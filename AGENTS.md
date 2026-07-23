@@ -400,6 +400,32 @@ Do not change because:
 Letting a review stage edit code would collapse the safety gate the workflow
 exists to provide.
 
+### The MCP secret launcher caches; it must not re-resolve per launch
+
+Looks like:
+`~/.config/ai-devops/mcp-launch.cmd` just runs an MCP server with secrets.
+
+Actually:
+It calls `bin/mcp-secret-launch.ps1`, which resolves all `mcp.env` `op://`
+references **once** behind a machine-wide mutex and reuses a 15-minute
+DPAPI-encrypted cache (`mcp-secrets.dpapi.json`). It does **not** run
+`op run --env-file` on every launch. `$CommandArgs` is declared
+`[Parameter(Position = 0, ValueFromRemainingArguments = $true)]`, and the
+generated `.cmd` files pass `%*` with **no `--` separator**.
+
+Why:
+5 machines share one 1Password service account with a per-hour request cap. A
+per-launch `op run` resolving ~11 refs × every window/server/subagent overran the
+cap and locked the account (see the 2026-07-23 incident). The cache makes it
+≤1 refresh / 15 min / machine. `Position = 0` forces `-Url`/`-SecretRef` to bind
+by name only so a Stdio child's leading `cmd /c` is not swallowed; `--` is omitted
+because `pwsh -File` mis-parses it as an empty parameter name.
+
+Do not change because:
+Re-introducing a per-launch `op run`, removing `Position = 0`, or re-adding `--`
+each independently reproduces a real outage. Full detail:
+[docs/mcp-1password-rate-limit-hardening.md](docs/mcp-1password-rate-limit-hardening.md).
+
 ## Credentials and environment
 
 No secrets live in this repo. The variables below are **non-secret** command
@@ -557,6 +583,50 @@ rejected by GitHub's email-privacy protection because the commit used a private
 `@gmail.com` address. Resolved by setting the repo-local git email to the
 `@users.noreply.github.com` form. Future commits should keep using the noreply
 email.)_
+
+### 2026-07-23 — 1Password service account locked out by a "parallel initialization storm"
+
+**Impact:** the shared 1Password **service account** (one account across all 5
+machines) hit its **per-hour request cap** and temporarily locked, cutting off
+1Password secret access for every AI surface.
+
+**Root cause:** the deployed MCP secret launcher (`~/.config/ai-devops/mcp-launch.cmd`,
+2026-07-17 version) wrapped every server in `op run --env-file=mcp.env`, which
+**re-resolved all ~11 `op://` references on every MCP-server start** — whether or
+not that server needed them. Claude Code boots ~2 wrapped servers (~22 reads),
+Claude Desktop ~3 (~33 reads), per window open/reload, ×5 machines sharing one
+account, into a rolling 60-minute window. Parallel subagents from one session
+compounded it. The limit is **total requests/hour, not concurrency** — so a mutex
+alone is the wrong tool, and a shared HTTP broker was rejected (no new moving
+parts across 5 machines).
+
+**Fix (all in this repo):** `bin/mcp-secret-launch.ps1` resolves all secrets
+**once** behind a machine-wide mutex (`Local\ai-devops-1password-refresh`) and
+reuses a **15-minute DPAPI-encrypted cache** (`mcp-secrets.dpapi.json`), so
+1Password is hit **≤1 refresh / 15 min / machine** no matter how many
+windows/servers/subagents launch (~44 reads/hr/machine worst case). Also folded
+**Codex** (`~/.codex/config.toml`) into the same launcher via
+`bin/configure-codex-1password.ps1`, removing its inline plaintext token.
+Deployed + verified on t16; **still to roll out on the other machines** and
+**commit/push**. Full detail: [docs/mcp-1password-rate-limit-hardening.md](docs/mcp-1password-rate-limit-hardening.md).
+
+**Trap fixed along the way:** the caching launcher had been committed but never
+deployed, hiding a bug. `pwsh -File script -- %*` mis-parses `--` as an empty
+parameter name, and even without `--` the child's leading `cmd /c` bound
+positionally to `-Url`/`-SecretRef` and was silently dropped. Fixed by declaring
+`$CommandArgs` as `[Parameter(Position = 0, ValueFromRemainingArguments = $true)]`
+(makes it the only positional, forcing `-Url`/`-SecretRef` to name-only) and
+removing `--` from both generated launchers. **Do not re-add `--` or remove
+`Position = 0`.**
+
+**Lessons worth keeping:**
+1. **A committed fix that was never deployed is not a fix.** The caching launcher
+   existed in the repo for days while every machine still ran the storming
+   2026-07-17 launcher. Verify the artifact on disk, not just the repo.
+2. **Rate limits are per-time-window totals.** Reach for "resolve once, reuse"
+   (cache), not concurrency limits, when the cap is requests/hour.
+3. **The config/launch layer, not the server, was the primary lever** — confirmed
+   by an independent Codex review.
 
 ## Pending work
 

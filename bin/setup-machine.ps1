@@ -216,7 +216,9 @@ Step "MCP launcher -> $Launcher"
 $launcherBody = @"
 @echo off
 rem [ai-devops] one single-flight 1Password refresh, then DPAPI cache reuse.
-pwsh -NoProfile -File "$SecretLauncher" -Mode Stdio -- %*
+rem No `--` before %*: PowerShell -File mis-parses it as an empty parameter name.
+rem CommandArgs (Position=0) in mcp-secret-launch.ps1 captures the whole child line.
+pwsh -NoProfile -File "$SecretLauncher" -Mode Stdio %*
 "@
 Set-Content -Path $Launcher -Value $launcherBody -Encoding ascii
 Ok "Wrote $Launcher"
@@ -233,7 +235,9 @@ Ok "Wrote $Launcher"
 #          the previous two-argument form).
 $remoteBody = @"
 @echo off
-pwsh -NoProfile -File "$SecretLauncher" -Mode Remote -Url %1 -SecretRef %2 -- %3 %4 %5 %6 %7 %8 %9
+rem No `--`: PowerShell -File mis-parses it. -Url/-SecretRef bind by name; any
+rem extra mcp-remote flags (%3+) are captured by CommandArgs (Position=0).
+pwsh -NoProfile -File "$SecretLauncher" -Mode Remote -Url %1 -SecretRef %2 %3 %4 %5 %6 %7 %8 %9
 "@
 Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
@@ -603,6 +607,22 @@ if (Test-Path $gitBash) {
   else { Warn "Could not create the scheduled task; run '$syncScript' from Git bash to sync manually." }
 } else {
   Warn "Git bash not found (install Git) — memory sync not scheduled."
+}
+
+# --------------------------------------------------------------------------
+# 6c. Codex's OWN config (~/.codex/config.toml) — route 1Password through the
+# shared caching launcher, so Codex shares the one single-flight refresh + DPAPI
+# cache and carries NO plaintext service-account token. Codex reads its own file,
+# which the Claude consumers above never touch; without this step the 1password
+# block drifts back to a direct `npx` + inline token — outside the cache and a
+# contributor to the per-hour rate-limit lockout. Idempotent; safe if Codex absent.
+# --------------------------------------------------------------------------
+Step "Routing Codex 1Password MCP through the caching launcher"
+$codexFix = Join-Path $RepoPath "bin\configure-codex-1password.ps1"
+if (Test-Path -LiteralPath $codexFix) {
+  & pwsh -NoProfile -File $codexFix -Launcher $Launcher
+} else {
+  Warn "Missing $codexFix — Codex 1password left as-is."
 }
 
 # --------------------------------------------------------------------------
