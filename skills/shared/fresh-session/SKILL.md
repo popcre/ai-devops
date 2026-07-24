@@ -88,3 +88,11 @@ State the decision (fresh session / continue) with the one-line reason. If fresh
 confirm the whole-plan scope passed, the reciprocal instruction is present, and
 `handoff-writer`'s self-audit passed — then give Albert the exact next-session
 starting prompt.
+
+## Related
+
+- `handoff-writer` — produces/judges the actual handoff document this skill
+  delegates to (Step 4).
+- `close-old-session` — the backward-looking counterpart: when *resuming* a
+  stale session, it reconciles pending work against ground truth before acting.
+  This skill is the forward-looking half (cutting over cleanly).

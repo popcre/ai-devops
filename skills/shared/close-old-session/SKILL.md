@@ -96,3 +96,11 @@ Give Albert a short reconciled report, not a narration of git internals:
 
 The whole point: he should never have to wonder whether resuming this old chat
 quietly clobbered newer work. You already checked, and you say so.
+
+## Related
+
+- `session-docs-update` / `wrap-up` / `dflow-ship` — this skill reconciles first,
+  then hands the actual doc/ship work to these.
+- `fresh-session` — the forward-looking counterpart: when *leaving* a session
+  mid-plan, it decides whether to cut over to a clean context window and grades
+  the handoff. This skill is the backward-looking half (safely picking one up).
