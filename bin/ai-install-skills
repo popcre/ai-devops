@@ -16,8 +16,27 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+
+# On Windows (Git Bash / MSYS) $HOME can be redirected to a mapped network
+# drive (e.g. Z:) via a HOME env var or a roaming profile. That is NOT where
+# Claude Code or Codex read their config — those apps use the Windows user
+# profile (%USERPROFILE% = C:\Users\<you>). Installing under $HOME there puts
+# skills on a network share the apps never look at, and silently skips Codex.
+# So when USERPROFILE is set (Windows only; unset on Linux/macOS), base the
+# install on it instead of $HOME. Explicit CLAUDE_HOME/CODEX_HOME still win.
+BASE_HOME="$HOME"
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+  if [[ "$BASE_HOME" != "$HOME" ]]; then
+    echo "NOTE: \$HOME is $HOME but Windows profile is $BASE_HOME — installing to the profile (where Claude/Codex actually read)." >&2
+  fi
+fi
+CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
+CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 DRY_RUN=false
 MIGRATE_OBSOLETE=false
 
