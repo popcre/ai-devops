@@ -67,13 +67,20 @@ anything it did or learned that affects a later phase. If that instruction is
 missing from the spec, add it. (Authoring of this rule lives in the plan step;
 here you verify it survived into the spec being handed over.)
 
-## Step 4 — Delegate the document to `handoff-writer`
+## Step 4 — Delegate the document to the handoff standard
 
-Invoke the `handoff-writer` skill to produce or judge the actual handoff. Do NOT
-re-implement its 9-section structure, checklist, or self-audit gate — pass it the
-widened scope from Steps 2–3 (whole-plan, plus the reciprocal-instruction
-requirement) and let it grade against its fixed bar. The answer to "is it
-comprehensive?" must be a truthful **Yes** before cutover, per that skill.
+Do NOT re-implement the handoff structure, checklist, or self-audit gate here —
+delegate to the canonical standard and pass it the widened scope from Steps 2–3
+(whole-plan, plus the reciprocal-instruction requirement):
+
+- **In Claude:** invoke the `handoff-writer` skill.
+- **In Codex (or if `handoff-writer` isn't installed):** apply the canonical
+  cross-tool standard at `templates/system/handoff-standard.md` in the
+  `ai-devops` repo — the same 9 sections + self-audit gate `handoff-writer`
+  wraps.
+
+Either way, the answer to "is it comprehensive?" must be a truthful **Yes**
+before cutover.
 
 ## Output
 
