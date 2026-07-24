@@ -21,6 +21,17 @@ notes; it does not repeat AGENTS.md.
 - Model roles: Opus 4.8 (high reasoning) plans + final-reviews; Opus reviews the
   gates; Codex/GPT-5.5 implements + tests. **Do not mention or use Fable.**
 
+## New skills go in `skills/shared/` by default (installs to BOTH Claude and Codex)
+
+- `bin/ai-install-skills` routes by folder: `skills/claude/` → Claude only,
+  `skills/codex/` → Codex only, `skills/shared/` → **both**. So **every new skill
+  is authored in `skills/shared/` unless it is genuinely client-specific** (uses
+  a tool only one client has, or drives the other client — e.g. `codex-handoff`).
+  Do not put a general skill in `skills/claude/` and force Albert to ask for it in
+  Codex later. Default = shared, no exceptions unless you can name the
+  client-specific reason. A name may live in `shared/` OR a client tree, never
+  both (the installer fails closed on the collision).
+
 ## Commits
 
 - Commit only when asked.
