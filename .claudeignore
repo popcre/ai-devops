@@ -20,6 +20,9 @@ codex_chats/
 .ai/tmp/
 .ai/reviews/
 
+# Playwright MCP scratch output (page snapshots), generated during a session.
+.playwright-mcp/
+
 # Real machine-local config (lives in /etc/ai-devops, never committed).
 # Only *.env.example belongs in git.
 *.env
