@@ -51,6 +51,10 @@ Then, per stage (prompts live in the toolkit's `templates/prompts/`):
 
 ## Guardrails
 
+- **Phased plans:** each phase spec must end with an instruction telling the
+  implementing agent to, when the phase finishes, re-read all downstream phases
+  (to plan-end) and report any drift it introduced or discovered. This is the
+  authoring side of the `fresh-session` skill's Step 3 check.
 - Feature branch only; never work on `main`/`master`.
 - Planning/review stages are read-only.
 - Implementation makes the smallest safe change and adds/updates tests.
