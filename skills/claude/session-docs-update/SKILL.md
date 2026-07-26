@@ -25,6 +25,7 @@ recovered verbatim from his transcripts). Summary of the file-role table:
 |---|---|
 | `AGENTS.md` | Only high-signal guidance future sessions must see fast: new quirks, critical warnings, task routing, identifiers, "do not repeat this mistake" notes |
 | `HANDOFF.md` | Only if work is unfinished/blocked/partially deployed. Delete it when the work it describes is truly complete |
+| **Any plan file** (`IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`) the session did work against | **Always — see the plan-file gate below.** A plan describes the world as it was when written; every step you execute makes it lie a little more |
 | `docs/<topic>.md` | Topic detail for the affected area |
 | `README.md` | Only if quick-start or top-level orientation changed |
 | `CLAUDE.md` | Only Claude Code-specific workflow rules; general guidance goes in AGENTS.md |
@@ -33,6 +34,50 @@ Hard rules:
 - Derive every update from code, config, migrations, or verified session findings. Never document guesses as facts.
 - Never add secrets, tokens, passwords, or credential values.
 - If nothing needs updating, say so explicitly — do not invent updates.
+
+## Mandatory plan-file gate (a plan you worked against MUST NOT be left stale)
+
+**Trigger:** the session executed, partially executed, or invalidated any part of a
+plan file — `IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`, or any file whose job is to
+tell a future session what to build. Find them: `ls` the repo root and `docs/` for
+`*PLAN*.md` / `plan_*.md`. If one exists and you touched its subject matter, this
+gate applies even when the user did not mention the plan.
+
+**Why this is mandatory.** A plan is written in the present tense about a world that
+your work then changes. Left alone it becomes an actively harmful document: the next
+session reads "these skill files carry false claims" or "AGENTS.md still says open",
+believes it, and **redoes finished work or re-fixes a fixed bug**. This happened in
+this repo on 2026-07-26 — steps 1–4 of `plan_phase3-config-consolidation.md` were
+executed and its §5 "current state" table still described the pre-fix world. It was
+caught only because Albert asked the right question. Do not rely on that.
+
+**Do all five:**
+
+1. **STATUS table at the very top of the plan** — one row per step, each marked
+   ✅ done / 🟡 partial / ⬜ open, dated, plus one line naming **where a fresh session
+   should start**. Create the table if the plan lacks one.
+2. **De-stale the descriptive sections.** Anything that says a file/system is in a
+   state your work changed must be corrected — especially the "current state of the
+   code" section, which is exactly what an implementer trusts. Mark the row
+   ✅ FIXED/UPDATED `<date>` and say **"do not redo"** where that applies.
+3. **Keep the reasoning, delete only the falsehood.** The *why* behind a step (what
+   broke, what it cost, why the fix must not be weakened) stays — relabel it as
+   history rather than deleting it. A future session that loses the why will
+   cheerfully undo the fix.
+4. **Mark verification that already ran** (test IDs, gates) as passed with the
+   evidence, so nobody re-runs a proven check or, worse, assumes it never ran.
+5. **Record what is still open and what it is blocked on** — approval needed, a
+   machine that is powered off, a decision the owner owes you. "Open" with no reason
+   reads as "nobody got to it".
+
+**Then make it discoverable, so nobody has to memorize a path.** A plan only findable
+by its filename is a plan that will be lost. Link it from `AGENTS.md` (the router),
+from `HANDOFF.md` if one exists, from the topic doc it belongs to, and from any skill
+whose trigger would lead someone to it. Add a memory entry naming the plan and saying
+"read its STATUS table first — do not re-derive or re-plan".
+
+**Delete a plan file only when every step is genuinely done** — same rule as
+`HANDOFF.md`. If it is finished, say so in the final report and remove it.
 
 ## Mandatory HANDOFF.md completeness gate
 
@@ -84,3 +129,6 @@ repo. See DOC-SPEC.md for the required shared-db documentation shape.
 End with the report format from DOC-SPEC.md: a Documentation Updates table,
 Handoff status (HANDOFF.md present/absent + reason), and Verification summary.
 When `HANDOFF.md` is present, state that the mandatory completeness gate passed.
+When a plan file exists, state its updated STATUS line — which steps are now done,
+where the next session starts, and what is blocked on whom — or say explicitly that
+no plan file was touched.

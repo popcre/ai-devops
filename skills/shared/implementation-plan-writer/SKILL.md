@@ -182,6 +182,22 @@ When asked whether the plan is comprehensive/detailed enough:
 - When work has already happened, the plan complements — not replaces —
   `HANDOFF.md`; cross-link the two so neither is read alone.
 - Delete/complete the plan file only when the work it describes is truly done.
+- **Put a STATUS table at the top from day one** — one row per step (done / partial /
+  open, dated) plus a line naming where a fresh session starts. On a brand-new plan
+  every row is `⬜ open`; that is fine. It exists so the first thing any reader sees
+  is what is still true.
+- **A plan goes stale the moment someone executes part of it.** Whoever does the work
+  owns updating it — the `session-docs-update` / `codex-docs-update` skills carry a
+  **mandatory plan-file gate** for exactly this (de-stale the "current state" section,
+  keep the reasoning as history, mark passed verification, record what is blocked and
+  on whom). Real failure it prevents: on 2026-07-26 four steps of
+  `plan_phase3-config-consolidation.md` were executed while its current-state section
+  still described the pre-fix world, which would have made the next session redo
+  finished work.
+- **Make it discoverable, not memorable.** Nobody will remember `plan_<topic>.md`
+  three months on. Link it from `AGENTS.md` (the router), `HANDOFF.md`, the topic doc,
+  and any skill whose trigger leads there; add a memory entry saying "read its STATUS
+  table first — do not re-derive or re-plan".
 
 ---
 
