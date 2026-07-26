@@ -58,6 +58,11 @@ canonical() {
     mapped="$(awk -F'\t' -v s="$slug" '!/^#/ && $1==s {print $2; exit}' "$MAP_FILE")"
     if [[ -n "$mapped" ]]; then echo "$mapped"; return; fi
   fi
+  # Linux checkouts live under /worksp, whose slug is "-worksp-<name>". Without
+  # this the Windows box stores "monitor" and hetz stores "-worksp-monitor" —
+  # two keys for one project, neither machine ever seeing the other's memory.
+  # (That is exactly how 87 files ended up stranded before 2026-07-26.)
+  if [[ "$slug" == -worksp-* ]]; then echo "${slug#-worksp-}"; return; fi
   # default heuristic: drop everything up to and including the last "repos-"
   if [[ "$slug" == *repos-* ]]; then echo "${slug##*repos-}"; else echo "$slug"; fi
 }
