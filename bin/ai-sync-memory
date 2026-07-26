@@ -49,7 +49,11 @@ MAP_FILE="$MEM_REPO/project-map.tsv"
 
 run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
 
-usage() { echo "usage: ai-sync-memory {push|pull} [--dry-run]" >&2; exit 2; }
+usage() {
+  echo "usage: ai-sync-memory {push|pull} [--dry-run]" >&2
+  echo "       ai-sync-memory forget <project> <file.md> \"<reason>\"" >&2
+  exit 2
+}
 
 # Canonical project key for a per-machine slug.
 canonical() {
@@ -67,6 +71,40 @@ canonical() {
   if [[ "$slug" == *repos-* ]]; then echo "${slug##*repos-}"; else echo "$slug"; fi
 }
 
+# --- Tombstones ------------------------------------------------------------
+# Sync is copy-over, not mirror: `cp` never deletes. So deleting a memory file
+# that turned out to be WRONG did not propagate — the next pull restored it from
+# the hub, and any machine still holding it re-pushed it. A wrong memory was
+# effectively immortal, which directly defeats the standing instruction to
+# delete memories that turn out to be wrong.
+#
+# A tombstone records the deletion instead of relying on absence (absence is
+# indistinguishable from "this machine hasn't synced yet"). Each project may
+# carry a `.forgotten` file:
+#     <filename><TAB><YYYY-MM-DD><TAB><reason>
+# push: never re-adds a tombstoned file, and unions the machine's tombstones
+#       with the hub's so a deletion recorded anywhere reaches the hub.
+# pull: deletes tombstoned files from the machine, so the removal propagates.
+FORGET_NAME=".forgotten"
+
+# Names listed in a project's tombstone file (comments/blank lines ignored).
+tombstoned_names() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  awk -F'\t' '!/^#/ && NF && $1 != "" {print $1}' "$f"
+}
+
+# Delete tombstoned files from a directory.
+apply_tombstones() {
+  local dir="$1" forget="$2" label="$3" name
+  [[ -f "$forget" ]] || return 0
+  while IFS= read -r name; do
+    [[ -n "$name" && -e "$dir/$name" ]] || continue
+    run rm -f "$dir/$name"
+    echo "  forget  $label/$name  (tombstoned)"
+  done < <(tombstoned_names "$forget")
+}
+
 case "$DIRECTION" in
   push)
     run mkdir -p "$MEM_REPO"
@@ -77,7 +115,30 @@ case "$DIRECTION" in
       proj="$(canonical "$slug")"
       dest="$MEM_REPO/$proj"
       run mkdir -p "$dest"
+      # Union the two tombstone lists BEFORE copying, so neither side loses a
+      # deletion: the machine may have forgotten something the hub hasn't, and
+      # a stale machine must not overwrite the hub's newer list.
+      if [[ -f "$md/$FORGET_NAME" || -f "$dest/$FORGET_NAME" ]] && [[ "$DRY_RUN" != "--dry-run" ]]; then
+        # `cat` exits non-zero when only one side exists, and `set -o pipefail`
+        # would abort the pipeline mid-way and strand a .tmp file — so tolerate
+        # the missing file explicitly rather than chaining on success.
+        { cat "$dest/$FORGET_NAME" 2>/dev/null; cat "$md/$FORGET_NAME" 2>/dev/null; } \
+          | awk 'NF && !seen[$0]++' > "$dest/$FORGET_NAME.tmp" || true
+        mv -f "$dest/$FORGET_NAME.tmp" "$dest/$FORGET_NAME"
+      fi
       run cp -a "$md/." "$dest/"
+      # Re-apply after the copy: the machine may still hold a file the hub has
+      # tombstoned, and cp would have silently resurrected it in the hub.
+      apply_tombstones "$dest" "$dest/$FORGET_NAME" "memory/$proj"
+      # A file in the hub but not on this machine is EITHER a deletion nobody
+      # recorded, OR memory from another machine this one has never pulled.
+      # Those are indistinguishable, so never delete — surface it and let a
+      # human decide, via `ai-sync-memory forget`.
+      while IFS= read -r rf; do
+        base="$(basename "$rf")"
+        [[ "$base" == "$FORGET_NAME" ]] && continue
+        [[ -e "$md/$base" ]] || echo "  note    memory/$proj/$base is in the hub but not on this machine (deleted here, or never pulled) — 'ai-sync-memory forget $proj $base \"why\"' to propagate a deletion"
+      done < <(find "$dest" -maxdepth 1 -type f 2>/dev/null)
       echo "  push  $slug  ->  memory/$proj"
       n=$((n+1))
     done
@@ -105,6 +166,9 @@ case "$DIRECTION" in
         if [[ "$(canonical "$slug")" == "$proj" ]]; then
           run mkdir -p "$md"
           run cp -a "$pd." "$md/"
+          # This is what makes a deletion actually propagate: the hub's
+          # tombstones remove the file from this machine too.
+          apply_tombstones "$md" "$md/$FORGET_NAME" "$slug"
           echo "  pull  memory/$proj  ->  $slug"
           matched=1
         fi
@@ -121,6 +185,24 @@ case "$DIRECTION" in
       echo "[FAIL] Memory did NOT sync. Do not report this sync as successful." >&2
       exit 1
     fi
+    ;;
+  forget)
+    # ai-sync-memory forget <project> <file> "<reason>"
+    # Records a deletion so it propagates, instead of a bare `rm` that the next
+    # sync silently undoes.
+    proj="${2:-}"; file="${3:-}"; reason="${4:-}"
+    [[ -n "$proj" && -n "$file" ]] || {
+      echo "usage: ai-sync-memory forget <project> <file.md> \"<reason>\"" >&2; exit 2; }
+    dest="$MEM_REPO/$proj"
+    [[ -d "$dest" ]] || { echo "No such project in the hub: memory/$proj" >&2; exit 1; }
+    [[ -n "$reason" ]] || {
+      echo "Refusing to forget without a reason — a future session needs to know WHY" >&2
+      echo "this memory was wrong, or it gets re-learned and re-added." >&2; exit 2; }
+    # Date comes from the OS; memories record absolute dates, never "today".
+    printf '%s\t%s\t%s\n' "$file" "$(date +%Y-%m-%d)" "$reason" >> "$dest/$FORGET_NAME"
+    [[ -e "$dest/$file" ]] && rm -f "$dest/$file" && echo "  removed memory/$proj/$file from the hub"
+    echo "  tombstoned $file in memory/$proj — every machine drops it on its next pull."
+    echo "  Remember to remove its line from memory/$proj/MEMORY.md, then commit+push ai-devops."
     ;;
   *) usage ;;
 esac
