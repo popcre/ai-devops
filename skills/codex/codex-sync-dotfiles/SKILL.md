@@ -6,10 +6,17 @@ description: Sync this machine's AI config with the ai-devops hub (Codex edition
 # codex-sync-dotfiles
 
 Codex twin of the Claude `sync-dotfiles` skill. Keeps this machine's AI config in
-step with the `ai-devops` hub (GitHub `u2giants/ai-devops`). **Phase 1** of the
-consolidation plan (`ai-devops/docs/config-consolidation-proposal.md`): skills,
-global instructions, memory, gcloud. SSH + MCP remain the Dropbox scripts until
-Phase 2 — do not claim otherwise.
+step with the `ai-devops` hub (GitHub `u2giants/ai-devops`): skills, global
+instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
+`ai-devops/docs/config-consolidation-proposal.md`, shipped 2026-07-14).
+
+> **This skill must bring the machine to FULL current state, or say loudly what is
+> missing.** Until 2026-07-26 it did neither: it covered only skills + memory +
+> gcloud while claiming SSH/MCP "remain the Dropbox scripts", so a machine that had
+> only ever been synced kept **plaintext 1Password tokens inside its MCP config
+> files** and the pre-fix "storming" launcher that rate-limit-locked the shared
+> service account — and was told it was synced. Step 2 exists to make that
+> impossible. Never report success while Phase 2 wiring is absent.
 
 ## Trigger phrases
 - "sync my dotfiles" / "sync my config"
@@ -23,7 +30,8 @@ Phase 2 — do not claim otherwise.
 | Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine (never clobbers local edits) | `bin/ai-install-skills` |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
-| SSH config / MCP tokens | **NOT here yet — Phase 2** | Dropbox scripts for now |
+| Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
+| Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
 
 ## Locate the repo
 Check `$HOME/repos/ai-devops`, `/worksp/ai-devops`, `C:\repos\ai-devops`,
@@ -34,17 +42,48 @@ clone + `./install.sh` on Ubuntu).
 ## Procedure
 1. `git pull --ff-only` in the repo. On failure (local changes/diverged), STOP
    and report — never force or reset.
-2. `bin/ai-sync-memory pull` — lay hub memory onto this machine (only existing
+2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip.** Report each item
+   present/missing:
+   - `~/.config/ai-devops/op-service-account` (vault-locked 1Password SA token file).
+   - Both launchers: `mcp-launch.cmd` + `mcp-remote-launch.cmd` (Windows) or
+     `mcp-launch.sh` + `mcp-remote-launch.sh` (Ubuntu) in `~/.config/ai-devops/`.
+   - `~/.config/ai-devops/mcp.env` exists and `diff`s clean against the repo's
+     `config/mcp.env.example` (the `TRIGGER_ACCESS_TOKEN` pointer changed
+     2026-07-26, so a mismatch is real drift).
+   - **No real plaintext token** in `~/.codex/config.toml`, `~/.claude/settings.json`,
+     or the Claude Desktop config. Use a shape-based check —
+     `grep -oE '\bops_[A-Za-z0-9_-]{20,}' <file>` — NOT a bare `grep ops_`: the
+     legitimate ref `op://vibe_coding/designflow-mcp/devops_token` contains `ops_`
+     and produced a false positive on 2026-07-26. A real SA token is ~866 chars.
+   - Windows: `~/.ssh/ai-devops.conf` exists and `~/.ssh/config` `Include`s it.
+     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it.
+   **If anything is missing or a real token is found**, run the per-OS installer:
+   `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-machine.ps1 -RepoPath <repo>`
+   or `<repo>/bin/setup-secrets.sh`. Preconditions: **pwsh 7** (the Windows script
+   has no `#requires` and dies with cryptic parse errors under 5.1), and **the token
+   file must already exist** or the script blocks on a prompt and a headless Codex
+   run will hang. If it is absent, do NOT invoke — tell Albert the token is in
+   1Password `vibe_coding` → `vibe_coding-service-account` → field
+   `op_service_account_token` (NOT the empty `credential` field), passable as
+   `-Token <value>` / `OP_SERVICE_ACCOUNT_TOKEN=<value>`. A plaintext token or a
+   missing launcher is a security/regression condition — fix it; a cosmetic gap
+   (e.g. the memory-sync task) is his call. The installer rewrites the live Claude
+   Desktop MCP config (backup: `*.aidevops.bak`) — say so first.
+   **If all present, state "Phase 2 wiring already current"** so the report
+   distinguishes *checked and fine* from *not checked*. After any MCP config
+   rewrite, Claude Desktop needs a full quit+reopen, and deleting
+   `~/.config/ai-devops/mcp-secrets.dpapi.json` forces a fresh resolve (15-min cache).
+3. `bin/ai-sync-memory pull` — lay hub memory onto this machine (only existing
    local projects update; a skip for a project this machine doesn't have is
    normal). **But if EVERY project skips, or `push` reports 0 folders, the
    script now exits non-zero — that is a real failure, not "expected". It means
    the resolved Claude home is not the one Claude Code uses. Do not report the
    sync as successful; report the failure.**
-3. `bin/ai-install-skills` — refresh Codex (`~/.codex/skills`) + Claude skills and
+4. `bin/ai-install-skills` — refresh Codex (`~/.codex/skills`) + Claude skills and
    global instructions; never clobbers local edits (prints a diff hint instead —
    relay it).
-3b. **Carry across any standing rule the local instruction file is missing.**
-   Step 3 deliberately never overwrites `~/.codex/AGENTS.md` (it holds this
+4b. **Carry across any standing rule the local instruction file is missing.**
+   Step 4 deliberately never overwrites `~/.codex/AGENTS.md` (it holds this
    machine's own atlas section and hand edits), so a NEW STANDING RULE added to
    `templates/system/AGENTS-global-codex.md` reaches this machine only if you
    carry it. Without this step a rule Albert set once is silently absent here
@@ -53,9 +92,9 @@ clone + `./install.sh` on Ubuntu).
    each rule section present in the template but absent locally, append it
    verbatim (append-only — never rewrite or reorder the local file). Report what
    you appended. This mirrors step 4 of the Claude `sync-dotfiles` skill.
-4. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
+5. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
    absent).
-4b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints
+5b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints
    `already correct` when there is nothing to do. Not cosmetic: Git has no
    default identity, and with none configured it does not stop — it silently
    invents one from the OS/AD account and stamps it on every commit. That put
@@ -66,12 +105,14 @@ clone + `./install.sh` on Ubuntu).
    Claude, GLM, Grok and Kimi all use the same `git`, so one setting covers
    every agent. Relay any warning about a repo-local override or a Git Bash
    `$HOME` that differs from the Windows profile.
-5. `bin/ai-sync-memory push` — copy local memory back into the hub.
-6. Commit + push `ai-devops` if memory (or intentional skill edits) changed. Use
+6. `bin/ai-sync-memory push` — copy local memory back into the hub.
+7. Commit + push `ai-devops` if memory (or intentional skill edits) changed. Use
    the noreply email (`u2giants@users.noreply.github.com`); keep the repo
    secret-free. If nothing changed, say so.
-7. Report plainly: what synced, which memory projects changed, whether a push
-   happened (SHA), and that SSH/MCP are still on the Dropbox scripts.
+8. Report plainly: what synced, **the step-2 Phase 2 wiring verdict** (either
+   "already current" or exactly what was installed), which memory projects changed,
+   whether a push happened (SHA), and any manual step left (Claude Desktop restart).
+   Never imply SSH/MCP live anywhere but this repo.
 
 ## Preview mode
 `bin/ai-sync-memory {push,pull} --dry-run` and `bin/ai-gcloud-dflow --dry-run`
@@ -84,5 +125,7 @@ show what would happen without changing anything.
 - Don't force-pull/reset the hub to resolve a conflict — surface it.
 
 ## Related
-`ai-devops/docs/config-inventory.md`, `docs/config-consolidation-proposal.md`,
-`HANDOFF.md`, `memory/README.md`.
+`ai-devops/docs/config-inventory.md`, `docs/config-consolidation-proposal.md`
+(Phases 1 and 2 complete), **`plan_phase3-config-consolidation.md` — the remaining
+Phase 3 work; read it when Albert asks "what's left on the config consolidation?"**,
+`docs/mcp-1password-rate-limit-hardening.md`, `HANDOFF.md`, `memory/README.md`.

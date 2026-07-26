@@ -1,4 +1,10 @@
-# HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-22)
+# HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-26)
+
+> **Config consolidation: Phases 1 and 2 are COMPLETE. The remaining work has its own
+> self-contained plan → [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md).**
+> Open that file for Phase 3; it needs no other context. Highest-value item in it: the
+> Dropbox folder still holds the **916-alien private key in plaintext** plus 16
+> token-bearing script variants (inventory written, removal approval-gated).
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything

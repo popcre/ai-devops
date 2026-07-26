@@ -640,9 +640,12 @@ removing `--` from both generated launchers. **Do not re-add `--` or remove
 | open | App-repo onboarding helper | `docs/repo-onboarding.md` describes manual steps; `ai-onboard-repo` helper not built |
 | done | Initial toolkit scaffold + install + doctor green | Completed in commit `f39315d` |
 | done | Config-consolidation **Phase 1** | `sync-dotfiles` skill (Claude + Codex), `bin/ai-gcloud-dflow`, `bin/ai-sync-memory` + `memory/` tree. See `docs/config-consolidation-proposal.md`. |
-| open | Config-consolidation **Phase 2** | Fold the Dropbox SSH + MCP scripts into `bin/`, pulling secrets from the scoped `vibe_coding` 1Password service account (incl. the `916-alien` SSH key). Rotate the currently-plaintext tokens as they move. |
-| open | Config-consolidation **Phase 3** | Retire Dropbox scripts; one-command per-machine onboarding; track the ~5 portable `config.toml` prefs. |
+| done | Config-consolidation **Phase 2** | Shipped 2026-07-14, `2d` closed 2026-07-26. Secret plumbing, MCP launchers with the 15-min cache, token-free MCP configs, SSH aliases, 916-alien key — all repo-owned (`bin/setup-machine.ps1`, `bin/setup-secrets.sh`). **Adopted on `t16` + `al8960ofc`; rollout still outstanding on `916` (off until ~2026-07-28) and Ubuntu servers beyond `hetz`** — one `git pull` + per-OS script each. |
+| open | Config-consolidation **Phase 3** | 👉 **Full implementation plan: [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)** — read that file, it stands alone. Retire the Dropbox scripts (they still hold the **916-alien private key in plaintext** + 16 token-bearing files — inventory only, approval-gated), one-command onboarding docs for both OSes, portable Codex prefs template, refresh `machine-atlas.md`. |
 
 Config-consolidation follow-through is in progress, so **`HANDOFF.md` is present** —
-read it for the exact next steps (first memory push, propagate to other machines,
-Phase 2/3).
+read it for the exact next steps. **For the remaining consolidation work, the one
+file to open is [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)**
+(self-contained; written for a session with zero context). Nobody has to remember its
+path: it is linked from here, from `HANDOFF.md`, from both `sync-dotfiles` skills, and
+from `docs/config-consolidation-proposal.md`.
