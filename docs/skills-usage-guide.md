@@ -65,6 +65,7 @@ quarantine after reviewing a `--dry-run`.
 |---|---|
 | The 2-page "AI Session Documentation Update Prompt" (pasted 30+ times) | `session-docs-update` — say "update the .md files" |
 | "this chat is a week old — anything to update/merge/commit? first check it wasn't superseded, since 25+ sessions ran since we last spoke here" | `close-old-session` — say "this chat is old" / "picking this back up"; reconciles stale in-context work against ground truth, then hands off to `wrap-up` |
+| "failed to switch branch: main is already used by worktree" / "clean up stale Codex and Claude working folders" | `cleanup-worktree` — audits active and abandoned linked worktrees and temp clones, preserves unique work, then removes only proven-safe copies |
 | "pull develop into sandbox-albert, then pull into local…" + 4 standing rules | `dflow-session-start` — automatic at dflow session start |
 | "push and commit… update the PR for sandbox-albert with develop" | `dflow-ship` — say "ship it" or "push and commit" |
 | "is everything pushed? the live site is still running the old commit" | `deploy-and-verify` (hetz apps) — deploy verification with the Coolify quirks baked in |
@@ -96,6 +97,9 @@ quarantine after reviewing a `--dry-run`.
 - `grok-cli` (xAI Grok Build discovery, documentation, and safe delegation) is
   repo-owned under `skills/shared/`. The CLI, login, and version-matched docs
   remain machine-local under `~/.grok/`.
+- `cleanup-worktree` is repo-owned under `skills/shared/`. It handles Codex,
+  Claude, and delegated-agent linked worktrees or temp clones across Windows,
+  Linux, WSL, and macOS, with recovery-before-deletion safeguards.
 - The 7-stage pipeline (`skills/claude/ai-development-pipeline`,
   `templates/prompts/01–07`) is unchanged and complements these: these skills
   automate the *rituals around* coding sessions; the pipeline governs staged

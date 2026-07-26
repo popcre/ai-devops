@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cleanup Worktree"
+  short_description: "Safely reconcile and remove stale AI worktrees"
+  default_prompt: "Use $cleanup-worktree to audit and safely clean stale Codex and Claude worktrees without losing unique work."
