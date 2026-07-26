@@ -126,6 +126,23 @@ case "$DIRECTION" in
           | awk 'NF && !seen[$0]++' > "$dest/$FORGET_NAME.tmp" || true
         mv -f "$dest/$FORGET_NAME.tmp" "$dest/$FORGET_NAME"
       fi
+      # MEMORY.md is an INDEX every machine rewrites, so a plain copy is
+      # last-push-wins. Observed live 2026-07-26: another machine pushed its
+      # older index and silently dropped 5 entries from the hub — the memory
+      # files survived, but nothing referenced them, so recall would never find
+      # them. Warn BEFORE the copy; never block (the machine's index is usually
+      # the newer one), but make a shrink impossible to miss.
+      if [[ -f "$dest/MEMORY.md" && -f "$md/MEMORY.md" ]]; then
+        lost="$(comm -23 \
+          <(grep -o '^- \[[^]]*\]([^)]*)' "$dest/MEMORY.md" 2>/dev/null | sort) \
+          <(grep -o '^- \[[^]]*\]([^)]*)' "$md/MEMORY.md"   2>/dev/null | sort) || true)"
+        if [[ -n "$lost" ]]; then
+          echo "[WARN] memory/$proj/MEMORY.md: this machine's index is MISSING entries the hub has:" >&2
+          printf '%s\n' "$lost" | sed 's/^/         /' >&2
+          echo "[WARN] Pushing will drop them. Merge the missing lines into $md/MEMORY.md" >&2
+          echo "[WARN] BEFORE committing, or those memories become unreachable by recall." >&2
+        fi
+      fi
       run cp -a "$md/." "$dest/"
       # Re-apply after the copy: the machine may still hold a file the hub has
       # tombstoned, and cp would have silently resurrected it in the hub.
