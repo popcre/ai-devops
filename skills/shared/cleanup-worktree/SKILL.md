@@ -77,6 +77,11 @@ worktrees. Common clues include:
 - Claude paths under `.claude/worktrees/`.
 - Delegated-agent, review, audit, or detached checkouts under temp roots.
 
+For machine-wide discovery, search for both `.git` directories and `.git`
+files: linked worktrees normally contain a `.git` file. Resolve
+`git rev-parse --path-format=absolute --git-common-dir` for every candidate and
+group matching results so each worktree family is audited once.
+
 Do not assume those conventions are exhaustive. Resolve each candidate's
 top-level directory, common Git directory, origin URL, HEAD, upstream, status,
 and last activity.
@@ -110,12 +115,17 @@ not just “merged” in a branch name:
 git merge-base --is-ancestor <candidate-sha> <target-sha>
 git branch --contains <candidate-sha>
 git log --cherry-mark --left-right <target>...<candidate>
+git cherry <target> <candidate>
+git ls-remote --heads origin <candidate-branch>
 gh pr list --state all --head <branch> --json number,state,mergedAt,url,headRefName,baseRefName
 ```
 
-When changes were recreated or squashed, ancestry may be false. Compare the full
-patch and final file behavior, then record why the newer implementation
-supersedes the old one.
+Clean means only “no uncommitted files”; it does not mean the local commits
+exist remotely. Treat a clean branch absent from `ls-remote` as unique local
+work until incorporation is proved. When changes were recreated or squashed,
+ancestry may be false; a `-` result from `git cherry` proves an equivalent patch
+is already present. Otherwise compare the full patch and final file behavior,
+then record why the newer implementation supersedes the old one.
 
 ## 4. Recover valuable work before cleanup
 
@@ -164,6 +174,12 @@ checks.
 - A failed first removal can leave a directory without a registration, or a
   registration without a directory. Re-run both the Git inventory and the
   filesystem check before retrying.
+- Treat a clone showing mass staged deletions plus same-named untracked
+  replacements as an integrity warning, not ordinary dirt. Preserve it until
+  blob hashes or a fresh clone comparison proves equivalence.
+- When permanent recursive deletion is blocked or unnecessary, move only the
+  exact verified directory to the Recycle Bin, verify the move, and empty the
+  bin only when the user authorized permanent deletion.
 - Distinguish native PowerShell, Git Bash, and WSL. Windows environment variables
   and paths do not automatically cross into WSL.
 
