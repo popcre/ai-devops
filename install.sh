@@ -116,6 +116,16 @@ info "Installing Claude + Codex skills into \$HOME"
 "$REPO_ROOT/bin/ai-install-skills"
 
 # --------------------------------------------------------------------------
+# 4.6 Git commit identity. Without a global identity Git does not stop — it
+#     silently invents one from the OS account and stamps it on every commit.
+#     That already put 231 wrong-identity commits into merged dflow history.
+#     Machine-level on purpose: every agent (Claude, Codex, GLM, Grok, Kimi)
+#     uses the same git binary, so one setting covers all of them.
+# --------------------------------------------------------------------------
+info "Pinning Git commit identity (and disabling Git's silent auto-guess)"
+"$REPO_ROOT/bin/ai-git-identity"
+
+# --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
 # --------------------------------------------------------------------------
 # Wires the vault-locked 1Password service-account token, the central mcp.env

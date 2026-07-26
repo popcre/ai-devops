@@ -58,6 +58,19 @@ clone + `./install.sh` (Ubuntu) first.
    you are only adding missing rules, never reconciling wording.
 5. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
    Skips cleanly if gcloud isn't installed.
+5b. **Pin the Git commit identity:** `bin/ai-git-identity`. Idempotent; prints
+   `already correct` and exits when there is nothing to do. This is NOT
+   cosmetic. Git has no default identity: with none configured it does not stop,
+   it silently invents one from the OS/AD account and stamps that on every
+   commit. On al8960ofc that reached **231 commits already merged into `develop`
+   AND `main`** across the dflow repos before anyone noticed — unfixable, since
+   correcting them would mean force-pushing shared release history. The script
+   also sets `user.useConfigOnly=true`, so if the config is ever lost Git FAILS
+   LOUDLY instead of guessing. It is machine-level on purpose: Claude, Codex,
+   GLM, Grok and Kimi all shell out to the same `git`, so one setting covers
+   every agent — there is nothing per-agent to configure. Relay any warning it
+   prints about a repo-local override or a Git Bash `$HOME` that differs from
+   the Windows profile.
 6. **Capture local memory** back to the hub: `bin/ai-sync-memory push`.
 7. **Commit + push the hub** if step 2/6 changed anything: `git status` to see
    what changed, then stage `memory/` (and any skill/template edits the user made

@@ -41,6 +41,17 @@ clone + `./install.sh` on Ubuntu).
    relay it).
 4. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
    absent).
+4b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints
+   `already correct` when there is nothing to do. Not cosmetic: Git has no
+   default identity, and with none configured it does not stop — it silently
+   invents one from the OS/AD account and stamps it on every commit. That put
+   **231 wrong-identity commits into merged `develop`/`main`** across the dflow
+   repos before it was noticed, which is unfixable without force-pushing shared
+   release history. Also sets `user.useConfigOnly=true` so Git FAILS LOUDLY
+   rather than guessing if the config is lost. Machine-level on purpose: Codex,
+   Claude, GLM, Grok and Kimi all use the same `git`, so one setting covers
+   every agent. Relay any warning about a repo-local override or a Git Bash
+   `$HOME` that differs from the Windows profile.
 5. `bin/ai-sync-memory push` — copy local memory back into the hub.
 6. Commit + push `ai-devops` if memory (or intentional skill edits) changed. Use
    the noreply email (`u2giants@users.noreply.github.com`); keep the repo

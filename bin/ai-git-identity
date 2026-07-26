@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ai-git-identity — pin Albert's Git commit identity on this machine, once.
+#
+# WHY THIS EXISTS
+# ---------------
+# Git has no built-in default identity. When a repository has no user.name /
+# user.email, Git does NOT stop — it silently invents one from the OS account
+# (on Windows that is the AD profile, e.g. "albert@popcre.com") and stamps that
+# onto every commit. Nothing warns you; you find out months later, in history
+# that is already merged and released.
+#
+# That is exactly what happened on al8960ofc: no global identity existed, so
+# every repo without a local override committed under the AD email. By
+# 2026-07-26 that had reached 231 commits already merged into develop AND main
+# across the six dflow repositories — permanently unfixable, because correcting
+# them would mean force-pushing shared release history to the whole team.
+#
+# Only ~8 commits were still unmerged and recoverable. The rest stand as a
+# permanent record of a silent default.
+#
+# This script is the fix, and it is machine-level on purpose: every AI agent
+# (Claude, Codex/GPT, GLM, Grok, Kimi) shells out to the SAME `git` binary, so
+# one global setting covers all of them. There is no per-agent work to do —
+# the gap was never per-agent, it was per-machine.
+#
+# Idempotent. Safe to re-run. Run it on every machine.
+#
+# Usage:
+#   ai-git-identity            # apply (default)
+#   ai-git-identity --check    # report only, change nothing; non-zero if wrong
+#   ai-git-identity --audit    # also scan repo roots for wrong-identity commits
+set -euo pipefail
+
+# Albert's GitHub email-privacy address. A real address (gmail, popcre.com) is
+# rejected by GitHub's email-privacy protection on push, and leaks a private
+# address into public history. Do not "improve" this to a friendlier address.
+readonly WANT_NAME='Albert Hazan'
+readonly WANT_EMAIL='u2giants@users.noreply.github.com'
+
+# WINDOWS HOME-DRIVE TRAP. On some Windows boxes (e.g. 4837) Git Bash's $HOME
+# resolves to a roaming/network drive like Z:, while native Git, Claude Code and
+# every GUI tool read the Windows profile (%USERPROFILE%). Writing --global from
+# Git Bash there lands the identity on a drive nothing else reads, so commits
+# keep using the guessed identity and this script appears to have "worked".
+# Pin the global config file to the Windows profile whenever the two disagree.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*)
+    if [ -n "${USERPROFILE:-}" ]; then
+      win_home="$(cd "$(echo "$USERPROFILE" | tr '\\' '/')" 2>/dev/null && pwd || true)"
+      if [ -n "$win_home" ] && [ "$win_home" != "$HOME" ]; then
+        export GIT_CONFIG_GLOBAL="$win_home/.gitconfig"
+        printf '\033[33m[WARN]\033[0m Git Bash HOME (%s) differs from the Windows profile (%s).\n' "$HOME" "$win_home"
+        printf '\033[33m[WARN]\033[0m Writing the identity to %s so native Git actually reads it.\n' "$GIT_CONFIG_GLOBAL"
+      fi
+    fi
+    ;;
+esac
+
+info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
+warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
+ok()   { printf '\033[32m[ OK ]\033[0m %s\n' "$1"; }
+bad()  { printf '\033[31m[FAIL]\033[0m %s\n' "$1"; }
+
+mode="apply"
+case "${1:-}" in
+  --check) mode="check" ;;
+  --audit) mode="audit" ;;
+  ""|--apply) mode="apply" ;;
+  *) echo "usage: ai-git-identity [--apply|--check|--audit]" >&2; exit 2 ;;
+esac
+
+have_name="$(git config --global --get user.name  || true)"
+have_email="$(git config --global --get user.email || true)"
+have_only="$(git config --global --get user.useConfigOnly || true)"
+
+if [ "$mode" = "check" ]; then
+  rc=0
+  [ "$have_name"  = "$WANT_NAME"  ] && ok "user.name  = $have_name"  || { bad "user.name  = ${have_name:-<unset>} (want: $WANT_NAME)"; rc=1; }
+  [ "$have_email" = "$WANT_EMAIL" ] && ok "user.email = $have_email" || { bad "user.email = ${have_email:-<unset>} (want: $WANT_EMAIL)"; rc=1; }
+  [ "$have_only"  = "true"        ] && ok "user.useConfigOnly = true" || { bad "user.useConfigOnly = ${have_only:-<unset>} (want: true)"; rc=1; }
+  exit "$rc"
+fi
+
+if [ "$mode" = "apply" ] || [ "$mode" = "audit" ]; then
+  changed=0
+  if [ "$have_name" != "$WANT_NAME" ]; then
+    git config --global user.name "$WANT_NAME"; changed=1
+    info "set global user.name  = $WANT_NAME"
+  fi
+  if [ "$have_email" != "$WANT_EMAIL" ]; then
+    git config --global user.email "$WANT_EMAIL"; changed=1
+    info "set global user.email = $WANT_EMAIL"
+  fi
+  # THE ACTUAL SAFETY NET. With this on, Git refuses to auto-guess an identity
+  # and errors out instead. If the global config is ever wiped, commits FAIL
+  # LOUDLY rather than silently attaching the wrong address — which is the whole
+  # failure mode this script exists to prevent. Never set this to false.
+  if [ "$have_only" != "true" ]; then
+    git config --global user.useConfigOnly true; changed=1
+    info "set global user.useConfigOnly = true (Git may no longer guess an identity)"
+  fi
+  [ "$changed" -eq 0 ] && ok "Git identity already correct — nothing to change."
+
+  # A local repo setting silently overrides the global one, so a repo configured
+  # wrong long ago stays wrong. Report those; never rewrite history here.
+  info "checking for repositories that override the global identity..."
+  found=0
+  for root in "$HOME/repos" /worksp /c/repos /d/repos "$HOME/src"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r gitdir; do
+      repo="$(dirname "$gitdir")"
+      # Skip anything that is not a real work tree (bare mirrors, stray .git dirs).
+      git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+      local_email="$(git -C "$repo" config --local --get user.email 2>/dev/null || true)"
+      [ -z "$local_email" ] && continue
+      if [ "$local_email" != "$WANT_EMAIL" ]; then
+        warn "local override: $repo -> $local_email"
+        found=1
+      fi
+    done < <(find "$root" -maxdepth 3 -name .git -type d 2>/dev/null)
+  done
+  [ "$found" -eq 0 ] && ok "no repository overrides the global identity."
+fi
+
+if [ "$mode" = "audit" ]; then
+  info "scanning for commits already made under a wrong identity..."
+  info "(informational only — commits already merged to a shared branch are NOT safely fixable)"
+  for root in "$HOME/repos" /worksp /c/repos /d/repos "$HOME/src"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r gitdir; do
+      repo="$(dirname "$gitdir")"
+      git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+      n="$(git -C "$repo" log --all --format='%ae %ce' 2>/dev/null \
+           | grep -vc "$WANT_EMAIL" || true)"
+      [ "${n:-0}" -gt 0 ] && warn "$repo: $n commit(s) not using $WANT_EMAIL"
+    done < <(find "$root" -maxdepth 3 -name .git -type d 2>/dev/null)
+  done
+  info "Fix only what is still unmerged. Rewriting a shared branch breaks every"
+  info "clone and the release history — that is a coordinated team operation."
+fi
