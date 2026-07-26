@@ -29,6 +29,7 @@ file.
 | "reduce my token usage / stop making me paste the same prompt" | "use `codex-context-optimizer`" |
 | "find all local Codex transcripts / analyze repeated prompts" | "use `codex-transcript-miner`" |
 | "branch is already used by worktree" / "clean up stale Codex and Claude worktrees" | "use `cleanup-worktree`" |
+| "write the plan for this — but the session implementing it won't have any of this context" | "use `implementation-plan-writer`" |
 
 ## Skill map
 
@@ -55,6 +56,11 @@ file.
   headless mode, using plan-then-execute prompts and local verification.
 - `grok-cli`: locates the installed Grok Build CLI, reads its version-matched
   local docs, and delegates read-only reviews or explicitly authorized edits.
+- `implementation-plan-writer`: writes (or judges) an implementation plan a
+  brand-new session with zero context can execute perfectly — ultimate goal in
+  plain English first, full background, rejected approaches, locked-vs-open
+  decisions, per-step files and verification gates, per
+  `templates/system/implementation-plan-standard.md`.
 - `cleanup-worktree`: safely inventories, recovers, and removes stale Codex,
   Claude, and delegated-agent worktrees or temp clones across Windows and
   POSIX systems without losing unique work.
