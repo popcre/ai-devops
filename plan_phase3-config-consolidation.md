@@ -1,5 +1,20 @@
 # Implementation plan — Config consolidation **Phase 3**
 
+## ⏱ STATUS (read this first) — updated 2026-07-26
+
+| Step | State |
+|---|---|
+| 1–2 · Fix the `sync-dotfiles` gap (both twins) | ✅ **DONE 2026-07-26.** Both skills now check Phase 2 wiring every run (new step 2) and can no longer report success while it is absent. Stale "Dropbox scripts for now" claims removed. |
+| 3 · Reinstall + prove the loop | ✅ **DONE.** Installed copies `diff` clean vs repo; drift test passed both ways (quiet when current → `RESULT: Phase 2 wiring already current`; caught a moved `mcp-launch.cmd`; restored). Shape-based token check produced **zero** false positives on this machine's three configs. |
+| 4 · Commit + push Phase A | ✅ **DONE.** |
+| 5 · Stub the 3 current Dropbox scripts | ⬜ **OPEN — needs Albert's confirmation** (files outside the repo, in his Dropbox). |
+| 6 · Dropbox credential inventory doc | ⬜ **OPEN.** Findings already measured — see §6/F2; the doc itself is not written. |
+| 7 · Rewrite `docs/restore-from-zero.md` (both OSes) | ⬜ **OPEN.** |
+| 8 · Portable Codex prefs template | ⬜ **OPEN.** |
+| 9 · `machine-atlas.md` + status rows | 🟡 **PARTIAL.** `AGENTS.md`, `HANDOFF.md` and the proposal are updated; **`machine-atlas.md` still teaches the Dropbox path** (lines ~84–86) and still reads as if "4837" were a fourth machine. |
+
+**So a fresh session starts at step 5**, after re-reading steps 5–9 for drift.
+
 **Written:** 2026-07-26 · **Repo:** `u2giants/ai-devops` (private) · **Branch:** `main` (main-only, no branches)
 **Companions — read alongside, not instead:** [`docs/config-consolidation-proposal.md`](docs/config-consolidation-proposal.md) (the 3-phase plan; Phase 3 table is §"Phase 3"), [`docs/config-inventory.md`](docs/config-inventory.md) (the scatter map), [`HANDOFF.md`](HANDOFF.md) (live machine state), [`AGENTS.md`](AGENTS.md) (canonical repo guide).
 

@@ -182,6 +182,13 @@ reverting is "keep using Dropbox." Don't delete them until Phase 3.
 
 ## Phase 3 — retire Dropbox + document (low risk) — PLANNED
 
+> **Implementation plan: [`../plan_phase3-config-consolidation.md`](../plan_phase3-config-consolidation.md)**
+> (written 2026-07-26, self-contained, 13 sections). It covers the four rows below
+> **plus** two things this table never anticipated: (a) the `sync-dotfiles` skill did
+> not run the Phase 2 plumbing — **fixed 2026-07-26**, both twins now check it every
+> run; (b) the Dropbox folder holds the **916-alien private key in plaintext** and 16
+> token-bearing script variants, making Dropbox retirement partly a credential cleanup.
+
 | Item | Deliverable |
 |---|---|
 | Retire Dropbox scripts | Replace their contents with a stub/README pointing at ai-devops; stop editing them |
