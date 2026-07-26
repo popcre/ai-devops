@@ -1,8 +1,9 @@
 # Proposal — converge all machine config onto ai-devops (phased)
 
-**Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`). **Phase 2 built
-2026-07-14** (commits `5868f19`→`26c176f`): 2a/2b/2c shipped; 2d (token rotation)
-still open. **Adopted + verified on t16 2026-07-15.** Phase 3 PLANNED, not started.
+**Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`). **Phase 2 COMPLETE
+2026-07-26**: 2a/2b/2c built 2026-07-14 (commits `5868f19`→`26c176f`), 2d closed
+2026-07-26. **Adopted + verified on t16 2026-07-15 and al8960ofc 2026-07-26.**
+Phase 3 PLANNED, not started.
 **Companion docs:** [`config-inventory.md`](config-inventory.md) (the current
 scattered state, with all paths/aliases/1Password item titles) and
 [`../HANDOFF.md`](../HANDOFF.md) (live next steps).
@@ -128,19 +129,49 @@ helper (items: `vibe_coding-service-account`, `devops-mcp-client-tokens`,
 Acceptance: running it writes `~/.claude/settings.json` with working MCP servers,
 tokens sourced live, and the repo contains no token.
 
-### 2d. Hygiene — rotate exposed tokens — ⬜ OPEN (partially done?)
+### 2d. Hygiene — rotate exposed tokens — ✅ DONE 2026-07-26
 The Trigger PAT and the two MCP bearer tokens sat in plaintext in `settings.json`
-(and in an archived transcript). Rotate them as they move to 1Password sourcing.
-**Status 2026-07-15:** the `designflow-mcp` item (which now holds the devops-mcp
-and NAS bearer tokens) was updated 2026-07-14 17:20 and tagged `mcp-rotation`,
-suggesting the two MCP bearers were already rotated. The **Trigger PAT**
-(`Trigger.dev Personal Access Token (management)`) was last updated 2026-07-09 —
-**appears NOT yet rotated.** Confirm with Albert before rotating (rotation can
-break live integrations; needs his approval + click-through).
+(and in an archived transcript). The two MCP bearers were rotated 2026-07-14
+(`designflow-mcp` item, tagged `mcp-rotation`).
+
+**Trigger PAT rotated 2026-07-26 by Albert** in the Trigger dashboard, along with
+the Oracle Trigger secret keys. Consumer map checked first — the PAT is consumed
+only by the `trigger` MCP (all machines, via `op://`) and the Ubuntu shell env;
+theoracle's GitHub Actions uses a `ci-placeholder-trigger-key`, and the app/Vercel
+uses the separate per-env `TRIGGER_SECRET_KEY`. So no live integration depended on
+the PAT itself.
+
+The 1Password item now holds **two** tokens: `credential` (owner level) and field
+id `qeqqkatqor6dphspzwyandzwhe` (admin level). `config/mcp.env.example` references
+the **admin-level** one — least privilege that still does the job.
+
+**Verified 2026-07-26** (all with the new admin-level token): `/api/v2/whoami`
+→ 200 as `hello@popcre.com`; project envvars GET → 200; `trigger` MCP `list_orgs`
+→ returns org POP/`pop-13dc`. Both Oracle secret keys (`tr_prod_`, `tr_dev_`)
+→ `/api/v1/runs` 200, so the recorded values are live.
+
+⚠️ **Known quirk — do not read it as a bad credential.** `npx trigger.dev whoami`
+rejects both post-rotation tokens ("Invalid or Missing Access Token"), on CLI
+4.5.7 *and* 4.4.1, while the management REST API and the MCP accept them. Verify
+these tokens against the API, never with the CLI subcommand.
 
 **Exit criteria:** a fresh machine is fully configured (SSH + MCP + skills +
 instructions + gcloud + memory) from ai-devops alone, all secrets sourced from
-1Password, nothing secret committed.
+1Password, nothing secret committed. **MET on t16 (2026-07-15) and al8960ofc
+(2026-07-26).** Machines still to adopt: **916** (powered off until ~2026-07-28),
+**4837**, the dflow boxes, and the Ubuntu servers beyond `hetz` — each needs
+`git pull` + `bin/setup-machine.ps1` (Windows) or `bin/setup-secrets.sh` (Ubuntu).
+
+**al8960ofc adoption record (2026-07-26).** Before: token file + `mcp.env` existed,
+but there were no launchers, no `~/.ssh/ai-devops.conf`, and plaintext
+service-account tokens sat inline in `~/.claude/settings.json`, `~/.codex/config.toml`
+and the Claude Desktop config. After one `setup-machine.ps1` run: all ten MCP
+servers token-free, launchers installed with the 15-minute single-flight cache
+(cold start writes the cache; warm start makes **zero** `op` calls — verified),
+SSH aliases Included and `ssh vps` → `root` with no `NUL` litter, 916-alien key
+restored user-only, Codex PATH fixed and its sandbox proven writing, memory
+auto-sync task scheduled. This also lands the 1Password rate-limit hardening that
+HANDOFF §3b listed as pending on every machine but t16.
 
 **Rollback:** the Dropbox scripts stay in place and untouched during Phase 2, so
 reverting is "keep using Dropbox." Don't delete them until Phase 3.

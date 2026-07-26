@@ -622,10 +622,19 @@ Desktop MCP config was deliberately NOT changed** (pending Albert's go-ahead).
 **Still open in Phase 2:**
 - **t16 Claude Desktop MCP migration** — held for explicit approval (it rewrites
   the live daily-driver MCP config; the script backs up to `*.aidevops.bak` first).
-- **2d token rotation** — the two MCP bearers look already rotated (`designflow-mcp`
-  item tagged `mcp-rotation`, updated 2026-07-14 17:20); the **Trigger PAT** looks
-  NOT yet rotated (last updated 2026-07-09). Needs Albert's approval to rotate.
-- **Rollout to 916, 4837, and the Ubuntu servers** — not yet done.
+  Note: the same step was **approved and applied on al8960ofc on 2026-07-26** and
+  went clean, so the risk is now measured rather than theoretical.
+- ~~**2d token rotation**~~ — **DONE 2026-07-26.** Albert rotated the Trigger PAT
+  (and the Oracle Trigger secret keys); `config/mcp.env.example` now points at the
+  new **admin-level** PAT field for least privilege. Verified against the
+  management REST API and the `trigger` MCP. ⚠️ `npx trigger.dev whoami` rejects
+  the new tokens on 4.5.7 and 4.4.1 while the API and MCP accept them — a CLI
+  quirk, not a bad credential. Details: `docs/config-consolidation-proposal.md` §2d.
+- **Rollout to the remaining machines** — al8960ofc **DONE 2026-07-26** (full
+  record in the proposal's Phase 2 exit-criteria section). Still to do: **916**
+  (off until ~2026-07-28), **4837**, the dflow boxes, and Ubuntu servers beyond
+  `hetz`. One `git pull` + `bin/setup-machine.ps1` (or `bin/setup-secrets.sh`) each;
+  that run is also what replaces the storming 2026-07-17 launcher (§3b).
 
 The rest of this file (Phase-1 history) is unchanged below.
 
