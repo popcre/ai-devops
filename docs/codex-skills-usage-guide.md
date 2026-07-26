@@ -28,6 +28,7 @@ file.
 | "read all docs and handoff, then keep only useful context" | "use `codex-context-optimizer`" |
 | "reduce my token usage / stop making me paste the same prompt" | "use `codex-context-optimizer`" |
 | "find all local Codex transcripts / analyze repeated prompts" | "use `codex-transcript-miner`" |
+| "branch is already used by worktree" / "clean up stale Codex and Claude worktrees" | "use `cleanup-worktree`" |
 
 ## Skill map
 
@@ -54,6 +55,9 @@ file.
   headless mode, using plan-then-execute prompts and local verification.
 - `grok-cli`: locates the installed Grok Build CLI, reads its version-matched
   local docs, and delegates read-only reviews or explicitly authorized edits.
+- `cleanup-worktree`: safely inventories, recovers, and removes stale Codex,
+  Claude, and delegated-agent worktrees or temp clones across Windows and
+  POSIX systems without losing unique work.
 
 The installer fails before copying when a shared skill name collides with a
 client-specific skill. It warns about the retired ShareSync skill without
