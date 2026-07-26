@@ -22,7 +22,27 @@ set -euo pipefail
 
 DIRECTION="${1:-}"
 DRY_RUN="${2:-}"
-CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+
+# WINDOWS HOME-DRIVE TRAP — must match bin/ai-install-skills exactly.
+# On some Windows boxes Git Bash's $HOME resolves to a roaming/network drive
+# (Z:), while Claude Code reads the Windows profile (%USERPROFILE%). Basing the
+# memory path on $HOME there points this script at a directory Claude never
+# uses: `push` finds nothing and reports "0 project memory folder(s)" with exit
+# 0, and `pull` prints "no local project dir on this machine yet" for every
+# project — output the skill documents as *expected*. The sync appears to
+# succeed while memory never moves in either direction. ai-install-skills was
+# already fixed for this; this script was not, so skills and memory resolved to
+# DIFFERENT homes on exactly the machines that need them most.
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+else
+  BASE_HOME="$HOME"
+fi
+CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MEM_REPO="$REPO_ROOT/memory"
 MAP_FILE="$MEM_REPO/project-map.tsv"
@@ -57,9 +77,19 @@ case "$DIRECTION" in
       n=$((n+1))
     done
     echo "$n project memory folder(s) copied into the repo. Review, then commit+push ai-devops."
+    # Finding nothing is almost never legitimate: any machine running this has
+    # used Claude Code at least once. Silence here previously read as success.
+    if [[ "$n" -eq 0 ]]; then
+      echo "[FAIL] No memory found under $CLAUDE_HOME/projects/." >&2
+      echo "[FAIL] Nothing was captured — do NOT report this sync as successful." >&2
+      echo "[FAIL] Check that this is the home Claude Code actually uses (Windows: %USERPROFILE%, not a Z:/roaming drive)." >&2
+      exit 1
+    fi
     ;;
   pull)
     [[ -d "$MEM_REPO" ]] || { echo "No memory/ tree in repo yet — nothing to pull."; exit 0; }
+    pulled=0
+    skipped=0
     for pd in "$MEM_REPO"/*/; do
       [[ -d "$pd" ]] || continue
       proj="$(basename "$pd")"
@@ -74,8 +104,18 @@ case "$DIRECTION" in
           matched=1
         fi
       done
-      [[ $matched -eq 0 ]] && echo "  skip  memory/$proj  (no local project dir on this machine yet)"
+      [[ $matched -eq 0 ]] && { echo "  skip  memory/$proj  (no local project dir on this machine yet)"; skipped=$((skipped+1)); }
+      [[ $matched -eq 1 ]] && pulled=$((pulled+1))
     done
+    # A skip is normal for a project this machine doesn't have. EVERY project
+    # skipping is not — that means CLAUDE_HOME points somewhere Claude Code
+    # never writes, and the "expected" skip messages are hiding a total failure.
+    if [[ "${pulled:-0}" -eq 0 && "${skipped:-0}" -gt 0 ]]; then
+      echo "[FAIL] Every project was skipped — no local project directory matched." >&2
+      echo "[FAIL] $CLAUDE_HOME is almost certainly not the home Claude Code uses." >&2
+      echo "[FAIL] Memory did NOT sync. Do not report this sync as successful." >&2
+      exit 1
+    fi
     ;;
   *) usage ;;
 esac
