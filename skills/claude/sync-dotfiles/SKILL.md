@@ -39,7 +39,14 @@ clone + `./install.sh` (Ubuntu) first.
    changes / diverged history), STOP and report — do not force, do not `git
    reset`. Tell the user to resolve or ask to inspect.
 2. **Lay down memory** from the hub: `bin/ai-sync-memory pull`. Only projects
-   that already exist locally are updated (skips are expected and printed).
+   that already exist locally are updated, so a skip for a project this machine
+   doesn't have is normal. **A skip for EVERY project is not** — nor is `push`
+   reporting `0 project memory folder(s)`. Both now exit non-zero, because they
+   mean the resolved Claude home is not the one Claude Code actually writes to
+   (classically: Git Bash `$HOME` on a `Z:`/roaming drive). Previously this
+   printed reassuring "expected" skips and returned success while memory never
+   moved in either direction. If either fails, STOP and report the failure —
+   never call the sync successful.
 3. **Install skills + instructions:** `bin/ai-install-skills`. Refreshes
    `~/.claude/skills` (+ `~/.codex/skills`) and seeds global instructions
    **only if absent** — if `CLAUDE.md`/`AGENTS.md` differ it prints a diff hint

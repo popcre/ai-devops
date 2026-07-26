@@ -35,10 +35,24 @@ clone + `./install.sh` on Ubuntu).
 1. `git pull --ff-only` in the repo. On failure (local changes/diverged), STOP
    and report — never force or reset.
 2. `bin/ai-sync-memory pull` — lay hub memory onto this machine (only existing
-   local projects update; skips are expected).
+   local projects update; a skip for a project this machine doesn't have is
+   normal). **But if EVERY project skips, or `push` reports 0 folders, the
+   script now exits non-zero — that is a real failure, not "expected". It means
+   the resolved Claude home is not the one Claude Code uses. Do not report the
+   sync as successful; report the failure.**
 3. `bin/ai-install-skills` — refresh Codex (`~/.codex/skills`) + Claude skills and
    global instructions; never clobbers local edits (prints a diff hint instead —
    relay it).
+3b. **Carry across any standing rule the local instruction file is missing.**
+   Step 3 deliberately never overwrites `~/.codex/AGENTS.md` (it holds this
+   machine's own atlas section and hand edits), so a NEW STANDING RULE added to
+   `templates/system/AGENTS-global-codex.md` reaches this machine only if you
+   carry it. Without this step a rule Albert set once is silently absent here
+   while he believes it is everywhere. Diff
+   `~/.codex/AGENTS.md` against `templates/system/AGENTS-global-codex.md`; for
+   each rule section present in the template but absent locally, append it
+   verbatim (append-only — never rewrite or reorder the local file). Report what
+   you appended. This mirrors step 4 of the Claude `sync-dotfiles` skill.
 4. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
    absent).
 4b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints
