@@ -126,3 +126,14 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   before starting each one (drift check); pair with the `fresh-session` skill.
 - Cross-link with `HANDOFF.md` when work has already happened — neither should
   be read alone.
+- **STATUS table at the top from day one:** one row per step (done / partial / open,
+  dated) plus a line naming where a fresh session starts. On a new plan every row is
+  `open`; it exists so the first thing a reader sees is what is still true.
+- **Executing part of a plan makes the rest of it lie.** Whoever does the work updates
+  the plan in the same session — the `session-docs-update` / `codex-docs-update` skills
+  carry a mandatory plan-file gate: de-stale the "current state of the code" section,
+  keep the reasoning as history (a session that loses the *why* undoes the fix), mark
+  verification that already passed, and record what is open and blocked on whom.
+- **Discoverability beats memory.** Nobody recalls `plan_<topic>.md` months later.
+  Link it from `AGENTS.md`, `HANDOFF.md`, the topic doc, and any skill whose trigger
+  leads there, and add a memory entry pointing at its STATUS table.
