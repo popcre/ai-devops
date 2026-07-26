@@ -631,9 +631,10 @@ Desktop MCP config was deliberately NOT changed** (pending Albert's go-ahead).
   the new tokens on 4.5.7 and 4.4.1 while the API and MCP accept them — a CLI
   quirk, not a bad credential. Details: `docs/config-consolidation-proposal.md` §2d.
 - **Rollout to the remaining machines** — al8960ofc **DONE 2026-07-26** (full
-  record in the proposal's Phase 2 exit-criteria section). Still to do: **916**
-  (off until ~2026-07-28), **4837**, the dflow boxes, and Ubuntu servers beyond
-  `hetz`. One `git pull` + `bin/setup-machine.ps1` (or `bin/setup-secrets.sh`) each;
+  record in the proposal's Phase 2 exit-criteria section). **al8960ofc IS the box
+  §0.2/§8 calls "4837"** — same machine, not a second target. Still to do: **916**
+  (off until ~2026-07-28), any dflow box that is not t16/al8960ofc, and Ubuntu
+  servers beyond `hetz`. One `git pull` + `bin/setup-machine.ps1` (or `bin/setup-secrets.sh`) each;
   that run is also what replaces the storming 2026-07-17 launcher (§3b).
 
 The rest of this file (Phase-1 history) is unchanged below.
