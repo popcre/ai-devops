@@ -183,3 +183,24 @@ if [[ -d "$CODEX_HOME" ]]; then
 else
   echo "No $CODEX_HOME directory — skipping Codex global instructions."
 fi
+
+# ---------------------------------------------------------------------------
+# Git commit identity.
+#
+# This lives HERE, not only in the sync-dotfiles skill, on purpose. During a
+# sync the agent has already loaded the OLD installed copy of the skill before
+# `git pull` brings the new one down — so a step added to the skill text does
+# not run until the NEXT sync. This script, by contrast, is executed from the
+# repo AFTER the pull, so the updated version runs on the very first sync.
+#
+# Without it Git silently invents an identity from the OS/AD account and stamps
+# it on every commit (231 such commits reached merged dflow develop+main before
+# anyone noticed). Idempotent — prints "already correct" and changes nothing
+# when it is already right.
+# ---------------------------------------------------------------------------
+if [ -x "$REPO_ROOT/bin/ai-git-identity" ]; then
+  echo
+  "$REPO_ROOT/bin/ai-git-identity" || echo "[WARN] git identity step failed — commits may use a guessed identity."
+else
+  echo "[WARN] bin/ai-git-identity missing — Git identity NOT pinned on this machine."
+fi
