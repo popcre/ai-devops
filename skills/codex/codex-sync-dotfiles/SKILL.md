@@ -106,6 +106,15 @@ clone + `./install.sh` on Ubuntu).
    every agent. Relay any warning about a repo-local override or a Git Bash
    `$HOME` that differs from the Windows profile.
 6. `bin/ai-sync-memory push` — copy local memory back into the hub.
+   **Deleting a memory needs `forget`, not `rm`.** Sync copies, never mirrors, so
+   a plain delete does not propagate — the next `pull` restores it and any
+   machine still holding it re-pushes it, making a WRONG memory immortal. Use
+   `bin/ai-sync-memory forget <project> <file.md> "<reason>"` (reason mandatory);
+   it tombstones the file in `memory/<project>/.forgotten` so every machine drops
+   it on its next pull and no stale machine resurrects it. Then remove its line
+   from that project's `MEMORY.md`. The `note ... in the hub but not on this
+   machine` line is NOT proof of a deletion — it is equally memory from a machine
+   you never pulled; never delete on that basis alone.
 7. Commit + push `ai-devops` if memory (or intentional skill edits) changed. Use
    the noreply email (`u2giants@users.noreply.github.com`); keep the repo
    secret-free. If nothing changed, say so.

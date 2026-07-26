@@ -142,6 +142,19 @@ If the user wants a dry run first: `bin/ai-sync-memory {push,pull} --dry-run` an
 `bin/ai-gcloud-dflow --dry-run` print what they'd do without changing anything.
 
 ## Safety
+- **Deleting a memory needs `forget`, not `rm`.** Sync copies, it never mirrors,
+  so a plain delete does not propagate: the next `pull` restores the file from
+  the hub and any machine still holding it re-pushes it. A memory you removed
+  *because it was wrong* comes back. Use
+  `bin/ai-sync-memory forget <project> <file.md> "<reason>"` — it records a
+  tombstone in `memory/<project>/.forgotten`, so every machine drops the file on
+  its next pull and no stale machine can resurrect it. A reason is mandatory
+  (without it the fact just gets re-learned later). Then remove the file's line
+  from that project's `MEMORY.md` and commit.
+- `push` prints `note ...is in the hub but not on this machine`. That is NOT
+  automatically a deletion — it is equally "memory from another machine you have
+  never pulled". Never delete on that basis; use `forget` only when you know the
+  memory is wrong.
 - **Never commit a secret.** Memory is secret-free by policy; if a memory file
   contains a credential, STOP and flag it — it must move to 1Password
   (`vibe_coding` vault), not git.
