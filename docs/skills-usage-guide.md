@@ -73,6 +73,7 @@ quarantine after reviewing a `--dry-run`.
 | "save this key / put these credentials in 1password with notes a future session can use" | `secrets-to-1password` — same skill, single-entry mode |
 | "whenever anything (a secret OR a plain info note) goes into 1Password, give it a proper title, tags, and notes a future context-free session can use" | `secrets-to-1password` — same skill; it's the quality gate on every MCP create/update, for Claude and Codex alike |
 | "make it comprehensive enough that a brand new fresh developer…" | `handoff-writer` — say "write the handoff" |
+| "write the plan for this — but the session implementing it won't have any of this context" | `implementation-plan-writer` — say "write an implementation plan" |
 | "@design.zip read the README in full… recreate these screens in our stack" | `design-handoff-implement` — attach the zip |
 | "read the entire codebase and tell me if you find any bugs" | `repo-bug-audit` — say "audit the codebase" |
 | "run all of this by codex and tell me what it says and if you agree — if you disagree, give it your reasoning and see if it changes its opinion" | `codex-second-opinion` — say "run this by codex" |
