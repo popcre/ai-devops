@@ -1,3 +1,5 @@
 - [op_run MCP WSL env trap](op-run-mcp-wsl-env-trap.md) — op_run works fully (env + op:// + redaction); trap is argv `bash`=WSL which drops injected env. Use cmd `%VAR%` / PowerShell `$env:VAR` / node, not WSL bash
 - [Merch-group taxonomy](merch-group-taxonomy.md) — Coldlion→DesignFlow→Supabase licensor/property flow; the 3 rules that corrupt data (mgTypeCode meaning varies by division, no hierarchy/active-flag in Coldlion, codes unique only per division+type)
 - [1Password IDs re-key mid-session](onepassword-ids-rekey-midsession.md) — vault/item IDs can change within one session (MCP reconnect); re-lookup by title+vault, don't reuse a cached ID; title-with-spaces/parens can't be an op:// ref
+- [shared-db apply mechanics](shared-db-apply-mechanics.md) — Supabase MCP is read-only; apply migrations via the GitHub workflow; out-of-order pending needs --include-all; the preview ledger is unreliable
+- [PopDAM two permission systems](popdam-two-permission-systems.md) — public schema (admin|user) vs app schema (administrator/designer/viewer); signup is invitation-gated; style_tracker_rows RLS lets ANY user edit
