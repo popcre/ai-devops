@@ -119,8 +119,14 @@ ever said "sync my dotfiles" will be told it is synced while it still has
 **"storming" launcher** that re-resolved ~11 `op://` refs on every MCP start and
 got the shared 1Password service account rate-limit-locked (full story:
 [`docs/mcp-1password-rate-limit-hardening.md`](docs/mcp-1password-rate-limit-hardening.md)).
-Both skill files still say *"SSH config / MCP tokens — **NOT here yet — Phase 2** —
-Dropbox scripts for now"*, which was true when written and is now false.
+Both skill files said *"SSH config / MCP tokens — **NOT here yet — Phase 2** —
+Dropbox scripts for now"* — true when written, false once Phase 2 shipped.
+
+> ✅ **FIXED 2026-07-26 (commit `d592a9f`), steps 1–3.** Both twins now carry a
+> mandatory step 2 that checks the wiring and installs it when missing, and the false
+> claims are gone. **The background above is kept because it is the *reason* the check
+> must never be weakened or made optional** — not because the bug is still live. If
+> you are starting at step 5, treat §3 as history.
 
 **Reproduce the gap (read-only, takes a minute):** open
 [`skills/claude/sync-dotfiles/SKILL.md`](skills/claude/sync-dotfiles/SKILL.md) and
@@ -200,11 +206,11 @@ commits: `8033ddd` (2d closed + `al8960ofc` adoption recorded), `2349f4a` (memor
 
 | Thing | Exact state |
 |---|---|
-| [`skills/claude/sync-dotfiles/SKILL.md`](skills/claude/sync-dotfiles/SKILL.md) | 7-step procedure covering pull → memory pull → skills → **manual rule carry-across (step 4)** → gcloud → memory push → commit. Line ~11: *"This is **Phase 1** … SSH + MCP setup are still the Dropbox scripts until Phase 2"*. Table row (~line 27): *"SSH config / MCP tokens \| **NOT here yet — Phase 2** \| Dropbox scripts for now"*. **Both statements are now false.** |
-| [`skills/codex/codex-sync-dotfiles/SKILL.md`](skills/codex/codex-sync-dotfiles/SKILL.md) | Same falsehood at lines 11–12, 26, and 74 (*"report … that SSH/MCP are still on the Dropbox scripts"*). |
+| [`skills/claude/sync-dotfiles/SKILL.md`](skills/claude/sync-dotfiles/SKILL.md) | ✅ **FIXED 2026-07-26 — do not redo steps 1–3.** Now a 9-step procedure whose **step 2** verifies the Phase 2 wiring (token file, both launchers, `mcp.env` vs repo, shape-based plaintext-token check, SSH include / shellrc), runs the per-OS installer when anything is missing, refuses to invoke it when the token file is absent, and must state the verdict. The old "Phase 1"/"Dropbox scripts for now" claims are gone. |
+| [`skills/codex/codex-sync-dotfiles/SKILL.md`](skills/codex/codex-sync-dotfiles/SKILL.md) | ✅ **FIXED 2026-07-26** in the same commit, kept behaviorally identical to the Claude twin (only tool-specific wording differs). |
 | [`docs/restore-from-zero.md`](docs/restore-from-zero.md) | Ubuntu-only, 8 steps, and **zero** mentions of `setup-secrets.sh`, MCP, 1Password, or Windows. Says "Secrets, tokens, SSH keys — none of these live in this repo", which is true but now incomplete: they are *restorable from 1Password by the installer*. |
 | [`templates/system/machine-atlas.md`](templates/system/machine-atlas.md) | Lines ~84–86 still teach the Dropbox path as authoritative. Heading at line 57 is `## 916 ("916-alien") and t16 and 4837 — Windows 11 dev machines` — and "4837" is `al8960ofc`, the same box, which reads as a fourth machine. |
-| [`AGENTS.md`](AGENTS.md) `## Pending work` (line 633) | Phase 2 row still says `open` (line 643) though Phase 2 is complete; Phase 3 row `open` (line 644). Line ~648 explains why `HANDOFF.md` exists. |
+| [`AGENTS.md`](AGENTS.md) `## Pending work` (line 633) | ✅ **UPDATED 2026-07-26:** Phase 2 row = `done` with the outstanding-rollout caveat (`916`, Ubuntu beyond `hetz`); Phase 3 row now links this plan. `HANDOFF.md` header and `docs/config-consolidation-proposal.md` §Phase 3 also link it — so the plan is reachable without anyone remembering its path. |
 | Codex `~/.codex/config.toml` | Portable lines 1–9 on this machine: `model = "gpt-5.6-sol"`, `model_reasoning_effort = "low"`, `sandbox_mode = "workspace-write"`, `approval_policy = "never"`, `[windows] sandbox = "elevated"`. **Not portable:** `notify = [...]` (an absolute per-install path) and dozens of `[projects.'…'] trust_level` blocks (per-machine paths). No template tracks any of this. |
 | Dropbox folder | **Not yet stubbed. Contains live-shaped credentials — see §6.** |
 
@@ -566,6 +572,9 @@ script as the way to configure a machine. Then commit + push per step 4's gates.
 
 ## 10. Tests required
 
+**T1–T4 already ran and passed on 2026-07-26** (marked ✅) as part of steps 1–3 —
+re-run them only if you touch the skills again. T5–T10 remain for steps 5–9.
+
 This repo has **no test framework** — it is Bash + PowerShell + Markdown, and that is
 deliberate (`CLAUDE.md`). "Add unit tests for the code you create" (standing rule 13)
 applies to the code you touch; here that means these concrete, runnable checks. Record
@@ -573,10 +582,10 @@ the output of each in your final report.
 
 | # | Check | Command / method | Pass condition |
 |---|---|---|---|
-| T1 | Skill files parse and install | `CLAUDE_HOME=/c/Users/ahazan2/.claude bin/ai-install-skills` | Both sync-dotfiles skills listed; no collision error; installed copies `diff` clean vs repo |
-| T2 | Drift detection catches a missing launcher | Move `mcp-launch.cmd` aside, run the skill's check, **restore it** | Reports the missing launcher and proposes the setup script; does not report "synced" |
-| T3 | No-drift path is quiet | Run the skill's check on this fully-wired machine | Reports "Phase 2 wiring already current"; does **not** run `setup-machine.ps1` |
-| T4 | No false "plaintext token" positives | §11 shape-based scan on this machine's three configs | Zero hits (they are token-free as of 2026-07-26), proving the check doesn't fire on `devops_token` |
+| T1 ✅ | Skill files parse and install | `CLAUDE_HOME=/c/Users/ahazan2/.claude bin/ai-install-skills` | Both sync-dotfiles skills listed; no collision error; installed copies `diff` clean vs repo |
+| T2 ✅ | Drift detection catches a missing launcher | Move `mcp-launch.cmd` aside, run the skill's check, **restore it** | Reports the missing launcher and proposes the setup script; does not report "synced" |
+| T3 ✅ | No-drift path is quiet | Run the skill's check on this fully-wired machine | Reports "Phase 2 wiring already current"; does **not** run `setup-machine.ps1` |
+| T4 ✅ | No false "plaintext token" positives | §11 shape-based scan on this machine's three configs | Zero hits (they are token-free as of 2026-07-26), proving the check doesn't fire on `devops_token` |
 | T5 | Launcher cache still healthy after any edit | Delete `mcp-secrets.dpapi.json`, cold launch, note mtime, warm launch | Cold writes cache; warm launch leaves mtime **unchanged** (zero `op` calls) |
 | T6 | Secret plumbing intact end-to-end | `op run --env-file ~/.config/ai-devops/mcp.env -- <trivial cmd>` , or a launcher run | Succeeds; the launcher fails closed on any empty secret, so success proves all refs resolve |
 | T7 | Codex prefs applier is non-destructive | Step 8 dry-run on a **copy** with one key removed | Reports exactly that key; `notify` + all `[projects.*]` blocks untouched |
