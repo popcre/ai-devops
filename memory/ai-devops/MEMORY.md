@@ -8,3 +8,5 @@
 - [Trigger PAT: CLI whoami lies](trigger-pat-cli-whoami-false-negative.md) — post-2026-07-26 Trigger PATs fail `trigger.dev whoami` on 4.5.7/4.4.1 but are valid via the REST API and the trigger MCP; verify with the API, and clear the DPAPI cache after any rotation.
 - [op account migration 2026-07](op-account-migration-2026-07.md) — 2026-07-22 SA moved to popcreations.1password.com; old item UUIDs dead, refs re-pointed by name; final SA is read-write.
 - [remote-shell CWD trap](remote-shell-cwd-trap.md) — remote `bash -lc` over SSH starts in $HOME not the repo; use `git -C`/absolute paths, not relative. Includes the `4837` ssh alias (100.123.87.44, key 916-alien).
+- [Git identity silent guess](git-identity-silent-guess.md) — Git invents an identity from the AD account when none is set; 231 wrong-email commits reached merged dflow develop+main before anyone noticed.
+- [4837 IS this machine](4837-is-this-machine.md) — `4837` is al8960ofc's own Tailscale name; `ssh 4837` loops back. The separate dev box is `916` (usually offline).
