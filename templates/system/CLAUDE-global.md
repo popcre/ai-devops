@@ -140,6 +140,25 @@ agent automation; stop and switch to the dedicated read-only AI identity.
 19. Before pulling/merging, check for uncommitted work from concurrent AI
     sessions; never clobber it silently.
 20. State the target repo and branch before any merge/push.
+20b. **Commit identity — verify, never assume.** Every commit must be authored
+    AND committed as `Albert Hazan <u2giants@users.noreply.github.com>`. Git has
+    no default identity: when none is configured it does **not** stop, it
+    silently invents one from the OS/AD account (on Windows,
+    `albert@popcre.com`) and stamps it on every commit. This is not theoretical
+    — it put **231 wrong-identity commits into merged `develop`/`main`** across
+    the dflow repos before anyone noticed, which cannot be corrected without
+    force-pushing shared release history.
+    - `bin/ai-git-identity` pins it machine-wide and sets
+      `user.useConfigOnly=true` so Git fails loudly instead of guessing. It runs
+      from `install.sh`, `setup-machine.ps1`, and `sync-dotfiles`.
+    - One `git` binary serves every agent (Claude, Codex, GLM, Grok, Kimi), so
+      this is per-MACHINE, never per-agent. Do not add per-agent identity config.
+    - Before the first commit in an unfamiliar repo, confirm with
+      `git var GIT_COMMITTER_IDENT`. If it is wrong, fix it BEFORE committing —
+      correcting it afterwards means rewriting history.
+    - Only rewrite wrong-identity commits that are **not yet merged into a
+      shared branch**. Anything already in `develop`/`main` stays; rewriting it
+      breaks every clone and the release history.
 
 > **Database = `u2giants/shared-db`, always.** Any schema/DDL change to the shared
 > supabase backend (`<removed-protected-project-ref>`) — column/table/view/RPC/trigger/RLS/

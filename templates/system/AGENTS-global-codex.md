@@ -97,6 +97,15 @@ agent automation; stop and switch to the dedicated read-only AI identity.
     never self-merge (Uma reviews); `shared-db` — branch+PR, AI merges it.
 19. Done = committed + pushed + CI green + deployed SHA verified.
 20. Check for uncommitted work from concurrent AI sessions before pull/merge.
+20b. **Verify commit identity before the first commit in any repo:**
+    `git var GIT_COMMITTER_IDENT` must show
+    `Albert Hazan <u2giants@users.noreply.github.com>`. Git has no default
+    identity — with none configured it silently invents one from the OS/AD
+    account instead of stopping, and that already put **231 wrong-identity
+    commits into merged `develop`/`main`** across the dflow repos. Fix it
+    BEFORE committing (`bin/ai-git-identity`); afterwards means rewriting
+    history. Only rewrite commits not yet merged to a shared branch. One `git`
+    serves every agent, so this is per-machine, never per-agent.
 21. State target repo and branch before any merge/push.
 
 ## Session rituals (full procedures: ai-devops repo, skills/claude/)

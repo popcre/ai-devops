@@ -168,6 +168,22 @@ if (Test-Path $existingInstaller) {
 }
 
 # --------------------------------------------------------------------------
+# 2b. Git commit identity.
+#     Git has no default identity. With none configured it does NOT stop — it
+#     silently invents one from the Windows/AD account and stamps it on every
+#     commit. That is how 231 wrong-identity commits reached merged dflow
+#     history before anyone noticed. useConfigOnly makes Git fail loudly
+#     instead of guessing if the config is ever lost.
+#     Set natively here (not via the bash script) so it lands in the Windows
+#     profile that native Git and every GUI tool actually read.
+# --------------------------------------------------------------------------
+Step "Pinning Git commit identity"
+git config --global user.name  "Albert Hazan"
+git config --global user.email "u2giants@users.noreply.github.com"
+git config --global user.useConfigOnly true
+Note ("Git identity: " + (git config --global --get user.email) + "  (auto-guess disabled)")
+
+# --------------------------------------------------------------------------
 # 3. The one bootstrap secret: the service-account token (paste once)
 # --------------------------------------------------------------------------
 Step "Service-account token (vault-locked to 'vibe_coding')"
