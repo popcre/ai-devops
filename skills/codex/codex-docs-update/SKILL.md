@@ -40,6 +40,45 @@ Do not:
 | `docs/configuration.md` | Env vars, config files, feature flags, no values |
 | `docs/deployment.md` | Deploy/release/environment/rollback workflow |
 | `HANDOFF.md` | Temporary continuation state only when work is unfinished |
+| **Any plan file** (`IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`) the session worked against | **Always — see the plan-file gate.** A plan describes the world as it was when written; each executed step makes it lie a little more |
+
+## Mandatory Plan-File Gate (never leave a plan you worked against stale)
+
+**Trigger:** the session executed, partially executed, or invalidated any part of a
+plan file (`IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`, or any file whose job is to
+tell a future session what to build). Locate them by listing the repo root and
+`docs/` for `*PLAN*.md` / `plan_*.md`. The gate applies whenever you touched the
+plan's subject matter, even if the user never mentioned the plan.
+
+**Why mandatory.** A plan is present-tense about a world your work changes. Left
+alone it becomes actively harmful: the next session reads "these files carry false
+claims", believes it, and redoes finished work or re-fixes a fixed bug. Real case in
+this repo, 2026-07-26: steps 1-4 of `plan_phase3-config-consolidation.md` were
+executed while its "current state" section still described the pre-fix world. It was
+caught only because Albert asked. Do not rely on that.
+
+**Do all five:**
+
+1. **STATUS table at the very top** - one row per step, marked done / partial / open,
+   dated, plus one line naming where a fresh session should start. Create it if absent.
+2. **De-stale the descriptive sections**, above all the "current state of the code"
+   section, since that is what an implementer trusts. Mark rows FIXED/UPDATED with the
+   date and say "do not redo" where it applies.
+3. **Keep the reasoning, delete only the falsehood.** The why behind a step (what
+   broke, what it cost, why the fix must not be weakened) stays, relabelled as
+   history. A session that loses the why will cheerfully undo the fix.
+4. **Mark verification that already ran** as passed, with its evidence, so nobody
+   re-runs a proven check or assumes it never ran.
+5. **Record what is still open and what it is blocked on** - approval, a powered-off
+   machine, an owner decision. "Open" with no reason reads as "nobody got to it".
+
+**Then make it discoverable** - a plan findable only by filename will be lost. Link it
+from `AGENTS.md`, from `HANDOFF.md` when present, from the topic doc it belongs to, and
+from any skill whose trigger leads there. Add a memory entry naming the plan and saying
+"read its STATUS table first - do not re-derive or re-plan".
+
+**Delete a plan file only when every step is genuinely done** (same rule as
+`HANDOFF.md`), and say so in the final report.
 
 ## Mandatory HANDOFF.md Completeness Gate
 
@@ -79,5 +118,8 @@ Report:
 - docs intentionally not changed,
 - verification source used.
 
+When a plan file exists, state its updated STATUS line: which steps are now done,
+where the next session starts, and what is blocked on whom - or say explicitly that
+no plan file was touched.
 When `HANDOFF.md` is present, also state that the mandatory completeness gate
 passed.
