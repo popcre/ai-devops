@@ -1,11 +1,11 @@
 ---
 name: op-account-migration-2026-07
-description: "2026-07-22 the 1Password service account moved to a NEW account (popcreations.1password.com); all old-account item UUIDs are dead; the final SA is READ-WRITE (item_edit verified 2026-07-26)"
+description: "2026-07-22 the 1Password service account moved to a NEW account (popcreations.1password.com); all old-account item UUIDs are dead, SA is now read-only"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 4838ebb3-d531-4f47-8660-f0a495d23914
-  modified: 2026-07-26T18:05:27.061Z
+  modified: 2026-07-23T04:10:13.208Z
 ---
 
 On **2026-07-22** Albert rotated the 1Password service-account token AND the new
