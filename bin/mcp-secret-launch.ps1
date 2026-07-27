@@ -88,6 +88,10 @@ if (($CommandArgs -join ' ') -match '1password-mcp') {
   $opToken = (Get-Content -Raw -LiteralPath $tokenFile).Trim()
   if ([string]::IsNullOrEmpty($opToken)) { throw "1Password token file is empty: $tokenFile" }
   [Environment]::SetEnvironmentVariable('OP_SERVICE_ACCOUNT_TOKEN', $opToken, 'Process')
+  # Belt and braces: hand over the token FILE PATH too (not a secret). 1password-mcp
+  # >= 2.6.0 can re-resolve from it, so the server self-heals instead of staying dead
+  # for its whole lifetime if the env injection above ever fails.
+  [Environment]::SetEnvironmentVariable('OP_SERVICE_ACCOUNT_TOKEN_FILE', $tokenFile, 'Process')
 }
 
 if ($Mode -eq 'Remote') {
