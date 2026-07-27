@@ -4,7 +4,9 @@
 > self-contained plan → [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md).**
 > Open that file for Phase 3; it needs no other context. Highest-value item in it: the
 > Dropbox folder still holds the **916-alien private key in plaintext** plus 16
-> token-bearing script variants (inventory written, removal approval-gated).
+> token-bearing script variants. **Measured 2026-07-26 (counts only, no values read);
+> the inventory doc itself is step 6 and is NOT yet written.** Stubbing (step 5) and
+> any removal/rotation are approval-gated — Albert decides, nothing has been deleted.
 
 > Read this whole file before continuing. It is written for a developer with
 > ZERO prior context — every path, alias, and identifier is defined. If anything
