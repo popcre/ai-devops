@@ -72,6 +72,24 @@ if ($Mode -eq 'Capture') { Write-EncryptedCache; exit 0 }
 Ensure-Cache
 Import-Cache
 
+# The 1Password MCP authenticates with OP_SERVICE_ACCOUNT_TOKEN itself, but that
+# variable is NOT in mcp.env and therefore never lands in the DPAPI cache. Ensure-Cache
+# only sets it on the *refresh* path (stale cache), so whether the 1Password MCP got a
+# token was a race with the 15-minute cache window: start it while the cache was fresh
+# -- e.g. any reconnect shortly after another MCP refreshed it -- and it came up with no
+# token, failing every call with "Service account token is required" until Claude Code
+# was restarted. Observed mid-session 2026-07-26.
+#
+# Inject it explicitly, and ONLY for that MCP: handing the vault's service-account token
+# to every MCP child (supabase, trigger, recall-ai, nas, ...) would widen its blast radius
+# for no reason.
+if (($CommandArgs -join ' ') -match '1password-mcp') {
+  if (-not (Test-Path -LiteralPath $tokenFile)) { throw "Missing 1Password token file: $tokenFile" }
+  $opToken = (Get-Content -Raw -LiteralPath $tokenFile).Trim()
+  if ([string]::IsNullOrEmpty($opToken)) { throw "1Password token file is empty: $tokenFile" }
+  [Environment]::SetEnvironmentVariable('OP_SERVICE_ACCOUNT_TOKEN', $opToken, 'Process')
+}
+
 if ($Mode -eq 'Remote') {
   $name = (Get-References).GetEnumerator() | Where-Object Value -eq $SecretRef | Select-Object -ExpandProperty Key -First 1
   if (-not $name) { throw "Secret reference is not managed by ${envFile}: $SecretRef" }
