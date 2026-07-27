@@ -428,6 +428,31 @@ Re-introducing a per-launch `op run`, removing `Position = 0`, or re-adding `--`
 each independently reproduces a real outage. Full detail:
 [docs/mcp-1password-rate-limit-hardening.md](docs/mcp-1password-rate-limit-hardening.md).
 
+### The isolated memory hub must enable Git long paths before checkout
+
+Looks like:
+The main `ai-devops` checkout has `core.longpaths=true`, so every Git operation
+on Windows should support paths longer than 260 characters.
+
+Actually:
+`bin/ai-memory-sync` works in a separate clone at
+`~/.cache/ai-devops-memory`. Git settings stored in the main checkout do not
+apply there. Claude local-agent transcripts can produce paths over 400
+characters. New hub clones therefore pass `-c core.longpaths=true` to
+`git clone` before checkout, and existing hub clones set the same local config
+before fetch/reset.
+
+Why:
+On 2026-07-27 the hidden clone failed to create a 409-character transcript path.
+The old script did not check the reset result, continued against a partial
+checkout, and printed misleading memory-copy messages.
+
+Do not change because:
+Setting long-path support after clone is too late for the first checkout.
+Every destructive reset in this script must also fail closed; otherwise a
+damaged hidden clone can look healthy. Regression coverage:
+`tests/test-ai-memory-sync.sh`.
+
 ## Credentials and environment
 
 No secrets live in this repo. The variables below are **non-secret** command
