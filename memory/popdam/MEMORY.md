@@ -14,6 +14,7 @@
 - [Project: VPS 1Password/MCP secrets](project_vps_1password_mcp_secrets.md) — vibe_coding vault via vault-scoped op SA in /root/.bashrc; .mcp.json placeholders + op run; MCP→Coolify token mapping; held-docker fix for proxy socket failure
 - [Project: PDF backfill processor](project_pdf_backfill_processor.md) — full-library text extraction runs on an on-prem agent (Windows render agent, bridge fallback), not cloud; trigger/total/handover gotchas
 - [Project: Style Guide Sources scope](project_style_guide_sources_scope.md) — sku_files_used now only from licensing/tech-pack PDFs; source column; 863 legacy_ungated rows to purge after review
+- [Feedback: changes go through ai-devops](feedback_changes_via_ai_devops.md) — skills/dotfiles/memories/global instructions are edited in the hub (or synced to it), never only locally
 - [Feedback: no workarounds](feedback_no_workarounds.md) — fix root cause or ask for what's missing; don't silently downgrade to best-effort
 - [Feedback: handoff "comprehensive?" → Yes](feedback_handoff_comprehensive_yes.md) — answer Yes when the handoff genuinely passes the checklist; don't reflexively say "No, I'll fix it"
 - [Project: PopDAM shared/concurrent env](project_popdam_shared_env.md) — repo checkout is concurrently edited; supabase MCP token wiring gap + fix
