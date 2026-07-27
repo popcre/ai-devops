@@ -1,6 +1,6 @@
 ---
 name: op-account-migration-2026-07
-description: "2026-07-22 the 1Password service account moved to a NEW account (popcreations.1password.com); all old-account item UUIDs are dead; the final SA is READ-WRITE (item_edit verified 2026-07-26)"
+description: "2026-07-22 the 1Password service account moved to a NEW account (popcreations.1password.com); all old-account item UUIDs are dead, SA is now read-only"
 metadata: 
   node_type: memory
   type: project
