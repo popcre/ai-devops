@@ -37,13 +37,18 @@ mkdir -p "$(dirname "$LOG")"
 # --- 1. Isolated hub clone (kept pristine; never your dev checkout) ---------
 if [ ! -d "$HUB/.git" ]; then
   log "Cloning memory hub -> $HUB"
-  [ -n "$DRY" ] || git clone -q "$REPO_URL" "$HUB" || { log "clone failed"; exit 1; }
+  # Set long-path support before checkout. Setting it after clone is too late:
+  # the transcript archive can contain Windows paths longer than 260 chars.
+  [ -n "$DRY" ] || git clone -q -c core.longpaths=true "$REPO_URL" "$HUB" || { log "clone failed"; exit 1; }
 fi
 if [ -z "$DRY" ]; then
+  # Existing hub clones created before long-path support was added need the same
+  # setting before fetch/reset tries to materialize a deep transcript path.
+  git -C "$HUB" config core.longpaths true || { log "could not enable long-path support in memory hub"; exit 1; }
   # Reset to a clean base = current origin/main. Any leftover uncommitted memory
   # is safe to discard: it is regenerated from this machine's live memory below.
   git -C "$HUB" fetch -q origin main || { log "fetch failed (offline?) — skipping."; exit 0; }
-  git -C "$HUB" reset -q --hard origin/main
+  git -C "$HUB" reset -q --hard origin/main || { log "reset failed; memory sync stopped before copying files."; exit 1; }
 fi
 
 SYNC="$HUB/bin/ai-sync-memory"
@@ -95,7 +100,7 @@ else
 fi
 
 # --- 5. INCOMING LAST: hub -> this machine, now that our edits are safely up.
-git -C "$HUB" reset -q --hard origin/main 2>/dev/null
+git -C "$HUB" reset -q --hard origin/main || { log "final reset failed; incoming memory was not copied."; exit 1; }
 log "Pull incoming memory (hub -> machine)"
 $SYNC pull 2>&1 | tee -a "$LOG" >&2
 log "Sync complete."

@@ -47,6 +47,7 @@ Installer behavior has lightweight, dependency-free tests:
 
 ```bash
 bash tests/test-ai-install-skills.sh
+bash tests/test-ai-memory-sync.sh
 ```
 
 ```powershell
