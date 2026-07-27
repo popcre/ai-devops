@@ -1,0 +1,4 @@
+interface:
+  display_name: "Synology Long-Running Operations"
+  short_description: "Run safe NAS jobs beyond MCP time limits"
+  default_prompt: "Use $synology-long-running-operations to run this safe NAS operation without weakening MCP timeouts."
