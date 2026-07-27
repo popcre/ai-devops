@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 510c0819-789c-4874-93eb-eb8cadc5cbdb
+  modified: 2026-07-27T22:08:50.345Z
 ---
 
 Working access paths on the hetz VPS checkout (verified 2026-07-14), for when a
@@ -32,6 +33,16 @@ task needs a live secret or DB read and printing the secret is blocked:
   read via service-role + PostgREST (`${SUPABASE_URL}/rest/v1/<table>?...` with
   apikey+Bearer) or the CLI, both fed by op. See [[project_popdam_shared_env]],
   [[project_vps_1password_mcp_secrets]].
+- **The exact working psql string (re-verified 2026-07-27)** — prod SQL, arbitrary
+  DDL/DML, no MCP needed. `PGPASSWORD` from item `246sf23gymd64yudpmhswcnyle`
+  (`Supabase DB Password - shared POP database`) field `password`, injected by
+  `op run --env-file`, then:
+  `psql "postgresql://postgres.qsllyeztdwjgirsysgai@aws-1-us-east-1.pooler.supabase.com:5432/postgres"`
+  Note the user is `postgres.<project-ref>` (pooler form) and the host region is
+  `aws-1-us-east-1`, NOT the project's own hostname. Preview branch
+  `rjyboqwcdzcocqgmsyel` has its own item
+  `qbvfk7umc3n75ejekd65zwd4ty` with a ready-made `POSTGRES_URL_NON_POOLING` field —
+  use that directly rather than assembling a URL.
 - **Gotcha:** the PopDAM OpenRouter account's privacy/data-policy blocks bare
   text completions ("No endpoints available matching your guardrail restrictions
   and data policy") — a from-scratch live OpenRouter probe fails even with the

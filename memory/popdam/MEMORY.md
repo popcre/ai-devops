@@ -26,3 +26,4 @@
 - [Project: PopSG tag matching baseline](project_popsg_tag_matching_baseline.md) — exact-match coverage on 216k files: licensor 49% / property 83% unmatched; licensor head=16 (WB→Warner Bros etc), property tail=300; parent-child conformance perfect (0 violations); reconcile GUI needs alias+create-row; CLI-token→Mgmt-API is the working DB path
 - [Project: PopSG AI tester login](project_popsg_tester_login.md) — ai-tester@popcre.com in 1Password (vibe_coding); invitation-gated signup; how to create/inject-session/teardown
 - [Project: service-role key mismatch](project_service_role_key_mismatch.md) — edge functions use new sb_secret_ key, 1Password holds legacy service_role JWT; probes 401 and look like a regression; secrets-list DIGEST = plain sha256
+- [Project: git commit identity](project_git_commit_identity.md) — u2giants pushes need the noreply email; worktrees do not inherit it
