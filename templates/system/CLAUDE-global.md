@@ -90,6 +90,15 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
    1Password MCP calls in parallel; fetch a shared environment once and reuse it.
 9. Long operations: run as background tasks that write incremental results to
    files, so partial work survives a crashed session and the chat stays light.
+9a. **Long Synology reads:** keep the Synology Monitor MCP's 25-second
+    `run_command` limit. It protects the NAS from orphaned or runaway commands
+    and is not a budget to raise for whole-volume `find`, hashing, inventory, or
+    other heavy read-only walks. Prefer a native NAS background-job capability.
+    If none exists, use the shared `synology-long-running-operations` skill:
+    managed SSH, lowest practical priority, unique durable output, PID/status,
+    separate stderr, and completion/exit evidence. A read-only command can still
+    overload production; obtain explicit approval for a broad metadata walk.
+    Never report a timed-out partial result as complete.
 
 ## AI model settings (hard rule — check before every Codex call)
 

@@ -40,6 +40,7 @@ the others live where noted.
 | ⚙ `cicd-rules-audit` | Audits a repo's CI/CD against your full operating rules (embedded verbatim); fixes violations. | "audit CI/CD against our rules" |
 | ⚙ `shared-db-change` | The proper way to change the shared supabase backend: migration discipline, shared-db authoring, correct project refs, type regeneration. | fires on any shared-backend DB change; "make db changes the proper way" |
 | ⚙ `synology-sharesync-triage` | Diagnoses and narrowly repairs Synology Drive ShareSync stalls using pairing, log, hash, and queue evidence. Shared by Claude and Codex/ChatGPT. | "check ShareSync health" / "a file is stuck syncing" |
+| ⚙ `synology-long-running-operations` | Runs safe NAS reads that exceed Synology Monitor MCP's 25-second command budget as durable, low-priority background work without weakening the timeout. Shared by Claude and Codex/ChatGPT. | "scan all of /volume1" / "this NAS command will take longer than 25 seconds" / "run a long read-only NAS audit" |
 
 ## Quality & analysis
 
