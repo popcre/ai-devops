@@ -13,6 +13,48 @@
 > here would make you ask a question, the answer is somewhere below.
 
 
+## 2026-07-26 — Git identity + sync-dotfiles reliability (COMPLETE, shipped)
+
+Four silent-failure classes were found and fixed. All are pushed to `main`. Each
+"worked" while doing nothing, which is why none had been noticed.
+
+1. **Git had no identity on this machine at all** — no `--global`, no `--system`, no
+   `EMAIL`. Git does not stop when unconfigured; it invents an identity from the
+   Windows/AD account (`albert@popcre.com`) and stamps it on every commit. **231 such
+   commits are already merged into `develop` AND `main` across the dflow repos** (184
+   frontend, 41 backend, 6 tracking) and are NOT safely fixable — correcting them means
+   force-pushing shared release history. The 8 still-unmerged ones were rewritten and
+   force-pushed. Fix: `bin/ai-git-identity` sets the identity plus
+   `user.useConfigOnly=true`, so Git now FAILS LOUDLY instead of guessing. Wired into
+   `install.sh`, `bin/setup-machine.ps1`, and — critically — `bin/ai-install-skills`.
+2. **Why `ai-install-skills` and not just the skill text:** during a sync the agent has
+   already loaded the OLD installed copy of `sync-dotfiles` before `git pull` fetches the
+   new one, so a step added to skill prose does not run until the NEXT sync. Scripts
+   invoked from the repo after the pull DO run immediately. **Rule for future changes:
+   anything that must run belongs in a script, not in skill prose.**
+3. **`ai-sync-memory` resolved the Claude home from `$HOME` while `ai-install-skills`
+   used `%USERPROFILE%`.** On a box where Git Bash `$HOME` is a roaming/network drive,
+   skills installed correctly and memory silently did not: `push` reported
+   "0 project memory folder(s)" and exited 0; `pull` printed "no local project dir" for
+   every project — which the skill documented as *expected*. Both now exit non-zero.
+4. **Memory project keys were fragmenting.** The slug normaliser only stripped through
+   `repos-`, so checkouts elsewhere got their own key and the same project stored memory
+   in two places. **104 files were stranded** (87 under `-worksp-*`, 17 under
+   `D--*`/`C--PopDAM-*`). Merged file-by-file, 201 files before and after, none lost.
+   `canonical()` now handles `-worksp-<name>`; odd shapes are pinned in
+   `memory/project-map.tsv`.
+
+Also added: **memory tombstones**. Sync copies and never mirrors, so `rm` did not
+propagate — a memory deleted *because it was wrong* came back on the next pull. Use
+`bin/ai-sync-memory forget <project> <file> "<reason>"` (reason mandatory). And `push`
+now warns when it would shrink a project's `MEMORY.md` index — caught live when another
+machine clobbered 5 entries; the files survived but nothing referenced them.
+
+**Outstanding:** only THIS machine is fixed. `albt16`, `hetz`, and `916` (offline) each
+need one `sync my dotfiles` to pick all of this up. Until then they keep committing under
+the wrong identity. Note `4837` is this machine's own Tailscale name — `ssh 4837` from
+here loops back; the separate Windows dev box is `916`.
+
 ## Current priority: minimum-touch Windows + Ansible provisioning
 
 ### 1. What this repository is
