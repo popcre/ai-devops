@@ -16,6 +16,8 @@
 - [dflow fixes register](dflow-fixes-register.md) — fixes.md (in designflow-frontend) re-verified 2026-07-20: 39 closed/106 open/14 new; JWT bypass is FIXED; watch regression-by-activation
 - [dflow vendor identity model](dflow-vendor-identity-model.md) — TWO unreconciled vendor-scope mechanisms (factory_id vs externalVendor.vendorCode-by-email); root cause of the Group A tracking auth holes
 - [dflow schema: dflow vs plm](dflow-schema-dflow-vs-plm.md) — app runs on `SCHEMA=dflow`; segregation moves tables to `plm` and breaks the app (`relation "dflow.X" does not exist`); fix in shared-db
-- [dflow DB → Supabase](dflow-db-supabase-migration.md) — Cloud SQL being RETIRED; new dflow storage (e.g. hts_rag_rulings) goes to supabase.com via shared-db
+- [dflow DB → Supabase](dflow-db-supabase-migration.md) — migration DONE for the sandbox (verified 2026-07-27); do not say dflow runs on Cloud SQL
 - [HTS RAG pilot](hts-rag-pilot.md) — HTS_RAG.md is plan-only (no code); pilot = 9-model bake-off + ruling verifier; cross.js now has fetchRuling()
 - [dflow UI verify via preview](dflow-ui-verify-preview.md) — start:preview + `umeka@popcre.com` (vibe_coding) to see UI render; dev-server renders AG-Grid cell renderers BLANK (prod is fine)
+- [dflow sandbox = PRODUCTION Supabase](dflow-sandbox-is-production-supabase.md) — alsand writes to `qsllyeztdwjgirsysgai`, schema-separated only; test data is permanent and only Albert can delete it
+- [AG Grid group id → context.col_id](aggrid-group-id-survives-as-context-colid.md) — on Standardized, `field` is cleared and `groupId` is auto-numbered; match saved group ids on `context.col_id`
