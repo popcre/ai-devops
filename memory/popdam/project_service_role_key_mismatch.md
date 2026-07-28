@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 7f75d1b6-370e-40a4-b10e-fe9af344cbca
-  modified: 2026-07-27T02:19:02.035Z
+  modified: 2026-07-28T20:36:11.035Z
 ---
 
 For Supabase project `qsllyeztdwjgirsysgai` (PopDAM/PopSG, Virginia), the
@@ -31,7 +31,13 @@ code that is fine.
   `GET https://api.supabase.com/v1/projects/qsllyeztdwjgirsysgai/api-keys?reveal=true`
   (returns `legacy anon`, `legacy service_role`, `default publishable`,
   `default secret`).
-- The 1Password entry has not been reconciled — treat it as stale for
-  edge-function work until it is.
+- **Fixed 2026-07-28:** the 1Password item now also carries
+  `SUPABASE_SECRET_KEY` (`sb_secret_…`) and `SUPABASE_PUBLISHABLE_KEY`, plus a
+  note section explaining which generation is which. Use `SUPABASE_SECRET_KEY`
+  for any edge-function server-to-server probe; the legacy `service_role` JWT
+  field is still there and still works for PostgREST only.
+- Gotcha: nesting `op item edit` inside `op run --env-file=… -- …` fails with
+  "invalid JSON provided". Read the token with `op read` into a shell var and
+  run `op item edit` outside `op run`.
 
 Related: [[project_secret_access_paths]], [[project_supabase_virginia_cutover]]
