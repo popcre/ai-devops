@@ -24,7 +24,7 @@ file.
 | `uma_designflow_prompt.docx` / DesignFlow sandbox start/end workflow | "use `codex-dflow-plm`" |
 | `new application one big prompt.docx` / "set up a brand-new app" | "use `codex-new-application`" |
 | `devops procedure deploying from github.docx` / CI/CD rules | "use `codex-cicd-pipeline`" |
-| "is HANDOFF.md comprehensive enough for a fresh developer?" | "use `codex-session-closeout`" |
+| "is HANDOFF.md comprehensive enough for a fresh developer?" | "use `handoff-writer`" |
 | "read all docs and handoff, then keep only useful context" | "use `codex-context-optimizer`" |
 | "reduce my token usage / stop making me paste the same prompt" | "use `codex-context-optimizer`" |
 | "find all local Codex transcripts / analyze repeated prompts" | "use `codex-transcript-miner`" |
@@ -61,6 +61,12 @@ file.
   plain English first, full background, rejected approaches, locked-vs-open
   decisions, per-step files and verification gates, per
   `templates/system/implementation-plan-standard.md`.
+- `handoff-writer`: writes or judges a fresh-developer-grade handoff with the
+  canonical nine-section structure and mandatory self-audit gate.
+- `design-handoff-implement`: implements a Claude Design export in the existing
+  application stack and requires source-driven visual verification.
+- `repo-bug-audit`: audits one or more complete repositories for correctness,
+  silent failures, hard-coded configuration, and inefficient code.
 - `cleanup-worktree`: safely inventories, recovers, and removes stale Codex,
   Claude, and delegated-agent worktrees or temp clones across Windows and
   POSIX systems without losing unique work.

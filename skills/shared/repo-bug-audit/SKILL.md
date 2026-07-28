@@ -1,6 +1,6 @@
 ---
 name: repo-bug-audit
-description: Whole-codebase quality audit across one or many repos. Use when the user says "read the entire codebase and tell me if you find any bugs, inefficient code, or poorly written code", or asks for an AI-implementation audit (context/prompt-caching correctness). Spawns one review subagent per repo and writes bugs.md.
+description: Whole-codebase quality audit across one or many repos. Use when the user says "read the entire codebase and tell me if you find any bugs, inefficient code, or poorly written code", asks to audit the codebase, or requests an AI-implementation audit (context/prompt-caching correctness). Uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex.
 ---
 
 # repo-bug-audit
@@ -13,8 +13,9 @@ if you see inefficient code, bugs, poorly written code"*.
 
 1. **Scope.** Enumerate the repos in scope (e.g. the six designflow-* repos, or
    the oracle monorepo packages). Confirm scope in one sentence, then go.
-2. **Fan out.** Spawn one review subagent per repo/package, in parallel. Each
-   reads that repo's AGENTS.md first, then the code. Dimensions:
+2. **Fan out.** When the client supports subagents, spawn one review subagent per
+   repo/package in parallel. Otherwise audit the repositories sequentially.
+   Each pass reads that repo's AGENTS.md first, then the code. Dimensions:
    - correctness bugs (with a concrete failure scenario)
    - silent failures and swallowed errors (Albert's #1 pet peeve — every
      fallback must be loud; flag ANY silent fallback as a finding)
