@@ -1,5 +1,170 @@
 # HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-26)
 
+## 2026-07-28 — response-style rollout and Ubuntu Codex secret gap
+
+### 1. What this application is
+
+`u2giants/ai-devops` is Albert's private source of truth for Claude and Codex
+instructions, skills, machine setup, and recovery. The response rules live in
+`templates/system/CLAUDE-global.md` and
+`templates/system/AGENTS-global-codex.md`. Ubuntu machine setup is handled by
+`bin/setup-secrets.sh`. Hetz is the Ubuntu server reached as SSH alias `vps2`;
+its checkout is `/worksp/ai-devops` and its AI user is `ai`.
+
+### 2. What we set out to do this session, and why
+
+Albert reported that forcing every AI response into bullets made answers worse.
+The goal was to remove only that requirement from Claude and Codex, keep the
+rest of the plain-language response rules, push the durable change to GitHub,
+and install it on this Windows machine and Hetz. T16 and 916 were offline and
+were explicitly left untouched.
+
+### 3. Current state
+
+- Complete and pushed: commit `bbdb3ac` changed both templates from “Bullet
+  points only” to “Use short paragraphs or bullets, whichever reads better.”
+- Complete on this Windows machine: the same wording is active in
+  `C:\Users\ahazan2\.claude\CLAUDE.md` and
+  `C:\Users\ahazan2\.codex\AGENTS.md`.
+- Complete on Hetz: `/home/ai/.claude/CLAUDE.md` and
+  `/home/ai/.codex/AGENTS.md` contain the corrected response-style block and no
+  “Bullet points only” line. The block was appended because both files contain
+  machine-specific rules and the installer correctly refuses to overwrite them.
+- Hetz pulled through commit `5a4eeb48b369953e3ef1dd6676f2f76978a2ee59`;
+  that commit contains `bbdb3ac`. Its `/worksp/ai-devops` checkout was clean and
+  matched `origin/main` at verification time. GitHub later advanced through
+  normal memory syncs; no response-style work is missing from Hetz.
+- Hetz Phase 2 setup was refreshed. `mcp.env` matched the repo template, the
+  launchers and protected 1Password token file were present, all six protected
+  references resolved, and the GLM-5.2 live probe passed.
+- A raw 1Password service-account token was found in Hetz
+  `/home/ai/.codex/config.toml` under `[mcp_servers."1password".env]`. It was
+  removed. The `1password` MCP now launches through
+  `/home/ai/.config/ai-devops/mcp-launch.sh`; `codex mcp list` parsed the result
+  successfully and the token-shape scan returned zero.
+- Unfinished product fix: `bin/setup-secrets.sh` cleans a raw token from Claude
+  settings but does not reconcile Codex MCP blocks on Ubuntu. The Hetz repair
+  is live and safe, but a later run or another Ubuntu machine could retain the
+  same bad Codex layout until the repo script gains parity with the Windows
+  `bin/configure-codex-1password.ps1`.
+
+### 4. Everything tried that did not work
+
+1. A single-line SSH command used nested PowerShell, Bash, and `awk` quoting to
+   append the response block. PowerShell parsed the inner Bash `for` statement
+   and rejected it before SSH ran. No remote file changed.
+2. Piping a PowerShell here-string to `bash -s` failed twice with “unexpected
+   end of file,” including after removing carriage returns. No remote file
+   changed. Base64-encoding the public script text before transport avoided the
+   Windows pipe/line-ending problem and succeeded.
+3. A multiline Perl replacement tried to rewrite the Hetz 1Password MCP block.
+   It did not match the exact TOML layout, so the raw token remained. A
+   section-scoped `sed` edit changed only the named block, removed its env
+   section, and passed `codex mcp list`.
+4. Running `./bin/ai-git-identity` on Hetz returned permission denied because
+   that checkout lacks its executable bit. Running `bash ./bin/ai-git-identity`
+   succeeded and pinned Albert's global identity. The source-mode issue remains
+   a separate repo bug.
+
+### 5. Root causes and key findings
+
+- The bad response behavior came from one sentence near the top of both global
+  templates. No skill or application code also enforced bullet-only replies.
+- `bin/ai-install-skills` intentionally preserves existing global instruction
+  files. New standing sections therefore need the sync skill's append-only
+  carry-forward step on machines with local additions.
+- `bin/setup-secrets.sh` builds protected launchers around lines 215-273 and
+  removes `OP_SERVICE_ACCOUNT_TOKEN` only from
+  `~/.claude/settings.json` around lines 434-459. It does not update
+  `~/.codex/config.toml`. The Windows path already has a dedicated
+  `bin/configure-codex-1password.ps1`, which is the behavior model for a durable
+  Ubuntu fix.
+- The Hetz Git identity audit also found unrelated repo-local overrides in
+  `/worksp/hiclaw`, `/worksp/bizanalysis/app`, and
+  `/worksp/albert-standards`. The global identity is now correct; those local
+  overrides were not changed without reviewing their ownership.
+
+### 6. Exact next steps
+
+1. Add Ubuntu Codex MCP reconciliation to `bin/setup-secrets.sh`, using the
+   protected `mcp-launch.sh` and `mcp-remote-launch.sh` rather than writing
+   resolved tokens into TOML. Gate: a fixture containing a raw
+   `[mcp_servers."1password".env]` token is rewritten with no token-shaped value,
+   and `codex mcp list` accepts the result.
+2. Add a dependency-free regression test under `tests/` for first install,
+   repair of the legacy raw-token block, and a second unchanged run. Gate: the
+   new test and the existing Bash setup tests pass twice.
+3. Fix or deliberately document the missing executable bit on
+   `bin/ai-git-identity`. Gate: `./bin/ai-git-identity` runs directly in a fresh
+   Linux checkout and the installer no longer warns that it is missing.
+4. When T16 and 916 are online, run their normal dotfiles sync. Gate: both
+   active Claude/Codex files contain the corrected sentence, contain no old
+   bullet-only sentence, and their repos match GitHub.
+5. Review the three Hetz repo-local Git identities before changing them. Gate:
+   each override is either confirmed intentional in its repo docs or corrected
+   to Albert's noreply identity with no shared-history rewrite.
+
+### 7. Constraints and gotchas
+
+- Never overwrite whole machine instruction files; they contain local atlas and
+  standing-rule additions. Carry new rule sections append-only.
+- Never print or commit resolved credentials. Secret values belong only in
+  1Password vault `vibe_coding` and protected machine storage.
+- Serialize all 1Password access. Do not run parallel `op` calls.
+- Do not run the unproven Windows bootstrap on an established workstation just
+  to roll out this wording change.
+- `main` is the only branch for `u2giants/ai-devops`.
+
+### 8. Access and environment
+
+- Local repo: `C:\repos\ai-devops`, branch `main`, remote
+  `https://github.com/u2giants/ai-devops`.
+- Hetz access: Git for Windows SSH executable, alias `vps2`, user `ai`, checkout
+  `/worksp/ai-devops`.
+- GitHub CLI is authenticated as `u2giants`.
+- Hetz 1Password uses its protected service-account file and vault
+  `vibe_coding`; no secret value belongs in this handoff.
+- T16 and 916 were offline on 2026-07-28.
+
+### 9. Open questions and risks
+
+- The durable Ubuntu Codex repair is not implemented. Hetz is repaired, but
+  another Ubuntu machine may still hold a raw Codex MCP token.
+- Hetz's current Codex config contains older inline credentials for other MCP
+  entries. They were observed only as config structure during diagnosis and
+  were not copied into this file. The durable Ubuntu reconciliation should
+  migrate every secret-bearing Codex MCP entry to the protected launchers, not
+  only 1Password.
+- It is not yet known whether the three Hetz repo-local Git identities are
+  intentional. Changing them without repo context could misattribute commits.
+
+### Handoff self-audit
+
+1. **Could a street-new developer continue without questions? Yes.** Sections
+   1-3 define the repo, hosts, paths, goal, exact completed state, commits, and
+   the remaining Ubuntu gap. Sections 6 and 8 provide ordered work and access.
+2. **Could they continue as effectively as this session? Yes.** Sections 4 and
+   5 preserve every failed transport/edit attempt, the successful alternatives,
+   file locations, and non-obvious installer behavior.
+3. **Are failures included with reasons? Yes.** Section 4 records all four
+   failed or partial approaches, why they failed, and what succeeded.
+4. **Is every next step concrete and verifiable? Yes.** Every item in section 6
+   names the target and ends with an observable gate.
+5. **Are unfamiliar terms, paths, identifiers, and secrets explained? Yes.**
+   Sections 1, 3, 7, and 8 define the repo, two machines, SSH alias, active
+   files, launchers, branch, vault, and secret boundaries.
+
+Final synthesis: **Yes**, this workstream is comprehensive enough for a
+brand-new developer to continue without missing a beat; sections 1-9 cover the
+background, goal, outcome, current state, failures, findings, constraints,
+access, risks, and exact next actions. **Yes**, it contains all knowledge from
+this session, especially the Ubuntu Codex gap and failed remote-edit paths.
+**Yes**, every relevant detail needed for flawless continuation is present,
+with secrets referenced only by protected location and every next action tied
+to a verification gate.
+
+---
+
 > **Config consolidation: Phases 1 and 2 are COMPLETE. The remaining work has its own
 > self-contained plan → [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md).**
 > Open that file for Phase 3; it needs no other context. Highest-value item in it: the
