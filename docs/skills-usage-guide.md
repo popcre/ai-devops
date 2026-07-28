@@ -1,7 +1,7 @@
 # Skills usage guide
 
-How the skills in `skills/claude/` map to the things Albert used to type
-manually, and how to install them. Built from an analysis of ~1,790 prompts
+How the skills in `skills/claude/` and `skills/shared/` map to the things Albert
+used to type manually, and how to install them. Built from an analysis of ~1,790 prompts
 across 179 archived sessions (six machines) in `claude_chats/`.
 
 ## Install
@@ -12,7 +12,8 @@ On each machine, after cloning/pulling this repo:
 ./bin/ai-install-skills          # Linux/macOS/Git Bash
 ```
 
-This copies every skill to `~/.claude/skills/` and seeds the global standing
+This copies Claude-specific and shared skills to `~/.claude/skills/`, copies
+Codex-specific and shared skills to `~/.codex/skills/`, and seeds the global standing
 instructions (`templates/system/CLAUDE-global.md`) to `~/.claude/CLAUDE.md` if
 absent. Then append the machine's section from
 `templates/system/machine-atlas.md` to that CLAUDE.md.
@@ -100,6 +101,9 @@ quarantine after reviewing a `--dry-run`.
 - `cleanup-worktree` is repo-owned under `skills/shared/`. It handles Codex,
   Claude, and delegated-agent linked worktrees or temp clones across Windows,
   Linux, WSL, and macOS, with recovery-before-deletion safeguards.
+- `handoff-writer`, `implementation-plan-writer`, `design-handoff-implement`,
+  and `repo-bug-audit` are repo-owned under `skills/shared/`, so both Claude and
+  Codex use the same handoff, planning, design-implementation, and audit rules.
 - The 7-stage pipeline (`skills/claude/ai-development-pipeline`,
   `templates/prompts/01–07`) is unchanged and complements these: these skills
   automate the *rituals around* coding sessions; the pipeline governs staged

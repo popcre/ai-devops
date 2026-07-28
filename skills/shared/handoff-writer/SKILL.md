@@ -1,6 +1,6 @@
 ---
 name: handoff-writer
-description: Write a fresh-developer-grade handoff (HANDOFF.md or fix_*.md), OR judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a fix_*.md", "give me a detailed prompt for the new chat", OR asks whether HANDOFF.md is thorough / detailed / comprehensive enough for a fresh developer to pick up and not skip a beat. This skill is self-contained. The handoff must pass the concrete self-audit BELOW before it is shown, so that the answer to "is it comprehensive enough?" is already a truthful Yes. NOTE: do not trigger on a bare "wrap up" — that belongs to the `wrap-up` skill, which calls this skill only for its handoff step.
+description: Write a fresh-developer-grade handoff (HANDOFF.md or fix_*.md), or judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a fix_*.md", "give me a detailed prompt for the new chat", or asks whether HANDOFF.md is thorough, detailed, or comprehensive enough for a fresh developer to pick up and not skip a beat. The handoff must pass the concrete self-audit before it is shown. Do not trigger on a bare "wrap up"; the active client's closeout skill owns that phrase. Shared by Claude and Codex.
 ---
 
 # handoff-writer
@@ -20,7 +20,7 @@ truthful, and (2) when asked, verify against the concrete checklist and answer
 
 ## When to use
 
-- "put that plan in handoff.md" / "write a comprehensive handoff.md"
+- "put that context in handoff.md" / "write a comprehensive handoff.md"
 - "write a fix_<topic>.md"
 - "give me a very detailed prompt to give another ai session"
 - "this session's context window is getting full"
@@ -155,6 +155,6 @@ now**. If that is true, the answer is Yes — say it.
 
 ---
 
-_Canonical cross-tool standard (also used by Codex): `templates/system/handoff-standard.md`
+_Canonical cross-tool standard: `templates/system/handoff-standard.md`
 in the `ai-devops` repo. This SKILL.md is self-contained and does not depend on it
 being checked out; keep the two in sync when either changes._

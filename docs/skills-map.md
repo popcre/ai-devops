@@ -12,7 +12,7 @@ the others live where noted.
 | ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
 | ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
 | ⚙ `secrets-to-1password` | **The quality gate on every 1Password MCP write** — secret or plain info note. Sweeps the session for credentials, or stores/updates a single entry you hand it, in the `vibe_coding` vault: searchable title, mandatory tags, and notes detailed enough for a future context-free session to find it, know what it's for, and use it. Checks for an existing entry first, and never stores a truncated value or reveals a live one to compare. Shared by Claude and Codex/ChatGPT. | "secrets sweep" / "any secrets not in 1password?" / "save this key" / "add this note to the vault" |
-| ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt per `handoff-standard.md`, with a mandatory self-audit gate so it's never skimpy. | "write the handoff" / "give me a prompt for a new session" |
+| ⚙ `handoff-writer` | Fresh-developer-grade HANDOFF.md / fix_*.md / next-session prompt per `handoff-standard.md`, with a mandatory self-audit gate so it's never skimpy. Shared by Claude and Codex. | "write the handoff" / "give me a prompt for a new session" |
 | ⚙ `implementation-plan-writer` | Writes (or judges) an implementation plan a brand-new session with zero context can execute perfectly: ultimate goal in plain English first, all background, rejected approaches, locked-vs-open decisions, per-step files + verification gates, per `implementation-plan-standard.md`, with a mandatory self-audit gate. Shared by Claude and Codex. | "write an implementation plan" / "plan how we'll build X" / "give another session a plan to implement this" |
 | ⚙ `fresh-session` | Between phases of a plan: decides whether to cut over to a NEW session with a clean context window, grades the handoff + plan against ALL remaining phases (not just the next), and verifies the outgoing spec tells the implementer to re-read downstream phases for drift. Delegates the document to `handoff-writer`. Shared by Claude and Codex. Forward-looking counterpart to `close-old-session`. | "fresh session?" / "should this be a new session?" / "new context window?" |
 | ⚙ `close-old-session` | Resuming a stale/abandoned session whose in-context "todo" list can't be trusted: verifies each pending doc/merge/commit item against ground truth (git + current .md + code) BEFORE acting, then delegates the actual work to `session-docs-update` / `wrap-up` / `dflow-ship`. Backward-looking counterpart to `fresh-session`. Shared by Claude and Codex. | "this chat is a week old" / "did we ever finish this?" / "picking this back up" |
@@ -30,7 +30,7 @@ the others live where noted.
 |---|---|---|
 | ⚙ `dflow-session-start` | Syncs develop → your sandbox branch across all six repos; loads the standing dflow rules (branch policy, AG-Grid MCP, unit tests). | "pull develop into sandbox-albert" — or it fires automatically at dflow session start |
 | ⚙ `dflow-ship` | Tests → commit → push → PR to develop → watches the Cloud Build deploy → verifies the sandbox site. | "push and commit" / "ship it" |
-| ⚙ `design-handoff-implement` | Implements a Claude Design zip in the real stack, phase by phase, with visual verification. | attach the zip + "read the README in full" |
+| ⚙ `design-handoff-implement` | Implements a Claude Design zip in the real stack, phase by phase, with visual verification. Shared by Claude and Codex. | attach the zip + "read the README in full" |
 
 ## Infrastructure & deploys
 
@@ -46,7 +46,7 @@ the others live where noted.
 
 | Skill | What it does | Say this |
 |---|---|---|
-| ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; one subagent per repo; writes bugs.md. | "read the entire codebase and tell me if you find any bugs" |
+| ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex. | "read the entire codebase and tell me if you find any bugs" |
 | `designflow-e2e-tester` | AI-driven end-to-end/visual testing of the dflow app. | "run the E2E tester" (lives in designflow-frontend/.claude/skills) |
 
 ## Meta
