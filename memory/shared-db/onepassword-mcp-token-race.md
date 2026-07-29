@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: c2fb38ad-dde0-459e-9563-443c4d2c38e1
-  modified: 2026-07-27T02:24:06.231Z
+  modified: 2026-07-27T21:59:48.390Z
 ---
 
 If the 1Password MCP suddenly fails **every** call with
@@ -27,17 +27,23 @@ and cached it forever**, and the only non-env fallback was a **macOS-only** Keyc
 lookup. So on Windows a transient env gap became a permanently dead server for its
 whole lifetime.
 
-**Fixed 2026-07-26, both layers:**
-- ai-devops `81954f8` + follow-up: the launcher always injects the token from
+**FIXED AND LIVE (verified 2026-07-27)** — both layers shipped; the MCP is working:
+- ai-devops `81954f8` + `f5b7646`: the launcher always injects the token from
   `~/.config/ai-devops/op-service-account`, scoped to the `1password-mcp` child only
   (the vault token is NOT handed to supabase/trigger/recall-ai/nas children), and
   also passes `OP_SERVICE_ACCOUNT_TOKEN_FILE` (a path, not a secret).
-- 1password-mcp **2.7.0**: adds a cross-platform token-file source
+- 1password-mcp **2.7.0 — published to npm 2026-07-27** (`npm view
+  @u2giants/1password-mcp version` → `2.7.0`): adds a cross-platform token-file source
   (`--service-account-token-file` / `OP_SERVICE_ACCOUNT_TOKEN_FILE`) and
   `refreshServiceAccountToken()`, so `requireServiceAccountToken()` re-resolves once
-  before failing and the server self-heals instead of staying dead.
+  before failing.
 
-A running MCP still needs a **Claude Code restart** to pick up either fix.
+**Scope of the retry (corrected in `a980f6e` — do not overstate it):** the recheck
+recovers a **token FILE** that appears or becomes readable after startup. It canNOT
+recover an env-only setup, because a parent process cannot inject a new environment
+variable into an already-running child. Env-only configs still need a restart.
+
+A running MCP needs a **Claude Code restart** to pick up either fix (it now has).
 
 **Workaround when the MCP is down:** the `op` CLI works independently —
 `OP_SERVICE_ACCOUNT_TOKEN` is present in the ordinary shell env, so
