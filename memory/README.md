@@ -102,6 +102,14 @@ minimize them, `pull` before a work session and `push`+commit at the end (the
   owning project, and pushing.
 - `MEMORY.md` inside each project is an index only — keep it one line per fact
   file (this mirrors how Claude Code maintains it locally).
+- **`pull` overwrites `MEMORY.md` wholesale — write new memories AFTER the pull,
+  or re-add the index line.** Fact files are additive (a local file the hub has
+  never seen survives a pull), but `MEMORY.md` is copied over, so an index line
+  added locally minutes earlier is silently deleted while the sync still reports
+  success. The fact file remains on disk and is therefore invisible to recall,
+  which is the worst of both outcomes. Observed on hetz 2026-07-29. If you write
+  a memory mid-session and then sync, re-check that its line is still in
+  `MEMORY.md` before pushing.
 
 ## See also
 [`../docs/config-inventory.md`](../docs/config-inventory.md) ·

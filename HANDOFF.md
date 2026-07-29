@@ -1,4 +1,64 @@
-# HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-26)
+# HANDOFF — machine configuration and minimum-touch provisioning (updated 2026-07-29)
+
+## 2026-07-29 — hetz sync run: two sync bugs found and fixed, global rules backfilled
+
+A routine `sync-dotfiles` run on **hetz** (Ubuntu server, SSH alias `vps2`, AI
+user `ai`, checkout `/worksp/ai-devops`). Nothing was broken going in; the run
+surfaced three real problems. All three are resolved except the last item under
+"left for Albert".
+
+### 1. `ai-sync-memory pull` silently deletes freshly written index lines — DOCUMENTED
+
+A memory file was written locally, then `pull` ran. Fact files are additive, so
+the `.md` survived — but `MEMORY.md` is copied over wholesale, so the index line
+pointing at it was deleted. The sync reported success. The result is the worst
+possible shape: the fact exists on disk but nothing indexes it, so recall never
+loads it. Fixed by documenting the hazard as a rule in `memory/README.md`
+(write memories after the pull, or re-check the index line before pushing).
+**Not fixed in code** — `ai-sync-memory` still overwrites `MEMORY.md`. A real
+fix would merge index lines instead of copying. Worth doing.
+
+### 2. `ai-install-skills` reported `bin/ai-git-identity missing` when it exists — FIXED
+
+The checkout had the script at mode `600` (no execute bit), and the guard tested
+`[ -x ... ]`, so it took the "missing" branch. That warning is the single signal
+that commit identity is unpinned, and it was firing for an unrelated reason —
+on a machine where the identity really was unset, this would read as noise.
+Changed the guard to `[ -f ... ]` and the call to `bash <script>`, so a missing
+mode bit no longer masquerades as a missing script. Verified: the step now runs
+and prints `Git identity already correct`.
+
+### 3. hetz's global `~/.claude/CLAUDE.md` was missing most standing rules — FIXED
+
+The local file was 83 lines against the template's 245. Present: RTK include,
+no-workarounds, AI model settings, production infra safety, response style.
+**Absent: who you're working for, communication rules, the do-it-yourself
+execution rules, no-`terraform apply`-against-prod, engineering standards, git
+and branch rules including the commit-identity rule (20b), and the whole session
+protocol including handoff quality (24).** Albert set those rules once and
+believed they applied everywhere; on this machine they did not. Backfilled by
+appending the absent sections verbatim (append-only, existing text untouched,
+the two already-present sections skipped so nothing duplicated). Now 252 lines.
+Same for `~/.codex/AGENTS.md`: added serialize-1Password-reads, long-Synology-
+reads (9a), and commit identity (20b); now 237 lines.
+
+This is step 5 of the `sync-dotfiles` skill working as designed — but it only
+works if the session actually diffs and appends. It is manual by nature, so
+**assume any machine not synced since a template change is missing those rules**
+and diff it rather than trusting that a past sync carried them.
+
+### Left for Albert
+
+Three repos override the global commit identity, reported by `ai-git-identity`:
+`/worksp/hiclaw` → `55610577+u2giants@users.noreply.github.com` (harmless
+variant), `/worksp/bizanalysis/app` → `ai@bizanalysis`, and
+`/worksp/albert-standards` → `albert@popcre.com`. That last one is exactly the
+pattern rule 20b exists to prevent — the same wrong address that reached 231
+merged dflow commits. Not changed here because clearing a repo-local identity is
+his call, and any already-merged commits cannot be corrected anyway.
+
+---
+
 
 ## 2026-07-28 — response-style rollout and Ubuntu Codex secret gap
 
