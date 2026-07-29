@@ -28,4 +28,5 @@
 - [Project: service-role key mismatch](project_service_role_key_mismatch.md) — edge functions use new sb_secret_ key, 1Password holds legacy service_role JWT; probes 401 and look like a regression; secrets-list DIGEST = plain sha256
 - [Project: git commit identity](project_git_commit_identity.md) — u2giants pushes need the noreply email; worktrees do not inherit it
 - [Project: Kimi K3 model alias](project_kimi_k3_model_alias.md) — kimi CLI defaults to kimi-for-coding; pass -m kimi-code/k3 for K3
+- [Project: batch ops live in the worker](project_batch_ops_live_in_worker.md) — long-running/bulk ops are Railway worker handlers, NOT edge functions; and don't describe a component before opening its file
 - [Project: DB Data Admin access](project_db_data_admin_access.md) — separate app in shared-db; 2 grants (administrator role + explicit admin app_access), admin-only, dev=PREVIEW project, prod 503
