@@ -198,9 +198,13 @@ fi
 # anyone noticed). Idempotent — prints "already correct" and changes nothing
 # when it is already right.
 # ---------------------------------------------------------------------------
-if [ -x "$REPO_ROOT/bin/ai-git-identity" ]; then
+# Run via `bash` and test with -f, not -x: a checkout can land with the mode bit
+# off (observed on hetz 2026-07-29, mode 600), and the old -x test reported
+# "missing" for a script sitting right there — the one warning that is supposed
+# to tell you the identity is unpinned, firing for the wrong reason.
+if [ -f "$REPO_ROOT/bin/ai-git-identity" ]; then
   echo
-  "$REPO_ROOT/bin/ai-git-identity" || echo "[WARN] git identity step failed — commits may use a guessed identity."
+  bash "$REPO_ROOT/bin/ai-git-identity" || echo "[WARN] git identity step failed — commits may use a guessed identity."
 else
   echo "[WARN] bin/ai-git-identity missing — Git identity NOT pinned on this machine."
 fi
