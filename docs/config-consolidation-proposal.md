@@ -6,7 +6,8 @@
 Phase 3 PLANNED, not started.
 **Companion docs:** [`config-inventory.md`](config-inventory.md) (the current
 scattered state, with all paths/aliases/1Password item titles) and
-[`../HANDOFF.md`](../HANDOFF.md) (live next steps).
+the OPEN files in [`../HANDOFF.d/`](../HANDOFF.d/) — live next steps are in
+[`HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md).
 
 ## Goal
 Make `ai-devops` the **single hub** that configures every machine (3 Windows dev
@@ -197,7 +198,7 @@ reverting is "keep using Dropbox." Don't delete them until Phase 3.
 | Update machine-atlas | Reflect the single-path setup in `templates/system/machine-atlas.md` |
 
 **Exit criteria:** Dropbox is no longer a config source; restore/atlas docs
-describe the single path; `HANDOFF.md` can be deleted (project complete).
+describe the single path; that handoff file can be deleted (project complete).
 
 ---
 
