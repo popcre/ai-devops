@@ -31,7 +31,8 @@ Focus on:
 ## What To Update
 
 - `AGENTS.md`: only for high-signal guidance future AI sessions must see quickly, including new quirks, critical warnings, task routing, identifiers, or "do not repeat this mistake" notes.
-- `HANDOFF.md`: create or update only if work is unfinished, blocked, partially deployed, or requires continuation context. Delete it only when the unfinished work it describes is truly complete.
+- `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`: create **one new write-once file of your own** only if work is unfinished, blocked, partially deployed, or requires continuation context (e.g. `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`). Delete YOUR file only when the unfinished work it describes is truly complete — git history preserves the text. Never edit, tidy, or delete another session's file; concurrent agents depend on that.
+- `HANDOFF.md`: **never rewrite it.** It is a short static pointer to `HANDOFF.d/`. The only permitted write is migration: if line 1 lacks `handoff-pointer: v1` it is a legacy full-document handoff — `git mv` it verbatim into `HANDOFF.d/` as one open workstream, then write the pointer. Exact rules and pointer text: the `handoff-writer` skill / `templates/system/handoff-standard.md`.
 - Topic docs under `docs/`: update the specific doc for the affected area, such as architecture, deployment, configuration, schema, worker logic, PopSG, Helper, Seafile, auth, bulk jobs, or known quirks.
 - `README.md`: update only if the quick-start or top-level orientation changed.
 - `CLAUDE.md`: update only for Claude Code-specific workflow rules. General AI/developer guidance belongs in `AGENTS.md`.
@@ -118,7 +119,8 @@ Risks / watchouts:
 - Docs changed are limited to files that actually needed updates.
 - New claims match the repository or verified session findings.
 - No secrets were added.
-- `HANDOFF.md` exists only if continuation context is needed.
+- A new `HANDOFF.d/` file exists only if continuation context is needed, and it is yours alone (no other session's file was touched).
+- `HANDOFF.d/` holds no more than 5 open files; if it does, the excess is called out loudly with dates so the owner can say which are finished.
 - Any new quirk or warning explains why it exists and what would break if ignored.
 
 ## Final Report
@@ -132,8 +134,10 @@ Reply with:
 | `path/to/file.md` | Short summary |
 
 ## Handoff
-- `HANDOFF.md`: present/absent
+- New file written: `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` / none
 - Reason: ...
+- Files deleted as proven done: ...
+- Open files now in `HANDOFF.d/`: N (WARN loudly if more than 5, oldest-first with dates)
 
 ## Verification
 - Docs verified against session findings: yes/no

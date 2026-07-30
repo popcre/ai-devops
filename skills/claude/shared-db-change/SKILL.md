@@ -36,4 +36,5 @@ db changes" in at least three separate sessions — this skill is that protocol.
    (what/why/apps affected/where implemented/verified/risks; app migration
    handoffs under `docs/app-migration-notes/<app>-YYYYMMDD.md`).
 10. Never leave shared-db with untracked migrations or docs — finish the
-    branch/PR/merge or write HANDOFF.md saying exactly what remains.
+    branch/PR/merge or write your own `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`
+    file saying exactly what remains (never rewrite the shared root `HANDOFF.md`).

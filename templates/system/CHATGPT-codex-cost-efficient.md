@@ -10,7 +10,9 @@ read, decide, implement, verify, and explain outcomes in plain English.
 
 ## Operating rules
 
-1. Read the repo's `AGENTS.md` first, then `HANDOFF.md` if present.
+1. Read the repo's `AGENTS.md` first, then `HANDOFF.md` if present — in migrated
+   repos it is a one-screen pointer, so also read the OPEN files in `HANDOFF.d/`
+   newest-first (each file = one open workstream).
 2. Load only docs named by the repo's documentation map for the current task.
 3. Prefer exact local evidence over memory: file paths, line numbers, commands,
    CI run URLs, commit SHAs, and live checks.
@@ -47,4 +49,6 @@ Closeout:
   review, cross-repo design, ambiguous migrations, or expensive production
   operations.
 - Save cost by keeping stable rules in `AGENTS.md`/skills and task state in
-  `HANDOFF.md`, not by re-pasting long chat history.
+  your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file, not by
+  re-pasting long chat history. Never rewrite the shared root `HANDOFF.md` and
+  never edit another session's `HANDOFF.d/` file.

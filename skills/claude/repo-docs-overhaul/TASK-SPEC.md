@@ -65,7 +65,9 @@ Deploy/release/environment/rollback workflow
 folder-level README.md
 Local context for that folder only, when genuinely useful
 HANDOFF.md
-Temporary continuation document for unfinished work
+Short STATIC pointer to HANDOFF.d/ — never rewritten
+HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md
+One write-once continuation document per session, for unfinished work
 Create missing docs only when useful.
 Delete, rewrite, or consolidate docs that are obsolete, misleading, duplicated, or too vague to help future sessions.
 
@@ -114,8 +116,8 @@ Then load additional docs only when relevant:
 | Change local setup, dev scripts, test/lint/debug workflow, package scripts, or tooling | `AGENTS.md`, `docs/development.md`, relevant package/config files | `docs/deployment.md` unless CI/CD changes |
 | Change deployment, Docker, CI/CD, hosting, release flow, rollback, or runtime environment | `AGENTS.md`, `docs/deployment.md`, `docs/configuration.md`, relevant workflow/deployment files | Local-only development docs unless needed |
 | Change database schema, migrations, models, external IDs, or data flow | `AGENTS.md`, `docs/architecture.md`, `docs/configuration.md` if env/config is affected, relevant migration/model docs | Deployment docs unless rollout/deploy behavior changes |
-| Investigate bugs or incidents | `AGENTS.md`, relevant docs based on affected area, `HANDOFF.md` if present, Critical incidents section in `AGENTS.md` | Unrelated folder-level READMEs |
-| Continue unfinished work | `AGENTS.md`, `HANDOFF.md`, relevant docs named inside `HANDOFF.md` | Docs unrelated to the handoff scope |
+| Investigate bugs or incidents | `AGENTS.md`, relevant docs based on affected area, the OPEN files in `HANDOFF.d/` (newest-first), Critical incidents section in `AGENTS.md` | Unrelated folder-level READMEs |
+| Continue unfinished work | `AGENTS.md`, `HANDOFF.md` (pointer) → the OPEN files in `HANDOFF.d/`, relevant docs named inside them | Docs unrelated to the handoff scope |
 | Work in a subfolder with its own README | `AGENTS.md`, that folder-level `README.md`, and only broader docs referenced there | Other folder-level READMEs |
 | Claude Code session | `CLAUDE.md`, then `AGENTS.md` | Other docs unless task requires them |
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/`, folder-level READMEs only where relevant | Source files except as needed to verify accuracy |
@@ -124,7 +126,7 @@ MUST be task-based.
 MUST NOT become a flat list of every Markdown file.
 MUST distinguish always-read docs from task-relevant docs.
 MUST identify docs that are usually unnecessary.
-MUST mention HANDOFF.md as required reading when it exists.
+MUST mention HANDOFF.md (and the OPEN files in HANDOFF.d/ it points to) as required reading when handoffs exist.
 MUST be updated when documentation files are added, removed, renamed, or repurposed.
 MUST reduce context bloat.
 
@@ -341,11 +343,16 @@ MUST create .copilotignore if the repository uses GitHub Copilot and ignore rule
 Ignore files MUST align with the “What to ignore” section of AGENTS.md.
 
 HANDOFF RULE
+Handoffs are ONE WRITE-ONCE FILE PER SESSION. Many AI agents work these repos concurrently, sometimes in the same working copy; a shared rewritten handoff loses one session's work with no merge to resolve.
 IF any work is unfinished, blocked, or in progress:
-MUST create HANDOFF.md in repo root.
-MUST make it comprehensive enough for a new developer or AI session to continue without prior chat context.
-MUST mention HANDOFF.md in AGENTS.md as required reading for continuation work.
-HANDOFF.md MUST include:
+MUST create exactly ONE NEW file of your own: HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md (timestamp `date -u +%Y-%m-%dT%H%MZ`, time included; machine = short hostname lowercased; agent = claude/codex/grok/glm/kimi/qwen; slug = 2-5 word kebab-case topic).
+MUST NOT rewrite the root HANDOFF.md — it is a short STATIC pointer telling readers that active handoffs live in HANDOFF.d/, to read the open ones newest-first, and not to rewrite it. Create it if absent (see `templates/system/handoff-standard.md` for the exact text, including the `handoff-pointer: v1` marker on line 1).
+MUST NOT open, edit, tidy, or delete another session's HANDOFF.d/ file.
+IF the root HANDOFF.md exists and line 1 lacks `handoff-pointer: v1`, it is a LEGACY full-document handoff: MUST `git mv` it verbatim into HANDOFF.d/ as one open workstream, then write the pointer, then write your own file.
+MUST NOT add a generated handoff index or `.gitattributes merge=union` — both reintroduce the shared-mutable-file / silent-corruption failure.
+MUST make your file comprehensive enough for a new developer or AI session to continue without prior chat context — all 9 sections of `templates/system/handoff-standard.md`; the per-session file does NOT lower the verbosity bar.
+MUST mention HANDOFF.md and HANDOFF.d/ in AGENTS.md as required reading for continuation work.
+Your HANDOFF.d/ file MUST include:
 what was being built or fixed and why
 what is fully done
 what is partially done and exact current state
@@ -356,8 +363,11 @@ dead ends or abandoned approaches
 exact next action
 known risks, blockers, or unknowns
 session context that would otherwise be lost
-IF the work described in HANDOFF.md is complete:
-MUST delete HANDOFF.md.
+RETENTION:
+IF the work described in YOUR HANDOFF.d/ file is proven complete:
+MUST delete that file in the same commit that finishes the work (git history preserves the text). Presence of a file means the workstream is OPEN.
+IF HANDOFF.d/ holds more than 5 files:
+MUST warn loudly in the final report, listing them oldest-first with dates, and ask which are actually finished.
 
 REQUIRED AI WORKFLOW
 Follow this sequence:
@@ -371,7 +381,7 @@ Update README.md only for quick orientation.
 Update CLAUDE.md only for Claude-specific notes.
 Update folder-level README.md files only where local folder context is useful.
 Update .claudeignore, .cursorignore, and .copilotignore if applicable.
-Create, update, or delete HANDOFF.md according to the handoff rule.
+Create your own HANDOFF.d/ file, or delete it when done, according to the handoff rule; create the static HANDOFF.md pointer if it is missing, and migrate a legacy full-document HANDOFF.md.
 Verify documentation against actual repository files.
 Check that no secrets were added.
 Commit and push documentation changes to GitHub.
@@ -387,7 +397,7 @@ CLAUDE.md does not duplicate AGENTS.md.
 Ignore files match documented ignore guidance where appropriate.
 Env vars are listed without secret values.
 Deployment docs describe actual deployment, not guesses.
-HANDOFF.md exists if and only if work is unfinished, blocked, or in progress.
+A HANDOFF.d/ file of yours exists if and only if your work is unfinished, blocked, or in progress; HANDOFF.md is the static pointer and was not rewritten; no other session's HANDOFF.d/ file was touched; HANDOFF.d/ holds no more than 5 open files (or the excess is called out with dates).
 No secrets were written.
 Stale docs were removed, corrected, or clearly marked.
 
@@ -407,8 +417,10 @@ After committing and pushing, final response MUST include:
 
 ## Handoff status
 
-- `HANDOFF.md`: present/absent
+- New file written: `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` / none
 - Reason: ...
+- Files deleted as proven done: ...
+- Open files now in `HANDOFF.d/`: N (warn loudly if more than 5, oldest-first with dates)
 
 ## Verification
 
@@ -421,6 +433,6 @@ After committing and pushing, final response MUST include:
 - ...
 If no documentation changes were required, final response MUST say so and explain why.
 
-Then answer this, honestly: Is HANDOFF.md comprehensive enough that a brand-new fresh developer with no knowledge of this project and no context into what was done and what's left could pick up where you left off and not skip a beat — could they continue as effectively as you can right now, with every relevant detail and nuance?
+Then answer this, honestly: Is your `HANDOFF.d/` file comprehensive enough that a brand-new fresh developer with no knowledge of this project and no context into what was done and what's left could pick up where you left off and not skip a beat — could they continue as effectively as you can right now, with every relevant detail and nuance?
 
 Answer it by the rule in `templates/system/handoff-standard.md` → section "Answering 'is it comprehensive enough?'" (use the `handoff-writer` skill): re-read the file, grade it against the comprehensiveness checklist, and if every item passes answer **"Yes"** with the evidence. Answer "No" ONLY if you can name a SPECIFIC missing checklist item — then fix exactly that and answer "Yes." Never reflexively answer "No, I'll improve it"; "more detail is always possible" is not a deficiency.

@@ -68,10 +68,32 @@ Then load additional docs only when relevant:
 | Change a standing AI behavior rule (branch policy, plain-English, verify-before-done, etc.) | `templates/system/CLAUDE-global.md`, `templates/system/AGENTS-global-codex.md`, `templates/system/machine-atlas.md`, affected `skills/shared/*/SKILL.md` (cross-client rules) or `skills/claude/*/SKILL.md` / `skills/codex/*/SKILL.md` | Unrelated docs |
 | Work on future MCP wrapper | `AGENTS.md`, `docs/future-mcp-wrapper.md`, `mcp/README.md` | Unrelated docs |
 | Work on future visual testing | `AGENTS.md`, `docs/future-visual-testing.md`, `templates/repo-docs/docs-ai-visual-testing.md` | Unrelated docs |
-| Investigate a bug in a tool | `AGENTS.md`, `docs/development.md`, the specific `bin/` script, `HANDOFF.md` if present, Critical incidents section below | Unrelated docs |
-| Continue unfinished work | `AGENTS.md`, `HANDOFF.md`, docs named inside `HANDOFF.md` | Docs unrelated to the handoff scope |
+| Investigate a bug in a tool | `AGENTS.md`, `docs/development.md`, the specific `bin/` script, the OPEN handoffs (see the handoff note below), Critical incidents section below | Unrelated docs |
+| Continue unfinished work | `AGENTS.md`, `HANDOFF.md` → the OPEN files in `HANDOFF.d/` (newest-first), docs named inside them | Docs unrelated to the handoff scope |
 | Claude Code session | `CLAUDE.md`, then `AGENTS.md` | Other docs unless the task requires them |
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
+
+### How handoffs work now (one write-once file per session)
+
+Because several AI agents work these repos concurrently — sometimes in the same
+working copy — **no session ever rewrites a shared handoff document.** Each session
+writes exactly ONE new file:
+
+```
+HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md
+```
+
+e.g. `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`. In a migrated
+repo the root `HANDOFF.md` is a one-screen **static pointer** (line 1 carries the
+marker `handoff-pointer: v1`) and is never rewritten; **session start** lists
+`HANDOFF.d/` and reads the OPEN files newest-first — every file present is one open
+workstream, and a finished workstream's file is **deleted** (git history preserves
+the text). A repo whose root `HANDOFF.md` lacks that marker is still the **legacy**
+full-document form: read it as one open workstream and migrate it per
+`handoff-writer`. Canonical rules: `templates/system/handoff-standard.md`; skill:
+`skills/shared/handoff-writer/`. **This repo has not been migrated yet** — its root
+`HANDOFF.md` (and `HANDOFF-prod-trigger-disable-investigation.md`) are still legacy
+full documents; the owner is migrating them separately.
 
 `HANDOFF.md` is required reading **whenever it exists** — it means work is in
 progress. It is currently **present**. The immediate unfinished work is proving

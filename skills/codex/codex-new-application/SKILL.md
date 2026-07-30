@@ -39,7 +39,9 @@ Use `codex-repo-docs-overhaul` to create the standard docs:
 - `docs/development.md`
 - `docs/configuration.md`
 - `docs/deployment.md`
-- `HANDOFF.md` only if work remains unfinished
+- `HANDOFF.md` as a short STATIC pointer to `HANDOFF.d/` (never rewritten), plus
+  one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file per session
+  only while work remains unfinished — see `templates/system/handoff-standard.md`
 
 ## CI/CD
 

@@ -19,7 +19,11 @@ Read `references/repo-docs-task-spec.md` and follow it. Key points:
 - Required docs normally include `README.md`, `AGENTS.md`,
   `docs/architecture.md`, `docs/development.md`, `docs/configuration.md`, and
   `docs/deployment.md`.
-- `HANDOFF.md` exists only while work is unfinished.
+- `HANDOFF.md` is a short STATIC pointer to `HANDOFF.d/` and is never rewritten;
+  handoffs are one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file
+  per session, existing only while that session's work is unfinished. Never edit
+  another session's file. Migrate a legacy full-document `HANDOFF.md` (line 1
+  lacks `handoff-pointer: v1`) into `HANDOFF.d/` verbatim, then write the pointer.
 - `.claudeignore` / `.cursorignore` should match the "What to ignore" guidance
   where relevant.
 - Never invent unknown facts; mark unknowns and explain how to verify them.
@@ -33,4 +37,7 @@ Before reporting done:
 2. Confirm `AGENTS.md` has a task-based documentation map.
 3. Confirm stale/duplicated docs were removed or routed.
 4. Confirm no secrets were added.
-5. Confirm `HANDOFF.md` is present only if unfinished work remains.
+5. Confirm your own `HANDOFF.d/` file is present only if unfinished work remains,
+   that the root `HANDOFF.md` was not rewritten, that no other session's
+   `HANDOFF.d/` file was touched, and that `HANDOFF.d/` holds no more than 5 open
+   files (otherwise warn loudly, oldest-first with dates).

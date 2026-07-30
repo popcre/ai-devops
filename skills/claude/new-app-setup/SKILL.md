@@ -65,7 +65,7 @@ Examples: `popcmr-api`, `popcmr-web`, `popdam-api`, `oclaw-gate`,
 New projects get the full documentation system from day one — the same "AI
 TASK SPEC: Repository Documentation Maintenance" that `repo-docs-overhaul`
 implements (AGENTS.md as canonical router, required sections, ignore files,
-HANDOFF.md discipline). **Run that skill** (or follow
+`HANDOFF.d/` handoff discipline). **Run that skill** (or follow
 [NEW-PROJECT-STANDARD.md](NEW-PROJECT-STANDARD.md) section 4 directly) rather
 than re-deriving the spec here.
 

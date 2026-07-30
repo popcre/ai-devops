@@ -5,6 +5,125 @@ context windows and relies on the handoff as the ONLY memory carried forward.
 Skimpy handoffs force him to stay in long sessions babysitting — the exact thing
 this standard exists to prevent. Applies to Claude AND Codex, every time.
 
+## Where the handoff goes: ONE WRITE-ONCE FILE PER SESSION (`HANDOFF.d/`)
+
+This is the most important mechanical rule in this standard, and it overrides
+every older instruction that said "rewrite `HANDOFF.md`".
+
+Several AI agents (Claude, Codex, Grok, GLM, Kimi, Qwen) work on the same repos
+at the same time — sometimes in the SAME working copy on the same machine,
+sometimes in different clones of the same GitHub repo. A single shared
+`HANDOFF.md` that each session rewrites makes **data loss the default**: in one
+working copy the second writer silently overwrites the first (git never sees two
+versions, so it cannot help), and across clones both sides rewrite and push,
+producing either a merge conflict a non-programmer will never resolve or a
+resolution that quietly drops one session's work. This has already happened.
+
+### The rule
+
+- **Each session writes exactly ONE new file** under `HANDOFF.d/` and nothing else:
+
+  ```
+  HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md
+  ```
+
+  Example: `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`
+
+- **Write-once.** Create it, fill it, done. You may keep editing **your own**
+  file while your session is still running. You must **never** open, edit,
+  reformat, "tidy", merge, or delete **another** session's file. If you think
+  another session's handoff is wrong or stale, say so in YOUR file — do not touch
+  theirs.
+
+- **`HANDOFF.md` is a short STATIC pointer.** It is written once (see below) and
+  is **never rewritten at closeout**. It exists only so the standing rule "read
+  `HANDOFF.md` on start" still has one named entry point.
+
+Because each session owns a distinct filename, two sessions can never write the
+same file, so there is nothing to conflict and nothing to overwrite — in a shared
+working copy or across clones. No `.gitattributes` merge driver is involved, and
+**`merge=union` must never be added** for handoffs: it merges lines with no
+understanding of Markdown structure, so it would silently produce a file with two
+contradictory "current state" sections instead of a loud conflict.
+
+### Filename fields — how to derive them at runtime
+
+| Field | How to get it | Example |
+|---|---|---|
+| `<UTC-timestamp>` | `date -u +%Y-%m-%dT%H%MZ` (Bash) / `(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHHmm')+'Z'` (PowerShell). **Must include the time**, not just the date — two sessions on one day are normal. | `2026-07-29T2140Z` |
+| `<machine>` | Short hostname, lowercased, non-alphanumerics → `-`: `hostname` (Bash) / `$env:COMPUTERNAME` (PowerShell). Use the short machine nickname when it is well known (`t16`, `916`, `4837`, `al8960ofc`, `hetz`). | `t16` |
+| `<agent>` | The agent you are: `claude`, `codex`, `grok`, `glm`, `kimi`, `qwen`. Never omit it — two agents on the same machine in the same minute is possible. | `claude` |
+| `<slug>` | 2–5 word kebab-case topic of THIS workstream. Lowercase `a-z0-9-` only. | `supabase-mcp-scoping` |
+
+If you cannot determine the machine or agent name for certain, use a specific
+best guess rather than a placeholder — never write `unknown`, `machine`, or
+`agent` literally, and never drop the field (dropping a field is what creates
+collisions).
+
+### The static `HANDOFF.md` pointer
+
+If the repo has no `HANDOFF.md`, or has one that is already the pointer, write /
+leave exactly this (the HTML marker on line 1 is how tools detect the pointer
+form — keep it verbatim):
+
+```md
+<!-- handoff-pointer: v1 — do not rewrite this file; add a file under HANDOFF.d/ instead -->
+# HANDOFF
+
+Active handoffs live in [`HANDOFF.d/`](HANDOFF.d/) — one write-once file per AI
+session, named `<UTC-timestamp>-<machine>-<agent>-<slug>.md`.
+
+**Starting a session:** list `HANDOFF.d/`, read the open files **newest first**.
+Every file present is an OPEN workstream; finished ones are deleted (git history
+keeps the text).
+
+**Ending a session:** create your OWN new file in `HANDOFF.d/` following
+`templates/system/handoff-standard.md` (all 9 sections). **Do not rewrite this
+file, and do not edit another session's file.** Concurrent sessions rely on that.
+```
+
+### Legacy (un-migrated) repos — detect and migrate
+
+Most repos still hold the OLD form: a root `HANDOFF.md` containing a full 9-section
+handoff document. The transition must be non-breaking, so detect it:
+
+1. `HANDOFF.md` missing → nothing to migrate; write the pointer when you create
+   your first `HANDOFF.d/` file.
+2. `HANDOFF.md` exists and line 1 contains `handoff-pointer: v1` → already the
+   pointer. Leave it completely alone.
+3. `HANDOFF.md` exists **without** that marker → **legacy full document**. Treat
+   its entire contents as ONE open workstream:
+   - `git mv HANDOFF.md HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`, where
+     `<slug>` describes that legacy work (e.g. `legacy-migrated-handoff`). Do not
+     rewrite or summarize its body — move the text verbatim.
+   - Then create `HANDOFF.md` as the static pointer above.
+   - Then write your own session's separate file for your own work.
+
+Also migrate sibling legacy handoff documents (`HANDOFF-<topic>.md`,
+`fix_<topic>.md` used as a handoff) the same way when you touch them: one file
+each under `HANDOFF.d/`, text moved verbatim.
+
+Never do a legacy migration if another session may be mid-write in the same
+working copy and you cannot tell — in that case just add your own `HANDOFF.d/`
+file and note in it that migration is still pending.
+
+### Retention — automatic, never a manual chore
+
+- When a workstream is **genuinely proven done** (verified, committed, pushed,
+  deployed as applicable), **delete that workstream's `HANDOFF.d/` file** in the
+  same commit that finishes it. Git history preserves the text forever, so
+  nothing is lost. Delete only files for work you can prove is done — normally
+  only your own.
+- **A file's presence means OPEN.** Session start reads only the files that are
+  present; it does not need any status field, index, or archive folder.
+- **Threshold warning:** if `HANDOFF.d/` holds **more than 5** files, say so
+  loudly in the closing report, list them oldest-first with their dates, and ask
+  which are actually finished. Never let them silently accumulate — 50 nine-section
+  essays a year is exactly the drowning a fresh developer must be spared.
+- Do not create an `archive/`, `done/`, or index file. Deletion + git history IS
+  the archive. A generated index would just be another shared mutable file for
+  sessions to clobber.
+
 ## The mindset (read this first)
 
 Write the handoff for a brand-new developer who **walked in off the street this
@@ -29,8 +148,11 @@ are not symmetric — always err long.
 Use these sections. Never drop one silently — if a section genuinely doesn't
 apply, write "N/A" and one line saying why.
 
+All 9 sections apply to **your session's own `HANDOFF.d/` file** — the verbosity
+bar is per session file, not per repo. A three-sentence handoff is still a failure.
+
 ```md
-# HANDOFF — <topic> (<date>)
+# HANDOFF — <topic> (<UTC date/time>, <machine>/<agent>)
 
 ## 1. What this application is
 Plain-English: what the product does, who uses it, why it exists. Assume zero
@@ -79,7 +201,7 @@ later session doesn't contradict them).
 After drafting, grade your OWN handoff against these questions. **Write an
 answer to every question and cite the handoff section(s) that prove the answer.**
 Do not merely acknowledge that the questions were asked. If an answer exposes
-any missing or weak detail, add it to `HANDOFF.md`, reread the affected sections,
+any missing or weak detail, add it to **your own `HANDOFF.d/` file**, reread the affected sections,
 and answer all questions again. Do NOT present the handoff to Albert until every
 answer is an evidence-backed "yes" and every identified gap has been closed:
 
@@ -95,8 +217,8 @@ answer is an evidence-backed "yes" and every identified gap has been closed:
 
 Then ask and answer these three final synthesis questions exactly:
 
-1. **Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
-   knowledge of this project and no context about what we did or what remains
+1. **Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with
+   no knowledge of this project and no context about what we did or what remains
    could pick up where I left off and not skip a beat?**
 2. **Is it detailed enough that they could continue as well as I could right
    now, with all my knowledge from this session and all relevant background
@@ -108,7 +230,8 @@ Then ask and answer these three final synthesis questions exactly:
 
 For each answer, name the supporting sections and any gap found. A found gap
 must be fixed before re-running the entire audit. Preserve the final answers in
-the closing report or at the end of `HANDOFF.md` so the audit is inspectable.
+the closing report or at the end of your own `HANDOFF.d/` file so the audit is
+inspectable.
 
 State in your closing message that the self-audit passed. Albert should never
 again have to ask "is this comprehensive enough for a fresh developer?" — you
@@ -165,9 +288,19 @@ If that is true, the answer is Yes — say it.
 - Jargon or internal shorthand from this session with no definition.
 - Writing three sentences and calling it a handoff. If it's under a screen of
   text for anything non-trivial, it's almost certainly too thin — re-audit.
+- **Rewriting the shared root `HANDOFF.md`, or editing another session's
+  `HANDOFF.d/` file.** That is the concurrency data-loss bug this standard was
+  restructured to remove.
 
 ## Mechanics
 
-- Write it to a repo file (HANDOFF.md, or fix_<topic>.md for a specific fix),
-  commit and push — a handoff that lives only in chat is lost.
-- HANDOFF.md is deleted only when the work it describes is truly complete.
+- Write it to your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`, then
+  commit and push — a handoff that lives only in chat is lost. See
+  **§ Where the handoff goes** above for the naming rules, the static `HANDOFF.md`
+  pointer, legacy migration, and retention.
+- Stage only your own file (and your own code hunks). In a concurrently-edited
+  checkout, never `git add -A` another session's uncommitted work.
+- Your `HANDOFF.d/` file is deleted only when the work it describes is truly
+  complete. Never delete someone else's.
+- Never add `.gitattributes merge=union` for handoffs — line-unioning Markdown
+  produces a silently wrong document instead of a loud conflict.

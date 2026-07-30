@@ -11,7 +11,11 @@ tokens. The goal is to preserve the contract while shrinking the prompt.
 ## Minimal Loading Order
 
 1. Read `AGENTS.md` first.
-2. If present, read `HANDOFF.md` next and make it the task spine.
+2. Read the handoffs next and make them the task spine: `HANDOFF.md` is a
+   one-screen pointer in migrated repos, so list `HANDOFF.d/` and read the OPEN
+   files newest-first (each file = one open workstream). If `HANDOFF.md` exists
+   and line 1 lacks `handoff-pointer: v1`, it is the legacy full document — read
+   it as one open workstream.
 3. Read only docs named by the repo's documentation map for the current task.
 4. Search code with `rg` before opening many files.
 5. Keep large transcript/history files out of context unless the task is about
@@ -25,7 +29,8 @@ When the user pastes a long repeated prompt:
 2. Replace the pasted text with a short standing instruction, skill, or doc
    pointer.
 3. Put machine-specific facts in the machine atlas, repo-specific facts in
-   `AGENTS.md`, and task-specific state in `HANDOFF.md`.
+   `AGENTS.md`, and task-specific state in your own `HANDOFF.d/` file (one
+   write-once file per session; never rewrite the shared root `HANDOFF.md`).
 4. Avoid duplicating the same rule in multiple places; link to the source of
    truth.
 

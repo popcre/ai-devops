@@ -138,8 +138,8 @@ prod Cloud Build triggers (`popcre-core/item/sync/tracking-prod`).
 ## Engineering standards
 
 10. **No band-aids. Ever.** Root-cause, permanent, fewest-moving-parts fixes
-    only. If a temporary workaround is unavoidable, label it TEMPORARY in
-    HANDOFF.md with the permanent fix described.
+    only. If a temporary workaround is unavoidable, label it TEMPORARY in your
+    session's `HANDOFF.d/` file with the permanent fix described.
 11. **No silent failures.** Every fallback must alert loudly. When you find one
     silent failure, sweep the codebase for the same pattern.
 12. **Nothing hard-coded** that should be configurable — especially AI model
@@ -221,8 +221,9 @@ agent automation; stop and switch to the dedicated read-only AI identity.
 ## Session protocol
 
 21. **Start:** read `AGENTS.md` (the router) first, then only the docs it points
-    to for your task; read `HANDOFF.md` whenever it exists. Don't bulk-load
-    every .md file.
+    to for your task; read `HANDOFF.md` whenever it exists — in migrated repos it
+    is a one-screen pointer, so also list `HANDOFF.d/` and read the OPEN files
+    newest-first (each file = one open workstream). Don't bulk-load every .md file.
 22. **Environment first:** confirm which URL/branch/environment a bug report
     came from before debugging; verify live config before asserting stack facts
     (past mistakes: assuming dflow uses Supabase — it's Cloud SQL; wrong GCP
@@ -231,11 +232,19 @@ agent automation; stop and switch to the dedicated read-only AI identity.
     sweep secrets to 1Password; leave every repo handoff-safe (no mystery
     untracked files). Never say "done" if anything still needs
     commit/merge/apply.
-24. **Handoff quality (non-negotiable).** Write EVERY HANDOFF.md / handoff for a
+24. **Handoff quality (non-negotiable).** Write EVERY handoff for a
     developer who walked in off the street this morning with ZERO knowledge of
     the app, this session, this chat, or what was tried and failed. Follow
     `templates/system/handoff-standard.md`: the 9 sections including the
-    mandatory "what we tried that did NOT work" section. Before showing it, run
+    mandatory "what we tried that did NOT work" section. **Write ONE NEW file of
+    your own:** `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
+    `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`). Never
+    rewrite the shared root `HANDOFF.md` (it is a static pointer) and never edit
+    or delete another session's `HANDOFF.d/` file — several agents work the same
+    repos concurrently and a rewritten shared file loses one session's work with
+    no merge to resolve. Delete YOUR file when its work is proven done; if
+    `HANDOFF.d/` holds more than 5 open files, warn loudly. Skill:
+    `handoff-writer`. Before showing it, run
     the self-audit gate — could that stranger continue with NO questions, as
     effectively as you can right now? If not, expand and re-grade. Default to
     too much; too-short costs Albert a whole session. He must NEVER have to ask

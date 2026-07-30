@@ -169,4 +169,5 @@ If the user wants a dry run first: `bin/ai-sync-memory {push,pull} --dry-run` an
 complete), `ai-devops/plan_phase3-config-consolidation.md` (**the remaining Phase 3
 work — read this when Albert asks "what's left on the config consolidation?"**),
 `ai-devops/docs/mcp-1password-rate-limit-hardening.md` (why the launchers cache),
-`ai-devops/HANDOFF.md`, `ai-devops/memory/README.md`.
+`ai-devops/HANDOFF.md` (pointer) plus the OPEN files in `ai-devops/HANDOFF.d/`,
+`ai-devops/memory/README.md`.
