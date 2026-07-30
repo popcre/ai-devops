@@ -36,7 +36,7 @@ Built from `codex_chats/` after syncing `main` from GitHub on 2026-07-08.
 | "push and commit" / "commit and push" / "is everything pushed and committed?" | `codex-github-ship` |
 | "pull latest develop into sandbox-albert, then pull local" | `codex-github-ship` |
 | "update the .md files" plus the long session docs prompt | `codex-session-closeout` |
-| "is HANDOFF.md comprehensive enough for a fresh developer?" | `codex-session-closeout` |
+| "is the handoff comprehensive enough for a fresh developer?" | `codex-session-closeout` |
 | "find all local Codex session transcripts" | `codex-transcript-miner` |
 | "read all docs / read handoff / remove irrelevant context" | `codex-context-optimizer` |
 | "why is the live site still running the old commit?" | `codex-github-ship` plus repo deploy docs |
@@ -64,5 +64,7 @@ secret values in reports, and route future access through 1Password references.
 - Keep `templates/system/AGENTS-global-codex.md` short and delegate procedures
   to skills/docs.
 - Add/keep repo-local `AGENTS.md` documentation maps so sessions read less.
-- Prefer `HANDOFF.md` for cross-session state instead of long chat history.
+- Prefer a per-session `HANDOFF.d/` handoff file for cross-session state instead of
+  long chat history (one write-once file per session; never rewrite the shared root
+  `HANDOFF.md`, which is a static pointer).
 - Use transcript mining periodically to promote repeated prompts into skills.

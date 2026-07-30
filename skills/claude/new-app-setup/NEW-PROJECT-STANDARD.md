@@ -135,12 +135,12 @@ Random or auto-generated names are not acceptable for project-owned services.
 
 This section replaces the older documentation checklist with the updated repository-documentation maintenance rules. Documentation must be created and maintained as part of the work, not as a final cleanup step.
 
-This is the same "AI TASK SPEC: Repository Documentation Maintenance" that the `repo-docs-overhaul` skill implements in full — see `skills/claude/repo-docs-overhaul/TASK-SPEC.md` for the complete verbatim spec (required AGENTS.md sections, file roles, ignore-file rules, HANDOFF.md rule, required AI workflow, verification gates, and final completion report format). For a brand-new project, run that skill (or follow its spec directly) rather than re-deriving it here.
+This is the same "AI TASK SPEC: Repository Documentation Maintenance" that the `repo-docs-overhaul` skill implements in full — see `skills/claude/repo-docs-overhaul/TASK-SPEC.md` for the complete verbatim spec (required AGENTS.md sections, file roles, ignore-file rules, `HANDOFF.d/` handoff rule, required AI workflow, verification gates, and final completion report format). For a brand-new project, run that skill (or follow its spec directly) rather than re-deriving it here.
 
 Summary of what it requires:
 
 - `AGENTS.md` is the canonical operating guide and documentation router — a new senior engineer or AI session must understand the repo from it in under 5 minutes, and it must prevent future sessions from ingesting every `.md` file.
-- Fixed file roles: `README.md` (orientation), `AGENTS.md` (canonical guide), `CLAUDE.md` (Claude-only, never duplicates AGENTS.md), `docs/architecture.md`, `docs/development.md`, `docs/configuration.md`, `docs/deployment.md`, folder-level `README.md` only where genuinely useful, `HANDOFF.md` only while work is unfinished.
+- Fixed file roles: `README.md` (orientation), `AGENTS.md` (canonical guide), `CLAUDE.md` (Claude-only, never duplicates AGENTS.md), `docs/architecture.md`, `docs/development.md`, `docs/configuration.md`, `docs/deployment.md`, folder-level `README.md` only where genuinely useful, a static `HANDOFF.md` pointer plus one write-once file per session under `HANDOFF.d/` while work is unfinished (see `templates/system/handoff-standard.md`).
 - Everything documented must be derived from actual repository state — never invented, with unknowns marked and how to verify them explained, and no secrets ever written.
 - `.claudeignore` / `.cursorignore` (and `.copilotignore` if Copilot is used) must match the "What to ignore" section.
 

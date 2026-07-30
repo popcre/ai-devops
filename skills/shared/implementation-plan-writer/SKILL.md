@@ -180,7 +180,9 @@ When asked whether the plan is comprehensive/detailed enough:
   to **re-read the downstream phases before starting each one** (drift check);
   pair with the `fresh-session` skill at each cut.
 - When work has already happened, the plan complements — not replaces —
-  `HANDOFF.md`; cross-link the two so neither is read alone.
+  your own `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file (one write-once file
+  per session — never rewrite the shared root `HANDOFF.md`, which is a static
+  pointer to `HANDOFF.d/`); cross-link the two so neither is read alone.
 - Delete/complete the plan file only when the work it describes is truly done.
 - **Put a STATUS table at the top from day one** — one row per step (done / partial /
   open, dated) plus a line naming where a fresh session starts. On a brand-new plan
@@ -195,7 +197,7 @@ When asked whether the plan is comprehensive/detailed enough:
   still described the pre-fix world, which would have made the next session redo
   finished work.
 - **Make it discoverable, not memorable.** Nobody will remember `plan_<topic>.md`
-  three months on. Link it from `AGENTS.md` (the router), `HANDOFF.md`, the topic doc,
+  three months on. Link it from `AGENTS.md` (the router), your own `HANDOFF.d/` file, the topic doc,
   and any skill whose trigger leads there; add a memory entry saying "read its STATUS
   table first — do not re-derive or re-plan".
 

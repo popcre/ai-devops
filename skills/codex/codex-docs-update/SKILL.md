@@ -12,8 +12,9 @@ ritual.
 
 Do:
 
-- Update `AGENTS.md`, `README.md`, relevant `docs/*.md`, folder READMEs, or
-  `HANDOFF.md` only when the task created durable knowledge.
+- Update `AGENTS.md`, `README.md`, relevant `docs/*.md`, folder READMEs, or your
+  own new `HANDOFF.d/` file only when the task created durable knowledge.
+  **Never rewrite the root `HANDOFF.md`** — it is a static pointer to `HANDOFF.d/`.
 - Derive every statement from code, config, scripts, migrations, deployment
   files, or verified session findings.
 - Keep `AGENTS.md` as the fast router: rules and pointers future sessions must
@@ -39,7 +40,8 @@ Do not:
 | `docs/development.md` | Local setup, run/test/lint/debug workflow |
 | `docs/configuration.md` | Env vars, config files, feature flags, no values |
 | `docs/deployment.md` | Deploy/release/environment/rollback workflow |
-| `HANDOFF.md` | Temporary continuation state only when work is unfinished |
+| `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` | Temporary continuation state only when work is unfinished — **one NEW write-once file of your own**, never another session's |
+| `HANDOFF.md` | **Never rewrite.** Static pointer to `HANDOFF.d/`; the only permitted write is legacy migration (see the handoff gate) |
 | **Any plan file** (`IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`) the session worked against | **Always — see the plan-file gate.** A plan describes the world as it was when written; each executed step makes it lie a little more |
 
 ## Mandatory Plan-File Gate (never leave a plan you worked against stale)
@@ -73,23 +75,48 @@ caught only because Albert asked. Do not rely on that.
    machine, an owner decision. "Open" with no reason reads as "nobody got to it".
 
 **Then make it discoverable** - a plan findable only by filename will be lost. Link it
-from `AGENTS.md`, from `HANDOFF.md` when present, from the topic doc it belongs to, and
+from `AGENTS.md`, from your own `HANDOFF.d/` file, from the topic doc it belongs to, and
 from any skill whose trigger leads there. Add a memory entry naming the plan and saying
 "read its STATUS table first - do not re-derive or re-plan".
 
-**Delete a plan file only when every step is genuinely done** (same rule as
-`HANDOFF.md`), and say so in the final report.
+**Delete a plan file only when every step is genuinely done** (same rule as a
+`HANDOFF.d/` file), and say so in the final report.
 
-## Mandatory HANDOFF.md Completeness Gate
+## Mandatory Handoff Gate (`HANDOFF.d/`, one write-once file per session)
 
-Whenever `HANDOFF.md` exists or this skill creates it, do not report the
+Handoffs are **one file per session**, never a shared rewritten document. Several
+AI agents work these repos concurrently — sometimes in the same working copy —
+and a rewritten shared file loses one session's work with no merge to resolve.
+
+**Where your handoff goes:** `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`, e.g.
+`HANDOFF.d/2026-07-29T2140Z-t16-codex-supabase-mcp-scoping.md`. Derive the fields:
+`date -u +%Y-%m-%dT%H%MZ`; short hostname lowercased; `codex`; a 2-5 word
+kebab-case topic slug. All four fields are required — dropping one is what makes
+two sessions collide. Full rules and the exact static `HANDOFF.md` pointer text:
+`templates/system/handoff-standard.md` / the `handoff-writer` skill.
+
+Hard rules:
+
+- **Never rewrite the root `HANDOFF.md`**, and **never open, edit, tidy, or delete
+  another session's `HANDOFF.d/` file.**
+- **Legacy repos:** if `HANDOFF.md` exists and line 1 lacks `handoff-pointer: v1`,
+  it is an old full-document handoff — `git mv` it verbatim into `HANDOFF.d/` as
+  one open workstream, then write the static pointer, then write your own file. If
+  the marker is present, leave the file alone.
+- **Retention:** delete YOUR file once its work is proven done; git history keeps
+  the text. Presence = OPEN. If `HANDOFF.d/` holds **more than 5** files, warn
+  loudly in the final report, oldest-first with dates, and ask which are finished.
+- **Never add `.gitattributes merge=union`** for handoffs — line-unioning Markdown
+  silently produces a wrong document instead of a loud conflict.
+
+Whenever this skill creates or updates your `HANDOFF.d/` file, do not report the
 documentation update complete until this gate passes:
 
-1. Reread `HANDOFF.md` and every related Markdown file it relies on as if the
-   current conversation had been erased. Do not use chat context to fill gaps.
+1. Reread your `HANDOFF.d/` file and every related Markdown file it relies on as
+   if the current conversation had been erased. Do not use chat context to fill gaps.
 2. Write and answer these three questions, citing the handoff sections that
    support each answer:
-   - Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+   - Is it comprehensive enough that a brand-new developer with no
      project knowledge and no session context could pick up where I left off and
      not skip a beat?
    - Is it detailed enough that they could continue as well as I could right
@@ -99,12 +126,12 @@ documentation update complete until this gate passes:
      constraints, risks, exact next actions, and verification evidence?
 3. Do not accept a bare **yes**. Name the evidence and every gap found. If any
    answer is not an evidence-backed **yes**, revise
-   `HANDOFF.md` and the appropriate related Markdown files to add every missing
-   fact, decision, failed attempt, exact state, path, identifier, constraint,
-   risk, and executable next step with a verification gate.
+   **your own** `HANDOFF.d/` file and the appropriate related Markdown files to add
+   every missing fact, decision, failed attempt, exact state, path, identifier,
+   constraint, risk, and executable next step with a verification gate.
 4. Reread and answer all three questions again. Repeat until every answer is an
    evidence-backed **yes**. Preserve the final answers in the closing report or
-   at the end of `HANDOFF.md` so the audit is inspectable.
+   at the end of your own `HANDOFF.d/` file so the audit is inspectable.
 
 This is a revision loop, not a checklist acknowledgment. Never claim the docs
 update is complete merely because the question was asked.
@@ -121,5 +148,6 @@ Report:
 When a plan file exists, state its updated STATUS line: which steps are now done,
 where the next session starts, and what is blocked on whom - or say explicitly that
 no plan file was touched.
-When `HANDOFF.md` is present, also state that the mandatory completeness gate
-passed.
+When you wrote a `HANDOFF.d/` file, also state that the mandatory completeness
+gate passed, name the file, and report how many open files `HANDOFF.d/` now holds
+(warning loudly if more than 5).

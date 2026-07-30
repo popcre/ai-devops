@@ -25,7 +25,8 @@ The non-negotiable rule is:
 
 ## 1. Establish scope and protect live work
 
-Read the target repo's `AGENTS.md`, `HANDOFF.md`, and relevant local rules before
+Read the target repo's `AGENTS.md`, the OPEN handoffs (`HANDOFF.d/` newest-first,
+or the legacy root `HANDOFF.md` if it is still a full document), and relevant local rules before
 changing anything. If the user asked for a machine-wide audit, scan local fixed
 drives and known repository roots, but do not traverse large network mounts
 unless explicitly invited.

@@ -10,7 +10,9 @@ Always adapt to the repo's `AGENTS.md` branch rules before touching git.
 
 ## Start
 
-1. Read `AGENTS.md` and any `HANDOFF.md`.
+1. Read `AGENTS.md` and the OPEN handoffs (`HANDOFF.d/` newest-first, or a legacy
+   full-document `HANDOFF.md`). Never rewrite the root `HANDOFF.md` and never
+   commit another session's `HANDOFF.d/` edits as your own.
 2. State the target repo and branch before merge, commit, or push.
 3. Check for user/concurrent-session work with `git status --short --branch`.
    Do not overwrite unrelated changes.

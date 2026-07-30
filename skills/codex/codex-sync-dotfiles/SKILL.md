@@ -137,4 +137,5 @@ show what would happen without changing anything.
 `ai-devops/docs/config-inventory.md`, `docs/config-consolidation-proposal.md`
 (Phases 1 and 2 complete), **`plan_phase3-config-consolidation.md` — the remaining
 Phase 3 work; read it when Albert asks "what's left on the config consolidation?"**,
-`docs/mcp-1password-rate-limit-hardening.md`, `HANDOFF.md`, `memory/README.md`.
+`docs/mcp-1password-rate-limit-hardening.md`, `HANDOFF.md` (pointer) plus the OPEN
+files in `HANDOFF.d/`, `memory/README.md`.

@@ -1,6 +1,6 @@
 ---
 name: handoff-writer
-description: Write a fresh-developer-grade handoff (HANDOFF.md or fix_*.md), or judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a fix_*.md", "give me a detailed prompt for the new chat", or asks whether HANDOFF.md is thorough, detailed, or comprehensive enough for a fresh developer to pick up and not skip a beat. The handoff must pass the concrete self-audit before it is shown. Do not trigger on a bare "wrap up"; the active client's closeout skill owns that phrase. Shared by Claude and Codex.
+description: Write a fresh-developer-grade handoff as one write-once file under HANDOFF.d/, or judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a handoff", "give me a detailed prompt for the new chat", or asks whether the handoff is thorough, detailed, or comprehensive enough for a fresh developer to pick up and not skip a beat. The handoff must pass the concrete self-audit before it is shown. Do not trigger on a bare "wrap up"; the active client's closeout skill owns that phrase. Shared by Claude and Codex.
 ---
 
 # handoff-writer
@@ -10,7 +10,7 @@ IS the memory carried forward. A thin handoff forces them to babysit long
 sessions — the exact thing this skill prevents. It applies to two situations:
 **writing** a handoff, and **judging** one the user is challenging.
 
-The recurring failure this skill exists to kill: the user asks *"is HANDOFF.md
+The recurring failure this skill exists to kill: the user asks *"is the handoff
 comprehensive enough for a fresh developer to pick up and not skip a beat?"* and
 the answer comes back *"No, I'll fix it now."* — **every single time**, whether
 or not the handoff is actually deficient. That reflex is the bug. The cure is two
@@ -20,14 +20,105 @@ truthful, and (2) when asked, verify against the concrete checklist and answer
 
 ## When to use
 
-- "put that context in handoff.md" / "write a comprehensive handoff.md"
+- "put that context in handoff.md" / "write a comprehensive handoff"
 - "write a fix_<topic>.md"
 - "give me a very detailed prompt to give another ai session"
 - "this session's context window is getting full"
-- **The verification question** — any form of "is HANDOFF.md thorough / detailed /
+- **The verification question** — any form of "is the handoff thorough / detailed /
   comprehensive / complete enough?", "does it have every relevant detail and
   nuance?", "could a fresh developer continue as well as you?" → go to
   **§ Answering the verification question**. Do NOT reflexively answer "No."
+
+## FIRST: where the handoff goes — one write-once file per session
+
+Many AI agents (Claude, Codex, Grok, GLM, Kimi, Qwen) work the same repos
+concurrently — sometimes in the SAME working copy, sometimes in different clones
+of the same GitHub repo. A shared root `HANDOFF.md` that each session rewrites
+loses data by default: in one working copy the second writer silently overwrites
+the first (git never sees two versions, so it cannot help); across clones both
+push and either conflict — which the owner, who is not a programmer, will never
+resolve — or lose one side in the resolution. This has already happened.
+
+So: **create ONE new file, and only that file:**
+
+```
+HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md
+```
+
+Example: `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`
+
+| Field | How to derive it at runtime | Example |
+|---|---|---|
+| UTC timestamp | `date -u +%Y-%m-%dT%H%MZ` (Bash) / `(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHHmm')+'Z'` (PowerShell). **Must include the time** — several sessions per day is normal. | `2026-07-29T2140Z` |
+| machine | Short hostname lowercased (`hostname` / `$env:COMPUTERNAME`); prefer the known nickname (`t16`, `916`, `4837`, `al8960ofc`, `hetz`). | `t16` |
+| agent | `claude`, `codex`, `grok`, `glm`, `kimi`, `qwen` — whichever you are. Never omit. | `claude` |
+| slug | 2–5 word kebab-case topic, `a-z0-9-` only. | `supabase-mcp-scoping` |
+
+Never write a literal placeholder (`unknown`, `machine`, `agent`) and never drop a
+field — dropping a field is what creates collisions.
+
+Hard rules:
+
+- **You may edit only your OWN file.** Never open, edit, reformat, "tidy", merge,
+  or delete another session's `HANDOFF.d/` file. If another session's handoff
+  looks wrong or stale, say so in YOURS.
+- **Never rewrite the root `HANDOFF.md`.** It is a short static pointer, written
+  once, so that "read HANDOFF.md on start" still has one entry point:
+
+  ```md
+  <!-- handoff-pointer: v1 — do not rewrite this file; add a file under HANDOFF.d/ instead -->
+  # HANDOFF
+
+  Active handoffs live in [`HANDOFF.d/`](HANDOFF.d/) — one write-once file per AI
+  session, named `<UTC-timestamp>-<machine>-<agent>-<slug>.md`.
+
+  **Starting a session:** list `HANDOFF.d/`, read the open files **newest first**.
+  Every file present is an OPEN workstream; finished ones are deleted (git history
+  keeps the text).
+
+  **Ending a session:** create your OWN new file in `HANDOFF.d/` following the
+  handoff standard (all 9 sections). **Do not rewrite this file, and do not edit
+  another session's file.** Concurrent sessions rely on that.
+  ```
+
+- **Never add `.gitattributes merge=union`** for handoffs. It unions lines with no
+  understanding of Markdown, so it merges without a conflict yet yields a wrong
+  file (two contradictory "current state" sections, duplicated next steps, one
+  session's deletions silently undone). A loud conflict beats silent corruption.
+- **Do not build an index or archive folder.** A generated index is the same shared
+  mutable file one level up — sessions would clobber the index instead. Presence in
+  `HANDOFF.d/` means open; deletion + git history is the archive.
+
+### Legacy (un-migrated) repos
+
+Most repos still have the OLD form. Detect it before writing:
+
+1. No `HANDOFF.md` → nothing to migrate; write the pointer above alongside your
+   first `HANDOFF.d/` file.
+2. `HANDOFF.md` line 1 contains `handoff-pointer: v1` → already the pointer.
+   Leave it entirely alone.
+3. `HANDOFF.md` exists **without** that marker → **legacy full document**. Treat
+   the whole thing as ONE open workstream:
+   `git mv HANDOFF.md HANDOFF.d/<UTC>-<machine>-<agent>-legacy-migrated-handoff.md`
+   (move the text **verbatim** — do not rewrite or summarize it), then create
+   `HANDOFF.md` as the static pointer, then write your own separate session file.
+   Migrate sibling legacy docs (`HANDOFF-<topic>.md`, a `fix_<topic>.md` used as a
+   handoff) the same way when you touch them.
+
+If another session might be mid-write in the same working copy and you cannot
+tell, skip the migration: just add your own `HANDOFF.d/` file and note that
+migration is still pending.
+
+### Retention (automatic — never a manual chore)
+
+- When a workstream is **genuinely proven done** (verified, committed, pushed,
+  deployed as applicable), **delete its `HANDOFF.d/` file** in the same commit that
+  finishes it. Git history preserves the text. Delete only work you can prove is
+  done — normally only your own.
+- **Presence = OPEN.** Session start reads only the files that are there.
+- **If `HANDOFF.d/` holds more than 5 files, warn loudly** in the closing report:
+  list them oldest-first with dates and ask which are actually finished. Silent
+  accumulation buries a fresh developer under dozens of nine-section essays.
 
 ## Two modes
 
@@ -36,7 +127,7 @@ truthful, and (2) when asked, verify against the concrete checklist and answer
   enough. Re-read the actual file, grade it, and answer per § Answering the
   verification question.
 
-## Required structure (use these 9 sections; never drop one silently — write "N/A" + why if truly inapplicable)
+## Required structure (use these 9 sections in YOUR `HANDOFF.d/` file; never drop one silently — write "N/A" + why if truly inapplicable)
 
 Write for a developer who **walked in off the street this morning**: zero
 knowledge of the app, the business, this session, this chat, or what failed. Make
@@ -96,7 +187,7 @@ passed and name what makes it comprehensive (which section covers each dimension
 Write and answer the following three questions, citing the handoff sections that
 support each answer:
 
-1. Is `HANDOFF.md` comprehensive enough that a brand-new developer with no
+1. Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with no
    project knowledge and no session context could pick up where I left off and
    not skip a beat?
 2. Is it detailed enough that they could continue as well as I could right now,
@@ -140,17 +231,21 @@ now**. If that is true, the answer is Yes — say it.
 - Vague next steps ("finish the migration") instead of exact, verifiable ones.
 - Session jargon with no definition.
 - Three sentences called a handoff. Under a screen of text for non-trivial work is
-  almost certainly too thin — re-audit.
+  almost certainly too thin — re-audit. (The per-session file does NOT lower the
+  verbosity bar; all 9 sections and the "what did NOT work" section still apply.)
+- **Rewriting the root `HANDOFF.md`, or editing/deleting another session's
+  `HANDOFF.d/` file.** That is the concurrency data-loss bug this design removes.
 - Reflexively answering "No, not comprehensive enough" to look diligent when the
   checklist already passes.
 
 ## Mechanics
 
-- Write to a repo file (HANDOFF.md, or fix_<topic>.md for a specific fix), commit
-  and push — a handoff that lives only in chat is lost.
-- In a concurrently-edited checkout, stage only your own hunks; never sweep in
-  another session's uncommitted work.
-- HANDOFF.md is deleted only when the work it describes is truly complete.
+- Write to your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`, commit and
+  push — a handoff that lives only in chat is lost. See § FIRST above.
+- In a concurrently-edited checkout, stage only your own file and your own hunks;
+  never `git add -A` another session's uncommitted work.
+- Your `HANDOFF.d/` file is deleted only when the work it describes is truly
+  complete. Never delete another session's.
 - Record infra/design decisions with dates so a later session can't contradict them.
 
 ---

@@ -24,22 +24,36 @@ doesn't apply, say so in the report.
 ## The chain
 
 1. **Docs** — run the `session-docs-update` skill: record what this session
-   learned or changed in the right .md files (AGENTS.md / HANDOFF.md / docs/),
-   mirror any shared-backend change to `u2giants/shared-db`. If nothing durable
-   changed, state that explicitly.
+   learned or changed in the right .md files (AGENTS.md / docs/ / your own
+   `HANDOFF.d/` file), mirror any shared-backend change to `u2giants/shared-db`.
+   If nothing durable changed, state that explicitly.
 2. **Secrets** — run the `secrets-to-1password` skill: sweep the session for
    any credential that appeared and store it in the `vibe_coding` vault with
    rich notes.
 3. **Handoff-safe state** — every touched repo: no mystery untracked files,
-   no half-done merges. If work is unfinished, create/update HANDOFF.md to the
-   full `handoff-standard.md` and RUN ITS SELF-AUDIT GATE — a stranger who
-   walked in off the street must be able to continue with no questions, as
-   effectively as you can right now, including knowing what was tried and
-   failed. A three-sentence handoff is a failure; expand until the audit
-   passes (use the `handoff-writer` skill). Once it passes, if asked whether the
-   handoff is comprehensive enough, answer "Yes" with evidence — do not
-   reflexively answer "No, I'll fix it." If HANDOFF.md describes work that
-   is now complete, delete it.
+   no half-done merges. If work is unfinished, write **ONE NEW file of your own**:
+   `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
+   `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`) to the full
+   `handoff-standard.md` — all 9 sections — and RUN ITS SELF-AUDIT GATE. A
+   stranger who walked in off the street must be able to continue with no
+   questions, as effectively as you can right now, including knowing what was
+   tried and failed. A three-sentence handoff is a failure; expand until the
+   audit passes (use the `handoff-writer` skill, which owns the naming rules,
+   the static `HANDOFF.md` pointer, legacy migration, and retention). Once it
+   passes, if asked whether the handoff is comprehensive enough, answer "Yes"
+   with evidence — do not reflexively answer "No, I'll fix it."
+
+   Concurrency rules, non-negotiable — other agents may be working the same
+   checkout right now:
+   - **Do NOT rewrite the root `HANDOFF.md`.** It is a static pointer to
+     `HANDOFF.d/`. If it is still a legacy full document (line 1 lacks
+     `handoff-pointer: v1`), migrate it per `handoff-writer`: `git mv` it verbatim
+     into `HANDOFF.d/` as one open workstream, then write the pointer.
+   - **Do NOT open, edit, tidy, or delete another session's `HANDOFF.d/` file.**
+   - **Retention:** delete YOUR `HANDOFF.d/` file when the work it describes is
+     proven done (git history keeps the text). If `HANDOFF.d/` holds **more than
+     5** files, warn loudly in the closing report — list them oldest-first with
+     dates and ask which are actually finished.
 4. **Ship & verify** — commit and push everything per each repo's rules
    (dflow → `dflow-ship`: PR to develop; hetz apps → `deploy-and-verify`:
    Actions/GHCR/Coolify + live SHA check; everything else → main). Confirm
@@ -53,7 +67,8 @@ doesn't apply, say so in the report.
 - What we accomplished: [1-3 sentences, business language]
 - Docs updated: [files, or "nothing durable changed"]
 - Secrets: [stored/none found]
-- Handoff: [HANDOFF.md present + why / absent because work is complete]
+- Handoff: [new HANDOFF.d/<file> written + why / none because work is complete;
+  files deleted as done; WARNING if HANDOFF.d/ now holds more than 5 open files]
 - Shipped: [commit SHAs, PR URLs, deploy verified yes/no]
 - Loose ends: [anything Albert should know, or "none"]
 ```

@@ -36,16 +36,20 @@ supabase.com backend). The spec's core requirements:
   deployment (the REAL path), critical incidents, pending work.
 - Fixed file roles: README (orientation), CLAUDE.md (Claude-only, short,
   never duplicates AGENTS.md), docs/architecture|development|configuration|
-  deployment.md, folder READMEs only when genuinely useful, HANDOFF.md only
-  while work is unfinished.
+  deployment.md, folder READMEs only when genuinely useful, a static `HANDOFF.md`
+  pointer plus one write-once file per session under `HANDOFF.d/` while work is
+  unfinished.
 - Derive everything from actual repo state; never invent; mark unknowns and
   how to verify them; no secrets; delete/consolidate stale docs.
 - Maintain `.claudeignore` / `.cursorignore` (and `.copilotignore` if Copilot
   is used) matching the "What to ignore" section.
 - Follow the spec's REQUIRED AI WORKFLOW order and VERIFICATION GATES; end
   with its FINAL COMPLETION REPORT format.
-- Close with the handoff quality bar: HANDOFF.md (if present) must let a brand
-  new developer pick up without skipping a beat.
+- Close with the handoff quality bar: each OPEN `HANDOFF.d/` file must let a brand
+  new developer pick up without skipping a beat. Write only your own new
+  `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`; never rewrite the root
+  `HANDOFF.md` (static pointer) or another session's file. Migrate a legacy
+  full-document `HANDOFF.md` into `HANDOFF.d/` verbatim — see `handoff-writer`.
 
 Already applied to ~12 repos (ansible session, t16). When running on a new
 repo, mirror the structure of a recently-overhauled repo for consistency.

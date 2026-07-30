@@ -35,7 +35,9 @@ Default Windows parent path: `C:\repos\dflow`.
 2. Clone missing repos or open existing working copies.
 3. In every repo: check status, fetch, merge `origin/develop` into the user
    branch on GitHub when appropriate, then pull the updated user branch locally.
-4. Read `AGENTS.md` and `HANDOFF.md` if present.
+4. Read `AGENTS.md`, then the OPEN handoffs: `HANDOFF.d/` newest-first, or the
+   root `HANDOFF.md` if it is still the legacy full document (line 1 lacks
+   `handoff-pointer: v1`).
 5. Load only task-relevant docs.
 
 ## Coding Rules

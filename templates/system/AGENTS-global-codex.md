@@ -109,7 +109,7 @@ hand it back; do not raise the dial.
 ## Engineering standards
 
 11. No band-aids — root-cause, permanent, fewest-moving-parts fixes. Label any
-    unavoidable workaround TEMPORARY in HANDOFF.md.
+    unavoidable workaround TEMPORARY in your session's `HANDOFF.d/` file.
 12. No silent failures — every fallback alerts loudly; sweep for the same
     pattern when you find one instance.
 13. Nothing hard-coded that should be configurable (AI models especially).
@@ -163,8 +163,8 @@ agent automation; stop and switch to the dedicated read-only AI identity.
   locally, all six designflow repos; AG-Grid work per the AG-Grid MCP docs
   (Angular 35.1.0), Theming API only, no `--ag-*` vars.
   [full: dflow-session-start]
-- **Session end:** update the .md files per the doc spec (AGENTS.md router,
-  HANDOFF.md only if unfinished, mirror shared-backend changes to
+- **Session end:** update the .md files per the doc spec (AGENTS.md router, one
+  NEW `HANDOFF.d/` file of your own only if unfinished, mirror shared-backend changes to
   `u2giants/shared-db`); sweep new secrets into 1Password with rich notes;
   leave no repo with mystery untracked files. [full: session-docs-update,
   secrets-to-1password]
@@ -188,6 +188,33 @@ agent automation; stop and switch to the dedicated read-only AI identity.
 Albert starts new sessions with clean context windows; the handoff is the ONLY
 memory carried forward. Skimpy handoffs are his #1 pain — they trap him in long
 sessions. This is a hard standard.
+
+**Where it goes — ONE WRITE-ONCE FILE PER SESSION.** Several agents (Claude,
+Codex, Grok, GLM, Kimi, Qwen) work the same repos concurrently, sometimes in the
+SAME working copy. So never rewrite a shared handoff document; create exactly one
+new file:
+
+```
+HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md
+```
+
+e.g. `HANDOFF.d/2026-07-29T2140Z-t16-codex-supabase-mcp-scoping.md` — timestamp
+from `date -u +%Y-%m-%dT%H%MZ` (time included, not just the date), `<machine>` the
+short hostname lowercased, `<agent>` = `codex`, `<slug>` a 2-5 word kebab-case
+topic. All four fields required.
+
+- **Never rewrite the root `HANDOFF.md`** — it is a one-screen static pointer to
+  `HANDOFF.d/`, so "read HANDOFF.md on start" still has one entry point.
+- **Never open, edit, tidy, or delete another session's `HANDOFF.d/` file.**
+- **Session start:** list `HANDOFF.d/` and read the OPEN files newest-first; each
+  file present is one open workstream.
+- **Legacy repos:** a root `HANDOFF.md` whose line 1 lacks `handoff-pointer: v1`
+  is the old full-document form — `git mv` it verbatim into `HANDOFF.d/` as one
+  open workstream, then write the pointer, then write your own file.
+- **Retention:** delete YOUR file when its work is proven done (git history keeps
+  the text). More than 5 open files → warn loudly, oldest-first with dates.
+- **Never add `.gitattributes merge=union`** for handoffs; unioning lines yields a
+  silently wrong Markdown document instead of a loud conflict.
 
 **Mindset:** write EVERY handoff for a developer who walked in off the street
 this morning. They have ZERO knowledge of the application, of what this session
@@ -223,9 +250,10 @@ can right now? (3) did you include what failed and why? (4) is every next step
 concrete + verifiable? (5) is every term/path/URL explained? If any "no," expand
 and re-grade. Only then present it, and state the self-audit passed. Albert must
 NEVER have to ask "is this comprehensive enough for a fresh developer?" — you
-already answered it. A three-sentence handoff is a failure. Write it to a repo
-file (HANDOFF.md / fix_<topic>.md), commit and push; delete HANDOFF.md only when
-its work is truly complete.
+already answered it. A three-sentence handoff is a failure (the per-session file
+does not lower the bar — all 9 sections still apply). Write it to your own new
+`HANDOFF.d/` file, commit and push; delete that file only when its work is truly
+complete.
 
 ## Environment
 

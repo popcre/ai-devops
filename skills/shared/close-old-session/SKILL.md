@@ -50,7 +50,18 @@ Before believing any suspect, look at what actually happened since:
   (`git log -p -- path/to/FILE.md`) if unsure who last touched it.
 - For code changes: read the current code, not this session's memory of it. The
   function/config/schema may already differ.
-- Check `HANDOFF.md` if one exists — a later session may have recorded the state.
+- **Check the handoffs.** List `HANDOFF.d/` and read the OPEN files newest-first —
+  a later session may already have recorded the state, including the fact that your
+  suspect work is done. Every file present means an OPEN workstream. If the repo has
+  no `HANDOFF.d/` but has a root `HANDOFF.md` whose line 1 lacks
+  `handoff-pointer: v1`, that is the legacy full-document form — read it the same
+  way, as one open workstream. (If `HANDOFF.md` IS the pointer, it carries no
+  status; the real content is in `HANDOFF.d/`.)
+- **Never edit another session's `HANDOFF.d/` file** while reconciling, and never
+  rewrite the root `HANDOFF.md`. A stale-looking handoff from another agent may
+  belong to a session still running. If a `HANDOFF.d/` file describes work you can
+  prove is now finished, say so in your report and let the close-out chain delete
+  it — deletion is how a workstream is closed (git history preserves the text).
 
 ## Step 3 — Classify each suspect
 

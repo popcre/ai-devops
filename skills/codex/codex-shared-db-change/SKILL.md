@@ -74,5 +74,7 @@ change is applied.
 ## Don't leave a mess
 
 Never leave shared-db with untracked migrations or an open PR: finish
-branch → PR → merge, or write `HANDOFF.md` stating the exact next action.
+branch → PR → merge, or write your own
+`HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file stating the exact next action
+(never rewrite the shared root `HANDOFF.md`).
 Full reference: `u2giants/shared-db/AGENTS.md`.
