@@ -91,12 +91,12 @@ workstream, and a finished workstream's file is **deleted** (git history preserv
 the text). A repo whose root `HANDOFF.md` lacks that marker is still the **legacy**
 full-document form: read it as one open workstream and migrate it per
 `handoff-writer`. Canonical rules: `templates/system/handoff-standard.md`; skill:
-`skills/shared/handoff-writer/`. **This repo has not been migrated yet** — its root
-`HANDOFF.md` (and `HANDOFF-prod-trigger-disable-investigation.md`) are still legacy
-full documents; the owner is migrating them separately.
+`skills/shared/handoff-writer/`. **This repo was migrated 2026-07-30**: its root
+`HANDOFF.md` is now the static pointer, and the two former legacy documents were moved
+verbatim into `HANDOFF.d/` as open workstreams.
 
-`HANDOFF.md` is required reading **whenever it exists** — it means work is in
-progress. It is currently **present**. The immediate unfinished work is proving
+The OPEN files in `HANDOFF.d/` are required reading — each one means work is in
+progress. There are currently **two**. The immediate unfinished work is proving
 the Windows minimum-touch bootstrap on a disposable Windows 11 machine and then
 proving a second run makes no unintended changes. Older config-consolidation
 rollout work is also recorded there. Do not apply the unproven bootstrap to an
@@ -690,9 +690,9 @@ removing `--` from both generated launchers. **Do not re-add `--` or remove
 | done | Config-consolidation **Phase 2** | Shipped 2026-07-14, `2d` closed 2026-07-26. Secret plumbing, MCP launchers with the 15-min cache, token-free MCP configs, SSH aliases, 916-alien key — all repo-owned (`bin/setup-machine.ps1`, `bin/setup-secrets.sh`). **Adopted on `t16` + `al8960ofc`; rollout still outstanding on `916` (off until ~2026-07-28) and Ubuntu servers beyond `hetz`** — one `git pull` + per-OS script each. |
 | open | Config-consolidation **Phase 3** | 👉 **Full implementation plan: [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)** — read that file, it stands alone. Retire the Dropbox scripts (they still hold the **916-alien private key in plaintext** + 16 token-bearing files — inventory only, approval-gated), one-command onboarding docs for both OSes, portable Codex prefs template, refresh `machine-atlas.md`. |
 
-Config-consolidation follow-through is in progress, so **`HANDOFF.md` is present** —
-read it for the exact next steps. **For the remaining consolidation work, the one
+Config-consolidation follow-through is in progress, so an **open handoff is present**
+in `HANDOFF.d/` ([`HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md)) — read it for the exact next steps. **For the remaining consolidation work, the one
 file to open is [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)**
 (self-contained; written for a session with zero context). Nobody has to remember its
-path: it is linked from here, from `HANDOFF.md`, from both `sync-dotfiles` skills, and
+path: it is linked from here, from that handoff file, from both `sync-dotfiles` skills, and
 from `docs/config-consolidation-proposal.md`.
