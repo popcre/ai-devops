@@ -96,10 +96,12 @@ coordinator has to be able to resume or retire **each agent individually**.
 > including the mandatory "what we tried that did NOT work", and its
 > fresh-developer self-audit gate. This skill adds what shared-db needs on top.
 
-## The handoff has TWO halves
+## The handoff has TWO halves — and a REQUIRED queue seed
 
 A coordinator handoff that omits half (b) is **incomplete**, no matter how long
-it is.
+it is. **A coordinator handoff that leaves the `REQUEST QUEUE` in
+`COORDINATOR_INTAKE.md` un-seeded is equally incomplete**, and carries exactly
+the same weight — see "Seed the queue" below.
 
 **(a) Coordination state**
 
@@ -129,6 +131,39 @@ One clearly headed block per agent — never merged into a single narrative:
 That last line matters most. Without it the next session redoes abandoned work
 or, worse, undoes a deliberate omission.
 
+## Seed the queue — REQUIRED, and a handover without it is INCOMPLETE
+
+**Before you call the handover done, the outgoing coordinator MUST seed or
+refresh the `## REQUEST QUEUE` in `COORDINATOR_INTAKE.md` with EVERY outstanding
+item** — everything in `HANDOFF.md`'s opening agenda, its "waiting on Albert"
+list, and its `## BACKLOG` section, plus anything you dispatched that did not
+finish. Nothing outstanding may exist only in `HANDOFF.md` prose.
+
+**Why this rule exists — 2026-07-31.** A fresh coordinator opened a session, read
+the `REQUEST QUEUE`, `INTAKE QUEUE` and `IN PROGRESS` sections of
+`COORDINATOR_INTAKE.md` exactly as `shared-db-orchestrator` instructs, found all
+three empty, and reported **"there is no pending work"** while roughly **twenty
+real jobs** sat in `HANDOFF.md`'s `## BACKLOG`. Every word of that report was
+true and the conclusion was completely wrong. The cause was not the incoming
+session: the **outgoing** coordinator had written a long narrative handover and
+never populated the queue, because nothing in this standard required it. It does
+now.
+
+How to do it correctly:
+
+- **Short entries only** — a heading, one or two sentences of what outcome is
+  needed, and a pointer to the section of `HANDOFF.md` that holds the detail.
+  Use the Part 0 request template in `COORDINATOR_INTAKE.md`.
+- **Never duplicate content.** Detail copied into the queue is detail that will
+  drift out of date; the two documents have already drifted apart repeatedly in
+  this repo. `HANDOFF.md` is authoritative — **where the queue and `HANDOFF.md`
+  disagree, `HANDOFF.md` wins** and the queue entry is stale.
+- **Every `HANDOFF.md` `## BACKLOG` item `B<n>` gets an entry**, titled so the
+  B-number is visible in the heading (`### REQUEST — Backlog B7 — …`).
+- **Refresh, do not restart.** Items already queued and still outstanding stay
+  where they are; items that were completed move on through the lifecycle rules
+  that `COORDINATOR_INTAKE.md` owns. Do not delete.
+
 ## Ingesting a block from `COORDINATOR_INTAKE.md`
 
 Other sessions file their handovers into `COORDINATOR_INTAKE.md` at the repo root
@@ -156,6 +191,12 @@ Three passes, and then a fourth that is just honesty:
    For each agent you are calling finished: confirm the PR is merged
    (`gh pr view`), confirm the commits are in `origin/main`, and only then retire
    the worktree.
+2b. **Seed / refresh the `REQUEST QUEUE` with every outstanding item** — the
+   section above. This is not optional tidying: a handover that leaves the queue
+   un-seeded is **incomplete**, in exactly the same way as one missing the
+   per-sub-agent blocks. On 2026-07-31 an un-seeded queue caused a fresh
+   coordinator to report "there is no pending work" over a twenty-item backlog.
+
 3. **Flag anything you deliberately left.** A worktree you chose not to touch, a
    branch you left alive, a request you decided not to dispatch — each gets one
    line saying it was a decision, not an oversight. Unexplained leftovers get
@@ -223,7 +264,12 @@ The handover is where unverified claims become someone else's false assumptions.
    you deliberately left behind flagged as a decision. This is a checklist item,
    not a nicety: an unswept repo is how the next coordinator inherits phantom
    worktrees and branches nobody dares delete.
-8. **Pass the gate:** could a developer who walked in off the street this morning
+8. **Confirm the `REQUEST QUEUE` is seeded.** Open `COORDINATOR_INTAKE.md` and
+   check that every outstanding item — the opening agenda, the waiting-on-Albert
+   list, and **every `B<n>` in `HANDOFF.md`'s `## BACKLOG`** — has a short entry
+   pointing back at `HANDOFF.md`. **A handover without this is INCOMPLETE**, the
+   same as one missing half (b).
+9. **Pass the gate:** could a developer who walked in off the street this morning
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
 
