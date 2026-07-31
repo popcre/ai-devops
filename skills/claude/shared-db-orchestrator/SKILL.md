@@ -102,8 +102,8 @@ section with the date instead of deleting it. Details live in the
 
 ## At session start — the hygiene sweep (do this before dispatching anything)
 
-A coordinator that starts by trusting a document starts wrong. Run all four
-steps, in order, before the first brief goes out:
+A coordinator that starts by trusting a document starts wrong. Run all five
+steps, **in this order**, before the first brief goes out:
 
 1. **Establish ground truth from the repo, never from a Markdown file.**
    `git fetch --all --prune=false`, then read `origin/main`'s **real** tip SHA
@@ -111,14 +111,36 @@ steps, in order, before the first brief goes out:
    for duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
    this skill are all capable of being hours out of date; the repo is not.
    Stamp both facts with the time you checked them and put them in the register.
-2. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
+2. **Read `HANDOFF.md` — REQUIRED, and BEFORE you look at the queues.** Two
+   parts of it, specifically:
+   - the **most recent `COORDINATOR HANDOVER` section** at the top of the file,
+     including its **opening agenda** and its **waiting-on-Albert list**; and
+   - the **`## BACKLOG`** section (the `B<n>` items).
+
+   > **"An empty REQUEST QUEUE / INTAKE QUEUE / IN PROGRESS does not mean there
+   > is no work. `HANDOFF.md` is the authoritative record of outstanding work;
+   > the queues track only incoming requests and handovers."**
+
+   **Where the queues and `HANDOFF.md` disagree, `HANDOFF.md` wins.** A queue
+   entry that contradicts it is stale, not news.
+
+   This step is here because on **2026-07-31** a fresh coordinator read the three
+   empty queue sections, exactly as this skill then instructed, and reported
+   "there is no pending work" while about twenty real jobs sat in the
+   `HANDOFF.md` backlog. Every word of the report was true; the conclusion was
+   completely wrong. Never report the project idle on the strength of the queues
+   alone.
+3. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
    done that nobody has started. Triage it: what is ready to dispatch, what needs
-   an Albert decision first, what is already obsolete.
-3. **Read the `## INTAKE` sections** of the same file — work other sessions
+   an Albert decision first, what is already obsolete. Reconcile it against the
+   `HANDOFF.md` backlog you just read: **any outstanding item missing from the
+   queue is a defect in the previous handover** — seed the missing entries (short,
+   pointing at `HANDOFF.md`, never duplicating its detail) before dispatching.
+4. **Read the `## INTAKE` sections** of the same file — work other sessions
    started and handed over. Verify every claim against the live repo before
    acting on it (`gh pr list`, `git worktree list`, the real migration maximum),
    then dispatch and move the block on.
-4. **Run the branch/worktree hygiene check.** `git worktree list` and
+5. **Run the branch/worktree hygiene check.** `git worktree list` and
    `git branch -vv`: every worktree is either live (say whose and what for) or
    finished; every finished branch should be merged. Do not delete anything at
    session start — record it, and act at handover time under the rules in
