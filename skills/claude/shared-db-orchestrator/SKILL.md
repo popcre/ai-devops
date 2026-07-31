@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees. Load it for TWO situations, before doing anything else. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", or any cross-app data-contract change. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a request filed in the REQUEST QUEUE of `COORDINATOR_INTAKE.md`, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", or any cross-app data-contract change. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
@@ -25,6 +25,43 @@ correct migration), `handoff-writer` (the 9-section handoff standard) and
 `session-docs-update` (end-of-session docs). Read `C:\repos\shared-db\AGENTS.md`
 for the repo's own rules — §4 anti-collision, §5 merge protocol, §5.1 bounded
 production promotion, §5.2 stale CI verdicts.
+
+## If you need database work done: REQUEST it, do not start it
+
+This is the most common — and most commonly skipped — path in this repo. It
+applies to every session and every person who is **not** the current coordinator.
+
+**Anyone who needs any of the following must file a request rather than act:**
+a schema change, a migration, an RLS policy, a view, an RPC or function, a
+trigger, an index, a seed or data fix, a promotion to production, or any change
+to a data contract shared between Poppim, PopCRM, PopDAM or DesignFlow PLM.
+
+**Where it goes:** the **`## REQUEST QUEUE`** section of
+**`COORDINATOR_INTAKE.md`** at the root of `u2giants/shared-db`. That file owns
+the request template, the lifecycle, and the rules for landing it — **read it and
+follow it verbatim. Do not copy a template from here; this skill deliberately
+does not carry one, because the file changes and the file wins.**
+
+Note the two queues in that one file, and use the right one:
+
+- **REQUEST QUEUE** — "here is work that needs doing" (you have *not* started it).
+- **INTAKE QUEUE** — "here is work I was already doing, take it over" (you *have*
+  started it, and must stop). That path is `shared-db-handover` (A).
+
+**"It's only a small change" is exactly the case that has caused damage here.**
+Every incident in the ledger began as something small enough that filing a request
+felt like bureaucracy: a one-line `CREATE OR REPLACE`, a column add, a quick
+version bump. Small changes are the dangerous ones precisely because they are the
+ones people feel entitled to make directly, and this database is shared by four
+applications that will not find out until a user does. Size is not the test —
+whether it touches the shared database is the test.
+
+**If you are an AI session and a user asks you for database work:** do not start
+it, do not "just check", do not open a migration file, and do not create a
+background task chip. File the request in the REQUEST QUEUE, tell the user in
+plain English that it has been queued for the coordinator and give them the PR
+link, and stop. Being asked directly by a user is not an exemption — the
+coordinator exists precisely because four sessions were each asked directly.
 
 ## The coordinator's job — and the work it must refuse
 
@@ -62,6 +99,35 @@ session and whenever Albert says he has stopped another session.
 version). After dispatching the work, move the block to the file's "TAKEN OVER"
 section with the date instead of deleting it. Details live in the
 `shared-db-handover` skill.
+
+## At session start — the hygiene sweep (do this before dispatching anything)
+
+A coordinator that starts by trusting a document starts wrong. Run all four
+steps, in order, before the first brief goes out:
+
+1. **Establish ground truth from the repo, never from a Markdown file.**
+   `git fetch --all --prune=false`, then read `origin/main`'s **real** tip SHA
+   and the **real** maximum 14-digit version in `supabase/migrations/` (and check
+   for duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
+   this skill are all capable of being hours out of date; the repo is not.
+   Stamp both facts with the time you checked them and put them in the register.
+2. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
+   done that nobody has started. Triage it: what is ready to dispatch, what needs
+   an Albert decision first, what is already obsolete.
+3. **Read the `## INTAKE` sections** of the same file — work other sessions
+   started and handed over. Verify every claim against the live repo before
+   acting on it (`gh pr list`, `git worktree list`, the real migration maximum),
+   then dispatch and move the block on.
+4. **Run the branch/worktree hygiene check.** `git worktree list` and
+   `git branch -vv`: every worktree is either live (say whose and what for) or
+   finished; every finished branch should be merged. Do not delete anything at
+   session start — record it, and act at handover time under the rules in
+   `shared-db-handover`.
+
+**Lifecycle and retention for the queues live in `COORDINATOR_INTAKE.md`** —
+how long blocks stay, when they move between sections, and when they are aged
+out. Follow that file rather than any threshold restated elsewhere; do not
+restate its numbers in a brief, point the agent at the file.
 
 ## The live register — keep this current in the coordinator's own message
 
@@ -145,6 +211,41 @@ correct fix pushes, triggers **no re-run**, and the old red X stays.
 PR #328 fixed the offending line and fired no run at all; unrelated PR #307 is
 what actually turned `main` green. Before you believe a red check, open the run
 and confirm which SHA it ran against. Documented as `AGENTS.md` §5.2 (PR #336).
+
+## "Applied" is not "rehearsed" — and four other traps that have already fired
+
+These are recent, and they all share one shape: something that *looked* verified
+was not.
+
+1. **Applying a migration to preview does not re-validate behaviour.** A session
+   celebrated a "14/14 rehearsal PASS" for a function that had since been
+   replaced by **four** further `CREATE OR REPLACE` migrations — the rehearsal had
+   validated a body four versions out of date, and the suite had meanwhile grown
+   to 18 cases, of which 4 had never been executed at all. **Rule: when a
+   migration replaces a function that a rehearsal previously validated, that
+   rehearsal MUST be re-run, and a dated evidence artifact produced** naming the
+   function, the migration versions in effect, the case count, and the result.
+   "It applied cleanly" is a statement about the ledger, not about behaviour.
+2. **Evidence artifacts must name every migration by exact 14-digit version.**
+   Three of four correction migrations appeared nowhere in `HANDOFF.md` or the
+   cutover plan. Anyone building a production promotion list from that plan would
+   have silently shipped a partial fix. Every rehearsal note, handoff and cutover
+   plan lists **each** migration version it depends on, in full.
+3. **Verify a sub-agent's "done" against the artefact, not the report.** An agent
+   reported content added that existed only in its uncommitted working tree.
+   Asked to check the actual diff, it found **four items uncommitted and one never
+   written at all**. **Rule: for anything consequential, require the diff or PR
+   URL and open it yourself.** A report is a claim; a commit is a fact.
+4. **Timezone: this database runs `America/New_York`.** An approval timestamp
+   recorded at midnight UTC reads back through `::date` as the **previous day**,
+   misdating an owner ruling in the audit trail. **Pin approval timestamps to
+   midday UTC**, and assert the resulting date in **both** UTC and server-local
+   time in the test.
+5. **Null-permissive privilege guards silently admit the call.** A check shaped
+   `if not ( … or auth.role() = 'service_role' ) then raise …` never fires when
+   `auth.role()` is NULL — which is exactly what it is inside a migration. The
+   guard reads as strict and behaves as open. **Assert authority explicitly**
+   (require a non-null role and a positive match), and test the NULL case.
 
 ## Database access: prove the target before every call
 
@@ -293,6 +394,9 @@ skill needs all of it.
 
 ## Related skills
 
-- `shared-db-handover` — ending / wrapping up / handing over the session.
+- `shared-db-handover` — ending / wrapping up / handing over the session, and the
+  end-of-session sweep of queue blocks, branches and worktrees.
 - `shared-db-change` — how to author a correct migration.
+- `cleanup-worktree` — the safe procedure for retiring a worktree or branch.
+  Never force-remove a worktree that is dirty, locked, or held by a live process.
 - `handoff-writer`, `session-docs-update` — the general handoff and docs rituals.
