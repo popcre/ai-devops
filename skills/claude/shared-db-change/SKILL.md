@@ -10,6 +10,14 @@ description: Discipline for any change to the shared supabase.com backend. Use b
 say "pull the repo again and re-read the .md files to see the proper way to make
 db changes" in at least three separate sessions — this skill is that protocol.
 
+> **Working IN the shared-db repo, or running more than one workstream?** Load the
+> **`shared-db-orchestrator`** skill as well. This skill covers how to author a
+> correct change; that one covers how a session is run — one coordinator, all work
+> in isolated sub-agent worktrees, never background task chips (four of them once
+> wrote competing `CREATE OR REPLACE` migrations on the same function),
+> single-writer ownership of `supabase/migrations/`, and the two-part coordinator
+> handoff. To end or hand over that session, use **`shared-db-handover`**.
+
 ## Hard rules
 
 1. **DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.

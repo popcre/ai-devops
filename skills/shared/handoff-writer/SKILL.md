@@ -157,6 +157,14 @@ session; those are not symmetric, so err long.
 9. **Open questions and risks** — what's uncertain, what could break, decisions
    made and why, each dated so a later session can't unknowingly contradict them.
 
+**Coordinator sessions that used sub-agents need a second half.** If this session
+dispatched sub-agents (typically `u2giants/shared-db`), the 9 sections above are
+only part (a). Part (b) — one clearly headed block **per sub-agent**: what it was
+asked to do, what it actually did, what it found, its PR/branch, whether its
+worktree is live or finished, and what it deliberately did NOT do and why — is
+mandatory, and a handoff without it is incomplete. Use the
+**`shared-db-handover`** skill, which owns that shape.
+
 ## Comprehensiveness checklist (objective — every item must be YES)
 
 This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
