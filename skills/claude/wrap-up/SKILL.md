@@ -21,6 +21,12 @@ doesn't apply, say so in the report.
 > the .md docs. Running it alone silently skips the docs step. This skill runs
 > docs FIRST, then calls `dflow-ship` for the ship step.
 
+> **Shared-database sessions:** if this session touched the shared Supabase
+> database / `u2giants/shared-db`, or dispatched sub-agents, also run the
+> **`shared-db-handover`** skill for the handoff step. That handoff has two
+> halves and the second — one block per sub-agent — is mandatory; a generic
+> handoff is incomplete.
+
 ## The chain
 
 1. **Docs** — run the `session-docs-update` skill: record what this session
