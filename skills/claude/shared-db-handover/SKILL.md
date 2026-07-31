@@ -42,6 +42,13 @@ a template from here.
 Follow whatever the file says about how to land the change (normally: its own
 branch, a PR, left OPEN and **not merged**).
 
+**Right queue, right section.** That file holds two queues. If you had **already
+started** work, you file an **INTAKE** block — this path. If you had **not**
+started, and you simply need database work done, that is a **REQUEST QUEUE**
+entry instead, and the skill for it is `shared-db-orchestrator` ("if you need
+database work done: request it, do not start it"). Filing a request as an intake
+block, or vice versa, sends it to the wrong triage.
+
 Your block must cover, at minimum:
 
 1. **What you were doing and why** — the task as you understood it, and who or
@@ -135,6 +142,63 @@ After you have dispatched the work, **move the ingested block to the file's
 "TAKEN OVER" section with the date** rather than deleting it. The queue's history
 is the audit trail of who touched what.
 
+## The sweep — do this BEFORE you write the handover, not after
+
+The handover describes the state you leave behind, so tidy the state first.
+Three passes, and then a fourth that is just honesty:
+
+1. **Move completed blocks through the lifecycle.** Every REQUEST QUEUE item you
+   dispatched and every INTAKE block you ingested moves to its next section in
+   `COORDINATOR_INTAKE.md`, with the date — never deleted. **That file owns the
+   lifecycle and its retention rules; follow what it says rather than any
+   threshold remembered from a previous session.**
+2. **Verify each finished branch is actually merged, then retire its worktree.**
+   For each agent you are calling finished: confirm the PR is merged
+   (`gh pr view`), confirm the commits are in `origin/main`, and only then retire
+   the worktree.
+3. **Flag anything you deliberately left.** A worktree you chose not to touch, a
+   branch you left alive, a request you decided not to dispatch — each gets one
+   line saying it was a decision, not an oversight. Unexplained leftovers get
+   treated as abandoned by the next session and deleted.
+
+**The deletion rules — narrow on purpose:**
+
+- **A local branch label is deleted only when it is fully merged into
+  `origin/main` AND checked out in no worktree.** Both conditions, verified, not
+  assumed.
+- **Remote branches are deleted by the merge itself, never by hand.**
+- **A worktree is NEVER removed if it is dirty, locked, or held by a live
+  process.** Uncommitted work in a worktree is the only copy of that work.
+
+Use the **`cleanup-worktree`** skill as the safe procedure for any of this. Do
+not improvise `git worktree remove --force` or `git branch -D`.
+
+## Evidence obligations at handover time
+
+The handover is where unverified claims become someone else's false assumptions.
+
+- **"Applied" is not "rehearsed."** If a migration replaced a function that an
+  earlier rehearsal validated, that rehearsal is **void** until re-run. Either
+  re-run it and attach a dated evidence artifact, or state plainly in the handoff
+  that the rehearsal is stale and which migration invalidated it. A "14/14 PASS"
+  was carried forward across four `CREATE OR REPLACE` migrations while the suite
+  had grown to 18 cases with 4 never executed.
+- **Name every migration by exact 14-digit version.** Three of four correction
+  migrations were missing from `HANDOFF.md` and the cutover plan, so a promotion
+  list built from that plan would have shipped a partial fix. List them all.
+- **Verify each sub-agent's "done" against the artefact, not its report.** Before
+  writing an agent's block, open its diff or PR. One agent's "added" content lived
+  only in its uncommitted working tree — four items uncommitted, one never
+  written. Record what the diff shows, not what the agent said.
+- **Timezone in audit trails.** The database runs `America/New_York`; a
+  midnight-UTC approval timestamp reads back through `::date` as the previous day
+  and misdates an owner ruling. Pin approvals to **midday UTC** and assert the
+  date in both UTC and server-local time.
+- **Null-permissive guards.** `if not ( … or auth.role() = … )` never fires when
+  `auth.role()` is NULL, as it is inside a migration — the guard silently admits
+  the call. If one shipped, say so in the handoff; authority must be asserted
+  explicitly.
+
 ## Before you call the handover done
 
 1. **Re-verify the moving facts at write time**, not from memory: `git fetch`,
@@ -154,18 +218,27 @@ is the audit trail of who touched what.
 6. **Run the closers:** `session-docs-update` for the documentation ritual and
    `secrets-to-1password` for the secrets sweep. Credentials are referenced by
    1Password item ID only — never a value in the handoff.
-7. **Pass the gate:** could a developer who walked in off the street this morning
+7. **Confirm the sweep above was actually run** — queue blocks moved on, every
+   "finished" branch confirmed merged and its worktree retired, and everything
+   you deliberately left behind flagged as a decision. This is a checklist item,
+   not a nicety: an unswept repo is how the next coordinator inherits phantom
+   worktrees and branches nobody dares delete.
+8. **Pass the gate:** could a developer who walked in off the street this morning
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
 
 ## Related
 
-- `COORDINATOR_INTAKE.md` at the root of `u2giants/shared-db` — the live intake
-  queue and the **single source of truth for the handover template** used by
-  path (A). Never duplicate that template here; it changes hourly.
-- `shared-db-orchestrator` — how the session is opened and run (coordinator +
-  sub-agents, single-writer ownership, the never-use-task-chips rule, and the
-  incident ledger behind each rule).
+- `COORDINATOR_INTAKE.md` at the root of `u2giants/shared-db` — the live REQUEST
+  and INTAKE queues, the **single source of truth for both templates** and for
+  the block lifecycle/retention rules. Never duplicate those templates or
+  thresholds here; the file changes hourly and the file wins.
+- `shared-db-orchestrator` — how the session is opened and run (the request path
+  for anyone who needs database work, the session-start hygiene sweep,
+  coordinator + sub-agents, single-writer ownership, the never-use-task-chips
+  rule, and the incident ledger behind each rule).
+- `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
+  never improvise a forced removal.
 - `handoff-writer` — the canonical 9-section handoff standard and file naming.
 - `session-docs-update` — the end-of-session documentation ritual.
 - `templates/system/handoff-standard.md` in `ai-devops` — the cross-tool standard.
