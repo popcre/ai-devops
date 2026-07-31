@@ -49,6 +49,20 @@ mode, not a hypothetical.
 sub-agent briefs, read reports, spot contradictions between agents, escalate
 owner decisions to Albert in plain English, and write the handoff.
 
+## Where incoming handovers arrive: `COORDINATOR_INTAKE.md`
+
+Other AI sessions running in this repo are told to stop and hand their work to
+you. They file it into **`COORDINATOR_INTAKE.md` at the root of
+`C:\repos\shared-db`** — that file is the live intake queue and the single source
+of truth for the handover template they fill in. Check it at the start of your
+session and whenever Albert says he has stopped another session.
+
+**Verify every claim in a filed block against the live repo before acting on it**
+(`git fetch --all`, `gh pr list`, `git worktree list`, the real maximum migration
+version). After dispatching the work, move the block to the file's "TAKEN OVER"
+section with the date instead of deleting it. Details live in the
+`shared-db-handover` skill.
+
 ## The live register — keep this current in the coordinator's own message
 
 Maintain and restate this after every dispatch and every report. When it goes
