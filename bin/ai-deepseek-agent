@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# ai-deepseek-agent — freeform, multi-turn conversation with DeepSeek.
+#
+# This is NOT a one-shot diff reviewer. Claude and Codex use it to actually
+# talk back and forth with DeepSeek about anything -- a plan, a design, a
+# piece of code, an environment/config question, a debugging theory, a
+# disagreement -- the same way codex-second-opinion lets Claude debate Codex.
+# DeepSeek sees the FULL conversation history on every turn (there is no
+# native DeepSeek CLI with session-resume, so this script keeps the thread in
+# a JSON transcript file and resends it each time).
+#
+# Usage:
+#   ai-deepseek-agent send "<message>" [--file FILE] [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"]
+#       Start a NEW conversation. Prints:
+#         SESSION_ID: <id>
+#         <DeepSeek's reply>
+#
+#   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]
+#       Continue an EXISTING conversation. Prints DeepSeek's reply.
+#
+#   ai-deepseek-agent show <session-id>
+#       Print the full transcript so far.
+#
+#   ai-deepseek-agent list
+#       List open session ids for this repo, newest first.
+#
+# --file FILE appends that file's contents to the message -- paste in a diff,
+# a plan, a config file, a log, whatever DeepSeek needs to see. Sessions are
+# stored under .ai/deepseek-sessions/ in the current repo (or cwd if not in a
+# repo) and are local scratch, not meant to be committed.
+#
+# Secrets: DEEPSEEK_API_KEY self-resolves from 1Password (same pattern as
+# ai-glm-agent), so this works whether or not the calling shell already
+# exported it.
+
+set -uo pipefail
+
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+MCP_ENV="$CFG_DIR/mcp.env"
+MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
+BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ai-deepseek-agent send "<message>" [--file FILE] [--model MODEL] [--system "<prompt>"]
+      Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
+
+  ai-deepseek-agent reply <session-id> "<message>" [--file FILE]
+      Continue an existing conversation with full history.
+
+  ai-deepseek-agent show <session-id>
+      Print the full transcript.
+
+  ai-deepseek-agent list
+      List open session ids for this repo, newest first.
+
+A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
+same as resuming a Codex session. Use it for plans, code, environment/config
+questions, debugging theories, or a second-opinion debate -- not just diffs.
+EOF
+}
+
+SUBCMD="${1:-}"
+[ -n "$SUBCMD" ] && shift || true
+
+case "$SUBCMD" in
+  send|reply|show|list) ;;
+  ""|-h|--help|help) usage; exit 0 ;;
+  *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
+esac
+
+# --- Resolve DEEPSEEK_API_KEY from 1Password if not already in the environment ---
+if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "reply" ]; }; then
+  if [ -n "${AI_DEEPSEEK_REEXEC:-}" ]; then
+    echo "Error: DEEPSEEK_API_KEY resolved EMPTY from $MCP_ENV after 'op run'." >&2
+    echo "       Check the DEEPSEEK_API_KEY reference in config/mcp.env.example." >&2
+    exit 1
+  fi
+  command -v op >/dev/null 2>&1 || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
+  [ -s "$TOKEN_FILE" ] || { echo "Error: missing 1Password service-account token file: $TOKEN_FILE" >&2; exit 1; }
+  [ -f "$MCP_ENV" ] || { echo "Error: missing managed 1Password reference file: $MCP_ENV" >&2; exit 1; }
+  export OP_SERVICE_ACCOUNT_TOKEN AI_DEEPSEEK_REEXEC=1
+  OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
+  exec op run --env-file "$MCP_ENV" -- "$0" "$SUBCMD" "$@"
+fi
+
+command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }
+
+PYTHON=""
+if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  PYTHON=python3
+elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  PYTHON=python
+fi
+[ -n "$PYTHON" ] || { echo "Error: Python is required." >&2; exit 1; }
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+else
+  REPO_ROOT="$PWD"
+fi
+SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
+mkdir -p "$SESS_DIR"
+
+new_id() { date +%Y%m%d-%H%M%S; }
+
+call_api() {
+  # $1 = path to a JSON file containing the messages array
+  local msgs_file="$1" req_file resp_file http_code rc
+  req_file="$(mktemp)"; resp_file="$(mktemp)"
+  MODEL="$MODEL" "$PYTHON" - "$msgs_file" >"$req_file" <<'PY'
+import json, os, sys
+messages = json.load(open(sys.argv[1], encoding="utf-8"))
+print(json.dumps({"model": os.environ["MODEL"], "messages": messages, "stream": False}))
+PY
+  http_code="$(curl -sS -o "$resp_file" -w '%{http_code}' \
+    "$BASE_URL/chat/completions" \
+    -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d @"$req_file")"
+  if [ "$http_code" != "200" ]; then
+    echo "Error: DeepSeek API returned HTTP $http_code:" >&2
+    cat "$resp_file" >&2
+    rm -f "$req_file" "$resp_file"
+    return 1
+  fi
+  "$PYTHON" -c '
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print(data["choices"][0]["message"]["content"])
+' "$resp_file"
+  rc=$?
+  rm -f "$req_file" "$resp_file"
+  return $rc
+}
+
+append_and_save() {
+  # $1 = transcript file, $2 = role, $3 = content
+  "$PYTHON" - "$1" "$2" "$3" <<'PY'
+import json, sys
+path, role, content = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    messages = json.load(open(path, encoding="utf-8"))
+except FileNotFoundError:
+    messages = []
+messages.append({"role": role, "content": content})
+json.dump(messages, open(path, "w", encoding="utf-8"), indent=2)
+PY
+}
+
+with_file_appended() {
+  # $1 = message, $2 = file path (may be empty) -> prints combined message
+  local msg="$1" file="$2"
+  if [ -n "$file" ]; then
+    [ -f "$file" ] || { echo "Error: file not found: $file" >&2; return 1; }
+    printf '%s\n\n--- %s ---\n%s\n--- end %s ---' "$msg" "$file" "$(cat "$file")" "$file"
+  else
+    printf '%s' "$msg"
+  fi
+}
+
+case "$SUBCMD" in
+  list)
+    ls -1t "$SESS_DIR" 2>/dev/null | sed 's/\.json$//'
+    ;;
+
+  show)
+    ID="${1:-}"
+    [ -n "$ID" ] || { echo "Usage: ai-deepseek-agent show <session-id>" >&2; exit 2; }
+    F="$SESS_DIR/$ID.json"
+    [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
+    "$PYTHON" -c '
+import json, sys
+for m in json.load(open(sys.argv[1], encoding="utf-8")):
+    print("--- " + m["role"].upper() + " ---")
+    print(m["content"])
+    print()
+' "$F"
+    ;;
+
+  send)
+    MSG=""; FILE=""; SYSTEM=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --file) FILE="${2:-}"; shift 2 ;;
+        --model) MODEL="${2:-}"; shift 2 ;;
+        --system) SYSTEM="${2:-}"; shift 2 ;;
+        *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
+      esac
+    done
+    [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]' >&2; exit 2; }
+    MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+
+    ID="$(new_id)"
+    F="$SESS_DIR/$ID.json"
+    while [ -f "$F" ]; do ID="${ID}-$$"; F="$SESS_DIR/$ID.json"; done
+    echo "[]" > "$F"
+    [ -n "$SYSTEM" ] && append_and_save "$F" "system" "$SYSTEM"
+    append_and_save "$F" "user" "$MSG"
+
+    REPLY="$(call_api "$F")" || exit 1
+    append_and_save "$F" "assistant" "$REPLY"
+    echo "SESSION_ID: $ID"
+    echo
+    echo "$REPLY"
+    ;;
+
+  reply)
+    ID="${1:-}"; shift || true
+    MSG=""; FILE=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --file) FILE="${2:-}"; shift 2 ;;
+        *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
+      esac
+    done
+    [ -n "$ID" ] && [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent reply <session-id> "<message>"' >&2; exit 2; }
+    F="$SESS_DIR/$ID.json"
+    [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
+    MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+
+    append_and_save "$F" "user" "$MSG"
+    REPLY="$(call_api "$F")" || exit 1
+    append_and_save "$F" "assistant" "$REPLY"
+    echo "$REPLY"
+    ;;
+esac
