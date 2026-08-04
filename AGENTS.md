@@ -58,7 +58,7 @@ Then load additional docs only when relevant:
 | Enable secure Windows remote setup over Tailscale / SSH | `AGENTS.md`, `docs/windows-openssh-tailscale.md` | Do not enable LAN/public SSH, password logins, broad default firewall rules, or WinRM |
 | Edit the staged prompt templates | `AGENTS.md`, `templates/prompts/*`, `docs/architecture.md` | Deployment/config docs |
 | Onboard an application repo to the workflow | `AGENTS.md`, `docs/repo-onboarding.md`, `templates/repo-docs/*` | Deployment docs |
-| Back up / sync Claude Code transcripts | `AGENTS.md`, `claude_chats/README.md`, `claude_chats/sync.sh`, `skills/claude/claude-transcript-backup/SKILL.md` | Do not open the transcript `.jsonl` files themselves |
+| Back up / sync Claude Code transcripts | `AGENTS.md`, `skills/claude/claude-transcript-backup/SKILL.md` | Transcripts live in the PRIVATE `transcripts/` submodule. Never commit them here. Do not open the `.jsonl` files themselves |
 | Analyze Codex transcripts or repeated Codex prompts | `AGENTS.md`, `docs/codex-chat-analysis.md`, `docs/codex-skills-usage-guide.md`, `skills/codex/codex-transcript-miner/SKILL.md` | Raw transcript `.jsonl` unless the analysis task requires them |
 | Install or update Claude/Codex skills / global instructions on a machine | `AGENTS.md`, `docs/skills-usage-guide.md`, `docs/codex-skills-usage-guide.md`, `bin/ai-install-skills`, `templates/system/*` | Transcript data |
 | Add or update Codex workflow skills | `AGENTS.md`, `docs/codex-skills-usage-guide.md`, affected `skills/codex/*/SKILL.md`, `docs/skills-map.md` | Raw chat/docx prompt sources unless needed |
@@ -106,7 +106,7 @@ established workstation merely as a test.
 
 The toolkit code is **project-owned and hand-written** (no generated code, no
 vendor/third-party code, no framework, no build artifacts). The one large
-non-code area is `claude_chats/` — archived session transcripts (data, not code).
+non-code area is `transcripts/` - a PRIVATE submodule holding session transcripts.
 
 | Path | What it is | Category |
 |---|---|---|
@@ -121,16 +121,15 @@ non-code area is `claude_chats/` — archived session transcripts (data, not cod
 | `tests/` | Dependency-free Bash and PowerShell installer behavior tests | project-owned tests |
 | `memory/` | Cross-machine Claude auto-memory (per-project `MEMORY.md` + fact files), synced by `bin/ai-sync-memory`. **Secret-free** — see `memory/README.md` | project-owned data (git-tracked) |
 | `mcp/` | Future MCP wrapper placeholder | project-owned scaffolding |
-| `claude_chats/` | **~219 MB** of archived Claude Code session transcripts (`.jsonl`) across machines, plus `sync.sh` and its own `README.md` | archived data (sensitive — see below) |
+| `transcripts/` | Session transcripts, in the PRIVATE submodule `u2giants/ai-devops-transcripts`. This repo is PUBLIC; transcripts must never be committed into it. | archived data (sensitive) |
 | `codex_chats/` | Archived Codex session transcripts (`.jsonl`) across machines, plus its own `README.md` | archived data (scrubbed, still sensitive — see below) |
 | `README.md`, `AGENTS.md`, `CLAUDE.md` | Top-level docs | docs |
 
-`claude_chats/` is a cross-machine backup of `~/.claude/projects/` (machines:
-`hetz`, `compshop`, `t16`, `seafile`). It is **tracked in git on purpose**, but
-should **never be loaded into AI context** — it is large and, per
-[`claude_chats/README.md`](claude_chats/README.md), may contain live secrets. It
-is excluded via `.claudeignore` / `.cursorignore`. See **What to ignore** and
-**Credentials and environment**.
+`transcripts/` is a cross-machine backup of `~/.claude/projects/`, kept in the
+PRIVATE repo `u2giants/ai-devops-transcripts` as a git submodule. **This repo
+(`u2giants/ai-devops`) is PUBLIC.** Transcripts routinely contain live secrets, so
+they must never be committed here; `.gitignore` blocks `claude_chats/` and
+`codex_chats/`. Do not open the `.jsonl` files themselves.
 
 There are **no** migrations, `Dockerfile`, `docker-compose`, CI/CD workflows
 (`.github/workflows`), `package.json`, or database files in this repo. If you go
@@ -147,7 +146,7 @@ Our custom code lives here:
 - `docs/` — documentation
 - `skills/`, `mcp/` — skill/MCP scaffolding
 - `tests/` — dependency-free installer behavior tests
-- `claude_chats/` — transcript archive + `sync.sh` (owned, but data — edit only
+- `transcripts/` - private submodule (owned, but data - edit only
   the script/README, never hand-edit transcript `.jsonl` files)
 
 Everything else requires justification before touching.
@@ -185,7 +184,7 @@ Host side-effects (not repo files) that `install.sh` creates, for awareness:
 | Edit a workflow stage prompt | `templates/prompts/0X-*.md` | Other stages unless intentionally aligning them |
 | Change install/symlink logic | `install.sh` (and mirror in `uninstall.sh`), `docs/deployment.md` | — |
 | Change the restore procedure | `docs/restore-from-zero.md`, `docs/deployment.md` | — |
-| Back up session transcripts | run `claude_chats/sync.sh [machine]` | Transcript `.jsonl` files (never hand-edit) |
+| Back up session transcripts | see `skills/claude/claude-transcript-backup/SKILL.md` (PRIVATE `transcripts/` submodule) | Transcript `.jsonl` files (never hand-edit) |
 
 ## Data model and external identifiers
 
@@ -204,7 +203,7 @@ names.
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |
-| Transcript archive machines | `hetz`, `compshop`, `t16`, `seafile` | `claude_chats/<machine>/` | Backup of each machine's `~/.claude/projects/`; synced by `claude_chats/sync.sh` |
+| Transcript archive machines | `hetz`, `compshop`, `t16`, `seafile` | `transcripts/<machine>/` (PRIVATE submodule) | Backup of each machine's `~/.claude/projects/` |
 
 Do not casually rename or regenerate these identifiers — scripts and docs assume
 them verbatim.
@@ -224,12 +223,12 @@ The closest thing to a "service" is the set of installed CLI commands listed in
 
 ## What to ignore
 
-Apart from `claude_chats/`, this repo is small and text-only. Keep these aligned
+Apart from the `transcripts/` submodule, this repo is small and text-only. Keep these aligned
 with `.claudeignore` / `.cursorignore`.
 
-- **`claude_chats/`** — **the big one.** ~219 MB of archived session transcripts
-  that will blow out any AI context window and may contain live secrets. Never
-  load it. (Tracked in git as a backup; excluded from AI context only.)
+- **`transcripts/`** - session transcripts, in the PRIVATE submodule
+  `u2giants/ai-devops-transcripts`. Untracked here and gitignored: this repo is
+  PUBLIC and transcripts routinely embed live secrets.
 - **`codex_chats/`** — archived Codex session transcripts. Scrubbed before
   commit, but still large and sensitive. Never load it into AI context.
 - `.git/` — version-control internals
@@ -242,7 +241,7 @@ with `.claudeignore` / `.cursorignore`.
 
 Note: real config and secrets are **not in the toolkit code** — they live under
 `/etc/ai-devops/` and in the Claude/Codex CLI login state (`~/.claude`,
-`~/.codex`). The exception is `claude_chats/`, whose raw transcripts may embed
+`~/.codex`). The exception is the `transcripts/` submodule, whose raw transcripts may embed
 secrets that were visible during those sessions — see below.
 
 ## Intentional quirks and non-obvious decisions
@@ -535,14 +534,11 @@ are resolved as one environment and reused; Windows launchers enforce this with
 an OS mutex and DPAPI-encrypted short-lived cache, while Ubuntu resolves once in
 the login shell and locks any fallback refresh.
 
-> ⚠️ **`claude_chats/` may contain live secrets.** The archived transcripts are
-> raw session logs including full tool outputs, so they can embed API tokens,
-> credentials, or private data that were on screen during those sessions (this
-> warning is stated in [`claude_chats/README.md`](claude_chats/README.md)).
-> Consequences: **keep this repository private**, do not paste transcript
-> contents elsewhere, and **rotate any secret** you find exposed there. This is
-> why `claude_chats/` is excluded from AI context in `.claudeignore` /
-> `.cursorignore`.
+> **Transcripts may contain live secrets.** They live in the PRIVATE submodule
+> `transcripts/` (`u2giants/ai-devops-transcripts`), never in this repo, which is
+> PUBLIC. `claude_chats/` and `codex_chats/` are gitignored so they cannot be
+> committed here again, and both are excluded from AI context in `.claudeignore` /
+> `.cursorignore`. Do not open the raw `.jsonl` files.
 
 ## Deployment
 
