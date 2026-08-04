@@ -70,7 +70,59 @@ there is deliberately no separate cache-measurement subsystem.
 
 ---
 
-## 2. Operations
+## 2. Windows
+
+GLM runs locally on Windows too. There is one implementation, not two: the
+security-critical launcher and the `ai-glm` client are the same bash scripts used on
+Ubuntu, run through Git Bash. Only the service manager differs (Scheduled Task instead
+of systemd).
+
+Prerequisites, checked by the installer and named exactly if missing:
+
+```powershell
+winget install --id Git.Git          # Git for Windows, provides Git Bash
+winget install --id jqlang.jq        # jq, used by ai-glm
+```
+
+Install:
+
+```powershell
+cd C:\repos\ai-devops
+git pull
+.\bin\setup-opencode-glm.ps1
+```
+
+Do **not** run it elevated; everything lands in your user profile. It installs the
+pinned OpenCode build, copies the canonical config and agents, generates a
+loopback-only server password restricted to your user account, writes the launcher, and
+registers the `AiDevOps-OpenCodeGlm` scheduled task that starts the server at logon.
+
+Then use it from **Git Bash**, inside the repository you are working on:
+
+```bash
+/c/repos/ai-devops/bin/ai-glm doctor
+/c/repos/ai-devops/bin/ai-glm new my-review --prompt "your question"
+```
+
+Service control on Windows (`ai-glm server ...` is systemd-only):
+
+```powershell
+Start-ScheduledTask   -TaskName AiDevOps-OpenCodeGlm
+Stop-ScheduledTask    -TaskName AiDevOps-OpenCodeGlm
+Get-ScheduledTaskInfo -TaskName AiDevOps-OpenCodeGlm
+```
+
+Windows notes:
+- `HOME` must be the local profile. A roaming `Z:` home would send the install to a
+  network drive nothing reads back; the installer uses `%USERPROFILE%` for that reason.
+- The password file is locked to your user account with an explicit ACL, which is the
+  NTFS equivalent of `chmod 600`.
+- SSH to the Ubuntu host still works and is unchanged. Use whichever is closer to the
+  repository you are actually editing.
+
+---
+
+## 3. Operations
 
 Start a debate:
 ```bash
@@ -145,7 +197,7 @@ during rollback — keep it for diagnosis.
 
 ---
 
-## 3. Migration record
+## 4. Migration record
 
 **Removed**
 - `bin/ai-glm-agent` → replaced by a stub that fails and points at `ai-glm`. Delete the

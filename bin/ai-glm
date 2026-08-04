@@ -38,7 +38,7 @@ warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
 note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
-need curl; need jq; need git; need flock
+need curl; need jq; need git
 
 # --------------------------------------------------------------------------------
 # HTTP. Every request is authenticated; the server 401s otherwise.
@@ -92,7 +92,28 @@ valid_name() {
   esac
 }
 meta_path() { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
-lock_path() { printf '%s/locks/%s--%s--%s.lock' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+lock_path() { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+
+# Portable mutex. `flock` does not exist in Git Bash, and this harness has to behave
+# identically on Ubuntu and on Windows, so the lock is an atomic mkdir plus a pid file.
+# A lock whose owning process is gone is treated as stale and reclaimed, so a crashed
+# or killed run never wedges a session permanently.
+lock_acquire() { # lock_acquire DIR TIMEOUT_SECONDS
+  local d="$1" timeout="$2" waited=0 owner
+  mkdir -p "$(dirname "$d")"
+  while ! mkdir "$d" 2>/dev/null; do
+    owner="$(cat "$d/pid" 2>/dev/null || echo '')"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf "$d"; continue                       # stale: owner is gone
+    fi
+    [ "$waited" -lt "$timeout" ] || return 1
+    sleep 2; waited=$((waited + 2))
+  done
+  printf '%s' "$$" > "$d/pid"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$d'" EXIT
+  return 0
+}
 
 write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem)
   local f="$1" tmp
@@ -302,9 +323,9 @@ cmd_ask() {
        Start a new one (a replacement under the same name would falsely imply continuity):
          ai-glm delete $name && ai-glm new $name ..."
   pf="$(read_prompt)"
-  lock="$(lock_path "$rid" "$name")"; mkdir -p "$(dirname "$lock")"
-  exec 9>"$lock"
-  flock -w "$LOCK_TIMEOUT" 9 || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
+  lock="$(lock_path "$rid" "$name")"
+  lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s.
+       If you are sure nothing else is running, remove: $lock"
   before="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   send_prompt "$sid" "$pf"; rm -f "$pf"
   msg="$(await_turn "$sid" "$name")"
@@ -322,26 +343,58 @@ cmd_ask() {
 }
 
 cmd_implement() {
-  local name="$1" root rid wt sid pf msg text tokens patch report
+  local name="$1" root rid sb sid pf msg text tokens patch report base carry
   valid_name "$name" || die "invalid session name '$name'"
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"
+  base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || die "repository has no commits yet; commit something first."
   pf="$(read_prompt)"
-  wt="$STATE_DIR/wt/$rid/$(date -u +%Y%m%d%H%M%S)-$$"
-  mkdir -p "$(dirname "$wt")"
-  # The worktree is created and destroyed inside this one command. Nothing survives it,
-  # no branch is created, and Albert is never asked to merge or clean anything up.
+  sb="$STATE_DIR/wt/$rid/$(date -u +%Y%m%d%H%M%S)-$$"
+  mkdir -p "$(dirname "$sb")"
+  # The sandbox is created and destroyed inside this one command. Nothing survives it
+  # and the user is never asked to merge or clean anything up.
+  #
+  # It is a CLONE with its remote removed, not a `git worktree`. A worktree shares the
+  # parent's .git and therefore its remotes, so an enabled bash tool could run
+  # `git push` against the real remote. OpenCode 1.18.12 does not enforce bash
+  # allow/deny rules (measured), so removing the remote is the only real control.
+  # With no remote there is nowhere to push, which is what lets GLM have a shell and
+  # actually run builds and tests.
   # shellcheck disable=SC2064
-  trap "git -C '$root' worktree remove --force '$wt' >/dev/null 2>&1 || true; git -C '$root' worktree prune >/dev/null 2>&1 || true; rm -rf '$wt'" EXIT
-  git -C "$root" worktree add --detach "$wt" HEAD >/dev/null 2>&1 || die "could not create a scratch worktree at $wt"
-  sid="$(create_session "$name (implement)" glm-implement "$wt")"
+  trap "rm -rf '$sb'" EXIT
+  git clone --quiet --no-hardlinks "$root" "$sb" 2>/dev/null || die "could not create the GLM sandbox at $sb"
+  git -C "$sb" checkout --quiet --detach "$base" 2>/dev/null || die "could not check out $base in the sandbox"
+  git -C "$sb" remote remove origin >/dev/null 2>&1 || true
+  # Carry over the parent's uncommitted TRACKED changes so GLM works on what you see.
+  # Untracked files are not carried; mention them in the prompt if GLM needs them.
+  carry="$(mktemp)"
+  git -C "$root" diff HEAD > "$carry" 2>/dev/null || true
+  [ -s "$carry" ] && git -C "$sb" apply "$carry" 2>/dev/null
+  rm -f "$carry"
+  # Keep build noise out of the patch. A repo with a .gitignore already handles this;
+  # this covers the ones that do not, so a test run does not add .pyc/node_modules to
+  # the diff a human has to review.
+  cat >> "$sb/.git/info/exclude" <<'EXCL'
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.venv/
+venv/
+dist/
+build/
+target/
+*.log
+EXCL
+
+  sid="$(create_session "$name (implement)" glm-implement "$sb")"
   send_prompt "$sid" "$pf"; rm -f "$pf"
   msg="$(await_turn "$sid" "$name")"
   verify_model "$msg"
-  git -C "$wt" add -A >/dev/null 2>&1 || true
+  git -C "$sb" add -A >/dev/null 2>&1 || true
   patch="$root/.ai/reviews/glm-$name-$(date -u +%Y%m%dT%H%M%SZ).patch"
   mkdir -p "$(dirname "$patch")"
-  git -C "$wt" diff --cached > "$patch"
+  git -C "$sb" diff --cached "$base" > "$patch"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" implement "$text
 
@@ -350,7 +403,7 @@ cmd_implement() {
 \`$patch\`
 
 \`\`\`
-$(git -C "$wt" diff --cached --stat)
+$(git -C "$sb" diff --cached --stat "$base")
 \`\`\`
 " "$tokens" "$sid")"
   note "Patch written to: $patch"
@@ -441,7 +494,7 @@ cmd_doctor() {
   chk "review agent installed"             test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
   chk "implement agent installed"          test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
   chk "review agent has no bash tool"      grep -q '^  bash: false' "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
-  chk "implement agent has no bash tool"   grep -q '^  bash: false' "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
+  chk "implement agent has a bash tool"    grep -q '^  bash: true'  "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
   chk "server password present"            test -s "$PW_FILE"
   chk "server password is 0600"            test "$(stat -c '%a' "$PW_FILE" 2>/dev/null)" = "600"
   chk "1Password CLI present"              command -v op

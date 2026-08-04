@@ -24,8 +24,16 @@ Do **not** run `opencode`, `opencode run`, `opencode serve`, or curl the server'
 API. `ai-glm` owns the server URL, credentials, API shapes, model pin, locking, and
 read-only enforcement. Bypassing it bypasses all of that.
 
-On Windows there is no local GLM server. Run `ai-glm` on the Ubuntu host over the normal
-SSH workflow, inside the repository you are working on.
+On Windows, `ai-glm` runs locally from **Git Bash** once
+`bin\setup-opencode-glm.ps1` has been run once on that machine:
+
+```bash
+/c/repos/ai-devops/bin/ai-glm new my-review --prompt-file "$brief"
+```
+
+If that machine has not been set up yet, run `ai-glm` on the Ubuntu host over the normal
+SSH workflow instead. Service control on Windows is
+`Start-ScheduledTask -TaskName AiDevOps-OpenCodeGlm`, not `ai-glm server start`.
 
 ## Continue a session. Do not start a new one per question.
 

@@ -88,6 +88,19 @@ install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env"
 # --------------------------------------------------------------------------
 # 4. Symlink bin/* into /usr/local/bin
 # --------------------------------------------------------------------------
+# First prune symlinks that point into this repo's bin/ but whose target is gone.
+# Without this, a retired command (e.g. ai-glm-agent.ps1) leaves a dangling link on
+# PATH forever: the loop below skips it because there is no source file to link from.
+info "Pruning stale $BIN_TARGET symlinks that point into this repo"
+for dest in "$BIN_TARGET"/*; do
+  [ -L "$dest" ] || continue
+  target="$(readlink "$dest")"
+  case "$target" in
+    "$REPO_ROOT"/bin/*)
+      [ -e "$dest" ] || { $SUDO rm -f "$dest"; info "  removed stale $(basename "$dest")"; } ;;
+  esac
+done
+
 info "Symlinking Unix entrypoints into $BIN_TARGET"
 for src in "$REPO_ROOT"/bin/*; do
   [ -f "$src" ] && [ -x "$src" ] || continue
