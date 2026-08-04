@@ -170,7 +170,7 @@ $cfgBash    = ConvertTo-BashPath $CfgDir
 # Scheduled Task -> Git Bash -> this launcher -> op run -> opencode serve.
 # The Z.ai key never touches a task definition, an argv, or a file at rest.
 set -euo pipefail
-# Git Bash \$HOME is NOT reliably the Windows profile: with a roaming profile it can be a
+# Git Bash `$HOME is NOT reliably the Windows profile: with a roaming profile it can be a
 # network drive (Z:), and then every path below points somewhere nothing was installed.
 # PowerShell knows the real profile, so it is baked in here rather than resolved at runtime.
 export HOME="$homeBash"
@@ -227,7 +227,7 @@ $aiGlmBash = "/" + (((Join-Path $RepoPath "bin\ai-glm")) -replace '\\','/' -repl
 @"
 @echo off
 rem Managed by ai-devops setup-opencode-glm.ps1. Runs the shared bash ai-glm client.
-rem HOME is pinned to the Windows profile: Git Bash \$HOME can be a roaming network
+rem HOME is pinned to the Windows profile: Git Bash `$HOME can be a roaming network
 rem drive, and then ai-glm would look for its config and sessions in the wrong place.
 set "HOME=$HomeDir"
 set "AI_DEVOPS_CONFIG_DIR=$CfgDir"
@@ -267,6 +267,22 @@ foreach ($i in 1..20) {
 }
 if (-not $smoke.HasExited) { Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue }
 Get-Process -Name opencode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Killing bash does not always take the opencode child with it, and even when it does the
+# socket lingers. Starting the scheduled task while the port is still held means the real
+# server cannot bind and exits, which surfaced only as "server did not become healthy".
+function Wait-PortFree($p, $seconds) {
+  foreach ($i in 1..$seconds) {
+    $inUse = @(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue).Count -gt 0
+    if (-not $inUse) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+if (-not (Wait-PortFree $Port 30)) {
+  Warn "Port $Port is still held after the smoke test; stopping whatever holds it."
+  Get-Process -Name opencode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  [void](Wait-PortFree $Port 15)
+}
 if (-not $up) {
   $err = ""
   foreach ($f in @("$smokeLog.err", $smokeLog)) {
@@ -279,8 +295,22 @@ Ok "Launcher starts the server correctly"
 
 Step "Registering the OpenCodeGlm scheduled task"
 $TaskName = "AiDevOps-OpenCodeGlm"
-$launchBash = "/" + ($LaunchSh -replace '\\','/' -replace '^([A-Za-z]):','$1')
-$action  = New-ScheduledTaskAction -Execute $GitBash -Argument "-lc `"exec '$launchBash'`""
+$launchBash = ConvertTo-BashPath $LaunchSh
+# Task Scheduler discards a task's output, so a failure there is invisible. This wrapper
+# captures everything the server says into one log the installer and `ai-glm doctor` can
+# read back. It also uses the same plain invocation the smoke test proved, not `-lc`.
+$svcSh  = Join-Path $BinDir "opencode-glm-service"
+$logFwd = ConvertTo-BashPath (Join-Path $OcHome "server.log")
+@"
+#!/usr/bin/env bash
+# Managed by ai-devops setup-opencode-glm.ps1. Wrapper so the scheduled task's output
+# lands in a file instead of being thrown away by Task Scheduler.
+exec >>"$logFwd" 2>&1
+echo "--- starting `$(date) ---"
+exec "$launchBash"
+"@ | Set-Content -NoNewline -Encoding ASCII -Path $svcSh
+$svcBash = ConvertTo-BashPath $svcSh
+$action  = New-ScheduledTaskAction -Execute $GitBash -Argument "`"$svcBash`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
               -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
@@ -302,7 +332,23 @@ foreach ($i in 1..30) {
   } catch { Start-Sleep -Seconds 2 }
 }
 if (-not $healthy) {
-  Die "server did not become healthy. Check the task history for $TaskName, or run the launcher by hand:`n       & '$GitBash' -lc `"'$launchBash'`""
+  $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+  $logFile = Join-Path $OcHome "server.log"
+  $tail = if (Test-Path -LiteralPath $logFile) { (Get-Content -Tail 40 -LiteralPath $logFile) -join "`n" } else { "(no server.log was written - the task never ran)" }
+  Die @"
+The scheduled task started but the server never answered.
+The launcher itself works: it passed the smoke test moments ago, so this is about the task.
+
+Task last result : $($info.LastTaskResult)
+Task last run    : $($info.LastRunTime)
+
+Last lines of $logFile
+
+$tail
+
+Run it in the foreground to see it live:
+  & '$GitBash' '$launchBashPre'
+"@
 }
 
 Ok "OpenCode GLM server is up on 127.0.0.1:$Port (pinned $Version)"
