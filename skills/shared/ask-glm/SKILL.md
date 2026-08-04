@@ -38,15 +38,24 @@ Two Windows-only differences:
 
 ## Continue a session. Do not start a new one per question.
 
-Before creating anything:
+**This is mandatory, and the user must never have to ask for it.** Run `ai-glm list`
+before creating anything:
 
 ```bash
 ai-glm list
 ```
 
-If a session already covers this topic, continue it with `ai-glm ask`. A fresh session
-re-reads the repository, loses every conclusion already reached, and pays full price for
-context the old session already has cached.
+If any existing session covers this topic, this repository, and this workstream, you
+MUST continue it with `ai-glm ask`. Only call `ai-glm new` when nothing existing fits.
+When in doubt, continue rather than create.
+
+A fresh session re-reads the repository, loses every conclusion already reached, and
+pays full price for context the old session already has cached. It also costs the
+calling agent more, because a continued session needs a short follow-up instead of a
+full re-brief.
+
+Do not wait to be told to reuse a session, and do not ask the user which session to use
+when `ai-glm list` makes it obvious.
 
 Name sessions after the work: `auth-token-rotation-review`, `sample-status-migration`,
 `pdf-extraction-model-routing`. Never `review`, `glm`, `task`, or `new-session`.

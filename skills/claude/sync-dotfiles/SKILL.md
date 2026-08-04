@@ -32,6 +32,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
+| GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
 
 ## Locate the repo
@@ -86,6 +87,22 @@ clone + `./install.sh` (Ubuntu) first.
    (MCP servers only re-read config on a full restart), and deleting
    `~/.config/ai-devops/mcp-secrets.dpapi.json` forces a fresh secret resolve
    (it is a 15-minute cache).
+2b. **Check the GLM server** (`ai-glm`), because it is machine-local state that a
+   `git pull` alone cannot install. Run `ai-glm doctor`. Three outcomes:
+   - **Exit 0** — say "GLM server already current" explicitly, and move on.
+   - **Exit non-zero, or `ai-glm` not found** — install/repair it. It is idempotent
+     and installs its own prerequisites, so just run it:
+     Windows: `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-opencode-glm.ps1 -RepoPath <repo>`
+     Ubuntu:  `<repo>/bin/setup-opencode-glm.sh`
+     Then re-run `ai-glm doctor` and report the result. Do NOT report the sync as
+     successful while doctor still fails.
+   - **No 1Password service-account token file yet** — do not run it (same rule as
+     step 2: it needs the token). Report that GLM is unavailable until the token is
+     in place, and say so plainly rather than skipping silently.
+   The pinned OpenCode version lives in `config/opencode/version`; when a pull changes
+   it, the setup script installs the new build and doctor verifies the running server
+   matches. That is why this step runs on every sync and not only on a fresh machine.
+
 3. **Lay down memory** from the hub: `bin/ai-sync-memory pull`. Only projects
    that already exist locally are updated, so a skip for a project this machine
    doesn't have is normal. **A skip for EVERY project is not** — nor is `push`
