@@ -39,8 +39,8 @@ abort, delete), runs headless on loopback, and already tracks a git snapshot per
 | Network | Server binds `127.0.0.1` only. `ai-glm doctor` fails if anything else is listening on the port. |
 | Local users | HTTP Basic from `~/.config/ai-devops/opencode/server-password` (0600). Unauthenticated requests get 401. |
 | GLM → your files (review) | The `glm-review` agent has **no** write, edit, patch, or bash tool. |
-| GLM → your files (implement) | A throwaway git worktree, created and destroyed inside one command. |
-| GLM → the network / your remote | No bash tool in either agent, `webfetch: false`. |
+| GLM → your files (implement) | A throwaway CLONE with its git remote removed, created and destroyed inside one command. |
+| GLM → the network / your remote | Review agent has no bash tool. Implement has one, but its sandbox has no remote to push to. `webfetch: false` on both. |
 | Secrets | Key resolved from 1Password at exec time; never in a unit file, argv, log, report, or git. |
 
 ### What actually enforces read-only
@@ -56,9 +56,16 @@ Measured on 1.18.12, and this is the single most important implementation fact:
   `bash: false, write: false, edit: false, patch: false` genuinely removes those tools;
   GLM reports it does not have them and refuses.
 
-Consequence: **both** agents run with `bash: false`. GLM cannot run tests. The calling
-agent runs them and feeds failures back as another turn. Enabling bash would mean
-unrestricted shell in a worktree that shares the parent repo's remotes.
+Consequence, and this is the design's load-bearing decision:
+
+- `glm-review` runs with `bash: false`. It genuinely cannot run anything. If a review
+  needs a command run, the calling agent runs it and pastes the output.
+- `glm-implement` runs with `bash: true` so GLM can actually build and test its own work.
+  That is only safe because its sandbox is a **clone with the remote removed**, not a
+  `git worktree`. A worktree shares the parent's `.git`, and therefore its remotes, so
+  `git push` from inside one reaches the real GitHub. Measured: an agent denying
+  `git push*` and `curl*` ran both without a prompt. **The deny map is not a control.
+  The absence of a remote is the control.**
 
 ### Prompt caching
 
@@ -74,8 +81,11 @@ there is deliberately no separate cache-measurement subsystem.
 
 GLM runs locally on Windows too. There is one implementation, not two: the
 security-critical launcher and the `ai-glm` client are the same bash scripts used on
-Ubuntu, run through Git Bash. Only the service manager differs (Scheduled Task instead
-of systemd).
+Ubuntu. Only the service manager differs (Scheduled Task instead of systemd), and
+`ai-glm doctor` / `ai-glm server` detect the platform and check the right things.
+
+Albert never opens Git Bash. `ai-glm` is on the PATH and the syntax is identical to
+Ubuntu.
 
 `bin/setup-machine.ps1` runs this automatically, so a normal machine setup needs no
 extra step. To install or repair GLM on its own:
@@ -241,3 +251,97 @@ the repository they are working on.
    `models.env`/`server.env`. The agent files carry the only working read-only
    enforcement, so the repo copy must always win. Machine-local tuning goes in
    `AI_GLM_PORT`, not in an edited `opencode.json`.
+
+
+---
+
+## 5. Hard-won constraints - do not "fix" these
+
+Every item here was established by something breaking. Each says what to keep and what
+happens if you change it. If you are about to simplify one of these, read the reason
+first and then re-measure before touching it.
+
+### GLM / OpenCode
+
+1. **Only the agent-file `tools:` map enforces anything.** The session-creation
+   `permission` array and the agent-file `permission.bash` map are both no-ops in
+   1.18.12 - separately measured, both let GLM edit files and run `git push`. Never
+   present either as a safety control.
+2. **`glm-implement` gets a clone with `git remote remove origin`, never a worktree.**
+   A worktree shares the parent's remotes and would let an enabled bash tool push to the
+   real GitHub. If you ever swap this back to `git worktree add`, you must also set
+   `bash: false` in the same change.
+3. **A turn is complete only when `finish == "stop"` AND the server has been idle for
+   two consecutive polls.** "Session id absent from `/session/status`" alone is NOT
+   completion: a wedged turn looks identical to a finished one, and treating it as
+   success silently reports an empty review as a real one.
+4. **`POST /api/session/<id>/wait` does not work in 1.18.12** (`ServiceUnavailableError`).
+   Do not "simplify" the poller to use it without checking the pinned version first.
+5. **HTTP 400 from `/api/session/<id>/permission` is the stuck-permission sentinel.**
+   While a `glob`/`grep` permission is pending the endpoint cannot even list it, so it
+   can never be approved. Treat that 400 as a hard error naming the stuck tool; do not
+   retry or wait it out.
+6. **Keep `.claude/` and `claude_chats/` gitignored.** They reached 1.1 GB and 664 MB.
+   AI worktrees live inside `.claude/`, so a `glob` from inside one walked its own parent
+   and hung the session forever. Ignoring them is what made `glob`/`grep` usable.
+7. **The model is pinned in `config/opencode/agent/*.md`.** The provider's own default
+   resolves to `glm-5.2-highspeed`, which is not what we qualified. `ai-glm` also rejects
+   a substituted model at runtime; keep both.
+8. **`config/opencode/*` is force-copied on every install.** This is a deliberate
+   exception to the repo's copy-only-if-absent convention, because the agent files carry
+   the only working read-only enforcement. Machine-local tuning belongs in `AI_GLM_PORT`.
+9. **No per-call overrides** (`--model`, `--agent`, `--directory`, ...). A stable request
+   prefix is what makes provider caching work and a stable agent is what keeps a review
+   read-only. Adding one override quietly costs both.
+
+### Windows - every one of these cost a failed setup run in front of Albert
+
+10. **Repo-owned `.ps1` files must be pure ASCII.** Windows PowerShell 5.1 reads a
+    BOM-less `.ps1` as Windows-1252, so a UTF-8 em dash (`E2 80 94`) decodes to
+    U+201D RIGHT DOUBLE QUOTATION MARK, which PowerShell accepts as a string delimiter.
+    Two em dashes corrupted quote state for a whole file and produced "The string is
+    missing the terminator" hundreds of lines later, aborting setup on all three
+    machines and silently preventing skills from ever installing.
+    `tests/test-windows-scripts.sh` enforces this.
+11. **Never hardcode a drive letter or user path.** `C:\repos\ai-devops` defaults made
+    setup clone a second copy of the repo, and made the GLM installer refuse to run from
+    `D:\repos\ai-devops`. Derive the repo from `$PSCommandPath`.
+12. **Use `%USERPROFILE%`, never `$HOME`, and never Git Bash's `$HOME`.** With a roaming
+    profile `$HOME` can be a network drive that nothing reads back. The generated
+    launcher and the `ai-glm.cmd` shim both pin `HOME` from `%USERPROFILE%` for exactly
+    this reason.
+13. **`op run -- "$0"` does not work on Windows.** `op.exe` is a native Windows process
+    and cannot exec an extension-less shell script. The launcher re-execs as
+    `-- "C:/Program Files/Git/bin/bash.exe" "$0"`, naming bash by absolute path because
+    Git's `bin` is not reliably on the Windows PATH.
+14. **`\$` is not an escape inside a PowerShell here-string.** PowerShell expands the
+    variable anyway and leaves a stray backslash. Use a backtick. This shipped twice.
+15. **Wait for the port to be free between the smoke test and the scheduled task.**
+    Killing bash does not reliably kill the opencode child, and the socket lingers, so
+    the real server could not bind. This is what made 916 fail while the other two
+    machines won the same race.
+16. **The scheduled task must log to a file.** Task Scheduler discards a task's output,
+    so without `opencode-glm-service` writing `server.log` a failure there is completely
+    invisible.
+17. **`stat -c %a` is meaningless on NTFS.** It returns a synthesised mode whatever the
+    ACL says, so the 0600 check failed on all three machines while the files were
+    correctly locked. Windows permissions are checked with `icacls`.
+18. **A check that cannot fail is worse than no check.** `no secret in the systemd unit`
+    passed on Windows because it grepped a file that does not exist there. Every check
+    must target something that actually exists on the platform it runs on.
+19. **`ai-glm doctor` must never abort part-way.** A failing command substitution under
+    `set -e` ended the report after three lines on Windows. Doctor must print every check
+    and exit non-zero. Tested against a machine with nothing installed.
+20. **Every failure message must name the next command.** A bare
+    "FAIL health endpoint answers" cost a full round trip. Doctor now distinguishes
+    "setup never ran" from "service is down" and prints the service log inline.
+
+### Process lessons
+
+21. **Do not edit a script while a copy of it is running.** Bash re-reads the file as it
+    executes; a mid-run edit killed a GLM implement run and left an orphaned sandbox.
+22. **The installed command is a symlink into the main checkout, not your worktree.**
+    Testing `/usr/local/bin/ai-glm` after editing a worktree copy tests the old code.
+23. **Fix a bug class, not one instance.** The hardcoded-path bug was fixed in
+    `setup-machine.ps1` and left in `setup-opencode-glm.ps1`, which cost another round
+    trip. When you fix something in one script, grep for it in all of them.

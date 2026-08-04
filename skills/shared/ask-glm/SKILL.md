@@ -15,7 +15,7 @@ instead of starting a fresh conversation for every question.
 ```bash
 ai-glm new <name>   --prompt-file "$brief"    # start a review session
 ai-glm ask <name>   --prompt-file "$next"     # continue that same session
-ai-glm implement <name> --prompt-file "$task" # scoped write run, throwaway worktree
+ai-glm implement <name> --prompt-file "$task" # write run in a throwaway sandbox clone
 ai-glm list | show <name> | transcript <name> | diff <name>
 ai-glm abort <name> | delete <name> | doctor | server status
 ```
@@ -79,14 +79,16 @@ changed.
 
 Use `ai-glm implement` only when the user explicitly asks GLM to write or change code.
 
-It creates a throwaway git worktree, lets GLM edit inside it, writes the result out as a
-patch under `.ai/reviews/`, and **deletes the worktree before it exits** — every time,
-including on crash or interrupt. Nothing accumulates and nothing is ever left for the
-user to merge or clean up.
+It creates a throwaway clone with its git remote removed, lets GLM edit and run
+builds/tests inside it, writes the result out as a patch under `.ai/reviews/`, and
+**deletes the sandbox before it exits** - every time, including on crash or interrupt.
+Nothing accumulates and nothing is ever left for the user to merge or clean up.
 
-The implement agent has no bash tool either, so GLM cannot run the tests. That is
-deliberate: OpenCode 1.18.12 does not enforce bash allow/deny rules, so an enabled bash
-tool would be unrestricted and could reach the real git remote. **You** run the tests.
+GLM has a shell there, so ask it to run the tests and report the real output. It cannot
+push: the sandbox has no remote, which is the actual control. OpenCode 1.18.12 does not
+enforce bash allow/deny rules, so never rely on those.
+
+You still review the patch and re-run the tests yourself before applying anything.
 
 Review the patch before applying it:
 
