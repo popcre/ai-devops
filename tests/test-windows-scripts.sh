@@ -64,5 +64,18 @@ else
   bad "could not render the launcher: $rendered"
 fi
 
+# `\$` is never a valid escape inside a PowerShell here-string: PowerShell expands the
+# variable anyway and leaves a stray backslash. Caught twice by hand; now checked.
+if grep -nE '\\\$(HOME|\()' bin/*.ps1 >/dev/null 2>&1; then
+  bad "backslash-dollar in a .ps1 here-string (use a backtick)"; grep -nE '\\\$(HOME|\()' bin/*.ps1 | sed 's/^/       /'
+else ok "no invalid backslash-dollar escapes in .ps1 files"; fi
+
+# The scheduled task must log somewhere, or a failure under Task Scheduler is invisible.
+if grep -q 'opencode-glm-service' bin/setup-opencode-glm.ps1 && grep -q 'server.log' bin/setup-opencode-glm.ps1; then
+  ok "scheduled task writes a server log"
+else bad "scheduled task output is discarded"; fi
+if grep -q 'Wait-PortFree' bin/setup-opencode-glm.ps1; then ok "waits for the port before starting the task"
+else bad "no port wait; the smoke test can block the real server"; fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
