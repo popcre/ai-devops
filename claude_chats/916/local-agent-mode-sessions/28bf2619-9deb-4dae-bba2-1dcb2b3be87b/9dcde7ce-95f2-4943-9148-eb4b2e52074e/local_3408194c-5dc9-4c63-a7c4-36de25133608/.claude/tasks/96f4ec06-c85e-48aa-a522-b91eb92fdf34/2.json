@@ -1,8 +1,0 @@
-{
-  "id": "2",
-  "subject": "Add recall-ai to Claude Desktop section",
-  "description": "Add recall-ai via mcp-remote http-first with bearer token to Claude Desktop section only, matching synology/devops pattern.",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

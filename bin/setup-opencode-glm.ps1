@@ -155,18 +155,25 @@ Set-Acl -LiteralPath $PwFile -AclObject $acl
 Ok "Server password stored, current user only"
 
 # ---------------------------------------------------------------------------
-# 4. Launcher — the SAME bash launcher logic as Ubuntu, run through Git Bash
+# 4. Launcher - the SAME bash launcher logic as Ubuntu, run through Git Bash
 # ---------------------------------------------------------------------------
 Step "Installing the GLM server launcher"
 $LaunchSh = Join-Path $BinDir "opencode-glm-launch"
-$binaryBash = "/" + ($Binary -replace '\\','/' -replace '^([A-Za-z]):','$1')
+function ConvertTo-BashPath($p) { "/" + ($p -replace '\\','/' -replace '^([A-Za-z]):','$1') }
+$binaryBash = ConvertTo-BashPath $Binary
+$homeBash   = ConvertTo-BashPath $HomeDir
+$cfgBash    = ConvertTo-BashPath $CfgDir
 @"
 #!/usr/bin/env bash
 # Managed by ai-devops setup-opencode-glm.ps1 (Windows).
 # Scheduled Task -> Git Bash -> this launcher -> op run -> opencode serve.
 # The Z.ai key never touches a task definition, an argv, or a file at rest.
 set -euo pipefail
-CFG_DIR="`${AI_DEVOPS_CONFIG_DIR:-`$HOME/.config/ai-devops}"
+# Git Bash \$HOME is NOT reliably the Windows profile: with a roaming profile it can be a
+# network drive (Z:), and then every path below points somewhere nothing was installed.
+# PowerShell knows the real profile, so it is baked in here rather than resolved at runtime.
+export HOME="$homeBash"
+CFG_DIR="`${AI_DEVOPS_CONFIG_DIR:-$cfgBash}"
 TOKEN_FILE="`$CFG_DIR/op-service-account"
 MCP_ENV="`$CFG_DIR/mcp.env"
 OC_HOME="`$CFG_DIR/opencode"
@@ -216,6 +223,10 @@ $aiGlmBash = "/" + (((Join-Path $RepoPath "bin\ai-glm")) -replace '\\','/' -repl
 @"
 @echo off
 rem Managed by ai-devops setup-opencode-glm.ps1. Runs the shared bash ai-glm client.
+rem HOME is pinned to the Windows profile: Git Bash \$HOME can be a roaming network
+rem drive, and then ai-glm would look for its config and sessions in the wrong place.
+set "HOME=$HomeDir"
+set "AI_DEVOPS_CONFIG_DIR=$CfgDir"
 "$GitBash" "$aiGlmBash" %*
 "@ | Set-Content -Encoding ASCII -Path (Join-Path $BinDir "ai-glm.cmd")
 
@@ -227,6 +238,40 @@ if (($userPath -split ';') -notcontains $BinDir) {
 }
 $env:Path = $BinDir + ';' + $env:Path
 Ok "ai-glm is now callable from PowerShell"
+
+Step "Smoke-testing the launcher before registering it"
+# Run it in the foreground briefly and capture output. Without this, a broken launcher
+# only ever shows up as "server did not become healthy", with the actual error buried in
+# Task Scheduler history where nobody will look.
+$launchBashPre = ConvertTo-BashPath $LaunchSh
+$smokeLog = Join-Path $OcHome "launcher-smoke.log"
+$smoke = Start-Process -FilePath $GitBash -ArgumentList @($launchBashPre) -PassThru `
+           -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" `
+           -WindowStyle Hidden
+$up = $false
+foreach ($i in 1..20) {
+  if ($smoke.HasExited) { break }
+  try {
+    $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/global/health" -TimeoutSec 2 `
+               -UseBasicParsing -ErrorAction Stop
+    if ($probe.StatusCode -eq 401 -or $probe.StatusCode -eq 200) { $up = $true; break }
+  } catch {
+    # 401 without credentials still proves the server is listening.
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode.value__ -eq 401) { $up = $true; break }
+    Start-Sleep -Seconds 2
+  }
+}
+if (-not $smoke.HasExited) { Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue }
+Get-Process -Name opencode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+if (-not $up) {
+  $err = ""
+  foreach ($f in @("$smokeLog.err", $smokeLog)) {
+    if (Test-Path -LiteralPath $f) { $err += (Get-Content -Raw -LiteralPath $f) }
+  }
+  if (-not $err.Trim()) { $err = "(launcher produced no output)" }
+  Die "The GLM launcher failed. This is what it said:`n`n$err`nRun it yourself to retry:`n  & '$GitBash' '$launchBashPre'"
+}
+Ok "Launcher starts the server correctly"
 
 Step "Registering the OpenCodeGlm scheduled task"
 $TaskName = "AiDevOps-OpenCodeGlm"

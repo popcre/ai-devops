@@ -1,9 +1,0 @@
-{
-  "id": "2",
-  "subject": "Add passwordless sudo for docker",
-  "description": "Confirmed: ai user exists, docker at /usr/local/bin/docker, ahazan needs password for sudo. Monitoring MCP cannot write arbitrary files. Must write /etc/sudoers.d/ai-docker via scheduled-task ssh + sudo. Blocked on elevation method.",
-  "activeForm": "Adding passwordless sudo entry",
-  "status": "pending",
-  "blocks": [],
-  "blockedBy": []
-}

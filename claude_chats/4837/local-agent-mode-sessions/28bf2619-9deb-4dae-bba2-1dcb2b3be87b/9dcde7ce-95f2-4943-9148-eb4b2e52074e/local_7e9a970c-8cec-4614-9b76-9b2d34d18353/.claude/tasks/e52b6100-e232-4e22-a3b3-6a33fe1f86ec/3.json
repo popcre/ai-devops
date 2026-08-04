@@ -1,9 +1,0 @@
-{
-  "id": "3",
-  "subject": "Verify passwordless sudo works",
-  "description": "Confirm user 'ai' can run sudo docker without a password prompt",
-  "activeForm": "Verifying passwordless sudo",
-  "status": "pending",
-  "blocks": [],
-  "blockedBy": []
-}

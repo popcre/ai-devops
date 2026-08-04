@@ -1,9 +1,0 @@
-{
-  "id": "15",
-  "subject": "Sub-grid chrome strip: suppress kebab/header menu, soften gridlines",
-  "description": "In detail-cell-renderer: suppress context menu (kebab) and header menu buttons; soften gridlines via SCSS. KEEP selection checkboxes, sorting, inline editing. Run detail-grid specs, verify live vs prototype. No push.",
-  "activeForm": "Stripping sub-grid chrome to quote-card",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

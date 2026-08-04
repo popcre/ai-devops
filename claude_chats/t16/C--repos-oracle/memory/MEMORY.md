@@ -1,1 +1,0 @@
-- [No hardcoded model names in adapters](no-hardcoded-model-names-in-adapters.md) — model facts live in the catalog/capability layer, never branched on model-id strings in provider adapters; "proper fix, never a band-aid"

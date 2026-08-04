@@ -1,7 +1,7 @@
 <#
-setup-machine.ps1 — one-script new-machine setup for a Windows coding computer.
+setup-machine.ps1 - one-script new-machine setup for a Windows coding computer.
 
-Run in PowerShell 7 (pwsh) — NOT Windows PowerShell 5.1:
+Run in PowerShell 7 (pwsh) - NOT Windows PowerShell 5.1:
   pwsh -ExecutionPolicy Bypass -File .\bin\setup-machine.ps1
 
   `powershell` is 5.1 and this script throws on it (see the version guard below).
@@ -12,7 +12,7 @@ service-account token, unless -Token is passed or the token file already exists
 at %USERPROFILE%\.config\ai-devops\op-service-account. An automated/AI session
 will BLOCK there.
 
-What it does (idempotent — safe to re-run):
+What it does (idempotent - safe to re-run):
   1. Ensures git, the 1Password CLI (op), and (best-effort) Node/npx are present.
   2. Clones/updates the ai-devops repo and installs Claude + Codex skills and the
      global instruction files (delegates to install-ai-devops-windows.ps1).
@@ -31,7 +31,7 @@ What it does (idempotent — safe to re-run):
   7. Wires the FULL MCP server set into BOTH Claude Desktop's
      claude_desktop_config.json and Claude Code's ~/.claude/settings.json (each
      backed up first). The set is defined exactly once, in step 5d, and both
-     surfaces merge it — so a server added there reaches every surface on every
+     surfaces merge it - so a server added there reaches every surface on every
      machine, and a fresh machine ends up matching an established one.
        - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
@@ -41,7 +41,7 @@ What it does (idempotent — safe to re-run):
      Servers we do not define (the Windows-MCP extension, anything hand-added)
      and all other settings keys are preserved untouched.
 
-IMPORTANT — Claude Desktop limitations you must know (verified):
+IMPORTANT - Claude Desktop limitations you must know (verified):
   - Claude Desktop does NOT expand ${VAR} in its config, and neither does
     mcp-remote in --header. So tokens are resolved to real values by `op` at
     launch (inside a launcher .cmd), not by placeholder substitution.
@@ -70,10 +70,10 @@ $ErrorActionPreference = "Stop"
 if ($PSVersionTable.PSVersion.Major -lt 7) {
   throw "Run this with PowerShell 7 (pwsh), not Windows PowerShell 5.1. Install: winget install Microsoft.PowerShell"
 }
-# Resolve the directory holding a USABLE codex.exe — one whose sandbox helper is
+# Resolve the directory holding a USABLE codex.exe - one whose sandbox helper is
 # reachable. Prefer the real standalone package bin
 # (~\.codex\packages\standalone\current\bin) over the visible junction
-# (…\Programs\OpenAI\Codex\bin): only `bin` is junctioned, so from the visible
+# (...\Programs\OpenAI\Codex\bin): only `bin` is junctioned, so from the visible
 # path Codex resolves <exe_dir>\..\codex-resources\ to a directory that does not
 # exist and cannot launch codex-windows-sandbox-setup.exe. `current` is itself a
 # junction that the Codex updater re-points, so this stays correct across upgrades.
@@ -104,8 +104,22 @@ function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
 # --------------------------------------------------------------------------
 # Paths
 # --------------------------------------------------------------------------
-if ([string]::IsNullOrWhiteSpace($RepoPath)) { $RepoPath = Join-Path $HOME "repos\ai-devops" }
-$CfgDir    = Join-Path $HOME ".config\ai-devops"
+if ([string]::IsNullOrWhiteSpace($RepoPath)) {
+  # Default to the checkout this script is running FROM. Defaulting to a fixed
+  # $HOME\repos\ai-devops path made every run clone a second, unrelated copy even when
+  # started from an existing checkout (observed on 916, T16 and 4837: run from
+  # D:\repos\ai-devops, cloned again into C:\Users\<user>\repos\ai-devops).
+  $selfRepo = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+  if (Test-Path -LiteralPath (Join-Path $selfRepo "config\mcp.env.example")) {
+    $RepoPath = $selfRepo
+  } else {
+    $RepoPath = Join-Path $env:USERPROFILE "repos\ai-devops"
+  }
+}
+# %USERPROFILE%, never $HOME: on a machine with a roaming profile $HOME can point at a
+# network drive (Z:) that nothing reads back, which has silently misplaced installs here
+# before.
+$CfgDir    = Join-Path $env:USERPROFILE ".config\ai-devops"
 $TokenFile = Join-Path $CfgDir "op-service-account"
 $McpEnv    = Join-Path $CfgDir "mcp.env"
 $Launcher  = Join-Path $CfgDir "mcp-launch.cmd"
@@ -134,11 +148,11 @@ if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$nul
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
 if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
 
-# cloudflared — used by the SSH config's ProxyCommand so `ssh vps` works on any network.
+# cloudflared - used by the SSH config's ProxyCommand so `ssh vps` works on any network.
 if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) { Ensure-Winget "Cloudflare.cloudflared" "cloudflared" }
 if (Get-Command cloudflared -ErrorAction SilentlyContinue) { Ok "cloudflared" } else { Warn "cloudflared not found; `ssh vps` (tunnel) will not work until it is installed." }
 
-# uv — required by the Windows-MCP Claude Desktop extension (installed from the
+# uv - required by the Windows-MCP Claude Desktop extension (installed from the
 # Extensions UI, see the checklist at the end). Without uv that extension fails to
 # start. winget first; fall back to Astral's installer, which is what the legacy
 # Dropbox script used.
@@ -169,7 +183,7 @@ if (Test-Path $existingInstaller) {
 
 # --------------------------------------------------------------------------
 # 2b. Git commit identity.
-#     Git has no default identity. With none configured it does NOT stop — it
+#     Git has no default identity. With none configured it does NOT stop - it
 #     silently invents one from the Windows/AD account and stamps it on every
 #     commit. That is how 231 wrong-identity commits reached merged dflow
 #     history before anyone noticed. useConfigOnly makes Git fail loudly
@@ -259,7 +273,7 @@ Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
 
 # --------------------------------------------------------------------------
-# 5d. The MCP server set — ONE definition, used by BOTH Claude Desktop and Code
+# 5d. The MCP server set - ONE definition, used by BOTH Claude Desktop and Code
 # --------------------------------------------------------------------------
 # Defined once, deliberately. Claude Desktop and Claude Code keeping separate
 # hand-maintained server lists is the root cause of every gap this script has
@@ -288,7 +302,7 @@ $McpServers["supabase"] = @{
 }
 
 # devops-mcp + synology-monitor (remote/HTTP). Wired via the mcp-remote shim under
-# the remote launcher, so the bearer token is resolved from 1Password at launch —
+# the remote launcher, so the bearer token is resolved from 1Password at launch -
 # never written into the config. Only the URL + op:// ref appear.
 $McpServers["devops-mcp"] = @{
   command = "cmd"
@@ -302,7 +316,7 @@ $McpServers["synology-monitor"] = @{
 }
 
 # recall-ai (remote/HTTP). Same treatment. Until 2026-07-17 this token was
-# hard-coded in plaintext in claude_desktop_config.json — the LAST plaintext
+# hard-coded in plaintext in claude_desktop_config.json - the LAST plaintext
 # secret left after the Phase 2 token-free pass, which missed it because nothing
 # ever rewrote the recall-ai entry. --transport preserves the flag the working
 # config used; the launcher passes %3+ through to mcp-remote untouched.
@@ -314,23 +328,23 @@ $McpServers["recall-ai"] = @{
 }
 
 # trigger (stdio, npx). Wrapped in the launcher so `op` injects
-# TRIGGER_ACCESS_TOKEN (from mcp.env) at launch — no token in the config.
+# TRIGGER_ACCESS_TOKEN (from mcp.env) at launch - no token in the config.
 $McpServers["trigger"] = @{
   command = "cmd"
   args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
 }
 
 # 1password (stdio, npx). The launcher reads the vault-locked service-account
-# token from the user file into OP_SERVICE_ACCOUNT_TOKEN — exactly the var this
-# MCP needs — so no token is written into the config either.
+# token from the user file into OP_SERVICE_ACCOUNT_TOKEN - exactly the var this
+# MCP needs - so no token is written into the config either.
 $McpServers["1password"] = @{
   command = "cmd"
   args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
 }
 
-# playwright / ag-grid — plain npx stdio servers, no secret of any kind.
+# playwright / ag-grid - plain npx stdio servers, no secret of any kind.
 # vercel is remote but authenticates with an interactive OAuth flow that
-# mcp-remote opens in a browser, so it needs no token either — and must NOT go
+# mcp-remote opens in a browser, so it needs no token either - and must NOT go
 # through the remote launcher, which would force a bearer header onto it.
 $McpServers["playwright"] = @{
   command = "cmd"
@@ -348,7 +362,7 @@ $McpServers["vercel"] = @{
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
 # its own `codex login` session, so there is no token to inject.
 #
-# CRITICAL — use Get-CodexBin, NOT …\Programs\OpenAI\Codex\bin. That visible path
+# CRITICAL - use Get-CodexBin, NOT ...\Programs\OpenAI\Codex\bin. That visible path
 # is a JUNCTION to the package's bin\, and its parent has no sibling
 # codex-resources\ directory. Codex looks for its sandbox helper at
 # <exe_dir>\..\codex-resources\, so through the junction the helper is unreachable
@@ -382,7 +396,7 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   Ok "codex-cli -> native mcp-server ($codexExe)"
 } elseif ($cmd = Get-Command codex -ErrorAction SilentlyContinue) {
   # No standalone package (e.g. npm-global install). Use what's on PATH, but say
-  # so plainly — we have not proven this one's sandbox can write.
+  # so plainly - we have not proven this one's sandbox can write.
   $McpServers["codex-cli"] = @{
     command = $cmd.Source
     args    = @("mcp-server")
@@ -390,7 +404,7 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   }
   Warn "codex-cli -> $($cmd.Source) (non-standalone; run 'ai-devops doctor' to prove its sandbox can write)"
 } else {
-  Warn "Codex CLI not found — codex-cli MCP NOT configured."
+  Warn "Codex CLI not found - codex-cli MCP NOT configured."
   Warn "  Install Codex, run: codex login, then re-run this script."
 }
 
@@ -425,12 +439,12 @@ if ($LASTEXITCODE -eq 0 -and $priv) {
   }
   Ok "Restored $keyPath (+ .pub), user-only ACL"
 } else {
-  Warn "Could not read '$privRef' from 1Password — skipping SSH key restore."
+  Warn "Could not read '$privRef' from 1Password - skipping SSH key restore."
   Warn "  (Item missing, or the service-account token lacks access. Not fatal.)"
 }
 
 # --------------------------------------------------------------------------
-# 5c. SSH config — host aliases (ssh vps / vps2 / coolify / seafile / ...)
+# 5c. SSH config - host aliases (ssh vps / vps2 / coolify / seafile / ...)
 # --------------------------------------------------------------------------
 # Installed as ~/.ssh/ai-devops.conf and Included FIRST from ~/.ssh/config.
 # OpenSSH uses the first value it finds for each setting, so placing this Include
@@ -461,7 +475,7 @@ if (Test-Path $sshTmpl) {
     Ok "Placed 'Include ai-devops.conf' first in ~/.ssh/config (managed aliases are authoritative)"
   }
 } else {
-  Warn "Missing $sshTmpl — skipping SSH config."
+  Warn "Missing $sshTmpl - skipping SSH config."
 }
 
 # --------------------------------------------------------------------------
@@ -472,7 +486,7 @@ if ($SkipDesktopMcp) {
 } else {
   Step "Wiring MCP servers into Claude Desktop (best-effort)"
   # The Store/MSIX install keeps the REAL config here (the "Edit Config" button
-  # opens the wrong %APPDATA% copy — do not use it).
+  # opens the wrong %APPDATA% copy - do not use it).
   $msix = Join-Path $env:LOCALAPPDATA "Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json"
   $std  = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
   $cfgPath = if (Test-Path (Split-Path $msix)) { $msix } elseif (Test-Path (Split-Path $std)) { $std } else { $null }
@@ -491,23 +505,23 @@ if ($SkipDesktopMcp) {
 
     # Merge the ONE server set defined in step 5d. Servers already present that we
     # do not define (Windows-MCP extension entries, anything hand-added) are left
-    # untouched — this only ever adds or refreshes our own.
+    # untouched - this only ever adds or refreshes our own.
     foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
-    Ok "Wired token-free: $McpServerList — no tokens in the file"
+    Ok "Wired token-free: $McpServerList - no tokens in the file"
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
     Warn "  these MCPs show connected: $McpServerList."
   }
 }
 
 # --------------------------------------------------------------------------
-# 6b. Codex on PATH — make `codex exec` actually able to write
+# 6b. Codex on PATH - make `codex exec` actually able to write
 # --------------------------------------------------------------------------
-# The standalone installer puts …\Programs\OpenAI\Codex\bin on PATH, but that dir
+# The standalone installer puts ...\Programs\OpenAI\Codex\bin on PATH, but that dir
 # is a JUNCTION to the package's bin\ and its parent has no codex-resources\
 # sibling. Codex resolves its sandbox helper at <exe_dir>\..\codex-resources\, so
-# via that PATH entry every sandboxed write fails with "program not found" — while
+# via that PATH entry every sandboxed write fails with "program not found" - while
 # `codex --version` and `codex login status` still succeed. That combination
 # (healthy-looking, silently non-functional) cost a full debugging session on
 # 2026-07-16. Fix: put the real package bin FIRST on the user PATH. `current` is a
@@ -541,7 +555,7 @@ if (-not $codexRealBin) {
     if (Test-Path -LiteralPath (Join-Path $probe "probe.txt")) {
       Ok "verified: codex sandbox can write"
     } else {
-      Warn "codex sandbox still cannot write — `codex exec` will silently do nothing."
+      Warn "codex sandbox still cannot write - `codex exec` will silently do nothing."
       Warn "  Check: $codexRealBin\..\codex-resources\codex-windows-sandbox-setup.exe"
     }
   } catch {
@@ -552,7 +566,7 @@ if (-not $codexRealBin) {
 }
 
 # --------------------------------------------------------------------------
-# 6c. Kimi Code CLI — optional local delegation target
+# 6c. Kimi Code CLI - optional local delegation target
 # --------------------------------------------------------------------------
 # Kimi delegation is distributed as a shared skill (`skills/shared/kimi-code-delegation`).
 # It is not an MCP server and has no repo-stored secret. The only machine setup is
@@ -573,7 +587,7 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
 }
 
 # --------------------------------------------------------------------------
-# 7. Claude Code (CLI) MCP config — same token-free treatment
+# 7. Claude Code (CLI) MCP config - same token-free treatment
 # --------------------------------------------------------------------------
 # Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.
 # It gets the SAME server set (step 5d) rather than its own list: this section used
@@ -594,7 +608,7 @@ if (Test-Path $ccSettings) {
   }
 } else {
   New-Item -ItemType Directory -Force -Path (Split-Path $ccSettings) | Out-Null
-  Note "No ~/.claude/settings.json yet — creating one."
+  Note "No ~/.claude/settings.json yet - creating one."
 }
 if ($null -ne $cc) {
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
@@ -604,7 +618,7 @@ if ($null -ne $cc) {
 }
 
 # --------------------------------------------------------------------------
-# 8. Memory auto-sync — keep Claude memories in sync across machines
+# 8. Memory auto-sync - keep Claude memories in sync across machines
 # --------------------------------------------------------------------------
 # ai-memory-sync is a bash script (isolated clone + secret gate); run it through
 # Git bash on a 30-minute schedule. Seeds once now, then a Scheduled Task keeps
@@ -622,15 +636,15 @@ if (Test-Path $gitBash) {
   if ($LASTEXITCODE -eq 0) { Ok "Scheduled task 'ai-memory-sync' every 30 min" }
   else { Warn "Could not create the scheduled task; run '$syncScript' from Git bash to sync manually." }
 } else {
-  Warn "Git bash not found (install Git) — memory sync not scheduled."
+  Warn "Git bash not found (install Git) - memory sync not scheduled."
 }
 
 # --------------------------------------------------------------------------
-# 6c. Codex's OWN config (~/.codex/config.toml) — route 1Password through the
+# 6c. Codex's OWN config (~/.codex/config.toml) - route 1Password through the
 # shared caching launcher, so Codex shares the one single-flight refresh + DPAPI
 # cache and carries NO plaintext service-account token. Codex reads its own file,
 # which the Claude consumers above never touch; without this step the 1password
-# block drifts back to a direct `npx` + inline token — outside the cache and a
+# block drifts back to a direct `npx` + inline token - outside the cache and a
 # contributor to the per-hour rate-limit lockout. Idempotent; safe if Codex absent.
 # --------------------------------------------------------------------------
 Step "Routing Codex 1Password MCP through the caching launcher"
@@ -638,7 +652,7 @@ $codexFix = Join-Path $RepoPath "bin\configure-codex-1password.ps1"
 if (Test-Path -LiteralPath $codexFix) {
   & pwsh -NoProfile -File $codexFix -Launcher $Launcher
 } else {
-  Warn "Missing $codexFix — Codex 1password left as-is."
+  Warn "Missing $codexFix - Codex 1password left as-is."
 }
 
 # --------------------------------------------------------------------------

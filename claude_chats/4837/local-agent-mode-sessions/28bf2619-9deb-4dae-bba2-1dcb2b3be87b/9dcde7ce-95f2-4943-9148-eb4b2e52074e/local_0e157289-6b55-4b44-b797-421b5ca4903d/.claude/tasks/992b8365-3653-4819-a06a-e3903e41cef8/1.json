@@ -1,8 +1,0 @@
-{
-  "id": "1",
-  "subject": "Read Claude Desktop MCP config",
-  "description": "Locate and read claude_desktop_config.json for synology-monitor and devops-mcp server definitions",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

@@ -1,8 +1,0 @@
-{
-  "id": "6",
-  "subject": "Record Coolify token in 1Password",
-  "description": "Store the Coolify API token in the vibe_coding vault with title, description, notes via op CLI or 1Password MCP",
-  "status": "in_progress",
-  "blocks": [],
-  "blockedBy": []
-}

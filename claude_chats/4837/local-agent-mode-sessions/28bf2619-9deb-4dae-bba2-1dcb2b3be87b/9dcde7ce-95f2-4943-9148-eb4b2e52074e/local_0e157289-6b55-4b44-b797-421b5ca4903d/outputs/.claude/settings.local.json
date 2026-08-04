@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "mcp__1password__vault_list",
-      "mcp__1password__password_create"
-    ]
-  }
-}

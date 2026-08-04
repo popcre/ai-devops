@@ -6,7 +6,7 @@
   Codex reads its own ~/.codex/config.toml, which setup-machine.ps1 does NOT
   otherwise manage. Left alone, its [mcp_servers."1password"] block spawns the
   MCP server with a DIRECT `npx` command and an inline plaintext service-account
-  token — which means:
+  token - which means:
     1. The token sits in cleartext in config.toml (a file secret), and
     2. Codex's 1Password server is OUTSIDE the shared single-flight refresh +
        15-minute DPAPI cache that mcp-secret-launch.ps1 gives every other
@@ -29,7 +29,7 @@
 #>
 [CmdletBinding()]
 param(
-  # The stdio MCP launcher (…\.config\ai-devops\mcp-launch.cmd). Defaulted from $HOME.
+  # The stdio MCP launcher (...\.config\ai-devops\mcp-launch.cmd). Defaulted from $HOME.
   [string]$Launcher = (Join-Path $HOME ".config\ai-devops\mcp-launch.cmd"),
   # Codex config file.
   [string]$ConfigPath = (Join-Path $HOME ".codex\config.toml")
@@ -38,7 +38,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
-  Write-Host "[skip] No Codex config at $ConfigPath — Codex not installed here." -ForegroundColor Yellow
+  Write-Host "[skip] No Codex config at $ConfigPath - Codex not installed here." -ForegroundColor Yellow
   return
 }
 if (-not (Test-Path -LiteralPath $Launcher)) {

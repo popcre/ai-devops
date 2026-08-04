@@ -1,9 +1,0 @@
-{
-  "id": "11",
-  "subject": "Step 3 — Status & Step pill cell renderers",
-  "description": "Create StatusPillCellRenderer and StepIndicatorCellRenderer; register in rfq.grid.config.ts.",
-  "activeForm": "Implementing Step 3 pill renderers",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

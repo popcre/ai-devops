@@ -1,9 +1,0 @@
-{
-  "id": "12",
-  "subject": "Verify reskin already in code matches prototype; find gaps",
-  "description": "The reskin (theming, density, pill renderers, tints, seam, sub-grid configs) is already implemented and deployed. Compare the LIVE sandbox RFQ page against Claude Design's prototype, identify any gaps/mismatches, and only then decide what code work remains.",
-  "activeForm": "Implementing Step 4 sub-grid card",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

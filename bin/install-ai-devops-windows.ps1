@@ -140,7 +140,7 @@ function Install-SkillFolder {
 # on purpose: no skill name lives here, so retiring a skill is just "delete it
 # from skills/ and commit". Only directories carrying the .ai-devops-managed
 # marker (or named in config/retired-skills.txt, the pre-marker migration list)
-# are eligible — vendor skills in the same root are never touched. Nothing is
+# are eligible - vendor skills in the same root are never touched. Nothing is
 # deleted; orphans move to <client>\skills-quarantine\.
 function Invoke-OrphanSkillPruning {
     param(
@@ -162,7 +162,7 @@ function Invoke-OrphanSkillPruning {
     }
     # An empty repo set means a broken checkout, not that everything retired.
     if ($expected.Count -eq 0) {
-        Write-Warning "No $Label skills found in the repo — skipping orphan pruning."
+        Write-Warning "No $Label skills found in the repo - skipping orphan pruning."
         return
     }
 

@@ -1,9 +1,0 @@
-{
-  "id": "8",
-  "subject": "Commit design handoff folder to albert-2sandbox",
-  "description": "Write the three spec files into design_handoff_rfq_polish/ on albert-2sandbox and commit (no push until Albert says so).",
-  "activeForm": "Committing the handoff folder",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

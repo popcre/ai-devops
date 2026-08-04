@@ -1,9 +1,0 @@
-{
-  "id": "1",
-  "subject": "Verify browser connection and access sandbox URL",
-  "description": "Confirm Claude in Chrome is connected, then open https://alsand2.designflow.app/ to audit the current live site visually.",
-  "activeForm": "Checking browser connection and opening sandbox site",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

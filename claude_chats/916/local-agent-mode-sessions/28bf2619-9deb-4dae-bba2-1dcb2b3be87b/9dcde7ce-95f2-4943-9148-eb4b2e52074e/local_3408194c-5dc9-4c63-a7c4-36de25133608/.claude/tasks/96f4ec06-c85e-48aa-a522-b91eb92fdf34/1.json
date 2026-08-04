@@ -1,8 +1,0 @@
-{
-  "id": "1",
-  "subject": "Make all config logic verbose",
-  "description": "Replace silent behaviors (broken backup, BOM-less write, rebuild) with explicit Write-Host output so nothing happens silently.",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

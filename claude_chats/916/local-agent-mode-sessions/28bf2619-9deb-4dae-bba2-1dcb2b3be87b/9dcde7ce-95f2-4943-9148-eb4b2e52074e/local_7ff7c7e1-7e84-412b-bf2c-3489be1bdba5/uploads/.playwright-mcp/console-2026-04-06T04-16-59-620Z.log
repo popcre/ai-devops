@@ -1,3 +1,0 @@
-[     441ms] [ERROR] WebSocket connection to 'wss://mc.designflow.app/vnc/websockify' failed: Error during WebSocket handshake: Unexpected response code: 502 @ https://mc.designflow.app/vnc/core/websock.js:250
-[     441ms] [WARNING] WebSocket on-error event @ https://mc.designflow.app/vnc/core/rfb.js:693
-[     441ms] [ERROR] Failed when connecting: Connection closed (code: 1006) @ https://mc.designflow.app/vnc/core/rfb.js:967

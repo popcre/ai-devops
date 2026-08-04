@@ -1,6 +1,0 @@
-- [Synology Monitor Project](project_synology_monitor.md) — 3-component architecture: Go agents + Supabase + Next.js on Coolify, AI via pg_cron
-- [User Profile](user_profile.md) — Non-technical user in NY, runs DS1621xs+ NAS units, also has POPdam and OpenClaw projects
-- [Coolify Deployment](reference_coolify.md) — VPS at 178.156.180.212, API token stored, for deploying web UI
-- [Minimize Cloud Services](feedback_minimize_services.md) — Don't add new services, use existing infra (Coolify, Supabase, DigitalOcean)
-- [Do It For Me](feedback_do_it_for_me.md) — If you CAN do it, DO IT. Don't list steps, just execute them.
-- [edgesynology2 Root Access](feedback_edgesynology2_root_access.md) — SSH as popdam + sudo for docker/root ops; ahazan can't reach docker socket

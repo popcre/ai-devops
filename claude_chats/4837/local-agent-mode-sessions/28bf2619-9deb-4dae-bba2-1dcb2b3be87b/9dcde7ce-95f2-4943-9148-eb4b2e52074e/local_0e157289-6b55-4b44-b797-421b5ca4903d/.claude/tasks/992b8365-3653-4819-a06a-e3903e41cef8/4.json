@@ -1,8 +1,0 @@
-{
-  "id": "4",
-  "subject": "Apply fix",
-  "description": "Fix the config/environment so both MCP servers start",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

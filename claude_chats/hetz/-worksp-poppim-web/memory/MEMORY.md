@@ -1,2 +1,0 @@
-- [retailer is not a customer list](retailer-is-not-a-customer-list.md) — curated `retailer`/`buyer` were physically split from the raw `ingested_domains`/`ingested_contact`; only active/potential customers belong in app pickers
-- [PLM is master-data authority](plm-is-master-data-authority.md) — Designflow PLM is the source for customers/licensors/properties; links via `retailer_plm_customer` + `plm_mg_code`, API auth header is `x-api-key`

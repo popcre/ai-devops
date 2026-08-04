@@ -1,8 +1,0 @@
-{
-  "id": "2",
-  "subject": "Read MCP server error logs",
-  "description": "Read Claude Desktop MCP logs to find why both servers fail to start after update",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

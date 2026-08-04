@@ -1,8 +1,0 @@
-{
-  "id": "3",
-  "subject": "Verify script syntax",
-  "description": "Run PowerShell parser check to confirm the edited script has no syntax errors.",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

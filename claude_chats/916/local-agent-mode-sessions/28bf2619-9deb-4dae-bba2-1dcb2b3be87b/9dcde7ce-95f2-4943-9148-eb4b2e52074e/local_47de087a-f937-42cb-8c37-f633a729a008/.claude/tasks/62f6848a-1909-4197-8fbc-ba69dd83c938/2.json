@@ -1,9 +1,0 @@
-{
-  "id": "2",
-  "subject": "Read frontend and backend repos via gh CLI",
-  "description": "Use the authenticated gh CLI to clone/read popcre/designflow-frontend and popcre/designflow-backend on the albert-2sandbox branch. Identify structure, Angular setup, ag-grid usage.",
-  "activeForm": "Reading the frontend and backend repos",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

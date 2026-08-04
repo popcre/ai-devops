@@ -1,9 +1,0 @@
-{
-  "id": "6",
-  "subject": "Extract SPEC_V2.md from Design project",
-  "description": "Ask Claude Design to output the full verbatim contents of SPEC_V2.md; capture it via the browser.",
-  "activeForm": "Extracting SPEC_V2.md",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

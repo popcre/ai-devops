@@ -1,9 +1,0 @@
-{
-  "id": "10",
-  "subject": "Step 2 — density toggle",
-  "description": "Compact/Standard/Comfortable row height toggle (setGridOption rowHeight + resetRowHeights + localStorage) in rfq.component.ts/.html.",
-  "activeForm": "Implementing Step 2 density toggle",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

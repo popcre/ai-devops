@@ -1,9 +1,0 @@
-{
-  "id": "9",
-  "subject": "Step 1 — Alpine theming block in rfq.component.scss",
-  "description": "Implement SPEC_V2 §4 replacement block: ::ng-deep .ag-theme-alpine --ag-* tokens + header/seam/row styling. Run specs, verify vs prototype.",
-  "activeForm": "Implementing Step 1 theming",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

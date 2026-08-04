@@ -1,9 +1,0 @@
-{
-  "id": "14",
-  "subject": "Final visual verification vs prototype",
-  "description": "Compare the live albert-2sandbox RFQ page against Design's prototype; loop back to fix mismatches until it matches.",
-  "activeForm": "Verifying final result vs prototype",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

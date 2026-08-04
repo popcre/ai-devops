@@ -84,19 +84,19 @@ if (-not $TestOnly -and $capability.State -eq 'Installed') {
   Restart-Service sshd
 
   Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
-  Remove-NetFirewallRule -DisplayName 'OpenSSH Server — Tailscale only' -ErrorAction SilentlyContinue
+  Remove-NetFirewallRule -DisplayName 'OpenSSH Server - Tailscale only' -ErrorAction SilentlyContinue
   if (-not $tsIp) { throw 'OpenSSH is installed, but the Tailscale address is unavailable; firewall access was not opened.' }
-  New-NetFirewallRule -DisplayName 'OpenSSH Server — Tailscale only' -Direction Inbound -Action Allow `
+  New-NetFirewallRule -DisplayName 'OpenSSH Server - Tailscale only' -Direction Inbound -Action Allow `
     -Protocol TCP -LocalPort 22 -LocalAddress $tsIp -RemoteAddress '100.64.0.0/10' -Profile Any | Out-Null
 
   Get-NetFirewallRule -DisplayGroup 'Windows Remote Management' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
-  Remove-NetFirewallRule -DisplayName 'WinRM HTTPS — Tailscale only' -ErrorAction SilentlyContinue
+  Remove-NetFirewallRule -DisplayName 'WinRM HTTPS - Tailscale only' -ErrorAction SilentlyContinue
   Stop-Service WinRM -ErrorAction SilentlyContinue
   Set-Service WinRM -StartupType Disabled
 }
 
 $sshd = Get-Service sshd -ErrorAction SilentlyContinue
-$firewall = Get-NetFirewallRule -DisplayName 'OpenSSH Server — Tailscale only' -ErrorAction SilentlyContinue
+$firewall = Get-NetFirewallRule -DisplayName 'OpenSSH Server - Tailscale only' -ErrorAction SilentlyContinue
 $keyInstalled = Test-Path (Join-Path $env:ProgramData 'ssh\administrators_authorized_keys')
 Result 'sshd service' $(if($sshd -and $sshd.Status -eq 'Running'){'OK'}else{'MISSING'}) $(if($sshd){$sshd.Status}else{'not installed'})
 Result 'SSH public key' $(if($keyInstalled){'OK'}else{'MISSING'}) 'administrators_authorized_keys'

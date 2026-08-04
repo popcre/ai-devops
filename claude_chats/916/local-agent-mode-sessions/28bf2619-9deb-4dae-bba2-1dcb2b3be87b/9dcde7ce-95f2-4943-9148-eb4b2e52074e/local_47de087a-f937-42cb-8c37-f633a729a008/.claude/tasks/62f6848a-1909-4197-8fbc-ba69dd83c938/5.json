@@ -1,9 +1,0 @@
-{
-  "id": "5",
-  "subject": "Capture Claude Design's RFQ Prototype",
-  "description": "Open the dflow RFQ project tab, render the RFQ Prototype file fully, screenshot it, and pull the prototype HTML so I have the precise design spec to implement and verify against.",
-  "activeForm": "Capturing the RFQ Prototype from Claude Design",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}

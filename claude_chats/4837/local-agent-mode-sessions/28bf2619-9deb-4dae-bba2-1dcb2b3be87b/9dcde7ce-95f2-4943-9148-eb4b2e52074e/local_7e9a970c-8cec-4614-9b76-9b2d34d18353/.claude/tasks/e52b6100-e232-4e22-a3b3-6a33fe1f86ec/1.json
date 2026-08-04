@@ -1,9 +1,0 @@
-{
-  "id": "1",
-  "subject": "Inspect current state on edgesynology1",
-  "description": "Check user 'ai', docker binary path, and existing sudoers config",
-  "activeForm": "Inspecting current state on edgesynology1",
-  "status": "completed",
-  "blocks": [],
-  "blockedBy": []
-}
