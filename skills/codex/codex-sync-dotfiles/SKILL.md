@@ -31,6 +31,7 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
+| GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor` | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
 
 ## Locate the repo
@@ -73,6 +74,18 @@ clone + `./install.sh` on Ubuntu).
    distinguishes *checked and fine* from *not checked*. After any MCP config
    rewrite, Claude Desktop needs a full quit+reopen, and deleting
    `~/.config/ai-devops/mcp-secrets.dpapi.json` forces a fresh resolve (15-min cache).
+2b. **Check the GLM server — never skip.** `ai-glm` is machine-local state that a
+   `git pull` cannot install. Run `ai-glm doctor`.
+   - Exit 0 → say "GLM server already current" explicitly.
+   - Non-zero, or `ai-glm` not found → run the idempotent installer (it installs its
+     own prerequisites):
+     Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-opencode-glm.ps1 -RepoPath <repo>`,
+     Ubuntu `<repo>/bin/setup-opencode-glm.sh`. Re-run doctor and report. Do NOT call
+     the sync successful while doctor still fails.
+   - No 1Password service-account token file → do not run it; report that GLM is
+     unavailable until the token is in place. Never skip silently.
+   `config/opencode/version` pins OpenCode, so a pull that bumps it is installed here.
+
 3. `bin/ai-sync-memory pull` — lay hub memory onto this machine (only existing
    local projects update; a skip for a project this machine doesn't have is
    normal). **But if EVERY project skips, or `push` reports 0 folders, the
