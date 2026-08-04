@@ -141,6 +141,20 @@ check "doctor prints no stray error lines"           "! printf '%s' \"\$dout\" |
 check "doctor knows Windows from Linux"              "grep -q 'IS_WINDOWS' '$AI_GLM'"
 check "server control works on Windows"              "grep -q 'schtasks' '$AI_GLM'"
 
+echo "== platform-correct doctor checks =="
+# `stat -c %a` reports a synthesised mode on NTFS regardless of the ACL, so the 0600
+# check failed on all three Windows machines even though the installer had locked the
+# file down correctly. Windows must be checked with icacls.
+check "password check is platform-aware"    "grep -q 'icacls' '$AI_GLM'"
+# A grep over a file that does not exist on the platform always passes. That reads as
+# assurance while checking nothing.
+check "secret check targets real files"     "grep -q 'secret_targets' '$AI_GLM'"
+check "no vacuous systemd-only secret check" "! grep -q 'no secret in the systemd unit' '$AI_GLM'"
+# Vestiges get swept, not nagged about forever.
+check "doctor sweeps the glm-claude vestige" "grep -q 'swept just now' '$AI_GLM'"
+check "ubuntu setup sweeps it too"           "grep -q 'Removed retired' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
+check "windows setup sweeps it too"          "grep -q 'Removed retired' '$REPO_ROOT/bin/setup-opencode-glm.ps1'"
+
 echo "== completion rule =="
 check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_GLM' || grep -q 'finish\" = \"stop' '$AI_GLM'"
 check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' || grep -q 'idle -ge 2' '$AI_GLM'"

@@ -507,7 +507,8 @@ warnchk() {
 }
 
 cmd_doctor() {
-  local repo_root_dir pinned installed health_ver pw bin_path
+  local repo_root_dir pinned installed health_ver pw bin_path leaked f
+  local -a secret_targets
   # Resolve through the /usr/local/bin symlink, or the repo root would come out as
   # /usr/local and every repo-relative check would fail.
   local self
@@ -540,7 +541,21 @@ cmd_doctor() {
   chk "review agent has no bash tool"      grep -q '^  bash: false' "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
   chk "implement agent has a bash tool"    grep -q '^  bash: true'  "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
   chk "server password present"            test -s "$PW_FILE"
-  chk "server password is 0600"            test "$(stat -c '%a' "$PW_FILE" 2>/dev/null)" = "600"
+  if [ "$IS_WINDOWS" = 1 ]; then
+    # Check the real ACL. Anything granting Everyone/Users/Authenticated Users is a fail.
+    if command -v icacls >/dev/null 2>&1; then
+      if icacls "$(cygpath -w "$PW_FILE" 2>/dev/null || printf '%s' "$PW_FILE")" 2>/dev/null |
+         grep -qiE 'Everyone|BUILTIN\\Users|Authenticated Users'; then
+        printf 'FAIL  server password is user-only\n'; FAILS=$((FAILS+1))
+      else
+        printf 'PASS  server password is user-only\n'
+      fi
+    else
+      printf 'WARN  server password is user-only (icacls unavailable, not checked)\n'
+    fi
+  else
+    chk "server password is 0600"          test "$(stat -c '%a' "$PW_FILE" 2>/dev/null)" = "600"
+  fi
   chk "1Password CLI present"              command -v op
   chk "service-account token present"      test -s "$CFG_DIR/op-service-account"
   chk "mcp.env present"                    test -f "$CFG_DIR/mcp.env"
@@ -586,8 +601,29 @@ cmd_doctor() {
       printf 'PASS  server listens only on loopback\n'
     fi
   fi
-  chk "no secret in the systemd unit"      bash -c "! grep -qiE 'api[_-]?key|zhipu|zai_' '$HOME/.config/systemd/user/opencode-glm.service'"
-  warnchk "old glm-claude config removed"  test ! -d "$CFG_DIR/glm-claude"
+  if [ "$IS_WINDOWS" = 1 ]; then
+    secret_targets=("$HOME/.local/bin/opencode-glm-launch" "$HOME/.local/bin/opencode-glm-service" "$HOME/.local/bin/ai-glm.cmd")
+  else
+    secret_targets=("$HOME/.config/systemd/user/opencode-glm.service" "$HOME/.local/bin/opencode-glm-launch")
+  fi
+  leaked=0
+  for f in "${secret_targets[@]}"; do
+    [ -f "$f" ] || continue
+    # The scripts legitimately name the VARIABLES; a leak is an actual key value.
+    grep -oE '(ops_|sk-|ghp_)[A-Za-z0-9_-]{20,}' "$f" >/dev/null 2>&1 && leaked=1
+  done
+  if [ "$leaked" = 0 ]; then printf 'PASS  no secret value in the service files\n'
+  else printf 'FAIL  no secret value in the service files\n'; FAILS=$((FAILS+1)); fi
+  if [ -d "$CFG_DIR/glm-claude" ]; then
+    rm -rf "$CFG_DIR/glm-claude" 2>/dev/null || true
+    if [ -d "$CFG_DIR/glm-claude" ]; then
+      printf 'FAIL  old glm-claude config removed (could not delete %s)\n' "$CFG_DIR/glm-claude"; FAILS=$((FAILS+1))
+    else
+      printf 'PASS  old glm-claude config removed (swept just now)\n'
+    fi
+  else
+    printf 'PASS  old glm-claude config removed\n'
+  fi
   chk "retired ai-glm-agent fully gone"    bash -c "! command -v ai-glm-agent"
   # Orphaned scratch worktrees: nothing ai-glm creates may outlive its command.
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then

@@ -87,6 +87,9 @@ rm -f "$OC_CONF/agent"/*.md
 install -m 0644 "$REPO_ROOT/config/opencode/agent"/*.md "$OC_CONF/agent/"
 printf '%s\n' "$VERSION" > "$OC_HOME/installed-version"
 
+# Sweep the retired Claude-Code GLM harness's isolated config. Nothing reads it now.
+[ -d "$CFG_DIR/glm-claude" ] && { rm -rf "$CFG_DIR/glm-claude"; info "Removed retired $CFG_DIR/glm-claude"; }
+
 # ---------------------------------------------------------------------------
 # 3. Loopback server password
 # ---------------------------------------------------------------------------
