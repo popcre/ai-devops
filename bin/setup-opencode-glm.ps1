@@ -162,6 +162,7 @@ $LaunchSh = Join-Path $BinDir "opencode-glm-launch"
 function ConvertTo-BashPath($p) { "/" + ($p -replace '\\','/' -replace '^([A-Za-z]):','$1') }
 $binaryBash = ConvertTo-BashPath $Binary
 $homeBash   = ConvertTo-BashPath $HomeDir
+$gitBashFwd = $GitBash -replace '\\','/'      # C:/Program Files/Git/bin/bash.exe
 $cfgBash    = ConvertTo-BashPath $CfgDir
 @"
 #!/usr/bin/env bash
@@ -196,7 +197,10 @@ if [ -z "`${ZAI_API_KEY:-}" ]; then
   [ -f "`$MCP_ENV" ]    || { echo "FATAL: missing `$MCP_ENV" >&2; exit 1; }
   OP_SERVICE_ACCOUNT_TOKEN="`$(<"`$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN AI_GLM_LAUNCH_REEXEC=1
-  exec op run --env-file "`$MCP_ENV" -- "`$0" "`$@"
+  # op.exe is a native Windows process: it cannot exec an extension-less shell script,
+  # and Git's bin directory is not reliably on the Windows PATH. So name bash.exe by
+  # absolute path and let it run this script.
+  exec op run --env-file "`$MCP_ENV" -- "$gitBashFwd" "`$0" "`$@"
 fi
 
 export ZHIPU_API_KEY="`$ZAI_API_KEY"
