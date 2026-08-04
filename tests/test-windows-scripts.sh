@@ -49,5 +49,20 @@ echo "== a failed GLM launcher must show its error =="
 if grep -q 'Smoke-testing the launcher' bin/setup-opencode-glm.ps1; then ok "launcher is smoke-tested before the task is registered"
 else bad "no launcher smoke test; failures would be silent"; fi
 
+echo "== the generated Windows launcher must be valid bash =="
+# It is written from a PowerShell here-string, so a quoting slip yields a broken shell
+# script that only fails on Windows. Render it and check it here instead.
+if rendered="$(python3 tests/render-windows-launcher.py 2>&1)"; then
+  if printf '%s' "$rendered" | bash -n 2>/dev/null; then ok "rendered launcher is valid bash"
+  else bad "rendered launcher is not valid bash"; fi
+  # op.exe is a native Windows process and cannot exec an extension-less shell script.
+  if printf '%s' "$rendered" | grep -q 'exec op run .* -- "C:/Program Files/Git/bin/bash.exe" "$0"'; then
+    ok "op run re-execs through bash.exe by absolute path"
+  else bad "op run re-exec does not name bash.exe (Windows cannot exec the script directly)"; fi
+  if printf '%s' "$rendered" | grep -q 'export HOME='; then ok "launcher pins HOME"; else bad "launcher does not pin HOME"; fi
+else
+  bad "could not render the launcher: $rendered"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
