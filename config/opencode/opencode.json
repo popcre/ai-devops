@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "zai-coding-plan/glm-5.2",
+  "small_model": "zai-coding-plan/glm-5.2",
+  "share": "disabled",
+  "autoupdate": false,
+  "permission": {
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "webfetch": "deny"
+  }
+}

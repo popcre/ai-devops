@@ -49,13 +49,22 @@ tools run via git-bash on Windows).
 | **`codex-cli` MCP entry** (Claude Desktop config + `~/.claude/settings.json`) | Lets Claude call Codex as a tool (`codex`, `codex-reply`) instead of shelling out | ✅ Windows: `bin/setup-machine.ps1`; Ubuntu: `bin/setup-secrets.sh` | No — Codex carries its own `codex login`, so it is **not** wrapped in the op launcher and never touches `mcp.env` |
 | **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine and checked by Windows setup | No repo secret — Kimi carries its own interactive login |
 | **Grok Build CLI** (`grok`) | Optional xAI coding-agent target used by the shared `grok-cli` skill | ⚠️ Skill is synced by `ai-devops`; this machine's native install, docs, config, sessions, and login live under `%USERPROFILE%\.grok`; `%USERPROFILE%\.grok\bin` is on User PATH | No repo secret — never read or sync machine-local `.grok/auth.json` |
-| **GLM coding agent** (`ai-glm-agent`) | Lets Claude or Codex delegate reviews or scoped implementation to Z.ai GLM through Claude Code's repository/terminal tools | ✅ repo-owned launcher + shared skill; Windows/Ubuntu secret setup performs a real capability probe | Z.ai key stays in 1Password; only an `op://` reference is distributed |
+| **GLM sessions** (`ai-glm`) | Named, persistent GLM-5.2 sessions on a loopback-only OpenCode server; read-only reviews and worktree-isolated implementation | ✅ repo-owned client, pinned OpenCode, canonical agents, systemd user service, `ai-glm doctor` | Z.ai key stays in 1Password; only an `op://` reference is distributed |
 
-## GLM: isolated Claude Code host
+## GLM: persistent sessions on a local OpenCode server
 
-`ai-glm-agent` uses Claude Code as the agent runtime but sends only that child
-process to Z.ai's Anthropic-compatible Coding Plan endpoint. It clears inherited
-Anthropic credentials, uses an isolated Claude config directory, requests the
+`ai-glm` talks to a pinned OpenCode server bound to `127.0.0.1` and running as a
+systemd user service. Claude Code is no longer involved. The server uses
+OpenCode's built-in `zai-coding-plan` provider against Z.ai's Coding Plan
+endpoint, with the key resolved from 1Password at launch. Sessions are named and
+persistent; review sessions have no write, edit, patch or bash tool, and
+implementation runs in a throwaway git worktree. Full detail:
+[glm-opencode.md](glm-opencode.md). The paragraph below describes the retired
+`ai-glm-agent` design and is kept only as history:
+
+Previously `ai-glm-agent` used Claude Code as the agent runtime, sending only that child
+process to Z.ai's Anthropic-compatible Coding Plan endpoint. It cleared inherited
+Anthropic credentials, used an isolated Claude config directory, requested the
 configured GLM model explicitly, and checks Claude Code's returned model record.
 Normal `claude`, Claude Desktop, and Codex sessions remain on their existing
 providers. Review mode is read-only (`plan`); implementation mode is available

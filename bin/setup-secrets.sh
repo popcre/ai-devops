@@ -497,19 +497,21 @@ done < "$MCP_ENV"
 
 echo
 if [ "$fail" -eq 0 ]; then
-  if command -v claude >/dev/null 2>&1 && [ -x "$REPO_ROOT/bin/ai-glm-agent" ]; then
-    info "Verifying GLM coding agent end-to-end"
-    glm_probe="$(mktemp)"
-    if "$REPO_ROOT/bin/ai-glm-agent" --mode review --output "$glm_probe" \
-        "Reply with exactly GLM_AGENT_OK and nothing else." >/dev/null &&
-        [ "$(tr -d '\r\n' <"$glm_probe")" = "GLM_AGENT_OK" ]; then
-      ok "GLM-5.2 coding agent verified through Claude Code and Z.ai"
+  if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
+    info "Verifying the GLM session harness end-to-end"
+    glm_probe="$(mktemp -d)"
+    ( cd "$glm_probe" && git init -q && git -c user.email=probe@local -c user.name=probe commit -q --allow-empty -m probe ) >/dev/null 2>&1
+    if ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
+           --prompt "Reply with exactly GLM_AGENT_OK and nothing else." 2>/dev/null ) |
+         grep -q GLM_AGENT_OK; then
+      ok "GLM-5.2 verified end-to-end through the OpenCode session harness and Z.ai"
+      ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" delete secrets-probe ) >/dev/null 2>&1 || true
     else
-      rm -f "$glm_probe"
-      warn "GLM coding-agent capability check failed"
+      rm -rf "$glm_probe"
+      warn "GLM capability check failed. Run: ai-glm doctor"
       exit 1
     fi
-    rm -f "$glm_probe"
+    rm -rf "$glm_probe"
   else
     warn "Claude Code is missing; GLM agent cannot be capability-tested yet."
   fi

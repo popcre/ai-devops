@@ -644,20 +644,14 @@ if (Test-Path -LiteralPath $codexFix) {
 # --------------------------------------------------------------------------
 # Done + validation checklist
 # --------------------------------------------------------------------------
-Step "GLM coding-agent capability"
-$glmLauncher = Join-Path $RepoPath "bin\ai-glm-agent.ps1"
-$glmProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-glm-probe-" + [guid]::NewGuid() + ".txt")
-try {
-  if (-not (Test-Path -LiteralPath $glmLauncher)) { throw "Missing GLM launcher: $glmLauncher" }
-  & op run --env-file $McpEnv -- pwsh -NoProfile -File $glmLauncher -Mode review -Output $glmProbe `
-    "Reply with exactly GLM_AGENT_OK and nothing else."
-  if ($LASTEXITCODE -ne 0) { throw "GLM launcher exited $LASTEXITCODE." }
-  $glmProbeText = (Get-Content -Raw -LiteralPath $glmProbe).Trim()
-  if ($glmProbeText -ne "GLM_AGENT_OK") { throw "GLM returned an unexpected probe response." }
-  Ok "GLM-5.2 coding agent verified end-to-end through Claude Code and Z.ai"
-} finally {
-  Remove-Item -LiteralPath $glmProbe -Force -ErrorAction SilentlyContinue
-}
+Step "GLM delegation (server-side)"
+# There is no local GLM server on Windows. GLM now runs as named, persistent
+# sessions on a loopback-only OpenCode server on the Ubuntu host, driven by
+# `ai-glm`. The retired Windows launcher (bin\ai-glm-agent.ps1) is gone, so
+# there is nothing to probe here. Windows Claude and Codex sessions call
+# `ai-glm` on Ubuntu over the existing SSH workflow, inside the target repo.
+# See docs/glm-opencode.md.
+Ok "GLM is reached via ai-glm on the Ubuntu host (no Windows GLM launcher)"
 
 Step "Done"
 Write-Host "Setup summary:"

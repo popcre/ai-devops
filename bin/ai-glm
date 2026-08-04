@@ -1,0 +1,541 @@
+#!/usr/bin/env bash
+# ai-glm — persistent, named GLM sessions hosted by a local OpenCode server.
+#
+# This is the ONLY supported way for Claude or Codex to talk to GLM. Never call
+# `opencode`, `opencode run`, or the server's HTTP API directly: this script owns the
+# server URL, the credentials, the API shapes, and every safety invariant.
+#
+#   ai-glm new <name> [--prompt T | --prompt-file F | stdin]   start a review session
+#   ai-glm ask <name> [...]                                    continue it
+#   ai-glm implement <name> [...]                              write run in a throwaway worktree
+#   ai-glm list | show <name> | transcript <name> | diff <name>
+#   ai-glm abort <name> | delete <name>
+#   ai-glm doctor
+#   ai-glm server status|start|stop|restart
+#
+# Model, agent, provider, tools and working directory are fixed when a session is
+# created and are deliberately NOT overridable per call: a stable request prefix is
+# what makes provider prompt caching work, and a stable agent is what keeps a review
+# session read-only.
+set -euo pipefail
+
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+OC_HOME="$CFG_DIR/opencode"
+PW_FILE="$OC_HOME/server-password"
+STATE_DIR="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
+PORT="${AI_GLM_PORT:-4096}"
+BASE="http://127.0.0.1:$PORT"
+PROVIDER="zai-coding-plan"
+MODEL="${AI_GLM_MODEL:-glm-5.2}"
+CALLER="${AI_GLM_CALLER:-claude}"
+TIMEOUT="${AI_GLM_TIMEOUT:-1800}"        # seconds to wait for one GLM turn
+LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
+POLL_SECS=5
+JSON_OUT=0
+
+die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
+note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+need curl; need jq; need git; need flock
+
+# --------------------------------------------------------------------------------
+# HTTP. Every request is authenticated; the server 401s otherwise.
+# --------------------------------------------------------------------------------
+server_pw() {
+  [ -s "$PW_FILE" ] || die "missing server password file: $PW_FILE (run setup-opencode-glm.sh)"
+  tr -d '\r\n' < "$PW_FILE"
+}
+api() { # api METHOD PATH [JSON_BODY_FILE]
+  local method="$1" path="$2" body="${3:-}" pw
+  pw="$(server_pw)"
+  if [ -n "$body" ]; then
+    curl -sS -m 120 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
+      -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
+  else
+    curl -sS -m 120 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path"
+  fi
+}
+api_code() { # api_code METHOD PATH -> HTTP status only
+  local pw; pw="$(server_pw)"
+  curl -sS -m 30 -o /dev/null -w '%{http_code}' \
+    -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$1" "$BASE$2" 2>/dev/null || echo 000
+}
+server_up() { [ "$(api_code GET /global/health)" = "200" ]; }
+require_server() {
+  server_up || die "OpenCode GLM server is not answering on $BASE.
+       Try: ai-glm server start     (then: ai-glm doctor)"
+}
+
+# --------------------------------------------------------------------------------
+# Repository + session identity
+#
+# The key is repo + caller + name. Claude and Codex keep separate sessions, so both
+# can use the short name "auth-review" in the same repo without colliding.
+# --------------------------------------------------------------------------------
+repo_root() {
+  local r
+  r="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository (cd into one, or pass --repo)."
+  printf '%s' "$r"
+}
+repo_id() {
+  local root remote
+  root="$1"
+  remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
+  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
+}
+valid_name() {
+  case "$1" in
+    ''|*[!a-zA-Z0-9._-]*) return 1 ;;
+    *) [ "${#1}" -le 64 ] ;;
+  esac
+}
+meta_path() { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+lock_path() { printf '%s/locks/%s--%s--%s.lock' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+
+write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem)
+  local f="$1" tmp
+  mkdir -p "$(dirname "$f")"
+  tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
+  printf '%s\n' "$2" > "$tmp"
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$f"
+}
+
+# --------------------------------------------------------------------------------
+# Turn execution
+#
+# Completion rule, deliberately strict. A turn is done only when the newest assistant
+# message reports finish=="stop" AND the server has reported idle twice in a row.
+# Anything else - unknown finish value, stuck tool, pending permission - times out or
+# hard-fails loudly. "Session id absent from /session/status" alone is NOT completion:
+# a wedged turn also looks idle, and treating that as success silently reports an
+# empty review as a finished one.
+# --------------------------------------------------------------------------------
+approve_read_permissions() { # best effort; returns 1 if the endpoint is broken
+  local sid="$1" raw ids id pw
+  pw="$(server_pw)"
+  raw="$(curl -sS -m 20 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
+        "$BASE/api/session/$sid/permission" 2>/dev/null || echo '')"
+  # OpenCode 1.18.12 returns HTTP 400 with an InvalidRequestError body when a pending
+  # request has no metadata.path (glob/grep). The request can then never be listed or
+  # approved, so the turn would hang forever. Report it instead of waiting.
+  if printf '%s' "$raw" | jq -e '._tag? == "InvalidRequestError"' >/dev/null 2>&1; then
+    return 1
+  fi
+  ids="$(printf '%s' "$raw" | jq -r '.data[]? | select(.action=="read" or .action=="list") | .id' 2>/dev/null || true)"
+  for id in $ids; do
+    curl -sS -m 20 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
+      -X POST "$BASE/api/session/$sid/permission/$id/reply" \
+      -H 'content-type: application/json' -d '{"reply":"always"}' >/dev/null 2>&1 || true
+  done
+  return 0
+}
+
+last_assistant() { # -> JSON of the newest assistant message
+  api GET "/api/session/$1/message?limit=1" | jq -c '.data[0] // {}'
+}
+
+running_tools() {
+  printf '%s' "$1" | jq -r '[.content[]? | select(.type=="tool" and .state.status=="running") | .name] | join(", ")'
+}
+
+send_prompt() { # send_prompt SID PROMPT_FILE
+  local sid="$1" pf="$2" body
+  body="$(mktemp)"
+  jq -Rs '{prompt:{text:.}}' < "$pf" > "$body"
+  api POST "/api/session/$sid/prompt" "$body" > /dev/null
+  rm -f "$body"
+}
+
+await_turn() { # await_turn SID -> prints the assistant message JSON, nonzero on failure
+  local sid="$1" waited=0 idle=0 msg finish stuck
+  sleep 6
+  while [ "$waited" -lt "$TIMEOUT" ]; do
+    if ! approve_read_permissions "$sid"; then
+      msg="$(last_assistant "$sid")"
+      stuck="$(running_tools "$msg")"
+      die "GLM turn is wedged on an un-approvable permission request (tool: ${stuck:-unknown}).
+       OpenCode $( (api GET /global/health | jq -r .version) 2>/dev/null ) returns HTTP 400 from
+       /api/session/<id>/permission while such a request is pending, so it can never be
+       approved. Run: ai-glm abort $2. If the stuck tool is glob or grep, the usual cause is
+       a very large untracked directory in the repo - add it to .gitignore."
+    fi
+    if api GET /session/status | grep -q "$sid"; then
+      idle=0
+    else
+      idle=$((idle + 1))
+    fi
+    msg="$(last_assistant "$sid")"
+    finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
+    if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ]; then
+      printf '%s' "$msg"; return 0
+    fi
+    sleep "$POLL_SECS"
+    waited=$((waited + POLL_SECS))
+  done
+  msg="$(last_assistant "$sid")"
+  stuck="$(running_tools "$msg")"
+  finish="$(printf '%s' "$msg" | jq -r '.finish // "none"')"
+  die "GLM turn did not complete within ${TIMEOUT}s (last finish='$finish'${stuck:+, tool still running: $stuck}).
+       Run: ai-glm abort $2"
+}
+
+msg_text()   { printf '%s' "$1" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")'; }
+msg_tokens() { printf '%s' "$1" | jq -c '.tokens // null'; }
+
+# --------------------------------------------------------------------------------
+# Reports
+# --------------------------------------------------------------------------------
+write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
+  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  f="$root/.ai/reviews/glm-$name-$ts.md"
+  mkdir -p "$(dirname "$f")"
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  {
+    printf '# GLM %s — %s\n\n' "$kind" "$name"
+    printf '| field | value |\n|---|---|\n'
+    printf '| model | %s/%s |\n' "$PROVIDER" "$MODEL"
+    printf '| opencode | %s (pinned) |\n' "$ver"
+    printf '| session | %s |\n' "$name"
+    printf '| session id | `%s` |\n' "$sid"
+    printf '| repository | %s |\n' "$root"
+    printf '| branch | %s |\n' "$branch"
+    printf '| caller | %s |\n' "$CALLER"
+    printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '| tokens | `%s` |\n\n' "$tokens"
+    printf -- '---\n\n%s\n' "$text"
+  } > "$f"
+  printf '%s' "$f"
+}
+
+emit() { # emit NAME KIND SID TEXT TOKENS REPORT
+  if [ "$JSON_OUT" = 1 ]; then
+    jq -n --arg name "$1" --arg kind "$2" --arg sid "$3" --arg text "$4" \
+          --argjson tokens "${5:-null}" --arg report "$6" \
+          --arg model "$PROVIDER/$MODEL" --arg caller "$CALLER" \
+      '{schema_version:1, ok:true,
+        session:{name:$name, type:$kind, id:$sid, caller:$caller, model:$model},
+        response:{text:$text}, usage:$tokens, artifacts:{report:$report}}'
+  else
+    printf '%s\n' "$4"
+    printf '\n--- session: %s (%s)  model: %s/%s  tokens: %s\n--- report: %s\n' \
+      "$1" "$2" "$PROVIDER" "$MODEL" "${5:-null}" "$6" >&2
+  fi
+}
+
+# --------------------------------------------------------------------------------
+# Prompt input
+# --------------------------------------------------------------------------------
+read_prompt() { # read_prompt -> path to a temp file holding the prompt
+  local f; f="$(mktemp)"
+  if [ -n "$PROMPT_TEXT" ]; then
+    printf '%s' "$PROMPT_TEXT" > "$f"
+  elif [ -n "$PROMPT_FILE" ]; then
+    [ -f "$PROMPT_FILE" ] || die "prompt file not found: $PROMPT_FILE"
+    cat "$PROMPT_FILE" > "$f"
+  elif [ ! -t 0 ]; then
+    cat > "$f"
+  else
+    die "provide a prompt: --prompt TEXT, --prompt-file FILE, or stdin."
+  fi
+  [ -s "$f" ] || die "prompt is empty."
+  printf '%s' "$f"
+}
+
+# --------------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------------
+create_session() { # create_session TITLE AGENT DIRECTORY -> session id
+  local body sid
+  body="$(mktemp)"
+  jq -n --arg t "$1" --arg a "$2" --arg p "$PROVIDER" --arg m "$MODEL" \
+     '{title:$t, agent:$a, model:{providerID:$p, id:$m}}' > "$body"
+  sid="$(api POST "/session?directory=$3" "$body" | jq -r '.id // empty')"
+  rm -f "$body"
+  [ -n "$sid" ] || die "could not create an OpenCode session."
+  printf '%s' "$sid"
+}
+
+verify_model() { # verify_model MSG_JSON — reject silent provider fallback
+  local got
+  got="$(printf '%s' "$1" | jq -r '.model.id // ""')"
+  [ -z "$got" ] || [ "$got" = "$MODEL" ] || \
+    die "requested model '$MODEL' but the provider answered with '$got'. No fallback accepted."
+}
+
+cmd_new() {
+  local name="$1" root rid mp sid pf msg text tokens report
+  valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
+  require_server
+  root="${REPO_OVERRIDE:-$(repo_root)}"
+  [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
+  rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
+  pf="$(read_prompt)"
+  sid="$(create_session "$name" glm-review "$root")"
+  write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg rid "$rid" \
+      --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
+      '{schema_version:1, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r,
+        repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
+        created_at:$ts, last_activity_at:$ts, status:"active"}')"
+  send_prompt "$sid" "$pf"; rm -f "$pf"
+  msg="$(await_turn "$sid" "$name")"
+  verify_model "$msg"
+  text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  emit "$name" review "$sid" "$text" "$tokens" "$report"
+}
+
+cmd_ask() {
+  local name="$1" root rid mp sid pf msg text tokens report before after lock
+  require_server
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
+  sid="$(jq -r .opencode_session_id "$mp")"
+  [ "$(jq -r .type "$mp")" = "review" ] || die "session '$name' is not a review session."
+  api GET "/session/$sid" | jq -e .id >/dev/null 2>&1 || \
+    die "session '$name' is orphaned: local metadata exists but the OpenCode server has no such session.
+       Start a new one (a replacement under the same name would falsely imply continuity):
+         ai-glm delete $name && ai-glm new $name ..."
+  pf="$(read_prompt)"
+  lock="$(lock_path "$rid" "$name")"; mkdir -p "$(dirname "$lock")"
+  exec 9>"$lock"
+  flock -w "$LOCK_TIMEOUT" 9 || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
+  before="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
+  send_prompt "$sid" "$pf"; rm -f "$pf"
+  msg="$(await_turn "$sid" "$name")"
+  verify_model "$msg"
+  after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
+  if [ "$before" != "$after" ]; then
+    write_meta "$mp" "$(jq '.status="failed"' "$mp")"
+    die "review session '$name' CHANGED the working tree. Review mode must be read-only.
+       The session is marked failed; inspect 'git status' before doing anything else."
+  fi
+  write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)" '.last_activity_at=$ts' "$mp")"
+  text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  emit "$name" review "$sid" "$text" "$tokens" "$report"
+}
+
+cmd_implement() {
+  local name="$1" root rid wt sid pf msg text tokens patch report
+  valid_name "$name" || die "invalid session name '$name'"
+  require_server
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"
+  pf="$(read_prompt)"
+  wt="$STATE_DIR/wt/$rid/$(date -u +%Y%m%d%H%M%S)-$$"
+  mkdir -p "$(dirname "$wt")"
+  # The worktree is created and destroyed inside this one command. Nothing survives it,
+  # no branch is created, and Albert is never asked to merge or clean anything up.
+  # shellcheck disable=SC2064
+  trap "git -C '$root' worktree remove --force '$wt' >/dev/null 2>&1 || true; git -C '$root' worktree prune >/dev/null 2>&1 || true; rm -rf '$wt'" EXIT
+  git -C "$root" worktree add --detach "$wt" HEAD >/dev/null 2>&1 || die "could not create a scratch worktree at $wt"
+  sid="$(create_session "$name (implement)" glm-implement "$wt")"
+  send_prompt "$sid" "$pf"; rm -f "$pf"
+  msg="$(await_turn "$sid" "$name")"
+  verify_model "$msg"
+  git -C "$wt" add -A >/dev/null 2>&1 || true
+  patch="$root/.ai/reviews/glm-$name-$(date -u +%Y%m%dT%H%M%SZ).patch"
+  mkdir -p "$(dirname "$patch")"
+  git -C "$wt" diff --cached > "$patch"
+  text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  report="$(write_report "$root" "$name" implement "$text
+
+## Patch
+
+\`$patch\`
+
+\`\`\`
+$(git -C "$wt" diff --cached --stat)
+\`\`\`
+" "$tokens" "$sid")"
+  note "Patch written to: $patch"
+  note "Apply it only after review:  git apply --check '$patch' && git apply '$patch'"
+  emit "$name" implement "$sid" "$text" "$tokens" "$report"
+}
+
+cmd_list() {
+  local f
+  shopt -s nullglob
+  if [ "$JSON_OUT" = 1 ]; then
+    jq -s '{schema_version:1, sessions:.}' "$STATE_DIR"/sessions/*/*.json 2>/dev/null || echo '{"schema_version":1,"sessions":[]}'
+    return
+  fi
+  printf '%-24s %-10s %-8s %-10s %s\n' NAME TYPE CALLER STATUS REPOSITORY
+  for f in "$STATE_DIR"/sessions/*/*.json; do
+    jq -r '[.name,.type,.caller,.status,.repository_root]|@tsv' "$f"
+  done | awk -F'\t' '{printf "%-24s %-10s %-8s %-10s %s\n",$1,$2,$3,$4,$5}'
+}
+
+find_meta() { # find_meta NAME -> path
+  local root rid mp
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$1")"
+  [ -f "$mp" ] || die "no session '$1' for caller '$CALLER' in this repo."
+  printf '%s' "$mp"
+}
+
+cmd_show()   { cat "$(find_meta "$1")"; }
+cmd_abort()  { require_server; api POST "/session/$(jq -r .opencode_session_id "$(find_meta "$1")")/abort" >/dev/null; note "aborted: $1"; }
+cmd_diff()   { require_server; api GET  "/session/$(jq -r .opencode_session_id "$(find_meta "$1")")/diff"; }
+
+cmd_transcript() {
+  local sid; sid="$(jq -r .opencode_session_id "$(find_meta "$1")")"
+  require_server
+  api GET "/api/session/$sid/message?limit=200" | jq -r '
+    .data | reverse | .[] |
+    if .type=="user" then "\n### user\n" + (.text // "")
+    else "\n### glm\n" + ([.content[]? | select(.type=="text") | .text] | join("\n"))
+    end'
+}
+
+cmd_delete() {
+  local mp sid; mp="$(find_meta "$1")"; sid="$(jq -r .opencode_session_id "$mp")"
+  server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
+  rm -f "$mp"
+  note "deleted session: $1"
+}
+
+cmd_server() {
+  case "${1:-status}" in
+    start)   systemctl --user start opencode-glm.service;   note "started" ;;
+    stop)    systemctl --user stop opencode-glm.service;    note "stopped" ;;
+    restart) systemctl --user restart opencode-glm.service; note "restarted" ;;
+    status)
+      systemctl --user status opencode-glm.service --no-pager || true
+      printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)"
+      ;;
+    *) die "usage: ai-glm server start|stop|restart|status" ;;
+  esac
+}
+
+# --------------------------------------------------------------------------------
+# doctor
+# --------------------------------------------------------------------------------
+FAILS=0
+chk() { # chk LABEL COMMAND...
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"
+  else printf 'FAIL  %s\n' "$label"; FAILS=$((FAILS+1)); fi
+}
+warnchk() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"; else printf 'WARN  %s\n' "$label"; fi
+}
+
+cmd_doctor() {
+  local repo_root_dir pinned installed health_ver pw
+  repo_root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  pinned="$(tr -d ' \t\r\n' < "$repo_root_dir/config/opencode/version" 2>/dev/null || echo '')"
+
+  printf 'ai-glm doctor\n\n'
+  chk "pinned version file present"        test -n "$pinned"
+  chk "opencode wrapper installed"         test -x "$HOME/.local/bin/opencode-ai-devops"
+  chk "launcher installed (0700)"          test -x "$HOME/.local/bin/opencode-glm-launch"
+  installed="$("$HOME/.local/bin/opencode-ai-devops" --version 2>/dev/null | tail -1 | tr -d ' \r')"
+  chk "installed binary matches pin ($pinned)" test "$installed" = "$pinned"
+  chk "canonical config installed"         test -f "$CFG_DIR/opencode-xdg/opencode/opencode.json"
+  chk "review agent installed"             test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
+  chk "implement agent installed"          test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
+  chk "review agent has no bash tool"      grep -q '^  bash: false' "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
+  chk "implement agent has no bash tool"   grep -q '^  bash: false' "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
+  chk "server password present"            test -s "$PW_FILE"
+  chk "server password is 0600"            test "$(stat -c '%a' "$PW_FILE" 2>/dev/null)" = "600"
+  chk "1Password CLI present"              command -v op
+  chk "service-account token present"      test -s "$CFG_DIR/op-service-account"
+  chk "mcp.env present"                    test -f "$CFG_DIR/mcp.env"
+  chk "ZAI_API_KEY reference present"      grep -q '^ZAI_API_KEY=' "$CFG_DIR/mcp.env"
+  chk "systemd unit installed"             test -f "$HOME/.config/systemd/user/opencode-glm.service"
+  chk "service enabled"                    systemctl --user is-enabled opencode-glm.service
+  chk "service active"                     systemctl --user is-active opencode-glm.service
+  # StartLimitBurst leaves a flapping unit in `failed` where it would sit silently.
+  if systemctl --user is-failed opencode-glm.service >/dev/null 2>&1; then
+    printf 'FAIL  service is not in a failed state\n'; FAILS=$((FAILS+1))
+  else
+    printf 'PASS  service is not in a failed state\n'
+  fi
+  chk "health endpoint answers"            server_up
+  if server_up; then
+    health_ver="$(api GET /global/health | jq -r .version)"
+    chk "health version matches pin"       test "$health_ver" = "$pinned"
+    chk "requires authentication"          test "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$BASE/global/health")" = "401"
+    local providers; providers="$(api GET /config/providers 2>/dev/null || echo '{}')"
+    printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
+      && printf 'PASS  provider %s available\n' "$PROVIDER" \
+      || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
+    printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
+      '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
+      && printf 'PASS  model %s available\n' "$MODEL" \
+      || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+  fi
+  # Loopback only. A public bind would expose GLM (and the repo) to the network.
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn 2>/dev/null | grep -q ":$PORT " && ss -ltn 2>/dev/null | grep ":$PORT " | grep -qvE '127\.0\.0\.1|\[::1\]'; then
+      printf 'FAIL  server listens ONLY on loopback\n'; FAILS=$((FAILS+1))
+    else
+      printf 'PASS  server listens only on loopback\n'
+    fi
+  fi
+  chk "no secret in the systemd unit"      bash -c "! grep -qiE 'api[_-]?key|zhipu|zai_' '$HOME/.config/systemd/user/opencode-glm.service'"
+  warnchk "old glm-claude config removed"  test ! -d "$CFG_DIR/glm-claude"
+  warnchk "old ai-glm-agent not on PATH"   bash -c "! command -v ai-glm-agent"
+  # Orphaned scratch worktrees: nothing ai-glm creates may outlive its command.
+  if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
+    printf 'WARN  orphaned scratch worktrees found under %s/wt (sweeping)\n' "$STATE_DIR"
+    find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d -exec rm -rf {} + 2>/dev/null || true
+  else
+    printf 'PASS  no orphaned scratch worktrees\n'
+  fi
+
+  printf '\n'
+  if [ "$FAILS" -gt 0 ]; then printf '%d check(s) FAILED.\n' "$FAILS"; exit 1; fi
+  printf 'All required checks passed.\n'
+}
+
+# --------------------------------------------------------------------------------
+# Argument parsing. Overrides that would break cache stability or the safety model
+# are rejected explicitly rather than ignored.
+# --------------------------------------------------------------------------------
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
+CMD="${1:-}"; shift || true
+[ -n "$CMD" ] || { usage; exit 2; }
+ARG=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prompt)       PROMPT_TEXT="${2:-}"; shift 2 ;;
+    --prompt-file)  PROMPT_FILE="${2:-}"; shift 2 ;;
+    --repo)         REPO_OVERRIDE="$(cd "${2:-}" && pwd)"; shift 2 ;;
+    --caller)       CALLER="${2:-}"; shift 2 ;;
+    --json)         JSON_OUT=1; shift ;;
+    --timeout)      TIMEOUT="${2:-}"; shift 2 ;;
+    --lock-timeout) LOCK_TIMEOUT="${2:-}"; shift 2 ;;
+    -h|--help)      usage; exit 0 ;;
+    --model|--agent|--system|--tools|--provider|--mcp|--directory|--temperature|--reasoning)
+      die "$1 is not overridable. Model, agent, provider, tools and directory are fixed
+       when a session is created: a stable request prefix is what makes prompt caching
+       work, and a stable agent is what keeps a review session read-only." ;;
+    -*)             die "unknown option: $1" ;;
+    *)              [ -n "$ARG" ] && ARG="$ARG $1" || ARG="$1"; shift ;;
+  esac
+done
+
+case "$CMD" in
+  new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
+  ask)        [ -n "$ARG" ] || die "usage: ai-glm ask <name> ..."; cmd_ask "$ARG" ;;
+  implement)  [ -n "$ARG" ] || die "usage: ai-glm implement <name> ..."; cmd_implement "$ARG" ;;
+  list)       cmd_list ;;
+  show)       cmd_show "$ARG" ;;
+  transcript) cmd_transcript "$ARG" ;;
+  diff)       cmd_diff "$ARG" ;;
+  abort)      cmd_abort "$ARG" ;;
+  delete)     cmd_delete "$ARG" ;;
+  doctor)     cmd_doctor ;;
+  server)     cmd_server "$ARG" ;;
+  -h|--help|help) usage ;;
+  *)          die "unknown command: $CMD (try: ai-glm --help)" ;;
+esac

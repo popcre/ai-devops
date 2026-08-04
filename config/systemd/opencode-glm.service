@@ -1,0 +1,23 @@
+[Unit]
+Description=AI DevOps OpenCode GLM server (loopback only)
+Documentation=file://%h/.config/ai-devops/opencode/README
+After=network-online.target
+Wants=network-online.target
+# A flapping unit must NOT fan out `op run` 1Password reads. Five starts in five
+# minutes and systemd gives up until it is started by hand or by `ai-glm server start`.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# The launcher resolves the Z.ai key from 1Password immediately before exec, so no
+# long-lived plaintext copy of the key exists on disk.
+ExecStart=%h/.local/bin/opencode-glm-launch
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
