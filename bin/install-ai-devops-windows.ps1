@@ -24,6 +24,8 @@ param(
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
     [string]$CodexHome = (Join-Path $HOME ".codex"),
     [switch]$SkillsDryRun,
+    # Deprecated: retiring skills is now automatic and needs no flag.
+    # Accepted so older docs and scripts keep working.
     [switch]$MigrateObsolete
 )
 
@@ -122,6 +124,9 @@ function Install-SkillFolder {
                 Remove-Item -LiteralPath $dest -Recurse -Force
             }
             Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse
+            # Stamp as ai-devops-managed so a later run may retire it. Vendor
+            # skills sharing this root never get the marker and are never moved.
+            New-Item -ItemType File -Force -Path (Join-Path $dest ".ai-devops-managed") | Out-Null
         }
         Write-Note "+ $($_.Name)"
         $script:InstalledSkillCount += 1
@@ -131,42 +136,65 @@ function Install-SkillFolder {
     return $count
 }
 
-function Invoke-ObsoleteSkillMigration {
+# Quarantine skills ai-devops installed that the repo no longer ships. Generic
+# on purpose: no skill name lives here, so retiring a skill is just "delete it
+# from skills/ and commit". Only directories carrying the .ai-devops-managed
+# marker (or named in config/retired-skills.txt, the pre-marker migration list)
+# are eligible — vendor skills in the same root are never touched. Nothing is
+# deleted; orphans move to <client>\skills-quarantine\.
+function Invoke-OrphanSkillPruning {
     param(
         [string]$ClientHome,
         [string]$Label,
-        [string]$Root
+        [string]$Root,
+        [string[]]$SourceRoots
     )
 
-    $old = Join-Path $ClientHome "skills\synology-sharesync-stuck-triage"
-    if (-not (Test-Path -LiteralPath $old)) {
+    $destRoot = Join-Path $ClientHome "skills"
+    if (-not (Test-Path -LiteralPath $destRoot)) { return }
+
+    $expected = @()
+    foreach ($src in $SourceRoots) {
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        Get-ChildItem -LiteralPath $src -Directory | ForEach-Object {
+            if (Test-Path -LiteralPath (Join-Path $_.FullName "SKILL.md")) { $expected += $_.Name }
+        }
+    }
+    # An empty repo set means a broken checkout, not that everything retired.
+    if ($expected.Count -eq 0) {
+        Write-Warning "No $Label skills found in the repo — skipping orphan pruning."
         return
     }
 
-    Write-Warning "Obsolete $Label skill remains active at $old and overlaps synology-sharesync-triage."
-    if (-not $MigrateObsolete) {
-        Write-Note "Re-run with -MigrateObsolete to move it into recoverable quarantine."
-        return
-    }
-
-    $replacement = Join-Path $Root "skills\shared\synology-sharesync-triage\SKILL.md"
-    if (-not (Test-Path -LiteralPath $replacement)) {
-        throw "Replacement shared skill is missing; refusing to quarantine $old."
+    $retired = @()
+    $retiredList = Join-Path $Root "config\retired-skills.txt"
+    if (Test-Path -LiteralPath $retiredList) {
+        $retired = Get-Content -LiteralPath $retiredList |
+            ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+            Where-Object { $_ -ne '' }
     }
 
     $quarantineRoot = Join-Path $ClientHome "skills-quarantine"
-    $quarantine = Join-Path $quarantineRoot "synology-sharesync-stuck-triage"
-    if (Test-Path -LiteralPath $quarantine) {
-        throw "Quarantine destination already exists: $quarantine"
-    }
+    Get-ChildItem -LiteralPath $destRoot -Directory | ForEach-Object {
+        if (-not (Test-Path -LiteralPath (Join-Path $_.FullName "SKILL.md"))) { return }
+        if ($expected -contains $_.Name) { return }
+        $managed = (Test-Path -LiteralPath (Join-Path $_.FullName ".ai-devops-managed")) -or
+                   ($retired -contains $_.Name)
+        if (-not $managed) { return }
 
-    if ($SkillsDryRun) {
-        Write-Note "[skills-dry-run] move $old -> $quarantine"
-    } else {
-        New-Item -ItemType Directory -Force -Path $quarantineRoot | Out-Null
-        Move-Item -LiteralPath $old -Destination $quarantine
+        $quarantine = Join-Path $quarantineRoot $_.Name
+        if ($SkillsDryRun) {
+            Write-Note "[skills-dry-run] retire $($_.FullName) -> $quarantine"
+        } else {
+            New-Item -ItemType Directory -Force -Path $quarantineRoot | Out-Null
+            # Re-running must not fail: replace any earlier quarantine copy.
+            if (Test-Path -LiteralPath $quarantine) {
+                Remove-Item -LiteralPath $quarantine -Recurse -Force
+            }
+            Move-Item -LiteralPath $_.FullName -Destination $quarantine
+        }
+        Write-Note "- $($_.Name) ($Label) retired -> $quarantine (recoverable)"
     }
-    Write-Note "Quarantined obsolete $Label skill -> $quarantine"
 }
 
 function Install-GlobalFile {
@@ -239,7 +267,8 @@ $sharedClaudeCount = Install-SkillFolder `
     -DestRoot (Join-Path $ClaudeHome "skills") `
     -Label "shared"
 Write-Note "$sharedClaudeCount shared skills installed for Claude."
-Invoke-ObsoleteSkillMigration -ClientHome $ClaudeHome -Label "Claude" -Root $RepoPath
+Invoke-OrphanSkillPruning -ClientHome $ClaudeHome -Label "Claude" -Root $RepoPath -SourceRoots @(
+    (Join-Path $RepoPath "skills\claude"), (Join-Path $RepoPath "skills\shared"))
 
 Write-Step "Installing Codex skills"
 $codexCount = Install-SkillFolder `
@@ -252,7 +281,8 @@ $sharedCodexCount = Install-SkillFolder `
     -DestRoot (Join-Path $CodexHome "skills") `
     -Label "shared"
 Write-Note "$sharedCodexCount shared skills installed for Codex."
-Invoke-ObsoleteSkillMigration -ClientHome $CodexHome -Label "Codex" -Root $RepoPath
+Invoke-OrphanSkillPruning -ClientHome $CodexHome -Label "Codex" -Root $RepoPath -SourceRoots @(
+    (Join-Path $RepoPath "skills\codex"), (Join-Path $RepoPath "skills\shared"))
 
 if ($SkillsDryRun) {
     Write-Step "Skills dry-run complete"

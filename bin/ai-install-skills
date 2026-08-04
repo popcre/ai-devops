@@ -5,7 +5,22 @@
 #
 #   ai-install-skills                      # install/refresh skills + globals
 #   ai-install-skills --dry-run            # show actions without changing files
-#   ai-install-skills --migrate-obsolete   # quarantine the retired ShareSync skill
+#   ai-install-skills --keep-orphans       # do NOT quarantine retired skills
+#
+# Orphan pruning (the permanent fix for "obsolete skill remains active"):
+# every skill this script installs is stamped with a .ai-devops-managed marker
+# file. On each run, a skill directory carrying that marker but no longer
+# shipped by the repo is moved into <client>/skills-quarantine/. Nothing is
+# deleted. So retiring a skill is just "delete it from skills/ and commit" —
+# it then disappears from every machine on its next sync, with no per-name
+# special case to maintain.
+#
+# The marker is what makes this safe: skill roots also hold skills we do NOT
+# own (vendor skills shipped with the client — e.g. Codex's own `playwright`,
+# which carries its own LICENSE/NOTICE). Those have no marker and are never
+# touched. config/retired-skills.txt is a one-time migration list covering
+# skills ai-devops installed BEFORE markers existed; nothing needs to be added
+# to it going forward.
 #
 # - Claude skills:  skills/claude/<name>/ + skills/shared/<name>/ -> ~/.claude/skills/<name>/
 # - Codex skills:   skills/codex/<name>/ + skills/shared/<name>/ -> ~/.codex/skills/<name>/
@@ -38,22 +53,25 @@ fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 DRY_RUN=false
-MIGRATE_OBSOLETE=false
+KEEP_ORPHANS=false
 
 usage() {
   cat <<'EOF'
-Usage: ai-install-skills [--dry-run] [--migrate-obsolete]
+Usage: ai-install-skills [--dry-run] [--keep-orphans]
 
-  --dry-run            Show every planned action without changing files.
-  --migrate-obsolete   Move synology-sharesync-stuck-triage out of active
-                       skill directories into a recoverable quarantine.
+  --dry-run        Show every planned action without changing files.
+  --keep-orphans   Leave retired/unknown skills active instead of moving them
+                   into <client>/skills-quarantine/ (default is to quarantine).
 EOF
 }
 
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
-    --migrate-obsolete) MIGRATE_OBSOLETE=true ;;
+    --keep-orphans) KEEP_ORPHANS=true ;;
+    # Deprecated: pruning is now the default and needs no flag. Accepted so
+    # older docs, scripts and muscle memory do not fail.
+    --migrate-obsolete) ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -61,6 +79,21 @@ while (($#)); do
 done
 
 run() { if $DRY_RUN; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; else "$@"; fi }
+
+MARKER=".ai-devops-managed"
+
+# Stamp an installed skill as ours, so a later run may retire it. Vendor skills
+# in the same root never get this file and are therefore never touched.
+mark_managed() {
+  if $DRY_RUN; then echo "[dry-run] touch $1/$MARKER"; else : > "$1/$MARKER"; fi
+}
+
+# Names ai-devops installed before markers existed (see config/retired-skills.txt).
+retired_skill_names() {
+  local list="$REPO_ROOT/config/retired-skills.txt"
+  [[ -f "$list" ]] || return 0
+  sed -e 's/#.*//' -e 's/[[:space:]]//g' "$list" | grep -v '^$' || true
+}
 
 skill_names() {
   local root="$1" d
@@ -94,6 +127,7 @@ for d in "$REPO_ROOT"/skills/claude/*/; do
   [[ -f "$d/SKILL.md" ]] || continue
   run rm -rf "$CLAUDE_HOME/skills/$name"
   run cp -a "$d" "$CLAUDE_HOME/skills/$name"
+  mark_managed "$CLAUDE_HOME/skills/$name"
   echo "  + $name"
 done
 claude_count="$(count_skills "$REPO_ROOT/skills/claude")"
@@ -107,6 +141,7 @@ install_skill_tree() {
     name="$(basename "$d")"
     run rm -rf "$dst_root/$name"
     run cp -a "$d" "$dst_root/$name"
+    mark_managed "$dst_root/$name"
     echo "  + $name ($label)"
   done
 }
@@ -115,32 +150,60 @@ install_skill_tree "$REPO_ROOT/skills/shared" "$CLAUDE_HOME/skills" "shared"
 shared_count="$(count_skills "$REPO_ROOT/skills/shared")"
 echo "$claude_count Claude skills + $shared_count shared skills installed for Claude."
 
-migrate_obsolete_skill() {
-  local client_home="$1" label="$2"
-  local old="$client_home/skills/synology-sharesync-stuck-triage"
+# Quarantine every installed skill that the repo no longer ships for this
+# client. Generic on purpose: no skill name appears here, so retiring a skill
+# is just "delete it from skills/ and commit" — the next sync retires it
+# everywhere. Nothing is deleted; orphans move to <client>/skills-quarantine/.
+prune_orphan_skills() {
+  local client_home="$1" label="$2"; shift 2
+  local src_roots=("$@")
+  local dst_root="$client_home/skills"
   local quarantine_root="$client_home/skills-quarantine"
-  local quarantine="$quarantine_root/synology-sharesync-stuck-triage"
+  local name root expected=() found=0 dest
 
-  [[ -d "$old" ]] || return 0
-  echo "WARNING: obsolete $label skill remains active at $old and overlaps synology-sharesync-triage." >&2
-  if ! $MIGRATE_OBSOLETE; then
-    echo "         Re-run with --migrate-obsolete to move it into recoverable quarantine." >&2
+  [[ -d "$dst_root" ]] || return 0
+
+  for root in "${src_roots[@]}"; do
+    while IFS= read -r name; do expected+=("$name"); done < <(skill_names "$root")
+  done
+  # Safety net: an empty repo set means a broken/partial checkout, not that
+  # every skill was retired. Refuse to quarantine the whole tree.
+  if ((${#expected[@]} == 0)); then
+    echo "WARNING: no $label skills found in the repo — skipping orphan pruning." >&2
     return 0
   fi
-  if [[ ! -f "$REPO_ROOT/skills/shared/synology-sharesync-triage/SKILL.md" ]]; then
-    echo "ERROR: replacement shared skill is missing; refusing to quarantine $old." >&2
-    return 1
-  fi
-  if [[ -e "$quarantine" ]]; then
-    echo "ERROR: quarantine destination already exists: $quarantine" >&2
-    return 1
-  fi
-  run mkdir -p "$quarantine_root"
-  run mv "$old" "$quarantine"
-  echo "  quarantined obsolete $label skill -> $quarantine"
+
+  local retired=()
+  while IFS= read -r name; do retired+=("$name"); done < <(retired_skill_names)
+
+  for d in "$dst_root"/*/; do
+    [[ -f "$d/SKILL.md" ]] || continue
+    name="$(basename "$d")"
+    if printf '%s\n' "${expected[@]}" | grep -qxF "$name"; then continue; fi
+    # Only ours: a marker from a previous install, or a pre-marker name we
+    # know ai-devops put there. Anything else belongs to the client/vendor.
+    if [[ ! -f "$d/$MARKER" ]] &&
+       ! { ((${#retired[@]})) && printf '%s\n' "${retired[@]}" | grep -qxF "$name"; }; then
+      continue
+    fi
+    found=1
+    if $KEEP_ORPHANS; then
+      echo "WARNING: retired $label skill left active at $d (--keep-orphans)." >&2
+      continue
+    fi
+    dest="$quarantine_root/$name"
+    # Re-running must not fail: replace any earlier quarantine of the same name.
+    run mkdir -p "$quarantine_root"
+    run rm -rf "$dest"
+    run mv "$d" "$dest"
+    echo "  - $name ($label) retired -> $dest"
+  done
+  ((found)) && echo "  (quarantined copies are recoverable; delete $quarantine_root when you are sure)"
+  return 0
 }
 
-migrate_obsolete_skill "$CLAUDE_HOME" "Claude"
+prune_orphan_skills "$CLAUDE_HOME" "Claude" \
+  "$REPO_ROOT/skills/claude" "$REPO_ROOT/skills/shared"
 
 install_global() {
   local src="$1" dst="$2" label="$3"
@@ -170,13 +233,15 @@ if [[ -d "$CODEX_HOME" ]]; then
     [[ -f "$d/SKILL.md" ]] || continue
     run rm -rf "$CODEX_HOME/skills/$name"
     run cp -a "$d" "$CODEX_HOME/skills/$name"
+    mark_managed "$CODEX_HOME/skills/$name"
     echo "  + $name"
   done
   codex_count="$(count_skills "$REPO_ROOT/skills/codex")"
 
   install_skill_tree "$REPO_ROOT/skills/shared" "$CODEX_HOME/skills" "shared"
   echo "$codex_count Codex skills + $shared_count shared skills installed for Codex."
-  migrate_obsolete_skill "$CODEX_HOME" "Codex"
+  prune_orphan_skills "$CODEX_HOME" "Codex" \
+    "$REPO_ROOT/skills/codex" "$REPO_ROOT/skills/shared"
 
   install_global "$REPO_ROOT/templates/system/AGENTS-global-codex.md" \
                  "$CODEX_HOME/AGENTS.md" "Codex global instructions"
