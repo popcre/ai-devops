@@ -371,18 +371,27 @@ The one-way repo→machine copy is deliberate (a local edit must never be captur
 back). Pruning was simply never implemented — nobody noticed, because an orphan
 fails only when a session actually triggers it.
 
-Future sessions should:
-Treat "the skill is installed" as **no evidence** it came from the repo. When a
-machine behaves oddly, diff `ls ~/.claude/skills` against `ls skills/claude/` in the
-repo. Orphans are worse than clutter: `codex-consult` overlaps semantically with
-`codex-second-opinion`, so a session on `hetz` could match the broken one. If a
-prune step is ever added, it must be opt-in (`--prune`) — a blind prune would delete
-legitimately machine-local skills. Repo-owned cross-client skills live under
-`skills/shared/` and install into both Claude and Codex. The one sanctioned
-migration is explicit and recoverable: `--migrate-obsolete` (Bash) or
-`-MigrateObsolete` (PowerShell) moves only the retired
-`synology-sharesync-stuck-triage` directory outside the active skills root after
-the replacement exists. Default installs warn but never move or delete it.
+FIXED 2026-08-03 — orphans are now pruned automatically:
+Both installers stamp every skill they lay down with a `.ai-devops-managed`
+marker file, and on each run move any marked skill the repo no longer ships into
+`<client>/skills-quarantine/`. So retiring a skill is just "delete it from
+`skills/` and commit" — it leaves every machine on that machine's next sync,
+with no per-name special case. Nothing is deleted, and re-running is safe.
+
+The marker is what makes a blind prune safe, and it must stay: skill roots also
+hold skills ai-devops does **not** own — Codex ships its own `playwright` skill
+with its own LICENSE/NOTICE, and an earlier "prune anything not in the repo"
+draft would have quarantined it. Unmarked directories are never touched.
+`config/retired-skills.txt` is a one-time migration list for skills installed
+before markers existed (only `synology-sharesync-stuck-triage`); nothing new
+should ever be added to it. `--keep-orphans` (Bash) opts out. The old
+`--migrate-obsolete` / `-MigrateObsolete` flags are accepted as no-ops.
+
+Still true: treat "the skill is installed" as **no evidence** it came from the
+repo — a hand-authored local skill has no marker and survives pruning, so when a
+machine behaves oddly, still diff `ls ~/.claude/skills` against `ls
+skills/claude/`. Repo-owned cross-client skills live under `skills/shared/` and
+install into both Claude and Codex.
 
 ### `codex exec resume` takes different flags from `codex exec`
 

@@ -45,14 +45,16 @@ Skill-only maintenance supports preview and a recoverable legacy migration:
 
 ```bash
 ai-install-skills --dry-run
-ai-install-skills --migrate-obsolete
+ai-install-skills --keep-orphans
 ```
 
 On Windows, `bin/install-ai-devops-windows.ps1 -SkillsDryRun` previews only skill
-operations and skips repository, tool, global-file, and login work. Add
-`-MigrateObsolete` to preview moving the retired ShareSync skill into quarantine;
-a normal run with `-MigrateObsolete` performs that move. Neither installer prunes
-other machine-local skills.
+operations and skips repository, tool, global-file, and login work. Both installers
+retire skills automatically: any skill they previously installed (marked with a
+`.ai-devops-managed` file) that the repo no longer ships is moved into
+`<client>/skills-quarantine/`. Skills ai-devops did not install — vendor skills
+shipped with the client, or hand-authored local ones — carry no marker and are
+never touched. Pass `--keep-orphans` (Bash) to opt out.
 
 ## Update
 

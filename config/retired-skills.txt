@@ -1,0 +1,11 @@
+# One-time migration list — skills ai-devops installed BEFORE bin/ai-install-skills
+# started stamping installed skills with a .ai-devops-managed marker (2026-08-03).
+#
+# Without markers there is no way to tell an ai-devops leftover apart from a
+# vendor skill the client shipped itself, so these pre-marker names are listed
+# explicitly. Every skill installed from now on carries a marker and is retired
+# automatically by deleting it from skills/ — DO NOT add new names here.
+#
+# One skill name per line. Blank lines and # comments ignored.
+
+synology-sharesync-stuck-triage

@@ -52,13 +52,13 @@ Per-machine notes:
 | Windows dev boxes (916 / t16 / 4837) | `bash bin/ai-install-skills` via Git Bash | — |
 | `hetz` (Ubuntu) | Runs as user **`ai`**, not root: repo is `ai:ai`-owned at `/worksp/ai-devops`, skills land in `/home/ai/.claude/skills`. Root has **no** `~/.claude/skills`. | `sudo -u ai -H bash -lc '…'` when driving it over SSH as root, or the install lands in `/root` and does nothing useful. **Never run `git` as root there** — it writes root-owned objects into `.git/objects` and every later `sudo -u ai git pull` fails with `insufficient permission…`; repair with `chown -R ai:ai /worksp/ai-devops/.git`. `-c safe.directory` hides the ownership warning but does **not** prevent this. |
 
-Orphaned skills are never pruned — see the `ai-install-skills` quirk in
-`AGENTS.md`.
+Skills ai-devops installed that the repo has since dropped are retired
+automatically into `<client>/skills-quarantine/` (recoverable, never deleted).
+Skills it did not install are left alone — see the `ai-install-skills` entry in
+`AGENTS.md` for how the `.ai-devops-managed` marker draws that line, and use
+`--dry-run` to preview or `--keep-orphans` to opt out.
 
-Shared/client name collisions fail before anything is copied. The retired
-`synology-sharesync-stuck-triage` skill is detected but left active by default;
-use `--migrate-obsolete` to move only that exact directory into recoverable
-quarantine after reviewing a `--dry-run`.
+Shared/client name collisions fail before anything is copied.
 
 ## What replaces what
 
