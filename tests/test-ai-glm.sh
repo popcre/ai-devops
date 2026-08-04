@@ -155,6 +155,13 @@ check "doctor sweeps the glm-claude vestige" "grep -q 'swept just now' '$AI_GLM'
 check "ubuntu setup sweeps it too"           "grep -q 'Removed retired' '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "windows setup sweeps it too"          "grep -q 'Removed retired' '$REPO_ROOT/bin/setup-opencode-glm.ps1'"
 
+echo "== a down server must explain itself =="
+# "FAIL health endpoint answers" on its own is not actionable. Doctor must say whether
+# the service exists at all and give the exact next command.
+check "health failure names a next command" "grep -q 'ai-glm server start' '$AI_GLM'"
+check "health failure names the setup script" "grep -q 'setup-opencode-glm' '$AI_GLM'"
+check "health failure shows recent log lines"  "grep -qE 'journalctl --user -u opencode-glm -n|tail -n 12' '$AI_GLM'"
+
 echo "== completion rule =="
 check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_GLM' || grep -q 'finish\" = \"stop' '$AI_GLM'"
 check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' || grep -q 'idle -ge 2' '$AI_GLM'"

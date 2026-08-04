@@ -579,7 +579,37 @@ cmd_doctor() {
       printf 'PASS  service is not in a failed state\n'
     fi
   fi
-  chk "health endpoint answers"            server_up
+  # A bare "FAIL health endpoint answers" tells you nothing you can act on. When the
+  # server is down, say WHY and give the exact next command.
+  if server_up; then
+    printf 'PASS  health endpoint answers\n'
+  else
+    printf 'FAIL  health endpoint answers\n'; FAILS=$((FAILS+1))
+    if [ "$IS_WINDOWS" = 1 ]; then
+      if schtasks //Query //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 ||
+         schtasks  /Query  /TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1; then
+        printf '      the scheduled task exists but nothing is listening on %s\n' "$BASE"
+        printf '      start it:   ai-glm server start\n'
+      else
+        printf '      no scheduled task on this machine - setup never finished\n'
+        printf '      run:        .\\bin\\setup-opencode-glm.ps1\n'
+      fi
+      if [ -s "$OC_HOME/server.log" ]; then
+        printf '      last lines of %s:\n' "$OC_HOME/server.log"
+        tail -n 12 "$OC_HOME/server.log" 2>/dev/null | sed 's/^/        /'
+      else
+        printf '      no %s yet, so the service has never started\n' "$OC_HOME/server.log"
+      fi
+    else
+      if systemctl --user list-unit-files opencode-glm.service >/dev/null 2>&1; then
+        printf '      start it:   ai-glm server start\n'
+        journalctl --user -u opencode-glm -n 12 --no-pager 2>/dev/null | sed 's/^/        /'
+      else
+        printf '      no service on this machine - setup never finished\n'
+        printf '      run:        bin/setup-opencode-glm.sh\n'
+      fi
+    fi
+  fi
   if server_up; then
     health_ver="$(api GET /global/health | jq -r .version)"
     chk "health version matches pin"       test "$health_ver" = "$pinned"
