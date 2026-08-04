@@ -69,6 +69,12 @@ for opt in --model --agent --system --tools --provider --directory --temperature
   check "$opt error explains why"           "'$AI_GLM' ask x $opt y 2>&1 | grep -q 'not overridable'"
 done
 
+# doctor is normally invoked through the /usr/local/bin symlink; if it resolves the
+# repo root from $0 without following the link it looks for config under /usr/local.
+mkdir -p "$TMP/binlink"
+ln -sf "$AI_GLM" "$TMP/binlink/ai-glm"
+check "doctor resolves through a symlink"   "'$TMP/binlink/ai-glm' doctor 2>&1 | grep -q 'PASS  pinned version file present'"
+
 echo "== repository + session identity =="
 mkdir -p "$TMP/repoA" "$TMP/repoB"
 for d in repoA repoB; do

@@ -481,7 +481,11 @@ warnchk() {
 
 cmd_doctor() {
   local repo_root_dir pinned installed health_ver pw
-  repo_root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # Resolve through the /usr/local/bin symlink, or the repo root would come out as
+  # /usr/local and every repo-relative check would fail.
+  local self
+  self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+  repo_root_dir="$(cd "$(dirname "$self")/.." && pwd)"
   pinned="$(tr -d ' \t\r\n' < "$repo_root_dir/config/opencode/version" 2>/dev/null || echo '')"
 
   printf 'ai-glm doctor\n\n'
