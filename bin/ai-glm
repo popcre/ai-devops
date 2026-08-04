@@ -37,6 +37,12 @@ die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
 note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
 
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+  *) IS_WINDOWS=0 ;;
+esac
+[ "${OS:-}" = "Windows_NT" ] && IS_WINDOWS=1
+
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 need curl; need jq; need git
 
@@ -44,12 +50,15 @@ need curl; need jq; need git
 # HTTP. Every request is authenticated; the server 401s otherwise.
 # --------------------------------------------------------------------------------
 server_pw() {
-  [ -s "$PW_FILE" ] || die "missing server password file: $PW_FILE (run setup-opencode-glm.sh)"
+  # Return empty rather than dying: doctor probes the server while deliberately
+  # inspecting a machine that may not be set up, and a die() here printed a stray
+  # error in the middle of the report. require_server gives the actionable message.
+  [ -s "$PW_FILE" ] || return 1
   tr -d '\r\n' < "$PW_FILE"
 }
 api() { # api METHOD PATH [JSON_BODY_FILE]
   local method="$1" path="$2" body="${3:-}" pw
-  pw="$(server_pw)"
+  pw="$(server_pw || true)"
   if [ -n "$body" ]; then
     curl -sS -m 120 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
@@ -58,12 +67,17 @@ api() { # api METHOD PATH [JSON_BODY_FILE]
   fi
 }
 api_code() { # api_code METHOD PATH -> HTTP status only
-  local pw; pw="$(server_pw)"
+  local pw; pw="$(server_pw || true)"
   curl -sS -m 30 -o /dev/null -w '%{http_code}' \
     -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$1" "$BASE$2" 2>/dev/null || echo 000
 }
 server_up() { [ "$(api_code GET /global/health)" = "200" ]; }
 require_server() {
+  if [ ! -s "$PW_FILE" ]; then
+    die "GLM is not set up on this machine (no $PW_FILE).
+       Ubuntu:  bin/setup-opencode-glm.sh
+       Windows: .\\bin\\setup-opencode-glm.ps1"
+  fi
   server_up || die "OpenCode GLM server is not answering on $BASE.
        Try: ai-glm server start     (then: ai-glm doctor)"
 }
@@ -453,6 +467,19 @@ cmd_delete() {
 }
 
 cmd_server() {
+  if [ "$IS_WINDOWS" = 1 ]; then
+    case "${1:-status}" in
+      start)   schtasks //Run    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "started" ;;
+      stop)    schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "stopped" ;;
+      restart) schtasks //End //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 || true
+               sleep 3
+               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "restarted" ;;
+      status)  schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20
+               printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)" ;;
+      *) die "usage: ai-glm server start|stop|restart|status" ;;
+    esac
+    return
+  fi
   case "${1:-status}" in
     start)   systemctl --user start opencode-glm.service;   note "started" ;;
     stop)    systemctl --user stop opencode-glm.service;    note "stopped" ;;
@@ -480,7 +507,7 @@ warnchk() {
 }
 
 cmd_doctor() {
-  local repo_root_dir pinned installed health_ver pw
+  local repo_root_dir pinned installed health_ver pw bin_path
   # Resolve through the /usr/local/bin symlink, or the repo root would come out as
   # /usr/local and every repo-relative check would fail.
   local self
@@ -490,10 +517,23 @@ cmd_doctor() {
 
   printf 'ai-glm doctor\n\n'
   chk "pinned version file present"        test -n "$pinned"
-  chk "opencode wrapper installed"         test -x "$HOME/.local/bin/opencode-ai-devops"
-  chk "launcher installed (0700)"          test -x "$HOME/.local/bin/opencode-glm-launch"
-  installed="$("$HOME/.local/bin/opencode-ai-devops" --version 2>/dev/null | tail -1 | tr -d ' \r')"
-  chk "installed binary matches pin ($pinned)" test "$installed" = "$pinned"
+  chk "launcher installed"                 test -f "$HOME/.local/bin/opencode-glm-launch"
+  if [ "$IS_WINDOWS" = 1 ]; then
+    # Windows has no Unix wrapper: the launcher execs the pinned binary directly and
+    # ai-glm.cmd is what puts the command on PATH.
+    chk "ai-glm command installed"         test -f "$HOME/.local/bin/ai-glm.cmd"
+    bin_path="$(sed -n 's|^exec "\(.*opencode\.exe\)".*|\1|p' "$HOME/.local/bin/opencode-glm-launch" 2>/dev/null | tail -1)"
+  else
+    chk "opencode wrapper installed"       test -x "$HOME/.local/bin/opencode-ai-devops"
+    bin_path="$HOME/.local/bin/opencode-ai-devops"
+  fi
+  # Never let a missing binary abort doctor: under `set -e` a failing command
+  # substitution here ended the whole report after three lines on Windows.
+  installed=""
+  if [ -n "${bin_path:-}" ] && [ -f "$bin_path" ]; then
+    installed="$("$bin_path" --version 2>/dev/null | tail -1 | tr -d ' \r' || true)"
+  fi
+  chk "installed binary matches pin ($pinned)" test -n "$installed" -a "$installed" = "$pinned"
   chk "canonical config installed"         test -f "$CFG_DIR/opencode-xdg/opencode/opencode.json"
   chk "review agent installed"             test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-review.md"
   chk "implement agent installed"          test -f "$CFG_DIR/opencode-xdg/opencode/agent/glm-implement.md"
@@ -505,14 +545,24 @@ cmd_doctor() {
   chk "service-account token present"      test -s "$CFG_DIR/op-service-account"
   chk "mcp.env present"                    test -f "$CFG_DIR/mcp.env"
   chk "ZAI_API_KEY reference present"      grep -q '^ZAI_API_KEY=' "$CFG_DIR/mcp.env"
-  chk "systemd unit installed"             test -f "$HOME/.config/systemd/user/opencode-glm.service"
-  chk "service enabled"                    systemctl --user is-enabled opencode-glm.service
-  chk "service active"                     systemctl --user is-active opencode-glm.service
-  # StartLimitBurst leaves a flapping unit in `failed` where it would sit silently.
-  if systemctl --user is-failed opencode-glm.service >/dev/null 2>&1; then
-    printf 'FAIL  service is not in a failed state\n'; FAILS=$((FAILS+1))
+  if [ "$IS_WINDOWS" = 1 ]; then
+    chk "service wrapper installed"        test -f "$HOME/.local/bin/opencode-glm-service"
+    if schtasks //Query //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 ||
+       schtasks  /Query  /TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1; then
+      printf 'PASS  scheduled task registered\n'
+    else
+      printf 'FAIL  scheduled task registered\n'; FAILS=$((FAILS+1))
+    fi
   else
-    printf 'PASS  service is not in a failed state\n'
+    chk "systemd unit installed"           test -f "$HOME/.config/systemd/user/opencode-glm.service"
+    chk "service enabled"                  systemctl --user is-enabled opencode-glm.service
+    chk "service active"                   systemctl --user is-active opencode-glm.service
+    # StartLimitBurst leaves a flapping unit in `failed` where it would sit silently.
+    if systemctl --user is-failed opencode-glm.service >/dev/null 2>&1; then
+      printf 'FAIL  service is not in a failed state\n'; FAILS=$((FAILS+1))
+    else
+      printf 'PASS  service is not in a failed state\n'
+    fi
   fi
   chk "health endpoint answers"            server_up
   if server_up; then
@@ -529,7 +579,7 @@ cmd_doctor() {
       || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
   fi
   # Loopback only. A public bind would expose GLM (and the repo) to the network.
-  if command -v ss >/dev/null 2>&1; then
+  if [ "$IS_WINDOWS" = 0 ] && command -v ss >/dev/null 2>&1; then
     if ss -ltn 2>/dev/null | grep -q ":$PORT " && ss -ltn 2>/dev/null | grep ":$PORT " | grep -qvE '127\.0\.0\.1|\[::1\]'; then
       printf 'FAIL  server listens ONLY on loopback\n'; FAILS=$((FAILS+1))
     else

@@ -91,7 +91,9 @@ check "repo id is stable"                   "test '$idA' = \"\$(cd '$TMP/repoA' 
 
 echo "== error paths without a server =="
 check "new fails when server is down"       "! ( cd '$TMP/repoA' && '$AI_GLM' new probe --prompt hi ) >/dev/null 2>&1"
-check "server-down message is actionable"   "( cd '$TMP/repoA' && '$AI_GLM' new probe --prompt hi 2>&1 ) | grep -q 'ai-glm server start'"
+# Either message is fine as long as it names the exact next command: "not set up yet"
+# (no password file) or "server not answering" (installed but down).
+check "server-down message is actionable"   "( cd '$TMP/repoA' && '$AI_GLM' new probe --prompt hi 2>&1 ) | grep -qE 'setup-opencode-glm|ai-glm server start'"
 check "ask on unknown session fails"        "! ( cd '$TMP/repoA' && '$AI_GLM' ask nope --prompt hi ) >/dev/null 2>&1"
 check "invalid session name rejected"       "! ( cd '$TMP/repoA' && '$AI_GLM' new 'bad name!' --prompt hi ) >/dev/null 2>&1"
 check "non-git directory rejected"          "! ( cd '$TMP' && '$AI_GLM' new probe --prompt hi ) >/dev/null 2>&1"
@@ -125,6 +127,19 @@ check "skill tells callers to use ai-glm"   "grep -q 'ai-glm new' '$S'"
 check "skill forbids calling opencode"      "grep -qi 'never call opencode' '$S'"
 check "skill says continue, not recreate"   "grep -q 'ai-glm list' '$S'"
 check "skill has no stale launcher ref"     "! grep -q 'ai-glm-agent' '$S'"
+
+echo "== doctor must report, not abort =="
+# On Windows, doctor stopped after three lines: a missing binary made a command
+# substitution fail and `set -e` ended the run, so Albert saw one FAIL and no report.
+# Doctor must always print every check and exit non-zero.
+BARE="$TMP/bare"; mkdir -p "$BARE/cfg"
+dout="$(HOME="$BARE" AI_DEVOPS_CONFIG_DIR="$BARE/cfg" AI_GLM_STATE_DIR="$BARE/state" "$AI_GLM" doctor 2>&1)"
+dn=$(printf '%s\n' "$dout" | grep -c 'PASS\|FAIL\|WARN')
+check "doctor reports every check on a bare machine" "test $dn -ge 20"
+check "doctor exits nonzero on a bare machine"       "! ( HOME='$BARE' AI_DEVOPS_CONFIG_DIR='$BARE/cfg' '$AI_GLM' doctor ) >/dev/null 2>&1"
+check "doctor prints no stray error lines"           "! printf '%s' \"\$dout\" | grep -q 'ai-glm: error:'"
+check "doctor knows Windows from Linux"              "grep -q 'IS_WINDOWS' '$AI_GLM'"
+check "server control works on Windows"              "grep -q 'schtasks' '$AI_GLM'"
 
 echo "== completion rule =="
 check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_GLM' || grep -q 'finish\" = \"stop' '$AI_GLM'"
