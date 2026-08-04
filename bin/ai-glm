@@ -538,7 +538,7 @@ cmd_doctor() {
   fi
   chk "no secret in the systemd unit"      bash -c "! grep -qiE 'api[_-]?key|zhipu|zai_' '$HOME/.config/systemd/user/opencode-glm.service'"
   warnchk "old glm-claude config removed"  test ! -d "$CFG_DIR/glm-claude"
-  warnchk "old ai-glm-agent not on PATH"   bash -c "! command -v ai-glm-agent"
+  chk "retired ai-glm-agent fully gone"    bash -c "! command -v ai-glm-agent"
   # Orphaned scratch worktrees: nothing ai-glm creates may outlive its command.
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  orphaned scratch worktrees found under %s/wt (sweeping)\n' "$STATE_DIR"

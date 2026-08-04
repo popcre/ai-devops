@@ -644,14 +644,32 @@ if (Test-Path -LiteralPath $codexFix) {
 # --------------------------------------------------------------------------
 # Done + validation checklist
 # --------------------------------------------------------------------------
-Step "GLM delegation (server-side)"
-# There is no local GLM server on Windows. GLM now runs as named, persistent
-# sessions on a loopback-only OpenCode server on the Ubuntu host, driven by
-# `ai-glm`. The retired Windows launcher (bin\ai-glm-agent.ps1) is gone, so
-# there is nothing to probe here. Windows Claude and Codex sessions call
-# `ai-glm` on Ubuntu over the existing SSH workflow, inside the target repo.
-# See docs/glm-opencode.md.
-Ok "GLM is reached via ai-glm on the Ubuntu host (no Windows GLM launcher)"
+Step "GLM server (local OpenCode, loopback only)"
+# Installs the pinned OpenCode build, the canonical agents, the scheduled task, and
+# the `ai-glm` command for PowerShell. It installs its own prerequisites (Git, Node,
+# op, jq) via winget, so nothing here has to be done by hand. See docs/glm-opencode.md.
+$glmSetup = Join-Path $RepoPath "bin\setup-opencode-glm.ps1"
+if (Test-Path -LiteralPath $glmSetup) {
+  try {
+    & $glmSetup -RepoPath $RepoPath
+    if ($LASTEXITCODE -ne 0) { throw "setup-opencode-glm.ps1 exited $LASTEXITCODE" }
+    Ok "GLM runs locally: ai-glm is on PATH and the OpenCode server is healthy"
+  } catch {
+    # Loud, not silent: say what broke and what still works.
+    Warn "Local GLM setup did not complete: $($_.Exception.Message)"
+    Warn "Re-run by hand:  & '$glmSetup'"
+    Warn "Until then, GLM is only reachable by running ai-glm on the Ubuntu host over SSH."
+  }
+} else {
+  Warn "Missing $glmSetup - pull the latest ai-devops and re-run."
+}
+
+# Retired: bin\ai-glm-agent.ps1 (GLM inside a Claude Code child process). Remove any
+# leftover PATH shim so a stale command cannot linger.
+foreach ($stale in @((Join-Path $env:USERPROFILE ".local\bin\ai-glm-agent.cmd"),
+                     (Join-Path $RepoPath "bin\ai-glm-agent.ps1"))) {
+  if (Test-Path -LiteralPath $stale) { Remove-Item -Force -LiteralPath $stale; Note "removed retired $stale" }
+}
 
 Step "Done"
 Write-Host "Setup summary:"

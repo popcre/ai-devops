@@ -77,14 +77,8 @@ security-critical launcher and the `ai-glm` client are the same bash scripts use
 Ubuntu, run through Git Bash. Only the service manager differs (Scheduled Task instead
 of systemd).
 
-Prerequisites, checked by the installer and named exactly if missing:
-
-```powershell
-winget install --id Git.Git          # Git for Windows, provides Git Bash
-winget install --id jqlang.jq        # jq, used by ai-glm
-```
-
-Install:
+`bin/setup-machine.ps1` runs this automatically, so a normal machine setup needs no
+extra step. To install or repair GLM on its own:
 
 ```powershell
 cd C:\repos\ai-devops
@@ -92,17 +86,26 @@ git pull
 .\bin\setup-opencode-glm.ps1
 ```
 
-Do **not** run it elevated; everything lands in your user profile. It installs the
-pinned OpenCode build, copies the canonical config and agents, generates a
-loopback-only server password restricted to your user account, writes the launcher, and
-registers the `AiDevOps-OpenCodeGlm` scheduled task that starts the server at logon.
+It installs its own prerequisites via winget (Git for Windows, Node.js LTS, the
+1Password CLI, jq) rather than asking anyone to install them by hand. Do **not** run it
+elevated; everything lands in the user profile.
 
-Then use it from **Git Bash**, inside the repository you are working on:
+It then installs the pinned OpenCode build, copies the canonical config and agents,
+generates a loopback-only server password restricted to that user account, writes the
+launcher, installs an `ai-glm` command on the user PATH, and registers the
+`AiDevOps-OpenCodeGlm` scheduled task that starts the server at logon.
 
-```bash
-/c/repos/ai-devops/bin/ai-glm doctor
-/c/repos/ai-devops/bin/ai-glm new my-review --prompt "your question"
+After that the command is the same as on Ubuntu, from a new PowerShell window inside
+any repository:
+
+```powershell
+ai-glm doctor
+ai-glm new my-review --prompt-file brief.md
 ```
+
+`ai-glm` on Windows is a `.cmd` shim that runs the same bash script through Git Bash.
+It passes arguments straight through rather than re-parsing them as one string, so
+prompts containing spaces or quotes survive. Nobody needs to open Git Bash.
 
 Service control on Windows (`ai-glm server ...` is systemd-only):
 
