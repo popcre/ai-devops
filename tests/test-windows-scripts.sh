@@ -36,8 +36,14 @@ else bad "longest tracked path is $longest chars (Windows checkout risk)"; fi
 if git ls-files claude_chats | grep -q .; then bad "claude_chats/ is tracked again"; else ok "claude_chats/ is not tracked"; fi
 
 echo "== setup must not clone a second copy of itself =="
-if grep -q 'PSCommandPath' bin/setup-machine.ps1; then ok "setup-machine.ps1 defaults to its own checkout"
-else bad "setup-machine.ps1 does not derive RepoPath from its own location"; fi
+for f in bin/setup-machine.ps1 bin/setup-opencode-glm.ps1; do
+  if grep -q 'PSCommandPath' "$f"; then ok "$(basename "$f") defaults to its own checkout"
+  else bad "$(basename "$f") does not derive RepoPath from its own location"; fi
+done
+# A drive-letter default breaks anyone whose checkout is not on C:.
+if grep -nE '\$RepoPath\s*=.*"[A-Za-z]:' bin/*.ps1 >/dev/null 2>&1; then
+  bad "hardcoded drive-letter RepoPath default"; grep -nE '\$RepoPath\s*=.*"[A-Za-z]:' bin/*.ps1 | sed 's/^/       /'
+else ok "no hardcoded drive-letter repo defaults"; fi
 
 echo "== Windows paths must not trust Git Bash \$HOME =="
 if grep -q 'export HOME=' bin/setup-opencode-glm.ps1; then ok "GLM launcher pins HOME to the Windows profile"

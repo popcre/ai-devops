@@ -24,7 +24,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$RepoPath = $(if ($env:AI_DEVOPS_HOME) { $env:AI_DEVOPS_HOME } else { "C:\repos\ai-devops" }),
+  [string]$RepoPath = "",
   [int]$Port = 4096
 )
 
@@ -47,7 +47,23 @@ $LibRoot = Join-Path $HomeDir ".local\lib\ai-devops\opencode"
 $BinDir  = Join-Path $HomeDir ".local\bin"
 $StateDir= Join-Path $HomeDir ".local\state\ai-devops\glm"
 
-if (-not (Test-Path -LiteralPath $RepoPath)) { Die "ai-devops repo not found at $RepoPath. Pass -RepoPath or set AI_DEVOPS_HOME." }
+# Default to the checkout this script lives in. A hardcoded C:\repos\ai-devops default
+# meant running it from D:\repos\ai-devops failed outright, even though the caller was
+# standing in a perfectly good checkout. Same bug that made setup-machine.ps1 clone a
+# second copy of the repo.
+if ([string]::IsNullOrWhiteSpace($RepoPath)) {
+  $selfRepo = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+  if (Test-Path -LiteralPath (Join-Path $selfRepo "config\opencode\version")) {
+    $RepoPath = $selfRepo
+  } elseif ($env:AI_DEVOPS_HOME) {
+    $RepoPath = $env:AI_DEVOPS_HOME
+  } else {
+    $RepoPath = Join-Path $env:USERPROFILE "repos\ai-devops"
+  }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RepoPath "config\opencode\version"))) {
+  Die "No ai-devops checkout at $RepoPath (config\opencode\version is missing). Pass -RepoPath <path-to-your-checkout>."
+}
 
 $VersionFile = Join-Path $RepoPath "config\opencode\version"
 if (-not (Test-Path -LiteralPath $VersionFile)) { Die "missing $VersionFile" }
