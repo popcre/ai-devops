@@ -150,6 +150,13 @@ Remove-Item -Force (Join-Path $OcConf "agent\*.md") -ErrorAction SilentlyContinu
 Copy-Item -Force (Join-Path $RepoPath "config\opencode\agent\*.md") (Join-Path $OcConf "agent\")
 Set-Content -NoNewline -Path (Join-Path $OcHome "installed-version") -Value $Version
 
+# Sweep the retired Claude-Code GLM harness's isolated config. Nothing reads it now.
+$staleGlm = Join-Path $CfgDir "glm-claude"
+if (Test-Path -LiteralPath $staleGlm) {
+  Remove-Item -Recurse -Force -LiteralPath $staleGlm -ErrorAction SilentlyContinue
+  Ok "Removed retired $staleGlm"
+}
+
 # ---------------------------------------------------------------------------
 # 3. Loopback server password
 # ---------------------------------------------------------------------------
