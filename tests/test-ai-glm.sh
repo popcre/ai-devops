@@ -40,13 +40,16 @@ echo "== agent safety (the only working read-only enforcement) =="
 for a in glm-review glm-implement; do
   f="$REPO_ROOT/config/opencode/agent/$a.md"
   check "$a exists"                         "test -f '$f'"
-  check "$a has bash: false"                "grep -q '^  bash: false' '$f'"
   check "$a has webfetch: false"            "grep -q '^  webfetch: false' '$f'"
   check "$a pins the model"                 "grep -q '^model: zai-coding-plan/glm-5.2$' '$f'"
 done
 check "glm-review has write: false"         "grep -q '^  write: false' '$REPO_ROOT/config/opencode/agent/glm-review.md'"
 check "glm-review has edit: false"          "grep -q '^  edit: false'  '$REPO_ROOT/config/opencode/agent/glm-review.md'"
+check "glm-review has NO bash tool"         "grep -q '^  bash: false' '$REPO_ROOT/config/opencode/agent/glm-review.md'"
 check "glm-implement can write"             "grep -q '^  write: true'  '$REPO_ROOT/config/opencode/agent/glm-implement.md'"
+check "glm-implement HAS a bash tool"       "grep -q '^  bash: true'   '$REPO_ROOT/config/opencode/agent/glm-implement.md'"
+check "sandbox is a clone, not a worktree"  "grep -q 'git clone --quiet --no-hardlinks' '$AI_GLM'"
+check "sandbox removes its git remote"      "grep -q 'remote remove origin' '$AI_GLM'"
 
 echo "== systemd unit =="
 U="$REPO_ROOT/config/systemd/opencode-glm.service"
