@@ -58,20 +58,41 @@ if (-not $Version) { Die "config/opencode/version is empty" }
 # Prerequisites
 # ---------------------------------------------------------------------------
 Step "Checking prerequisites"
-foreach ($t in @('npm','node','op')) {
-  if (-not (Get-Command $t -ErrorAction SilentlyContinue)) { Die "$t is required but not on PATH." }
+
+# Install anything missing rather than telling a non-programmer to go and do it.
+function Ensure-Winget($id, $name) {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Die "$name is missing and winget is unavailable. Install $name, then re-run this script."
+  }
+  Step "Installing $name via winget"
+  winget install --id $id -e --source winget --accept-package-agreements --accept-source-agreements | Out-Null
+  # winget updates the stored PATH, not this session's copy.
+  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+              [Environment]::GetEnvironmentVariable("Path","User")
+}
+
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Ensure-Winget "Git.Git" "Git for Windows" }
+if (-not (Get-Command node -ErrorAction SilentlyContinue) -or
+    -not (Get-Command npm  -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
+if (-not (Get-Command op   -ErrorAction SilentlyContinue)) { Ensure-Winget "AgileBits.1Password.CLI" "1Password CLI" }
+if (-not (Get-Command jq   -ErrorAction SilentlyContinue)) { Ensure-Winget "jqlang.jq" "jq" }
+
+foreach ($t in @('npm','node','op','git')) {
+  if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
+    Die "$t is still missing after the install attempt. Close and reopen this window, then re-run."
+  }
 }
 $GitBash = $null
 foreach ($c in @("C:\Program Files\Git\bin\bash.exe", "C:\Program Files (x86)\Git\bin\bash.exe",
                  (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe"))) {
   if (Test-Path -LiteralPath $c) { $GitBash = $c; break }
 }
-if (-not $GitBash) { Die "Git Bash not found. Install Git for Windows: winget install --id Git.Git" }
+if (-not $GitBash) { Die "Git Bash still not found after installing Git. Close and reopen this window, then re-run." }
 & $GitBash -lc "command -v jq" *>$null
 if ($LASTEXITCODE -ne 0) {
-  Die "jq is required inside Git Bash and was not found.`n       Install it with:  winget install --id jqlang.jq`n       Then re-run this script."
+  Die "jq is installed but Git Bash cannot see it. Close and reopen this window, then re-run."
 }
-Ok "npm, node, op, Git Bash and jq present"
+Ok "git, node, npm, op, Git Bash and jq present"
 
 # ---------------------------------------------------------------------------
 # 1. Pinned OpenCode binary
@@ -184,6 +205,29 @@ exec "$binaryBash" serve --hostname 127.0.0.1 --port "`${AI_GLM_PORT:-$Port}"
 # ---------------------------------------------------------------------------
 # 5. Scheduled Task (systemd's stand-in on Windows)
 # ---------------------------------------------------------------------------
+Step "Installing the ai-glm command for PowerShell"
+# `ai-glm` is one bash script shared with Ubuntu. This .cmd shim lets Claude for
+# Windows, Codex for Windows, PowerShell and cmd call `ai-glm ...` exactly the way
+# they would on the Ubuntu host - nobody has to know Git Bash exists.
+$aiGlmBash = "/" + (((Join-Path $RepoPath "bin\ai-glm")) -replace '\\','/' -replace '^([A-Za-z]):','$1')
+# Invoke bash with the script as its first argument, NOT via `-lc "... %*"`.
+# The -lc form re-parses everything as one string, so a prompt containing spaces or
+# quotes would be mangled. This form hands cmd's argv straight through untouched.
+@"
+@echo off
+rem Managed by ai-devops setup-opencode-glm.ps1. Runs the shared bash ai-glm client.
+"$GitBash" "$aiGlmBash" %*
+"@ | Set-Content -Encoding ASCII -Path (Join-Path $BinDir "ai-glm.cmd")
+
+# Put it on the user PATH so plain `ai-glm` resolves in any new shell.
+$userPath = [Environment]::GetEnvironmentVariable("PATH","User")
+if (($userPath -split ';') -notcontains $BinDir) {
+  [Environment]::SetEnvironmentVariable("PATH", ($BinDir + ';' + $userPath), "User")
+  Ok "Added $BinDir to your PATH (new windows will see it)"
+}
+$env:Path = $BinDir + ';' + $env:Path
+Ok "ai-glm is now callable from PowerShell"
+
 Step "Registering the OpenCodeGlm scheduled task"
 $TaskName = "AiDevOps-OpenCodeGlm"
 $launchBash = "/" + ($LaunchSh -replace '\\','/' -replace '^([A-Za-z]):','$1')
@@ -214,6 +258,6 @@ if (-not $healthy) {
 
 Ok "OpenCode GLM server is up on 127.0.0.1:$Port (pinned $Version)"
 Write-Host ""
-Write-Host "Use it from Git Bash, inside a repository:" -ForegroundColor Cyan
-Write-Host "  '$RepoPath/bin/ai-glm' doctor"
-Write-Host "  '$RepoPath/bin/ai-glm' new my-review --prompt 'your question'"
+Write-Host "Open a NEW PowerShell window, then from inside a repository:" -ForegroundColor Cyan
+Write-Host "  ai-glm doctor"
+Write-Host "  ai-glm new my-review --prompt 'your question'"

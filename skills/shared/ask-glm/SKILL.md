@@ -24,16 +24,17 @@ Do **not** run `opencode`, `opencode run`, `opencode serve`, or curl the server'
 API. `ai-glm` owns the server URL, credentials, API shapes, model pin, locking, and
 read-only enforcement. Bypassing it bypasses all of that.
 
-On Windows, `ai-glm` runs locally from **Git Bash** once
-`bin\setup-opencode-glm.ps1` has been run once on that machine:
+The command is identical on Windows and Ubuntu: type `ai-glm`. On Windows it resolves
+to a shim that runs the same script, so use the same syntax from PowerShell that you
+would use on Ubuntu. Prefer `--prompt-file` over `--prompt` there, so quoting can never
+mangle a long brief.
 
-```bash
-/c/repos/ai-devops/bin/ai-glm new my-review --prompt-file "$brief"
-```
-
-If that machine has not been set up yet, run `ai-glm` on the Ubuntu host over the normal
-SSH workflow instead. Service control on Windows is
-`Start-ScheduledTask -TaskName AiDevOps-OpenCodeGlm`, not `ai-glm server start`.
+Two Windows-only differences:
+- Service control is `Start-ScheduledTask -TaskName AiDevOps-OpenCodeGlm` (and
+  `Stop-ScheduledTask`), not `ai-glm server start`.
+- If `ai-glm` is not found, the machine has not been set up yet. Run
+  `bin\setup-opencode-glm.ps1` once (it installs its own prerequisites), or fall back to
+  running `ai-glm` on the Ubuntu host over SSH. Do not tell the user to open Git Bash.
 
 ## Continue a session. Do not start a new one per question.
 
