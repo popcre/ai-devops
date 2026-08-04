@@ -229,7 +229,8 @@ templates/      Prompt templates and per-repo doc add-ons
 docs/           architecture, development, configuration, deployment, restore, +more
 skills/         Claude + Codex skill scaffolding
 mcp/            Future MCP wrapper scaffolding
-claude_chats/   Archived Claude Code session transcripts (backup; sensitive, ~219 MB)
+transcripts/    Session transcripts. PRIVATE submodule (u2giants/ai-devops-transcripts).
+                Never commit transcripts into this repo: it is PUBLIC.
 install.sh      Install/verify deps, config, symlinks; runs doctor
 update.sh       Pull + re-install (keeps existing config)
 uninstall.sh    Remove symlinks (keeps config/auth unless flagged)
