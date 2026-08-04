@@ -54,9 +54,12 @@ The cross-platform GLM launcher reads these managed entries from
 
 | Variable | Purpose | Default/source |
 |---|---|---|
-| `ZAI_GLM_MODEL` | Exact model required from Z.ai | `glm-5.2` |
-| `ZAI_ANTHROPIC_BASE_URL` | Isolated Claude Code provider endpoint | `https://api.z.ai/api/anthropic` |
-| `ZAI_API_KEY` | Coding Plan authentication | 1Password reference only; never plaintext |
+| `ZAI_API_KEY` | Coding Plan authentication. Exported as `ZHIPU_API_KEY` for OpenCode's built-in `zai-coding-plan` provider | 1Password reference only; never plaintext |
+| `AI_GLM_PORT` | Loopback port for the OpenCode GLM server | `4096` |
+| `AI_GLM_CALLER` | Which agent owns the session (`claude` or `codex`) | `claude` |
+
+The GLM model, agent, tools, and permissions are pinned in `config/opencode/`,
+not in environment variables. See [glm-opencode.md](glm-opencode.md).
 
 These settings do not alter normal Claude or Codex configuration. Change the
 model or endpoint in the repo example and rerun machine setup; never hard-code

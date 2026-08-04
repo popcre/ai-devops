@@ -30,7 +30,7 @@
 # repo) and are local scratch, not meant to be committed.
 #
 # Secrets: DEEPSEEK_API_KEY self-resolves from 1Password (same pattern as
-# ai-glm-agent), so this works whether or not the calling shell already
+# opencode-glm-launch), so this works whether or not the calling shell already
 # exported it.
 
 set -uo pipefail

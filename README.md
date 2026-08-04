@@ -138,12 +138,15 @@ Codex-specific repeated workflows now live in `skills/codex/`; see
 
 ### GLM as a full coding agent
 
-`ai-glm-agent` runs Z.ai GLM through an isolated Claude Code process, so GLM can
-read/search the repository, run terminal commands and tests, and perform
-multi-step work without replacing the normal Anthropic Claude configuration.
-It defaults to `glm-5.2`, rejects silent model fallback, uses read-only plan
-permissions for reviews, and obtains its Coding Plan key from 1Password only at
-launch. The shared `ask-glm` skill lets either Claude or Codex invoke it when
+`ai-glm` gives Claude and Codex named, persistent GLM sessions hosted by a
+loopback-only OpenCode server. A session remembers the whole conversation,
+survives a server restart, and keeps its prefix warm so Z.ai serves most of the
+context from cache. Review sessions are structurally read-only (no write, edit,
+patch or bash tool); implementation runs in a throwaway git worktree that is
+deleted before the command exits. The model is pinned to `glm-5.2` and the
+Coding Plan key is resolved from 1Password only at launch. See
+[docs/glm-opencode.md](docs/glm-opencode.md). The shared `ask-glm` skill lets
+either Claude or Codex invoke it when
 Albert says “ask GLM” or “run this by GLM.”
 
 ---
@@ -208,7 +211,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review |
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task "<task>"` | Scaffold a new staged task run (v0.1) |
-| `ai-glm-agent --mode review|implement ...` | Run GLM-5.2 as an isolated full coding agent |
+| `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.2 sessions (see docs/glm-opencode.md) |
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
 `visual-review`, `final-check`.

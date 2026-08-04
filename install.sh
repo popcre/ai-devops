@@ -155,6 +155,26 @@ info "Memory auto-sync (one-time seed; schedule is owned by ansible cron_glue)"
 "$BIN_TARGET/ai-memory-sync" >/dev/null 2>&1 || "$REPO_ROOT/bin/ai-memory-sync" >/dev/null 2>&1 || true
 
 # --------------------------------------------------------------------------
+# 4d. OpenCode GLM server (hosts GLM for `ai-glm`)
+# --------------------------------------------------------------------------
+# Installs the pinned OpenCode release, the canonical GLM agents, and the
+# loopback-only systemd USER service. Skipped when running as root, because a
+# user service installed under /root would never be the one `ai-glm` talks to.
+#
+# The setup script deliberately FORCE-COPIES config/opencode/* on every run
+# (unlike models.env/server.env, which are copied only if absent). The agent
+# files carry the only working read-only enforcement in OpenCode, so the repo
+# copy must always win. Do not "fix" this to match the no-overwrite pattern.
+if [ "$(id -u)" -eq 0 ]; then
+  warn "Running as root — skipping OpenCode GLM server setup. Re-run as your normal user, or run: bin/setup-opencode-glm.sh"
+elif [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  info "OpenCode GLM server (pinned $(tr -d ' \t\r\n' < "$REPO_ROOT/config/opencode/version"))"
+  "$REPO_ROOT/bin/setup-opencode-glm.sh" || warn "setup-opencode-glm.sh did not complete; run it by hand later."
+else
+  info "  No 1Password service-account token yet — skipping. Run: setup-opencode-glm.sh"
+fi
+
+# --------------------------------------------------------------------------
 # 5. Doctor
 # --------------------------------------------------------------------------
 info "Running ai-devops doctor"

@@ -53,8 +53,9 @@ For the do-this-now steps, see the **"Set up a new machine"** section of
 Agents must serialize direct `op read`, `op run`, and 1Password MCP calls.
 Parallel repository work is fine; parallel vault access is not.
 
-The `ZAI_API_KEY` reference follows the same rule. `ai-glm-agent` resolves it
-only when launching an isolated GLM child process. The key is not copied into
+The `ZAI_API_KEY` reference follows the same rule. `opencode-glm-launch` resolves
+it only when starting the OpenCode GLM server, and exports it as `ZHIPU_API_KEY`
+for OpenCode's built-in `zai-coding-plan` provider. The key is not copied into
 Claude settings, Codex config, the repository, prompts, or reports. The model
 and endpoint are non-secret entries in the same managed reference file so every
 machine uses the same configurable defaults.
@@ -96,10 +97,12 @@ The canonical copy of this token also lives in 1Password
 The same central `mcp.env` and the same "resolve at launch with `op run`" idea
 run on both platforms — the plumbing differs because the two Claude apps differ.
 
-For GLM, both platforms expose the same behavior: the shared `ask-glm` skill
-invokes `ai-glm-agent`, which hosts GLM inside Claude Code's coding-agent runtime.
-That gives GLM repository search, terminal commands, tests, and multi-step work.
-An isolated `CLAUDE_CONFIG_DIR` plus process-scoped Z.ai variables prevents the
+For GLM, the shared `ask-glm` skill invokes `ai-glm`, which drives a loopback-only
+OpenCode server on the Ubuntu host. That gives GLM repository search and file
+reading in named sessions that persist across calls. Windows Claude and Codex
+sessions call `ai-glm` over the existing SSH workflow; there is no local GLM
+server on Windows. A dedicated XDG config home plus process-scoped Z.ai variables
+prevents the
 GLM child from replacing or inheriting normal Anthropic authentication. Setup
 performs a real `GLM_AGENT_OK` capability probe and rejects any returned model
 other than the explicitly requested model.

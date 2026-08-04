@@ -12,22 +12,26 @@ roles, adapting CLI flags, and how the scripts use the commands.
   final product/architecture review.
 - **GPT-5.5 / Codex** — coding, implementation, testing, fixing.
 - **Opus** — independent review throughout (plan, diff, security, final).
-- **GLM-5.2** — optional independent full coding agent invoked by either Claude
-  or Codex through `ai-glm-agent`; defaults to read-only review.
+- **GLM-5.2** — optional independent second opinion invoked by either Claude or
+  Codex through `ai-glm`, in named persistent sessions; defaults to read-only review.
 
 ## GLM configuration
 
-GLM is deliberately separate from the staged `models.env` commands because the
-same launcher runs on Windows and Ubuntu. Its non-secret defaults live in the
-managed `~/.config/ai-devops/mcp.env` copied from `config/mcp.env.example`:
+GLM is deliberately separate from the staged `models.env` commands. The model
+and agent behaviour are pinned in `config/opencode/agent/*.md`; the only GLM
+entry in the managed `~/.config/ai-devops/mcp.env` (copied from
+`config/mcp.env.example`) is the key reference:
 
-- `ZAI_GLM_MODEL=glm-5.2`
-- `ZAI_ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
 - `ZAI_API_KEY=op://vibe_coding/GLM z.ai API/api key`
 
-The last line is a 1Password reference, not a key. Do not put the resolved value
-in this repo or in Claude/Codex settings. The launcher refuses silent fallback
-when Z.ai returns a different model.
+That is a 1Password reference, not a key. Do not put the resolved value in this
+repo or in Claude/Codex settings. `bin/setup-opencode-glm.sh` installs a
+launcher that resolves it at exec time and exports it as `ZHIPU_API_KEY`, which
+is what OpenCode's built-in `zai-coding-plan` provider reads. `ai-glm` refuses a
+silently substituted model.
+
+There is no local GLM server on Windows. Windows Claude and Codex sessions run
+`ai-glm` on the Ubuntu host over the normal SSH workflow.
 
 ## Important: the exact flags may differ on your machine
 

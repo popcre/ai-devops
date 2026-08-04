@@ -73,3 +73,10 @@ __pycache__/
 # re-add them here. sync.sh uses a plain `git add`, so these entries block it.
 /claude_chats/
 /codex_chats/
+
+# === AI session scratch (never committed) ===
+# Claude Code keeps archived session transcripts and AI git worktrees in here.
+# It reached 1.1 GB untracked, which made every agent `glob`/`grep` walk it and
+# hang. Keep it ignored so repo-wide searches stay fast for humans and agents.
+.claude/
+!.claude/settings.json
