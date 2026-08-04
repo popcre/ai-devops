@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: c3a45a75-3b00-4aae-9fb1-c6f023a0ad83
-  modified: 2026-08-03T19:33:13.573Z
+  modified: 2026-08-02T13:50:16.761Z
 ---
 
 Albert's ruling, 2026-08-02, on two licensor-spine defects found in `core.licensor` /
@@ -17,35 +17,12 @@ Albert's ruling, 2026-08-02, on two licensor-spine defects found in `core.licens
   **defunct**. Its current mapping in `core.property` (`FK` → licensor `FR` FRIENDS TV)
   is therefore wrong on both halves.
 
-**FINAL position (2026-08-03), after two intermediate reversals — this is operative:**
-- **FRIDA KAHLO STAYS as a licensor.** Not as a "defunct" exception — it is legitimate:
-  we genuinely make product under a Frida Kahlo licence, and ColdLion transmits it in
-  its licensor list (slot 05, both divisions, modified 2026-07-31). It was simply never
-  imported into `core.licensor`.
-- **FRIENDS TV must NOT exist as a licensor, not even temporarily.** FRIENDS has always
-  been a *property* under WARNER BROS, so any genuine FRIENDS item has a correct home
-  already. Remove `FR`, don't park it.
-- **`X-NASA` goes too.** It is a hand-made substitute holding zero properties while
-  ColdLion transmits a real `NA` NASA licensor. General principle: **use the licensor
-  table as it comes in from ColdLion** — hand-made `X-` rows are for PROSPECTIVE
-  licensors only, never as substitutes for ones ColdLion already sends.
-
 **Why:** the `FR` code collision (property `FR` vs licensor `FR`) let a bad parent land in
-production. Corroborated independently on 2026-08-02: ColdLion's item feed carries 7
-products for property `FK`, unanimously naming a Frida Kahlo licensor — so the ruling is
-backed by data, not only by assertion. Note `core.licensor` DOES have a `status` column
-(enum `app.entity_status`: active/inactive/archived/deleted/potential) — an earlier claim
-that it had no active/inactive concept was wrong. See [[merch-group-taxonomy]] and
-[[no-inference-verify-everything]].
+production, and the defunct-licensor case is not representable today — `core.licensor` has
+no active/inactive flag, mirroring ColdLion's own lack of one. See
+[[merch-group-taxonomy]].
 
-**Consequence for migration `20260802171000`** (merged to `main` in PR #408, applied to
-preview ONLY, **verified NOT applied to production** on 2026-08-03): it marks `FR`
-**inactive**. R1 now calls for `FR` to be **removed**. So promoting that migration alone
-ships a superseded remedy — the live owner question is *"promote #408 now, or hold it and
-ship it with the removal work as ONE production change."* Production still shows `FR`
-active with no ruling recorded; preview shows it inactive. The two databases disagree.
-
-**How to apply:** treat `FR` as retire-on-sight, not as a valid parent. Keep defunct
-licensors with a non-active `status` rather than deleting them. Any fix is a shared-db
-branch+PR (preview first), never a direct UPDATE — and curated `status` only survives if
-the importer stops force-resetting it, see [[plm-master-data-sync-broken]].
+**How to apply:** treat `FR` as retire-on-sight, not as a valid parent. Any fix is a
+shared-db branch+PR (preview first), never a direct UPDATE. Note it cannot be fixed
+durably upstream while the DesignFlow PLM master-data sync is broken — see
+[[plm-master-data-sync-broken]].
