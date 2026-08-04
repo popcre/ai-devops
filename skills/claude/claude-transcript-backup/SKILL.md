@@ -6,14 +6,19 @@
 
 ---
 name: claude-transcript-backup
-description: Find all local Claude Code session transcripts on this machine and back them up to u2giants/ai-devops under claude_chats/<machine>. Use when the user says "find all the Local Claude Code session transcripts everywhere on this entire machine" or "put all of these into claude_chats".
+description: Find all local Claude Code session transcripts on this machine and back them up to the PRIVATE repo u2giants/ai-devops-transcripts under claude_chats/<machine>. Use when the user says "find all the Local Claude Code session transcripts everywhere on this entire machine" or "put all of these into claude_chats".
 ---
 
 # claude-transcript-backup
 
 Albert ran this identically on 916, t16, 4837, hetz, seafile, compshop.
-On Linux, `claude_chats/sync.sh` already does the core copy — use it. On
-Windows, follow the manual procedure below.
+
+**The destination is the PRIVATE repo `u2giants/ai-devops-transcripts`, never
+`ai-devops` itself, which is PUBLIC.** The old `claude_chats/sync.sh` lived in
+ai-devops and was removed on 2026-08-04 along with the 664 MB local archive
+(every file was verified present in the private repo first). Clone the private
+repo, copy into its `claude_chats/<machine>/`, commit and push there. Follow the
+manual procedure below on any platform.
 
 ## Where transcripts live
 
