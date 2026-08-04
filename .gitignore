@@ -80,3 +80,9 @@ __pycache__/
 # hang. Keep it ignored so repo-wide searches stay fast for humans and agents.
 .claude/
 !.claude/settings.json
+
+# === Retired transcript archive (moved to a private repo 2026-07-17) ===
+# 1,486 files with paths up to 411 characters. Windows checkout fails outright with
+# "Filename too long", which aborted setup on 4837 and left a broken clone. Untracked
+# here so a fresh clone never writes these paths again.
+claude_chats/

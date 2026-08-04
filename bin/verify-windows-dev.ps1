@@ -29,7 +29,7 @@ $sshd = Get-Service sshd -ErrorAction SilentlyContinue
 $checks.Add([pscustomobject]@{ Check='remote:sshd'; Passed=($sshd -and $sshd.Status -eq 'Running'); Detail=$(if($sshd){$sshd.Status}else{'not installed'}) })
 $winrm = Get-CimInstance Win32_Service -Filter "Name='WinRM'" -ErrorAction SilentlyContinue
 $checks.Add([pscustomobject]@{ Check='remote:winrm-disabled'; Passed=($winrm -and $winrm.State -eq 'Stopped' -and $winrm.StartMode -eq 'Disabled'); Detail=$(if($winrm){"$($winrm.State)/$($winrm.StartMode)"}else{'not found'}) })
-$sshRule = Get-NetFirewallRule -DisplayName 'OpenSSH Server — Tailscale only' -ErrorAction SilentlyContinue
+$sshRule = Get-NetFirewallRule -DisplayName 'OpenSSH Server - Tailscale only' -ErrorAction SilentlyContinue
 $checks.Add([pscustomobject]@{ Check='remote:tailscale-firewall'; Passed=[bool]($sshRule -and $sshRule.Enabled); Detail=$(if($sshRule){$sshRule.DisplayName}else{'not found'}) })
 
 $ubuntu = @(& wsl.exe --list --quiet 2>$null | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ -match '^Ubuntu' } | Select-Object -First 1)
