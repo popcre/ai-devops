@@ -233,13 +233,16 @@ session transcripts and AI worktrees, and because AI worktrees live inside it, a
 from inside one walked its own parent and hung the session. Ignoring it is what made
 `glob`/`grep` usable again.
 
-**Windows**: there is no local GLM server. `bin/ai-glm-agent.ps1` is gone; Windows Claude
-and Codex sessions run `ai-glm` on the Ubuntu host over the existing SSH workflow, inside
-the repository they are working on.
+**Windows**: GLM runs locally through the same `ai-glm` Bash client and OpenCode server
+used on Ubuntu. Git Bash hosts the process and Task Scheduler manages the loopback-only
+server; users invoke the installed `ai-glm` command from PowerShell or Codex/Claude.
 
 ### Known limitations
 
-1. No bash in either agent, so GLM cannot run tests. The parent runs them.
+1. Review sessions have no Bash tool, so the parent must run any diagnostic command a
+   review needs and provide its output in the next turn. Implementation sessions have
+   Bash only inside their disposable remote-less clone; GLM can run tests there, but the
+   parent must still independently verify the resulting patch and tests before applying it.
 2. `POST /api/session/<id>/wait` returns `ServiceUnavailableError` in 1.18.12, so
    completion is polled.
 3. `/api/session/<id>/permission` returns HTTP 400 while a `glob`/`grep` permission is
