@@ -193,6 +193,11 @@ It is safe by design:
 to sync until you have actually opened a project there (memory is stored per
 project by folder location) — after that it stays matched to your other machines.
 
+On Windows, Task Scheduler starts the sync through a hidden Windows Script Host
+launcher rather than launching Git Bash directly. This prevents a blank Windows
+Terminal window from opening every 30 minutes. A run is stopped after 15 minutes,
+and a new run is skipped while the prior one is still active.
+
 ## What lives where (boundary with Ansible)
 
 Per the host-change boundary, **installing host packages** (the `op` CLI,
