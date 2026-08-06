@@ -349,8 +349,15 @@ try {
   if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
     throw "Could not register the $TaskName scheduled task and none exists: $($_.Exception.Message)"
   }
-  Warn ("Could not re-register $TaskName ($($_.Exception.Message)). The EXISTING task is being " +
-        "reused as-is - if its definition changed, re-run this script from an ELEVATED PowerShell.")
+  # Do NOT tell the user to re-run this whole script elevated - it installs into the
+  # user profile and must stay unelevated. The one-time cure is to delete the
+  # admin-owned task object once from an elevated prompt, after which this script
+  # re-creates it owned by the normal user and never needs elevation again.
+  Warn ("Could not re-register $TaskName ($($_.Exception.Message)). This task was created by an " +
+        "ELEVATED session, so an ordinary user can start it but not redefine it. The EXISTING " +
+        "definition is being reused as-is, which is stale if this script changed it.")
+  Warn ("One-time cure, from an elevated PowerShell: Unregister-ScheduledTask -TaskName " +
+        "$TaskName -Confirm:`$false   then re-run THIS script as your normal user.")
 }
 Stop-ScheduledTask  -TaskName $TaskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $TaskName
