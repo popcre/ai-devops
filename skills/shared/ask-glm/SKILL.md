@@ -131,6 +131,10 @@ GLM's answer is an independent opinion, not authority.
   recommending it.
 - Say plainly when you disagree with GLM and why.
 
-If a session wedges or a turn times out, `ai-glm` exits nonzero and names the stuck tool.
-Run `ai-glm abort <name>`, then retry. If the stuck tool is `glob` or `grep`, the usual
-cause is a very large untracked directory in the repository; add it to `.gitignore`.
+If a permission cannot be safely classified or approved, `ai-glm` now fails immediately
+with a sanitized diagnostic instead of waiting for the 30-minute turn limit. Run
+`ai-glm abort <name>` before retrying. If the request tried to read outside the session
+repository, deliberately put a safe copy inside the repository or provide a small safe
+excerpt. Never approve every permission and never copy an arbitrary outside file
+automatically. A `glob` or `grep` failure can also mean a very large untracked directory
+is being walked; add that directory to `.gitignore` when appropriate.

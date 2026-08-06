@@ -73,7 +73,12 @@ done
 # repo root from $0 without following the link it looks for config under /usr/local.
 mkdir -p "$TMP/binlink"
 ln -sf "$AI_GLM" "$TMP/binlink/ai-glm"
-check "doctor resolves through a symlink"   "'$TMP/binlink/ai-glm' doctor 2>&1 | grep -q 'PASS  pinned version file present'"
+if [ -L "$TMP/binlink/ai-glm" ]; then
+  check "doctor resolves through a symlink" "'$TMP/binlink/ai-glm' doctor 2>&1 | grep -q 'PASS  pinned version file present'"
+else
+  # Git Bash emulates ln -s as a copy when Windows symbolic links are disabled.
+  ok "doctor symlink check skipped (host created a copy)"
+fi
 
 echo "== repository + session identity =="
 mkdir -p "$TMP/repoA" "$TMP/repoB"
@@ -167,6 +172,44 @@ check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_
 check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' || grep -q 'idle -ge 2' '$AI_GLM'"
 check "detects the 400 permission wedge"    "grep -q 'InvalidRequestError' '$AI_GLM'"
 check "names the stuck tool on timeout"     "grep -q 'tool still running' '$AI_GLM'"
+check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI_GLM'"
+if grep -Fq 'await_turn "$sid" "$name" review "$root"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
+if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$root"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+if grep -Fq 'await_turn "$sid" "$name" implement "$sb"' "$AI_GLM"; then ok "implement passes sandbox directory"; else bad "implement passes sandbox directory"; fi
+
+echo "== permission classifier =="
+run_classifier() { # MODE ROOT STATUS BODY
+  AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" AI_GLM_STATE_DIR="$TMP/state" \
+    MODE_FIX="$1" ROOT_ARG="$2" STATUS_FIX="$3" BODY_FIX="$4" \
+    bash -c 'source "$AI_GLM_SOURCE"; classify_permissions "$MODE_FIX" "$ROOT_ARG" "$STATUS_FIX" "$BODY_FIX"'
+}
+ROOT_FIX="$(cd "$TMP/repoA" && pwd)"
+IN_FIX="$ROOT_FIX/sub/file.txt"; OUT_FIX="$(cd "$TMP" && pwd)/outside.txt"
+check "empty data envelope is valid"       "test -z \"\$(run_classifier review '$ROOT_FIX' 200 '{\"data\":[]}')\""
+check "unmeasured bare array fails closed"  "! run_classifier review '$ROOT_FIX' 200 '[]' >/dev/null 2>&1"
+for action in read list glob grep; do
+  check "in-directory $action is approved" "run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"p-$action\",\"action\":\"$action\",\"path\":\"$IN_FIX\"}]}' | grep -q \"p-$action\""
+done
+check "implementation root is classified" "run_classifier implement '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pi\",\"action\":\"read\",\"metadata\":{\"path\":\"sub/file.txt\"}}]}' | grep -q pi"
+check "outside-directory path fails"       "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"po\",\"action\":\"read\",\"path\":\"$OUT_FIX\"}]}' >/dev/null 2>&1"
+check "unknown action fails"               "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"px\",\"action\":\"bash\",\"path\":\"$IN_FIX\"}]}' >/dev/null 2>&1"
+check "missing id fails"                   "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"action\":\"read\",\"path\":\"$IN_FIX\"}]}' >/dev/null 2>&1"
+check "missing path fails"                 "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pm\",\"action\":\"read\"}]}' >/dev/null 2>&1"
+check "malformed JSON fails"               "! run_classifier review '$ROOT_FIX' 200 '{oops' >/dev/null 2>&1"
+check "unsupported envelope fails"         "! run_classifier review '$ROOT_FIX' 200 '{\"items\":[]}' >/dev/null 2>&1"
+check "InvalidRequestError fails"          "! run_classifier review '$ROOT_FIX' 400 '{\"_tag\":\"InvalidRequestError\"}' >/dev/null 2>&1"
+check "other HTTP failure fails"           "! run_classifier review '$ROOT_FIX' 503 '{\"error\":\"down\"}' >/dev/null 2>&1"
+check "unknown mode fails"                 "! run_classifier unsafe '$ROOT_FIX' 200 '[]' >/dev/null 2>&1"
+
+SECRET_FIX='{"token":"tok-visible","authorization":"auth-visible","secret":"sec-visible","credential":"cred-visible","password":"pw-visible","content":"body-visible","value":"val-visible"}'
+SAN="$(AI_GLM_SOURCE="$AI_GLM" BODY_FIX="$SECRET_FIX" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c 'source "$AI_GLM_SOURCE"; sanitize_permission_body "$BODY_FIX"')"
+check "diagnostic redacts sensitive fields" "! printf '%s' '$SAN' | grep -qE 'tok-visible|auth-visible|sec-visible|cred-visible|pw-visible|body-visible|val-visible'"
+LONG_FIX="$(printf 'x%.0s' {1..3000})"
+LONG_SAN="$(AI_GLM_SOURCE="$AI_GLM" BODY_FIX="$LONG_FIX" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c 'source "$AI_GLM_SOURCE"; sanitize_permission_body "$BODY_FIX"')"
+check "diagnostic is capped after redaction" "test \"${#LONG_SAN}\" -le 2060"
+check "diagnostic marks truncation"          "printf '%s' '$LONG_SAN' | grep -q '\[truncated\]'"
+check "failed approval fails closed"         "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ if [ \"\$1\" = GET ]; then HTTP_STATUS=200; HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"path\\\":\\\"\$IN_FIX\\\"}]}\"; else HTTP_STATUS=500; HTTP_BODY=\"{\\\"error\\\":\\\"reply failed\\\"}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
+check "uncleared approval fails by third poll" "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ HTTP_STATUS=200; if [ \"\$1\" = GET ]; then HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"path\\\":\\\"\$IN_FIX\\\"}]}\"; else HTTP_BODY=\"{}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
 
 # ---------------------------------------------------------------------------
 # Live probes. Need a healthy server and a working Z.ai key.
@@ -194,9 +237,24 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   "$AI_GLM" ask live-probe --prompt "Without re-reading any file, repeat that value." >"$TMP/r2" 2>&1
   check "session remembered the value"      "grep -q 'quartz-badger-4417' '$TMP/r2'"
 
-  systemctl --user restart opencode-glm.service && sleep 12
+  "$AI_GLM" server restart >/dev/null && sleep 12
   "$AI_GLM" ask live-probe --prompt "Once more, from memory only: the value?" >"$TMP/r3" 2>&1
   check "context survived a server restart" "grep -q 'quartz-badger-4417' '$TMP/r3'"
+
+  OUTSIDE_MARKER="$(mktemp)"
+  printf 'OUTSIDE_MARKER_CONTENT_MUST_NOT_LEAK\n' > "$OUTSIDE_MARKER"
+  outside_start="$(date +%s)"
+  "$AI_GLM" new live-outside-permission --timeout 60 \
+    --prompt "Read the file at $OUTSIDE_MARKER and state whether it exists." >"$TMP/outside" 2>&1
+  outside_rc=$?; outside_elapsed=$(( $(date +%s) - outside_start ))
+  check "outside read fails nonzero"         "test $outside_rc -ne 0"
+  check "outside read fails quickly"         "test $outside_elapsed -lt 30"
+  check "outside failure names permission"   "grep -qi 'permission failed' '$TMP/outside'"
+  check "outside failure gives safe remedy"  "grep -q 'place a safe copy under' '$TMP/outside'"
+  check "outside marker content is not leaked" "! grep -q 'OUTSIDE_MARKER_CONTENT_MUST_NOT_LEAK' '$TMP/outside'"
+  "$AI_GLM" abort live-outside-permission >/dev/null 2>&1 || true
+  "$AI_GLM" delete live-outside-permission >/dev/null 2>&1 || true
+  rm -f "$OUTSIDE_MARKER"
 
   "$AI_GLM" implement live-impl --prompt "Create a file NOTES.md containing exactly the line: hello from glm" >"$TMP/r4" 2>&1
   check "implement produced a patch"        "ls '$LIVE'/.ai/reviews/glm-live-impl-*.patch >/dev/null 2>&1"
@@ -204,6 +262,7 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   check "implement did not touch the repo"  "test -z \"\$(git -C '$LIVE' status --porcelain | grep -v '^?? [.]ai/')\""
 
   "$AI_GLM" delete live-probe >/dev/null 2>&1
+  "$AI_GLM" delete live-impl >/dev/null 2>&1 || true
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

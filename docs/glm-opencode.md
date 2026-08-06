@@ -177,8 +177,9 @@ git apply --check "$patch" && git apply "$patch"
 | Symptom | Cause | Fix |
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
-| `wedged on an un-approvable permission request` | OpenCode 1.18.12 returns HTTP 400 from `/api/session/<id>/permission` while a `glob`/`grep` request is pending, so it can never be approved | `ai-glm abort <name>`. If the stuck tool is glob or grep, a very large untracked directory is being walked — add it to `.gitignore` |
-| Turn times out, tool still running | Same underlying class | `ai-glm abort <name>`, then retry |
+| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns HTTP 500 with a generic `UnknownError` in 1.18.12. | Run `ai-glm abort <name>`. For outside evidence, put a safe copy inside the repository or provide a small safe excerpt, then retry. Never approve everything or copy arbitrary files automatically. |
+| `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
+| Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
 | `session is busy` | Another `ai-glm` call holds the lock | Wait, or raise `--lock-timeout` |
 | `review session CHANGED the working tree` | A review wrote something (should be impossible) | Session is marked failed; inspect `git status` before anything else |
@@ -245,8 +246,12 @@ server; users invoke the installed `ai-glm` command from PowerShell or Codex/Cla
    parent must still independently verify the resulting patch and tests before applying it.
 2. `POST /api/session/<id>/wait` returns `ServiceUnavailableError` in 1.18.12, so
    completion is polled.
-3. `/api/session/<id>/permission` returns HTTP 400 while a `glob`/`grep` permission is
-   pending. `ai-glm` treats that 400 as a hard error rather than waiting forever.
+3. Permission failures are not one stable API shape in 1.18.12. A `glob`/`grep` wedge
+   has returned HTTP 400 `InvalidRequestError`; a measured outside-directory `read`
+   returned HTTP 500 `UnknownError` with only a server reference. `ai-glm` preserves the
+   status, emits a redacted diagnostic capped at 2 KiB, and fails after repeated errors
+   while a tool is observably still running. A lone generic 500 is not enough evidence:
+   this endpoint also returns it when no permission exists.
 4. The Z.ai key is visible in `/proc/<pid>/environ` to the same user and to root. That is
    inherent to putting it in the process environment and is stated here rather than
    glossed over.
@@ -260,9 +265,8 @@ server; users invoke the installed `ai-glm` command from PowerShell or Codex/Cla
 
 ## 5. Hard-won constraints - do not "fix" these
 
-> Active implementation plan: [`../plan_ai-glm-permission-deadlock.md`](../plan_ai-glm-permission-deadlock.md).
-> Read its STATUS table before changing permission polling; do not re-derive or re-plan
-> work that it records as complete.
+> Permission hardening implementation record:
+> [`../plan_ai-glm-permission-deadlock.md`](../plan_ai-glm-permission-deadlock.md).
 
 Every item here was established by something breaking. Each says what to keep and what
 happens if you change it. If you are about to simplify one of these, read the reason
@@ -288,6 +292,13 @@ first and then re-measure before touching it.
    While a `glob`/`grep` permission is pending the endpoint cannot even list it, so it
    can never be approved. Treat that 400 as a hard error naming the stuck tool; do not
    retry or wait it out.
+   **Related 500 behavior:** Every nonempty successful permission response is classified;
+   unknown never means empty. The
+   2026-08-05 outside-directory reproduction returned HTTP 500 `UnknownError`, not the
+   earlier 400 shape. Preserve HTTP status, redact response fields before capping
+   diagnostics at 2 KiB, and fail closed on malformed, unknown, external, or ineffective
+   requests. Only `read`, `list`, `glob`, and `grep` with a validated in-session path may
+   be approved. Never blanket-approve either agent mode.
 6. **Keep `.claude/` and `claude_chats/` gitignored.** They reached 1.1 GB and 664 MB.
    AI worktrees live inside `.claude/`, so a `glob` from inside one walked its own parent
    and hung the session forever. Ignoring them is what made `glob`/`grep` usable.
