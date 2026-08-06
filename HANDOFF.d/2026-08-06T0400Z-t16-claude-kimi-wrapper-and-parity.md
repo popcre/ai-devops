@@ -2,8 +2,13 @@
 
 **Session:** 2026-08-06, machine `t16`, agent Claude Opus 4.8, repo
 `u2giants/ai-devops` branch `main`. **All work is committed and pushed.**
-Continues `2026-08-06T0300Z-t16-claude-grok-review-wrapper.md`, which listed both
-of these as the open items.
+Continues the `ai-grok-review` session earlier the same night, which listed both
+of these as its open items. That handoff
+(`HANDOFF.d/2026-08-06T0300Z-t16-claude-grok-review-wrapper.md`) has been deleted
+now that everything in it is done and verified — recover its full text with
+`git log --diff-filter=D --format=%H -1 -- 'HANDOFF.d/2026-08-06T0300Z-*' ` then
+`git show <sha>^:HANDOFF.d/2026-08-06T0300Z-t16-claude-grok-review-wrapper.md`.
+Its substance survives here and in `bin/ai-grok-review`'s STEP 0 header.
 
 ## 1. What shipped
 
