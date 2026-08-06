@@ -148,24 +148,133 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
 # a wedged turn also looks idle, and treating that as success silently reports an
 # empty review as a finished one.
 # --------------------------------------------------------------------------------
-approve_read_permissions() { # best effort; returns 1 if the endpoint is broken
-  local sid="$1" raw ids id pw
-  pw="$(server_pw)"
-  raw="$(curl -sS -m 20 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
-        "$BASE/api/session/$sid/permission" 2>/dev/null || echo '')"
-  # OpenCode 1.18.12 returns HTTP 400 with an InvalidRequestError body when a pending
-  # request has no metadata.path (glob/grep). The request can then never be listed or
-  # approved, so the turn would hang forever. Report it instead of waiting.
-  if printf '%s' "$raw" | jq -e '._tag? == "InvalidRequestError"' >/dev/null 2>&1; then
+HTTP_STATUS=""; HTTP_BODY=""
+permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
+  local method="$1" path="$2" json="${3:-}" pw tmp rc=0
+  pw="$(server_pw)"; tmp="$(mktemp)"
+  if [ -n "$json" ]; then
+    HTTP_STATUS="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' \
+      -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
+  else
+    HTTP_STATUS="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' \
+      -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      2>/dev/null)" || rc=$?
+  fi
+  HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || HTTP_STATUS="000"
+}
+
+sanitize_permission_body() { # redact first, then cap response detail at 2 KiB
+  local body="$1" clean truncated=""
+  clean="$(printf '%s' "$body" | jq -c '
+    walk(if type=="object" then with_entries(
+      if (.key|ascii_downcase|test("token|authorization|secret|credential|password|content|value"))
+      then .value="[REDACTED]" else . end) else . end)' 2>/dev/null || printf '%s' "$body" | sed -E 's/(token|authorization|secret|credential|password|content|value)[^,}]*/\1=[REDACTED]/Ig')"
+  [ "${#clean}" -le 2048 ] || { clean="${clean:0:2048}"; truncated=" [truncated]"; }
+  printf '%s%s' "$clean" "$truncated"
+}
+
+canonical_path() { # canonical_path PATH BASE; supports paths that do not exist yet
+  local path="$1" base="$2" out
+  case "$path" in
+    /*|[A-Za-z]:[\\/]*|\\\\*) ;;
+    *) path="$base/$path" ;;
+  esac
+  if [ "$IS_WINDOWS" = 1 ] && command -v cygpath >/dev/null 2>&1; then
+    out="$(cygpath -am "$path" 2>/dev/null)" || return 1
+    printf '%s' "$out" | tr '[:upper:]' '[:lower:]'
+  elif command -v realpath >/dev/null 2>&1; then
+    realpath -m -- "$path" 2>/dev/null
+  else
     return 1
   fi
-  ids="$(printf '%s' "$raw" | jq -r '.data[]? | select(.action=="read" or .action=="list") | .id' 2>/dev/null || true)"
-  for id in $ids; do
-    curl -sS -m 20 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
-      -X POST "$BASE/api/session/$sid/permission/$id/reply" \
-      -H 'content-type: application/json' -d '{"reply":"always"}' >/dev/null 2>&1 || true
+}
+
+path_category() { # path_category TARGET SESSION_DIR
+  local target root
+  target="$(canonical_path "$1" "$2")" || { printf invalid; return; }
+  root="$(canonical_path "$2" "$2")" || { printf invalid; return; }
+  case "$target" in "$root"|"$root"/*) printf inside ;; *) printf outside ;; esac
+}
+
+permission_diagnostic() { # STATUS MODE CATEGORY BODY
+  printf 'status=%s mode=%s path=%s sanitized_response=%s' \
+    "$1" "$2" "$3" "$(sanitize_permission_body "$4")"
+}
+
+classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action path
+  local mode="$1" root="$2" status="$3" body="$4" shape count i item id action path category
+  [ "$mode" = review ] || [ "$mode" = implement ] || { printf 'unknown mode' >&2; return 1; }
+  if [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
+    if printf '%s' "$body" | jq -e '._tag? == "InvalidRequestError"' >/dev/null 2>&1; then
+      printf 'un-approvable OpenCode permission request' >&2
+    else
+      printf 'permission endpoint returned HTTP %s' "$status" >&2
+    fi
+    return 1
+  fi
+  printf '%s' "$body" | jq -e . >/dev/null 2>&1 || { printf 'malformed permission response' >&2; return 1; }
+  shape="$(printf '%s' "$body" | jq -r 'if type=="object" and (.data|type)=="array" then "data" else "unsupported" end')"
+  [ "$shape" != unsupported ] || { printf 'unsupported permission response envelope' >&2; return 1; }
+  count="$(printf '%s' "$body" | jq -r '.data|length')"
+  for ((i=0; i<count; i++)); do
+    item="$(printf '%s' "$body" | jq -c --argjson i "$i" '.data[$i]')"
+    id="$(printf '%s' "$item" | jq -r '.id // empty')"
+    action="$(printf '%s' "$item" | jq -r '.action // empty' | tr '[:upper:]' '[:lower:]')"
+    path="$(printf '%s' "$item" | jq -r '.path // .metadata.path // empty')"
+    [ -n "$id" ] || { printf 'permission entry is missing an id' >&2; return 1; }
+    case "$action" in read|list|glob|grep) ;; *) printf 'unknown permission action: %s' "${action:-missing}" >&2; return 1 ;; esac
+    [ -n "$path" ] || { printf 'permission entry is missing a path' >&2; return 1; }
+    category="$(path_category "$path" "$root")"
+    [ "$category" = inside ] || { printf 'permission path is %s' "$category" >&2; return 1; }
+    printf '%s\t%s\t%s\n' "$id" "$action" "$path"
   done
-  return 0
+}
+
+APPROVED_PERMISSION_IDS=""; PERMISSION_ERROR_POLLS=0
+handle_permissions() { # SID NAME MODE SESSION_DIR
+  local sid="$1" name="$2" mode="$3" root="$4" rows id action path prior category err msg stuck
+  permission_http GET "/api/session/$sid/permission"
+  # OpenCode 1.18.12 emits the same metadata-free HTTP 500 UnknownError while a normal
+  # read is briefly running and while an outside-directory read is permanently stuck.
+  # One response cannot be classified. Allow two consecutive polls for a normal read
+  # to clear, then fail on the third observable error instead of waiting 30 minutes.
+  if [ "$HTTP_STATUS" = 500 ] && printf '%s' "$HTTP_BODY" | jq -e \
+       '.name? == "UnknownError" and (.data.message? | type == "string")' >/dev/null 2>&1; then
+    msg="$(last_assistant "$sid" 2>/dev/null || printf '{}')"
+    stuck="$(running_tools "$msg" 2>/dev/null || true)"
+    # The endpoint also returns this 500 when no permission exists. It is evidence of
+    # a permission deadlock only while a tool is observably waiting.
+    [ -n "$stuck" ] || { PERMISSION_ERROR_POLLS=0; return 0; }
+    PERMISSION_ERROR_POLLS=$((PERMISSION_ERROR_POLLS + 1))
+    [ "$PERMISSION_ERROR_POLLS" -le 2 ] && return 0
+  else
+    PERMISSION_ERROR_POLLS=0
+  fi
+  if ! rows="$(classify_permissions "$mode" "$root" "$HTTP_STATUS" "$HTTP_BODY" 2>"${TMPDIR:-/tmp}/ai-glm-perm-err-$$")"; then
+    err="$(cat "${TMPDIR:-/tmp}/ai-glm-perm-err-$$" 2>/dev/null)"; rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
+    category=missing
+    printf '%s' "$err" | grep -q 'outside' && category=outside
+    die "GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
+       $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
+       Run: ai-glm abort $name. For an outside-directory file, place a safe copy under
+       the session repository or provide a small safe excerpt, then retry."
+  fi
+  rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
+  [ -n "$rows" ] || { APPROVED_PERMISSION_IDS=""; return 0; }
+  while IFS=$'\t' read -r id action path; do
+    prior="$(printf '%s\n' "$APPROVED_PERMISSION_IDS" | grep -cxF "$id" || true)"
+    if [ "$prior" -ge 2 ]; then
+      die "GLM permission approval did not clear after two polls (action: $action, path: inside).
+       Run: ai-glm abort $name"
+    fi
+    permission_http POST "/api/session/$sid/permission/$id/reply" '{"reply":"always"}'
+    case "$HTTP_STATUS" in 2*) ;; *) die "GLM permission approval failed (HTTP $HTTP_STATUS, action: $action, path: inside).
+       $(permission_diagnostic "$HTTP_STATUS" "$mode" inside "$HTTP_BODY")
+       Run: ai-glm abort $name" ;; esac
+    APPROVED_PERMISSION_IDS="${APPROVED_PERMISSION_IDS}${id}"$'\n'
+  done <<< "$rows"
 }
 
 last_assistant() { # -> JSON of the newest assistant message
@@ -184,19 +293,13 @@ send_prompt() { # send_prompt SID PROMPT_FILE
   rm -f "$body"
 }
 
-await_turn() { # await_turn SID -> prints the assistant message JSON, nonzero on failure
-  local sid="$1" waited=0 idle=0 msg finish stuck
+await_turn() { # await_turn SID NAME MODE SESSION_DIR -> assistant JSON
+  local sid="$1" name="$2" mode="$3" root="$4" waited=0 idle=0 msg finish stuck
+  APPROVED_PERMISSION_IDS=""
+  PERMISSION_ERROR_POLLS=0
   sleep 6
   while [ "$waited" -lt "$TIMEOUT" ]; do
-    if ! approve_read_permissions "$sid"; then
-      msg="$(last_assistant "$sid")"
-      stuck="$(running_tools "$msg")"
-      die "GLM turn is wedged on an un-approvable permission request (tool: ${stuck:-unknown}).
-       OpenCode $( (api GET /global/health | jq -r .version) 2>/dev/null ) returns HTTP 400 from
-       /api/session/<id>/permission while such a request is pending, so it can never be
-       approved. Run: ai-glm abort $2. If the stuck tool is glob or grep, the usual cause is
-       a very large untracked directory in the repo - add it to .gitignore."
-    fi
+    handle_permissions "$sid" "$name" "$mode" "$root"
     if api GET /session/status | grep -q "$sid"; then
       idle=0
     else
@@ -318,7 +421,7 @@ cmd_new() {
         repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
         created_at:$ts, last_activity_at:$ts, status:"active"}')"
   send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name")"
+  msg="$(await_turn "$sid" "$name" review "$root")"
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
@@ -342,7 +445,7 @@ cmd_ask() {
        If you are sure nothing else is running, remove: $lock"
   before="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name")"
+  msg="$(await_turn "$sid" "$name" review "$root")"
   verify_model "$msg"
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then
@@ -403,7 +506,7 @@ EXCL
 
   sid="$(create_session "$name (implement)" glm-implement "$sb")"
   send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name")"
+  msg="$(await_turn "$sid" "$name" implement "$sb")"
   verify_model "$msg"
   git -C "$sb" add -A >/dev/null 2>&1 || true
   patch="$root/.ai/reviews/glm-$name-$(date -u +%Y%m%dT%H%M%SZ).patch"
@@ -523,7 +626,7 @@ cmd_doctor() {
     # Windows has no Unix wrapper: the launcher execs the pinned binary directly and
     # ai-glm.cmd is what puts the command on PATH.
     chk "ai-glm command installed"         test -f "$HOME/.local/bin/ai-glm.cmd"
-    bin_path="$(sed -n 's|^exec "\(.*opencode\.exe\)".*|\1|p' "$HOME/.local/bin/opencode-glm-launch" 2>/dev/null | tail -1)"
+    bin_path="$(sed -n 's|^exec "\(.*opencode\.exe\)".*|\1|p' "$HOME/.local/bin/opencode-glm-launch" 2>/dev/null | tail -1 || true)"
   else
     chk "opencode wrapper installed"       test -x "$HOME/.local/bin/opencode-ai-devops"
     bin_path="$HOME/.local/bin/opencode-ai-devops"
@@ -674,9 +777,10 @@ cmd_doctor() {
 # --------------------------------------------------------------------------------
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
 
+main() {
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
 CMD="${1:-}"; shift || true
-[ -n "$CMD" ] || { usage; exit 2; }
+[ -n "$CMD" ] || { usage; return 2; }
 ARG=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -712,3 +816,8 @@ case "$CMD" in
   -h|--help|help) usage ;;
   *)          die "unknown command: $CMD (try: ai-glm --help)" ;;
 esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

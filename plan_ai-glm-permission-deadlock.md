@@ -4,13 +4,13 @@
 
 | Step | State | Last updated | Evidence / next action |
 |---|---|---|---|
-| 1. Establish testable permission-response boundaries | ⬜ open | 2026-08-05 | Fresh implementer starts here. |
-| 2. Implement fail-closed permission classification | ⬜ open | 2026-08-05 | Depends on step 1. |
-| 3. Integrate mode and session-directory context into turn polling | ⬜ open | 2026-08-05 | Depends on step 2. |
-| 4. Add offline regression coverage | ⬜ open | 2026-08-05 | Develop alongside steps 1–3. |
-| 5. Capture the real OpenCode 1.18.12 outside-directory schema | ⬜ open | 2026-08-05 | Run only after safe diagnostics exist. |
-| 6. Finalize messages, docs, and skill guidance | ⬜ open | 2026-08-05 | Depends on step 5 evidence. |
-| 7. Run complete verification and land the change | ⬜ open | 2026-08-05 | Final gate. |
+| 1. Establish testable permission-response boundaries | ✅ done | 2026-08-05 | `permission_http` retains transport status/body; pure helpers are sourceable under guarded `main`. |
+| 2. Implement fail-closed permission classification | ✅ done | 2026-08-05 | Only validated in-session read-like requests are approved; every other observable state fails safely. |
+| 3. Integrate mode and session-directory context into turn polling | ✅ done | 2026-08-05 | Both review call sites pass repository root; implementation passes its remote-less clone. |
+| 4. Add offline regression coverage | ✅ done | 2026-08-05 | 118 offline checks pass in Windows Git Bash, including fixtures, replies, redaction, and repeated IDs. |
+| 5. Capture the real OpenCode 1.18.12 outside-directory schema | ✅ done | 2026-08-05 | Live reproduction captured HTTP 500 `UnknownError`, generic message + server ref only; marker content absent. The endpoint later returned the same 500 with no permission, so the client requires a repeatedly running tool before acting on this shape. |
+| 6. Finalize messages, docs, and skill guidance | ✅ done | 2026-08-05 | Troubleshooting, limitations, constraint, skill wedge guidance, and optional live regression updated. |
+| 7. Run complete verification and land the change | ✅ done | 2026-08-05 | Syntax, 118 offline checks, doctor, diff, and secret scan pass. Normal/two-turn live gates were bounded and stopped: current OpenCode returned generic HTTP 500 even for `Reply with only hello`; no CI/deploy exists. Committed/pushed with this record. |
 
 Fresh session start: read this entire file, then `AGENTS.md` and section 5 of
 `docs/glm-opencode.md`; begin at the first open STATUS row. Update this table as work
@@ -130,9 +130,15 @@ surfaces unmatched response entries.
 - `skills/shared/ask-glm/SKILL.md` tells an agent how to handle wedged turns and must
   reflect the new fail-fast behavior.
 
-No implementation for this plan existed when written. The baseline was committed,
-pushed, and clean on `main`; nothing is deployed because this repo is a CLI toolkit, not
-a service deployment.
+Implementation is complete in the working tree. `bin/ai-glm` now preserves HTTP status,
+classifies every permission response, bounds and redacts diagnostics, detects ineffective
+approvals, and receives explicit mode/directory context. Offline fixture tests and an
+optional live outside-directory regression are present. The measured OpenCode 1.18.12
+outside-read response is HTTP 500 with `{"name":"UnknownError","data":{"message":
+"Unexpected server error. Check server logs for details.","ref":"err_<opaque>"}}`; it
+contains no request metadata that can safely prove a path category. The client therefore
+reports the measured HTTP failure and safe correction without falsely claiming the
+server identified an outside path. Commit/push evidence is recorded in STATUS step 7.
 
 ## 6. Key findings and root cause
 
