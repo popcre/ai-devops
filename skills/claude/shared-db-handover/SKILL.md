@@ -156,8 +156,9 @@ How to do it correctly:
   Use the Part 0 request template in `COORDINATOR_INTAKE.md`.
 - **Never duplicate content.** Detail copied into the queue is detail that will
   drift out of date; the two documents have already drifted apart repeatedly in
-  this repo. `HANDOFF.md` is authoritative — **where the queue and `HANDOFF.md`
-  disagree, `HANDOFF.md` wins** and the queue entry is stale.
+  this repo. **No document wins by name or by date.** Where the queue and
+  `HANDOFF.md` (or the newest `HANDOFF.d/` file) disagree, **re-derive the fact
+  from `git`/`gh` and believe that** — do not rank the documents and pick one.
 - **Every `HANDOFF.md` `## BACKLOG` item `B<n>` gets an entry**, titled so the
   B-number is visible in the heading (`### REQUEST — Backlog B7 — …`).
 - **Refresh, do not restart.** Items already queued and still outstanding stay
@@ -254,8 +255,18 @@ The handover is where unverified claims become someone else's false assumptions.
 4. **No mystery untracked files** in the repo. Either commit them under the
    repo's branch/PR rules or list them in the handoff with what they are and the
    exact next action.
-5. **Never merge on the way out.** A pending PR is handed over, not rushed
-   through to tidy up the session.
+5. **Merge your OWN docs-only handover PR before the session ends. Hand over
+   only work PRs.** A schema/code PR mid-review is handed over, not rushed
+   through to tidy up the session — that is what this rule was for. But a
+   **docs-only** PR (the handover itself, queue entries, notes) is merged by the
+   session that wrote it: `AGENTS.md` §5 says docs-only merges promptly and §2
+   says never leave an open PR behind.
+
+   This split exists because the old blanket "never merge on the way out" is what
+   stranded the **2026-08-05** handover in open PR #451. The next coordinator read
+   `main`, saw a five-day-old handover, and concluded the session had been lost.
+   Nothing was lost; it was parked by the rule. A handover nobody can find is not
+   a handover.
 6. **Run the closers:** `session-docs-update` for the documentation ritual and
    `secrets-to-1password` for the secrets sweep. Credentials are referenced by
    1Password item ID only — never a value in the handoff.

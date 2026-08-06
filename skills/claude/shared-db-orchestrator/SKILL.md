@@ -102,27 +102,53 @@ section with the date instead of deleting it. Details live in the
 
 ## At session start — the hygiene sweep (do this before dispatching anything)
 
-A coordinator that starts by trusting a document starts wrong. Run all five
-steps, **in this order**, before the first brief goes out:
+A coordinator that starts by trusting a document starts wrong. **Every startup is
+a recovery startup** — always assume the previous coordinator may have died
+mid-handover, because one did (2026-08-05). There is no separate emergency mode.
+Run all seven steps, **in this order**, before the first brief goes out:
 
+0. **Claim the coordinator marker — before anything else.** One coordinator, on
+   one machine, at a time. The marker is a GitHub issue in `u2giants/shared-db`
+   labelled `coordinator-marker` — a tracked file cannot serve, because branch
+   protection puts it behind a PR and the coordinator does not commit.
+   `gh issue list --label coordinator-marker --state open`, then:
+   - **An open marker that is not yours: STOP, do not dispatch.** Show Albert its
+     session id, machine and start time, and ask whether to close it. A dead
+     coordinator's marker stays open **on purpose**.
+   - **None open:** open `COORDINATOR ACTIVE — <session id> — <machine>` with the
+     start time, **list again**, and proceed only if exactly one is open and yours.
+   - **Re-check before EVERY dispatch**, not only at startup — a stopped
+     coordinator can resume hours later on stale context and dispatch against live
+     work. Workers carry no lease and check nothing; this is the coordinator's
+     obligation alone. Close the marker at handover.
 1. **Establish ground truth from the repo, never from a Markdown file.**
-   `git fetch --all --prune=false`, then read `origin/main`'s **real** tip SHA
-   and the **real** maximum 14-digit version in `supabase/migrations/` (and check
-   for duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
+   `git fetch --all --prune` (**not** `--prune=false` — that is not valid git and
+   fails with `option 'prune' takes no value`, leaving you on stale refs while
+   looking like you fetched), then read `origin/main`'s **real** tip SHA and the
+   **real** maximum 14-digit version in `supabase/migrations/` (and check for
+   duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
    this skill are all capable of being hours out of date; the repo is not.
    Stamp both facts with the time you checked them and put them in the register.
-2. **Read `HANDOFF.md` — REQUIRED, and BEFORE you look at the queues.** Two
-   parts of it, specifically:
-   - the **most recent `COORDINATOR HANDOVER` section** at the top of the file,
-     including its **opening agenda** and its **waiting-on-Albert list**; and
-   - the **`## BACKLOG`** section (the `B<n>` items).
+2. **Find the CURRENT handover — it is in `HANDOFF.d/`, not at the top of
+   `HANDOFF.md`.** Handovers are write-once dated files under `HANDOFF.d/`; root
+   `HANDOFF.md` is long-form history and its newest in-file section can be days
+   older than the real handover (on 2026-08-05 it was five days older).
+   - **Parse the timestamp, never sort the filename.** `HANDOFF.d/` holds two
+     formats — `2026-08-05T1827Z-…` and `20260731T231155Z-…`. A plain text sort
+     puts the **older** compact name last and calls it newest.
+   - **Search open PR heads too.** The newest handover may not be on
+     `origin/main` yet (see step 2b).
+   Then read `HANDOFF.md` for the **`## BACKLOG`** section (the `B<n>` items) and
+   the standing detail the handover points at.
 
    > **"An empty REQUEST QUEUE / INTAKE QUEUE / IN PROGRESS does not mean there
    > is no work. `HANDOFF.md` is the authoritative record of outstanding work;
    > the queues track only incoming requests and handovers."**
 
-   **Where the queues and `HANDOFF.md` disagree, `HANDOFF.md` wins.** A queue
-   entry that contradicts it is stale, not news.
+   **No document wins because it is newer, and none wins by name.** Documents are
+   pointers. Where any two disagree — queue vs handover vs `HANDOFF.md` vs this
+   skill — **re-derive the fact from `git`/`gh` and believe that.** Do not rank
+   the documents by date and pick a winner; that is document-shopping.
 
    This step is here because on **2026-07-31** a fresh coordinator read the three
    empty queue sections, exactly as this skill then instructed, and reported
@@ -130,6 +156,13 @@ steps, **in this order**, before the first brief goes out:
    `HANDOFF.md` backlog. Every word of the report was true; the conclusion was
    completely wrong. Never report the project idle on the strength of the queues
    alone.
+2b. **Check open pull requests — `gh pr list --state open`.** For each one:
+   who opened it, is it a handover, and is it parked deliberately? **The whole of
+   a previous session can be sitting in an open PR** — on 2026-08-05 the entire
+   handover plus days of queue findings were in PR #451, invisible to anyone
+   reading `main`. A docs-only handover PR is **merged before the session that
+   wrote it ends**; if you find one open, read it, then merge it (AGENTS.md §5:
+   docs-only merges promptly; §2: never leave an open PR behind).
 3. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
    done that nobody has started. Triage it: what is ready to dispatch, what needs
    an Albert decision first, what is already obsolete. Reconcile it against the
@@ -142,19 +175,50 @@ steps, **in this order**, before the first brief goes out:
    then dispatch and move the block on.
 5. **Run the branch/worktree hygiene check.** `git worktree list` and
    `git branch -vv`: every worktree is either live (say whose and what for) or
-   finished; every finished branch should be merged. Do not delete anything at
+   finished; every finished branch should be merged. **A DIRTY worktree belonging
+   to a dead agent is EVIDENCE — read it before retiring anything.** It may hold
+   the only copy of work no report ever mentioned. Do not delete anything at
    session start — record it, and act at handover time under the rules in
    `shared-db-handover`.
+6. **Preview state starts as `UNKNOWN`, and only a sub-agent can resolve it.**
+   Preview is a live mutable database; nothing in `git` can tell you what is
+   sitting on it, and the coordinator makes no database calls. Dispatch a
+   read-only **preview observer** and record `UNKNOWN` in the register until its
+   report lands. **Dispatch no preview writer while it reads `UNKNOWN`.**
+
+### Delegate the big reads
+
+Steps 2–4 span ~9,500 lines and reading them inline burns the exact resource this
+model exists to protect. Keep steps 0, 1, 2b and 5 inline — they are cheap
+commands, not reads — and dispatch **one read-only summarizer** for the documents,
+**pinned to an exact commit SHA**, returning **line anchors** for every claim, the
+outstanding work items, the owner-decision gates, and any **contradictions
+flagged, not resolved**. Then **verify each flagged contradiction yourself against
+the repo**: a summary is a document like any other, so "re-derive from `git`/`gh`"
+applies to it too.
 
 **Lifecycle and retention for the queues live in `COORDINATOR_INTAKE.md`** —
 how long blocks stay, when they move between sections, and when they are aged
 out. Follow that file rather than any threshold restated elsewhere; do not
 restate its numbers in a brief, point the agent at the file.
 
-## The live register — keep this current in the coordinator's own message
+## The live register — rebuild it, don't store it
 
 Maintain and restate this after every dispatch and every report. When it goes
 stale, agents collide.
+
+**Most of it is derivable, so never persist it.** The tip SHA, migration maximum,
+branches, worktrees and open PRs are all seconds away from `git`/`gh` — a
+committed register file would only manufacture another stale document, which is
+the disease this skill treats. **Rebuild the derivable rows at every startup.**
+
+What is **not** derivable is the assignment: which agent owns which files, which
+is alive, and who holds preview. Record that in the **`IN PROGRESS` annotations of
+`COORDINATOR_INTAKE.md`** at dispatch time (§B2.1) — that is its durable home, and
+the next handover PR carries those commits. A gitignored local scratch copy
+(`.claude/coordinator-register.local.md`) is fine as **crash convenience only**:
+it is a cache, never authority, it does not survive a change of machine, and
+session start always re-derives rather than trusting it.
 
 ```text
 main tip SHA:            <sha>            (re-verified <time>)
@@ -192,8 +256,13 @@ function `plm.promote_coldlion_source_owned`**, and three of those picked the
 identical version `20260731170000`. `CREATE OR REPLACE` replaces the whole
 function body — it is last-writer-wins, so merging any two of those PRs would
 have **silently erased** the others' fixes. Each PR passed CI on its own, because
-the duplicate-version guard only ever sees one branch at a time. CI cannot catch
-this class of bug; only a coordinator can.
+the duplicate-version guard only ever sees one branch at a time.
+
+**Since then the repo added a required `Cross-PR object collision` check**
+(`AGENTS.md` §6.7) which does catch this shape — so do not repeat the old line
+that "CI cannot catch it" and do not distrust a guard that works. It is **not**
+complete cover: `strict` is `false`, so a check can pass against a `main` that has
+since moved (§5.2). Treat it as a second pair of eyes, not as the coordinator.
 
 **Do instead:** write follow-ups to a backlog file in the repo (e.g.
 `docs/backlog/<topic>.md`). A backlog entry is inert until a coordinator reads it
