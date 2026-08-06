@@ -307,5 +307,12 @@ check "fallback never copies the password" \
 check "fallback is limited to a named user" \
   "grep -q 'AI_GLM_SERVER_USER' '$AI_GLM'"
 
+# Running AS the owning user with a bare config dir must NOT "attach to itself":
+# that reported "attached to the server owned by ai" while running as ai, and
+# short-circuited the full installation report doctor owes a not-yet-set-up
+# machine. Caught on Ubuntu; invisible on Windows, where getent does not exist.
+OUT="$(AI_GLM_SERVER_USER="$(id -un)" AI_DEVOPS_CONFIG_DIR="$SHTMP/empty2" bash "$AI_GLM" doctor 2>&1 || true)"
+check "never attaches to its own account" "! printf '%s' \"\$OUT\" | grep -q 'attached to the OpenCode server'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
