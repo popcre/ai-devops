@@ -631,10 +631,40 @@ if (Test-Path $gitBash) {
   $syncScript = "$posix/bin/ai-memory-sync"
   # Seed once now.
   & $gitBash -lc "'$syncScript' pull" 2>$null
-  $tr = '"' + $gitBash + '" -lc "''' + $syncScript + '''"'
-  schtasks /Create /TN "ai-memory-sync" /SC MINUTE /MO 30 /TR $tr /F /RL LIMITED 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { Ok "Scheduled task 'ai-memory-sync' every 30 min" }
-  else { Warn "Could not create the scheduled task; run '$syncScript' from Git bash to sync manually." }
+
+  # Task Scheduler launching bash.exe directly opens Windows Terminal whenever
+  # the task runs.  Use the GUI-based Windows Script Host as a silent shim so
+  # the sync stays in the background even when Windows Terminal is the default
+  # console host.  The task limit also prevents a stalled git/network operation
+  # from living forever, and IgnoreNew prevents overlapping syncs.
+  $taskDir = Join-Path $HOME ".config\ai-devops"
+  $taskLauncher = Join-Path $taskDir "ai-memory-sync-hidden.vbs"
+  New-Item -ItemType Directory -Force -Path $taskDir | Out-Null
+  $escapedBash = $gitBash.Replace('"', '""')
+  $escapedSync = $syncScript.Replace('"', '""')
+  $launcherBody = @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run """$escapedBash"" -lc ""'$escapedSync' >/dev/null 2>&1""", 0, True
+"@
+  Set-Content -LiteralPath $taskLauncher -Value $launcherBody -Encoding ascii
+
+  try {
+    $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" `
+      -Argument "//B //NoLogo `"$taskLauncher`""
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(30) `
+      -RepetitionInterval (New-TimeSpan -Minutes 30)
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
+      -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
+    $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+      -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName "ai-memory-sync" -Action $action -Trigger $trigger `
+      -Settings $settings -Principal $principal -Description "Silent AI memory sync every 30 minutes" `
+      -Force -ErrorAction Stop | Out-Null
+    Ok "Scheduled task 'ai-memory-sync' every 30 min (hidden; 15 min limit)"
+  } catch {
+    Warn "Could not create the scheduled task: $($_.Exception.Message)"
+    Warn "  Run '$syncScript' from Git bash to sync manually."
+  }
 } else {
   Warn "Git bash not found (install Git) - memory sync not scheduled."
 }
