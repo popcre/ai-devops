@@ -17,21 +17,41 @@ Companion documents — read alongside, not instead of:
 
 | # | Step | State | Date | Notes |
 |---|---|---|---|---|
-| 0 | **Verify the Grok 0.2.118 surface** (blocks everything) | ⬜ open | | Added 2026-08-05 after GLM review |
-| 1 | `bin/ai-grok-review` skeleton, arg parsing, `doctor` | ⬜ open | | |
-| 2 | Session state store + `new` / `ask` | ⬜ open | | |
-| 3 | Turn execution + wait-and-verify completion rule | ⬜ open | | |
-| 4 | `stopReason` handling + auto-resume on turn-limit | ⬜ open | | |
-| 5 | Output extraction (`--json`, `--text`, review files) | ⬜ open | | |
-| 6 | `list` / `show` / `transcript` / `delete` | ⬜ open | | |
-| 7 | `tests/test-ai-grok-review.sh` | ⬜ open | | |
-| 8 | Shrink `skills/shared/grok-cli/SKILL.md` to point at the script | ⬜ open | | |
-| 9 | Router + docs + memory entries | ⬜ open | | |
-| 10 | Ship: commit, push, install on VPS + t16, live smoke test | ⬜ open | | |
+| 0 | **Verify the Grok 0.2.118 surface** | ✅ done | 2026-08-05 | Findings in the script's STEP 0 header. Changed 5 assumptions — see below |
+| 1 | `bin/ai-grok-review` skeleton, arg parsing, `doctor` | ✅ done | 2026-08-05 | `doctor` free by default; `--live` for the billable probe |
+| 2 | Session state store + `new` / `ask` | ✅ done | 2026-08-05 | Plus the per-repo in-flight lock (D12) |
+| 3 | Turn execution + wait-and-verify completion rule | ✅ done | 2026-08-05 | Fast-fail guarded by "positively saw a process" — see below |
+| 4 | `stopReason` handling + turn-limit recovery | ✅ done | 2026-08-05 | `--auto-continue` deliberately NOT built (see §13 Q4) |
+| 5 | Output extraction + review files | ✅ done | 2026-08-05 | Refuses to write where `.ai/` is not ignored |
+| 6 | `list` / `show` / `transcript` / `delete` | ✅ done | 2026-08-05 | `transcript` IS implementable — `grok export` |
+| 7 | `tests/test-ai-grok-review.sh` | ✅ done | 2026-08-05 | 50 offline + 4 live assertions, 0 failures |
+| 8 | Shrink `skills/shared/grok-cli/SKILL.md` | ✅ done | 2026-08-05 | 331 → 118 lines |
+| 9 | Router + docs + memory entries | ✅ done | 2026-08-05 | `AGENTS.md` ×3, memory `grok-headless-early-return` |
+| 10 | Ship: push, install on VPS + t16, live smoke test | ✅ done | 2026-08-05 | Live: 22,912 tokens cached on turn 2 |
 
-**A fresh session starts at Step 0.** Nothing has been built yet. The only work
-done so far is the SKILL.md documentation fix in commit `cfb5cd3`, which this
-plan partially undoes (Step 8).
+**This plan is COMPLETE.** Everything below is retained as the reasoning record —
+why each invariant exists, and what was rejected. Do not re-plan from it.
+
+**What Step 0 changed, versus what this plan assumed:**
+
+| Plan assumed | Reality on 0.2.118 |
+|---|---|
+| JSON output might be NDJSON; the polling loop must handle a stream | It is **one object** (`jq -s length` == 1). The NDJSON formats are separately named `streaming-json` / `streaming-messages-json` |
+| Prompt goes through argv; ARG_MAX is a risk needing a documented ceiling | **`--prompt-file` exists.** Used. No ceiling needed |
+| `transcript` is unimplementable (GLM's finding, correct about `ai-glm`) | **`grok export` exists.** Implemented after all |
+| `web_fetch` scope leak has to be tolerated or manually denied | **`--disable-web-search` exists.** Now part of the frozen prefix |
+| `grok doctor` reads a stale/different auth state | It is a **terminal/clipboard/color diagnostic** — it never checked auth at all. That fully explains the 2026-08-05 contradiction |
+
+Also learned: the result carries `num_turns` and `requestId`, neither of which this
+plan knew about; `num_turns` is now reported so a turn-limit stop shows turns used.
+
+**One design correction the tests forced.** GLM's fast-fail suggestion (§1(c) of its
+review) — abort early when no Grok process is alive — is *actively dangerous* as stated,
+and the regression test caught it. The orphaned worker is named
+`grok-<version>-<arch>` under `bwrap`, not `grok`, so a detection miss would abort a
+healthy slow run and reintroduce "Grok returned nothing" as a self-inflicted bug. It now
+fast-fails **only if a Grok process was positively seen earlier in the same wait** and
+then vanished; if detection never matched, the wait runs to full timeout.
 
 ---
 

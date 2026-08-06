@@ -11,7 +11,7 @@ workflow**. It is a small set of Bash CLI scripts, prompt templates, docs, and
 skill/MCP scaffolding — **not** an application, service, or web app.
 
 - **What it does:** installs CLI helpers (`ai-devops`, `ai-workspace-status`,
-  `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`) that drive a staged coding
+  `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`) that drive a staged coding
   workflow: plan → plan-review → implement → diff-review → test → security-review
   → final-review.
 - **Who uses it:** the repo owner (Albert, GitHub `u2giants`) and AI coding
@@ -60,6 +60,7 @@ Then load additional docs only when relevant:
 | Onboard an application repo to the workflow | `AGENTS.md`, `docs/repo-onboarding.md`, `templates/repo-docs/*` | Deployment docs |
 | Back up / sync Claude Code transcripts | `AGENTS.md`, `skills/claude/claude-transcript-backup/SKILL.md` | Transcripts live in the PRIVATE `transcripts/` submodule. Never commit them here. Do not open the `.jsonl` files themselves |
 | Touch GLM, `ai-glm`, the OpenCode server, or the Windows GLM setup | `AGENTS.md`, **`docs/glm-opencode.md` (read section 5 "Hard-won constraints" FIRST)**, [`plan_ai-glm-permission-deadlock.md`](plan_ai-glm-permission-deadlock.md) while its STATUS has open rows, `bin/ai-glm`, `bin/setup-opencode-glm.sh` / `.ps1`, `config/opencode/*`, `skills/shared/ask-glm/SKILL.md`, `tests/test-ai-glm.sh`, `tests/test-windows-scripts.sh` | Section 5 lists 23 constraints that each cost a real failure. Do not "simplify" the completion rule, the sandbox clone, the ASCII-only `.ps1` rule, or the agent `tools:` maps without re-measuring |
+| Touch Grok, `ai-grok-review`, or the Grok skill | `AGENTS.md`, `bin/ai-grok-review` (read the STEP 0 VERIFICATION header FIRST), `skills/shared/grok-cli/SKILL.md`, `tests/test-ai-grok-review.sh` | Completion is proven by a terminal `stopReason` in the JSON, NEVER by exit status — exit 0 with a 0-byte file is Grok's normal early-return appearance. Do not remove `--max-turns`, broaden the permission set, add a flag passthrough, or "simplify" the wait loop or the per-repo lock. Each guards a failure that cost real money on 2026-08-05 |
 | Analyze Codex transcripts or repeated Codex prompts | `AGENTS.md`, `docs/codex-chat-analysis.md`, `docs/codex-skills-usage-guide.md`, `skills/codex/codex-transcript-miner/SKILL.md` | Raw transcript `.jsonl` unless the analysis task requires them |
 | Install or update Claude/Codex skills / global instructions on a machine | `AGENTS.md`, `docs/skills-usage-guide.md`, `docs/codex-skills-usage-guide.md`, `bin/ai-install-skills`, `templates/system/*` | Transcript data |
 | Add or update Codex workflow skills | `AGENTS.md`, `docs/codex-skills-usage-guide.md`, affected `skills/codex/*/SKILL.md`, `docs/skills-map.md` | Raw chat/docx prompt sources unless needed |
@@ -200,7 +201,7 @@ names.
 | Toolkit home | `/worksp/ai-devops` | fixed convention | **Never** `/opt/ai-devops`. Referenced by all scripts/docs |
 | Machine config dir | `/etc/ai-devops/` | `install.sh`, `server.env` | Holds real `models.env` + `server.env` (not in repo) |
 | Log dir | `/var/log/ai-devops/` | `install.sh`, `server.env` | Created on install; currently unused by scripts |
-| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
+| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |
