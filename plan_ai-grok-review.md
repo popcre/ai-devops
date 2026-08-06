@@ -17,6 +17,7 @@ Companion documents — read alongside, not instead of:
 
 | # | Step | State | Date | Notes |
 |---|---|---|---|---|
+| 0 | **Verify the Grok 0.2.118 surface** (blocks everything) | ⬜ open | | Added 2026-08-05 after GLM review |
 | 1 | `bin/ai-grok-review` skeleton, arg parsing, `doctor` | ⬜ open | | |
 | 2 | Session state store + `new` / `ask` | ⬜ open | | |
 | 3 | Turn execution + wait-and-verify completion rule | ⬜ open | | |
@@ -28,7 +29,7 @@ Companion documents — read alongside, not instead of:
 | 9 | Router + docs + memory entries | ⬜ open | | |
 | 10 | Ship: commit, push, install on VPS + t16, live smoke test | ⬜ open | | |
 
-**A fresh session starts at Step 1.** Nothing has been built yet. The only work
+**A fresh session starts at Step 0.** Nothing has been built yet. The only work
 done so far is the SKILL.md documentation fix in commit `cfb5cd3`, which this
 plan partially undoes (Step 8).
 
@@ -60,6 +61,17 @@ What will be true when this is done that isn't true today:
   tokens.
 - Follow-up questions reuse the warm session automatically, so the cache
   savings we already measured actually get realised in practice.
+
+**Be honest about what this does and does not make structural** (sharpened 2026-08-05
+after the GLM review, which correctly said the first draft overclaimed). Of the four
+cost-causing failures, the wrapper makes **three** structural — reading output too early
+(D3), omitting `--max-turns` (D4), and broadening permissions (D2). Duplicate concurrent
+sessions become structural only once the per-repo lock (D12) exists; without it the
+wrapper removes the *signal* that provoked duplicates but not the *ability* to start
+them. And **bypass remains advisory**: nothing stops a session invoking `grok` directly.
+The real win is that the advisory rule shrinks from "compose these nine flags correctly"
+to "call the wrapper." Say it that way. A future session must not read this plan and
+conclude that duplication and bypass were made impossible.
 
 **If a step in this plan conflicts with that goal, the goal wins — stop and
 flag it.** In particular: if enforcing an invariant in the script turns out to
@@ -232,6 +244,8 @@ not verified to exist in 0.2.118** — see §13, open question 2.
 | **A PowerShell script for Windows plus a Bash script for Ubuntu.** | Rejected: two implementations means two sets of invariants drifting apart, which is the exact failure mode being fixed. `ai-glm` proved one Bash script runs on both under Git Bash. This is a **locked** decision. |
 | **Let callers pass through arbitrary Grok flags (`--` passthrough).** | Rejected. A passthrough is a drift hatch: the next session under pressure will pass `--permission-mode auto` through it, precisely as happened on 2026-08-05. `ai-glm` deliberately fixes model, agent, tools, and cwd at session creation for the same reason. This is a **locked** decision. |
 | **Auto-retry a cancelled run with a doubled `--max-turns`, silently.** | Rejected as a silent failure (standing rule 11). Retrying *is* right, but it must be loud, opt-in per invocation, and bounded — see Step 4. |
+| **Fixing the launch layer so the invocation genuinely blocks** — e.g. `setsid` + waiting on the process group, or a `coproc` read to EOF — instead of polling around the early return. | Considered and rejected after the GLM review flagged its absence, but rejected on *pragmatism*, not evidence: it is platform-specific (there is no clean process-group equivalent under Git Bash on Windows, which D1 requires), it depends on Grok's internal `bwrap` arrangement which may change between versions, and it would still need the JSON check to catch turn-limit stops. Polling the result is version-independent and works identically on both platforms. **If Step 0 shows Grok exposes a genuinely blocking headless mode, prefer it** and keep the JSON check on top. |
+| **A per-repo in-flight lock.** | **Not rejected — adopted after review as D12.** The first draft scoped the `ai-glm` mutex to session name only, which leaves the most expensive symptom (duplicate concurrent reviews) unguarded. |
 | **Broadening permissions when a run returns no answer.** | Rejected on evidence. Verified: with Bash denied, Grok reported "Shell is blocked, so I'll stick to file reads and greps" and completed the review using `read_file`, `grep`, `list_dir`, `web_fetch`. Broadening is the wrong lever *and* it invalidates the cached prefix. |
 
 ## 8. Design decisions already made
@@ -241,7 +255,7 @@ judgment.
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | One Bash script, `bin/ai-grok-review`, runs on Ubuntu and on Windows under Git Bash. | **Locked** |
+| D1 | One Bash script, `bin/ai-grok-review`, runs on Ubuntu and on Windows under Git Bash. **Locked conditional on the Git Bash verification gate in Step 0.5** — the `mkdir` mutex, the `ps`/`pgrep` fallback, and `mktemp` templates are all inherited from `ai-glm` and assumed rather than proven on `t16`. If that gate fails, reopen D1 *then*; do not reopen it on preference. | **Locked (conditional)** |
 | D2 | Model, permission set, `--no-memory`, and `--cwd` are fixed at session creation and are **not** overridable per call. Stable prefix = working cache; fixed permissions = no drift. | **Locked** |
 | D3 | Completion is proven by valid JSON carrying a terminal `stopReason`, never by exit status, never by the Grok log. | **Locked** |
 | D4 | `--max-turns` is always passed. There is no code path that omits it. | **Locked** |
@@ -252,6 +266,8 @@ judgment.
 | D9 | Default wait timeout (proposal: 600 s; the longest observed successful run was ~200 s). | Open |
 | D10 | Whether review output also lands in `.ai/reviews/` like `ai-codex-review`, or only in the state dir. Proposal: both — state dir for the transcript, `.ai/reviews/` for the human-readable result, matching the existing convention. | Open |
 | D11 | Whether to add environment-slimming flags (`--no-skills` etc.). | Open, **blocked on verification** — see §13 Q2 |
+| D12 | A **per-repo in-flight lock**: while any `ai-grok-review` turn is running against a repo, a second `new` in that repo is refused (with the running session's name and elapsed time), not queued. Duplicate concurrent reviews were the single most expensive symptom of the incident, and D3 only removes the *signal* that provoked them, not the ability. Added 2026-08-05 after GLM review. | **Locked** |
+| D13 | `--max-turns` is a **runtime bound, not part of the frozen prefix** — it is overridable on `ask`. Everything else in D2 stays frozen. Turn-limit recovery is an `ask` that raises it, so freezing it would forbid Step 4. | **Locked** |
 
 ---
 
@@ -265,13 +281,60 @@ and tests). **Phase C = Steps 8–10** (documentation and ship). A fresh session
 can comfortably do Phase A in one context; cut between A and B if needed, and
 re-read Steps 6–10 before starting each.
 
+### Step 0 — Verify the Grok 0.2.118 surface BEFORE writing any logic
+
+**Added 2026-08-05 after the GLM review, which correctly pointed out this plan demanded
+verification for the *optional* env-slimming flags and omitted it for the *load-bearing*
+core — exactly backwards.** Everything in Steps 3–5 rests on assumptions captured from a
+single incident write-up, not from the CLI.
+
+Do all of this first, and paste the results into a comment block at the top of the script
+so the next reader knows what was true at build time:
+
+1. `grok --help` — confirm every flag the script will use exists **with the assumed
+   spelling**: `--single`, `--resume`, `--max-turns`, `--permission-mode`, `--allow`,
+   `--deny`, `--no-memory`, `--output-format`, `--cwd`. If any is misnamed the script
+   breaks on its first live run.
+2. **Confirm `--single` and `--resume` compose.** `--single` may mean "one-shot, no
+   persistence" in this CLI; if it does not combine with `--resume`, the entire session
+   model (D2, D6) needs rethinking before it is built, not after.
+3. **Pin the output shape.** Run one real `--output-format json` turn and check whether
+   the file is a **single JSON object** or a **stream/NDJSON**. This is the single
+   biggest unverified assumption in the plan: `jq -er .stopReason < "$f"` behaves
+   differently on a stream, and an early object carrying `cancelled` followed by a later
+   `end_turn` would be read wrongly. If it is a stream, `await_result` must select the
+   **last** object explicitly (`jq -es '.[-1].stopReason'` or equivalent) — decide from
+   the captured evidence, not from this sentence.
+4. `grok inspect` in the target repo — record what actually loads, and **what tools the
+   fixed permission set really grants**. The skill documents that under
+   `--allow Read --allow Grep` Grok used `read_file`, `grep`, `list_dir`, **and
+   `web_fetch`**. Outbound network in a nominally read-only review is a scope leak D5
+   does not currently notice. Decide deliberately whether to deny it, and say why.
+5. Check how a large prompt is passed. `--single "$prompt"` puts the whole brief in one
+   argv element and will hit `ARG_MAX` on a big plan (~128 KB–2 MB on Linux, less in a
+   sandbox). `ai-glm` avoids this by POSTing a body to a server; this script has no
+   server. Find out whether Grok reads a prompt file or stdin; if it does not, document
+   the size ceiling and fail loudly above it rather than truncating.
+
+**Step 0.5 — the Git Bash gate (D1's condition).** On `t16`, in Git Bash, prove:
+`mkdir`-based locking works; a process listing for Grok is obtainable
+(`pgrep -af grok` is absent — verify what `ps -W | grep -i grok` actually returns);
+`mktemp` with an `ai-glm`-style template works. If any fails, reopen D1 before building.
+
+**Done when:** the comment block exists in the script with the captured `grok --help`
+flag list, the observed JSON shape, and the `grok inspect` tool list; and every later
+step's assumptions have been either confirmed or corrected in this plan.
+
 ### Step 1 — Skeleton, argument parsing, `doctor`
 
 **Files:** create `bin/ai-grok-review`.
 
 Copy the header/idiom conventions from `bin/ai-glm` lines 1–50: `#!/usr/bin/env
-bash`, `set -uo pipefail`, a banner comment stating this is the ONLY supported
-way to call Grok, and `die`/`warn`/`note`/`need` helpers.
+bash`, a banner comment stating this is the ONLY supported way to call Grok, and
+`die`/`warn`/`note`/`need` helpers. `bin/ai-glm:20` is **`set -euo pipefail`** — with
+`-e`. Match it, and guard every intentionally-non-fatal `grep`/`jq` in the polling loop
+exactly as `ai-glm` does. (An earlier draft cited `set -uo pipefail`; mis-citation,
+caught in review.)
 
 Subcommands (final surface, for reference while building):
 
@@ -286,9 +349,16 @@ ai-grok-review doctor
 
 - Resolve the binary (`command -v grok`) and print `grok --version`.
 - Check auth with **`grok models`**, not `grok doctor` — the latter reported
-  "You are not authenticated" while real calls worked. If `grok models` is
-  ambiguous, fall back to a one-line headless probe. **A `grok doctor` failure
+  "You are not authenticated" while real calls worked. **A `grok doctor` failure
   alone must never be reported to Albert as "you need to log in."**
+- **`doctor` must stay free.** A headless probe is a real billable call, and the
+  definition of done runs `doctor` on every install. Gate any probe behind an explicit
+  `doctor --live`; the default path reports "ambiguous" rather than spending money.
+- **Resolve the Grok binary, do not assume PATH.** On `hetz` it is
+  `/home/ai/.local/bin/grok`, which is almost certainly **not** on `root`'s PATH — and
+  the plan installs for both users. `command -v grok` failing for `root` will be
+  mis-diagnosed as a broken install. Search a known list of locations, report the
+  resolved absolute path in `doctor`, and use that path for every invocation.
 - Report the state dir, whether `jq` is present (hard requirement — `need jq`),
   and the resolved default `--max-turns` and timeout.
 
@@ -312,10 +382,20 @@ Port the state model from `bin/ai-glm` lines ~25 and ~85–140:
 - The portable `mkdir`-based mutex from `ai-glm` lines ~111–131 — **`flock` does
   not exist in Git Bash**, and a crashed run must not wedge a session forever.
 
-`new` freezes the flag set into the metadata. `ask` reads it back and reuses it
-verbatim plus `--resume <sessionId>`. **There must be no code path by which
-`ask` composes a different flag set than `new` did** (D2) — that is the whole
-point. Prefer `--resume <id>` over `--continue`: `--continue` picks the newest
+`new` freezes the flag set into the metadata. `ask` reads it back and reuses it verbatim
+plus `--resume <sessionId>`. **There must be no code path by which `ask` composes a
+different flag set than `new` did, except `--max-turns`** (D2 + D13). `--max-turns` is a
+runtime bound outside the cached prefix, and Step 4's turn-limit recovery *is* an `ask`
+that raises it — freezing it would forbid Step 4. Everything else (model, permissions,
+`--no-memory`, `--cwd`) is frozen and per-call overrides of those are **rejected**, not
+silently ignored.
+
+Also implement the **per-repo in-flight lock (D12)**: while a turn is running against a
+repo, a second `new` in that repo is refused with the running session's name and elapsed
+time. The `ai-glm` mutex is keyed by session *name*, which does not stop a panicked
+session from starting `review-2` while `review-1` is still waiting — and duplicate
+concurrent reviews at full price were the most expensive symptom of the incident. An
+`ask` on the *same* session still serialises on the per-session lock as `ai-glm` does. Prefer `--resume <id>` over `--continue`: `--continue` picks the newest
 session for the directory, which is the wrong one whenever several AI sessions
 share a repo.
 
@@ -343,6 +423,16 @@ or the timeout (D9) expires. Terminal-success values: `end_turn`, `stop`,
 `completed`. **Do not treat the command returning as completion. Do not treat a
 non-empty file as completion** — it may be partially written; require `jq` to
 parse it *and* a `stopReason` to be present.
+
+If Step 0.3 found the output is a stream rather than one object, select the **last**
+object explicitly — do not let `jq` fold over every emitted object.
+
+**Fail fast when the process is gone.** Process-watching is rightly rejected as the
+*primary* signal (§7), but it has a legitimate secondary use: if no Grok process matches
+**and** the JSON is still incomplete, the run is definitively dead and waiting out the
+full timeout is pure waste — a crash at second 2 would otherwise make a human wait ten
+minutes for the diagnostic. Require two consecutive empty process checks before
+declaring it (the leader may not have spawned on the first look).
 
 On timeout the error must be loud and diagnostic, naming: the output path, the
 elapsed time, the session id if known, `~/.grok/logs/unified.jsonl` as the place
@@ -380,11 +470,17 @@ doing and the running cost before each retry. Off by default because a silent
 retry of a 250k-token run is exactly the kind of invisible spend this whole
 plan exists to stop.
 
-Also handle the **empty resume** case: a resumed run that produces no output at
-all was observed twice on 2026-08-05 after a cancellation. Detect it (timeout
-with a zero-byte file on an `ask`, not a `new`), say explicitly that this is a
-known 0.2.118 behaviour after a cancelled session, and tell the caller to start
-a new session — do **not** start one automatically.
+Also handle the **empty output** case. Two variants, and the plan originally covered only
+the first:
+
+- **Empty resume** — a resumed run producing nothing, observed twice on 2026-08-05 after
+  a cancellation. Detect it (timeout with a zero-byte file on an `ask`), name it as a
+  known 0.2.118 behaviour after a cancelled session, and tell the caller to start a new
+  session — do **not** start one automatically.
+- **Empty first turn** — session `019fd4ae-339d-7a10-98b2-c96a08e38a43` *completed*
+  (`handle_prompt.done ok:true` in Grok's log) and still delivered zero bytes to its
+  caller, and it does not read as a resume. A zero-byte timeout on `new` must therefore
+  get its own message, not a generic one. Do not claim the resume path covers this.
 
 **Done when:** a deliberate `--max-turns 2` run on a large repo exits non-zero
 with the recovery message and the session id, not with a bare `cancelled`.
@@ -416,7 +512,11 @@ remember.
 Default human output: the extracted answer on stdout, and a one-line usage
 summary on stderr (`tokens: … cached: … cost: $…`). `--json` emits the raw
 result. Per D10, also write `.ai/reviews/<TS>-grok-<name>.md` in the target repo,
-matching `ai-codex-review`, and print that path.
+matching `ai-codex-review`, and print that path — but **the script must refuse to write
+there if the target repo's `.gitignore` does not ignore `.ai/`**, rather than trusting
+the caller to check. (This repo's `.gitignore:56-58` already covers `.ai/runs/`,
+`.ai/tmp/`, `.ai/reviews/`; onboarded app repos are not guaranteed to.) That is exactly
+the class of invariant this plan argues belongs in code, not documentation.
 
 **Done when:** a live review prints a clean verdict with no "I'll read…"
 narration above it, and the stderr line shows non-zero cached tokens on the
@@ -424,13 +524,23 @@ second turn of the same session.
 
 ### Step 6 — `list`, `show`, `transcript`, `delete`
 
-**Files:** `bin/ai-grok-review`. Port directly from `ai-glm`'s equivalents.
-`list` shows name, repo, session id, turns, cumulative tokens and cost, and last
-`stopReason` — cost visibility is a feature here, since Grok is the only
-delegate CLI that reports real money.
+**Files:** `bin/ai-grok-review`. `list`, `show`, and `delete` port from `ai-glm`'s
+equivalents. `list` shows name, repo, session id, turns, cumulative tokens and cost, and
+last `stopReason` — cost visibility is a feature here, since Grok is the only delegate
+CLI that reports real money.
+
+**`transcript` does NOT port and must not be attempted as a port.** `ai-glm`'s
+`cmd_transcript` (`bin/ai-glm:452-459`) reads the OpenCode server's HTTP API
+(`/api/session/$sid/message?limit=200`). Grok has no such API — its history lives
+somewhere under `~/.grok/` in a format this plan does not specify. **Drop `transcript`
+from v1.** Ship it later only after locating and documenting the actual source file and
+shape, and never by reading `~/.grok/auth.json`. Accumulating each turn's extracted
+answer into the session state as it happens is the cheap alternative if a transcript is
+wanted.
 
 **Done when:** `list` shows a session created in Step 2 with an accurate
-cumulative cost after two turns.
+cumulative cost after two turns, and `transcript` either does not exist or is a
+documented stub that exits non-zero saying so.
 
 ### Step 7 — Tests
 
@@ -451,8 +561,11 @@ Required cases, by name:
    and never `--permission-mode auto`, `--allow Bash`, or `--always-approve`.
 4. `no_flag_passthrough` — an attempt to pass an arbitrary Grok flag is rejected,
    not forwarded (D2, and the anti-drift-hatch decision in §7).
-5. `prefix_stable_across_turns` — the flag string recorded at `new` is
-   byte-identical to the one used by `ask`.
+5. `prefix_stable_across_turns` — the flag string recorded at `new`, **with the
+   `--max-turns N` token removed**, is byte-identical to the one used by `ask`. Per D13
+   `--max-turns` is a runtime bound and is legitimately overridable; an earlier draft of
+   this test demanded whole-string equality, which contradicted Step 4's recovery path
+   and would have failed by construction.
 6. `await_blocks_on_empty_then_partial_then_complete` — the Step 3 synthetic
    fixture. **This is the regression test for the entire incident.**
 7. `stop_reason_cancelled_is_failure` — a fixture with
@@ -463,9 +576,19 @@ Required cases, by name:
    answer, tokens, and cost; and a top-level `model` of `null` does not break it.
 10. `model_prefix_assertion` — `modelUsage` key `grok-4.5-build` satisfies the
     `grok-4.5` prefix check.
-11. *(live, `AI_GROK_LIVE=1`)* `live_round_trip` — a real two-turn session in a
-    scratch repo; asserts a terminal `stopReason`, a non-empty answer, a reused
-    `sessionId`, and non-zero `cache_read_input_tokens` on turn two.
+11. `verdict_delimiter_extraction` — `text` containing `## Verdict` yields only the
+    verdict; `text` lacking it yields the whole text **plus a warning**. Without this,
+    Step 5's "no narration above the verdict" has no enforcement.
+12. `duplicate_new_is_refused` — with a fake in-flight lock held for a repo, a second
+    `new` in that repo exits non-zero naming the running session (D12).
+13. `transcript_is_not_silently_broken` — if `transcript` exists it exits non-zero with
+    an explanatory message rather than printing nothing.
+14. *(live, `AI_GROK_LIVE=1`)* `live_round_trip` — a real two-turn session in a
+    scratch repo; asserts a terminal `stopReason`, a non-empty answer, and a reused
+    `sessionId`. **Cache read on turn two is a warning, not a hard assertion** — caching
+    depends on the whole request prefix including the repo's `AGENTS.md`/`CLAUDE.md` and
+    the ~52 skills and ~10 MCP servers Grok loads, so a legitimate environment change or
+    an expired TTL would fail a hard check for reasons the wrapper cannot control.
 
 Existing suites that must stay green — run all of them, this repo has no CI to
 catch a regression:
@@ -500,9 +623,17 @@ script cannot enforce:
 - Reporting duties: label Grok's conclusions separately from your own; capture
   `usage` from every turn.
 
-**Delete or reduce to one line** — now enforced by the script: the `grok_wait`
-shell function, the hand-composed command snippets, the `--max-turns` argument
-block, the JSON field table, the permission-flag detail.
+**Delete or reduce to one line** — now enforced by the script: the `grok_wait` **and the
+PowerShell `Grok-Wait`** functions (the latter is dead code once the entry point is a
+Bash script Windows callers reach through Git Bash), the hand-composed command snippets,
+the `--max-turns` argument block, the JSON field table, the permission-flag detail.
+
+**Also add:** how a caller sets `AI_GROK_CALLER`. D6 keys sessions by repo + caller +
+name so Claude and Codex can share a short name, but that only works if Codex sessions
+actually set it — `ai-glm` inherits the same convention with a default of `claude`, so
+without explicit instruction both clients default to the same value and collide
+silently, blowing the cached prefix. Either teach it here or auto-detect it in the
+script; do not leave it implicit.
 
 Add at the top, unmissable: *"Never invoke `grok` directly. Use
 `ai-grok-review`. If it seems to be missing a capability you need, say so —
@@ -521,8 +652,10 @@ following it literally cannot reproduce any of the 2026-08-05 failures.
   "Installed commands" table): add `ai-grok-review`.
 - `AGENTS.md` §"Documentation map" (line 38): add a row — *"Touch Grok,
   `ai-grok-review`, or the Grok skill → `AGENTS.md`, `bin/ai-grok-review`,
-  `skills/shared/grok-cli/SKILL.md`, `tests/test-ai-grok-review.sh`,
-  `plan_ai-grok-review.md`"* — mirroring the existing GLM row's shape.
+  `skills/shared/grok-cli/SKILL.md`, `tests/test-ai-grok-review.sh`"* — mirroring the
+  existing GLM row's shape. **Do not point the router at this plan file.** The GLM row it
+  copies (`AGENTS.md:62`) targets a permanent doc; a plan file goes stale the moment it
+  is executed.
 - Write `memory/ai-devops/grok-headless-early-return.md` (frontmatter per the
   memory format: `name`, `description`, `metadata.type: project`) recording the
   early-return bug, that exit status is not evidence, and that
@@ -652,6 +785,7 @@ be weakened or deleted by a later session:
 
 **Definition of done — every box:**
 
+- [ ] Step 0 verification captured in a comment block at the top of the script.
 - [ ] `bin/ai-grok-review` exists, is executable in git (mode `100755`), and
       implements Steps 1–6.
 - [ ] `tests/test-ai-grok-review.sh` passes with 0 failures on `t16` and `hetz`.
