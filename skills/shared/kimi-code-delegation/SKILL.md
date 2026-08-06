@@ -1,147 +1,117 @@
 ---
 name: kimi-code-delegation
-description: Delegate scoped coding work to Kimi Code CLI (`kimi`) in non-interactive prompt mode from Windows PowerShell or Ubuntu bash. Use when an AI session should drive Kimi headlessly, split planning from execution, resume a prior Kimi session, constrain exploration, or verify Kimi-authored changes without relying on the interactive TUI.
+description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrapper — read-only reviews, repository analysis, session continuation, and explicit isolated implementation. Use when an AI session should drive Kimi headlessly, split planning from execution, resume a prior Kimi session, or verify Kimi-authored changes without relying on the interactive TUI.
 ---
 
 # Kimi Code Delegation
 
-Drive Kimi headlessly and treat the calling session as planner, reviewer, and quality gate.
-
-## Copy this block. Do not hand-assemble a `kimi` command.
-
-Kimi reports **neither the model nor token usage** in headless output. The only guarantee
-it ran K3 is that you copied this block verbatim. A dropped `-m` silently falls back to
-K2.7 and nothing in the output reveals it. Treat any hand-assembled `kimi` command as
-unverified. This is why the block matters more here than for Grok or GLM, where the
-returned model and usage are printed and can be asserted on.
+## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 
 ```bash
-# 1. First call. Captures the session id.
-out=$(kimi -m kimi-code/k3 -p "$brief" --output-format stream-json)
-sid=$(printf '%s\n' "$out" | jq -rs '[.[] | select(.type=="session.resume_hint")][-1].session_id')
-[ -n "$sid" ] && [ "$sid" != "null" ] || { echo "ERROR: no Kimi session id captured" >&2; exit 1; }
-
-# 2. Every follow-up. Same session, context already warm.
-kimi -r "$sid" -p "$next_instruction"
+ai-kimi new <name>       --prompt-file "$brief"   # read-only review / analysis
+ai-kimi ask <name>       --prompt-file "$next"    # continue that same session
+ai-kimi implement <name> --prompt-file "$task"    # explicit write run, isolated
+ai-kimi list | show <name> | transcript <name> | delete <name>
+ai-kimi doctor
 ```
 
-```powershell
-$out = & kimi -m kimi-code/k3 -p $brief --output-format stream-json
-$sid = ($out | ForEach-Object { $_ | ConvertFrom-Json } |
-        Where-Object { $_.type -eq 'session.resume_hint' } |
-        Select-Object -Last 1).session_id
-if (-not $sid) { throw 'ERROR: no Kimi session id captured' }
-& kimi -r $sid -p $nextInstruction
-```
+The wrapper owns the model pin, the read-only enforcement, the completion rule, the
+session bookkeeping, and the worktree isolation for write runs. It deliberately refuses
+to forward arbitrary `kimi` flags. **If it seems to be missing something you need, say so
+— do not route around it.**
 
-Use `jq`, not a hand-rolled `grep`/`cut`. A stray space after a colon or a differently
-ordered record silently yields the wrong id, which is the exact bug class this section
-exists to prevent.
+Run it from Git Bash on Windows (it is a Bash script, like `ai-glm`).
 
-## Verify the local CLI
+## Why the wrapper matters more here than anywhere else
 
-1. Run `kimi --version` and `kimi --help`; prefer the installed CLI over remembered
-   flags. Ubuntu: `~/.kimi-code/bin/kimi`. Windows: invoke from PowerShell.
-2. Run `kimi provider list` and confirm `kimi-code/k3` exists before pinning it.
-   **The configured default is `kimi-code/kimi-for-coding` (K2.7), not K3.** That is why
-   every call above pins `-m kimi-code/k3`. Use `kimi-code/k3-256k` only when the task
-   genuinely needs the larger context; switching model mid-workstream discards the
-   cached prefix, so pick once per workstream and stay there.
-3. Verify authentication with `kimi -m kimi-code/k3 -p "reply with OK"`. If it fails,
-   run `kimi login` once.
-4. Read the target repository's `AGENTS.md` before delegating.
-5. Record the working tree's starting `git status`.
+**Kimi reports neither the model nor token usage in headless output.** You cannot assert
+which model answered, and you cannot quote a cost or a cache saving — there is nothing to
+read. A dropped `-m` would silently fall back to another model and nothing in the output
+would reveal it. `ai-kimi` pins the model on every call so the guarantee comes from the
+code path, not from remembering.
 
-Prompt mode rejects `-p/--prompt` combined with `--plan`, `--auto`, or `-y/--yolo`
-(verified on 0.31.1; the same restriction existed on 0.27.0). Prompt mode already handles
-regular approvals automatically while keeping static deny rules. Do not add interactive
-permission flags to a `-p` command. Re-verify with `kimi --help` before trusting any flag.
+**Reviews are structurally read-only.** `new`/`ask` run under
+`config/kimi/readonly-review.md`, whose toolset is `Read, Grep, Glob, ReadMediaFile` —
+no `Write`, no `Edit`, no `Bash`, no network. This is not a prompt request. Verified on
+Kimi 0.31.1:
 
-## Never use `-c/--continue`
+> Plain `kimi -p "Write HACKED into canary.txt"` → exit 0, **the file contained
+> `HACKED`**. Kimi writes files freely in ordinary prompt mode.
+> The same instruction under the read-only profile → canary **unchanged**, model replied
+> `CANNOT_WRITE`.
 
-`-c` means "the newest session for this working directory", **not** "the session I was
-just using". Measured failure: session A was told a codeword, an unrelated `-p` call then
-created session B in the same directory, and `kimi -c -p "what is the codeword"` answered
-from B and got it wrong. With 3-7 AI sessions running against one repo, the newest
-session is routinely not yours.
+`ai-kimi` refuses to run a review at all if that profile is missing, and hard-fails if a
+review mutates the tree anyway.
 
-Always capture `session_id` from the `session.resume_hint` record and resume with
-`-r "$sid"`. This is not a style preference; it is the difference between resuming your
-own work and silently resuming somebody else's.
+## Continue a session. Do not start a new one per question.
 
-## Plan, approve, then execute — in ONE session
+Run `ai-kimi list` first; if a session covers this topic and repo, continue it with `ask`.
 
-`--plan` cannot be combined with `-p`, so planning and execution are two calls. They must
-be two calls **in the same session**, or the execution call re-explores everything the
-planning call already learned and you pay for the whole prefix twice.
+**Never use `kimi -c/--continue`** — it means "the newest session for this working
+directory", not "the session I was just using". Measured failure: session A was told a
+codeword, an unrelated call created session B in the same directory, and `-c` answered
+from B and got it wrong. With several AI sessions per repo, the newest is routinely not
+yours. `ai-kimi` always resumes by explicit id.
+
+Claude and Codex keep separate sessions. **Set `AI_KIMI_CALLER=codex` when running from
+Codex**; it defaults to `claude`.
+
+## Writing the brief
+
+- Self-contained: the task, the repo and branch, relevant paths or errors, constraints,
+  and the evidence you want back. Tell Kimi to read the repo's `AGENTS.md`.
+- **Do not paste file contents** — Kimi has `Read`, and pasted text is prefix that
+  changes every call.
+- Keep the opening stable across a workstream; put the new instruction last. Kimi exposes
+  no cache counters, so this is prefix-stability best practice, **not a verified saving**.
+  Do not claim a percentage you cannot show.
+- Name exact paths in prose (`Read only path/to/a and path/to/b`). `@path` injection is
+  documented for the interactive input box, not for headless prompts.
+- One scoped change and one verification target per call.
+
+## Implementation runs
+
+`ai-kimi implement` creates a throwaway git worktree, lets Kimi work inside it, writes the
+result out as a patch under `.ai/reviews/`, and **removes the worktree before it exits**.
+Nothing accumulates and nothing is left for Albert to clean up. Review the patch yourself
+before applying:
 
 ```bash
-# 1. Planning call. Capture $sid using the block above.
-#    Brief: "Produce a read-only implementation plan for <task>. Read only <paths>.
-#            Do not modify files. List steps, files, risks, and verification gates."
-
-# 2. Review and amend the plan in the calling session.
-
-# 3. Execution call — SAME session.
-kimi -r "$sid" -p "Implement exactly this approved plan: <amended plan>. Do not expand scope. Run <tests> and report the actual results."
+git apply --check "$patch" && git apply "$patch"
 ```
 
-Do **not** pass `--agent` or `--agent-file` on the planning call. Neither can be combined
-with `--session`/`--continue`, so the agent is fixed when the session is created; a
-read-only agent chosen for planning would leave the resumed execution call unable to
-edit anything.
+Planning and execution cannot share a session: `--agent`/`--agent-file` cannot be combined
+with a resume, so the agent is fixed when a session is created — which is exactly why a
+read-only review session can never later become a write session. Plan in a review session,
+amend the plan yourself, then start an `implement` session with the approved plan.
 
-The cost of that: the planning call's read-only status is **prompt-enforced only**, with
-no structural guarantee. So run `git status` after the **planning** call too, not just
-after execution.
+**Kimi cannot run your tests** — the read-only profile has no `Bash`, and an implement run
+happens in a throwaway worktree. Run them yourself and feed exact failures back into the
+same session with `ask`.
 
-## Keep the prefix stable so caching can engage
+## Verifying the install
 
-- Keep the opening of every prompt in a workstream identical. Put the varying instruction
-  at the END. Caching matches on a stable prefix; rewriting the opening invalidates
-  everything after it.
-- Do not paste file contents. Kimi has `Read`. Pasted text becomes prefix that changes on
-  every call, which is the worst case for caching.
-- Do not change `-m`, `--agent`, `--skills-dir`, or `--add-dir` mid-workstream.
-- Prefer one session with several bounded turns over several fresh sessions.
+`ai-kimi doctor` resolves the binary, shows the model pin and read-only profile, and
+checks auth. Two traps it exists to handle:
 
-Honest limitation: Kimi exposes no usage or cache counters in headless output, so these
-are prefix-stability best practices, not verified savings. Grok and GLM print the
-numbers; Kimi does not. Do not claim a percentage you cannot show.
+- **`~/.kimi-code/bin` is not on PATH** on either hetz user, so `command -v kimi` fails
+  while Kimi is installed and fine. The wrapper resolves the binary explicitly.
+- **`kimi provider list` exits 0 while printing "No providers configured"** — the exit
+  code alone is a false OK.
 
-## Keep each call bounded
+Kimi's credentials are **per-user OAuth** under `~/.kimi-code`, with no config-dir
+override. On `hetz` they belong to user `ai`; a root session borrows them automatically
+for reviews (`AI_KIMI_OWNER`, default `ai`). Implement runs are not borrowed — their
+writes would land owned by the wrong user, so run those as `ai`.
 
-- One scoped change and one verification target per execution call.
-- Name exact paths in prose: `Read only path/to/a and path/to/b`. `@path` injection is
-  documented for the interactive input box, not guaranteed for headless prompt strings.
-- State when editing should begin and forbid unrelated exploration.
-- State the build or test command and the done condition.
-- Decompose dependent multi-file work and inspect the diff after each call.
+## Verify every result
 
-On Windows, invoke Kimi from PowerShell and account for `C:\...` versus Git-Bash `/c/...`
-paths. If Kimi cannot find its internal shell, verify Git for Windows and
-`KIMI_SHELL_PATH`. On Ubuntu, use normal bash quoting and protect `$`, backticks, and
-embedded quotes.
-
-## Verify every execution
-
-1. Inspect the actual diff; never trust the summary alone.
-2. Run the relevant tests independently when Kimi's result is incomplete or ambiguous.
-3. Feed exact failures back into the SAME session with `-r "$sid"`.
-4. Stop if Kimi expands scope, edits protected files, or cannot prove completion.
-
-## Troubleshooting
-
-| Symptom | Likely cause | Action |
-|---|---|---|
-| Answers as if it never saw the earlier turn | Used `-c` and got another session, or no resume at all | Capture `session_id` from the resume hint and use `-r "$sid"` |
-| Output quality looks like a weaker model | `-m kimi-code/k3` was dropped; nothing in the output shows the model | Re-run with the copy-paste block above |
-| Execution call cannot edit files | An `--agent` was set on the planning call | Start over without `--agent`; it is fixed at session creation |
-| Long analysis, no edits | Prompt is too broad | Split planning from execution and name exact paths |
-| Repeats repository exploration | Fresh session lacks context | Resume with `-r <id>` and narrow the instruction |
-| Authentication error | Login is missing or expired | Run `kimi login`, then repeat the trivial prompt check |
-| Windows shell/path error | Git Bash is missing or mislocated | Verify Git for Windows and `KIMI_SHELL_PATH` |
-| Flag rejected | CLI surface changed | Run `kimi --help` and update the invocation |
+1. Inspect the actual diff; never trust a summary alone.
+2. Run the relevant tests yourself.
+3. Stop if Kimi expands scope, edits protected files, or cannot prove completion.
+4. Label Kimi's conclusions separately from your own judgment, and never claim a token,
+   cost, or model figure for a Kimi run — there isn't one.
 
 Official references: [command options](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html)
 and [interaction modes](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/interaction.html).
+Re-verify against `kimi --help` before trusting any flag statement here, including this one.
