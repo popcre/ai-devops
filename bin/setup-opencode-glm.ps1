@@ -169,12 +169,13 @@ if (-not (Test-Path -LiteralPath $PwFile) -or -not (Get-Content -Raw -LiteralPat
   Set-Content -NoNewline -Path $PwFile -Value $pw
 }
 # Restrict to the current user only (the NTFS equivalent of chmod 600).
-$acl = Get-Acl -LiteralPath $PwFile
-$acl.SetAccessRuleProtection($true, $false)
-$acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
-  "$env:USERDOMAIN\$env:USERNAME", 'FullControl', 'Allow')))
-Set-Acl -LiteralPath $PwFile -AclObject $acl
+# Use icacls, not Get-Acl/Set-Acl: the round-tripped security descriptor carries
+# the audit (SACL) section, and writing it back demands SeSecurityPrivilege,
+# which an ordinary non-elevated user does not hold - the script died there.
+$icaclsOut = & icacls $PwFile /inheritance:r /grant:r "$($env:USERNAME):(F)" 2>&1
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to restrict permissions on $PwFile - icacls said: $icaclsOut"
+}
 Ok "Server password stored, current user only"
 
 # ---------------------------------------------------------------------------
@@ -338,8 +339,19 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAM
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
               -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
               -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-  -Description "AI DevOps OpenCode GLM server, loopback only" -Force | Out-Null
+try {
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+    -Description "AI DevOps OpenCode GLM server, loopback only" -Force -ErrorAction Stop | Out-Null
+} catch {
+  # A task registered by an elevated session carries an ACL a normal user cannot
+  # overwrite. Do NOT fail silently: if no task exists at all this is fatal, and
+  # if one does exist the user must know it was left at its OLD definition.
+  if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+    throw "Could not register the $TaskName scheduled task and none exists: $($_.Exception.Message)"
+  }
+  Warn ("Could not re-register $TaskName ($($_.Exception.Message)). The EXISTING task is being " +
+        "reused as-is - if its definition changed, re-run this script from an ELEVATED PowerShell.")
+}
 Stop-ScheduledTask  -TaskName $TaskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $TaskName
 
