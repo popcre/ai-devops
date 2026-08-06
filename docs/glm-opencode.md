@@ -358,12 +358,35 @@ first and then re-measure before touching it.
     "FAIL health endpoint answers" cost a full round trip. Doctor now distinguishes
     "setup never ran" from "service is down" and prints the service log inline.
 
+21. **The setup script must survive an ordinary, non-elevated window** — that is the
+    only way it is supposed to run. Two steps silently required admin and stopped it
+    dead on t16 (2026-08-06), so GLM could not be repaired by `sync-dotfiles` at all:
+    - `Get-Acl` + `Set-Acl` round-trips the whole security descriptor including the
+      audit (SACL) section, which needs `SeSecurityPrivilege`. Use `icacls`, which
+      touches only the DACL.
+    - `Register-ScheduledTask -Force` cannot overwrite a task registered by an
+      elevated session. See the next lesson.
+22. **Stamp the scheduled task's own permissions after registering it.** Task Scheduler
+    inherits whoever created the task: one elevated run leaves Full Access to
+    `Administrators` and the ordinary user read-only, so every later unelevated run can
+    start the task but never redefine it — and silently keeps a stale definition. Both
+    t16 and 4837 were found in that state. The script now sets
+    `D:(A;;FA;;;<userSid>)(A;;0x1f019f;;;BA)(A;;0x1f019f;;;SY)` via
+    `Schedule.Service` → `SetSecurityDescriptor($sddl, 0)`. The second argument is a
+    **TASK_CREATION flag, not a SECURITY_INFORMATION mask** — passing `4` fails with
+    "Value does not fall within the expected range".
+23. **An SSH session into a Windows machine runs ELEVATED** (admin users authenticate
+    through `administrators_authorized_keys`). So a remote "can a normal user do this?"
+    test is worthless — it passes for the wrong reason. This produced a false "4837 is
+    fine" before reading the task's actual DACL showed it was not. Check permissions by
+    reading them, never by attempting the write.
+
 ### Process lessons
 
-21. **Do not edit a script while a copy of it is running.** Bash re-reads the file as it
+24. **Do not edit a script while a copy of it is running.** Bash re-reads the file as it
     executes; a mid-run edit killed a GLM implement run and left an orphaned sandbox.
-22. **The installed command is a symlink into the main checkout, not your worktree.**
+25. **The installed command is a symlink into the main checkout, not your worktree.**
     Testing `/usr/local/bin/ai-glm` after editing a worktree copy tests the old code.
-23. **Fix a bug class, not one instance.** The hardcoded-path bug was fixed in
+26. **Fix a bug class, not one instance.** The hardcoded-path bug was fixed in
     `setup-machine.ps1` and left in `setup-opencode-glm.ps1`, which cost another round
     trip. When you fix something in one script, grep for it in all of them.
