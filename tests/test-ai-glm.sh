@@ -274,5 +274,38 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   "$AI_GLM" delete live-impl >/dev/null 2>&1 || true
 fi
 
+# --- shared-server attach (root/ai parity) -----------------------------------
+# On hetz the OpenCode server is owned by `ai`. A root session used to get 17
+# doctor failures and "setup never finished" because it had no server-password
+# of its own, even though the server it needed was running. ai-glm now falls
+# back to the owning user's password file. These guard the mechanics of that.
+echo "== shared-server attach =="
+SHTMP="$TMP/shared"; mkdir -p "$SHTMP/fakehome/.config/ai-devops/opencode"
+printf 'secret-pw\n' > "$SHTMP/fakehome/.config/ai-devops/opencode/server-password"
+
+# The whole script must still LOAD on a machine with no getent (Git Bash). This
+# is the regression that broke 21 tests when the fallback was first added: an
+# assignment from a failing command substitution aborts under `set -e`.
+# Shadow getent with a stub that fails, which is exactly what an absent getent
+# does to the command substitution. Keep the rest of PATH so curl/jq still exist.
+mkdir -p "$SHTMP/nogetent"
+printf '#!/usr/bin/env bash\nexit 127\n' > "$SHTMP/nogetent/getent"
+chmod +x "$SHTMP/nogetent/getent"
+check "ai-glm loads when getent fails/absent" \
+  "PATH='$SHTMP/nogetent:$PATH' AI_DEVOPS_CONFIG_DIR='$SHTMP/empty' bash '$AI_GLM' --help >/dev/null 2>&1"
+check "ai-glm parses cleanly"  "bash -n '$AI_GLM'"
+
+# With its own password present, the fallback must NOT engage.
+mkdir -p "$SHTMP/own/opencode"; printf 'own-pw\n' > "$SHTMP/own/opencode/server-password"
+OUT="$(AI_DEVOPS_CONFIG_DIR="$SHTMP/own" bash "$AI_GLM" doctor 2>&1 || true)"
+check "own password wins over the shared one" "! printf '%s' \"\$OUT\" | grep -q 'attached to the OpenCode server'"
+
+# The fallback must only ever read a password this user can already read; it
+# grants nothing new. Assert it never copies or writes the file anywhere.
+check "fallback never copies the password" \
+  "! grep -qE 'cp .*server-password|tee .*server-password' '$AI_GLM'"
+check "fallback is limited to a named user" \
+  "grep -q 'AI_GLM_SERVER_USER' '$AI_GLM'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
