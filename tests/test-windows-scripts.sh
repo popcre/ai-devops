@@ -51,6 +51,16 @@ else bad "GLM launcher relies on Git Bash \$HOME"; fi
 if grep -q 'set "HOME=' bin/setup-opencode-glm.ps1; then ok "ai-glm shim pins HOME"
 else bad "ai-glm shim does not pin HOME"; fi
 
+echo "== MCP remote bridge version must be pinned =="
+if grep -q 'mcp-remote@0\.1\.38' bin/mcp-secret-launch.ps1 \
+  && grep -q 'mcp-remote@0\.1\.38' bin/setup-machine.ps1 \
+  && grep -q 'mcp-remote@0\.1\.38' bin/setup-secrets.sh \
+  && ! grep -q 'mcp-remote@latest' bin/mcp-secret-launch.ps1 bin/setup-machine.ps1 bin/setup-secrets.sh; then
+  ok "mcp-remote is pinned to 0.1.38 in generated launch paths"
+else
+  bad "mcp-remote launch paths are unpinned or disagree"
+fi
+
 echo "== a failed GLM launcher must show its error =="
 if grep -q 'Smoke-testing the launcher' bin/setup-opencode-glm.ps1; then ok "launcher is smoke-tested before the task is registered"
 else bad "no launcher smoke test; failures would be silent"; fi
