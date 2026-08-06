@@ -40,6 +40,12 @@ PW_FILE="$OC_HOME/server-password"
 # AI_GLM_SERVER_USER pins the owning user explicitly.
 if [ ! -s "$PW_FILE" ]; then
   for _oc_user in ${AI_GLM_SERVER_USER:-ai}; do
+    # Never "attach" to ourselves. Running as the owning user with a bare
+    # AI_DEVOPS_CONFIG_DIR would otherwise resolve to that same user's real
+    # password file, report "attached to the server owned by ai" while we ARE
+    # ai, and short-circuit the full installation report doctor is meant to
+    # give on a machine that is not set up yet.
+    [ "$_oc_user" = "$(id -un 2>/dev/null || echo)" ] && continue
     # `|| true` is load-bearing: under `set -e` an assignment from a failing
     # command substitution aborts the script, and `getent` does not exist on
     # Windows/Git Bash. Without it, ai-glm exited on line 30 on every Windows run.
