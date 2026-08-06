@@ -359,6 +359,31 @@ try {
   Warn ("One-time cure, from an elevated PowerShell: Unregister-ScheduledTask -TaskName " +
         "$TaskName -Confirm:`$false   then re-run THIS script as your normal user.")
 }
+
+# Stamp the task's own permissions so the OWNING USER keeps full control of it.
+# Task Scheduler otherwise inherits whoever created the task: a task registered from
+# an elevated window grants Full Access to Administrators and leaves the ordinary user
+# read-only, so every later unelevated run of this script can start the task but never
+# redefine it - and silently keeps a stale definition. Stamping this makes the task
+# self-healing on any run that CAN write it, elevated or not.
+try {
+  $userSid = ([Security.Principal.NTAccount]"$env:USERDOMAIN\$env:USERNAME").
+               Translate([Security.Principal.SecurityIdentifier]).Value
+  $sddl = "D:(A;;FA;;;$userSid)(A;;0x1f019f;;;BA)(A;;0x1f019f;;;SY)"
+  $svc = New-Object -ComObject Schedule.Service
+  $svc.Connect()
+  # The second argument is a TASK_CREATION flag, NOT a SECURITY_INFORMATION mask.
+  # Passing 4 there fails with "Value does not fall within the expected range"; 0 is
+  # the correct "no special creation flags" value. Verified on t16, unelevated.
+  $svc.GetFolder("\").GetTask($TaskName).SetSecurityDescriptor($sddl, 0)
+  Ok "Task permissions grant $env:USERNAME full control"
+} catch {
+  # Not fatal: the task still runs. But an unelevated run cannot redefine it later,
+  # so say so rather than leaving a silent trap.
+  Warn ("Could not set permissions on $TaskName ($($_.Exception.Message)). The task works, but " +
+        "an unelevated run of this script may not be able to change it later. Fix by deleting " +
+        "the task from an elevated PowerShell and re-running this script as your normal user.")
+}
 Stop-ScheduledTask  -TaskName $TaskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $TaskName
 
