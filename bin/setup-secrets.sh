@@ -270,7 +270,7 @@ esac
   echo "ai-devops: \$REF resolved EMPTY — not starting \$URL" >&2
   exit 1
 }
-exec npx -y mcp-remote "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
+exec npx -y mcp-remote@0.1.38 "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
   ok "Wrote $REMOTE_SH"
@@ -349,7 +349,7 @@ servers = {
     # so it must NOT go through the remote launcher (that would force a header).
     "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
     "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
-    "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@latest",
+    "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
                                               "https://mcp.vercel.com"]},
 }
 

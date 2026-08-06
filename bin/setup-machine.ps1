@@ -356,7 +356,7 @@ $McpServers["ag-grid"] = @{
 }
 $McpServers["vercel"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "mcp-remote@latest", "https://mcp.vercel.com")
+  args = @("/c", "npx", "-y", "mcp-remote@0.1.38", "https://mcp.vercel.com")
 }
 
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries

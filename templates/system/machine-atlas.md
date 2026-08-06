@@ -134,7 +134,7 @@ trust `codex --version` / `codex login status` as proof Codex works.
   tool is broken. Establish platform, resolved executable, shell, cwd and env
   boundary *before* blaming the tool. One `pwd` would have shown `/mnt/c/...`.
 - Remote MCPs: devops-mcp `https://mcp.designflow.app/mcp` (VPS root access),
-  synology-monitor `https://nas-mcp.designflow.app/sse` (NAS); AG-Grid MCP for
+  synology-monitor `https://nas-mcp.designflow.app/mcp` (NAS); AG-Grid MCP for
   dflow docs.
 - Known trap: the Windows-MCP PowerShell sandbox cannot capture SSH output
   (ConPTY exit 255); use Git's ssh (`C:\Program Files\Git\usr\bin\ssh.exe`)
