@@ -267,6 +267,13 @@ The handover is where unverified claims become someone else's false assumptions.
    `main`, saw a five-day-old handover, and concluded the session had been lost.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
+5b. **Close your coordinator marker** — the open GitHub issue labelled
+   `coordinator-marker` you opened at step 0 of the orchestrator sweep. Close it
+   **last**, after the handover PR is merged. Leaving it open makes the next
+   coordinator stop and ask Albert about a session that ended cleanly; that stop
+   is the correct behaviour for a *dead* coordinator and pure noise for a clean
+   handover. If you are handing over without ending (a fresh session continues
+   immediately), say so in the issue and leave it open deliberately.
 6. **Run the closers:** `session-docs-update` for the documentation ritual and
    `secrets-to-1password` for the secrets sweep. Credentials are referenced by
    1Password item ID only — never a value in the handoff.
