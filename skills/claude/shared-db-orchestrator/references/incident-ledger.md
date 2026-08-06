@@ -180,3 +180,36 @@ kept off production (`AGENTS.md` §5.1).
   merge yields a plausible file that silently drops one side's fix.
 - A PR whose migration version sorts **earlier** than another's must merge
   **first**, or Guard B strands it permanently.
+
+## 17. The handover nobody could find (2026-08-05)
+
+A coordinator session was cut off mid-handover. The incoming coordinator ran the
+five-step sweep exactly as written and concluded the session had been lost.
+Nothing had been lost. Five separate defects in the skills produced that verdict:
+
+- **`shared-db-handover` §"never merge on the way out" stranded it.** The finished
+  handover sat in open **PR #451** (docs-only, +1063/-0, all checks green), which
+  the rule told the outgoing session to leave open. `AGENTS.md` §2 and §5 say the
+  opposite. The rule now splits: work PRs are handed over, docs-only PRs merge
+  before the session ends.
+- **The sweep never checked open PRs at all**, so the PR was invisible.
+- **The sweep pointed at root `HANDOFF.md`**, whose newest in-file section was
+  **five days older** than the real handover in `HANDOFF.d/`.
+- **"Take the newest `HANDOFF.d/` file" would have picked the OLDEST.** The
+  directory mixes `2026-08-05T1827Z-…` and `20260731T231155Z-…`; a text sort puts
+  the July file last. Parse the timestamp, never sort the filename.
+- **Step 1's `git fetch --all --prune=false` is not valid git.** It exits with
+  `option 'prune' takes no value`, so the sweep proceeded on stale refs while
+  appearing to have fetched.
+
+Two further rules came out of the review (Kimi K3, then Codex GPT-5.6, which
+conceded the heavier design):
+
+- **"`HANDOFF.md` wins" is deleted, in all four places it appeared** — both skills
+  and twice in `COORDINATOR_INTAKE.md`. No document wins by name or date;
+  re-derive from `git`/`gh`.
+- **A committed register file was proposed and rejected.** Most of the register is
+  derivable in seconds, so persisting it only manufactures another stale document;
+  and branch protection would put a PR between every dispatch. Replaced by the
+  coordinator marker (issue-based, cross-machine, stop-and-ask) plus `IN PROGRESS`
+  annotations for the non-derivable assignment state.
