@@ -16,9 +16,6 @@ deleted.
 `docs/glm-opencode.md` section 5 "Hard-won constraints".** It lists 23 rules, each
 of which cost a real failure. `AGENTS.md` routes there.
 
-While `plan_ai-glm-permission-deadlock.md` has open STATUS rows, read it before touching
-permission polling. Do not re-derive or re-plan completed rows.
-
 The two least obvious, because they look like things worth simplifying:
 
 - In OpenCode 1.18.12 **only the agent-file `tools:` map enforces anything**. The
