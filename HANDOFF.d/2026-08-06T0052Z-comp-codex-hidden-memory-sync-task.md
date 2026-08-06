@@ -36,8 +36,10 @@ terminal and bounding a stalled run.
 - The affected Windows computers still have the old visible task until they pull
   this commit and run their normal setup once. New computers will receive the
   fixed task automatically from the current setup script.
-- Target repository and branch are `u2giants/ai-devops`, `main`. At handoff
-  writing time the fix is being committed and pushed from remote base `6e736c8`.
+- Target repository and branch are `u2giants/ai-devops`, `main`. The fix is
+  committed and pushed as `3773a49534769ccf33f2e5e158e8f3b9c9e1514d`.
+  GitHub was queried directly and returned that SHA, Albert's correct noreply
+  identity, and commit message `fix: hide Windows memory sync task`.
 
 ## 4. Everything we tried that did NOT work
 
@@ -72,8 +74,8 @@ terminal and bounding a stalled run.
 
 1. On every existing Windows computer, pull the pushed `main` commit through the
    normal dotfiles sync or `git -C C:\repos\ai-devops pull --ff-only`.
-   **Gate:** `git -C C:\repos\ai-devops rev-parse HEAD` contains the commit SHA
-   reported in the closing message for this session.
+   **Gate:** `git -C C:\repos\ai-devops rev-parse HEAD` is at or after
+   `3773a49534769ccf33f2e5e158e8f3b9c9e1514d`.
 2. Run `pwsh -NoProfile -File
    C:\repos\ai-devops\tests\test-memory-sync-scheduled-task.ps1`.
    **Gate:** it prints `PASS: Windows memory sync scheduled task is hidden and bounded`.
