@@ -55,6 +55,14 @@
 #     Frontmatter `tools:` must be a comma-separated string or a list of
 #       strings; a YAML map is rejected with "must be a comma-separated string
 #       or a list of strings".
+#     TOOL NAMES ARE CASE-SENSITIVE AND FAIL SILENTLY. `tools: read, grep,
+#       glob, ls` is accepted by the parser and matches NOTHING, leaving the
+#       agent with no tools at all — it reports "I have no working file-reading
+#       tool" and the canary survives for the wrong reason. Kimi's real names
+#       are capitalized: Read, Grep, Glob, ReadMediaFile, Bash, Edit, Write,
+#       FetchURL, WebSearch, Agent, AgentSwarm, Skill, Cron*, Task*, Todo*.
+#       ALWAYS verify BOTH directions after touching the profile: that a review
+#       can still read, and that it still cannot write. The live test does.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

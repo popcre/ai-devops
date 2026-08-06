@@ -22,6 +22,38 @@ set -euo pipefail
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 OC_HOME="$CFG_DIR/opencode"
 PW_FILE="$OC_HOME/server-password"
+
+# Attach to another user's already-running server rather than standing up a
+# second one.
+#
+# The OpenCode server is a single loopback process owned by whichever user set
+# it up (on hetz that is `ai`, on 127.0.0.1:4096). A session running as root
+# there previously got 17 doctor failures and "setup never finished", because
+# root has no server-password of its own — even though the server it needs is
+# running and reachable. Installing a SECOND server for root would mean two
+# OpenCode processes, two copies of the Z.ai key, and double consumption of one
+# shared coding plan. One server, shared, is the fewest moving parts.
+#
+# Only ever reads a password the current user can already read: root can read
+# any home directory by definition, and for a non-root user the read simply
+# fails and nothing changes. This grants no access anyone did not already have.
+# AI_GLM_SERVER_USER pins the owning user explicitly.
+if [ ! -s "$PW_FILE" ]; then
+  for _oc_user in ${AI_GLM_SERVER_USER:-ai}; do
+    # `|| true` is load-bearing: under `set -e` an assignment from a failing
+    # command substitution aborts the script, and `getent` does not exist on
+    # Windows/Git Bash. Without it, ai-glm exited on line 30 on every Windows run.
+    _oc_home="$(getent passwd "$_oc_user" 2>/dev/null | cut -d: -f6 || true)"
+    [ -n "${_oc_home:-}" ] || continue
+    _oc_pw="$_oc_home/.config/ai-devops/opencode/server-password"
+    if [ -r "$_oc_pw" ] && [ -s "$_oc_pw" ]; then
+      PW_FILE="$_oc_pw"
+      OC_SHARED_FROM="$_oc_user"
+      break
+    fi
+  done
+  unset _oc_user _oc_home _oc_pw
+fi
 STATE_DIR="${AI_GLM_STATE_DIR:-$HOME/.local/state/ai-devops/glm}"
 PORT="${AI_GLM_PORT:-4096}"
 BASE="http://127.0.0.1:$PORT"
@@ -644,6 +676,43 @@ cmd_doctor() {
   pinned="$(tr -d ' \t\r\n' < "$repo_root_dir/config/opencode/version" 2>/dev/null || echo '')"
 
   printf 'ai-glm doctor\n\n'
+
+  # Attached to another user's server: the local-installation checks below are
+  # about standing a server UP, and this user is not the one who did that. Only
+  # reachability and usability matter here. Reporting 17 "failures" for files
+  # that were never meant to exist in this home is worse than useless — it reads
+  # as "GLM is broken" when GLM is working.
+  if [ -n "${OC_SHARED_FROM:-}" ]; then
+    printf 'attached to the OpenCode server owned by user "%s"\n' "$OC_SHARED_FROM"
+    printf 'credentials: %s\n\n' "$PW_FILE"
+    chk "server password readable"         test -s "$PW_FILE"
+    if server_up; then
+      printf 'PASS  health endpoint answers\n'
+      health_ver="$(api GET /global/health 2>/dev/null | jq -r '.version // empty' || true)"
+      chk "health version matches pin ($pinned)" test -n "$health_ver" -a "$health_ver" = "$pinned"
+      chk "requires authentication"        test "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$BASE/global/health")" = "401"
+      local providers; providers="$(api GET /config/providers 2>/dev/null || echo '{}')"
+      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
+        && printf 'PASS  provider %s available\n' "$PROVIDER" \
+        || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
+      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
+        '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
+        && printf 'PASS  model %s available\n' "$MODEL" \
+        || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+    else
+      printf 'FAIL  health endpoint answers\n'; FAILS=$((FAILS+1))
+      printf '      the server owned by "%s" is not running. Start it there:\n' "$OC_SHARED_FROM"
+      printf '        su - %s -c "ai-glm server start"\n' "$OC_SHARED_FROM"
+    fi
+    printf '\n'
+    if [ "$FAILS" -eq 0 ]; then
+      printf 'GLM is usable from this account via user "%s".\n' "$OC_SHARED_FROM"
+      return 0
+    fi
+    printf '%d check(s) FAILED. The server is owned by "%s" — fix it there, not here.\n' "$FAILS" "$OC_SHARED_FROM"
+    return 1
+  fi
+
   chk "pinned version file present"        test -n "$pinned"
   chk "launcher installed"                 test -f "$HOME/.local/bin/opencode-glm-launch"
   if [ "$IS_WINDOWS" = 1 ]; then
