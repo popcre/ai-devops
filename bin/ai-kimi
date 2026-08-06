@@ -76,7 +76,12 @@ KIMI_MODEL="${AI_KIMI_MODEL:-kimi-code/k3}"
 WAIT_TIMEOUT="${AI_KIMI_WAIT_TIMEOUT:-900}"
 POLL_INTERVAL="${AI_KIMI_POLL_INTERVAL:-5}"
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve through the /usr/local/bin symlink, or SELF_DIR is /usr/local/bin and
+# the read-only profile is looked for at /usr/local/config/kimi/… — which does
+# not exist, so every review refuses to run. (bin/ai-glm's doctor carries the
+# same note for the same reason.)
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+SELF_DIR="$(cd "$(dirname "$_self")" && pwd)"
 RO_AGENT="${AI_KIMI_RO_AGENT:-$SELF_DIR/../config/kimi/readonly-review.md}"
 
 die()  { printf 'ai-kimi: error: %s\n' "$*" >&2; exit 1; }
@@ -103,6 +108,41 @@ resolve_kimi() {
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
   done
   die "kimi binary not found. Set AI_KIMI_BIN, or install Kimi Code. Looked on PATH, \$HOME/.kimi-code/bin, /home/ai/.kimi-code/bin, /usr/local/bin."
+}
+
+# ---------------------------------------------------------------------------
+# Credential owner.
+#
+# Unlike GLM (one loopback server with a shared password), Kimi has no server:
+# it is a local CLI whose credentials are per-user OAuth under ~/.kimi-code.
+# There is no config-dir override — `kimi --help` exposes none — so a second
+# account on a shared box has no credentials of its own.
+#
+# Rather than making Albert run a second interactive device-code login, a root
+# session runs the Kimi call AS the owning user. Only root can do this without
+# a password prompt, so this never turns into an interactive hang; for any other
+# user it simply does not engage and doctor says plainly what to do.
+#
+# Review mode only. An implement run is deliberately NOT delegated: its writes
+# would land owned by the other user, which is a mess a wrapper should not
+# create silently.
+KIMI_OWNER="${AI_KIMI_OWNER:-ai}"
+
+has_credentials() { # has_credentials [USER] — true if that account can reach a provider
+  local u="${1:-}" out
+  if [ -z "$u" ]; then out="$("$(resolve_kimi)" provider list 2>/dev/null || true)"
+  else out="$(su - "$u" -c "\"\$HOME/.kimi-code/bin/kimi\" provider list" 2>/dev/null || true)"
+  fi
+  [ -n "$out" ] && ! printf '%s' "$out" | grep -qi 'no providers configured'
+}
+
+# Prints the user to run Kimi as, or empty for "run directly as me".
+run_as_user() {
+  has_credentials && { printf ''; return 0; }
+  if [ "$(id -u)" = 0 ] && [ "$(id -un)" != "$KIMI_OWNER" ] && has_credentials "$KIMI_OWNER"; then
+    printf '%s' "$KIMI_OWNER"; return 0
+  fi
+  printf ''
 }
 
 kimi_procs() {
@@ -223,9 +263,25 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   fi
   args+=(-p "$(cat "$pf")")
 
+  local as; as="$(run_as_user)"
+  if [ -n "$as" ] && [ "$mode" = implement ]; then
+    die "this account has no Kimi credentials, and an implement run will not be delegated
+  to '$as' — its writes would land owned by the wrong user. Either run 'kimi login'
+  as $(id -un), or run: su - $as -c 'ai-kimi implement …'"
+  fi
+
   : > "$out"
   set +e
-  ( cd "$repo" && "$kimi" "${args[@]}" ) > "$out" 2>"$out.err"
+  if [ -n "$as" ]; then
+    # Prompt crosses the boundary on stdin, so no world-readable temp file is
+    # created for it. Quote every argument for the shell su spawns.
+    local q="" a
+    for a in "${args[@]}"; do q="$q $(printf '%q' "$a")"; done
+    su - "$as" -c "cd $(printf '%q' "$repo") && \"\$HOME/.kimi-code/bin/kimi\"$q" \
+      < /dev/null > "$out" 2>"$out.err"
+  else
+    ( cd "$repo" && "$kimi" "${args[@]}" ) > "$out" 2>"$out.err"
+  fi
   local rc=$?
   set -e
   printf '%s' "$rc"
@@ -329,11 +385,28 @@ cmd_doctor() {
     echo "read-only     : MISSING ($RO_AGENT) — reviews will refuse to run"; rc=1
   fi
   echo
-  if "$kimi" provider list >/dev/null 2>&1; then
-    echo "auth          : OK (kimi provider list succeeded)"
-    "$kimi" provider list 2>/dev/null | sed 's/^/                /'
+  # `kimi provider list` exits 0 even when it reports "No providers configured",
+  # so the exit code alone is a false OK. Kimi's credentials are per-user, under
+  # ~/.kimi-code, so a second account on a shared box has none of its own.
+  local provout
+  provout="$("$kimi" provider list 2>/dev/null || true)"
+  if printf '%s' "$provout" | grep -qi 'no providers configured' || [ -z "$provout" ]; then
+    local as; as="$(run_as_user)"
+    if [ -n "$as" ]; then
+      echo "auth          : borrowed from user \"$as\""
+      echo "                This account has no Kimi credentials of its own (they are"
+      echo "                per-user OAuth under ~/.kimi-code, with no config-dir"
+      echo "                override). Reviews run as \"$as\"; implement runs do not."
+    else
+      echo "auth          : NOT AUTHENTICATED for this account ($(id -un))"
+      echo "                Kimi credentials are per-user (~/.kimi-code)."
+      echo "                Run 'kimi login' as this user, or run ai-kimi as the account"
+      echo "                that owns the credentials (default: $KIMI_OWNER)."
+      rc=1
+    fi
   else
-    echo "auth          : FAILED — run 'kimi login'"; rc=1
+    echo "auth          : OK"
+    printf '%s' "$provout" | sed 's/^/                /'
   fi
   if [ "$live" = 1 ]; then
     local tmp; tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
