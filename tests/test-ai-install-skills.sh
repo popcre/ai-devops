@@ -20,6 +20,8 @@ make_fixture() {
   printf '%s\n' '---' 'name: client-codex' 'description: test' '---' > "$fixture/skills/codex/client-codex/SKILL.md"
   printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$fixture/skills/shared/shared-one/SKILL.md"
   printf '%s\n' '---' 'name: synology-sharesync-triage' 'description: test' '---' > "$fixture/skills/shared/synology-sharesync-triage/SKILL.md"
+  mkdir -p "$fixture/config"
+  cp "$REPO_ROOT/config/retired-skills.txt" "$fixture/config/retired-skills.txt"
   printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
   printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
 }
@@ -83,26 +85,58 @@ assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq "skills/codex" "$TMP_ROOT/collision-codex.out" || fail "Codex collision error missing"
 
-echo "5/5 obsolete skill warns, then quarantines only by opt-in"
+echo "5/5 orphans quarantine by default, marker-scoped"
 fixture="$TMP_ROOT/migrate/repo"; claude="$TMP_ROOT/migrate/claude"; codex="$TMP_ROOT/migrate/codex"
 make_fixture "$fixture"
-mkdir -p "$claude/skills/synology-sharesync-stuck-triage" "$codex/skills/synology-sharesync-stuck-triage"
-printf '%s\n' old > "$claude/skills/synology-sharesync-stuck-triage/SKILL.md"
-printf '%s\n' old > "$codex/skills/synology-sharesync-stuck-triage/SKILL.md"
-run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/migrate-warn.out" 2>&1
-assert_dir "$claude/skills/synology-sharesync-stuck-triage"
-assert_dir "$codex/skills/synology-sharesync-stuck-triage"
-grep -Fq 'Re-run with --migrate-obsolete' "$TMP_ROOT/migrate-warn.out" || fail "migration warning missing"
-run_installer "$fixture" "$claude" "$codex" --dry-run --migrate-obsolete >"$TMP_ROOT/migrate-preview.out" 2>&1
-assert_dir "$claude/skills/synology-sharesync-stuck-triage"
-assert_dir "$codex/skills/synology-sharesync-stuck-triage"
-grep -Fq '[dry-run] mv' "$TMP_ROOT/migrate-preview.out" || fail "migration preview missing"
-run_installer "$fixture" "$claude" "$codex" --migrate-obsolete >"$TMP_ROOT/migrate-run.out" 2>&1
-assert_absent "$claude/skills/synology-sharesync-stuck-triage"
-assert_absent "$codex/skills/synology-sharesync-stuck-triage"
-assert_file "$claude/skills-quarantine/synology-sharesync-stuck-triage/SKILL.md"
-assert_file "$codex/skills-quarantine/synology-sharesync-stuck-triage/SKILL.md"
-assert_file "$claude/skills/synology-sharesync-triage/SKILL.md"
-assert_file "$codex/skills/synology-sharesync-triage/SKILL.md"
+# Three kinds of installed skill the repo no longer ships:
+#   pre-marker  - unmarked, but named in config/retired-skills.txt (migration list)
+#   marked      - stamped by an earlier ai-devops run, so ours to retire
+#   vendor      - unmarked and unknown (e.g. Codex's own playwright): never touched
+for home in "$claude" "$codex"; do
+  for skill in synology-sharesync-stuck-triage marked-orphan vendor-skill; do
+    mkdir -p "$home/skills/$skill"
+    echo old > "$home/skills/$skill/SKILL.md"
+  done
+  : > "$home/skills/marked-orphan/.ai-devops-managed"
+done
+
+# --keep-orphans opts out: everything stays active and the warning is loud.
+run_installer "$fixture" "$claude" "$codex" --keep-orphans >"$TMP_ROOT/keep.out" 2>&1
+grep -Fq 'retired Claude skill left active' "$TMP_ROOT/keep.out" || fail "keep-orphans Claude warning missing"
+grep -Fq 'retired Codex skill left active' "$TMP_ROOT/keep.out" || fail "keep-orphans Codex warning missing"
+for home in "$claude" "$codex"; do
+  assert_dir "$home/skills/synology-sharesync-stuck-triage"
+  assert_dir "$home/skills/marked-orphan"
+  assert_absent "$home/skills-quarantine"
+done
+
+# --dry-run previews the moves and changes nothing. --migrate-obsolete is a
+# retired flag kept as an accepted no-op, so older docs/scripts still work.
+run_installer "$fixture" "$claude" "$codex" --dry-run --migrate-obsolete >"$TMP_ROOT/preview.out" 2>&1
+grep -Fq '[dry-run] mv' "$TMP_ROOT/preview.out" || fail "quarantine preview missing"
+for home in "$claude" "$codex"; do
+  assert_dir "$home/skills/synology-sharesync-stuck-triage"
+  assert_dir "$home/skills/marked-orphan"
+  assert_absent "$home/skills-quarantine"
+done
+
+# Default run (no flag): both of ours are quarantined, the vendor skill is not.
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/prune.out" 2>&1
+for home in "$claude" "$codex"; do
+  assert_absent "$home/skills/synology-sharesync-stuck-triage"
+  assert_absent "$home/skills/marked-orphan"
+  assert_file "$home/skills-quarantine/synology-sharesync-stuck-triage/SKILL.md"
+  assert_file "$home/skills-quarantine/marked-orphan/SKILL.md"
+  assert_file "$home/skills/vendor-skill/SKILL.md"
+  assert_file "$home/skills/synology-sharesync-triage/SKILL.md"
+  assert_file "$home/skills/shared-one/SKILL.md"
+done
+
+# Re-running must be safe even though the quarantine destinations now exist.
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/prune2.out" 2>&1
+for home in "$claude" "$codex"; do
+  assert_file "$home/skills-quarantine/synology-sharesync-stuck-triage/SKILL.md"
+  assert_file "$home/skills/vendor-skill/SKILL.md"
+done
 
 echo "PASS: ai-install-skills"
