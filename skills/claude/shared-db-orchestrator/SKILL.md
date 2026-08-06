@@ -72,6 +72,19 @@ is all. It performs **no** implementation work of its own:
 - no database calls of any kind
 - no long file reads it can delegate
 
+**Five exceptions, and only these — the coordinator's own bookkeeping.** They are
+the coordination surface itself, not work on the database. Do them yourself; do
+not dispatch an agent to record a dispatch.
+1. Open, re-check and close its **coordinator marker** issue (step 0).
+2. **`IN PROGRESS` annotations** in `COORDINATOR_INTAKE.md` at dispatch time, and
+   queue seeding at handover.
+3. **Merge a docs-only handover PR** it finds open, or its own (step 2b).
+4. The **handoff files** it writes at the end (`HANDOFF.d/`).
+5. Moving intake blocks to `TAKEN OVER`.
+
+Anything touching `supabase/`, application code, or the database is dispatched —
+no exceptions, however small.
+
 The reason is not purity, it is arithmetic. The coordinator's context window is
 the only place where the full picture of who-is-doing-what exists. Every token it
 spends reading a 700-line migration is a token it cannot spend keeping two agents
@@ -112,6 +125,9 @@ Run all seven steps, **in this order**, before the first brief goes out:
    labelled `coordinator-marker` — a tracked file cannot serve, because branch
    protection puts it behind a PR and the coordinator does not commit.
    `gh issue list --label coordinator-marker --state open`, then:
+   - **A failed `gh` call is UNKNOWN, never "none open".** Empty output from an
+     unauthenticated or erroring `gh` reads exactly like a clear board. Confirm
+     the command succeeded before believing zero results.
    - **An open marker that is not yours: STOP, do not dispatch.** Show Albert its
      session id, machine and start time, and ask whether to close it. A dead
      coordinator's marker stays open **on purpose**.
@@ -122,9 +138,11 @@ Run all seven steps, **in this order**, before the first brief goes out:
      work. Workers carry no lease and check nothing; this is the coordinator's
      obligation alone. Close the marker at handover.
 1. **Establish ground truth from the repo, never from a Markdown file.**
-   `git fetch --all --prune` (**not** `--prune=false` — that is not valid git and
-   fails with `option 'prune' takes no value`, leaving you on stale refs while
-   looking like you fetched), then read `origin/main`'s **real** tip SHA and the
+   `git fetch --all --no-prune` — **not** `--prune=false`, which is not valid git
+   and fails with `option 'prune' takes no value`, leaving you on stale refs
+   while looking like you fetched; and **not** bare `--prune`, which
+   `COORDINATOR_INTAKE.md` §B2.3 forbids while agents may be live, and at step 1
+   you do not yet know whether any are. Then read `origin/main`'s **real** tip SHA and the
    **real** maximum 14-digit version in `supabase/migrations/` (and check for
    duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
    this skill are all capable of being hours out of date; the repo is not.
@@ -133,11 +151,10 @@ Run all seven steps, **in this order**, before the first brief goes out:
    `HANDOFF.md`.** Handovers are write-once dated files under `HANDOFF.d/`; root
    `HANDOFF.md` is long-form history and its newest in-file section can be days
    older than the real handover (on 2026-08-05 it was five days older).
-   - **Parse the timestamp, never sort the filename.** `HANDOFF.d/` holds two
-     formats — `2026-08-05T1827Z-…` and `20260731T231155Z-…`. A plain text sort
-     puts the **older** compact name last and calls it newest.
-   - **Search open PR heads too.** The newest handover may not be on
-     `origin/main` yet (see step 2b).
+   - **Parse the timestamp, never sort the filename** — `HANDOFF.d/` mixes two
+     formats and a text sort picks the **July** file (ledger §17).
+   - **Search open PR heads too**: the newest handover may not be on
+     `origin/main` yet (step 2b).
    Then read `HANDOFF.md` for the **`## BACKLOG`** section (the `B<n>` items) and
    the standing detail the handover points at.
 
@@ -150,19 +167,15 @@ Run all seven steps, **in this order**, before the first brief goes out:
    skill — **re-derive the fact from `git`/`gh` and believe that.** Do not rank
    the documents by date and pick a winner; that is document-shopping.
 
-   This step is here because on **2026-07-31** a fresh coordinator read the three
-   empty queue sections, exactly as this skill then instructed, and reported
-   "there is no pending work" while about twenty real jobs sat in the
-   `HANDOFF.md` backlog. Every word of the report was true; the conclusion was
-   completely wrong. Never report the project idle on the strength of the queues
-   alone.
-2b. **Check open pull requests — `gh pr list --state open`.** For each one:
-   who opened it, is it a handover, and is it parked deliberately? **The whole of
-   a previous session can be sitting in an open PR** — on 2026-08-05 the entire
-   handover plus days of queue findings were in PR #451, invisible to anyone
-   reading `main`. A docs-only handover PR is **merged before the session that
-   wrote it ends**; if you find one open, read it, then merge it (AGENTS.md §5:
-   docs-only merges promptly; §2: never leave an open PR behind).
+   **Never report the project idle on the strength of the queues alone** — on
+   2026-07-31 a coordinator did exactly that while ~20 jobs sat in the backlog
+   (ledger §12).
+2b. **Check open pull requests — `gh pr list --state open`.** For each one: who
+   opened it, is it a handover, is it parked deliberately? **A previous session's
+   entire handover can be sitting in an open PR** (2026-08-05, PR #451 — ledger
+   §17). A docs-only handover PR is **merged before the session that wrote it
+   ends**; if you find one open, read it, then merge it (AGENTS.md §5 docs-only
+   merges promptly, §2 never leave an open PR behind).
 3. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
    done that nobody has started. Triage it: what is ready to dispatch, what needs
    an Albert decision first, what is already obsolete. Reconcile it against the
@@ -191,7 +204,9 @@ Run all seven steps, **in this order**, before the first brief goes out:
 Steps 2–4 span ~9,500 lines and reading them inline burns the exact resource this
 model exists to protect. Keep steps 0, 1, 2b and 5 inline — they are cheap
 commands, not reads — and dispatch **one read-only summarizer** for the documents,
-**pinned to an exact commit SHA**, returning **line anchors** for every claim, the
+**pinned to exact SHAs: `origin/main` AND the head of every open handover PR**
+(pinning to `main` alone misses the one place the 2026-08-05 handover actually
+was). It returns **line anchors** for every claim, the
 outstanding work items, the owner-decision gates, and any **contradictions
 flagged, not resolved**. Then **verify each flagged contradiction yourself against
 the repo**: a summary is a document like any other, so "re-derive from `git`/`gh`"
