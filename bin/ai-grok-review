@@ -1,0 +1,665 @@
+#!/usr/bin/env bash
+# ai-grok-review — read-only Grok reviews in persistent, named sessions.
+#
+# This is the ONLY supported way for Claude or Codex to talk to Grok. Never call
+# `grok --single`, `grok -p`, or `grok --resume` directly: this script owns the
+# model pin, the permission set, the turn bound, the completion rule, and the
+# session bookkeeping, and every one of those exists because getting it wrong
+# cost real money on 2026-08-05 (~1.9M tokens, ~$1.28, two runs that returned
+# nothing). See plan_ai-grok-review.md and skills/shared/grok-cli/SKILL.md.
+#
+#   ai-grok-review new <name> [--prompt T | --prompt-file F | stdin] [--max-turns N]
+#   ai-grok-review ask <name> [--prompt T | --prompt-file F | stdin] [--max-turns N]
+#   ai-grok-review list | show <name> | transcript <name> | delete <name>
+#   ai-grok-review doctor [--live]
+#
+# Model, permission set, --no-memory and --cwd are fixed when a session is
+# created and are deliberately NOT overridable per call: a stable request prefix
+# is what makes prompt caching work, and a fixed permission set is what keeps a
+# review read-only. --max-turns IS overridable per call: it is a runtime bound,
+# not part of the cached prefix, and turn-limit recovery depends on raising it.
+#
+# ---------------------------------------------------------------------------
+# STEP 0 VERIFICATION — captured 2026-08-05 against Grok 0.2.118 (1e1687c1cf)
+# on hetz/Ubuntu as user `ai`. Re-run and update this block on any version bump.
+#
+#   Flags confirmed present in `grok --help`:
+#     --cwd, --model, -p/--single, --prompt-file, -r/--resume, --max-turns,
+#     --permission-mode, --allow, --deny, --tools, --disallowed-tools,
+#     --disable-web-search, --no-memory, --output-format, --sandbox
+#   --resume + -p COMPOSE: verified. Turn 2 of session
+#     019fd4e9-28d9-77c3-81f7-9fc9ca72fa7a returned the same sessionId, answered
+#     from turn 1's context, and reported cache_read_input_tokens=23168.
+#   --output-format json emits ONE JSON object (`jq -s length` == 1), NOT NDJSON.
+#     The NDJSON formats are the separately-named streaming-json and
+#     streaming-messages-json. So a plain `jq .stopReason` is correct here.
+#   Result keys observed:
+#     text, thought, sessionId, stopReason, num_turns, requestId, usage,
+#     modelUsage, total_cost_usd, total_cost_usd_ticks
+#     There is NO top-level `model` field; the real model id is the modelUsage
+#     key (`grok-4.5-build` for `--model grok-4.5`).
+#   Success stopReason observed: "end_turn".
+#   `grok doctor` is a TERMINAL diagnostic ("Check terminal, clipboard, color,
+#     and input support") — it is not an auth check at all. This is the whole
+#     explanation for the 2026-08-05 "not authenticated" contradiction.
+#   `grok export` exists and exports a session transcript as Markdown, so
+#     `transcript` is implementable after all (the plan had dropped it).
+#   `--prompt-file` exists, so a large brief never goes through argv/ARG_MAX.
+#   NOTE: the early-return bug did NOT reproduce on a small 33s prompt — the
+#     file was complete when the command returned. The wait loop is harmless
+#     when the bug is absent (first poll succeeds) and load-bearing when it is
+#     present, which is exactly why completion is proven from the JSON.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
+CALLER="${AI_GROK_CALLER:-claude}"
+
+# Frozen review prefix. Changing any of this mid-workstream throws away the
+# provider cache; broadening it turns a read-only review into something else.
+# --disable-web-search closes a real scope leak: under --allow Read alone, Grok
+# has been observed using web_fetch during a purely local repository review.
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+GROK_PERMS=(--permission-mode default --allow Read --allow Grep
+            --deny Edit --deny Bash --disable-web-search --no-memory)
+
+DEFAULT_MAX_TURNS="${AI_GROK_MAX_TURNS:-20}"
+WAIT_TIMEOUT="${AI_GROK_WAIT_TIMEOUT:-900}"
+POLL_INTERVAL="${AI_GROK_POLL_INTERVAL:-5}"
+
+die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+# ---------------------------------------------------------------------------
+# Grok binary resolution.
+#
+# Do NOT rely on PATH. On hetz, grok lives at /home/ai/.local/bin/grok, which is
+# not on root's PATH — and the toolkit is installed for both users. A bare
+# `command -v grok` failure there reads as "broken install" when the binary is
+# present and fine.
+# ---------------------------------------------------------------------------
+resolve_grok() {
+  if [ -n "${AI_GROK_BIN:-}" ]; then
+    [ -x "$AI_GROK_BIN" ] || die "AI_GROK_BIN=$AI_GROK_BIN is not executable."
+    printf '%s' "$AI_GROK_BIN"; return 0
+  fi
+  local c
+  for c in "$(command -v grok 2>/dev/null || true)" \
+           "$HOME/.local/bin/grok" \
+           "$HOME/.grok/bin/grok" \
+           "$HOME/.grok/bin/grok.exe" \
+           /home/ai/.local/bin/grok \
+           /usr/local/bin/grok; do
+    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  die "grok binary not found. Set AI_GROK_BIN, or install Grok. Looked on PATH, \$HOME/.local/bin, \$HOME/.grok/bin, /home/ai/.local/bin, /usr/local/bin."
+}
+
+# Process diagnostics only — NEVER a completion signal.
+#
+# `pgrep -af grok` matches any command line containing "grok", including this
+# script and its parent shell, so it self-matches and is useless unmodified.
+# Match the process NAME, and fall back to Git Bash's `ps -W` on Windows where
+# pgrep does not exist.
+grok_procs() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -x grok 2>/dev/null || pgrep -f '[g]rok-[0-9]' 2>/dev/null || true
+  else
+    ps -W 2>/dev/null | grep -i '[g]rok' || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Repository + session identity. Keyed by repo + caller + name so Claude and
+# Codex can use the same short name in one repo without colliding.
+# ---------------------------------------------------------------------------
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null \
+    || die "ai-grok-review must be run inside a git repository."
+}
+
+repo_id() {
+  local root; root="$1"
+  printf '%s' "$root" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'
+}
+
+valid_name() {
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+meta_path() { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+
+# Per-session lock (serialises turns on one session).
+lock_path()      { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+# Per-REPO in-flight lock. The most expensive symptom of the 2026-08-05 incident
+# was three concurrent full-price reviews of one repository, started because the
+# first "looked dead". A per-session lock does not stop that; this does.
+repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+
+# Portable mutex: `flock` does not exist in Git Bash, so this is an atomic mkdir
+# plus a pid file. A lock whose owning process is gone is reclaimed, so a
+# crashed run never wedges a repo or a session permanently.
+lock_acquire() { # lock_acquire DIR LABEL
+  local dir="$1" label="$2" owner
+  mkdir -p "$(dirname "$dir")"
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s\n' "$$" > "$dir/pid"
+    printf '%s\n' "$label" > "$dir/label"
+    return 0
+  fi
+  owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+    return 1
+  fi
+  warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
+  rm -rf "$dir"
+  mkdir "$dir" 2>/dev/null || return 1
+  printf '%s\n' "$$" > "$dir/pid"
+  printf '%s\n' "$label" > "$dir/label"
+  return 0
+}
+lock_release() { rm -rf "$1" 2>/dev/null || true; }
+
+lock_info() { # lock_info DIR -> "label (pid, Ns ago)"
+  local dir="$1" label pid age started now
+  label="$(cat "$dir/label" 2>/dev/null || echo unknown)"
+  pid="$(cat "$dir/pid" 2>/dev/null || echo '?')"
+  if started="$(date -r "$dir" +%s 2>/dev/null)"; then
+    now="$(date +%s)"; age=$((now - started))
+    printf '%s (pid %s, running %ss)' "$label" "$pid" "$age"
+  else
+    printf '%s (pid %s)' "$label" "$pid"
+  fi
+}
+
+write_meta() { # write_meta FILE JSON  (atomic: temp + mv on one filesystem)
+  local f="$1" tmp
+  mkdir -p "$(dirname "$f")"
+  tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
+  printf '%s\n' "$2" > "$tmp"
+  mv -f "$tmp" "$f"
+}
+
+find_meta() {
+  local f; f="$(meta_path "$1" "$2")"
+  [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-grok-review list"
+  printf '%s' "$f"
+}
+
+# ---------------------------------------------------------------------------
+# The completion rule (the reason this script exists).
+#
+# A run is finished ONLY when the output file parses as JSON and carries a
+# terminal stopReason. Exit status proves nothing: the launcher has been
+# observed exiting ~25-30s in while the sandboxed binary kept working for
+# another 1-3 minutes, leaving a 0-byte file behind exit 0. Grok's own log is
+# not an oracle either — it reported `handle_prompt.done ok:true` for two runs
+# that were `cancelled` and for one whose output never reached its caller.
+# ---------------------------------------------------------------------------
+await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
+  local f="$1" label="$2" waited=0 empty_checks=0 saw_proc=0
+  while [ "$waited" -lt "$WAIT_TIMEOUT" ]; do
+    if [ -s "$f" ] && jq -e 'has("stopReason")' "$f" >/dev/null 2>&1; then
+      return 0
+    fi
+    # Fast-fail when a run is definitively dead, so a crash at second 2 does not
+    # cost a full timeout of waiting.
+    #
+    # CRITICAL SAFETY CONDITION: only ever fast-fail if we have POSITIVELY SEEN a
+    # Grok process during this wait and it then disappeared. If detection never
+    # matched anything, we do not trust it and we wait the full timeout instead.
+    # Without this guard the optimisation destroys the very case the wait exists
+    # for: the orphaned worker is named `grok-<version>-<arch>` under `bwrap`,
+    # not `grok`, so a detection miss would abort a perfectly healthy slow run
+    # and reintroduce "Grok returned nothing" — the original bug, self-inflicted.
+    if [ -n "$(grok_procs)" ]; then
+      saw_proc=1; empty_checks=0
+    elif [ "$saw_proc" = 1 ]; then
+      empty_checks=$((empty_checks + 1))
+      if [ "$empty_checks" -ge 2 ]; then
+        note ""
+        note "ai-grok-review: Grok is no longer running but produced no complete result."
+        note "  output file : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
+        note "  elapsed     : ${waited}s"
+        note "  diagnose    : tail -20 ~/.grok/logs/unified.jsonl"
+        return 1
+      fi
+    fi
+    sleep "$POLL_INTERVAL"
+    waited=$((waited + POLL_INTERVAL))
+    if [ $((waited % 60)) -eq 0 ]; then
+      note "  … $label still running (${waited}s; Grok has not written a terminal result yet)"
+    fi
+  done
+  note ""
+  note "ai-grok-review: no terminal JSON after ${WAIT_TIMEOUT}s."
+  note "  output file : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
+  note "  diagnose    : tail -20 ~/.grok/logs/unified.jsonl"
+  note "  processes   : $(grok_procs | tr '\n' ' ')"
+  note "  Raise the ceiling with AI_GROK_WAIT_TIMEOUT=<seconds> if the run is genuinely long."
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Turn execution
+# ---------------------------------------------------------------------------
+run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
+  local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
+  local grok; grok="$(resolve_grok)"
+  local args=(--cwd "$repo" --model "$GROK_MODEL" --prompt-file "$pf"
+              --max-turns "$turns" "${GROK_PERMS[@]}" --output-format json)
+  [ -n "$sid" ] && args+=(--resume "$sid")
+
+  : > "$out"
+  set +e
+  "$grok" "${args[@]}" > "$out" 2>"$out.err"
+  local rc=$?
+  set -e
+  # rc is recorded, never trusted: exit 0 with an empty file is the normal
+  # appearance of the early-return bug.
+  printf '%s' "$rc"
+}
+
+# The frozen prefix, minus --max-turns, for the stability assertion. --max-turns
+# is a runtime bound outside the cached prefix and is legitimately overridable.
+frozen_prefix() {
+  printf '%s|%s' "$GROK_MODEL" "$(printf '%s ' "${GROK_PERMS[@]}")"
+}
+
+# ---------------------------------------------------------------------------
+# Result interpretation
+# ---------------------------------------------------------------------------
+handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
+  local f="$1" name="$2" turns="$3" sr sid used
+  sr="$(jq -r '.stopReason // "missing"' "$f")"
+  sid="$(jq -r '.sessionId // ""' "$f")"
+  used="$(jq -r '.num_turns // "?"' "$f")"
+  case "$sr" in
+    end_turn|stop|completed)
+      return 0 ;;
+    cancelled|max_turns|max_turns_reached|max-turns*)
+      note ""
+      note "ai-grok-review: Grok stopped WITHOUT a final answer — the turn budget ran out."
+      note "  stopReason  : $sr"
+      note "  turns used  : $used of $turns"
+      note "  session     : ${sid:-unknown} (saved as '$name')"
+      note ""
+      note "  This is NOT a permissions problem. A denied tool does not cancel a run —"
+      note "  Grok says so and continues with its other tools. Do NOT broaden permissions."
+      note ""
+      note "  Continue the SAME session with a higher ceiling:"
+      note "    ai-grok-review ask $name --max-turns $((turns * 2)) --prompt 'Continue and give the final verdict now.'"
+      return 1 ;;
+    *)
+      note "ai-grok-review: unrecognised stopReason '$sr' — refusing to guess. Inspect: $f"
+      return 1 ;;
+  esac
+}
+
+report_usage() { # report_usage FILE
+  jq -r '"tokens: \(.usage.total_tokens // "?") "
+       + "(uncached in: \(.usage.input_tokens // "?"), cached: \(.usage.cache_read_input_tokens // 0)) "
+       + "turns: \(.num_turns // "?") "
+       + "cost: $\(.total_cost_usd // 0) "
+       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' "$1" >&2
+}
+
+# Grok's `text` concatenates progress narration with the final answer, so every
+# prompt this script sends asks for a delimiter and extraction happens on it.
+VERDICT_MARKER='## Verdict'
+extract_answer() { # extract_answer FILE
+  local text; text="$(jq -r '.text // ""' "$1")"
+  if printf '%s' "$text" | grep -qF "$VERDICT_MARKER"; then
+    printf '%s\n' "$text" | sed -n "/^${VERDICT_MARKER}/,\$p"
+  else
+    warn "Grok's reply has no '$VERDICT_MARKER' section; emitting the whole response including any progress narration."
+    printf '%s\n' "$text"
+  fi
+}
+
+PROMPT_FOOTER="
+
+---
+Formatting requirement: structure your reply so the final answer is last, under a
+literal '## Verdict' heading. Put any narration of what you are reading above it.
+Do not put the verdict anywhere else."
+
+build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
+  local dest="$1"
+  if [ -n "${OPT_PROMPT_FILE:-}" ]; then
+    [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
+    cat "$OPT_PROMPT_FILE" > "$dest"
+  elif [ -n "${OPT_PROMPT:-}" ]; then
+    printf '%s\n' "$OPT_PROMPT" > "$dest"
+  elif [ ! -t 0 ]; then
+    cat > "$dest"
+  else
+    die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
+  fi
+  [ -s "$dest" ] || die "the prompt is empty."
+  printf '%s' "$PROMPT_FOOTER" >> "$dest"
+}
+
+# Refuse to write review artifacts into a repo that would commit them.
+reviews_dir() { # reviews_dir REPO -> path, or empty if unsafe
+  local repo="$1"
+  if git -C "$repo" check-ignore -q .ai/reviews 2>/dev/null; then
+    printf '%s/.ai/reviews' "$repo"
+  else
+    printf ''
+  fi
+}
+
+write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
+  local repo="$1" name="$2" f="$3" dir ts out
+  dir="$(reviews_dir "$repo")"
+  if [ -z "$dir" ]; then
+    warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo (it would be committable). Add '.ai/reviews/' to .gitignore."
+    return 0
+  fi
+  mkdir -p "$dir"
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  out="$dir/grok-${name}-${ts}.md"
+  {
+    echo "# Grok review — $name"
+    echo
+    echo "- Repo: \`$repo\`"
+    echo "- Branch: \`$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')\`"
+    echo "- Session: \`$(jq -r '.sessionId // "?"' "$f")\`"
+    echo "- Model: \`$(jq -r '(.modelUsage // {} | keys | first) // "?"' "$f")\`"
+    echo "- stopReason: \`$(jq -r '.stopReason // "?"' "$f")\` · turns: $(jq -r '.num_turns // "?"' "$f")"
+    echo "- Tokens: $(jq -r '.usage.total_tokens // "?"' "$f") (cached $(jq -r '.usage.cache_read_input_tokens // 0')) · cost: \$$(jq -r '.total_cost_usd // 0' "$f")"
+    echo
+    echo "---"
+    echo
+    jq -r '.text // ""' "$f"
+  } > "$out"
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+usage() {
+  cat <<EOF
+ai-grok-review $VERSION — read-only Grok reviews in persistent, named sessions.
+
+  ai-grok-review new <name>  [--prompt TEXT | --prompt-file FILE | stdin] [--max-turns N]
+  ai-grok-review ask <name>  [--prompt TEXT | --prompt-file FILE | stdin] [--max-turns N]
+  ai-grok-review list
+  ai-grok-review show <name>
+  ai-grok-review transcript <name>
+  ai-grok-review delete <name>
+  ai-grok-review doctor [--live]
+
+Options:
+  --prompt TEXT        the brief (small briefs only; prefer --prompt-file)
+  --prompt-file FILE   the brief, read from a file (no argv size limit)
+  --max-turns N        turn ceiling for THIS call (default $DEFAULT_MAX_TURNS)
+  --json               print the raw Grok result instead of the extracted answer
+
+Reviews are read-only: Edit and Bash are denied and web search is disabled.
+Model, permissions and --no-memory are fixed and cannot be overridden per call.
+
+Environment:
+  AI_GROK_CALLER       'claude' (default) or 'codex' — keeps sessions separate
+  AI_GROK_BIN          explicit path to the grok binary
+  AI_GROK_MAX_TURNS    default turn ceiling ($DEFAULT_MAX_TURNS)
+  AI_GROK_WAIT_TIMEOUT seconds to wait for a terminal result ($WAIT_TIMEOUT)
+  AI_GROK_STATE_DIR    session state ($STATE_DIR)
+EOF
+}
+
+cmd_doctor() {
+  local live=0 grok rc=0
+  [ "${1:-}" = "--live" ] && live=1
+  need jq
+  grok="$(resolve_grok)"
+  echo "grok binary   : $grok"
+  echo "grok version  : $("$grok" --version 2>&1 | head -1)"
+  echo "caller        : $CALLER"
+  echo "state dir     : $STATE_DIR"
+  echo "model         : $GROK_MODEL"
+  echo "permissions   : ${GROK_PERMS[*]}"
+  echo "max turns     : $DEFAULT_MAX_TURNS   wait timeout: ${WAIT_TIMEOUT}s"
+  echo
+  # Auth: `grok doctor` is a TERMINAL diagnostic and has reported "not
+  # authenticated" while real calls worked. `grok models` is the cheap check.
+  # A billable probe happens only under --live.
+  if "$grok" models >/dev/null 2>&1; then
+    echo "auth          : OK (grok models succeeded)"
+  else
+    echo "auth          : AMBIGUOUS — 'grok models' failed."
+    echo "                Do NOT conclude a login is needed from 'grok doctor' alone;"
+    echo "                it only checks terminal/clipboard/color support."
+    echo "                Re-run with --live for a real (billable) probe."
+    rc=1
+  fi
+  if [ "$live" = 1 ]; then
+    echo -n "live probe    : "
+    local tmp; tmp="$(mktemp)"
+    printf 'Reply with exactly: OK\n' > "$tmp.prompt"
+    run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 >/dev/null || true
+    if jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
+      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(jq -r '.total_cost_usd // 0' "$tmp"))"
+    else
+      echo "FAILED — no terminal JSON"; rc=1
+    fi
+    rm -f "$tmp" "$tmp.prompt" "$tmp.err" 2>/dev/null || true
+  fi
+  return $rc
+}
+
+cmd_new() {
+  local name="$1" repo rid meta pf out rid_lock sid rc turns
+  valid_name "$name" || die "invalid session name '$name' (use letters, digits, . _ -)"
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  meta="$(meta_path "$rid" "$name")"
+  [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-grok-review ask $name"
+
+  turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
+  rid_lock="$(repolock_path "$rid")"
+  if ! lock_acquire "$rid_lock" "new:$name"; then
+    die "another Grok review is already running in this repository: $(lock_info "$rid_lock").
+  Do NOT start a second one — concurrent reviews are billed in full and were the most
+  expensive part of the 2026-08-05 incident. Wait for it, or continue it with 'ask'."
+  fi
+  # shellcheck disable=SC2064
+  trap "lock_release '$rid_lock'" EXIT INT TERM
+
+  pf="$(mktemp)"; out="$(mktemp)"
+  build_prompt_file "$pf"
+
+  note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
+  rc="$(run_turn "$repo" "$out" "$pf" "$turns")"
+  if ! await_result "$out" "review '$name'"; then
+    note "  grok exit status was $rc — which proves nothing; see the note above."
+    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    note "  A first turn that completes but delivers no output has been seen before"
+    note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
+    rm -f "$pf" "$out" "$out.err"; exit 1
+  fi
+
+  sid="$(jq -r '.sessionId // ""' "$out")"
+  [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
+
+  write_meta "$meta" "$(jq -n \
+    --arg sid "$sid" --arg repo "$repo" --arg name "$name" --arg caller "$CALLER" \
+    --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
+    --argjson turns 1 \
+    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
+    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    '{grok_session_id:$sid, repo:$repo, name:$name, caller:$caller,
+      frozen_prefix:$prefix, created:$created, updated:$created,
+      turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
+
+  finish_turn "$repo" "$name" "$out" "$turns"
+  local st=$?
+  rm -f "$pf" "$out" "$out.err"
+  return $st
+}
+
+cmd_ask() {
+  local name="$1" repo rid meta pf out sid rc turns sess_lock rid_lock
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  meta="$(find_meta "$rid" "$name")"
+  sid="$(jq -r .grok_session_id "$meta")"
+  turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
+
+  # The frozen prefix must not have drifted since the session was created.
+  local want got
+  want="$(jq -r .frozen_prefix "$meta")"; got="$(frozen_prefix)"
+  [ "$want" = "$got" ] || die "the frozen review prefix changed since session '$name' was created.
+  was: $want
+  now: $got
+  Continuing would silently discard the provider cache. Start a new session instead."
+
+  sess_lock="$(lock_path "$rid" "$name")"
+  rid_lock="$(repolock_path "$rid")"
+  lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  if ! lock_acquire "$rid_lock" "ask:$name"; then
+    lock_release "$sess_lock"
+    die "another Grok review is running in this repository: $(lock_info "$rid_lock")"
+  fi
+  # shellcheck disable=SC2064
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT INT TERM
+
+  pf="$(mktemp)"; out="$(mktemp)"
+  build_prompt_file "$pf"
+
+  note "Grok review '$name' continuing session $sid (max-turns $turns)…"
+  rc="$(run_turn "$repo" "$out" "$pf" "$turns" "$sid")"
+  if ! await_result "$out" "review '$name'"; then
+    note "  grok exit status was $rc — which proves nothing."
+    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    if [ ! -s "$out" ]; then
+      note ""
+      note "  An empty RESUME is a known 0.2.118 behaviour after a session was cancelled."
+      note "  Do not keep retrying this session: start a fresh one with"
+      note "    ai-grok-review new ${name}-2 --prompt-file <brief>"
+    fi
+    rm -f "$pf" "$out" "$out.err"; exit 1
+  fi
+
+  write_meta "$meta" "$(jq \
+    --arg updated "$(date -u +%FT%TZ)" \
+    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
+    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    '.updated=$updated | .turns=(.turns+1)
+     | .total_tokens=(.total_tokens+$tokens)
+     | .total_cost_usd=(.total_cost_usd+$cost)
+     | .last_stop_reason=$stop' "$meta")"
+
+  finish_turn "$repo" "$name" "$out" "$turns"
+  local st=$?
+  rm -f "$pf" "$out" "$out.err"
+  return $st
+}
+
+finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
+  local repo="$1" name="$2" out="$3" turns="$4" path
+  report_usage "$out"
+  if ! handle_stop_reason "$out" "$name" "$turns"; then
+    return 1
+  fi
+  path="$(write_review_file "$repo" "$name" "$out")"
+  if [ "${OPT_JSON:-0}" = 1 ]; then
+    cat "$out"
+  else
+    extract_answer "$out"
+  fi
+  [ -n "$path" ] && note "review saved: $path"
+  return 0
+}
+
+cmd_list() {
+  local rid dir f
+  rid="$(repo_id "$(repo_root)")"
+  dir="$STATE_DIR/sessions/$rid"
+  printf '%-24s %-8s %-38s %6s %10s %9s  %s\n' NAME CALLER SESSION TURNS TOKENS COST STOP
+  [ -d "$dir" ] || return 0
+  for f in "$dir"/*.json; do
+    [ -f "$f" ] || continue
+    jq -r '[.name, .caller, .grok_session_id, (.turns|tostring),
+            (.total_tokens|tostring), ("$" + (.total_cost_usd|tostring)),
+            .last_stop_reason] | @tsv' "$f" \
+      | awk -F'\t' '{printf "%-24s %-8s %-38s %6s %10s %9s  %s\n",$1,$2,$3,$4,$5,$6,$7}'
+  done
+}
+
+cmd_show() {
+  local rid; rid="$(repo_id "$(repo_root)")"
+  jq . "$(find_meta "$rid" "$1")"
+}
+
+cmd_transcript() {
+  # Implementable after all: `grok export` exports a session transcript as
+  # Markdown. (The plan had dropped this on the assumption that ai-glm's
+  # HTTP-API version could not be ported — Step 0 found the subcommand.)
+  local rid sid grok
+  rid="$(repo_id "$(repo_root)")"
+  sid="$(jq -r .grok_session_id "$(find_meta "$rid" "$1")")"
+  grok="$(resolve_grok)"
+  "$grok" export "$sid" 2>/dev/null \
+    || die "'grok export $sid' failed. Verify the subcommand with: grok export --help"
+}
+
+cmd_delete() {
+  local rid meta; rid="$(repo_id "$(repo_root)")"
+  meta="$(find_meta "$rid" "$1")"
+  rm -f "$meta"
+  note "deleted local session record '$1' (Grok's own session history is untouched)."
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing. There is deliberately NO passthrough of arbitrary grok
+# flags: a passthrough is a drift hatch, and the next session under pressure
+# would use it to pass --permission-mode auto, which is exactly what happened.
+# ---------------------------------------------------------------------------
+CMD="${1:-}"; shift || true
+ARG=""
+OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_MAX_TURNS=""; OPT_JSON=0; OPT_LIVE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prompt)       OPT_PROMPT="${2:-}"; shift 2 ;;
+    --prompt-file)  OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
+    --max-turns)    OPT_MAX_TURNS="${2:-}"; shift 2 ;;
+    --json)         OPT_JSON=1; shift ;;
+    --live)         OPT_LIVE="--live"; shift ;;
+    -h|--help)      usage; exit 0 ;;
+    --*)            die "unknown option '$1'. This wrapper deliberately does not forward arbitrary grok flags; if you need a capability it lacks, say so rather than calling grok directly." ;;
+    *)              [ -z "$ARG" ] && ARG="$1" || die "unexpected argument '$1'"; shift ;;
+  esac
+done
+
+if [ -n "$OPT_MAX_TURNS" ]; then
+  case "$OPT_MAX_TURNS" in
+    ''|*[!0-9]*) die "--max-turns must be a positive integer" ;;
+    *) [ "$OPT_MAX_TURNS" -ge 1 ] || die "--max-turns must be >= 1" ;;
+  esac
+fi
+
+need jq
+
+case "$CMD" in
+  new)        [ -n "$ARG" ] || die "usage: ai-grok-review new <name> …"; cmd_new "$ARG" ;;
+  ask)        [ -n "$ARG" ] || die "usage: ai-grok-review ask <name> …"; cmd_ask "$ARG" ;;
+  list)       cmd_list ;;
+  show)       [ -n "$ARG" ] || die "usage: ai-grok-review show <name>"; cmd_show "$ARG" ;;
+  transcript) [ -n "$ARG" ] || die "usage: ai-grok-review transcript <name>"; cmd_transcript "$ARG" ;;
+  delete)     [ -n "$ARG" ] || die "usage: ai-grok-review delete <name>"; cmd_delete "$ARG" ;;
+  doctor)     cmd_doctor "$OPT_LIVE" ;;
+  -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
+  *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
+esac

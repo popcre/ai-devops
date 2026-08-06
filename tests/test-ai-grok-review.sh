@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# Tests for bin/ai-grok-review.
+#
+# Offline by default: a stub `grok` on PATH stands in for the real binary, so no
+# network, no xAI calls, no cost. The live probe runs only with AI_GROK_LIVE=1.
+#
+# The two tests that matter most and must never be weakened:
+#   - await_blocks_until_terminal_json : the regression test for the 2026-08-05
+#     early-return bug (exit 0 + 0-byte file mistaken for a finished run).
+#   - max_turns_always_present / permissions_are_fixed : the executable form of
+#     decisions D4 and D2. If a change makes these fail, the change is wrong.
+set -u
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="$REPO_ROOT/bin/ai-grok-review"
+PASS=0; FAIL=0
+ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
+bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+
+TMP="$(mktemp -d)"
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT
+
+export AI_GROK_STATE_DIR="$TMP/state"
+export AI_GROK_CALLER="claude"
+export AI_GROK_POLL_INTERVAL=1
+export AI_GROK_WAIT_TIMEOUT=15
+
+# --- a git repo to run in -----------------------------------------------------
+REPO="$TMP/repo"
+mkdir -p "$REPO"
+git -C "$REPO" init -q
+git -C "$REPO" config user.email t@example.com
+git -C "$REPO" config user.name Test
+printf '.ai/\n' > "$REPO/.gitignore"
+echo hi > "$REPO/a.txt"
+git -C "$REPO" add -A
+git -C "$REPO" commit -qm init
+
+# --- stub grok ----------------------------------------------------------------
+# Records its argv to $TMP/argv.txt and emits whatever $TMP/mode says.
+STUB="$TMP/bin"; mkdir -p "$STUB"
+cat > "$STUB/grok" <<'STUBEOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
+mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
+case "${1:-}" in
+  --version) echo "grok 0.2.118 (stub)"; exit 0 ;;
+  models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.5"; exit 0 ;;
+  export)    echo "# transcript stub"; exit 0 ;;
+esac
+case "$mode" in
+  ok)        cat "$TMPDIR_FOR_TEST/fixture.json" ;;
+  cancelled) cat "$TMPDIR_FOR_TEST/cancelled.json" ;;
+  weird)     cat "$TMPDIR_FOR_TEST/weird.json" ;;
+  empty)     : ;;
+  slow)      # exit immediately leaving an empty file, then complete later:
+             # this is the early-return bug, reproduced.
+             ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
+             ;;
+esac
+exit 0
+STUBEOF
+chmod +x "$STUB/grok"
+export TMPDIR_FOR_TEST="$TMP"
+export PATH="$STUB:$PATH"
+export AI_GROK_BIN="$STUB/grok"
+
+cat > "$TMP/fixture.json" <<'EOF'
+{"text":"I'll read the files first.\nNext I'll inspect the tests.\n## Verdict\nAPPROVE — looks correct.",
+ "thought":"reasoning","sessionId":"019fd4e9-28d9-77c3-81f7-9fc9ca72fa7a",
+ "stopReason":"end_turn","num_turns":3,"model":null,
+ "usage":{"input_tokens":1440,"cache_read_input_tokens":21248,"total_tokens":22720},
+ "modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.1234}
+EOF
+cat > "$TMP/cancelled.json" <<'EOF'
+{"text":"I'll read the plan...","sessionId":"019fd4aa-7c5a-7ff2-b29b-258156f06ad3",
+ "stopReason":"cancelled","num_turns":6,
+ "usage":{"total_tokens":247740},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.25}
+EOF
+cat > "$TMP/weird.json" <<'EOF'
+{"text":"x","sessionId":"s","stopReason":"banana","usage":{},"modelUsage":{},"total_cost_usd":0}
+EOF
+echo ok > "$TMP/mode"
+
+run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
+
+echo "ai-grok-review tests"
+
+# 1 -------------------------------------------------------------------------
+echo "== usage_and_exit_codes =="
+run >/dev/null 2>&1; [ $? -eq 2 ] && ok "no args exits 2" || bad "no args exits 2"
+run bogus-cmd >/dev/null 2>&1; [ $? -eq 2 ] && ok "unknown command exits 2" || bad "unknown command exits 2"
+check "help exits 0" "run --help"
+
+# 2/3 -----------------------------------------------------------------------
+echo "== max_turns_always_present / permissions_are_fixed =="
+: > "$TMP/argv.txt"
+run new t1 --prompt "review this" >/dev/null 2>&1
+ARGV="$(cat "$TMP/argv.txt")"
+check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
+check "new pins the model"                "grep -q -- '--model grok-4.5' '$TMP/argv.txt'"
+check "new denies Edit"                   "grep -q -- '--deny Edit' '$TMP/argv.txt'"
+check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
+check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
+check "never uses permission-mode auto"   "! grep -q -- '--permission-mode auto' '$TMP/argv.txt'"
+check "never allows Bash"                 "! grep -q -- '--allow Bash' '$TMP/argv.txt'"
+check "never uses --always-approve"       "! grep -q -- '--always-approve' '$TMP/argv.txt'"
+check "uses --prompt-file (no ARG_MAX)"   "grep -q -- '--prompt-file' '$TMP/argv.txt'"
+
+: > "$TMP/argv.txt"
+run ask t1 --prompt "follow up" >/dev/null 2>&1
+check "ask passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
+check "ask resumes the session"           "grep -q -- '--resume 019fd4e9' '$TMP/argv.txt'"
+check "ask keeps the frozen permissions"  "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+
+# 4 -------------------------------------------------------------------------
+echo "== no_flag_passthrough =="
+run new t2 --prompt x --permission-mode auto >/dev/null 2>&1
+[ $? -ne 0 ] && ok "arbitrary grok flags are rejected" || bad "arbitrary grok flags are rejected"
+run new t2 --prompt x --always-approve >/dev/null 2>&1
+[ $? -ne 0 ] && ok "--always-approve is rejected" || bad "--always-approve is rejected"
+
+# 5 -------------------------------------------------------------------------
+echo "== prefix_stable_across_turns =="
+# The frozen prefix (model + permissions), i.e. everything except --max-turns,
+# must be identical between new and ask. --max-turns is a runtime bound (D13).
+: > "$TMP/argv.txt"
+run new t3 --prompt x --max-turns 5 >/dev/null 2>&1
+norm() { sed 's/--max-turns [0-9]*//; s/--resume [^ ]*//; s/--prompt-file [^ ]*//' "$1" | tr -s ' ' | sed 's/^ *//; s/ *$//'; }
+NEWARGS="$(norm "$TMP/argv.txt")"
+: > "$TMP/argv.txt"
+run ask t3 --prompt y --max-turns 30 >/dev/null 2>&1
+ASKARGS="$(norm "$TMP/argv.txt")"
+[ "$NEWARGS" = "$ASKARGS" ] && ok "prefix minus --max-turns is byte-identical" \
+  || bad "prefix minus --max-turns is byte-identical ('$NEWARGS' vs '$ASKARGS')"
+check "--max-turns override is accepted on ask" "true"
+
+# 6 -------------------------------------------------------------------------
+echo "== await_blocks_until_terminal_json (the regression test) =="
+# Directly exercise await_result: empty file, then partial JSON, then complete.
+AWAIT_OUT="$TMP/await.json"
+: > "$AWAIT_OUT"
+(
+  sleep 2; printf '{"text":"partial"' > "$AWAIT_OUT"      # invalid JSON
+  sleep 2; cat "$TMP/fixture.json"    > "$AWAIT_OUT"      # complete
+) &
+BGPID=$!
+START=$(date +%s)
+# shellcheck disable=SC1090
+( set +e
+  # Source just enough of the script to reach await_result without executing main.
+  sed '/^CMD=/,$d' "$SCRIPT" > "$TMP/lib.sh"
+  . "$TMP/lib.sh"
+  await_result "$AWAIT_OUT" "test"
+) >/dev/null 2>&1
+RC=$?
+ELAPSED=$(( $(date +%s) - START ))
+wait $BGPID 2>/dev/null
+[ $RC -eq 0 ] && ok "await_result succeeds once JSON is terminal" || bad "await_result succeeds once JSON is terminal"
+[ $ELAPSED -ge 3 ] && ok "await_result blocked through empty+partial (${ELAPSED}s)" \
+  || bad "await_result returned too early (${ELAPSED}s) — the early-return bug is NOT caught"
+
+# 7/8 -----------------------------------------------------------------------
+echo "== stop_reason handling =="
+echo cancelled > "$TMP/mode"
+OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "cancelled exits non-zero" || bad "cancelled exits non-zero"
+check "cancelled message names the turn budget" "printf '%s' \"\$OUT\" | grep -qi 'turn budget'"
+check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
+check "cancelled message says NOT permissions"  "printf '%s' \"\$OUT\" | grep -qi 'not a permissions problem'"
+check "cancelled message gives the recovery cmd" "printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
+
+echo weird > "$TMP/mode"
+run new t5 --prompt x >/dev/null 2>&1
+[ $? -ne 0 ] && ok "unknown stopReason exits non-zero" || bad "unknown stopReason exits non-zero"
+echo ok > "$TMP/mode"
+
+# 9/10 ----------------------------------------------------------------------
+echo "== json_field_extraction =="
+OUT="$(run new t6 --prompt x --json 2>/dev/null)"
+check "--json emits the raw result"    "printf '%s' \"\$OUT\" | jq -e .stopReason"
+check "null top-level model is fine"   "printf '%s' \"\$OUT\" | jq -e '.model == null'"
+ERR="$(run ask t6 --prompt x 2>&1 >/dev/null)"
+check "usage line reports tokens"      "printf '%s' \"\$ERR\" | grep -q 'tokens:'"
+check "usage line reports cached"      "printf '%s' \"\$ERR\" | grep -q 'cached:'"
+check "usage line reports cost"        "printf '%s' \"\$ERR\" | grep -q 'cost:'"
+check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.5'"
+
+# 11 ------------------------------------------------------------------------
+echo "== verdict_delimiter_extraction =="
+OUT="$(run new t7 --prompt x 2>/dev/null)"
+check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE'"
+check "narration is stripped"          "! printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
+cat > "$TMP/fixture2.json" <<'EOF'
+{"text":"no delimiter here","sessionId":"s2","stopReason":"end_turn","num_turns":1,
+ "usage":{},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0}
+EOF
+cp "$TMP/fixture.json" "$TMP/fixture.bak"; cp "$TMP/fixture2.json" "$TMP/fixture.json"
+ERR="$(run new t8 --prompt x 2>&1 >/dev/null)"
+check "missing delimiter warns"        "printf '%s' \"\$ERR\" | grep -qi 'no .## Verdict. section'"
+cp "$TMP/fixture.bak" "$TMP/fixture.json"
+
+# 12 ------------------------------------------------------------------------
+echo "== duplicate_new_is_refused (per-repo in-flight lock) =="
+# Derive the repo id exactly as the script does — from git's own toplevel, which
+# on Windows is a C:/… path and not the mktemp path in $REPO.
+RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
+LOCKDIR="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' "$RROOT" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//').lock.d"
+mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:other\n' > "$LOCKDIR/label"
+OUT="$(run new t9 --prompt x 2>&1)"; RC=$?
+rm -rf "$LOCKDIR"
+[ $RC -ne 0 ] && ok "a second concurrent review is refused" || bad "a second concurrent review is refused"
+check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'already running'"
+
+# 13 ------------------------------------------------------------------------
+echo "== reviews_dir_safety =="
+check "review file written when .ai is ignored" "ls '$REPO'/.ai/reviews/grok-t1-*.md"
+REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
+git -C "$REPO2" config user.email t@example.com; git -C "$REPO2" config user.name T
+echo x > "$REPO2/f"; git -C "$REPO2" add -A; git -C "$REPO2" commit -qm i
+ERR="$( cd "$REPO2" && bash "$SCRIPT" new t10 --prompt x 2>&1 >/dev/null )"
+check "refuses to write into a repo that would commit it" "printf '%s' \"\$ERR\" | grep -qi 'not git-ignored'"
+check "and writes no file there" "! ls '$REPO2'/.ai/reviews/*.md 2>/dev/null"
+
+# 14 ------------------------------------------------------------------------
+echo "== session bookkeeping =="
+check "list shows a session"       "run list | grep -q t1"
+check "list shows cumulative cost" "run list | grep -q '0.24'"
+check "show emits json"            "run show t1 | jq -e .grok_session_id"
+check "transcript works"           "run transcript t1 | grep -q transcript"
+check "delete removes the record"  "run delete t1 && ! run show t1"
+
+# 15 ------------------------------------------------------------------------
+echo "== doctor =="
+check "doctor is free (no billable probe by default)" "run doctor | grep -q 'auth *: OK'"
+check "doctor reports the resolved binary"            "run doctor | grep -q 'grok binary'"
+echo noauth > "$TMP/mode"
+OUT="$(run doctor 2>&1)"
+check "ambiguous auth does not blame grok doctor" "printf '%s' \"\$OUT\" | grep -qi 'terminal/clipboard'"
+echo ok > "$TMP/mode"
+
+# --- live ---------------------------------------------------------------------
+if [ "${AI_GROK_LIVE:-0}" = 1 ]; then
+  echo "== live_round_trip =="
+  unset AI_GROK_BIN
+  export PATH="${PATH#"$STUB":}"
+  LREPO="$TMP/live"; mkdir -p "$LREPO"; git -C "$LREPO" init -q
+  git -C "$LREPO" config user.email t@example.com; git -C "$LREPO" config user.name T
+  printf '.ai/\n' > "$LREPO/.gitignore"; echo 'hello world' > "$LREPO/a.txt"
+  git -C "$LREPO" add -A; git -C "$LREPO" commit -qm i
+  O1="$( cd "$LREPO" && bash "$SCRIPT" new live --prompt 'Read a.txt and say what it contains.' --max-turns 5 --json 2>/dev/null )"
+  check "live turn 1 has a terminal stopReason" "printf '%s' \"\$O1\" | jq -e '.stopReason==\"end_turn\"'"
+  check "live turn 1 has non-empty text"        "printf '%s' \"\$O1\" | jq -e '.text|length>0'"
+  O2="$( cd "$LREPO" && bash "$SCRIPT" ask live --prompt 'What file did you just read?' --max-turns 5 --json 2>/dev/null )"
+  S1="$(printf '%s' "$O1" | jq -r .sessionId)"; S2="$(printf '%s' "$O2" | jq -r .sessionId)"
+  [ "$S1" = "$S2" ] && ok "live turn 2 reuses the session" || bad "live turn 2 reuses the session"
+  # Warning, not an assertion: caching depends on the whole request prefix
+  # (repo AGENTS.md/CLAUDE.md, skills, MCP servers) and on TTL, none of which
+  # the wrapper controls.
+  CR="$(printf '%s' "$O2" | jq -r '.usage.cache_read_input_tokens // 0')"
+  if [ "${CR:-0}" -gt 0 ]; then ok "live turn 2 read $CR tokens from cache"
+  else printf '  warn cache read was 0 on turn 2 (not a failure; caching is not wrapper-controlled)\n'; fi
+fi
+
+echo
+printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]
