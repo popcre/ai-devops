@@ -196,13 +196,31 @@ Existing material, as of 2026-08-06:
 - Linked from `HANDOFF.md` under *"Active workstream — Characters and style
   guides → canonical"*.
 
-> ⚠️ **Open lead, unverified — check it before designing anything.** The OPA
-> extract (10,262 rows / 9,591 names) is within ~1.4% of the legacy
-> `dflow.properties_and_characters` (10,122) and `public.characters` (9,622).
-> **`dflow.properties_and_characters` may be a stale import of this same OPA
-> list.** If so this is a re-keyed *refresh* of data already held, not a new
-> dataset, and `characterID` may be the missing join key. Nobody has tested it.
-> If it is disproved, say so and delete the claim from both documents.
+### ❌ Do not repeat this mistake
+
+The OPA extract (10,262 rows / 9,591 names) sits within ~1% of
+`dflow.properties_and_characters` (10,122) and `public.characters` (9,622). **That
+is a coincidence. The three count different things.** A session raised and
+disproved this on 2026-08-06.
+
+| Table | What one row IS |
+| --- | --- |
+| **OPA extract** | a distinct **(property, character) pair** |
+| `dflow.properties_and_characters` | `type='PROPERTY'` → a **style guide**; `type='CHARACTER'` → a character **appearance**, one per style guide |
+| `public.characters` | a character **appearance**, carrying `property_id` |
+| `core.character` | *(0 rows — never populated)* |
+
+`AGENTS.md` §6.1 warns that `dflow.properties_and_characters` is misleadingly
+named and that two AI sessions have already corrupted their understanding by
+reading its column names literally. **Read that section before reasoning about
+these tables at all.** Two axes: ownership is linear (licensor → property →
+character); style is many-to-many (a style guide holds many characters, a
+character appears in many style guides). Chaining them is the classic bug.
+
+**What genuinely argues for landing the OPA data:** `core.character` is empty and
+wants distinct characters parented to a property. Both legacy tables hold
+*appearances*. OPA holds *identities scoped to a property* — the missing shape.
+Still untested: whether `characterID` is stable enough to be that identity key.
 
 ## Related skills
 
