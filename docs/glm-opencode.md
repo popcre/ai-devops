@@ -177,7 +177,7 @@ git apply --check "$patch" && git apply "$patch"
 | Symptom | Cause | Fix |
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
-| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns HTTP 500 with a generic `UnknownError` in 1.18.12. | Run `ai-glm abort <name>`. For outside evidence, put a safe copy inside the repository or provide a small safe excerpt, then retry. Never approve everything or copy arbitrary files automatically. |
+| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns a successful permission envelope whose action is `external_directory` and whose `resources[]` names the outside path. | Run `ai-glm abort <name>`. For outside evidence, put a safe copy inside the repository or provide a small safe excerpt, then retry. Never approve everything or copy arbitrary files automatically. |
 | `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
@@ -248,10 +248,12 @@ server; users invoke the installed `ai-glm` command from PowerShell or Codex/Cla
    completion is polled.
 3. Permission failures are not one stable API shape in 1.18.12. A `glob`/`grep` wedge
    has returned HTTP 400 `InvalidRequestError`; a measured outside-directory `read`
-   returned HTTP 500 `UnknownError` with only a server reference. `ai-glm` preserves the
-   status, emits a redacted diagnostic capped at 2 KiB, and fails after repeated errors
-   while a tool is observably still running. A lone generic 500 is not enough evidence:
-   this endpoint also returns it when no permission exists.
+   returned HTTP 200 with action `external_directory` and an outside `resources[]`
+   pattern. `ai-glm` fails that action closed. The endpoint has also transiently returned
+   a generic HTTP 500 when no permission existed or while a normal tool was running, so
+   a generic 500 is not sufficient evidence. In that fallback state the client may only
+   act on the measured running read `state.input.filePath` boundary; it must never infer a
+   deadlock from elapsed polls. Diagnostics are redacted and capped at 2 KiB.
 4. The Z.ai key is visible in `/proc/<pid>/environ` to the same user and to root. That is
    inherent to putting it in the process environment and is stated here rather than
    glossed over.
@@ -294,11 +296,13 @@ first and then re-measure before touching it.
    retry or wait it out.
    **Related 500 behavior:** Every nonempty successful permission response is classified;
    unknown never means empty. The
-   2026-08-05 outside-directory reproduction returned HTTP 500 `UnknownError`, not the
-   earlier 400 shape. Preserve HTTP status, redact response fields before capping
-   diagnostics at 2 KiB, and fail closed on malformed, unknown, external, or ineffective
-   requests. Only `read`, `list`, `glob`, and `grep` with a validated in-session path may
-   be approved. Never blanket-approve either agent mode.
+   2026-08-05 outside-directory reproductions first encountered transient HTTP 500
+   `UnknownError`, then captured the definitive HTTP 200 action `external_directory`
+   with `resources:["C:/tmp/*"]`. Preserve HTTP status, redact response fields before
+   capping diagnostics at 2 KiB, and fail closed on malformed, unknown, external, or
+   ineffective requests. Only `read`, `list`, `glob`, and `grep` with every V2 `resources[]` entry
+   validated inside the session directory may be approved. Never blanket-approve either
+   agent mode and never turn repeated generic 500s into a tool-duration watchdog.
 6. **Keep `.claude/` and `claude_chats/` gitignored.** They reached 1.1 GB and 664 MB.
    AI worktrees live inside `.claude/`, so a `glob` from inside one walked its own parent
    and hung the session forever. Ignoring them is what made `glob`/`grep` usable.

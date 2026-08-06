@@ -203,8 +203,8 @@ permission_diagnostic() { # STATUS MODE CATEGORY BODY
     "$1" "$2" "$3" "$(sanitize_permission_body "$4")"
 }
 
-classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action path
-  local mode="$1" root="$2" status="$3" body="$4" shape count i item id action path category
+classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action resources
+  local mode="$1" root="$2" status="$3" body="$4" shape count i item id action resources resource category
   [ "$mode" = review ] || [ "$mode" = implement ] || { printf 'unknown mode' >&2; return 1; }
   if [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
     if printf '%s' "$body" | jq -e '._tag? == "InvalidRequestError"' >/dev/null 2>&1; then
@@ -222,35 +222,60 @@ classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action p
     item="$(printf '%s' "$body" | jq -c --argjson i "$i" '.data[$i]')"
     id="$(printf '%s' "$item" | jq -r '.id // empty')"
     action="$(printf '%s' "$item" | jq -r '.action // empty' | tr '[:upper:]' '[:lower:]')"
-    path="$(printf '%s' "$item" | jq -r '.path // .metadata.path // empty')"
+    resources="$(printf '%s' "$item" | jq -r '
+      if (.resources|type)=="array" and (.resources|length)>0
+      then .resources[] else empty end')"
     [ -n "$id" ] || { printf 'permission entry is missing an id' >&2; return 1; }
     case "$action" in read|list|glob|grep) ;; *) printf 'unknown permission action: %s' "${action:-missing}" >&2; return 1 ;; esac
-    [ -n "$path" ] || { printf 'permission entry is missing a path' >&2; return 1; }
-    category="$(path_category "$path" "$root")"
-    [ "$category" = inside ] || { printf 'permission path is %s' "$category" >&2; return 1; }
-    printf '%s\t%s\t%s\n' "$id" "$action" "$path"
+    [ -n "$resources" ] || { printf 'permission entry is missing resources' >&2; return 1; }
+    while IFS= read -r resource; do
+      category="$(path_category "$resource" "$root")"
+      [ "$category" = inside ] || { printf 'permission resource is %s' "$category" >&2; return 1; }
+    done <<< "$resources"
+    printf '%s\t%s\t%s\n' "$id" "$action" "$(printf '%s' "$resources" | jq -Rs 'split("\n")|map(select(length>0))|join(",")')"
   done
 }
 
-APPROVED_PERMISSION_IDS=""; PERMISSION_ERROR_POLLS=0
+running_read_boundary() { # ASSISTANT_JSON SESSION_DIR -> inside|outside|invalid|missing
+  local msg="$1" root="$2" paths path category found=0
+  # OpenCode 1.18.12 ToolPart.state.input is intentionally open-ended. The measured
+  # built-in read tool uses filePath. Do not guess aliases: an unmeasured shape is
+  # "missing" and falls back to the strict overall turn timeout.
+  paths="$(printf '%s' "$msg" | jq -r '
+    .content[]? |
+    select(.type=="tool" and .state.status=="running" and ((.name // .tool)=="read")) |
+    .state.input.filePath // empty' 2>/dev/null || true)"
+  [ -n "$paths" ] || { printf missing; return; }
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    found=1; category="$(path_category "$path" "$root")"
+    case "$category" in outside|invalid) printf '%s' "$category"; return ;; esac
+  done <<< "$paths"
+  [ "$found" -eq 1 ] && printf inside || printf missing
+}
+
+APPROVED_PERMISSION_IDS=""
 handle_permissions() { # SID NAME MODE SESSION_DIR
-  local sid="$1" name="$2" mode="$3" root="$4" rows id action path prior category err msg stuck
+  local sid="$1" name="$2" mode="$3" root="$4" rows id action resources prior category err msg stuck boundary
   permission_http GET "/api/session/$sid/permission"
   # OpenCode 1.18.12 emits the same metadata-free HTTP 500 UnknownError while a normal
-  # read is briefly running and while an outside-directory read is permanently stuck.
-  # One response cannot be classified. Allow two consecutive polls for a normal read
-  # to clear, then fail on the third observable error instead of waiting 30 minutes.
+  # read is running and while an outside-directory read is stuck. The status is not a
+  # permission signal by itself. Use the measured running read input deterministically;
+  # never convert elapsed polls into a generic tool-duration watchdog.
   if [ "$HTTP_STATUS" = 500 ] && printf '%s' "$HTTP_BODY" | jq -e \
        '.name? == "UnknownError" and (.data.message? | type == "string")' >/dev/null 2>&1; then
     msg="$(last_assistant "$sid" 2>/dev/null || printf '{}')"
     stuck="$(running_tools "$msg" 2>/dev/null || true)"
-    # The endpoint also returns this 500 when no permission exists. It is evidence of
-    # a permission deadlock only while a tool is observably waiting.
-    [ -n "$stuck" ] || { PERMISSION_ERROR_POLLS=0; return 0; }
-    PERMISSION_ERROR_POLLS=$((PERMISSION_ERROR_POLLS + 1))
-    [ "$PERMISSION_ERROR_POLLS" -le 2 ] && return 0
-  else
-    PERMISSION_ERROR_POLLS=0
+    boundary="$(running_read_boundary "$msg" "$root")"
+    case "$boundary" in
+      outside|invalid)
+        die "GLM permission failed: running read path is $boundary${stuck:+ (tool: $stuck)}.
+       $(permission_diagnostic "$HTTP_STATUS" "$mode" "$boundary" "$HTTP_BODY")
+       Run: ai-glm abort $name. For an outside-directory file, place a safe copy under
+       the session repository or provide a small safe excerpt, then retry."
+        ;;
+      *) return 0 ;;
+    esac
   fi
   if ! rows="$(classify_permissions "$mode" "$root" "$HTTP_STATUS" "$HTTP_BODY" 2>"${TMPDIR:-/tmp}/ai-glm-perm-err-$$")"; then
     err="$(cat "${TMPDIR:-/tmp}/ai-glm-perm-err-$$" 2>/dev/null)"; rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
@@ -263,7 +288,7 @@ handle_permissions() { # SID NAME MODE SESSION_DIR
   fi
   rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
   [ -n "$rows" ] || { APPROVED_PERMISSION_IDS=""; return 0; }
-  while IFS=$'\t' read -r id action path; do
+  while IFS=$'\t' read -r id action resources; do
     prior="$(printf '%s\n' "$APPROVED_PERMISSION_IDS" | grep -cxF "$id" || true)"
     if [ "$prior" -ge 2 ]; then
       die "GLM permission approval did not clear after two polls (action: $action, path: inside).
@@ -296,7 +321,6 @@ send_prompt() { # send_prompt SID PROMPT_FILE
 await_turn() { # await_turn SID NAME MODE SESSION_DIR -> assistant JSON
   local sid="$1" name="$2" mode="$3" root="$4" waited=0 idle=0 msg finish stuck
   APPROVED_PERMISSION_IDS=""
-  PERMISSION_ERROR_POLLS=0
   sleep 6
   while [ "$waited" -lt "$TIMEOUT" ]; do
     handle_permissions "$sid" "$name" "$mode" "$root"

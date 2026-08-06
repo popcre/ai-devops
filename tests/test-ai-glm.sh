@@ -188,13 +188,15 @@ IN_FIX="$ROOT_FIX/sub/file.txt"; OUT_FIX="$(cd "$TMP" && pwd)/outside.txt"
 check "empty data envelope is valid"       "test -z \"\$(run_classifier review '$ROOT_FIX' 200 '{\"data\":[]}')\""
 check "unmeasured bare array fails closed"  "! run_classifier review '$ROOT_FIX' 200 '[]' >/dev/null 2>&1"
 for action in read list glob grep; do
-  check "in-directory $action is approved" "run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"p-$action\",\"action\":\"$action\",\"path\":\"$IN_FIX\"}]}' | grep -q \"p-$action\""
+  check "in-directory $action is approved" "run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"p-$action\",\"action\":\"$action\",\"resources\":[\"$IN_FIX\"]}]}' | grep -q \"p-$action\""
 done
-check "implementation root is classified" "run_classifier implement '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pi\",\"action\":\"read\",\"metadata\":{\"path\":\"sub/file.txt\"}}]}' | grep -q pi"
-check "outside-directory path fails"       "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"po\",\"action\":\"read\",\"path\":\"$OUT_FIX\"}]}' >/dev/null 2>&1"
-check "unknown action fails"               "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"px\",\"action\":\"bash\",\"path\":\"$IN_FIX\"}]}' >/dev/null 2>&1"
-check "missing id fails"                   "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"action\":\"read\",\"path\":\"$IN_FIX\"}]}' >/dev/null 2>&1"
-check "missing path fails"                 "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pm\",\"action\":\"read\"}]}' >/dev/null 2>&1"
+check "implementation root is classified" "run_classifier implement '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pi\",\"action\":\"read\",\"resources\":[\"sub/file.txt\"]}]}' | grep -q pi"
+check "outside-directory resource fails"   "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"po\",\"action\":\"read\",\"resources\":[\"$OUT_FIX\"]}]}' >/dev/null 2>&1"
+check "mixed resource set fails closed"    "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pmix\",\"action\":\"read\",\"resources\":[\"$IN_FIX\",\"$OUT_FIX\"]}]}' >/dev/null 2>&1"
+check "external-directory action fails"    "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pext\",\"action\":\"external_directory\",\"resources\":[\"$OUT_FIX/*\"]}]}' >/dev/null 2>&1"
+check "unknown action fails"               "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"px\",\"action\":\"bash\",\"resources\":[\"$IN_FIX\"]}]}' >/dev/null 2>&1"
+check "missing id fails"                   "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"action\":\"read\",\"resources\":[\"$IN_FIX\"]}]}' >/dev/null 2>&1"
+check "missing resources fails"            "! run_classifier review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"pm\",\"action\":\"read\"}]}' >/dev/null 2>&1"
 check "malformed JSON fails"               "! run_classifier review '$ROOT_FIX' 200 '{oops' >/dev/null 2>&1"
 check "unsupported envelope fails"         "! run_classifier review '$ROOT_FIX' 200 '{\"items\":[]}' >/dev/null 2>&1"
 check "InvalidRequestError fails"          "! run_classifier review '$ROOT_FIX' 400 '{\"_tag\":\"InvalidRequestError\"}' >/dev/null 2>&1"
@@ -208,8 +210,14 @@ LONG_FIX="$(printf 'x%.0s' {1..3000})"
 LONG_SAN="$(AI_GLM_SOURCE="$AI_GLM" BODY_FIX="$LONG_FIX" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c 'source "$AI_GLM_SOURCE"; sanitize_permission_body "$BODY_FIX"')"
 check "diagnostic is capped after redaction" "test \"${#LONG_SAN}\" -le 2060"
 check "diagnostic marks truncation"          "printf '%s' '$LONG_SAN' | grep -q '\[truncated\]'"
-check "failed approval fails closed"         "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ if [ \"\$1\" = GET ]; then HTTP_STATUS=200; HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"path\\\":\\\"\$IN_FIX\\\"}]}\"; else HTTP_STATUS=500; HTTP_BODY=\"{\\\"error\\\":\\\"reply failed\\\"}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
-check "uncleared approval fails by third poll" "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ HTTP_STATUS=200; if [ \"\$1\" = GET ]; then HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"path\\\":\\\"\$IN_FIX\\\"}]}\"; else HTTP_BODY=\"{}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
+check "failed approval fails closed"         "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ if [ \"\$1\" = GET ]; then HTTP_STATUS=200; HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"resources\\\":[\\\"\$IN_FIX\\\"]}]}\"; else HTTP_STATUS=500; HTTP_BODY=\"{\\\"error\\\":\\\"reply failed\\\"}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
+check "uncleared approval fails by third poll" "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ HTTP_STATUS=200; if [ \"\$1\" = GET ]; then HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"resources\\\":[\\\"\$IN_FIX\\\"]}]}\"; else HTTP_BODY=\"{}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
+
+RUNNING_OUTSIDE="{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"filePath\":\"$OUT_FIX\"}}}]}"
+RUNNING_INSIDE="{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"filePath\":\"$IN_FIX\"}}}]}"
+check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_OUTSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = outside'"
+check "running inside read remains legitimate" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_INSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = inside'"
+check "unmeasured running input is not guessed" "AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary '\''{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"path\":\"elsewhere\"}}}]}'\'' \"\$ROOT_FIX\")\" = missing'"
 
 # ---------------------------------------------------------------------------
 # Live probes. Need a healthy server and a working Z.ai key.
@@ -228,7 +236,8 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   git add -A && git -c user.email=t@example.com -c user.name=t commit -qm init
 
   "$AI_GLM" new live-probe --prompt "Read marker.txt and reply with ONLY the value of MARKER_VALUE." >"$TMP/r1" 2>&1
-  check "review turn succeeded"             "test \$? -eq 0"
+  review_rc=$?
+  check "review turn succeeded"             "test $review_rc -eq 0"
   check "GLM actually read the file"        "grep -q 'quartz-badger-4417' '$TMP/r1'"
   check "review left the tree clean"        "test -z \"\$(git -C '$LIVE' status --porcelain | grep -v '^?? [.]ai/')\""
   check "a report was written"              "ls '$LIVE'/.ai/reviews/glm-live-probe-*.md >/dev/null 2>&1"

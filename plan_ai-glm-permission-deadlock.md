@@ -5,12 +5,12 @@
 | Step | State | Last updated | Evidence / next action |
 |---|---|---|---|
 | 1. Establish testable permission-response boundaries | ✅ done | 2026-08-05 | `permission_http` retains transport status/body; pure helpers are sourceable under guarded `main`. |
-| 2. Implement fail-closed permission classification | ✅ done | 2026-08-05 | Only validated in-session read-like requests are approved; every other observable state fails safely. |
+| 2. Implement fail-closed permission classification | ✅ done | 2026-08-05 | Only validated in-session V2 `resources[]` for read-like requests are approved; the generic 500 path uses measured running-read `filePath`, not elapsed polls. |
 | 3. Integrate mode and session-directory context into turn polling | ✅ done | 2026-08-05 | Both review call sites pass repository root; implementation passes its remote-less clone. |
-| 4. Add offline regression coverage | ✅ done | 2026-08-05 | 118 offline checks pass in Windows Git Bash, including fixtures, replies, redaction, and repeated IDs. |
-| 5. Capture the real OpenCode 1.18.12 outside-directory schema | ✅ done | 2026-08-05 | Live reproduction captured HTTP 500 `UnknownError`, generic message + server ref only; marker content absent. The endpoint later returned the same 500 with no permission, so the client requires a repeatedly running tool before acting on this shape. |
+| 4. Add offline regression coverage | ✅ done | 2026-08-05 | 123 offline checks cover V2 resources, `external_directory`, replies, redaction, repeated IDs, and deterministic running-read boundaries. |
+| 5. Capture the real OpenCode 1.18.12 outside-directory schema | ✅ done | 2026-08-05 | Final bounded live reproduction failed in ~12s with HTTP 200 action `external_directory`, `resources:["C:/tmp/*"]`, safe guidance, and no marker leak. Earlier transient generic 500s were proven non-specific and are never used as a timer. |
 | 6. Finalize messages, docs, and skill guidance | ✅ done | 2026-08-05 | Troubleshooting, limitations, constraint, skill wedge guidance, and optional live regression updated. |
-| 7. Run complete verification and land the change | ✅ done | 2026-08-05 | Syntax, 118 offline checks, doctor, diff, and secret scan pass. Normal/two-turn live gates were bounded and stopped: current OpenCode returned generic HTTP 500 even for `Reply with only hello`; no CI/deploy exists. Committed/pushed with this record. |
+| 7. Run complete verification and land the change | ✅ done | 2026-08-05 | Syntax, 123 offline checks, doctor, diff, secret scan, bounded outside-read, and normal two-turn read/memory probes pass. No CI/deploy exists. Final follow-up commit/push recorded in repository history. |
 
 Fresh session start: read this entire file, then `AGENTS.md` and section 5 of
 `docs/glm-opencode.md`; begin at the first open STATUS row. Update this table as work
@@ -134,11 +134,12 @@ Implementation is complete in the working tree. `bin/ai-glm` now preserves HTTP 
 classifies every permission response, bounds and redacts diagnostics, detects ineffective
 approvals, and receives explicit mode/directory context. Offline fixture tests and an
 optional live outside-directory regression are present. The measured OpenCode 1.18.12
-outside-read response is HTTP 500 with `{"name":"UnknownError","data":{"message":
-"Unexpected server error. Check server logs for details.","ref":"err_<opaque>"}}`; it
-contains no request metadata that can safely prove a path category. The client therefore
-reports the measured HTTP failure and safe correction without falsely claiming the
-server identified an outside path. Commit/push evidence is recorded in STATUS step 7.
+outside-read response is HTTP 200 with action `external_directory` and a V2
+`resources:["C:/tmp/*"]` pattern. The client fails that unallowlisted action immediately.
+Earlier transient HTTP 500 `UnknownError` responses were also seen with no permission and
+ordinary tools, so they are explicitly not treated as a time-based deadlock signal. The
+running read's measured `state.input.filePath` is the only deterministic fallback boundary.
+Commit/push evidence is recorded in STATUS step 7.
 
 ## 6. Key findings and root cause
 
