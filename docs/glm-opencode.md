@@ -260,6 +260,10 @@ server; users invoke the installed `ai-glm` command from PowerShell or Codex/Cla
 
 ## 5. Hard-won constraints - do not "fix" these
 
+> Active implementation plan: [`../plan_ai-glm-permission-deadlock.md`](../plan_ai-glm-permission-deadlock.md).
+> Read its STATUS table before changing permission polling; do not re-derive or re-plan
+> work that it records as complete.
+
 Every item here was established by something breaking. Each says what to keep and what
 happens if you change it. If you are about to simplify one of these, read the reason
 first and then re-measure before touching it.
