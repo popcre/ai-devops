@@ -118,7 +118,7 @@ section with the date instead of deleting it. Details live in the
 A coordinator that starts by trusting a document starts wrong. **Every startup is
 a recovery startup** — always assume the previous coordinator may have died
 mid-handover, because one did (2026-08-05). There is no separate emergency mode.
-Run all seven steps, **in this order**, before the first brief goes out:
+Run all eight steps, **in this order**, before the first brief goes out:
 
 0. **Claim the coordinator marker — before anything else.** One coordinator, on
    one machine, at a time. The marker is a GitHub issue in `u2giants/shared-db`
@@ -198,6 +198,20 @@ Run all seven steps, **in this order**, before the first brief goes out:
    sitting on it, and the coordinator makes no database calls. Dispatch a
    read-only **preview observer** and record `UNKNOWN` in the register until its
    report lands. **Dispatch no preview writer while it reads `UNKNOWN`.**
+7. **Release stale object claims.** `gh issue list --label db-claim --state open`.
+   Every open claim blocks its objects for every future dispatch, so a claim left
+   behind by a dead agent silently freezes part of the schema. For each one,
+   check whether its work actually landed:
+   - **Its PR merged** → close the claim, noting the PR.
+   - **The agent is gone and nothing merged** → close it and put the work back in
+     the queue. Do **not** leave it open "just in case"; an open claim is a lock,
+     not a note.
+   - **Genuinely still live** → leave it, and name it in the register.
+
+   This is the counterpart to the dispatch gate below. The gate is only as good
+   as the claim list is honest, and the failure mode is asymmetric: a claim
+   wrongly left open costs a delay, while one wrongly closed costs a collision.
+   When you cannot tell, treat it as live and say so.
 
 ### Delegate the big reads
 
@@ -401,13 +415,62 @@ Never write a credential value into a file, doc, commit, report, or chat.
 
 ## Dispatching a sub-agent
 
-Every sub-agent gets:
+### STOP — run the collision check BEFORE you hand out the work
+
+**This is a gate, not advice. Run it every time, before dispatching anything
+that writes to the database.**
+
+```bash
+node scripts/check-dispatch-collision.mjs \
+  --task "<what the agent will do>" \
+  --objects "<every object it will WRITE, comma-separated>" \
+  --allocate-version
+```
+
+| Exit | Meaning | What you do |
+| --- | --- | --- |
+| `0` | Nothing in flight touches these objects | File the claim it prints, **then** dispatch |
+| `1` | Collision | **Do not dispatch.** Wait for the other work to merge, fold this into it, or narrow the task |
+| `2` | Could not determine | **Do not dispatch as a write task.** Fix the cause, or dispatch READ-ONLY |
+
+Then, and only then, file the claim — the command is printed for you. **The
+claim is what makes the NEXT dispatch safe.** Skipping it does not fail
+anything today; it just quietly restores the old behaviour for whoever
+dispatches next.
+
+**If the task cannot declare the objects it will write, dispatch it READ-ONLY.**
+"Rewrite the promotion function" is declarable. "Investigate why the sync is
+slow" is not. A read-only task cannot collide, so this is a routing decision,
+not a gap. Never guess at an object list to get past the gate — a wrong
+declaration is worse than none, because it reads as safety.
+
+**Close the claim** when the agent's PR merges or the work is abandoned. An
+open claim blocks that object for everyone else.
+
+**Why this exists, and why your context window is not a substitute.** On
+2026-07-31 four independent sessions each authored `create or replace function
+plm.promote_coldlion_source_owned`. `create or replace` is last-writer-wins, so
+merging any two would have silently erased the other. At the moment each was
+dispatched **none of them had a pull request**, so the merge-time cross-PR guard
+had nothing to compare — and three of those four sessions were wasted no matter
+which guard caught it afterwards. A coordinator reasoning over task summaries
+does not reliably notice that two differently-worded tasks touch one function;
+comparing exact object names across everything in flight is string matching, and
+a script does it the same way every time, including on the days there is no
+coordinator at all.
+
+Every sub-agent then gets:
 
 1. **Its own git worktree** under `.claude/worktrees/` — never the shared main
    checkout, which other sessions churn between turns.
-2. **An explicit anti-collision brief** naming the other live agents and the
-   files/branches they own.
-3. **The standard hard-limits block.**
+2. **The migration version you allocated above**, stated in the brief. Do **not**
+   let the agent choose its own from `now()` — two agents dispatched in the same
+   minute choose the same number, and a duplicate version means one migration is
+   **silently skipped** (`AGENTS.md` rule 5; this has happened twice).
+3. **An explicit anti-collision brief** naming the other live agents and the
+   files/branches they own. This is the human-readable companion to the gate
+   above, not a replacement for it.
+4. **The standard hard-limits block.**
 
 Use `references/sub-agent-brief-template.md` verbatim as the starting point.
 
