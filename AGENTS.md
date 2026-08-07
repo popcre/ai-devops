@@ -47,6 +47,7 @@ Then load additional docs only when relevant:
 |---|---|---|
 | Quick repo orientation | `README.md`, `AGENTS.md` | Deep docs under `docs/` unless task requires them |
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
+| Change the Markdown reachability gate, exclusions, or reusable workflow | `AGENTS.md`, [`docs/doc-reachability.md`](docs/doc-reachability.md), `bin/ai-doc-reachability`, `.doc-reachability.json`, `tests/test-ai-doc-reachability.py`, `.github/workflows/docs-reachability.yml` | Unrelated model and machine-setup docs |
 | Add or change configuration, env vars, or model commands | `AGENTS.md`, `docs/configuration.md`, `docs/model-setup.md` (model commands) | Unrelated architecture docs |
 | Understand where machine config lives (skills, SSH, MCP, gcloud, memory, secrets) | `AGENTS.md`, `docs/config-inventory.md` | Unrelated architecture docs |
 | **Codex "works" but `codex exec` changes nothing / sandbox helper not found / wiring the `codex-cli` MCP** | `AGENTS.md` (→ Critical incidents 2026-07-16 + Intentional quirks), `docs/config-inventory.md` (→ "Codex: PATH + MCP"), `templates/system/machine-atlas.md` (→ junction trap), `bin/setup-machine.ps1` (Windows), `bin/setup-secrets.sh` (Ubuntu) | Model/prompt docs |
@@ -113,7 +114,7 @@ non-code area is `transcripts/` - a PRIVATE submodule holding session transcript
 
 | Path | What it is | Category |
 |---|---|---|
-| `bin/` | The five CLI tools (Bash) | project-owned code |
+| `bin/` | CLI tools and repository checks (Bash, PowerShell, Python) | project-owned code |
 | `install.sh`, `update.sh`, `uninstall.sh` | Lifecycle scripts (Bash) | project-owned scripts |
 | `config/*.env.example` | Seed templates copied to `/etc/ai-devops/` on install | project-owned config templates |
 | `templates/prompts/` | The seven staged prompt templates (01–07) | project-owned templates |
@@ -202,7 +203,7 @@ names.
 | Toolkit home | `/worksp/ai-devops` | fixed convention | **Never** `/opt/ai-devops`. Referenced by all scripts/docs |
 | Machine config dir | `/etc/ai-devops/` | `install.sh`, `server.env` | Holds real `models.env` + `server.env` (not in repo) |
 | Log dir | `/var/log/ai-devops/` | `install.sh`, `server.env` | Created on install; currently unused by scripts |
-| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`, `ai-kimi`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
+| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`, `ai-kimi`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory`, `ai-doc-reachability` |
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |

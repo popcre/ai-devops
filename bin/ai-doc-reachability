@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Block new or moved Markdown files that are unreachable from living root docs."""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import os
+import posixpath
+import re
+import subprocess
+import sys
+from collections import defaultdict, deque
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+
+CONFIG_NAME = ".doc-reachability.json"
+MARKDOWN_SUFFIXES = (".md", ".mdx")
+
+
+class CheckError(RuntimeError):
+    pass
+
+
+def git(repo: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode:
+        detail = proc.stderr.strip() or proc.stdout.strip()
+        raise CheckError(f"git {' '.join(args)} failed: {detail}")
+    return proc.stdout
+
+
+def normalize(path: str) -> str:
+    value = posixpath.normpath(path.replace("\\", "/"))
+    return "" if value == "." else value.removeprefix("./")
+
+
+def is_markdown(path: str) -> bool:
+    return path.lower().endswith(MARKDOWN_SUFFIXES)
+
+
+def load_config(repo: Path, config_arg: str) -> dict:
+    path = Path(config_arg)
+    if not path.is_absolute():
+        path = repo / path
+    if not path.is_file():
+        raise CheckError(
+            f"Committed config not found: {path}. Add {CONFIG_NAME} before enabling the gate."
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CheckError(f"Cannot read config {path}: {exc}") from exc
+    roots = data.get("roots")
+    excludes = data.get("exclude")
+    if not isinstance(roots, list) or not roots or not all(isinstance(x, str) for x in roots):
+        raise CheckError("Config 'roots' must be a non-empty list of paths")
+    if not isinstance(excludes, list) or not all(isinstance(x, str) for x in excludes):
+        raise CheckError("Config 'exclude' must be a list of glob patterns")
+    preferred = data.get("preferred_root", roots[0])
+    if not isinstance(preferred, str) or preferred not in roots:
+        raise CheckError("Config 'preferred_root' must name one of the configured roots")
+    return {
+        "roots": [normalize(x) for x in roots],
+        "exclude": [normalize(x) for x in excludes],
+        "preferred_root": normalize(preferred),
+    }
+
+
+def excluded(path: str, patterns: list[str]) -> bool:
+    path = normalize(path)
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+
+
+def tracked_markdown(repo: Path, patterns: list[str]) -> set[str]:
+    raw = git(repo, "ls-files", "-z")
+    files = {normalize(x) for x in raw.split("\0") if x and is_markdown(x)}
+    return {x for x in files if not excluded(x, patterns)}
+
+
+def strip_code(text: str) -> str:
+    """Remove fenced and inline code without changing line structure."""
+    kept: list[str] = []
+    fence_char = ""
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        match = re.match(r"^[ ]{0,3}(`{3,}|~{3,})", line)
+        if fence_char:
+            if match and match.group(1)[0] == fence_char and len(match.group(1)) >= fence_len:
+                fence_char = ""
+                fence_len = 0
+            kept.append("\n" if line.endswith("\n") else "")
+            continue
+        if match:
+            fence_char = match.group(1)[0]
+            fence_len = len(match.group(1))
+            kept.append("\n" if line.endswith("\n") else "")
+            continue
+        # Inline code is not a Markdown link, including multi-backtick spans on one line.
+        line = re.sub(r"(`+)(.+?)\1", "", line)
+        kept.append(line)
+    return "".join(kept)
+
+
+INLINE_LINK = re.compile(
+    r"(?<!!)\[[^\]\n]+\]\(\s*(?:<([^>\n]+)>|([^\s)]+))"
+    r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"
+)
+REFERENCE_DEF = re.compile(
+    r"^[ ]{0,3}\[([^\]\n]+)\]:\s*(?:<([^>\n]+)>|(\S+))",
+    re.MULTILINE,
+)
+REFERENCE_USE = re.compile(r"(?<!!)\[([^\]\n]+)\]\[([^\]\n]*)\]")
+
+
+def markdown_targets(text: str) -> list[str]:
+    text = strip_code(text)
+    targets = [a or b for a, b in INLINE_LINK.findall(text)]
+    definitions = {
+        key.strip().casefold(): (angled or plain)
+        for key, angled, plain in REFERENCE_DEF.findall(text)
+    }
+    for label, key in REFERENCE_USE.findall(text):
+        target = definitions.get((key or label).strip().casefold())
+        if target:
+            targets.append(target)
+    return targets
+
+
+def resolve_target(source: str, target: str, files: set[str]) -> str | None:
+    target = target.strip()
+    if not target or target.startswith("#") or target.startswith("/"):
+        return None
+    split = urlsplit(target)
+    if split.scheme or split.netloc:
+        return None
+    decoded = unquote(split.path)
+    if not decoded:
+        return None
+    joined = normalize(posixpath.join(posixpath.dirname(source), decoded))
+    if joined == ".." or joined.startswith("../"):
+        return None
+    candidates = [joined]
+    if not joined.lower().endswith(MARKDOWN_SUFFIXES):
+        candidates.extend([f"{joined}.md", f"{joined}.mdx"])
+    candidates.extend(
+        [
+            posixpath.join(joined, "README.md"),
+            posixpath.join(joined, "README.mdx"),
+            posixpath.join(joined, "index.md"),
+            posixpath.join(joined, "index.mdx"),
+        ]
+    )
+    return next((candidate for candidate in candidates if candidate in files), None)
+
+
+def build_graph(repo: Path, files: set[str]) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    graph: dict[str, set[str]] = {path: set() for path in files}
+    inbound: dict[str, set[str]] = defaultdict(set)
+    for source in sorted(files):
+        try:
+            text = (repo / Path(source)).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise CheckError(f"Cannot read tracked Markdown file {source}: {exc}") from exc
+        for raw_target in markdown_targets(text):
+            target = resolve_target(source, raw_target, files)
+            if target:
+                graph[source].add(target)
+                inbound[target].add(source)
+    return graph, inbound
+
+
+def reachable_from_roots(graph: dict[str, set[str]], roots: list[str]) -> tuple[set[str], list[str]]:
+    existing = [root for root in roots if root in graph]
+    if not existing:
+        raise CheckError(
+            "None of the configured root documents exists. Expected one of: "
+            + ", ".join(roots)
+        )
+    seen = set(existing)
+    queue = deque(existing)
+    while queue:
+        source = queue.popleft()
+        for target in graph[source]:
+            if target not in seen:
+                seen.add(target)
+                queue.append(target)
+    return seen, existing
+
+
+def event_base_sha() -> str | None:
+    for name in ("DOC_REACHABILITY_BASE_SHA", "GITHUB_BASE_SHA"):
+        if os.environ.get(name):
+            return os.environ[name]
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path:
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            return event.get("pull_request", {}).get("base", {}).get("sha")
+        except (OSError, json.JSONDecodeError):
+            return None
+    return None
+
+
+def changed_markdown(repo: Path, base: str, patterns: list[str]) -> list[tuple[str, str, str | None]]:
+    # Triple-dot compares the PR branch with the merge base. -M detects moves;
+    # -C treats a copied tracked document as a new document too.
+    raw = git(
+        repo,
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames=50%",
+        "--find-copies=50%",
+        "--diff-filter=ACR",
+        f"{base}...HEAD",
+        "--",
+        "*.md",
+        "*.mdx",
+    )
+    parts = raw.split("\0")
+    changes: list[tuple[str, str, str | None]] = []
+    index = 0
+    while index < len(parts) and parts[index]:
+        status = parts[index]
+        index += 1
+        old: str | None = None
+        if status.startswith(("R", "C")):
+            old = normalize(parts[index])
+            new = normalize(parts[index + 1])
+            index += 2
+        else:
+            new = normalize(parts[index])
+            index += 1
+        if not excluded(new, patterns):
+            changes.append((status[0], new, old))
+    return changes
+
+
+def nearest_index(target: str, reachable: set[str], roots: list[str]) -> str | None:
+    parent = posixpath.dirname(target)
+    while parent:
+        for name in ("README.md", "README.mdx", "index.md", "index.mdx"):
+            candidate = posixpath.join(parent, name)
+            if candidate in reachable:
+                return candidate
+        parent = posixpath.dirname(parent)
+    return next((root for root in roots if root in reachable), None)
+
+
+def run_check(repo: Path, config: dict, base: str) -> int:
+    files = tracked_markdown(repo, config["exclude"])
+    graph, inbound = build_graph(repo, files)
+    reachable, existing_roots = reachable_from_roots(graph, config["roots"])
+    changes = changed_markdown(repo, base, config["exclude"])
+    candidates = [(kind, path, old) for kind, path, old in changes if path in files]
+    failures = [(kind, path, old) for kind, path, old in candidates if path not in reachable]
+
+    if not failures:
+        print(
+            f"PASS: {len(candidates)} added, copied, or moved Markdown file(s) are reachable "
+            f"from configured roots ({', '.join(existing_roots)})."
+        )
+        return 0
+
+    print(
+        f"FAIL: {len(failures)} added, copied, or moved Markdown file(s) are not reachable "
+        "from a living root document.",
+        file=sys.stderr,
+    )
+    preferred = config["preferred_root"] if config["preferred_root"] in existing_roots else existing_roots[0]
+    for kind, path, old in failures:
+        move = f" (moved from {old})" if kind == "R" and old else ""
+        print(f"\n- {path}{move}", file=sys.stderr)
+        print(f"  Expected route from root: {preferred} -> ... -> {path}", file=sys.stderr)
+        suggestion = nearest_index(path, reachable, existing_roots)
+        if suggestion:
+            print(
+                f"  Add a descriptive link from the real root or reachable topic index: {suggestion}",
+                file=sys.stderr,
+            )
+        island_sources = sorted(source for source in inbound.get(path, set()) if source not in reachable)
+        if island_sources:
+            print(
+                "  Unreachable files already link here, but an island does not count: "
+                + ", ".join(island_sources[:5]),
+                file=sys.stderr,
+            )
+        print(
+            "  Do not create a catch-all file list. Put the link where a reader would naturally look, "
+            "and make its text explain why to open the document.",
+            file=sys.stderr,
+        )
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", default=".", help="Git repository to check")
+    parser.add_argument("--config", default=CONFIG_NAME, help="Committed JSON config, relative to repo")
+    parser.add_argument("--base", help="Pull-request base commit or ref")
+    args = parser.parse_args(argv)
+    repo = Path(args.repo).resolve()
+    try:
+        if not (repo / ".git").exists():
+            raise CheckError(f"Not a Git working tree: {repo}")
+        config = load_config(repo, args.config)
+        base = args.base or event_base_sha()
+        if not base:
+            raise CheckError(
+                "No PR base was supplied. Pass --base <commit>, set DOC_REACHABILITY_BASE_SHA, "
+                "or run from a pull_request event. Refusing to guess the comparison base."
+            )
+        git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
+        return run_check(repo, config, base)
+    except CheckError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
