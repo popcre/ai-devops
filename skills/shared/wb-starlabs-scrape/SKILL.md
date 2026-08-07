@@ -43,6 +43,10 @@ Use the Product page as direct relationship evidence when its list is safely ava
 
 Use Art Assets for franchises/properties, style guides, characters, files, and their source relationships. The Nuxeo provider is `WBCPAssetSearchPublic`, page size 96. Observed fields include `public:property`, `public:styleGuideName`, and `public:character`; property and character can be multi-value.
 
+The Art Assets page does not return results for an empty search. Use a narrow filter batch. Its Polymer `paper-checkbox` controls may ignore automation while their group is collapsed; open the group, interact with the visible checkbox, then run Search. Switch results from Thumbnails to Details to expose the asset UUID and relationship columns without opening or downloading the asset.
+
+Initial filter panes displayed round limits rather than proven complete lists: 100 Franchise/Property values, 100 Style Guide values, and 120 Character values. Treat these as partial until client state, pagination, or another supported control proves completeness. A first Details record exposed one asset UUID, an exact file name and source path, dates, one style guide, many Franchise/Property values, and a blank Character field. This proves multi-property asset links can occur; it does not prove the general style-guide hierarchy.
+
 Treat the links as the deliverable. Separate name lists are supporting data. For every asset record, capture every relationship Warner exposes:
 
 - asset to style guide
