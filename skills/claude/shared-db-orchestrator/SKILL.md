@@ -1,9 +1,26 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", or any cross-app data-contract change. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db coordinator session", "start a coordinator session", "start an orchestrator session", "be the coordinator", "I want to run a coordinator session", "open a coordinator session", or any cross-app data-contract change. NOTE: "coordinator" and "orchestrator" mean the SAME role — the skill is named orchestrator, every document says coordinator, and both phrasings must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
+
+> ## "Coordinator" and "orchestrator" are the same thing
+>
+> This skill is named `shared-db-orchestrator`. Every document in `u2giants/shared-db`
+> — `AGENTS.md`, `HANDOFF.md`, the marker issue, the handover skill — calls the role
+> **coordinator**. One role, two words, for historical reasons.
+>
+> **If you were asked to "start a coordinator session", this is the skill.** There is no
+> separate coordinator skill and you have not missed one.
+>
+> The three `shared-db-*` skills, and which is which:
+>
+> | Skill | When |
+> |---|---|
+> | **`shared-db-orchestrator`** (this one) | You are RUNNING the session, or you need database work and must request it |
+> | `shared-db-change` | You are AUTHORING a schema change — the migration discipline itself |
+> | `shared-db-handover` | You are ENDING or STOPPING a session |
 
 `u2giants/shared-db` is the canonical repo for ONE Supabase Postgres database
 shared by four applications: **Poppim** (in development), and **PopCRM**,

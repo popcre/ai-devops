@@ -18,9 +18,30 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > single-writer ownership of `supabase/migrations/`, and the two-part coordinator
 > handoff. To end or hand over that session, use **`shared-db-handover`**.
 
+> ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.
+>
+> **`AGENTS.md` in `u2giants/shared-db` WINS over this file wherever they disagree.** It is
+> the live rulebook; this skill is a portable summary and it has already drifted once.
+>
+> **1. Rule 1 below is STALE and following it literally is dangerous.** It says to apply
+> DDL through the Supabase MCP. `AGENTS.md` standing fact 6 says the MCP **may be bound to
+> PRODUCTION and takes no project parameter — there is no way to aim it at preview.**
+> Following rule 1 can therefore apply DDL straight to production. **Preview work goes
+> through the Supabase CLI or psql**, and you must check `cat supabase/.temp/project-ref`
+> immediately before every push. Call `get_project_url` FIRST and confirm what you are
+> pointed at before any MCP call at all.
+>
+> **2. Requesting the work has changed.** `COORDINATOR_INTAKE.md` was retired on
+> 2026-08-07 and is now a 37-line pointer. If you need database work done and have not
+> started it, **open a GitHub issue**:
+> `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
+> A required check fails any PR that writes work back into the old file.
+
 ## Hard rules
 
-1. **DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.
+1. ~~**DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.~~
+   **SUPERSEDED — see the box above.** Never `execute_sql` for DDL still holds; "via MCP
+   only" does not. Prove which project you are pointed at before any MCP call.
 2. After applying, run `list_migrations` and capture the recorded timestamp;
    create the local migration file with the **identical** timestamp under
    `supabase/migrations/`. Never edit a migration that may already be applied.
