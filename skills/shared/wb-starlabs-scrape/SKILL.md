@@ -58,6 +58,14 @@ Keep these evidence types separate:
 
 Therefore, do not create direct style-guide-to-property or style-guide-to-character rows from asset co-occurrence. Such rows are inferred through an asset and must be stored separately and labeled as inferred if the downstream model needs them. Create a direct link only if Warner later exposes a dedicated field, endpoint, or catalogue that explicitly returns both source identities as one relationship.
 
+## Warner Franchise hierarchy
+
+STARLABS does have a distinct Franchise concept in addition to Property. Art Asset documents expose separate `public:franchise` and `public:property` fields, even though the visible filter is labeled `Franchise / Property`. Preserve both source fields. Do not flatten Franchise into Licensor or Property.
+
+Treat Franchise as a candidate brand level between Warner Bros. and Property, similar to other licensors' franchise level, but do not create a direct Franchise-to-Property parent link from asset co-occurrence. One asset can carry many properties, and the same property label can appear on assets carrying different franchise labels. That evidence supports asset-to-franchise and asset-to-property links only.
+
+Create a direct Franchise-to-Property link only when STARLABS exposes the relationship on a Property record, in a dedicated catalogue, or through an operation returning both source identities as one parent-child record. Until then, keep any Franchise-to-Property association derived through assets separate and mark it as inferred.
+
 ## Art Assets scrape
 
 Use Art Assets for franchises/properties, style guides, characters, files, and their source relationships. The Nuxeo provider is `WBCPAssetSearchPublic`. Its visible page size can vary, and the provider safely accepted a read-only page size of 1,000 on 2026-08-07. Observed fields include `public:property`, `public:styleGuideName`, and `public:character`; property and character can be multi-value.
