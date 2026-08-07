@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a request filed in the REQUEST QUEUE of `COORDINATOR_INTAKE.md`, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", or any cross-app data-contract change. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", or any cross-app data-contract change. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
@@ -36,17 +36,31 @@ a schema change, a migration, an RLS policy, a view, an RPC or function, a
 trigger, an index, a seed or data fix, a promotion to production, or any change
 to a data contract shared between Poppim, PopCRM, PopDAM or DesignFlow PLM.
 
-**Where it goes:** the **`## REQUEST QUEUE`** section of
-**`COORDINATOR_INTAKE.md`** at the root of `u2giants/shared-db`. That file owns
-the request template, the lifecycle, and the rules for landing it — **read it and
-follow it verbatim. Do not copy a template from here; this skill deliberately
-does not carry one, because the file changes and the file wins.**
+**Where it goes: a GitHub issue on `u2giants/shared-db`.** Not a file, not a PR,
+not a chip.
 
-Note the two queues in that one file, and use the right one:
+```bash
+gh issue create --repo u2giants/shared-db --label db-work   --title "<the outcome you need, in plain words>"   --body-file <a file you wrote>
+```
 
-- **REQUEST QUEUE** — "here is work that needs doing" (you have *not* started it).
-- **INTAKE QUEUE** — "here is work I was already doing, take it over" (you *have*
-  started it, and must stop). That path is `shared-db-handover` (A).
+Add `--label needs-albert` if it needs an owner decision. Use `--body-file`, not a
+heredoc: this is a PowerShell-first shop and heredoc recipes have silently failed here.
+
+Say, in the body: the outcome needed and why (business terms, not a schema design —
+state the problem and let the coordinator choose the shape); which applications depend
+on it; whether it is blocking and how urgently; any deadline; what you already know
+about the current schema **and whether you read it live or in a document**; and
+explicitly **what you have NOT done** — no branch, no migration file, no push to
+preview or production, no `supabase` CLI, no Supabase MCP call, no psql, no chip.
+That last one is mandatory: if you did any of them, this is a handover, not a request,
+and the path is `shared-db-handover`.
+
+> ⚠️ **CHANGED 2026-08-07.** This used to say "append a block to the `## REQUEST QUEUE`
+> section of `COORDINATOR_INTAKE.md`". **That file is retired.** It became a hand-built
+> issue tracker in Markdown that several sessions edited at once, grew from 0 to 89 blocks
+> in eight days, never once shrank, and had a retention rule that never fired because the
+> directory it archived to was never created. Its 63 open work items are now GitHub issues.
+> **Do not append to that file. If you find instructions telling you to, they are stale.**
 
 **"It's only a small change" is exactly the case that has caused damage here.**
 Every incident in the ledger began as something small enough that filing a request
@@ -58,8 +72,8 @@ whether it touches the shared database is the test.
 
 **If you are an AI session and a user asks you for database work:** do not start
 it, do not "just check", do not open a migration file, and do not create a
-background task chip. File the request in the REQUEST QUEUE, tell the user in
-plain English that it has been queued for the coordinator and give them the PR
+background task chip. Open the issue, tell the user in
+plain English that it is queued for the coordinator and give them the issue
 link, and stop. Being asked directly by a user is not an exemption — the
 coordinator exists precisely because four sessions were each asked directly.
 
@@ -158,7 +172,7 @@ Run all eight steps, **in this order**, before the first brief goes out:
    Then read `HANDOFF.md` for the **`## BACKLOG`** section (the `B<n>` items) and
    the standing detail the handover points at.
 
-   > **"An empty REQUEST QUEUE / INTAKE QUEUE / IN PROGRESS does not mean there
+   > **"An empty issue list does not mean there
    > is no work. `HANDOFF.md` is the authoritative record of outstanding work;
    > the queues track only incoming requests and handovers."**
 
@@ -176,7 +190,7 @@ Run all eight steps, **in this order**, before the first brief goes out:
    §17). A docs-only handover PR is **merged before the session that wrote it
    ends**; if you find one open, read it, then merge it (AGENTS.md §5 docs-only
    merges promptly, §2 never leave an open PR behind).
-3. **Read the `## REQUEST QUEUE`** in `COORDINATOR_INTAKE.md` — work people need
+3. **Read the open issues** — `gh issue list --repo u2giants/shared-db --label db-work` — work people need
    done that nobody has started. Triage it: what is ready to dispatch, what needs
    an Albert decision first, what is already obsolete. Reconcile it against the
    `HANDOFF.md` backlog you just read: **any outstanding item missing from the
