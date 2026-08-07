@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paramount Creative Library Scrape"
+  short_description: "Safely capture Paramount licensed metadata"
+  default_prompt: "Use $paramount-creative-library-scrape to inspect or capture licensed Paramount properties, characters, style guides, assets, and source IDs."
