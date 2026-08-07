@@ -90,7 +90,7 @@ is all. It performs **no** implementation work of its own:
 the coordination surface itself, not work on the database. Do them yourself; do
 not dispatch an agent to record a dispatch.
 1. Open, re-check and close its **coordinator marker** issue (step 0).
-2. **`IN PROGRESS` annotations** in `COORDINATOR_INTAKE.md` at dispatch time, and
+2. **A dispatch comment on the issue** it is dispatching, at dispatch time, and
    queue seeding at handover.
 3. **Merge a docs-only handover PR** it finds open, or its own (step 2b).
 4. The **handoff files** it writes at the end (`HANDOFF.d/`).
@@ -196,10 +196,10 @@ Run all eight steps, **in this order**, before the first brief goes out:
    `HANDOFF.md` backlog you just read: **any outstanding item missing from the
    queue is a defect in the previous handover** — seed the missing entries (short,
    pointing at `HANDOFF.md`, never duplicating its detail) before dispatching.
-4. **Read the `## INTAKE` sections** of the same file — work other sessions
-   started and handed over. Verify every claim against the live repo before
-   acting on it (`gh pr list`, `git worktree list`, the real migration maximum),
-   then dispatch and move the block on.
+4. **Read the handover issues** — the same list, titles starting `HANDOVER:`. These
+   are workstreams other sessions started and stopped. Verify every claim against the
+   live repo before acting on it (`gh pr list`, `git worktree list`, the real migration
+   maximum), then dispatch and comment on the issue. Close it when the work lands.
 5. **Run the branch/worktree hygiene check.** `git worktree list` and
    `git branch -vv`: every worktree is either live (say whose and what for) or
    finished; every finished branch should be merged. **A DIRTY worktree belonging
