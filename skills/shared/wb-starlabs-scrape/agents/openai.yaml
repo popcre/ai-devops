@@ -1,0 +1,4 @@
+interface:
+  display_name: "WB STARLABS Scrape"
+  short_description: "Capture Warner properties and characters"
+  default_prompt: "Use $wb-starlabs-scrape to capture Warner STARLABS property-to-character data safely."
