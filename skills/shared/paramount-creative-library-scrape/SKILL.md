@@ -45,7 +45,7 @@ Model the observed relationships as many-to-many source links, not a rigid tree:
 - Character to asset
 - asset to Brand and other metadata facets
 
-Do not infer Collection-to-Character or Property-to-Character links from names. Derive them from the filtered facet result or, preferably, each asset's full metadata. One character can appear under more than one Property, one asset can carry several Properties, and one asset can carry several Collections and Characters.
+Do not infer Collection-to-Character or Property-to-Character links from names or filtered facet results. A Character can appear in a Property-filtered result only because the asset also carries that Property tag. Derive direct Property-to-Character and Property-to-Collection links only from each asset's full cascading metadata. One character can appear under more than one filtered Property result, one asset can carry several Properties, and one asset can carry several Collections and Characters.
 
 ## Browser procedure
 
@@ -55,7 +55,7 @@ Do not infer Collection-to-Character or Property-to-Character links from names. 
 4. Open a Franchise or Property. The result page applies a facet filter. Remove that filter with its visible clear control to return to the broader list, then move to the next allowed item.
 5. Expand `Show more...` inside the named facet panel when needed. Bind reads to that panel. Do not read a cross-panel run of checkboxes because adjacent panels can be mistaken for Character rows.
 6. Verify every clicked facet is actually checked after the asynchronous refresh. A click can appear to succeed while the page rerenders.
-7. Read the current result count, Property values, Collection values, Character values, and their asset counts. Treat blank buckets rendered as `undefined` as missing source data, not as a real identity.
+7. Read the current result count, Property values, Collection values, Character values, and their asset counts. Treat these as discovery data, not proof of direct relationships. Treat blank buckets rendered as `undefined` as missing source data, not as a real identity.
 8. Page assets in stable, resumable batches. The default is 25 assets per page. Fingerprint each page with its first and last asset IDs and stop if a page repeats.
 9. Preserve exact labels, punctuation, capitalization, whitespace, file names, source IDs, counts, and observed relationships. Do not clean or merge names during extraction.
 10. Restore the user's original useful view and leave the tab open unless the user asked for it to be closed.
@@ -73,7 +73,7 @@ The response provides:
 
 The search facet named `CHARACTER_ID` is misleading: its facet value and filter request use the display name, not the real numeric character ID. Do not treat the facet name as proof that an ID was captured.
 
-## Find real Property and Character IDs
+## Find real Property, Collection, Character, and Franchise IDs
 
 Property IDs are positive numeric values exposed in Property-page links such as `property=<id>` and again in full asset metadata.
 
@@ -85,8 +85,13 @@ To reveal a Character ID safely:
 4. Inspect only the JSON response body from the authenticated `GET /otmmapi/v6/assets` request whose safe query facts include `level_of_detail=full` and `load_metadata=true`.
 5. Locate metadata element `CHARACTER_ID`, whose domain is `CUSTOM.CP_CREATIVE_LIBRARY.CHARACTER` and table is `CP_ASSET_CHARACTERS_CHARACTER`.
 6. Read `value.value.field_value.value` as the real Paramount Character ID. It is a numeric string. Read `display_value` as the exact Character name.
-7. Locate `CUSTOM.CP_CREATIVE_LIBRARY.CASCADE_CHARACTER_ID` in table `CP_ASSET_CHARACTERS_DATA`. Its cascading entries carry both the Property numeric ID and Character numeric ID. Its combined `field_value.value` uses `<property_id>^<character_id>`.
-8. Validate the same Character ID on another matching asset when practical. Preserve the Property-to-Character pair because the same display name can be scoped differently.
+7. Locate `CUSTOM.CP_CREATIVE_LIBRARY.CASCADE_CHARACTER_ID` in table `CP_ASSET_CHARACTERS_DATA`. Its cascading entries carry both the Property numeric ID and Character numeric ID. Its combined `field_value.value` uses `<property_id>^<character_id>`. This pair, not the active Property filter, is the direct relationship.
+8. Read Collection identity from metadata element `COLLECTION_ID`, domain `CUSTOM.CP_CREATIVE_LIBRARY.COLLECTION`, table `CP_ASSET_COLLECTION_COLLECTION`. Its `field_value.value` is the numeric Collection ID as text and its `display_value` is the exact Collection name.
+9. Read the direct Property-to-Collection pair from `CUSTOM.CP_CREATIVE_LIBRARY.COLLECTION_DATA_ID` in table `CP_ASSET_COLLECTION_DATA`. Its combined value uses `<property_id>^<collection_id>`.
+10. Read Franchise identity from metadata element `FRANCHISE_ID`, domain `CUSTOM.VIACOM_INT_GCC_FRANCHISE`, table `VIACOM_INT_ASSET_FRANCHISES`. Its `field_value.value` is the numeric Franchise ID and its `display_value` is the exact Franchise name.
+11. Validate the same source identity on another matching asset when practical. Preserve every explicit pair because filtered results can include indirect matches.
+
+For either combined relationship field, require exactly one `^` and exactly two non-empty parts. Validate both parts as source IDs. Reject and report malformed values rather than splitting at only the first or last separator. Multi-character assets store separate `<property_id>^<character_id>` entries, one pair per Character.
 
 Do not log the full metadata response. Extract only the identity fields and relationship fields required by the private output contract.
 
@@ -98,7 +103,8 @@ Do not log the full metadata response. Extract only the identity fields and rela
 - Blank facet buckets appear as `undefined` or missing `value` fields.
 - No negative or sentinel IDs were observed during reconnaissance. Do not assume they cannot exist.
 - No duplicate-name or capitalization-only duplicate audit has been completed. Key on source IDs, never names, when IDs exist.
-- Characters and Collections appeared name-only in the slim search response. Character IDs were later found in full asset metadata. Collection source IDs remain unproven; do not invent them or copy a Collection name into an ID field.
+- Characters, Collections, and Franchises can appear name-only in slim search results while their numeric IDs remain available in full asset metadata. Never copy a display name into an ID field.
+- Character-related classification can exist while both the Character identity and cascading relationship are empty. Record the missing link; never infer it from the file name, card text, or active filter.
 - Account access is broad across several Paramount brands, but the portal did not prove that the account sees all Paramount content. Describe every capture as the account-entitled, point-in-time view.
 
 ## Output and database boundary
@@ -107,8 +113,9 @@ Treat source relationships as the deliverable. Capture:
 
 - Brand, Franchise, and Property exact labels;
 - numeric Property ID;
-- Collection exact label and source ID only if genuinely exposed;
+- Collection exact label and numeric source ID from full metadata;
 - Character exact label and numeric Character ID from full metadata;
+- Franchise exact label and numeric source ID from full metadata;
 - asset ID, exact file name, size, source dates, and listed non-media metadata;
 - explicit Property-to-Character, Property-to-Collection, asset-to-Property, asset-to-Collection, and asset-to-Character links;
 - capture time, URL, filters, account entitlement caveat, page progress, and failures.

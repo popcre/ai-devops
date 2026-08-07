@@ -44,7 +44,7 @@ The navigation area named `Collections` and the asset metadata facet named `Coll
 
 ## Relationship evidence
 
-Filtering a Property changes the Character facet to the characters found on matching assets. At least one Character appeared under more than one Property. Property facet counts and Collection facet counts exceeded the total asset count when summed, proving overlapping tags. Treat Property, Collection, Character, and asset links as many-to-many.
+Filtering a Property changes the Character facet to the characters found on matching assets, but it does not prove a direct Property-to-Character link. Reconnaissance found Characters in several Property-filtered result sets while their explicit cascading relationship consistently pointed to a different Property carried by the same asset. Property facet counts and Collection facet counts also exceeded the total asset count when summed, proving overlapping tags. Treat Property, Collection, Character, and asset links as many-to-many, and use cascading metadata pairs as the direct relationship source.
 
 Relationships directly visible or returned by metadata:
 
@@ -60,9 +60,7 @@ Not established:
 
 - a standalone Character record page;
 - Character biography, species, role, or similar descriptive fields;
-- a standalone Franchise ID;
 - a direct Collection-to-Character source table independent of assets;
-- stable Collection source IDs;
 - a series, season, episode, or title hierarchy in this view.
 
 ## Search response shape
@@ -106,8 +104,8 @@ The normal asset result uses 25 assets per page. The full result is paged. Facet
 | Property | Positive numeric value, exposed in Property links and full metadata |
 | Character | Positive numeric value stored as a string in full asset metadata |
 | Asset | 40-character lowercase hexadecimal text |
-| Collection | No stable source ID proven; slim search exposes a name and count |
-| Franchise | No stable source ID proven in reconnaissance |
+| Collection | Positive numeric value stored in full asset metadata; slim search can expose only a name and count |
+| Franchise | Positive numeric value exposed in full asset metadata |
 
 Store source IDs as text at the ingestion boundary unless the database design has a strong reason to cast the numeric types. Text preserves the source byte-for-byte and leaves room for future nonnumeric values. If database design chooses numeric columns, keep the raw text value too.
 
@@ -140,6 +138,48 @@ field_value.value: <property_id>^<character_id>
 
 This proves that Paramount assigns a true Character identity and stores an explicit Property-to-Character pair. Do not generate local Character IDs merely because the slim facet response hides the source ID.
 
+The active Property filter is discovery context only. It is not relationship evidence. Create a direct Property-to-Character link only from `CUSTOM.CP_CREATIVE_LIBRARY.CASCADE_CHARACTER_ID`.
+
+Each populated combined value contains one Property and one Character. A multi-character asset carries separate combined values rather than one value with several Character IDs. Require exactly one `^`, split into two non-empty source IDs, and reject malformed values. Do not infer a missing Character relationship from the file name or a Character Count classification.
+
+## Property, Collection, and Franchise metadata
+
+Full asset metadata exposes these identity descriptors:
+
+```text
+Property:
+  id: PROGRAM_ID
+  domain_id: CUSTOM.VIACOM_INT_GCC_PROGRAM_DATA
+  table_name: CL_ASSET_PROGRAM
+  ID: value.value.field_value.value
+  label: value.value.display_value
+
+Collection:
+  id: COLLECTION_ID
+  domain_id: CUSTOM.CP_CREATIVE_LIBRARY.COLLECTION
+  table_name: CP_ASSET_COLLECTION_COLLECTION
+  ID: value.value.field_value.value
+  label: value.value.display_value
+
+Franchise:
+  id: FRANCHISE_ID
+  domain_id: CUSTOM.VIACOM_INT_GCC_FRANCHISE
+  table_name: VIACOM_INT_ASSET_FRANCHISES
+  ID: value.value.field_value.value
+  label: value.value.display_value
+```
+
+The direct Property-to-Collection relationship is present as:
+
+```text
+id: CUSTOM.CP_CREATIVE_LIBRARY.COLLECTION_DATA_ID
+cascading_group_id: CUSTOM.CP_CREATIVE_LIBRARY.COLLECTION_CASCADE
+table_name: CP_ASSET_COLLECTION_DATA
+field_value.value: <property_id>^<collection_id>
+```
+
+Treat the pair as authoritative. The visible Collection filter uses the display name and does not expose the numeric ID.
+
 ## Field quality and gaps
 
 - Asset ID, name, imported date, updated date, size, content type, and MIME type were filled in the small reconnaissance sample.
@@ -153,6 +193,8 @@ This proves that Paramount assigns a true Character identity and stores an expli
 
 - Reading only the visible Character facet finds names and counts, not source IDs.
 - Trusting the field label `CHARACTER_ID` is wrong because the slim request sends a name as its value.
+- Treating a Character found under an active Property filter as directly linked to that Property creates false relationships. Use the cascading pair.
+- Reading only the visible Collection or Franchise label misses its numeric source ID; inspect full metadata.
 - Treating the initial five facet values as a cap is wrong; `Show more...` expands the panel and the response may already contain all values for the current filtered result.
 - Assuming the account sees all Paramount content is unsupported.
 - Printing complete Chrome network events is unsafe because request headers can include a live bearer token. Sanitize before output.
