@@ -6,10 +6,14 @@ Create only these Warner-owned paths under `warner-bros/` in the private `u2gian
 
 ```text
 warner-bros/
-  franchises.csv or properties.csv
+  franchises.csv
+  properties.csv
   style-guides.csv
   characters.csv
   assets.csv
+  links-asset-franchise.csv
+  links-asset-property.csv
+  links-franchise-property.csv
   links-asset-style-guide.csv
   links-style-guide-franchise-property.csv
   links-asset-character.csv
@@ -17,7 +21,7 @@ warner-bros/
   README.md
 ```
 
-Use Warner's own word for the top-level file. Create only relationship files the portal supports, and document absent link types in `README.md`. Keep `disney-opa/` untouched.
+Warner exposes Franchise and Property as distinct source fields, so keep them in separate identity and asset-link files. Create `links-franchise-property.csv` only for direct source relationships; do not populate it from asset co-occurrence. Existing extracts that predate this finding may retain `franchise-properties.csv` and `links-asset-franchise-property.csv`, but a loader must split their meaning from the source columns and provenance rather than treating Franchise and Property as one level. Create only relationship files the portal supports, and document absent link types in `README.md`. Keep `disney-opa/` untouched.
 
 ## Property-character CSV
 
