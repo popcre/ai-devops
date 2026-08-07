@@ -1,6 +1,6 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the coordinator. TWO paths. (A) You are NOT the coordinator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the coordinator", "hand your work to the coordinator", "hand your work to the orchestrator", "hand this off to the coordinator", "you are not the coordinator", "another session is coordinating this", "there is already a coordinator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and write a handover block into `COORDINATOR_INTAKE.md` at the repo root. (B) You ARE the coordinator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A coordinator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a coordinator session is opened and run.
+description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the coordinator. TWO paths. (A) You are NOT the coordinator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the coordinator", "hand your work to the coordinator", "hand your work to the orchestrator", "hand this off to the coordinator", "you are not the coordinator", "another session is coordinating this", "there is already a coordinator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the coordinator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A coordinator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a coordinator session is opened and run.
 ---
 
 # shared-db-handover
@@ -33,21 +33,44 @@ background task chips. Do not delete or clean up your worktree or branch — the
 coordinator may resume them, and an agent that tidies itself away destroys the
 evidence.
 
-**Do exactly one thing:** write a handover block into **`COORDINATOR_INTAKE.md`
-at the root of the `shared-db` repo**, using **the fill-in template inside that
-file**. That file is the single source of truth for both the queue and the
-template — read it and follow it; do not invent your own format, and do not copy
-a template from here.
+**Do exactly one thing: open a GitHub issue** on `u2giants/shared-db` describing
+what you were doing and what state you left it in.
 
-Follow whatever the file says about how to land the change (normally: its own
-branch, a PR, left OPEN and **not merged**).
+```bash
+gh issue create --repo u2giants/shared-db --label db-work   --title "HANDOVER: <what you were doing>"   --body-file <a file you wrote>
+```
 
-**Right queue, right section.** That file holds two queues. If you had **already
-started** work, you file an **INTAKE** block — this path. If you had **not**
-started, and you simply need database work done, that is a **REQUEST QUEUE**
-entry instead, and the skill for it is `shared-db-orchestrator` ("if you need
-database work done: request it, do not start it"). Filing a request as an intake
-block, or vice versa, sends it to the wrong triage.
+> ⚠️ **CHANGED 2026-08-07.** This used to say "write a handover block into
+> `COORDINATOR_INTAKE.md` using the template inside that file". **That file is
+> retired** — it was a hand-built issue tracker in Markdown that several sessions
+> edited at once and that never once shrank. **Do not append to it.** If you find
+> instructions telling you to, they are stale.
+
+**The nine things the issue must say.** This replaces the template that used to live
+in the file. Answer every one, including the ones that make you look bad — those are
+the ones that save the next session a day:
+
+1. What you were doing, and why.
+2. What you have **actually done** — with PR numbers, commit SHAs and branch names.
+3. What you applied to **preview**, and what to **production**. "Nothing" is a fine
+   answer and is worth saying explicitly.
+4. What is **half-finished or abandoned mid-way**.
+5. What you **own right now** — branches, worktrees, open PRs, dispatched agents.
+6. What you were **about to do next**.
+7. What you are **blocked on**.
+8. **What you tried that did NOT work, and why. [MANDATORY]** Never leave this out.
+   A handover without it makes the next session repeat your dead ends.
+9. **Facts you believe that may already be stale** — anything you read more than an
+   hour ago, and every count, SHA and version you are quoting.
+
+**If the narrative is long, keep it a file and point at it.** Put the outstanding work
+in the issue and leave a ten-page briefing in `HANDOFF.d/`. A ten-page briefing pasted
+into an issue is a ten-page briefing nobody reads.
+
+**Right path.** If you had **already started** work, this is a handover — this path.
+If you had **not** started and simply need database work done, that is a **request**,
+and the skill is `shared-db-orchestrator`. Filing one as the other sends it to the
+wrong triage.
 
 Your block must cover, at minimum:
 
@@ -134,7 +157,7 @@ or, worse, undoes a deliberate omission.
 ## Seed the queue — REQUIRED, and a handover without it is INCOMPLETE
 
 **Before you call the handover done, the outgoing coordinator MUST seed or
-refresh the `## REQUEST QUEUE` in `COORDINATOR_INTAKE.md` with EVERY outstanding
+open or update an issue for EVERY outstanding
 item** — everything in `HANDOFF.md`'s opening agenda, its "waiting on Albert"
 list, and its `## BACKLOG` section, plus anything you dispatched that did not
 finish. Nothing outstanding may exist only in `HANDOFF.md` prose.
@@ -153,7 +176,7 @@ How to do it correctly:
 
 - **Short entries only** — a heading, one or two sentences of what outcome is
   needed, and a pointer to the section of `HANDOFF.md` that holds the detail.
-  Use the Part 0 request template in `COORDINATOR_INTAKE.md`.
+  Open an issue with the `db-work` label; see `shared-db-orchestrator`.
 - **Never duplicate content.** Detail copied into the queue is detail that will
   drift out of date; the two documents have already drifted apart repeatedly in
   this repo. **No document wins by name or by date.** Where the queue and
