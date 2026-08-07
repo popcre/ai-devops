@@ -77,7 +77,7 @@ Hard rules:
   keeps the text).
 
   **Ending a session:** create your OWN new file in `HANDOFF.d/` following the
-  handoff standard (all 9 sections). **Do not rewrite this file, and do not edit
+  handoff standard (all 10 sections, 0–9). **Do not rewrite this file, and do not edit
   another session's file.** Concurrent sessions rely on that.
   ```
 
@@ -127,7 +127,7 @@ migration is still pending.
   enough. Re-read the actual file, grade it, and answer per § Answering the
   verification question.
 
-## Required structure (use these 9 sections in YOUR `HANDOFF.d/` file; never drop one silently — write "N/A" + why if truly inapplicable)
+## Required structure (use these 10 sections, **0–9**, in YOUR `HANDOFF.d/` file; never drop one silently — write "N/A" + why if truly inapplicable)
 
 Write for a developer who **walked in off the street this morning**: zero
 knowledge of the app, the business, this session, this chat, or what failed. Make
@@ -136,6 +136,8 @@ know**. If they'd have to ask you one question to proceed, that answer belongs i
 the handoff. Default to TOO MUCH — too long costs minutes, too short costs a whole
 session; those are not symmetric, so err long.
 
+0. **⚠️ DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below. **Mandatory,
+   goes FIRST, and is a consolidation of every owner decision in the document.**
 1. **What this application is** — plain English: what it does, who uses it, why.
    Repos, stack, where it runs (URLs, hosts).
 2. **What we set out to do this session, and why** — goal in business terms + the
@@ -157,8 +159,70 @@ session; those are not symmetric, so err long.
 9. **Open questions and risks** — what's uncertain, what could break, decisions
    made and why, each dated so a later session can't unknowingly contradict them.
 
+## Section 0 — DECISIONS ONLY THE OWNER CAN MAKE (mandatory, goes FIRST)
+
+**Why this exists.** A handoff is written for the *worker*, so owner decisions
+land wherever they matter operationally: a blocker in §3, a gate in §6, a question
+in §9, a finding in part (b). That is correct filing and a **broken outcome** — a
+fresh session then meets them one at a time, days apart, and makes the owner
+re-load the same context five times. Worse, anything discovered *in passing* gets
+filed as a **finding** rather than an **ask**, and is never raised at all.
+
+**Measured, 2026-08-07 (`u2giants/shared-db`).** A handoff that passed the full
+checklist was audited against this exact question. Of eight items needing the
+owner: three would have been raised (they physically blocked the work), two would
+have been silently decided by the session itself (both were phrased "decide during
+step 1"), and **three would never have been raised** — they came from a sub-agent
+audit of a *different* question and sat in part (b) as findings. Those three had
+been waiting longest; one alert had been open and untouched for three days across
+three separate handoffs. **The owner had to notice and ask. That is the failure
+this section prevents.**
+
+### What goes in it
+
+**Every decision, approval, or judgement the owner must supply — consolidated.**
+Section 0 is an **index, not a new home**: each item still lives where it belongs
+operationally, AND is listed here. **The duplication is the point.** Include:
+
+- Hard gates that block the work outright.
+- Choices where a wrong guess is recoverable but rework is wasteful.
+- **Anything you learned that needs the owner's judgement, even if it is OUTSIDE
+  this workstream** — a bug you noticed in passing, a stale ticket, an open marker,
+  a security exposure. **This is the category that goes missing.** "Not my scope"
+  is exactly why it has been ignored by five sessions already.
+- Anything a sub-agent surfaced. A finding that needs a human ruling is an **ask**,
+  not a finding — promote it.
+
+### How to write it
+
+- **Group by consequence:** *blocking* vs *a wrong guess is recoverable* vs *not
+  part of this work and nobody is on it*. The owner triages by cost, not topic.
+- **Plain business English, one or two sentences each. No jargon.** If a technical
+  term is unavoidable, add a four-word plain tag after it.
+- **Give a recommendation for every item.** The owner should be able to answer most
+  with a single word. Presenting an unexplained menu is how a decision stalls.
+- **Say what each item blocks** — "blocks step 6, the first irreversible action"
+  beats "important".
+- **Add an "Already settled — do NOT re-ask" list**, with dates. Re-asking a
+  decided question burns the owner's patience and reopens closed arguments.
+- **Instruct the next session to put the WHOLE list to the owner in ONE message,
+  before starting work** — not one at a time as each is tripped over.
+
+### The sweep that makes it complete
+
+Before you finish, **re-read your own handoff end to end and extract every
+sentence that needs the owner**. Search for the tells: `⛔`, "approve", "owner",
+"decide", "waiting on", "needs a ruling", "unanswered", "nobody has", the owner's
+name. Anything you find anywhere in §1–§9 or part (b) **must also appear in §0**.
+
+**If there are genuinely no owner decisions, write "None — nothing in this
+workstream needs the owner" explicitly.** An empty section 0 is information; a
+missing one is indistinguishable from a forgotten sweep.
+
+---
+
 **Coordinator sessions that used sub-agents need a second half.** If this session
-dispatched sub-agents (typically `u2giants/shared-db`), the 9 sections above are
+dispatched sub-agents (typically `u2giants/shared-db`), the 10 sections above are
 only part (a). Part (b) — one clearly headed block **per sub-agent**: what it was
 asked to do, what it actually did, what it found, its PR/branch, whether its
 worktree is live or finished, and what it deliberately did NOT do and why — is
@@ -170,7 +234,10 @@ mandatory, and a handoff without it is incomplete. Use the
 This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
 always be more detailed" is NOT a checklist item — do not treat it as one.
 
-- [ ] All 9 sections present (or "N/A" + reason).
+- [ ] All 10 sections (0–9) present (or "N/A" + reason).
+- [ ] **Section 0 exists and the sweep was actually run.** Every owner decision
+      anywhere in §1–§9 or part (b) also appears in §0 — including ones outside
+      this workstream — each with a recommendation, or §0 says "None" explicitly.
 - [ ] A street-newcomer could continue **without asking a single question**.
 - [ ] They could continue **as effectively as you can right now** — every
       non-obvious thing you learned this session is written down.
@@ -192,8 +259,8 @@ the user MUST already pass; do not show a draft you know is thin and plan to
 improve after they push back. In your closing message, state that the self-audit
 passed and name what makes it comprehensive (which section covers each dimension).
 
-Write and answer the following three questions, citing the handoff sections that
-support each answer:
+Write and answer the following **four** questions, citing the handoff sections
+that support each answer:
 
 1. Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with no
    project knowledge and no session context could pick up where I left off and
@@ -203,10 +270,16 @@ support each answer:
 3. Is every single relevant detail needed for flawless execution included:
    background, goals, intended outcome, current state, failures, decisions,
    constraints, risks, exact next actions, and verification evidence?
+4. **If the owner read ONLY section 0, would he see every decision I need from
+   him — including the ones outside this workstream?** Answer it the hard way:
+   walk §1–§9 and part (b) line by line, list every sentence that needs his
+   judgement, and check each one appears in §0. **Do not answer this from memory
+   or from intent** — the failure this question exists to catch is a decision you
+   correctly wrote down somewhere else and never promoted.
 
 Do not accept a bare "yes." For each answer, name the supporting sections and
 any gap discovered. Fix every gap in the handoff, then reread and repeat the
-whole audit until all three answers are evidence-backed yeses. Preserve the
+whole audit until all four answers are evidence-backed yeses. Preserve the
 final answers in the closing report or at the end of the handoff.
 
 ## Answering the verification question (Mode B — the reflex this skill fixes)
@@ -240,7 +313,16 @@ now**. If that is true, the answer is Yes — say it.
 - Session jargon with no definition.
 - Three sentences called a handoff. Under a screen of text for non-trivial work is
   almost certainly too thin — re-audit. (The per-session file does NOT lower the
-  verbosity bar; all 9 sections and the "what did NOT work" section still apply.)
+  verbosity bar; all 10 sections and the "what did NOT work" section still apply.)
+- **Leaving an owner decision filed only where it operationally belongs.** Correct
+  filing, broken outcome — it reaches the owner days late or never. Promote it to
+  §0 as well.
+- **Recording something that needs the owner's ruling as a "finding" because it is
+  out of scope.** Out-of-scope findings are precisely the ones that have already
+  been ignored by several sessions. A finding that needs a human ruling is an ask.
+- **Making the owner ask "will the next session actually raise all of these?"**
+  If he has to ask, §0 was missing or the sweep was skipped. That question is the
+  alarm, not the process.
 - **Rewriting the root `HANDOFF.md`, or editing/deleting another session's
   `HANDOFF.d/` file.** That is the concurrency data-loss bug this design removes.
 - Reflexively answering "No, not comprehensive enough" to look diligent when the

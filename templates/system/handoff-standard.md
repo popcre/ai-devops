@@ -78,7 +78,7 @@ Every file present is an OPEN workstream; finished ones are deleted (git history
 keeps the text).
 
 **Ending a session:** create your OWN new file in `HANDOFF.d/` following
-`templates/system/handoff-standard.md` (all 9 sections). **Do not rewrite this
+`templates/system/handoff-standard.md` (all 10 sections, 0–9). **Do not rewrite this
 file, and do not edit another session's file.** Concurrent sessions rely on that.
 ```
 
@@ -148,11 +148,39 @@ are not symmetric — always err long.
 Use these sections. Never drop one silently — if a section genuinely doesn't
 apply, write "N/A" and one line saying why.
 
-All 9 sections apply to **your session's own `HANDOFF.d/` file** — the verbosity
-bar is per session file, not per repo. A three-sentence handoff is still a failure.
+All 10 sections (**0–9**) apply to **your session's own `HANDOFF.d/` file** — the
+verbosity bar is per session file, not per repo. A three-sentence handoff is still
+a failure.
 
 ```md
 # HANDOFF — <topic> (<UTC date/time>, <machine>/<agent>)
+
+## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
+Mandatory, and it goes FIRST. Every decision, approval or judgement Albert must
+supply — CONSOLIDATED. This is an index, not a new home: each item still lives
+where it belongs operationally AND is listed here. The duplication is the point.
+
+Group by consequence, not topic:
+- BLOCKING — the work cannot finish without an answer. Say what each one blocks.
+- RECOVERABLE — a wrong guess is fixable but wastes rework.
+- NOT PART OF THIS WORK, AND NOBODY IS ON IT — anything you learned that needs
+  his ruling even though it is out of scope: a bug noticed in passing, a stale
+  ticket, an open marker, a security exposure. THIS IS THE CATEGORY THAT GOES
+  MISSING, because "not my scope" is exactly why five sessions already skipped it.
+  A finding that needs a human ruling is an ASK, not a finding — promote it.
+
+Also list "Already settled — do NOT re-ask", with dates.
+
+Rules: plain business English, one or two sentences each, no jargon. A
+RECOMMENDATION for every item, so most can be answered with one word. Tell the
+next session to put the WHOLE list to him in ONE message, before starting work —
+not one at a time as each is tripped over.
+
+THE SWEEP: before finishing, re-read the whole handoff and extract every sentence
+needing the owner. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
+ruling", "unanswered", "nobody has", his name. Anything found in §1–§9 or part (b)
+MUST also appear here. If there are genuinely none, write "None" explicitly — an
+empty §0 is information, a missing one is indistinguishable from a skipped sweep.
 
 ## 1. What this application is
 Plain-English: what the product does, who uses it, why it exists. Assume zero
@@ -214,8 +242,11 @@ answer is an evidence-backed "yes" and every identified gap has been closed:
 4. Is every next step concrete enough to execute without guessing, each with a
    way to verify it worked?
 5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
+6. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
+   that every decision needing Albert appears in §0, including the ones outside
+   this workstream?
 
-Then ask and answer these three final synthesis questions exactly:
+Then ask and answer these **four** final synthesis questions exactly:
 
 1. **Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with
    no knowledge of this project and no context about what we did or what remains
@@ -227,6 +258,15 @@ Then ask and answer these three final synthesis questions exactly:
    current state, failed attempts, decisions, constraints, risks, exact next
    actions, and verification evidence—present for the implementing agent to
    execute flawlessly?**
+4. **If Albert read ONLY section 0, would he see every decision I need from him,
+   including the ones outside this workstream?** Answer it the hard way — walk
+   §1–§9 and part (b) line by line, list every sentence needing his judgement,
+   and confirm each appears in §0. **Do not answer from memory or from intent.**
+   The failure this catches is a decision correctly written down somewhere else
+   and never promoted, so it reaches him days late or never. Measured on
+   2026-08-07 in `u2giants/shared-db`: of eight items needing Albert, three
+   would have been raised, two silently self-decided, and **three never raised
+   at all** — and those three had been waiting the longest.
 
 For each answer, name the supporting sections and any gap found. A found gap
 must be fixed before re-running the entire audit. Preserve the final answers in
@@ -242,7 +282,10 @@ must have already answered it yourself.
 This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
 always be more detailed" is NOT an item on this list — do not treat it as one.
 
-- [ ] All 9 sections present (or "N/A" + reason).
+- [ ] All 10 sections (0–9) present (or "N/A" + reason).
+- [ ] Section 0 exists AND the sweep was actually run: every owner decision
+      anywhere in §1–§9 or part (b) also appears in §0 — including the ones
+      outside this workstream — each with a recommendation; or §0 says "None".
 - [ ] A street-newcomer could continue WITHOUT asking a single question.
 - [ ] They could continue as effectively as you can right now — every non-obvious
       thing learned this session is written down.
