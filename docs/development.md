@@ -287,6 +287,7 @@ on the Windows runner.
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash
+python3 tests/test-ai-doc-reachability.py
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
 bash tests/test-ai-qwen.sh
@@ -333,7 +334,8 @@ landed, and never raise one to silence a warning.
 
 The tests use temporary repositories and temporary Claude/Codex homes. They
 cover shared-skill installation, counts, dry-run safety, source-name collisions,
-and automatic quarantine of the retired ShareSync skill. Also verify manually:
+automatic quarantine of the retired ShareSync skill, Markdown parsing
+boundaries, rename detection, island graphs, and PR-base selection. Also verify manually:
 
 - `bash -n` on every changed script (fast syntax gate).
 - `ai-devops doctor` should stay green for required checks (warnings are OK when
