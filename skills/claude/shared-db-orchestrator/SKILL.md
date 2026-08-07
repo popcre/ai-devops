@@ -423,17 +423,26 @@ that writes to the database.**
 ```bash
 node scripts/check-dispatch-collision.mjs \
   --task "<what the agent will do>" \
-  --objects "<every object it will WRITE, comma-separated>" \
-  --allocate-version
+  --objects "<every object it will WRITE, comma-separated>"
 ```
+
+⚠️ **`--allocate-version` was withdrawn on 2026-08-07 and now exits `2`.** It
+never reserved anything: it read the versions already in use and printed a
+suggestion, so two coordinators running it in the same minute were handed the
+same number — the duplicate-timestamp incident it claimed to prevent. Pick a
+version manually; duplicates are already blocked at merge by the `SQL migration
+guards` check.
 
 | Exit | Meaning | What you do |
 | --- | --- | --- |
-| `0` | Nothing in flight touches these objects | File the claim it prints, **then** dispatch |
+| `0` | The check completed and found **no overlap in the object classes it can read**. This is evidence, **not clearance** — it is blind to `alter table`, `create table`, `create index`, `grant`, `comment on` and `create type`, and it prints exactly what it did and did not check | Read the CHECKED / NOT CHECKED lists, satisfy yourself about the unchecked classes, file the claim it prints, **then** dispatch |
 | `1` | Collision | **Do not dispatch.** Wait for the other work to merge, fold this into it, or narrow the task |
 | `2` | Could not determine | **Do not dispatch as a write task.** Fix the cause, or dispatch READ-ONLY |
 
-Then, and only then, file the claim — the command is printed for you. **The
+Then, and only then, file the claim — the command is printed for you. ⚠️ **That
+printed command is a bash heredoc and does not work in PowerShell** (run it in
+Git Bash, or save the block and use `gh issue create --body-file <path>`); plan
+step 5 replaces it with the tool acquiring the claim itself. **The
 claim is what makes the NEXT dispatch safe.** Skipping it does not fail
 anything today; it just quietly restores the old behaviour for whoever
 dispatches next.
