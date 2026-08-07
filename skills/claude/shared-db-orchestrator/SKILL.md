@@ -142,12 +142,14 @@ mode, not a hypothetical.
 sub-agent briefs, read reports, spot contradictions between agents, escalate
 owner decisions to Albert in plain English, and write the handoff.
 
-## Where incoming handovers arrive: `COORDINATOR_INTAKE.md`
+## Where incoming handovers arrive: GitHub issues
 
 Other AI sessions running in this repo are told to stop and hand their work to
-you. They file it into **`COORDINATOR_INTAKE.md` at the root of
-`C:\repos\shared-db`** — that file is the live intake queue and the single source
-of truth for the handover template they fill in. Check it at the start of your
+you. They **open a GitHub issue** titled `HANDOVER: …` with the `db-work` label:
+`gh issue list --repo u2giants/shared-db --label db-work --search "HANDOVER"`.
+⚠️ They used to append to `COORDINATOR_INTAKE.md`. That file was **RETIRED** on
+2026-08-07 and is now a 37-line pointer; a required check fails any PR that writes
+work back into it. Check the issues at the start of your
 session and whenever Albert says he has stopped another session.
 
 **Verify every claim in a filed block against the live repo before acting on it**
