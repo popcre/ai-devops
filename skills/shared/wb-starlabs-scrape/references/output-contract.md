@@ -1,5 +1,24 @@
 # Output contract
 
+## Private repository layout
+
+Create only these Warner-owned paths under `warner-bros/` in the private `u2giants/licensor-source-data` repository:
+
+```text
+warner-bros/
+  franchises.csv or properties.csv
+  style-guides.csv
+  characters.csv
+  assets.csv
+  links-asset-style-guide.csv
+  links-style-guide-franchise-property.csv
+  links-asset-character.csv
+  links-property-character.csv
+  README.md
+```
+
+Use Warner's own word for the top-level file. Create only relationship files the portal supports, and document absent link types in `README.md`. Keep `disney-opa/` untouched.
+
 ## Property-character CSV
 
 Required columns:
@@ -22,11 +41,29 @@ This relationship CSV is intentionally one property per row. That does not confl
 - `character_labels text[]`, with royalty placeholders preserved
 - nullable `style_guide_source_id text`
 - non-null `style_guide_natural_key text`, populated from `public:styleGuideName`
+- byte-exact asset file name and any exposed full path/folder structure
+- asset source ID, size, and source dates
+- explicit source IDs and relationship provenance for every available asset/style-guide/Franchise/Property/character link
 
 Do not infer a style-guide ID from its name. If the source ID is absent, null is correct.
 
+Do not derive classifications from file-name substrings. Do not download the underlying asset files.
+
 Optional provenance columns may include `crawl_id`, `contract_scope`, and `notes`. Never place credentials or browser tokens in output.
 
-## Known direct-list behavior
+## Hierarchy and linkage fields
 
-Verified 2026-08-07 on the Product submission page: selecting `Batman (1989)`, opening `+Add Product`, and opening Characters returned 27 property-specific options. The list included people, vehicles, locations, logos, a combined-character entry, `No Character Likeness`, and `No Reportable Elements`. The dialog was cancelled without adding or submitting a product.
+Keep Warner's vocabulary and IDs without normalising them. Add source fields as exposed for:
+
+- franchise label and ID
+- property label and ID
+- parent label, ID, and source level for sub-brands or deeper hierarchy
+- style-guide label, natural key, and source ID
+- character label and source ID
+- explicit relationship type and provenance
+
+Do not assume Franchise equals Property. Do not flatten hierarchy. Do not infer that a style guide sits between a property and character.
+
+## README scope statement
+
+Record the account entitlement scope, line of business, capture date, exact source URLs, whether each relationship type was present or absent, and that the extract is a point-in-time view of the licensee's allowed catalogue rather than Warner's complete catalogue.
