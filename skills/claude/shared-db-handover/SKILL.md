@@ -188,11 +188,12 @@ How to do it correctly:
   where they are; items that were completed move on through the lifecycle rules
   that `COORDINATOR_INTAKE.md` owns. Do not delete.
 
-## Ingesting a block from `COORDINATOR_INTAKE.md`
+## Ingesting a handover issue
 
-Other sessions file their handovers into `COORDINATOR_INTAKE.md` at the repo root
-(path A above). When you ingest one: **verify every claim against the live repo
-rather than trusting it** — `git fetch --all`, `gh pr list`, `git worktree list`,
+Other sessions open a GitHub issue titled `HANDOVER: …` with the `db-work` label
+(path A above). ⚠️ They used to append to `COORDINATOR_INTAKE.md`; that file was
+**RETIRED** on 2026-08-07 and is now a pointer. When you ingest one: **verify every
+claim against the live repo rather than trusting it** — `git fetch --all`, `gh pr list`, `git worktree list`,
 and the real current maximum migration version in `supabase/migrations/`.
 Documents in this repo have gone stale within the hour, and multiple agents have
 caught real errors exactly this way.
