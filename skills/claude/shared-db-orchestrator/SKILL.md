@@ -1,26 +1,38 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE coordinator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the coordinator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the coordinator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db coordinator session", "start a coordinator session", "start an orchestrator session", "be the coordinator", "I want to run a coordinator session", "open a coordinator session", or any cross-app data-contract change. NOTE: "coordinator" and "orchestrator" mean the SAME role — the skill is named orchestrator, every document says coordinator, and both phrasings must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
 
-> ## "Coordinator" and "orchestrator" are the same thing
+> ## The role is called ORCHESTRATOR. "Coordinator" is the OLD word for the same thing.
 >
-> This skill is named `shared-db-orchestrator`. Every document in `u2giants/shared-db`
-> — `AGENTS.md`, `HANDOFF.md`, the marker issue, the handover skill — calls the role
-> **coordinator**. One role, two words, for historical reasons.
+> Standardised on **orchestrator** on 2026-08-07 by the owner's instruction. Everything in
+> `u2giants/shared-db` now says orchestrator: `AGENTS.md`, `HANDOFF.md`, the skills, the
+> marker label.
 >
-> **If you were asked to "start a coordinator session", this is the skill.** There is no
-> separate coordinator skill and you have not missed one.
+> **"Coordinator" still appears in three places, and it means exactly this role:**
+> 1. **Older GitHub issues and their titles**, including any open orchestrator marker.
+> 2. **`HANDOFF.d/` files**, which are write-once records of past sessions and were
+>    deliberately NOT rewritten — editing another session's handover falsifies the record.
+> 3. **Git history and merged PR titles**, which cannot be changed.
+>
+> **If you were asked to "start a coordinator session", or to "hand over to the
+> coordinator", that is THIS skill and this role.** Do not go looking for a separate
+> coordinator skill; there has never been one.
+>
+> ⚠️ **The marker label was renamed** `coordinator-marker` → **`orchestrator-marker`** on
+> 2026-08-07. The rename carried existing issues with it. If a `gh issue list --label
+> coordinator-marker` returns empty, that is the rename, **not an empty board** — query
+> `orchestrator-marker`.
 >
 > The three `shared-db-*` skills, and which is which:
 >
 > | Skill | When |
 > |---|---|
-> | **`shared-db-orchestrator`** (this one) | You are RUNNING the session, or you need database work and must request it |
-> | `shared-db-change` | You are AUTHORING a schema change — the migration discipline itself |
-> | `shared-db-handover` | You are ENDING or STOPPING a session |
+> | **`shared-db-orchestrator`** (this one) | **OPENING and running** a session. You are in charge and you dispatch; you do no work yourself. Also the skill for anyone who needs database work and must request it. |
+> | `shared-db-change` | **AUTHORING** a schema change — the migration discipline itself |
+> | `shared-db-handover` | **ENDING or STOPPING** a session |
 
 `u2giants/shared-db` is the canonical repo for ONE Supabase Postgres database
 shared by four applications: **Poppim** (in development), and **PopCRM**,
@@ -29,13 +41,13 @@ change breaks all four at once, and the damage is usually discovered days later
 by a user, not by a test.
 
 The single biggest source of that damage is not bad SQL. It is **multiple AI
-sessions working the repo at the same time without a coordinator.** Every
+sessions working the repo at the same time without a orchestrator.** Every
 incident recorded in this skill traces back to two agents that did not know the
 other existed.
 
 Hence the shape of every shared-db session:
 
-> **ONE COORDINATOR. ALL WORK IN SUB-AGENTS. NOTHING OUTSIDE IT.**
+> **ONE ORCHESTRATOR. ALL WORK IN SUB-AGENTS. NOTHING OUTSIDE IT.**
 
 This skill EXTENDS, and does not replace, `shared-db-change` (how to author a
 correct migration), `handoff-writer` (the 9-section handoff standard) and
@@ -46,7 +58,7 @@ production promotion, §5.2 stale CI verdicts.
 ## If you need database work done: REQUEST it, do not start it
 
 This is the most common — and most commonly skipped — path in this repo. It
-applies to every session and every person who is **not** the current coordinator.
+applies to every session and every person who is **not** the current orchestrator.
 
 **Anyone who needs any of the following must file a request rather than act:**
 a schema change, a migration, an RLS policy, a view, an RPC or function, a
@@ -64,7 +76,7 @@ Add `--label needs-albert` if it needs an owner decision. Use `--body-file`, not
 heredoc: this is a PowerShell-first shop and heredoc recipes have silently failed here.
 
 Say, in the body: the outcome needed and why (business terms, not a schema design —
-state the problem and let the coordinator choose the shape); which applications depend
+state the problem and let the orchestrator choose the shape); which applications depend
 on it; whether it is blocking and how urgently; any deadline; what you already know
 about the current schema **and whether you read it live or in a document**; and
 explicitly **what you have NOT done** — no branch, no migration file, no push to
@@ -90,23 +102,23 @@ whether it touches the shared database is the test.
 **If you are an AI session and a user asks you for database work:** do not start
 it, do not "just check", do not open a migration file, and do not create a
 background task chip. Open the issue, tell the user in
-plain English that it is queued for the coordinator and give them the issue
+plain English that it is queued for the orchestrator and give them the issue
 link, and stop. Being asked directly by a user is not an exemption — the
-coordinator exists precisely because four sessions were each asked directly.
+orchestrator exists precisely because four sessions were each asked directly.
 
-## The coordinator's job — and the work it must refuse
+## The orchestrator's job — and the work it must refuse
 
-The coordinator session **reads reports, decides, asks Albert, dispatches.** That
+The orchestrator session **reads reports, decides, asks Albert, dispatches.** That
 is all. It performs **no** implementation work of its own:
 
 - no file edits, no commits, no pushes, no merges
 - no database calls of any kind
 - no long file reads it can delegate
 
-**Five exceptions, and only these — the coordinator's own bookkeeping.** They are
+**Five exceptions, and only these — the orchestrator's own bookkeeping.** They are
 the coordination surface itself, not work on the database. Do them yourself; do
 not dispatch an agent to record a dispatch.
-1. Open, re-check and close its **coordinator marker** issue (step 0).
+1. Open, re-check and close its **orchestrator marker** issue (step 0).
 2. **A dispatch comment on the issue** it is dispatching, at dispatch time, and
    queue seeding at handover.
 3. **Merge a docs-only handover PR** it finds open, or its own (step 2b).
@@ -116,17 +128,17 @@ not dispatch an agent to record a dispatch.
 Anything touching `supabase/`, application code, or the database is dispatched —
 no exceptions, however small.
 
-The reason is not purity, it is arithmetic. The coordinator's context window is
+The reason is not purity, it is arithmetic. The orchestrator's context window is
 the only place where the full picture of who-is-doing-what exists. Every token it
 spends reading a 700-line migration is a token it cannot spend keeping two agents
-from colliding. When the coordinator runs out of context, the session loses the
+from colliding. When the orchestrator runs out of context, the session loses the
 map, and the map is the whole value.
 
 If a task is small enough that delegating "feels like overkill" — delegate it
-anyway. The exception that ate a coordinator's context is the normal failure
+anyway. The exception that ate a orchestrator's context is the normal failure
 mode, not a hypothetical.
 
-**What the coordinator does do:** maintain the live register (below), write
+**What the orchestrator does do:** maintain the live register (below), write
 sub-agent briefs, read reports, spot contradictions between agents, escalate
 owner decisions to Albert in plain English, and write the handoff.
 
@@ -146,27 +158,27 @@ section with the date instead of deleting it. Details live in the
 
 ## At session start — the hygiene sweep (do this before dispatching anything)
 
-A coordinator that starts by trusting a document starts wrong. **Every startup is
-a recovery startup** — always assume the previous coordinator may have died
+A orchestrator that starts by trusting a document starts wrong. **Every startup is
+a recovery startup** — always assume the previous orchestrator may have died
 mid-handover, because one did (2026-08-05). There is no separate emergency mode.
 Run all eight steps, **in this order**, before the first brief goes out:
 
-0. **Claim the coordinator marker — before anything else.** One coordinator, on
+0. **Claim the orchestrator marker — before anything else.** One orchestrator, on
    one machine, at a time. The marker is a GitHub issue in `u2giants/shared-db`
-   labelled `coordinator-marker` — a tracked file cannot serve, because branch
-   protection puts it behind a PR and the coordinator does not commit.
-   `gh issue list --label coordinator-marker --state open`, then:
+   labelled `orchestrator-marker` — a tracked file cannot serve, because branch
+   protection puts it behind a PR and the orchestrator does not commit.
+   `gh issue list --label orchestrator-marker --state open`, then:
    - **A failed `gh` call is UNKNOWN, never "none open".** Empty output from an
      unauthenticated or erroring `gh` reads exactly like a clear board. Confirm
      the command succeeded before believing zero results.
    - **An open marker that is not yours: STOP, do not dispatch.** Show Albert its
      session id, machine and start time, and ask whether to close it. A dead
-     coordinator's marker stays open **on purpose**.
-   - **None open:** open `COORDINATOR ACTIVE — <session id> — <machine>` with the
+     orchestrator's marker stays open **on purpose**.
+   - **None open:** open `ORCHESTRATOR ACTIVE — <session id> — <machine>` with the
      start time, **list again**, and proceed only if exactly one is open and yours.
    - **Re-check before EVERY dispatch**, not only at startup — a stopped
-     coordinator can resume hours later on stale context and dispatch against live
-     work. Workers carry no lease and check nothing; this is the coordinator's
+     orchestrator can resume hours later on stale context and dispatch against live
+     work. Workers carry no lease and check nothing; this is the orchestrator's
      obligation alone. Close the marker at handover.
 1. **Establish ground truth from the repo, never from a Markdown file.**
    `git fetch --all --no-prune` — **not** `--prune=false`, which is not valid git
@@ -199,7 +211,7 @@ Run all eight steps, **in this order**, before the first brief goes out:
    the documents by date and pick a winner; that is document-shopping.
 
    **Never report the project idle on the strength of the queues alone** — on
-   2026-07-31 a coordinator did exactly that while ~20 jobs sat in the backlog
+   2026-07-31 a orchestrator did exactly that while ~20 jobs sat in the backlog
    (ledger §12).
 2b. **Check open pull requests — `gh pr list --state open`.** For each one: who
    opened it, is it a handover, is it parked deliberately? **A previous session's
@@ -226,7 +238,7 @@ Run all eight steps, **in this order**, before the first brief goes out:
    `shared-db-handover`.
 6. **Preview state starts as `UNKNOWN`, and only a sub-agent can resolve it.**
    Preview is a live mutable database; nothing in `git` can tell you what is
-   sitting on it, and the coordinator makes no database calls. Dispatch a
+   sitting on it, and the orchestrator makes no database calls. Dispatch a
    read-only **preview observer** and record `UNKNOWN` in the register until its
    report lands. **Dispatch no preview writer while it reads `UNKNOWN`.**
 7. **Release stale object claims.** `gh issue list --label db-claim --state open`.
@@ -276,7 +288,7 @@ What is **not** derivable is the assignment: which agent owns which files, which
 is alive, and who holds preview. Record that in the **`IN PROGRESS` annotations of
 `COORDINATOR_INTAKE.md`** at dispatch time (§B2.1) — that is its durable home, and
 the next handover PR carries those commits. A gitignored local scratch copy
-(`.claude/coordinator-register.local.md`) is fine as **crash convenience only**:
+(`.claude/orchestrator-register.local.md`) is fine as **crash convenience only**:
 it is a cache, never authority, it does not survive a change of machine, and
 session start always re-derives rather than trusting it.
 
@@ -305,7 +317,7 @@ for a file does not touch that file.
 This is the rule that exists because ignoring it nearly corrupted a production
 function.
 
-`spawn_task` chips launch **independent sessions outside the coordinator's
+`spawn_task` chips launch **independent sessions outside the orchestrator's
 control**. They do not see the register, do not know about each other, and start
 whenever the user clicks them — possibly days later, against a `main` that has
 moved.
@@ -322,17 +334,17 @@ the duplicate-version guard only ever sees one branch at a time.
 (`AGENTS.md` §6.7) which does catch this shape — so do not repeat the old line
 that "CI cannot catch it" and do not distrust a guard that works. It is **not**
 complete cover: `strict` is `false`, so a check can pass against a `main` that has
-since moved (§5.2). Treat it as a second pair of eyes, not as the coordinator.
+since moved (§5.2). Treat it as a second pair of eyes, not as the orchestrator.
 
 **Do instead:** write follow-ups to a backlog file in the repo (e.g.
-`docs/backlog/<topic>.md`). A backlog entry is inert until a coordinator reads it
+`docs/backlog/<topic>.md`). A backlog entry is inert until a orchestrator reads it
 and dispatches it with a current brief. If a chip is genuinely unavoidable, title
 it `DO NOT START — <what it is>` so a human click cannot start uncoordinated work.
 
 ## The migration rules that silently lie to you
 
 Read `references/incident-ledger.md` for the full incidents. The four that must be
-in the coordinator's head at all times:
+in the orchestrator's head at all times:
 
 1. **Duplicate 14-digit versions silently skip a migration.** Supabase's ledger
    keys on the version ALONE, not the filename. Two files sharing a version means
@@ -459,7 +471,7 @@ node scripts/check-dispatch-collision.mjs \
 
 ⚠️ **`--allocate-version` was withdrawn on 2026-08-07 and now exits `2`.** It
 never reserved anything: it read the versions already in use and printed a
-suggestion, so two coordinators running it in the same minute were handed the
+suggestion, so two orchestrators running it in the same minute were handed the
 same number — the duplicate-timestamp incident it claimed to prevent. Pick a
 version manually; duplicates are already blocked at merge by the `SQL migration
 guards` check.
@@ -493,11 +505,11 @@ plm.promote_coldlion_source_owned`. `create or replace` is last-writer-wins, so
 merging any two would have silently erased the other. At the moment each was
 dispatched **none of them had a pull request**, so the merge-time cross-PR guard
 had nothing to compare — and three of those four sessions were wasted no matter
-which guard caught it afterwards. A coordinator reasoning over task summaries
+which guard caught it afterwards. A orchestrator reasoning over task summaries
 does not reliably notice that two differently-worded tasks touch one function;
 comparing exact object names across everything in flight is string matching, and
 a script does it the same way every time, including on the days there is no
-coordinator at all.
+orchestrator at all.
 
 Every sub-agent then gets:
 
@@ -587,7 +599,7 @@ Ending, wrapping up, or handing over a shared-db session is a separate skill:
 **`shared-db-handover`**. Load it when the session ends, and do not write the
 handoff from memory here.
 
-The one thing to know while the session is still running: the coordinator handoff
+The one thing to know while the session is still running: the orchestrator handoff
 has **two halves** — (a) coordination state and (b) **one clearly headed block per
 sub-agent**. A handoff missing (b) is incomplete no matter how long it is. So keep
 the register current and record, per agent, what it was asked to do, what it

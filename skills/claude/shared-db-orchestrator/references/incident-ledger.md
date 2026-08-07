@@ -18,7 +18,7 @@ authored a forward migration doing `CREATE OR REPLACE` on the SAME function
   one branch. CI structurally cannot catch this.
 
 **Rule:** never spawn chips for shared-db work. Follow-ups go into a repo backlog
-file, inert until a coordinator dispatches them with a fresh brief. If a chip is
+file, inert until a orchestrator dispatches them with a fresh brief. If a chip is
 unavoidable, title it `DO NOT START — …`.
 
 ## 2. Duplicate migration versions silently skip a migration (2026-07-22, 2026-07-28)
@@ -183,7 +183,7 @@ kept off production (`AGENTS.md` §5.1).
 
 ## 17. The handover nobody could find (2026-08-05)
 
-A coordinator session was cut off mid-handover. The incoming coordinator ran the
+A orchestrator session was cut off mid-handover. The incoming orchestrator ran the
 five-step sweep exactly as written and concluded the session had been lost.
 Nothing had been lost. Five separate defects in the skills produced that verdict:
 
@@ -211,5 +211,5 @@ conceded the heavier design):
 - **A committed register file was proposed and rejected.** Most of the register is
   derivable in seconds, so persisting it only manufactures another stale document;
   and branch protection would put a PR between every dispatch. Replaced by the
-  coordinator marker (issue-based, cross-machine, stop-and-ask) plus `IN PROGRESS`
+  orchestrator marker (issue-based, cross-machine, stop-and-ask) plus `IN PROGRESS`
   annotations for the non-derivable assignment state.

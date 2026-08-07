@@ -1,36 +1,36 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the coordinator. TWO paths. (A) You are NOT the coordinator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the coordinator", "hand your work to the coordinator", "hand your work to the orchestrator", "hand this off to the coordinator", "you are not the coordinator", "another session is coordinating this", "there is already a coordinator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the coordinator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A coordinator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a coordinator session is opened and run.
+description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the orchestrator. TWO paths. (A) You are NOT the orchestrator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the orchestrator", "hand your work to the orchestrator", "hand your work to the orchestrator", "hand this off to the orchestrator", "hand your work to the coordinator", "hand this off to the coordinator", "you are not the coordinator", "there is already a coordinator" (COORDINATOR is the older word for the ORCHESTRATOR role, still used in older issues and in git history, and must trigger this skill too), "you are not the orchestrator", "another session is coordinating this", "there is already a orchestrator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the orchestrator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A orchestrator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a orchestrator session is opened and run.
 ---
 
 # shared-db-handover
 
-## FIRST: are you the coordinator? Answer this before anything else
+## FIRST: are you the orchestrator? Answer this before anything else
 
-`u2giants/shared-db` runs **ONE coordinator session at a time**, and that
-coordinator dispatches every piece of work to sub-agents in isolated worktrees
+`u2giants/shared-db` runs **ONE orchestrator session at a time**, and that
+orchestrator dispatches every piece of work to sub-agents in isolated worktrees
 (see `shared-db-orchestrator`). Handing over means something completely
 different depending on which you are, so settle it first.
 
-**You are the coordinator only if** this session was opened as the coordinator —
+**You are the orchestrator only if** this session was opened as the orchestrator —
 it has been maintaining the live register, writing sub-agent briefs, and reading
 their reports. If you were started to *do* a piece of shared-db work, or you have
-just realised you are working in this repo without being the coordinator, you are
-**not** the coordinator. When in doubt, you are not.
+just realised you are working in this repo without being the orchestrator, you are
+**not** the orchestrator. When in doubt, you are not.
 
 Then take exactly one path:
 
-- **NOT the coordinator → path (A) below.** Stop and file an intake block.
-- **The coordinator → path (B), the rest of this skill.**
+- **NOT the orchestrator → path (A) below.** Stop and file an intake block.
+- **The orchestrator → path (B), the rest of this skill.**
 
 ---
 
-## (A) You are NOT the coordinator — stop, and file into the intake queue
+## (A) You are NOT the orchestrator — stop, and file into the intake queue
 
 **Stop working now.** Do not continue the task, and do not commit, push, merge,
 apply, promote, or write anything further to any database. Do not create
 background task chips. Do not delete or clean up your worktree or branch — the
-coordinator may resume them, and an agent that tidies itself away destroys the
+orchestrator may resume them, and an agent that tidies itself away destroys the
 evidence.
 
 **Do exactly one thing: open a GitHub issue** on `u2giants/shared-db` describing
@@ -105,12 +105,12 @@ opened one. Do not start anything else, and do not "just finish this one thing".
 
 ---
 
-## (B) You ARE the coordinator — the two-halves handover
+## (B) You ARE the orchestrator — the two-halves handover
 
 The end of a `u2giants/shared-db` session. This skill exists because the normal
-handoff is not enough here: a shared-db session is run by a **coordinator** that
+handoff is not enough here: a shared-db session is run by a **orchestrator** that
 dispatched sub-agents (see the `shared-db-orchestrator` skill), and the next
-coordinator has to be able to resume or retire **each agent individually**.
+orchestrator has to be able to resume or retire **each agent individually**.
 
 > **This skill does not replace `handoff-writer`.** Follow that skill's file
 > convention (one write-once file at
@@ -121,8 +121,8 @@ coordinator has to be able to resume or retire **each agent individually**.
 
 ## The handoff has TWO halves — and a REQUIRED queue seed
 
-A coordinator handoff that omits half (b) is **incomplete**, no matter how long
-it is. **A coordinator handoff that leaves the `REQUEST QUEUE` in
+A orchestrator handoff that omits half (b) is **incomplete**, no matter how long
+it is. **A orchestrator handoff that leaves the `REQUEST QUEUE` in
 `COORDINATOR_INTAKE.md` un-seeded is equally incomplete**, and carries exactly
 the same weight — see "Seed the queue" below.
 
@@ -156,19 +156,19 @@ or, worse, undoes a deliberate omission.
 
 ## Seed the queue — REQUIRED, and a handover without it is INCOMPLETE
 
-**Before you call the handover done, the outgoing coordinator MUST seed or
+**Before you call the handover done, the outgoing orchestrator MUST seed or
 open or update an issue for EVERY outstanding
 item** — everything in `HANDOFF.md`'s opening agenda, its "waiting on Albert"
 list, and its `## BACKLOG` section, plus anything you dispatched that did not
 finish. Nothing outstanding may exist only in `HANDOFF.md` prose.
 
-**Why this rule exists — 2026-07-31.** A fresh coordinator opened a session, read
+**Why this rule exists — 2026-07-31.** A fresh orchestrator opened a session, read
 the `REQUEST QUEUE`, `INTAKE QUEUE` and `IN PROGRESS` sections of
 `COORDINATOR_INTAKE.md` exactly as `shared-db-orchestrator` instructs, found all
 three empty, and reported **"there is no pending work"** while roughly **twenty
 real jobs** sat in `HANDOFF.md`'s `## BACKLOG`. Every word of that report was
 true and the conclusion was completely wrong. The cause was not the incoming
-session: the **outgoing** coordinator had written a long narrative handover and
+session: the **outgoing** orchestrator had written a long narrative handover and
 never populated the queue, because nothing in this standard required it. It does
 now.
 
@@ -219,7 +219,7 @@ Three passes, and then a fourth that is just honesty:
    section above. This is not optional tidying: a handover that leaves the queue
    un-seeded is **incomplete**, in exactly the same way as one missing the
    per-sub-agent blocks. On 2026-07-31 an un-seeded queue caused a fresh
-   coordinator to report "there is no pending work" over a twenty-item backlog.
+   orchestrator to report "there is no pending work" over a twenty-item backlog.
 
 3. **Flag anything you deliberately left.** A worktree you chose not to touch, a
    branch you left alive, a request you decided not to dispatch — each gets one
@@ -286,15 +286,15 @@ The handover is where unverified claims become someone else's false assumptions.
    says never leave an open PR behind.
 
    This split exists because the old blanket "never merge on the way out" is what
-   stranded the **2026-08-05** handover in open PR #451. The next coordinator read
+   stranded the **2026-08-05** handover in open PR #451. The next orchestrator read
    `main`, saw a five-day-old handover, and concluded the session had been lost.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
-5b. **Close your coordinator marker** — the open GitHub issue labelled
-   `coordinator-marker` you opened at step 0 of the orchestrator sweep. Close it
+5b. **Close your orchestrator marker** — the open GitHub issue labelled
+   `orchestrator-marker` you opened at step 0 of the orchestrator sweep. Close it
    **last**, after the handover PR is merged. Leaving it open makes the next
-   coordinator stop and ask Albert about a session that ended cleanly; that stop
-   is the correct behaviour for a *dead* coordinator and pure noise for a clean
+   orchestrator stop and ask Albert about a session that ended cleanly; that stop
+   is the correct behaviour for a *dead* orchestrator and pure noise for a clean
    handover. If you are handing over without ending (a fresh session continues
    immediately), say so in the issue and leave it open deliberately.
 6. **Run the closers:** `session-docs-update` for the documentation ritual and
@@ -303,7 +303,7 @@ The handover is where unverified claims become someone else's false assumptions.
 7. **Confirm the sweep above was actually run** — queue blocks moved on, every
    "finished" branch confirmed merged and its worktree retired, and everything
    you deliberately left behind flagged as a decision. This is a checklist item,
-   not a nicety: an unswept repo is how the next coordinator inherits phantom
+   not a nicety: an unswept repo is how the next orchestrator inherits phantom
    worktrees and branches nobody dares delete.
 8. **Confirm the `REQUEST QUEUE` is seeded.** Open `COORDINATOR_INTAKE.md` and
    check that every outstanding item — the opening agenda, the waiting-on-Albert
@@ -322,7 +322,7 @@ The handover is where unverified claims become someone else's false assumptions.
   thresholds here; the file changes hourly and the file wins.
 - `shared-db-orchestrator` — how the session is opened and run (the request path
   for anyone who needs database work, the session-start hygiene sweep,
-  coordinator + sub-agents, single-writer ownership, the never-use-task-chips
+  orchestrator + sub-agents, single-writer ownership, the never-use-task-chips
   rule, and the incident ledger behind each rule).
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
   never improvise a forced removal.
