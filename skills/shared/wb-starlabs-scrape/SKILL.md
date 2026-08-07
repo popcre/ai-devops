@@ -45,6 +45,19 @@ After the last batch, close the Add Design dialog without pressing OK, then relo
 
 Use the Product page as direct relationship evidence when its list is safely available. Warner's Character list is broader than people: it can include vehicles, locations, logos, groups, combined elements, and royalty placeholders. Preserve first; classify later. Treat any `WW` code as ambiguous because internal systems have used it for both WWE and Wonder Woman.
 
+## Site-wide direct style-guide relationship audit
+
+A 2026-08-07 audit covered every reachable STARLABS page: Home, Product, Packaging, Marketing, Jobs, Art Assets, and Licensee Help. It also checked the loaded STARLABS page components and submission application code. No page or read operation exposed a direct style-guide-to-property or style-guide-to-character relationship.
+
+Keep these evidence types separate:
+
+- Product and Packaging expose direct Property-to-Character choices through `javascript.SearchField` using `contract:property` and `property_schema:character`.
+- Art Assets exposes independent Franchise/Property, Style Guide, and Character aggregations plus asset metadata. These are parallel asset fields, not a style-guide hierarchy.
+- The Product/Packaging asset picker can display `public:styleGuideName` on an asset while filtering the available assets by `public:property`. That is asset metadata, not a direct guide-to-property link. The picker also excludes style-guide-package, printable-style-guide, and brand-guideline themes.
+- Marketing, Jobs, Home, and Help expose no direct style-guide relationship control or data operation.
+
+Therefore, do not create direct style-guide-to-property or style-guide-to-character rows from asset co-occurrence. Such rows are inferred through an asset and must be stored separately and labeled as inferred if the downstream model needs them. Create a direct link only if Warner later exposes a dedicated field, endpoint, or catalogue that explicitly returns both source identities as one relationship.
+
 ## Art Assets scrape
 
 Use Art Assets for franchises/properties, style guides, characters, files, and their source relationships. The Nuxeo provider is `WBCPAssetSearchPublic`. Its visible page size can vary, and the provider safely accepted a read-only page size of 1,000 on 2026-08-07. Observed fields include `public:property`, `public:styleGuideName`, and `public:character`; property and character can be multi-value.
