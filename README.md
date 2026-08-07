@@ -212,6 +212,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task "<task>"` | Scaffold a new staged task run (v0.1) |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.2 sessions (see docs/glm-opencode.md) |
+| `ai-doc-reachability --repo . --base <ref>` | Block new or moved Markdown that no living root can reach |
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
 `visual-review`, `final-check`.
@@ -235,6 +236,11 @@ install.sh      Install/verify deps, config, symlinks; runs doctor
 update.sh       Pull + re-install (keeps existing config)
 uninstall.sh    Remove symlinks (keeps config/auth unless flagged)
 ```
+
+New documentation is protected by the shared
+[Markdown reachability gate](docs/doc-reachability.md). It blocks pull requests
+that add, copy, or move a Markdown file without a real link path from a living
+root document, while leaving legacy orphan cleanup to normal repository work.
 
 ---
 

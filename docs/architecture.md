@@ -18,6 +18,7 @@ a script you run from the shell (installed as symlinks in `/usr/local/bin`).
 | Second-opinion review | `bin/ai-codex-review` | Read-only Codex review; writes `.ai/reviews/<ts>-<mode>.md` |
 | Model invocation | `bin/ai-model-call` | Maps a stage name → `*_CMD` from `models.env`, pipes a prompt in, writes output (v0.1) |
 | Task scaffold | `bin/ai-run-task` | Creates `.ai/runs/<ts>-<slug>/`, records request + workspace status (v0.1, no code edits) |
+| Documentation reachability | `bin/ai-doc-reachability`, `.doc-reachability.json`, reusable workflow | Blocks PR-added, copied, or moved Markdown that no configured root can reach; legacy orphans are not gated |
 | Lifecycle | `install.sh`, `update.sh`, `uninstall.sh` | Install/update/remove the toolkit on a host |
 | Prompts | `templates/prompts/01..07` | One Markdown prompt per workflow stage |
 | Config seed | `config/*.env.example` | Seeds `/etc/ai-devops/*.env` on install |
