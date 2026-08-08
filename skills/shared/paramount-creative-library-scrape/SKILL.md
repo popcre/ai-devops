@@ -56,13 +56,17 @@ Do not infer Collection-to-Character or Property-to-Character links from names o
 5. Expand `Show more...` inside the named facet panel when needed. Bind reads to that panel. Do not read a cross-panel run of checkboxes because adjacent panels can be mistaken for Character rows.
 6. Verify every clicked facet is actually checked after the asynchronous refresh. A click can appear to succeed while the page rerenders.
 7. Read the current result count, Property values, Collection values, Character values, and their asset counts. Treat these as discovery data, not proof of direct relationships. Treat blank buckets rendered as `undefined` as missing source data, not as a real identity.
-8. Page assets in stable, resumable batches. The default is 25 assets per page. Fingerprint each page with its first and last asset IDs and stop if a page repeats.
-9. Preserve exact labels, punctuation, capitalization, whitespace, file names, source IDs, counts, and observed relationships. Do not clean or merge names during extraction.
-10. Restore the user's original useful view and leave the tab open unless the user asked for it to be closed.
+8. Set the results view to 200 assets per page when the UI offers it. Cards are lazy-loaded: scroll the results wrapper to its full height repeatedly, then collect every `ot-resource` by `ot-resource-index`. Read the real asset ID from `resourceid` and the exact file name from the child `ot-metadata[title]`.
+9. Page in durable, resumable chunks. Save progress after every page, including page number, expected count, first and last asset IDs, and every collected ID. At numbered-page group boundaries, use the visible `Next Page` control to reveal the next group before selecting its page. After navigation, wait until the first asset ID changes; otherwise the prior page can be captured twice.
+10. Require each completed page to contain the expected unique index range. Fingerprint it with its first and last asset IDs. Stop and report any repeated page, missing index, duplicate ID, or page whose visible result count changed during capture.
+11. Preserve exact labels, punctuation, capitalization, whitespace, file names, source IDs, counts, and observed relationships. Do not clean or merge names during extraction.
+12. Restore the user's original useful view and leave the tab open unless the user asked for it to be closed.
 
 ## Use the clean search response
 
 Prefer the portal's own authenticated search response over visual card scraping. Observe the normal UI request to `POST /otmmapi/v6/search/text`; do not copy or replay its credentials outside the browser.
+
+Run requests only inside the authenticated browser page. Browser-side `fetch` through the controlled tab is acceptable because the page supplies its own session. Never extract credentials to a terminal process. Block rendition and thumbnail endpoints in the controlled tab when practical so metadata capture does not pull creative previews.
 
 The response provides:
 
@@ -72,6 +76,20 @@ The response provides:
 - `total_hit_count`, `offset`, and other page facts.
 
 The search facet named `CHARACTER_ID` is misleading: its facet value and filter request use the display name, not the real numeric character ID. Do not treat the facet name as proof that an ID was captured.
+
+## Resolve licensed scope before the full capture
+
+Do not use free-text file-name search as the licensed scope. A licensed title can return zero text results while an exact Property or Franchise exists, and a text result can include assets outside the licensed Property.
+
+For every allowlisted business title:
+
+1. Resolve all exact Paramount Property and Franchise labels through their named facet panels or Property directory. Record the business-title-to-source-label aliases in the private output.
+2. Capture each exact Property or Franchise result set. Use free-text search only as discovery evidence.
+3. Union asset IDs across all authorized source labels, then deduplicate by the 40-character asset ID before requesting full metadata.
+4. Preserve per-label totals and overlaps. Do not add result counts to claim a unique total.
+5. Mark a title complete only when every resolved source label has all pages captured, all unique asset IDs have full metadata, and all failures are empty or explicitly documented.
+
+Search URLs and inherited requests can retain a hidden `LAYOUT` or other prior-view filter. Before trusting a capture, inspect the safe filter fields and remove unrelated inherited filters. A clean title or Property result must contain only the intended scope filters.
 
 ## Find real Property, Collection, Character, and Franchise IDs
 
@@ -95,9 +113,16 @@ For either combined relationship field, require exactly one `^` and exactly two 
 
 Do not log the full metadata response. Extract only the identity fields and relationship fields required by the private output contract.
 
+The search index is not the final scrape. Fetch `level_of_detail=full` metadata for every deduplicated authorized asset ID, in resumable browser-side batches, and persist each response immediately in the private repository. A run with complete file names but partial full metadata is incomplete.
+
 ## Completeness and quirks
 
 - The portal pages assets in chunks; it does not return the entire asset catalogue in one page.
+- The UI can show 200 assets per page even though the normal search response commonly uses 25. Do not assume either size; read the active page size and expected last-page remainder.
+- Result cards are virtualized or lazy-loaded. Reading the DOM before scrolling to the bottom returns only part of the page.
+- Numbered pagination is grouped. A later page number may not exist until `Next Page` advances the visible group.
+- A page click can finish before its cards refresh. Wait for the first asset ID to differ from the prior page.
+- Long browser calls can time out without saving in-memory work. Keep each call bounded and checkpoint to disk after every page or metadata batch.
 - All facet values for the current filtered result can arrive together in one search response. This does not mean the whole Paramount catalogue arrived.
 - Facet panels initially show five values and `Show more...`; this is a display preview, not a five-row cap.
 - Blank facet buckets appear as `undefined` or missing `value` fields.
@@ -105,6 +130,8 @@ Do not log the full metadata response. Extract only the identity fields and rela
 - No duplicate-name or capitalization-only duplicate audit has been completed. Key on source IDs, never names, when IDs exist.
 - Characters, Collections, and Franchises can appear name-only in slim search results while their numeric IDs remain available in full asset metadata. Never copy a display name into an ID field.
 - Character-related classification can exist while both the Character identity and cascading relationship are empty. Record the missing link; never infer it from the file name, card text, or active filter.
+- A zero free-text result is not proof that a licensed Property is absent. Retry through the exact Property and Franchise facets.
+- A successful asset index is not proof of relationship completeness. Relationship tables require full metadata for every indexed asset.
 - Account access is broad across several Paramount brands, but the portal did not prove that the account sees all Paramount content. Describe every capture as the account-entitled, point-in-time view.
 
 ## Output and database boundary
@@ -119,6 +146,15 @@ Treat source relationships as the deliverable. Capture:
 - asset ID, exact file name, size, source dates, and listed non-media metadata;
 - explicit Property-to-Character, Property-to-Collection, asset-to-Property, asset-to-Collection, and asset-to-Character links;
 - capture time, URL, filters, account entitlement caveat, page progress, and failures.
+
+Maintain a private reconciliation summary with, for each licensed business title: resolved source labels, reported result total, captured page count, indexed unique asset count, full-metadata count, duplicate count, malformed relationship count, and failures. The overall completion gate is:
+
+- every allowlisted title resolved or explicitly reported unresolved;
+- every authorized result page captured;
+- every unique authorized asset has one valid full-metadata record;
+- every explicit caret pair validates and appears in the matching link output;
+- aggregate counts reconcile after deduplication;
+- no licensed row appears in public repositories, commit messages, or pull-request text.
 
 Keep raw source identities separate from canonical POP records. Reconciliation and promotion are later, idempotent database work. Never infer a missing relationship or manufacture an ID.
 

@@ -95,7 +95,11 @@ search_result_resource
 
 Facet records include `field_name`, `_facet_field_request`, `_facet_value_list`, and value objects with `value` and `asset_count`.
 
-The normal asset result uses 25 assets per page. The full result is paged. Facet values for one filtered result can arrive in a single response.
+The normal search response commonly uses 25 assets per page. The results UI can be changed to 200 per page. The full result is paged in either case. Facet values for one filtered result can arrive in a single response.
+
+The 200-item UI uses lazy-loaded `ot-resource` cards. Each card's `resourceid` is the real asset ID, `ot-resource-index` is its position on the current page, and a child `ot-metadata` `title` carries the displayed file name. Repeatedly scroll the results wrapper to its full height before reading the page. Numbered page controls are grouped; use the visible `Next Page` control to reveal the next group. After selecting a new page, wait for its first `resourceid` to change before collecting it.
+
+Free-text search is not a rights boundary. A business title can return zero text matches while its Property exists, and text matches can span multiple Properties. Resolve the licensed allowlist to exact Property and Franchise facets, capture those scoped results, and deduplicate their asset IDs.
 
 ## Identity formats
 
@@ -199,7 +203,16 @@ Treat the pair as authoritative. The visible Collection filter uses the display 
 - Assuming the account sees all Paramount content is unsupported.
 - Printing complete Chrome network events is unsafe because request headers can include a live bearer token. Sanitize before output.
 - Double-clicking an asset can open download configuration rather than a metadata detail page. Use it only as a deliberate metadata-load step and cancel without clicking Finish.
+- Trusting free-text title totals as the licensed asset total is wrong. Use exact Property and Franchise scope, then deduplicate IDs across source labels.
+- Treating zero free-text matches as a missing Property is wrong. Check the Property directory and named facet panels.
+- Reading one 200-item page before forcing lazy loading silently misses cards.
+- Clicking a later page and reading immediately can duplicate the prior page because cards refresh asynchronously. Wait for the first asset ID to change.
+- Holding a large run only in browser memory loses progress when a control call times out. Persist every completed page and metadata batch.
+- Reusing a full-metadata request copied from another view can retain a hidden `LAYOUT` filter. Remove unrelated inherited filters and verify the safe request fields before trusting its scope.
+- A complete card index is not a complete scrape. Every authorized asset still needs full metadata before IDs and relationships can be reconciled.
 
 ## Capture estimate
 
-Property, Collection, Character, and relationship capture for a bounded rights list should take hours rather than days when the clean facet response and full metadata are used. Capturing every asset takes longer because asset results are paged. The largest design risks are business-name-to-source-name mapping, overlapping many-to-many relationships, name-only Collections, blank buckets, and ensuring every source ID comes from full metadata rather than a display label.
+Do not estimate a full capture from a small reconnaissance sample. One licensed title can contain tens of thousands of search results. Indexing is only the first pass; full metadata must then be fetched for every deduplicated authorized asset. Use page and metadata checkpoints so a timeout resumes from durable progress instead of restarting.
+
+The largest design risks are business-name-to-source-name mapping, false confidence from free-text searches, overlapping many-to-many relationships, lazy-loaded pages, grouped pagination, inherited hidden filters, name-only Collections, blank buckets, and ensuring every source ID comes from full metadata rather than a display label.
