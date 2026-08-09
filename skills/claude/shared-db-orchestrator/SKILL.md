@@ -123,7 +123,9 @@ not dispatch an agent to record a dispatch.
    queue seeding at handover.
 3. **Merge a docs-only handover PR** it finds open, or its own (step 2b).
 4. The **handoff files** it writes at the end (`HANDOFF.d/`).
-5. Moving intake blocks to `TAKEN OVER`.
+5. **Commenting on and closing** the `db-work` issues it has taken over.
+   *(Corrected 2026-08-09: this said "moving intake blocks to `TAKEN OVER`" —
+   that was the retired `COORDINATOR_INTAKE.md` workflow.)*
 
 Anything touching `supabase/`, application code, or the database is dispatched —
 no exceptions, however small.
@@ -154,9 +156,11 @@ session and whenever Albert says he has stopped another session.
 
 **Verify every claim in a filed block against the live repo before acting on it**
 (`git fetch --all`, `gh pr list`, `git worktree list`, the real maximum migration
-version). After dispatching the work, move the block to the file's "TAKEN OVER"
-section with the date instead of deleting it. Details live in the
-`shared-db-handover` skill.
+version). After dispatching the work, **comment on the issue** saying who you
+dispatched it to and when, and close it when the work lands — never delete the
+record. *(Corrected 2026-08-09: this said "move the block to the file's TAKEN
+OVER section", which was the retired `COORDINATOR_INTAKE.md` workflow.)* Details
+live in the `shared-db-handover` skill.
 
 ## At session start — the hygiene sweep (do this before dispatching anything)
 
@@ -185,9 +189,10 @@ Run all eight steps, **in this order**, before the first brief goes out:
 1. **Establish ground truth from the repo, never from a Markdown file.**
    `git fetch --all --no-prune` — **not** `--prune=false`, which is not valid git
    and fails with `option 'prune' takes no value`, leaving you on stale refs
-   while looking like you fetched; and **not** bare `--prune`, which
-   `COORDINATOR_INTAKE.md` §B2.3 forbids while agents may be live, and at step 1
-   you do not yet know whether any are. Then read `origin/main`'s **real** tip SHA and the
+   while looking like you fetched; and **not** bare `--prune`, which is forbidden
+   while agents may be live, and at step 1 you do not yet know whether any are.
+   *(The rule stands; its old citation to `COORDINATOR_INTAKE.md` §B2.3 died with
+   that file on 2026-08-07 — corrected 2026-08-09.)* Then read `origin/main`'s **real** tip SHA and the
    **real** maximum 14-digit version in `supabase/migrations/` (and check for
    duplicate prefixes while you are there). `HANDOFF.md`, the cutover plan and
    this skill are all capable of being hours out of date; the repo is not.
@@ -271,10 +276,12 @@ flagged, not resolved**. Then **verify each flagged contradiction yourself again
 the repo**: a summary is a document like any other, so "re-derive from `git`/`gh`"
 applies to it too.
 
-**Lifecycle and retention for the queues live in `COORDINATOR_INTAKE.md`** —
-how long blocks stay, when they move between sections, and when they are aged
-out. Follow that file rather than any threshold restated elsewhere; do not
-restate its numbers in a brief, point the agent at the file.
+⚠️ **Corrected 2026-08-09.** This used to say *"Lifecycle and retention for the
+queues live in `COORDINATOR_INTAKE.md` — follow that file."* **That file is
+retired** (2026-08-07) and is now a 37-line pointer; a required `Intake pointer
+guard` check fails any PR that regrows it. **GitHub issues are the queue**, and
+their lifecycle is GitHub's: open, comment at dispatch, close when the work lands.
+There is no separate retention table to consult.
 
 ## The live register — rebuild it, don't store it
 
@@ -287,9 +294,11 @@ committed register file would only manufacture another stale document, which is
 the disease this skill treats. **Rebuild the derivable rows at every startup.**
 
 What is **not** derivable is the assignment: which agent owns which files, which
-is alive, and who holds preview. Record that in the **`IN PROGRESS` annotations of
-`COORDINATOR_INTAKE.md`** at dispatch time (§B2.1) — that is its durable home, and
-the next handover PR carries those commits. A gitignored local scratch copy
+is alive, and who holds preview. Record that in a **dispatch comment on the
+GitHub issue** you are dispatching, at dispatch time — that is its durable home.
+⚠️ **Corrected 2026-08-09:** this used to name the `IN PROGRESS` annotations of
+`COORDINATOR_INTAKE.md` (§B2.1). That file is retired; the issue comment replaces
+it. A gitignored local scratch copy
 (`.claude/orchestrator-register.local.md`) is fine as **crash convenience only**:
 it is a cache, never authority, it does not survive a change of machine, and
 session start always re-derives rather than trusting it.
@@ -335,8 +344,13 @@ the duplicate-version guard only ever sees one branch at a time.
 **Since then the repo added a required `Cross-PR object collision` check**
 (`AGENTS.md` §6.7) which does catch this shape — so do not repeat the old line
 that "CI cannot catch it" and do not distrust a guard that works. It is **not**
-complete cover: `strict` is `false`, so a check can pass against a `main` that has
-since moved (§5.2). Treat it as a second pair of eyes, not as the orchestrator.
+complete cover, but *not* for the reason this skill used to give. ⚠️ **Corrected
+2026-08-09: this said "`strict` is `false`". It is `true`** — the owner turned
+"require branches to be up to date before merging" ON on 2026-08-06 and ruled it
+must not be turned back off (`AGENTS.md` §6.7). So a check can no longer pass
+against a `main` that has since moved. What remains true is that a green tick can
+still be a **stale verdict from an older commit** (§5.2) — check the run's
+`head_sha`. Treat the guard as a second pair of eyes, not as the orchestrator.
 
 **Do instead:** write follow-ups to a backlog file in the repo (e.g.
 `docs/backlog/<topic>.md`). A backlog entry is inert until a orchestrator reads it

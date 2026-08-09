@@ -27,7 +27,7 @@ Preserve Paramount's terms in the source layer:
 3. Capture names and metadata only. Never download artwork, PDFs, style guides, previews, videos, or original files. Opening a custom-download dialog solely to make the UI load full metadata is permitted; cancel it without accepting terms or clicking Finish.
 4. Work only from the user's current licensed-property allowlist. Do not scrape all Paramount properties. Keep the allowlist, extracts, and sample rows out of this public `ai-devops` repository.
 5. Store licensed extracts only in the approved private source-data repository and path. Never put them in `shared-db`, this repo, a paste service, logs sent to outside AI services, commit messages, or PR text.
-6. Do not perform database work from this skill. Route schema or load work through the active `shared-db` coordinator.
+6. Do not perform database work from this skill. Route schema or load work to the active `shared-db` orchestrator by opening a GitHub issue — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>` — and stop.
 
 When using Chrome network inspection, never print raw request headers or whole request events. They can contain a live `Authorization` header. Emit only sanitized method, path, safe request fields, and the small response fields needed for the task.
 

@@ -10,6 +10,30 @@ description: Discipline for ANY change to the shared supabase.com backend from a
 (designflow). Every app reads/writes the same tables, so a schema change made in
 one app repo can silently break another. All durable DB truth lives in shared-db.
 
+> ## ⚠️ Read this before anything below. Corrected 2026-08-09 (issue #574).
+>
+> **`AGENTS.md` in `u2giants/shared-db` is the live rulebook and WINS over this file
+> wherever they disagree.** This skill is a portable summary and it had drifted badly.
+>
+> 1. **The preview project ref in this file was WRONG.** It said
+>    `<removed-protected-project-ref>`, which is not a project in this account. Preview is
+>    **`<removed-protected-project-ref>`** (Supabase branch `shared-db-schema-rehearsal`);
+>    production is `<removed-protected-project-ref>`. Fixed throughout.
+> 2. **You almost certainly may not do this work yourself.** `shared-db` runs **one
+>    orchestrator session** and every other session **stops and opens a GitHub issue**:
+>    `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
+>    Read the procedure below as *how a dispatched agent authors the change*, never as
+>    permission to start one.
+> 3. **Prove which database you are on before every write** — `AGENTS.md` §4.2, an owner
+>    ruling. Immediately before any statement that writes, changes or removes data,
+>    schema or privileges (preview included), read `cat supabase/.temp/project-ref`, and
+>    quote the value in your report. A ref read ten minutes ago proves nothing.
+> 4. **Never reuse a migration timestamp.** The ledger keys on the version alone, so a
+>    duplicate makes one migration **silently skip**. Pick a version above the current
+>    maximum, by hand.
+> 5. **Never create background task chips for this repo.** Four of them once wrote
+>    competing `CREATE OR REPLACE` migrations against the same function.
+
 ## The one rule
 
 **Never make a schema/DDL change from an app repo, and never run direct DDL
@@ -41,13 +65,21 @@ change is applied.
    (1Password `Supabase DB Password - shared POP database` for prod; the preview
    item for `<removed-protected-project-ref>`):
    ```bash
-   supabase link --project-ref <removed-protected-project-ref>   # preview first
+   cat supabase/.temp/project-ref            # PROVE the target (AGENTS.md §4.2)
+   supabase link --project-ref <removed-protected-project-ref>   # preview ONLY
    supabase db push --dry-run   # must be clean: only your change
+   cat supabase/.temp/project-ref            # prove again, immediately before the push
    supabase db push
-   # then production:
-   supabase link --project-ref <removed-protected-project-ref>
-   supabase db push --dry-run && supabase db push
    ```
+
+   ⚠️ **Corrected 2026-08-09: this block used to continue straight into
+   `supabase link --project-ref <removed-protected-project-ref> && supabase db push`. Do NOT
+   promote to production that way.** Production almost always carries pending
+   migrations from other workstreams that other teams have deliberately kept off it,
+   so a plain `db push` either refuses or sweeps up work that was never approved.
+   Production promotion requires **Albert's explicit approval for that exact change**,
+   the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout recipe. It is
+   the orchestrator's call, not this skill's. Stop and ask.
    If a change was already applied out-of-band, use `supabase migration repair
    --status applied <version>` to record it (metadata only, no SQL re-run). If the
    dry-run reports "Remote migration versions not found in local migrations

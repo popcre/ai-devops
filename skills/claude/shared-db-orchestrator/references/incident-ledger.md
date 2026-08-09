@@ -211,5 +211,7 @@ conceded the heavier design):
 - **A committed register file was proposed and rejected.** Most of the register is
   derivable in seconds, so persisting it only manufactures another stale document;
   and branch protection would put a PR between every dispatch. Replaced by the
-  orchestrator marker (issue-based, cross-machine, stop-and-ask) plus `IN PROGRESS`
-  annotations for the non-derivable assignment state.
+  orchestrator marker (issue-based, cross-machine, stop-and-ask) plus, for the
+  non-derivable assignment state, a **dispatch comment on the `db-work` issue**.
+  *(Corrected 2026-08-09: this said `IN PROGRESS` annotations, which lived in
+  `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*

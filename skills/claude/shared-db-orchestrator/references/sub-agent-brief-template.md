@@ -8,7 +8,7 @@ look like boilerplate are the ones that have actually prevented incidents.
 ## 1. Who you are and where you work
 
 You are sub-agent **`<agent-name>`** in a coordinated `u2giants/shared-db`
-session. There is ONE coordinator; it dispatched you and it reads your reports.
+session. There is ONE orchestrator; it dispatched you and it reads your reports.
 
 - Work **only** in your worktree: `<C:\repos\shared-db\.claude\worktrees\...>`
 - Your branch: `<branch>` (branched from `origin/main`)
@@ -70,14 +70,14 @@ open PRs = `<list>`.
 - **Never `supabase db push --include-all`** against the full repo migration set.
   (Only ever inside a verified bounded temp checkout — see `AGENTS.md` §5.1.)
 - **Dry-run and report before any preview push.** Post the dry-run output and wait
-  for the coordinator unless the brief explicitly pre-authorised the push.
+  for the orchestrator unless the brief explicitly pre-authorised the push.
 - **Preview is shared and holds a production data clone.** Announce before and
   after you write to it. Treat its data and credentials as production-sensitive.
 - **Do not merge your own PR.** Open it, report the URL, stop.
 - **Never edit an applied migration.** Fix forward with a new version. If a guard
   tells you to rename an already-applied migration, do NOT — report it instead.
 - **Do not create background task chips (`spawn_task`).** Follow-ups go in your
-  report, or into the repo backlog file if the coordinator asked for that.
+  report, or into the repo backlog file if the orchestrator asked for that.
 - **Report incrementally.** Never go silent for a long stretch. Agents have died
   mid-run, once part-way through a preview apply — a partial report is worth far
   more than a perfect one you never send.
@@ -119,4 +119,4 @@ Report incrementally, and finish with:
 - **PR / branch** — URL, state
 - **Worktree** — live (resumable) or finished (safe to clean)
 - **What I deliberately did NOT do, and why**
-- **Follow-ups** — as text for the coordinator; never as task chips
+- **Follow-ups** — as text for the orchestrator; never as task chips
