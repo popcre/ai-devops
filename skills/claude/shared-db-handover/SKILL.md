@@ -366,11 +366,19 @@ the marker. Running it afterwards duplicates work and invites a second, competin
 handover document.
 
 The secrets sweep (step 6) and the documentation pass (step 6b) are **performed
-inside this skill**, not delegated. `secrets-to-1password` and
-`session-docs-update` remain the reference for *how* to do each well, and are
-worth reading when you need the detail — but the *obligation* is discharged here.
-A closeout that ends with "you should also run X" has failed: Albert asked for one
-step, and one step is the standard.
+inside this skill**, not delegated. A closeout that ends with "you should also run
+X" has failed: Albert asked for one step, and one step is the standard.
+
+**This absorption is scoped to the shared-db handover and nothing else.**
+`secrets-to-1password` and `session-docs-update` are full skills in their own
+right and are unaffected outside this file. `secrets-to-1password` still governs
+**every** create or update in the `vibe_coding` vault, at any time, in any repo,
+including mid-session when a credential appears — it is not a closing ritual.
+`session-docs-update` is still the documentation closer for every other repo and
+is still invoked directly whenever docs need updating. Both remain the authority
+on *how* to do the work well; what changes here is only *who invokes them* during
+a shared-db handover. Do not read this section as a demotion, and do not skip
+either skill elsewhere on the strength of it.
 
 **Corollary for the report:** state the outcome of both, even when both are empty
 ("swept, nothing new"; "docs pass: nothing outside the handover is stale"). A
@@ -389,11 +397,17 @@ silent skip and a clean result look identical, and only one of them is finished.
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
   never improvise a forced removal.
 - `handoff-writer` — the canonical 9-section handoff standard and file naming.
-- `session-docs-update` — **reference only.** Its documentation pass is performed
-  inside step 6b of this skill; read it for the detail, do not run it as a
-  separate closing step.
-- `secrets-to-1password` — **reference only.** Its sweep is performed inside step 6
-  of this skill; read it for how to write a good vault entry.
+- `session-docs-update` — the end-of-session documentation ritual, and a
+  first-class skill in its own right: it is the closer for every other repo and is
+  invoked directly whenever docs need updating. **Inside a shared-db handover you
+  do not invoke it as a separate step** — step 6b performs its pass here so the
+  closeout stays one step. Read it for the detail; it remains the authority on
+  *how*.
+- `secrets-to-1password` — the standing skill for EVERY create or update in the
+  1Password vault, secret or not, used constantly outside handovers. **Inside a
+  shared-db handover you do not invoke it as a separate step** — step 6 performs
+  the sweep here. It remains the authority on how to write a vault entry a future
+  session can use without asking a question.
 - `wrap-up` — the general-purpose closer for OTHER repos. **Not used for
   shared-db**; this skill owns the shared-db closeout end to end.
 - `templates/system/handoff-standard.md` in `ai-devops` — the cross-tool standard.
