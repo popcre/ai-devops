@@ -68,6 +68,8 @@ Prefer the portal's own authenticated search response over visual card scraping.
 
 Run requests only inside the authenticated browser page. Browser-side `fetch` through the controlled tab is acceptable because the page supplies its own session. Never extract credentials to a terminal process. Block rendition and thumbnail endpoints in the controlled tab when practical so metadata capture does not pull creative previews.
 
+For full metadata, use authenticated browser-side `GET /otmmapi/v6/assets` requests in batches of at most 100 asset IDs. A 200-ID full-metadata URL was observed returning an HTML error instead of JSON. Require HTTP 200, JSON content, the expected record count, and exact equality between requested and returned asset-ID sets before saving a batch. Persist compact required metadata rather than multi-gigabyte full response bodies when the output contract does not require every unused field.
+
 The response provides:
 
 - paged `asset_list` records with 40-character lowercase hexadecimal text asset IDs;
@@ -115,6 +117,8 @@ Do not log the full metadata response. Extract only the identity fields and rela
 
 The search index is not the final scrape. Fetch `level_of_detail=full` metadata for every deduplicated authorized asset ID, in resumable browser-side batches, and persist each response immediately in the private repository. A run with complete file names but partial full metadata is incomplete.
 
+The SPA can retain stale hidden result views. Bind UI reads to visible elements and prefer the fresh `/search/text` response over the DOM for page membership, totals, IDs, and names. When navigating an encoded search route directly, the route page marker is a zero-based page index while the response `offset` is an asset offset; do not treat them as the same value. If a cached route emits no new search response, reload that route and capture the authenticated response.
+
 ## Completeness and quirks
 
 - The portal pages assets in chunks; it does not return the entire asset catalogue in one page.
@@ -122,7 +126,9 @@ The search index is not the final scrape. Fetch `level_of_detail=full` metadata 
 - Result cards are virtualized or lazy-loaded. Reading the DOM before scrolling to the bottom returns only part of the page.
 - Numbered pagination is grouped. A later page number may not exist until `Next Page` advances the visible group.
 - A page click can finish before its cards refresh. Wait for the first asset ID to differ from the prior page.
+- The single-page application can leave old hidden totals, cards, and controls in the DOM. A selector that takes the first match can silently read the previous Property.
 - Long browser calls can time out without saving in-memory work. Keep each call bounded and checkpoint to disk after every page or metadata batch.
+- A full-metadata request containing 200 asset IDs can return an HTML error page. Use at most 100 and validate response content before JSON parsing.
 - All facet values for the current filtered result can arrive together in one search response. This does not mean the whole Paramount catalogue arrived.
 - Facet panels initially show five values and `Show more...`; this is a display preview, not a five-row cap.
 - Blank facet buckets appear as `undefined` or missing `value` fields.
@@ -132,6 +138,7 @@ The search index is not the final scrape. Fetch `level_of_detail=full` metadata 
 - Character-related classification can exist while both the Character identity and cascading relationship are empty. Record the missing link; never infer it from the file name, card text, or active filter.
 - A zero free-text result is not proof that a licensed Property is absent. Retry through the exact Property and Franchise facets.
 - A successful asset index is not proof of relationship completeness. Relationship tables require full metadata for every indexed asset.
+- A cascading relationship field can contain only one source ID instead of the required caret pair. Exclude it, record the asset ID, field, raw value, and action as a source anomaly, and never manufacture the second ID.
 - Account access is broad across several Paramount brands, but the portal did not prove that the account sees all Paramount content. Describe every capture as the account-entitled, point-in-time view.
 
 ## Output and database boundary
