@@ -298,9 +298,48 @@ The handover is where unverified claims become someone else's false assumptions.
    is the correct behaviour for a *dead* orchestrator and pure noise for a clean
    handover. If you are handing over without ending (a fresh session continues
    immediately), say so in the issue and leave it open deliberately.
-6. **Run the closers:** `session-docs-update` for the documentation ritual and
-   `secrets-to-1password` for the secrets sweep. Credentials are referenced by
-   1Password item ID only — never a value in the handoff.
+6. **The secrets sweep — DO IT, do not delegate it to a skill the user has to
+   invoke.** This step is part of the handover, not a follow-on ritual. Albert
+   should never have to run a second closing skill because this one stopped short.
+
+   Sweep the session for anything that should be in 1Password and is not: a
+   credential that appeared mid-session, a token pasted into chat, a connection
+   string in a scratch file, an `.env` written "just for now". Check the diff and
+   any untracked files too, not only your memory of the session.
+
+   - Store what you find per the **`secrets-to-1password`** skill — vault
+     `vibe_coding` only, descriptive title, tags, and notes detailed enough for a
+     future session that has never seen the entry. Fetch and write **serially**;
+     never fan out `op` calls in parallel.
+   - **A clean sweep is a RESULT, not a skip.** Say "swept, nothing new" in the
+     handover. "I don't think any secrets came up" is not a sweep.
+   - Credentials are referenced in the handoff by **1Password item ID only** —
+     never a value, in any file, doc, commit, report or chat.
+
+6b. **The documentation pass — DO IT here too, and keep it narrow.** Run the
+   substance of **`session-docs-update`** as part of this handover rather than
+   asking for it separately. In this repo that means asking four questions and
+   acting on the answers:
+
+   - Did this session change how something WORKS in a way `AGENTS.md` now
+     mis-states? Standing facts and numbered rules go stale silently and are what
+     the next session reads first.
+   - Did it **disprove** something a live doc still teaches? Add a dated
+     supersession pointer at the old claim. **Supersede, never rewrite** — the
+     originals are the audit trail, and this repo has already shipped a reversal
+     recorded in only one of the three places that taught the old behaviour.
+   - Is any rehearsal or evidence artifact now **void** because a migration
+     replaced what it validated? Say so, and name the migration that voided it.
+   - Is the only record of a durable lesson your handover file? If so, that is
+     usually correct — resist the urge to spray it across five documents.
+
+   **Scope guard:** the handover file is the primary record. If nothing outside it
+   is now WRONG, say "docs pass: nothing outside the handover is stale" and move
+   on. Churning docs to look thorough is a cost, not a deliverable. State the
+   conclusion either way — a silent skip is indistinguishable from an oversight.
+
+   Both 6 and 6b go in the handover PR with the handover file, so the whole
+   closeout is one docs-only PR and one merge.
 7. **Confirm the sweep above was actually run** — queue blocks moved on, every
    "finished" branch confirmed merged and its worktree retired, and everything
    you deliberately left behind flagged as a decision. This is a checklist item,
@@ -315,6 +354,28 @@ The handover is where unverified claims become someone else's false assumptions.
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
 
+## This skill is the WHOLE closeout — do not send Albert to a second skill
+
+**`shared-db-handover` is all-encompassing for a shared-db session.** When it is
+done, every loose end is tied: swept, documented, committed, pushed, merged, and
+the marker closed.
+
+**Do NOT run `wrap-up` after this skill.** They overlap, and `wrap-up`'s ship step
+is already owned here — steps 5 and 5b merge the docs-only handover PR and close
+the marker. Running it afterwards duplicates work and invites a second, competing
+handover document.
+
+The secrets sweep (step 6) and the documentation pass (step 6b) are **performed
+inside this skill**, not delegated. `secrets-to-1password` and
+`session-docs-update` remain the reference for *how* to do each well, and are
+worth reading when you need the detail — but the *obligation* is discharged here.
+A closeout that ends with "you should also run X" has failed: Albert asked for one
+step, and one step is the standard.
+
+**Corollary for the report:** state the outcome of both, even when both are empty
+("swept, nothing new"; "docs pass: nothing outside the handover is stale"). A
+silent skip and a clean result look identical, and only one of them is finished.
+
 ## Related
 
 - `COORDINATOR_INTAKE.md` at the root of `u2giants/shared-db` — the live REQUEST
@@ -328,5 +389,11 @@ The handover is where unverified claims become someone else's false assumptions.
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
   never improvise a forced removal.
 - `handoff-writer` — the canonical 9-section handoff standard and file naming.
-- `session-docs-update` — the end-of-session documentation ritual.
+- `session-docs-update` — **reference only.** Its documentation pass is performed
+  inside step 6b of this skill; read it for the detail, do not run it as a
+  separate closing step.
+- `secrets-to-1password` — **reference only.** Its sweep is performed inside step 6
+  of this skill; read it for how to write a good vault entry.
+- `wrap-up` — the general-purpose closer for OTHER repos. **Not used for
+  shared-db**; this skill owns the shared-db closeout end to end.
 - `templates/system/handoff-standard.md` in `ai-devops` — the cross-tool standard.
