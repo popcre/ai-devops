@@ -20,12 +20,12 @@ just realised you are working in this repo without being the orchestrator, you a
 
 Then take exactly one path:
 
-- **NOT the orchestrator → path (A) below.** Stop and file an intake block.
+- **NOT the orchestrator → path (A) below.** Stop and open a `db-work` issue.
 - **The orchestrator → path (B), the rest of this skill.**
 
 ---
 
-## (A) You are NOT the orchestrator — stop, and file into the intake queue
+## (A) You are NOT the orchestrator — stop, and open a handover issue
 
 **Stop working now.** Do not continue the task, and do not commit, push, merge,
 apply, promote, or write anything further to any database. Do not create
@@ -122,9 +122,10 @@ orchestrator has to be able to resume or retire **each agent individually**.
 ## The handoff has TWO halves — and a REQUIRED queue seed
 
 A orchestrator handoff that omits half (b) is **incomplete**, no matter how long
-it is. **A orchestrator handoff that leaves the `REQUEST QUEUE` in
-`COORDINATOR_INTAKE.md` un-seeded is equally incomplete**, and carries exactly
-the same weight — see "Seed the queue" below.
+it is. **A orchestrator handoff that leaves outstanding work with no open
+`db-work` issue is equally incomplete**, and carries exactly the same weight —
+see "Seed the queue" below. *(Corrected 2026-08-09: this named the `REQUEST
+QUEUE` in `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
 
 **(a) Coordination state**
 
@@ -184,9 +185,10 @@ How to do it correctly:
   from `git`/`gh` and believe that** — do not rank the documents and pick one.
 - **Every `HANDOFF.md` `## BACKLOG` item `B<n>` gets an entry**, titled so the
   B-number is visible in the heading (`### REQUEST — Backlog B7 — …`).
-- **Refresh, do not restart.** Items already queued and still outstanding stay
-  where they are; items that were completed move on through the lifecycle rules
-  that `COORDINATOR_INTAKE.md` owns. Do not delete.
+- **Refresh, do not restart.** Issues already open and still outstanding stay
+  open; issues whose work has landed get a closing comment naming the PR and are
+  then closed. Never delete an issue. *(Corrected 2026-08-09: this pointed at
+  lifecycle rules owned by the retired `COORDINATOR_INTAKE.md`.)*
 
 ## Ingesting a handover issue
 
@@ -198,27 +200,29 @@ and the real current maximum migration version in `supabase/migrations/`.
 Documents in this repo have gone stale within the hour, and multiple agents have
 caught real errors exactly this way.
 
-After you have dispatched the work, **move the ingested block to the file's
-"TAKEN OVER" section with the date** rather than deleting it. The queue's history
-is the audit trail of who touched what.
+After you have dispatched the work, **comment on the issue** with the date and
+who you dispatched it to, and close it once the work lands — never delete it. The
+issue history is the audit trail of who touched what. *(Corrected 2026-08-09:
+this said "move the ingested block to the file's TAKEN OVER section", which was
+the retired `COORDINATOR_INTAKE.md` workflow.)*
 
 ## The sweep — do this BEFORE you write the handover, not after
 
 The handover describes the state you leave behind, so tidy the state first.
 Three passes, and then a fourth that is just honesty:
 
-1. **Move completed blocks through the lifecycle.** Every REQUEST QUEUE item you
-   dispatched and every INTAKE block you ingested moves to its next section in
-   `COORDINATOR_INTAKE.md`, with the date — never deleted. **That file owns the
-   lifecycle and its retention rules; follow what it says rather than any
-   threshold remembered from a previous session.**
+1. **Close out the issues you handled.** Every `db-work` issue you dispatched and
+   every `HANDOVER:` issue you ingested gets a dated comment saying what happened
+   and, where the work has landed, a close referencing the merged PR — never
+   deleted. *(Corrected 2026-08-09: this instructed moving blocks between sections
+   of `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
 2. **Verify each finished branch is actually merged, then retire its worktree.**
    For each agent you are calling finished: confirm the PR is merged
    (`gh pr view`), confirm the commits are in `origin/main`, and only then retire
    the worktree.
-2b. **Seed / refresh the `REQUEST QUEUE` with every outstanding item** — the
-   section above. This is not optional tidying: a handover that leaves the queue
-   un-seeded is **incomplete**, in exactly the same way as one missing the
+2b. **Open or refresh a `db-work` issue for every outstanding item** — the
+   section above. This is not optional tidying: a handover that leaves outstanding
+   work unqueued is **incomplete**, in exactly the same way as one missing the
    per-sub-agent blocks. On 2026-07-31 an un-seeded queue caused a fresh
    orchestrator to report "there is no pending work" over a twenty-item backlog.
 
@@ -345,11 +349,15 @@ The handover is where unverified claims become someone else's false assumptions.
    you deliberately left behind flagged as a decision. This is a checklist item,
    not a nicety: an unswept repo is how the next orchestrator inherits phantom
    worktrees and branches nobody dares delete.
-8. **Confirm the `REQUEST QUEUE` is seeded.** Open `COORDINATOR_INTAKE.md` and
+8. **Confirm the queue is seeded.** Run
+   `gh issue list --repo u2giants/shared-db --label db-work --state open` and
    check that every outstanding item — the opening agenda, the waiting-on-Albert
-   list, and **every `B<n>` in `HANDOFF.md`'s `## BACKLOG`** — has a short entry
+   list, and **every `B<n>` in `HANDOFF.md`'s `## BACKLOG`** — has an open issue
    pointing back at `HANDOFF.md`. **A handover without this is INCOMPLETE**, the
-   same as one missing half (b).
+   same as one missing half (b). *(Corrected 2026-08-09: this told you to open
+   `COORDINATOR_INTAKE.md`, which has been a 37-line pointer since 2026-08-07 —
+   following it would have shown an empty queue over a live backlog, the exact
+   2026-07-31 failure this step exists to prevent.)*
 9. **Pass the gate:** could a developer who walked in off the street this morning
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
@@ -386,10 +394,17 @@ silent skip and a clean result look identical, and only one of them is finished.
 
 ## Related
 
-- `COORDINATOR_INTAKE.md` at the root of `u2giants/shared-db` — the live REQUEST
-  and INTAKE queues, the **single source of truth for both templates** and for
-  the block lifecycle/retention rules. Never duplicate those templates or
-  thresholds here; the file changes hourly and the file wins.
+- ⚠️ **`COORDINATOR_INTAKE.md` is RETIRED (2026-08-07)** and is now a 37-line
+  pointer; a required `Intake pointer guard` check fails any PR that regrows it.
+  This entry used to call it the live REQUEST/INTAKE queue and "the single source
+  of truth for both templates". It is neither. **GitHub issues on
+  `u2giants/shared-db` with the `db-work` label are the queue**, and the nine
+  things a handover issue must say are listed in path (A) of this skill. Corrected
+  2026-08-09.
+- `AGENTS.md` at the root of `u2giants/shared-db` — **the live rulebook, and it
+  WINS over this skill wherever the two disagree.** This file is a portable
+  summary; §12 "Standing facts an incoming session must know" is the canonical
+  version of the safety rules restated here.
 - `shared-db-orchestrator` — how the session is opened and run (the request path
   for anyone who needs database work, the session-start hygiene sweep,
   orchestrator + sub-agents, single-writer ownership, the never-use-task-chips

@@ -124,7 +124,7 @@ Do not load rows unless validation passes and every crawl gap is explained.
 
 ## Shared database gate
 
-Do not start database work. If the extract implies a schema change, use a separate shared-db worktree, copy the exact request template into `COORDINATOR_INTAKE.md` under `## REQUEST QUEUE`, and stop. The active coordinator owns migrations and database writes. Never place scraped rows or examples in that request.
+Do not start database work. If the extract implies a schema change, **open a GitHub issue** and stop — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>`. The active orchestrator owns migrations and database writes. Never place scraped rows or examples in that request. *(Corrected 2026-08-09: this said to copy a request template into `COORDINATOR_INTAKE.md` under `## REQUEST QUEUE`; that file was retired on 2026-08-07 and a required check now fails any PR that writes into it.)*
 
 The source layer must preserve Warner values. Promotion into `core.property`, `core.character`, and the many-to-many property-character bridge is a later, idempotent reconciliation step. Unresolved labels are reported, never invented.
 
