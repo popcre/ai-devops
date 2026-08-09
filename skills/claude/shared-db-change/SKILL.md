@@ -10,6 +10,13 @@ description: Discipline for any change to the shared supabase.com backend. Use b
 say "pull the repo again and re-read the .md files to see the proper way to make
 db changes" in at least three separate sessions — this skill is that protocol.
 
+> **Working IN the shared-db repo and you were not started as the orchestrator?
+> STOP.** `AGENTS.md` runs one orchestrator session; every other session opens a
+> GitHub issue and stops —
+> `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
+> This skill tells you how to author a correct change once you have been
+> dispatched; it is not permission to start one.
+>
 > **Working IN the shared-db repo, or running more than one workstream?** Load the
 > **`shared-db-orchestrator`** skill as well. This skill covers how to author a
 > correct change; that one covers how a session is run — one orchestrator, all work
@@ -42,19 +49,38 @@ db changes" in at least three separate sessions — this skill is that protocol.
 1. ~~**DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.~~
    **SUPERSEDED — see the box above.** Never `execute_sql` for DDL still holds; "via MCP
    only" does not. Prove which project you are pointed at before any MCP call.
-2. After applying, run `list_migrations` and capture the recorded timestamp;
-   create the local migration file with the **identical** timestamp under
-   `supabase/migrations/`. Never edit a migration that may already be applied.
+2. ~~After applying, run `list_migrations` and capture the recorded timestamp;
+   create the local migration file with the **identical** timestamp.~~
+   **SUPERSEDED 2026-08-09 — it is the same apply-through-MCP-first drift as rule 1.**
+   The file comes FIRST: write a new `YYYYMMDDHHMMSS_*.sql` under
+   `supabase/migrations/`, choosing a version **above the current maximum**
+   (`ls supabase/migrations | cut -c1-14 | sort | tail -1`), then apply it to
+   **preview** with the CLI. Pick the version by hand —
+   `check-dispatch-collision.mjs --allocate-version` was withdrawn on 2026-08-07
+   and now exits `2`. **Never reuse a timestamp:** Supabase's ledger keys on the
+   version alone, so a duplicate makes one migration **silently skip** with no
+   error (`AGENTS.md` §4 rule 5; this has happened twice). Never edit a migration
+   that may already be applied — fix forward.
 3. **Author the change in shared-db**, not only in the app repo. App repos get
    generated types and adapters; durable backend truth lives in shared-db.
 4. **Branch policy exception:** shared-db is the ONE repo that uses branches +
    PR (all app repos are main-only). Claude merges the shared-db PR itself once
    checks pass — Albert cannot.
 5. **Correct project refs** (never mix):
+   - shared backend **PRODUCTION**: `qsllyeztdwjgirsysgai`
+   - shared backend **PREVIEW**: `rjyboqwcdzcocqgmsyel` (Supabase branch
+     `shared-db-schema-rehearsal` — it is a *branch*, so it does **not** appear in
+     `supabase projects list`; that absence proves nothing). *(Added 2026-08-09:
+     this list previously omitted preview entirely.)*
    - popdam prod: `ryltkzzernhwnojzouyb`
    - SynoMon: `qnjimovrsaacneqkggsn` (migrated to Virginia: `aaxtrlfpnoutziwhshlt`)
-   - shared backend: `qsllyeztdwjgirsysgai`
    - oracle: `eqccjfbyrywsqkxxpjvg`
+
+   **Prove the target before every write** (`AGENTS.md` §4.2, an owner ruling):
+   immediately before any statement that writes, changes or removes data, schema
+   or privileges — in preview as well as production — check the live connection
+   target (`get_project_url` for MCP, `cat supabase/.temp/project-ref` for the
+   CLI) and quote what you saw in your report.
 6. Data-model semantics that keep getting violated:
    - The only companies in these apps are **customers** (active or potential).
      `core.customer`, not `core.company`. "Factory" is renamed **Vendor**.

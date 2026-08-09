@@ -192,7 +192,9 @@ Existing material, as of 2026-08-06:
 
 - Background doc: `docs/verification/opa-characters-20260806/README.md` in
   `u2giants/shared-db` — the full record, including design questions.
-- The request: `COORDINATOR_INTAKE.md` → `## REQUEST QUEUE`, PR #466.
+- The request as filed at the time: `COORDINATOR_INTAKE.md` → `## REQUEST QUEUE`,
+  PR #466. **Historical pointer only** — that file was retired on 2026-08-07 and
+  its open items became GitHub issues. File any new request as a `db-work` issue.
 - Linked from `HANDOFF.md` under *"Active workstream — Characters and style
   guides → canonical"*.
 
