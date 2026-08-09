@@ -99,6 +99,8 @@ The normal search response commonly uses 25 assets per page. The results UI can 
 
 The 200-item UI uses lazy-loaded `ot-resource` cards. Each card's `resourceid` is the real asset ID, `ot-resource-index` is its position on the current page, and a child `ot-metadata` `title` carries the displayed file name. Repeatedly scroll the results wrapper to its full height before reading the page. Numbered page controls are grouped; use the visible `Next Page` control to reveal the next group. After selecting a new page, wait for its first `resourceid` to change before collecting it.
 
+Prefer the search response to the DOM. The application can retain hidden result views, so old totals and cards may still match broad selectors. In encoded result routes, the `@<n>x200x...` marker is a zero-based page index; the search response `offset` is the asset offset (`n * 200`). A direct route can be served from application state without a fresh network event; reload it when a new authenticated search response is required.
+
 Free-text search is not a rights boundary. A business title can return zero text matches while its Property exists, and text matches can span multiple Properties. Resolve the licensed allowlist to exact Property and Franchise facets, capture those scoped results, and deduplicate their asset IDs.
 
 ## Identity formats
@@ -210,6 +212,8 @@ Treat the pair as authoritative. The visible Collection filter uses the display 
 - Holding a large run only in browser memory loses progress when a control call times out. Persist every completed page and metadata batch.
 - Reusing a full-metadata request copied from another view can retain a hidden `LAYOUT` filter. Remove unrelated inherited filters and verify the safe request fields before trusting its scope.
 - A complete card index is not a complete scrape. Every authorized asset still needs full metadata before IDs and relationships can be reconciled.
+- A full-metadata GET with 200 selected asset IDs returned HTML rather than JSON. Batches of 100 completed reliably. Validate status, content, count, and the complete returned-ID set before checkpointing.
+- Four observed cascading Collection values contained a Property ID without `^<collection_id>`. Treat any one-part value as malformed source data, exclude the link, and write it to an anomaly report.
 
 ## Capture estimate
 
