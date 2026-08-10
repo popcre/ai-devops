@@ -117,7 +117,8 @@ ai-glm new my-review --prompt-file brief.md
 It passes arguments straight through rather than re-parsing them as one string, so
 prompts containing spaces or quotes survive. Nobody needs to open Git Bash.
 
-Service control on Windows (`ai-glm server ...` is systemd-only):
+`ai-glm server status|start|stop|restart` is cross-platform. The direct PowerShell
+equivalents are:
 
 ```powershell
 Start-ScheduledTask   -TaskName AiDevOps-OpenCodeGlm
@@ -163,12 +164,12 @@ AI_GLM_CALLER=codex ai-glm new sample-status-review --prompt-file /tmp/brief.md
 
 Everything else:
 ```bash
-ai-glm list                     # every session, all repos
-ai-glm show <name>              # session metadata
+ai-glm list                     # review sessions and one-shot implementation jobs
+ai-glm show <name>              # safe session/job metadata and terminal evidence
 ai-glm transcript <name>        # full ordered conversation
 ai-glm diff <name>              # OpenCode's own diff for the session
-ai-glm abort <name>             # stop a stuck turn
-ai-glm delete <name>            # remove it locally and on the server
+ai-glm abort <name>             # stop the exact active review or implementation turn
+ai-glm delete <name>            # clear a review or a terminal implementation record
 ai-glm doctor                   # full PASS/WARN/FAIL check, nonzero on failure
 ai-glm server status|start|stop|restart
 ```
@@ -185,12 +186,23 @@ ai-glm implement fix-token-rotation --prompt-file /tmp/task.md
 git apply --check "$patch" && git apply "$patch"
 ```
 
-> Active defect, 2026-08-10: implementation jobs are not yet recorded in `ai-glm list`,
-> locked by name for the full run, or abortable by name. A missing list entry or patch
-> does not prove that the job stopped. Do not retry the same implementation name until
-> the first wrapper process reaches a terminal result. The permanent fix is specified in
-> [`../plan_glm-implementation-job-tracking.md`](../plan_glm-implementation-job-tracking.md);
-> read its STATUS table before changing this behavior.
+Implementation is one-shot, but it is no longer invisible. Before it creates a clone,
+`ai-glm` writes a private versioned record with state `starting` and holds the
+repository-plus-caller-plus-name lock through terminal cleanup. The record adds only the
+exact canonical clone and OpenCode session ID as those resources are created. `list` and
+`show` therefore remain truthful while the wrapper runs in another shell.
+
+`abort <name>` first records `abort-requested`, then targets only the recorded OpenCode
+session. It never deletes a clone from the control process. The original owner records
+the observed result as `completed`, `failed`, or `aborted`, removes its exact remote-less
+clone and disposable server session, and retains the terminal record with artifact and
+cleanup evidence. Completion wins an abort race if a valid patch already completed.
+
+Terminal records require explicit `delete <name>` before that name can be reused. Delete
+refuses active jobs and any record whose clone still exists. `ask`, `transcript`, and
+server `diff` reject implementation records because their disposable clone and server
+session do not form a persistent conversation. A missing patch still does not prove a
+job never started; check `ai-glm list` and `ai-glm show <name>`.
 
 ### Diagnosing
 
@@ -203,6 +215,9 @@ git apply --check "$patch" && git apply "$patch"
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
 | `session is busy` | Another `ai-glm` call holds the lock | Wait, or raise `--lock-timeout` |
+| `implementation job ... is already starting/running` | The same repository, caller, and name already has an owner | Inspect `ai-glm show <name>`. Do not retry. Abort it by name if it must stop. |
+| `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse | Inspect its artifact and cleanup fields, then run `ai-glm delete <name>` when no longer needed. |
+| `ambiguous implementation job state was preserved` | Doctor could not prove record schema, canonical paths, dead owner, matching lock, and exact server state | Inspect `ai-glm list` and `show`. Do not delete the clone or metadata by hand. |
 | `review session CHANGED the working tree` | A review wrote something (should be impossible) | Session is marked failed; inspect `git status` before anything else |
 | `ZAI_API_KEY resolved EMPTY` | The `op://` reference points at a blank field | Fix `ZAI_API_KEY` in `config/mcp.env.example` and re-run `setup-secrets.sh` |
 | Unit sits in `failed` | `StartLimitBurst` tripped after repeated crashes | Fix the cause, then `ai-glm server start` |
@@ -417,3 +432,12 @@ first and then re-measure before touching it.
     retry only three times at one-minute intervals, and rotate `server.log` at 1 MiB
     while retaining one prior log. Do not add an unbounded watchdog or restore the
     ineffective native retry setting without a controlled live test.
+28. **Implementation identity must outlive the terminal shell call.** Every one-shot
+    implementation writes its record before clone creation and holds the
+    repository/caller/name lock until terminal cleanup. `list` and `show` are the source
+    of truth while another shell owns the run. Abort targets only the exact recorded
+    server session and leaves clone cleanup to that owner. Doctor reconciles a dead owner
+    only after validating the v3 record, canonical clone root, dead PID, matching stale
+    lock, and exact server response. Old or forged scratch paths are warned about and
+    preserved. Removing any one of these checks recreates duplicate paid turns or turns
+    recovery into unsafe deletion.

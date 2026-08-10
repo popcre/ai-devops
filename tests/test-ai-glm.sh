@@ -180,7 +180,7 @@ check "names the stuck tool on timeout"     "grep -q 'tool still running' '$AI_G
 check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI_GLM'"
 if grep -Fq 'await_turn "$sid" "$name" review "$root"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
 if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$root"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
-if grep -Fq 'await_turn "$sid" "$name" implement "$sb"' "$AI_GLM"; then ok "implement passes sandbox directory"; else bad "implement passes sandbox directory"; fi
+if grep -Fq 'await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META"' "$AI_GLM"; then ok "implement passes sandbox directory"; else bad "implement passes sandbox directory"; fi
 
 echo "== permission classifier =="
 run_classifier() { # MODE ROOT STATUS BODY
@@ -223,6 +223,114 @@ RUNNING_INSIDE="{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"
 check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_OUTSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = outside'"
 check "running inside read remains legitimate" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_INSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = inside'"
 check "unmeasured running input is not guessed" "AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary '\''{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"path\":\"elsewhere\"}}}]}'\'' \"\$ROOT_FIX\")\" = missing'"
+
+echo "== implementation job records =="
+JOB_STATE="$TMP/jobs"; mkdir -p "$JOB_STATE"; : > "$TMP/job-calls"
+JOB_ID="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" bash -c 'source "$AI_GLM_SOURCE"; repo_id "$JOB_REPO"')"
+run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure point]
+  local name="$1" pause="${2:-}" ready="${3:-$TMP/no-ready}" release="${4:-$TMP/no-release}" turn="${5:-success}" fail="${6:-}"
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" \
+    JOB_REPO="$TMP/repoA" JOB_NAME="$name" JOB_PAUSE="$pause" JOB_READY="$ready" \
+    JOB_RELEASE="$release" JOB_TURN="$turn" JOB_FAIL="$fail" JOB_CALLS="$TMP/job-calls" \
+    bash -c '
+      source "$AI_GLM_SOURCE"
+      require_server(){ :; }; server_up(){ return 0; }; api(){ printf "{}"; }
+      permission_http(){ HTTP_STATUS=200; HTTP_BODY="{}"; }
+      create_session(){ printf "%s\n" "$JOB_NAME" >> "$JOB_CALLS"; printf "sid-%s" "$JOB_NAME"; }
+      send_prompt(){ :; }
+      await_turn(){
+        [ "$JOB_TURN" = success ] || return 1
+        printf "%s" '\''{"finish":"stop","model":{"id":"glm-5.2"},"content":[{"type":"text","text":"done"}],"tokens":null}'\''
+      }
+      PROMPT_TEXT=fixture; PROMPT_FILE=""; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex
+      AI_GLM_TEST_MODE=1; AI_GLM_TEST_PAUSE_AT="$JOB_PAUSE"; AI_GLM_TEST_READY="$JOB_READY"; AI_GLM_TEST_RELEASE="$JOB_RELEASE"; AI_GLM_TEST_FAIL_AT="$JOB_FAIL"
+      cmd_implement "$JOB_NAME"
+    '
+}
+job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
+wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
+
+READY="$TMP/record-ready"; RELEASE="$TMP/record-release"
+run_fake_impl exclusive record "$READY" "$RELEASE" >"$TMP/exclusive.out" 2>&1 & exclusive_pid=$!
+wait_file "$READY"
+EX_META="$(job_meta exclusive)"
+check "implement_record_exists_before_clone_creation" "test -f '$EX_META' -a \"\$(jq -r .status '$EX_META')\" = starting -a \"\$(jq -r .clone_path '$EX_META')\" = null"
+check "implement_list_and_show_are_type_and_state_aware" "AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' list | grep -qE 'exclusive.*implementation.*starting' && (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' show exclusive | jq -e '.type==\"implementation\" and .status==\"starting\"' >/dev/null)"
+before_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
+run_fake_impl exclusive >"$TMP/duplicate.out" 2>&1; duplicate_rc=$?
+after_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
+check "concurrent_same_name_implement_creates_one_job_and_session" "test $duplicate_rc -ne 0 -a '$before_calls' = '$after_calls' && grep -q 'No clone, server session, or provider turn' '$TMP/duplicate.out'"
+check "implement_record_is_private_and_contains_no_prompt_or_secret" "(case \"\$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) grep -q 'chmod 0600' '$AI_GLM' ;; *) test \"\$(stat -c %a '$EX_META')\" = 600 ;; esac) && ! grep -qiE 'fixture|prompt|token|secret|credential|password' '$EX_META'"
+check "implement_ask_is_rejected_as_one_shot" "! (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' ask exclusive --prompt again) >/dev/null 2>&1"
+check "delete_refuses_active_implementation_job" "! (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' delete exclusive) >/dev/null 2>&1"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" \
+  bash -c 'source "$AI_GLM_SOURCE"; require_server(){ :; }; permission_http(){ HTTP_STATUS=200; HTTP_BODY="{}"; }; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex; cmd_abort exclusive' >/dev/null 2>&1
+check "starting-job abort is recorded before a server session exists" "test \"\$(jq -r .status '$EX_META')\" = abort-requested"
+check "starting-job abort has no clone to delete" "test \"\$(jq -r .clone_path '$EX_META')\" = null"
+touch "$RELEASE"; wait "$exclusive_pid" || true
+check "pre-resource abort records terminal state" "test \"\$(jq -r .status '$EX_META')\" = aborted -a \"\$(jq -r .cleanup.clone '$EX_META')\" = none"
+
+SESSION_READY="$TMP/session-ready"; SESSION_RELEASE="$TMP/session-release"; ABORT_LOG="$TMP/abort-log"
+run_fake_impl exact-abort session "$SESSION_READY" "$SESSION_RELEASE" >"$TMP/exact-abort.out" 2>&1 & exact_abort_pid=$!
+wait_file "$SESSION_READY"; EXACT_META="$(job_meta exact-abort)"; EXACT_CLONE="$JOB_STATE/wt/$JOB_ID/codex--exact-abort"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" ABORT_LOG="$ABORT_LOG" \
+  bash -c 'source "$AI_GLM_SOURCE"; require_server(){ :; }; permission_http(){ printf "%s\n" "$1 $2" >> "$ABORT_LOG"; HTTP_STATUS=200; HTTP_BODY="{}"; }; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex; cmd_abort exact-abort' >/dev/null 2>&1
+check "abort_targets_exact_active_implementation_session" "grep -q 'POST /session/sid-exact-abort/abort' '$ABORT_LOG' && test \"\$(jq -r .status '$EXACT_META')\" = abort-requested"
+check "abort_never_deletes_live_clone_from_control_process" "test -d '$EXACT_CLONE'"
+touch "$SESSION_RELEASE"; wait "$exact_abort_pid" || true
+check "abort owner records terminal state and cleans exact resources" "test \"\$(jq -r .status '$EXACT_META')\" = aborted -a ! -e '$EXACT_CLONE' -a \"\$(jq -r .cleanup.server_session '$EXACT_META')\" = removed"
+
+SIGNAL_READY="$TMP/signal-ready"; SIGNAL_RELEASE="$TMP/signal-release"
+run_fake_impl interrupted session "$SIGNAL_READY" "$SIGNAL_RELEASE" >"$TMP/interrupted.out" 2>&1 & signal_pid=$!
+wait_file "$SIGNAL_READY"; SIGNAL_META="$(job_meta interrupted)"; SIGNAL_CLONE="$JOB_STATE/wt/$JOB_ID/codex--interrupted"
+kill -TERM "$signal_pid" 2>/dev/null || true; wait "$signal_pid" || true
+check "interrupt_records_terminal_state_and_cleans" "test \"\$(jq -r .status '$SIGNAL_META')\" = aborted -a \"\$(jq -r .failure '$SIGNAL_META')\" = interrupted -a ! -e '$SIGNAL_CLONE'"
+
+run_fake_impl normal >"$TMP/normal.out" 2>&1; normal_rc=$?
+NORMAL_META="$(job_meta normal)"; NORMAL_CLONE="$JOB_STATE/wt/$JOB_ID/codex--normal"
+check "implement_record_adds_clone_and_session_atomically" "jq -e '.opencode_session_id==\"sid-normal\" and .clone_path!=null' '$NORMAL_META' >/dev/null"
+check "normal_and_no_change_completion_clean_resources" "test $normal_rc -eq 0 -a \"\$(jq -r .status '$NORMAL_META')\" = completed -a ! -e '$NORMAL_CLONE' -a \"\$(jq -r .cleanup.server_session '$NORMAL_META')\" = removed"
+run_fake_impl failed '' "$TMP/no-ready" "$TMP/no-release" failure >"$TMP/failed.out" 2>&1; failed_rc=$?
+FAILED_META="$(job_meta failed)"; FAILED_CLONE="$JOB_STATE/wt/$JOB_ID/codex--failed"
+check "provider_and_permission_failures_record_failure_and_clean" "test $failed_rc -ne 0 -a \"\$(jq -r .status '$FAILED_META')\" = failed -a ! -e '$FAILED_CLONE'"
+run_fake_impl metadata-failed '' "$TMP/no-ready" "$TMP/no-release" success session-metadata >"$TMP/metadata-failed.out" 2>&1; metadata_rc=$?
+METADATA_META="$(job_meta metadata-failed)"; METADATA_CLONE="$JOB_STATE/wt/$JOB_ID/codex--metadata-failed"
+check "metadata_failure_cleans_new_server_session" "test $metadata_rc -ne 0 -a \"\$(jq -r .status '$METADATA_META')\" = failed -a ! -e '$METADATA_CLONE' -a \"\$(jq -r .cleanup.server_session '$METADATA_META')\" = removed"
+run_fake_impl patch-failed '' "$TMP/no-ready" "$TMP/no-release" success patch >"$TMP/patch-failed.out" 2>&1; patch_rc=$?
+PATCH_META="$(job_meta patch-failed)"; PATCH_CLONE="$JOB_STATE/wt/$JOB_ID/codex--patch-failed"
+check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .report_path '$PATCH_META')\" != null -a ! -e '$PATCH_CLONE'"
+
+RECON_META="$(job_meta reconcile-dead)"; RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--reconcile-dead"; RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--reconcile-dead.lock.d"
+mkdir -p "$RECON_CLONE" "$RECON_LOCK"
+jq --arg n reconcile-dead --arg clone "$RECON_CLONE" --argjson pid 99999999 \
+  '.name=$n | .status="running" | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .failure=null | .cleanup={clone:"pending",server_session:"pending"}' \
+  "$FAILED_META" > "$RECON_META"
+printf 99999999 > "$RECON_LOCK/pid"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" RECON_META="$RECON_META" \
+  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$RECON_META"' >/dev/null 2>&1
+check "dead_owner_reconciliation_requires_all_safety_checks" "test \"\$(jq -r .status '$RECON_META')\" = failed -a \"\$(jq -r .failure '$RECON_META')\" = owner-process-died -a ! -e '$RECON_CLONE' -a ! -e '$RECON_LOCK'"
+
+FORGED_META="$(job_meta forged-outside)"; FORGED_CLONE="$TMP/outside-owned-by-user"; FORGED_LOCK="$JOB_STATE/locks/$JOB_ID--codex--forged-outside.lock.d"
+mkdir -p "$FORGED_CLONE" "$FORGED_LOCK"
+jq --arg n forged-outside --arg clone "$FORGED_CLONE" --argjson pid 99999999 \
+  '.name=$n | .status="running" | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .failure=null' \
+  "$FAILED_META" > "$FORGED_META"
+printf 99999999 > "$FORGED_LOCK/pid"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" FORGED_META="$FORGED_META" \
+  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$FORGED_META" || true' >/dev/null 2>&1
+check "live_owner_and_forged_or_outside_paths_are_never_swept" "test -d '$FORGED_CLONE' -a -f '$FORGED_META' -a \"\$(jq -r .status '$FORGED_META')\" = running"
+
+READY_A="$TMP/a-ready"; READY_B="$TMP/b-ready"; RELEASE_A="$TMP/a-release"; RELEASE_B="$TMP/b-release"
+run_fake_impl parallel-a record "$READY_A" "$RELEASE_A" >"$TMP/a.out" 2>&1 & pid_a=$!
+run_fake_impl parallel-b record "$READY_B" "$RELEASE_B" >"$TMP/b.out" 2>&1 & pid_b=$!
+wait_file "$READY_A"; wait_file "$READY_B"
+check "different_implementation_names_run_independently" "test -f \"\$(job_meta parallel-a)\" -a -f \"\$(job_meta parallel-b)\""
+touch "$RELEASE_A" "$RELEASE_B"; wait "$pid_a"; wait "$pid_b"
+
+check "abort_completion_race_records_observed_truth" "grep -q 'implementation_abort_requested.*finish.*stop\|finish.*stop' '$AI_GLM'"
+check "ambiguous_server_state_is_reported_not_deleted" "grep -q 'server state.*ambiguous' '$AI_GLM'"
+(cd "$TMP/repoA" && AI_GLM_CALLER=codex AI_GLM_STATE_DIR="$JOB_STATE" "$AI_GLM" delete normal >/dev/null 2>&1)
+check "terminal_record_can_be_cleared_for_safe_name_reuse" "test ! -e '$NORMAL_META'"
 
 # ---------------------------------------------------------------------------
 # Live probes. Need a healthy server and a working Z.ai key.
@@ -269,6 +377,25 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   "$AI_GLM" abort live-outside-permission >/dev/null 2>&1 || true
   "$AI_GLM" delete live-outside-permission >/dev/null 2>&1 || true
   rm -f "$OUTSIDE_MARKER"
+
+  LIVE_JOB="implementation-job-tracking-live-$(date -u +%Y%m%d%H%M%S)"
+  LIVE_READY="$TMP/live-job-ready"; LIVE_RELEASE="$TMP/live-job-release"
+  AI_GLM_CALLER=codex AI_GLM_TEST_MODE=1 AI_GLM_TEST_PAUSE_AT=session \
+    AI_GLM_TEST_READY="$LIVE_READY" AI_GLM_TEST_RELEASE="$LIVE_RELEASE" \
+    "$AI_GLM" implement "$LIVE_JOB" --prompt "Create harmless-canary.txt containing: bounded canary" \
+    >"$TMP/live-job-owner" 2>&1 & live_job_pid=$!
+  wait_file "$LIVE_READY"
+  check "live implementation is visible while active" "AI_GLM_CALLER=codex '$AI_GLM' list | grep -qE '$LIVE_JOB.*implementation.*running'"
+  AI_GLM_CALLER=codex "$AI_GLM" implement "$LIVE_JOB" --lock-timeout 0 --prompt duplicate >"$TMP/live-job-duplicate" 2>&1
+  live_duplicate_rc=$?
+  check "live duplicate is rejected before another session" "test $live_duplicate_rc -ne 0 && grep -q 'No clone, server session, or provider turn' '$TMP/live-job-duplicate'"
+  AI_GLM_CALLER=codex "$AI_GLM" abort "$LIVE_JOB" >"$TMP/live-job-abort" 2>&1
+  check "live abort targets the named implementation" "grep -q 'abort requested' '$TMP/live-job-abort'"
+  touch "$LIVE_RELEASE"; wait "$live_job_pid" || true
+  AI_GLM_CALLER=codex "$AI_GLM" show "$LIVE_JOB" >"$TMP/live-job-show"
+  check "live abort records terminal truth" "jq -e '.status==\"aborted\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$TMP/live-job-show' >/dev/null"
+  check "live abort leaves no canonical clone" "test ! -e \"\$(jq -r .clone_path '$TMP/live-job-show')\""
+  AI_GLM_CALLER=codex "$AI_GLM" delete "$LIVE_JOB" >/dev/null 2>&1
 
   "$AI_GLM" implement live-impl --prompt "Create a file NOTES.md containing exactly the line: hello from glm" >"$TMP/r4" 2>&1
   check "implement produced a patch"        "ls '$LIVE'/.ai/reviews/glm-live-impl-*.patch >/dev/null 2>&1"

@@ -35,12 +35,13 @@ to a shim that runs the same script, so use the same syntax from PowerShell that
 would use on Ubuntu. Prefer `--prompt-file` over `--prompt` there, so quoting can never
 mangle a long brief.
 
-Two Windows-only differences:
-- Service control is `Start-ScheduledTask -TaskName AiDevOps-OpenCodeGlm` (and
-  `Stop-ScheduledTask`), not `ai-glm server start`.
+One Windows-only setup difference:
 - If `ai-glm` is not found, the machine has not been set up yet. Run
   `bin\setup-opencode-glm.ps1` once (it installs its own prerequisites), or fall back to
   running `ai-glm` on the Ubuntu host over SSH. Do not tell the user to open Git Bash.
+
+Once installed, `ai-glm server status|start|stop|restart` works on both Windows and
+Ubuntu. Windows uses Scheduled Task `AiDevOps-OpenCodeGlm` behind that command.
 
 ## Continue a session. Do not start a new one per question.
 
@@ -85,17 +86,25 @@ changed.
 
 Use `ai-glm implement` only when the user explicitly asks GLM to write or change code.
 
-**Known active defect (2026-08-10):** implementation jobs are not yet shown by
-`ai-glm list`, locked by name for the full run, or abortable by name. A missing list
-entry or patch does not mean the wrapper process stopped. Never retry the same
-implementation name until the original `ai-glm implement` command reaches a terminal
-result. The permanent fix is tracked in `plan_glm-implementation-job-tracking.md` in the
-ai-devops repo; read its STATUS table before modifying the harness.
+Implementation jobs are durable named records. `ai-glm list` shows `starting`,
+`running`, `abort-requested`, and terminal jobs even when the original terminal call is
+still running. The repository/caller/name lock is held for the entire lifecycle, so a
+same-name retry exits before creating a second clone, server session, or provider turn.
+Never treat a missing patch as proof that no job started. Check `ai-glm list`, then
+`ai-glm show <name>`.
+
+Stop an active implementation with `ai-glm abort <name>`. The control call targets the
+exact recorded server session and never deletes the live clone. The owner process cleans
+its exact clone and records `completed`, `failed`, or `aborted`. After inspecting the
+terminal evidence, use `ai-glm delete <name>` to clear the record before reusing the
+name. `ask`, `transcript`, and `diff` do not resume one-shot implementation jobs.
 
 It creates a throwaway clone with its git remote removed, lets GLM edit and run
 builds/tests inside it, writes the result out as a patch under `.ai/reviews/`, and
-**deletes the sandbox before it exits** - every time, including on crash or interrupt.
-Nothing accumulates and nothing is ever left for the user to merge or clean up.
+**deletes the sandbox before it exits** on every controlled completion, failure, abort,
+or interrupt. A dead owner is reconciled only when record, path, lock, process, and
+server evidence all agree. Ambiguous or old unrecorded paths are preserved with a loud
+warning instead of being swept.
 
 GLM has a shell there, so ask it to run the tests and report the real output. It cannot
 push: the sandbox has no remote, which is the actual control. OpenCode 1.18.12 does not

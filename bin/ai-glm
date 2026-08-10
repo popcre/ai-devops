@@ -7,7 +7,7 @@
 #
 #   ai-glm new <name> [--prompt T | --prompt-file F | stdin]   start a review session
 #   ai-glm ask <name> [...]                                    continue it
-#   ai-glm implement <name> [...]                              write run in a throwaway worktree
+#   ai-glm implement <name> [...]                              one-shot write job in a throwaway clone
 #   ai-glm list | show <name> | transcript <name> | diff <name>
 #   ai-glm abort <name> | delete <name>
 #   ai-glm doctor
@@ -138,6 +138,7 @@ repo_id() {
   printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
 }
 repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
+safe_repo_remote() { repo_remote "$1" | sed -E 's#(https?://)[^/@]+@#\1[REDACTED]@#; s/[?#].*$//'; }
 valid_name() {
   case "$1" in
     ''|*[!a-zA-Z0-9._-]*) return 1 ;;
@@ -168,6 +169,17 @@ lock_acquire() { # lock_acquire DIR TIMEOUT_SECONDS
   return 0
 }
 
+lock_release() { rm -rf "$1" 2>/dev/null || true; }
+
+implementation_lock_acquire() { # never reclaim: a stale lock is reconciliation evidence
+  local d="$1"
+  mkdir -p "$(dirname "$d")"
+  mkdir "$d" 2>/dev/null || return 1
+  if ! printf '%s' "$$" > "$d/pid"; then rm -rf "$d"; return 1; fi
+  # shellcheck disable=SC2064
+  trap "rm -rf '$d'" EXIT
+}
+
 write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem)
   local f="$1" tmp
   mkdir -p "$(dirname "$f")"
@@ -175,6 +187,100 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
   printf '%s\n' "$2" > "$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$f"
+}
+
+implementation_terminal() {
+  case "$1" in completed|failed|aborted) return 0 ;; *) return 1 ;; esac
+}
+
+implementation_active() {
+  case "$1" in starting|running|abort-requested) return 0 ;; *) return 1 ;; esac
+}
+
+implementation_clone_path() { # RID NAME
+  printf '%s/wt/%s/%s--%s' "$STATE_DIR" "$1" "$CALLER" "$2"
+}
+
+metadata_lock_acquire() { # lock used only for one atomic record transition
+  local d="$1" waited=0 owner
+  while ! mkdir "$d" 2>/dev/null; do
+    owner="$(cat "$d/pid" 2>/dev/null || echo '')"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$d"; continue; fi
+    [ "$waited" -lt 100 ] || return 1
+    sleep 0.1; waited=$((waited + 1))
+  done
+  if ! printf '%s' "$$" > "$d/pid"; then rm -rf "$d"; return 1; fi
+}
+
+implementation_record_path_valid() {
+  local f="$1" rid caller name expected
+  rid="$(jq -r '.repository_id // empty' "$f" 2>/dev/null)"
+  caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)"
+  name="$(jq -r '.name // empty' "$f" 2>/dev/null)"
+  expected="$STATE_DIR/sessions/$rid/$caller--$name.json"
+  [ "$(canonical_path "$f" "$STATE_DIR")" = "$(canonical_path "$expected" "$STATE_DIR")" ]
+}
+
+implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
+  local f="$1" expected_root="${2:-}" expected_caller="${3:-$CALLER}" root rid name caller clone expected
+  jq -e '
+    .schema_version == 3 and .type == "implementation" and
+    (.name|type)=="string" and (.repository_root|type)=="string" and
+    (.repository_id|type)=="string" and (.caller|type)=="string" and
+    (.base_sha|type)=="string" and (.owner_pid|type)=="number" and
+    (.status|IN("starting","running","abort-requested","completed","failed","aborted")) and
+    (.clone_path == null or (.clone_path|type)=="string") and
+    (.opencode_session_id == null or (.opencode_session_id|type)=="string")
+  ' "$f" >/dev/null 2>&1 || return 1
+  root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
+  name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
+  valid_name "$name" || return 1
+  [ -d "$root" ] && [ "$rid" = "$(repo_id "$root")" ] || return 1
+  [ "$caller" = "$expected_caller" ] || return 1
+  [ -z "$expected_root" ] || [ "$(canonical_path "$root" "$root")" = "$(canonical_path "$expected_root" "$expected_root")" ] || return 1
+  clone="$(jq -r '.clone_path // empty' "$f")"
+  if [ -n "$clone" ]; then
+    expected="$STATE_DIR/wt/$rid/$caller--$name"
+    [ "$(canonical_path "$clone" "$STATE_DIR")" = "$(canonical_path "$expected" "$STATE_DIR")" ] || return 1
+  fi
+}
+
+implementation_update() { # FILE JQ_FILTER [jq args...]
+  local f="$1" filter="$2" old new tmp record_caller update_lock="$1.update.lock.d"; shift 2
+  metadata_lock_acquire "$update_lock" || return 1
+  record_caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)"
+  if [ ! -f "$f" ] || [ -z "$record_caller" ] || ! implementation_meta_valid "$f" "" "$record_caller"; then
+    rm -rf "$update_lock"; return 1
+  fi
+  old="$(jq -r .status "$f")"
+  tmp="$(mktemp)"
+  jq "$@" "$filter | .updated_at=\"$(date -u +%FT%TZ)\"" "$f" > "$tmp" || { rm -f "$tmp"; rm -rf "$update_lock"; return 1; }
+  new="$(jq -r .status "$tmp")"
+  case "$old:$new" in
+    starting:starting|starting:running|starting:abort-requested|starting:failed|starting:aborted|\
+    running:running|running:abort-requested|running:completed|running:failed|running:aborted|\
+    abort-requested:abort-requested|abort-requested:completed|abort-requested:failed|abort-requested:aborted|\
+    completed:completed|failed:failed|aborted:aborted) ;;
+    *) rm -f "$tmp"; rm -rf "$update_lock"; return 1 ;;
+  esac
+  implementation_meta_valid "$tmp" "" "$record_caller" || { rm -f "$tmp"; rm -rf "$update_lock"; return 1; }
+  if ! write_meta "$f" "$(cat "$tmp")"; then rm -f "$tmp"; rm -rf "$update_lock"; return 1; fi
+  rm -f "$tmp"; rm -rf "$update_lock"
+}
+
+implementation_abort_requested() {
+  [ -f "$1" ] && [ "$(jq -r '.status // empty' "$1" 2>/dev/null)" = abort-requested ]
+}
+
+test_pause() { # internal deterministic fixture hook; inert outside the test suite
+  [ "${AI_GLM_TEST_PAUSE_AT:-}" = "$1" ] || return 0
+  [ "${AI_GLM_TEST_MODE:-0}" = 1 ] || die "AI_GLM_TEST_PAUSE_AT is test-only."
+  : > "${AI_GLM_TEST_READY:?AI_GLM_TEST_READY is required}"
+  while [ ! -e "${AI_GLM_TEST_RELEASE:?AI_GLM_TEST_RELEASE is required}" ]; do sleep 0.1; done
+}
+
+test_failure() { # internal deterministic failure hook; inert outside the test suite
+  [ "${AI_GLM_TEST_MODE:-0}" = 1 ] && [ "${AI_GLM_TEST_FAIL_AT:-}" = "$1" ]
 }
 
 # --------------------------------------------------------------------------------
@@ -202,6 +308,11 @@ permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTT
   fi
   HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
   [ "$rc" -eq 0 ] || HTTP_STATUS="000"
+}
+
+delete_exact_server_session() { # SID; 404 is already clean
+  permission_http DELETE "/session/$1"
+  case "$HTTP_STATUS" in 2*|404) return 0 ;; *) return 1 ;; esac
 }
 
 sanitize_permission_body() { # redact first, then cap response detail at 2 KiB
@@ -357,8 +468,8 @@ send_prompt() { # send_prompt SID PROMPT_FILE
   rm -f "$body"
 }
 
-await_turn() { # await_turn SID NAME MODE SESSION_DIR -> assistant JSON
-  local sid="$1" name="$2" mode="$3" root="$4" waited=0 idle=0 msg finish stuck
+await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck
   APPROVED_PERMISSION_IDS=""
   sleep 6
   while [ "$waited" -lt "$TIMEOUT" ]; do
@@ -372,6 +483,9 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR -> assistant JSON
     finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
     if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ]; then
       printf '%s' "$msg"; return 0
+    fi
+    if [ -n "$impl_meta" ] && implementation_abort_requested "$impl_meta" && [ "$idle" -ge 2 ]; then
+      return 130
     fi
     sleep "$POLL_SECS"
     waited=$((waited + POLL_SECS))
@@ -432,18 +546,18 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
 # Prompt input
 # --------------------------------------------------------------------------------
 read_prompt() { # read_prompt -> path to a temp file holding the prompt
-  local f; f="$(mktemp)"
+  local f
+  [ -z "$PROMPT_FILE" ] || [ -f "$PROMPT_FILE" ] || die "prompt file not found: $PROMPT_FILE"
+  [ -n "$PROMPT_TEXT" ] || [ -n "$PROMPT_FILE" ] || [ ! -t 0 ] || die "provide a prompt: --prompt TEXT, --prompt-file FILE, or stdin."
+  f="$(mktemp)"
   if [ -n "$PROMPT_TEXT" ]; then
     printf '%s' "$PROMPT_TEXT" > "$f"
   elif [ -n "$PROMPT_FILE" ]; then
-    [ -f "$PROMPT_FILE" ] || die "prompt file not found: $PROMPT_FILE"
     cat "$PROMPT_FILE" > "$f"
   elif [ ! -t 0 ]; then
     cat > "$f"
-  else
-    die "provide a prompt: --prompt TEXT, --prompt-file FILE, or stdin."
   fi
-  [ -s "$f" ] || die "prompt is empty."
+  [ -s "$f" ] || { rm -f "$f"; die "prompt is empty."; }
   printf '%s' "$f"
 }
 
@@ -527,39 +641,104 @@ cmd_ask() {
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
+IMPL_META=""; IMPL_LOCK=""; IMPL_CLONE=""; IMPL_SID=""; IMPL_PF=""; IMPL_CARRY=""
+IMPL_FINAL_STATE=""; IMPL_FAILURE=""; IMPL_CLEANING=0
+
+implementation_cleanup() {
+  local rc="${1:-1}" clone_state=none session_state=none final="$IMPL_FINAL_STATE" safe=1 terminal_recorded=0 recorded_clone expected_clone lock_pid
+  [ "$IMPL_CLEANING" = 0 ] || return 0
+  IMPL_CLEANING=1; trap - EXIT INT TERM HUP
+  rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
+  if [ -n "$IMPL_CLONE" ] && [ -e "$IMPL_CLONE" ]; then
+    recorded_clone="$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null || true)"
+    expected_clone="$(implementation_clone_path "$(jq -r '.repository_id // empty' "$IMPL_META" 2>/dev/null)" "$(jq -r '.name // empty' "$IMPL_META" 2>/dev/null)")"
+    lock_pid="$(cat "$IMPL_LOCK/pid" 2>/dev/null || echo '')"
+    if [ -n "$IMPL_META" ] && implementation_record_path_valid "$IMPL_META" && implementation_meta_valid "$IMPL_META" &&
+       [ "$lock_pid" = "$$" ] &&
+       [ "$(canonical_path "$expected_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ] &&
+       { [ -z "$recorded_clone" ] || [ "$(canonical_path "$recorded_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ]; }; then
+      rm -rf "$IMPL_CLONE" 2>/dev/null || true
+      [ ! -e "$IMPL_CLONE" ] && clone_state=removed || { clone_state=failed; safe=0; }
+    else
+      clone_state=ambiguous; safe=0
+      warn "implementation clone ownership is ambiguous; left untouched: $IMPL_CLONE"
+    fi
+  fi
+  if [ -n "$IMPL_SID" ]; then
+    if server_up && delete_exact_server_session "$IMPL_SID"; then
+      session_state=removed
+    else
+      session_state=failed; safe=0
+      warn "implementation server session $IMPL_SID could not be removed; its exact id remains in the job record."
+    fi
+  fi
+  if [ -z "$final" ]; then
+    if [ -n "$IMPL_META" ] && implementation_abort_requested "$IMPL_META"; then final=aborted
+    else final=failed; fi
+  fi
+  [ "$safe" = 1 ] || { final=failed; IMPL_FAILURE="${IMPL_FAILURE:-resource-cleanup-failed}"; }
+  if [ -n "$IMPL_META" ] && [ -f "$IMPL_META" ] && implementation_record_path_valid "$IMPL_META" && implementation_meta_valid "$IMPL_META"; then
+    implementation_update "$IMPL_META" \
+      '.status=$state | .finished_at=$now | .exit_code=$rc | .failure=$failure |
+       .cleanup={clone:$clone,server_session:$session}' \
+      --arg state "$final" --arg now "$(date -u +%FT%TZ)" --argjson rc "$rc" \
+      --arg failure "$IMPL_FAILURE" --arg clone "$clone_state" --arg session "$session_state" \
+      && terminal_recorded=1 || warn "could not record terminal implementation state."
+  fi
+  if [ "$terminal_recorded" = 1 ]; then
+    [ -n "$IMPL_LOCK" ] && lock_release "$IMPL_LOCK"
+  else
+    warn "implementation lock retained so doctor can reconcile the dead owner safely: $IMPL_LOCK"
+  fi
+  IMPL_CLEANING=0
+}
+
 cmd_implement() {
-  local name="$1" root rid sb sid pf msg text tokens patch report base carry
+  local name="$1" root rid mp state msg text tokens patch report base turn_rc
   valid_name "$name" || die "invalid session name '$name'"
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"
   base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || die "repository has no commits yet; commit something first."
-  pf="$(read_prompt)"
-  sb="$STATE_DIR/wt/$rid/$(date -u +%Y%m%d%H%M%S)-$$"
-  mkdir -p "$(dirname "$sb")"
-  # The sandbox is created and destroyed inside this one command. Nothing survives it
-  # and the user is never asked to merge or clean anything up.
-  #
-  # It is a CLONE with its remote removed, not a `git worktree`. A worktree shares the
-  # parent's .git and therefore its remotes, so an enabled bash tool could run
-  # `git push` against the real remote. OpenCode 1.18.12 does not enforce bash
-  # allow/deny rules (measured), so removing the remote is the only real control.
-  # With no remote there is nowhere to push, which is what lets GLM have a shell and
-  # actually run builds and tests.
-  # shellcheck disable=SC2064
-  trap "rm -rf '$sb'" EXIT
-  git clone --quiet --no-hardlinks "$root" "$sb" 2>/dev/null || die "could not create the GLM sandbox at $sb"
-  git -C "$sb" checkout --quiet --detach "$base" 2>/dev/null || die "could not check out $base in the sandbox"
-  git -C "$sb" remote remove origin >/dev/null 2>&1 || true
-  # Carry over the parent's uncommitted TRACKED changes so GLM works on what you see.
-  # Untracked files are not carried; mention them in the prompt if GLM needs them.
-  carry="$(mktemp)"
-  git -C "$root" diff HEAD > "$carry" 2>/dev/null || true
-  [ -s "$carry" ] && git -C "$sb" apply "$carry" 2>/dev/null
-  rm -f "$carry"
-  # Keep build noise out of the patch. A repo with a .gitignore already handles this;
-  # this covers the ones that do not, so a test run does not add .pyc/node_modules to
-  # the diff a human has to review.
-  cat >> "$sb/.git/info/exclude" <<'EXCL'
+  mp="$(meta_path "$rid" "$name")"; IMPL_LOCK="$(lock_path "$rid" "$name")"
+  if ! implementation_lock_acquire "$IMPL_LOCK"; then
+    state="$(jq -r '.status // "unknown"' "$mp" 2>/dev/null || echo unknown)"
+    die "implementation job '$name' is already $state. No clone, server session, or provider turn was created."
+  fi
+  if [ -f "$mp" ]; then
+    implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "$root" || die "implementation record '$mp' is malformed; refusing to overwrite or clean it."
+    state="$(jq -r .status "$mp")"
+    implementation_active "$state" && die "implementation job '$name' is already $state. Inspect it with: ai-glm show $name"
+    die "implementation job '$name' is $state. Clear it before safe reuse: ai-glm delete $name"
+  fi
+  IMPL_META="$mp"; IMPL_CLONE="$(implementation_clone_path "$rid" "$name")"
+  write_meta "$IMPL_META" "$(jq -n --arg n "$name" --arg r "$root" --arg remote "$(safe_repo_remote "$root")" \
+      --arg rid "$rid" --arg c "$CALLER" --arg b "$base" --arg ts "$(date -u +%FT%TZ)" --argjson pid "$$" \
+      --arg provider "$PROVIDER" --arg model "$MODEL" \
+      '{schema_version:3,name:$n,type:"implementation",repository_root:$r,repository_remote:$remote,
+        repository_id:$rid,caller:$c,agent:"glm-implement",provider:$provider,model:$model,
+        base_sha:$b,owner_pid:$pid,created_at:$ts,updated_at:$ts,status:"starting",
+        clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
+        finished_at:null,exit_code:null,failure:null,cleanup:{clone:"pending",server_session:"pending"}}')" \
+    || die "could not save implementation job record '$mp'."
+  implementation_meta_valid "$IMPL_META" "$root" || die "new implementation record failed validation."
+  trap 'implementation_cleanup "$?"' EXIT
+  trap 'IMPL_FAILURE="interrupted"; IMPL_FINAL_STATE="aborted"; exit 130' INT TERM HUP
+  test_pause record
+  implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
+  IMPL_PF="$(read_prompt)"
+  mkdir -p "$(dirname "$IMPL_CLONE")"
+  [ ! -e "$IMPL_CLONE" ] || die "canonical implementation clone already exists without a reusable job: $IMPL_CLONE"
+  git clone --quiet --no-hardlinks "$root" "$IMPL_CLONE" 2>/dev/null || die "could not create the GLM sandbox at $IMPL_CLONE"
+  git -C "$IMPL_CLONE" checkout --quiet --detach "$base" 2>/dev/null || die "could not check out $base in the sandbox"
+  git -C "$IMPL_CLONE" remote remove origin >/dev/null 2>&1 || true
+  implementation_update "$IMPL_META" '.clone_path=$clone' --arg clone "$IMPL_CLONE" || die "could not attach the clone to the implementation record."
+  test_pause clone
+  implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
+  IMPL_CARRY="$(mktemp)"
+  git -C "$root" diff HEAD > "$IMPL_CARRY" 2>/dev/null || true
+  [ -s "$IMPL_CARRY" ] && git -C "$IMPL_CLONE" apply "$IMPL_CARRY" 2>/dev/null
+  rm -f "$IMPL_CARRY"; IMPL_CARRY=""
+  cat >> "$IMPL_CLONE/.git/info/exclude" <<'EXCL'
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -571,16 +750,42 @@ build/
 target/
 *.log
 EXCL
-
-  sid="$(create_session "$name (implement)" glm-implement "$sb")"
-  send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name" implement "$sb")"
+  IMPL_SID="$(create_session "$name (implement)" glm-implement "$IMPL_CLONE")"
+  if test_failure session-metadata; then
+    delete_exact_server_session "$IMPL_SID" || true
+    die "simulated implementation metadata failure"
+  fi
+  implementation_update "$IMPL_META" '.opencode_session_id=$sid | .status="running"' --arg sid "$IMPL_SID" || {
+    delete_exact_server_session "$IMPL_SID" || true
+    die "could not attach the server session to the implementation record."
+  }
+  test_pause session
+  implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
+  send_prompt "$IMPL_SID" "$IMPL_PF"; rm -f "$IMPL_PF"; IMPL_PF=""
+  set +e
+  msg="$(await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META")"; turn_rc=$?
+  set -e
+  if [ "$turn_rc" -ne 0 ]; then
+    if [ "$turn_rc" -eq 130 ] || implementation_abort_requested "$IMPL_META"; then
+      IMPL_FINAL_STATE=aborted; IMPL_FAILURE="abort-requested"; return 130
+    fi
+    IMPL_FAILURE="turn-failed"; return "$turn_rc"
+  fi
   verify_model "$msg"
-  git -C "$sb" add -A >/dev/null 2>&1 || true
+  git -C "$IMPL_CLONE" add -A >/dev/null 2>&1 || true
   patch="$root/.ai/reviews/glm-$name-$(date -u +%Y%m%dT%H%M%SZ).patch"
   mkdir -p "$(dirname "$patch")"
-  git -C "$sb" diff --cached "$base" > "$patch"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached "$base" > "$patch"; then
+    rm -f "$patch"; IMPL_FAILURE="patch-export-failed"
+    report="$(write_report "$root" "$name" "implementation failure" "$text
+
+Patch export failed. No patch path was recorded. The terminal job record retains this
+GLM response and the exact failure reason; the disposable clone is still cleaned safely.
+" "$tokens" "$IMPL_SID")" || return 1
+    implementation_update "$IMPL_META" '.report_path=$report' --arg report "$report" || return 1
+    return 1
+  fi
   report="$(write_report "$root" "$name" implement "$text
 
 ## Patch
@@ -588,12 +793,16 @@ EXCL
 \`$patch\`
 
 \`\`\`
-$(git -C "$sb" diff --cached --stat "$base")
+$(git -C "$IMPL_CLONE" diff --cached --stat "$base")
 \`\`\`
-" "$tokens" "$sid")"
+" "$tokens" "$IMPL_SID")" || { IMPL_FAILURE="report-write-failed"; return 1; }
+  implementation_update "$IMPL_META" '.patch_path=$patch | .report_path=$report' --arg patch "$patch" --arg report "$report" || {
+    IMPL_FAILURE="artifact-metadata-failed"; return 1
+  }
   note "Patch written to: $patch"
   note "Apply it only after review:  git apply --check '$patch' && git apply '$patch'"
-  emit "$name" implement "$sid" "$text" "$tokens" "$report"
+  emit "$name" implement "$IMPL_SID" "$text" "$tokens" "$report"
+  IMPL_FINAL_STATE=completed
 }
 
 cmd_list() {
@@ -603,14 +812,14 @@ cmd_list() {
     jq -s '{schema_version:1, sessions:.}' "$STATE_DIR"/sessions/*/*.json 2>/dev/null || echo '{"schema_version":1,"sessions":[]}'
     return
   fi
-  printf '%-24s %-10s %-8s %-10s %s\n' NAME TYPE CALLER STATUS REPOSITORY
+  printf '%-24s %-15s %-8s %-16s %-20s %s\n' NAME TYPE CALLER STATUS UPDATED REPOSITORY
   for f in "$STATE_DIR"/sessions/*/*.json; do
-    jq -r '[.name,.type,.caller,.status,.repository_root]|@tsv' "$f"
-  done | awk -F'\t' '{printf "%-24s %-10s %-8s %-10s %s\n",$1,$2,$3,$4,$5}'
+    jq -r '[.name,.type,.caller,.status,(.updated_at // .last_activity_at // .created_at // "unknown"),.repository_root]|@tsv' "$f"
+  done | awk -F'\t' '{printf "%-24s %-15s %-8s %-16s %-20s %s\n",$1,$2,$3,$4,$5,$6}'
 }
 
 find_meta() { # find_meta NAME -> path
-  local root rid mp remote cand found=""
+  local root rid mp remote cand found="" moved_impl=""
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$1")"
   if [ ! -f "$mp" ]; then
     remote="$(repo_remote "$root")"
@@ -618,22 +827,66 @@ find_meta() { # find_meta NAME -> path
     while IFS= read -r cand; do
       [ "$(jq -r '.name // ""' "$cand")" = "$1" ] || continue
       [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
+      if [ "$(jq -r '.type // ""' "$cand")" = implementation ]; then
+        [ "$(jq -r '.repository_remote // ""' "$cand")" = "$(safe_repo_remote "$root")" ] || continue
+        [ -z "$moved_impl" ] || die "multiple moved-checkout implementation records match '$1'; refusing ambiguity."
+        moved_impl="$cand"; continue
+      fi
       [ "$(jq -r '.repository_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$1'; refusing an ambiguous migration."
       found="$cand"
     done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$1.json" 2>/dev/null)
+    [ -z "$moved_impl" ] || die "implementation job '$1' belongs to a different checkout path. Inspect or delete it from its recorded repository; one-shot ownership is never migrated."
     [ -z "$found" ] || { mkdir -p "$(dirname "$mp")"; mv "$found" "$mp"; }
   fi
   [ -f "$mp" ] || die "no session '$1' for caller '$CALLER' in this repo."
   printf '%s' "$mp"
 }
 
-cmd_show()   { cat "$(find_meta "$1")"; }
-cmd_abort()  { require_server; api POST "/session/$(jq -r .opencode_session_id "$(find_meta "$1")")/abort" >/dev/null; note "aborted: $1"; }
-cmd_diff()   { require_server; api GET  "/session/$(jq -r .opencode_session_id "$(find_meta "$1")")/diff"; }
+cmd_show() {
+  local mp type; mp="$(find_meta "$1")"; type="$(jq -r '.type // empty' "$mp")"
+  if [ "$type" = implementation ]; then
+    implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to display it as trusted state."
+    jq '{schema_version,name,type,status,repository_root,repository_remote,repository_id,caller,agent,provider,model,
+         base_sha,owner_pid,created_at,updated_at,finished_at,clone_path,opencode_session_id,
+         patch_path,report_path,exit_code,failure,cleanup}' "$mp"
+  else
+    cat "$mp"
+  fi
+}
+
+cmd_abort() {
+  local mp type state sid
+  mp="$(find_meta "$1")"; type="$(jq -r '.type // empty' "$mp")"
+  if [ "$type" != implementation ]; then
+    require_server
+    api POST "/session/$(jq -r .opencode_session_id "$mp")/abort" >/dev/null
+    note "aborted: $1"; return
+  fi
+  implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing an ambiguous abort."
+  state="$(jq -r .status "$mp")"
+  implementation_active "$state" || die "implementation job '$1' is $state, not active."
+  implementation_update "$mp" '.status="abort-requested" | .abort_requested_at=$now' --arg now "$(date -u +%FT%TZ)" \
+    || die "could not record the abort request; no server call was made."
+  sid="$(jq -r '.opencode_session_id // empty' "$mp")"
+  if [ -n "$sid" ]; then
+    require_server
+    permission_http POST "/session/$sid/abort"
+    case "$HTTP_STATUS" in 2*) ;; *) die "abort was recorded, but exact server session $sid returned HTTP $HTTP_STATUS. The owner will clean up conservatively." ;; esac
+  fi
+  note "abort requested: $1. Its owner process will remove the exact clone and record the terminal result."
+}
+
+cmd_diff() {
+  local mp; mp="$(find_meta "$1")"
+  [ "$(jq -r '.type // empty' "$mp")" = review ] || die "implementation job '$1' is one-shot; inspect its recorded patch path with: ai-glm show $1"
+  require_server; api GET "/session/$(jq -r .opencode_session_id "$mp")/diff"
+}
 
 cmd_transcript() {
-  local sid; sid="$(jq -r .opencode_session_id "$(find_meta "$1")")"
+  local mp sid; mp="$(find_meta "$1")"
+  [ "$(jq -r '.type // empty' "$mp")" = review ] || die "implementation job '$1' is one-shot and its disposable server session is not a persistent transcript target."
+  sid="$(jq -r .opencode_session_id "$mp")"
   require_server
   api GET "/api/session/$sid/message?limit=200" | jq -r '
     .data | reverse | .[] |
@@ -643,10 +896,75 @@ cmd_transcript() {
 }
 
 cmd_delete() {
-  local mp sid; mp="$(find_meta "$1")"; sid="$(jq -r .opencode_session_id "$mp")"
-  server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
+  local mp sid type state clone; mp="$(find_meta "$1")"; type="$(jq -r '.type // empty' "$mp")"
+  sid="$(jq -r '.opencode_session_id // empty' "$mp")"
+  if [ "$type" = implementation ]; then
+    implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to delete it."
+    state="$(jq -r .status "$mp")"; clone="$(jq -r '.clone_path // empty' "$mp")"
+    implementation_active "$state" && die "implementation job '$1' is $state. Abort it and wait for a terminal state before deleting it."
+    [ -z "$clone" ] || [ ! -e "$clone" ] || die "recorded clone still exists at $clone; refusing to erase its ownership record."
+    if [ -n "$sid" ] && [ "$(jq -r '.cleanup.server_session // "pending"' "$mp")" != removed ]; then
+      server_up || die "the exact server session still needs cleanup, but the server is unavailable. Retry delete after: ai-glm server start"
+      delete_exact_server_session "$sid" || die "could not delete exact server session $sid (HTTP $HTTP_STATUS); record preserved."
+    fi
+  else
+    server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
+  fi
   rm -f "$mp"
   note "deleted session: $1"
+}
+
+reconcile_implementation_record() { # conservative dead-owner recovery; never trusts PID alone
+  local mp="$1" root rid name caller state pid clone sid lock lock_pid clone_state=none session_state=none
+  [ "$(jq -r '.type // empty' "$mp" 2>/dev/null)" = implementation ] || return 0
+  root="$(jq -r '.repository_root // empty' "$mp" 2>/dev/null)"
+  caller="$(jq -r '.caller // empty' "$mp" 2>/dev/null)"
+  if [ -z "$root" ] || [ -z "$caller" ] || ! implementation_record_path_valid "$mp" || ! implementation_meta_valid "$mp" "$root" "$caller"; then
+    warn "malformed implementation record left untouched: $mp"; return 1
+  fi
+  state="$(jq -r .status "$mp")"; implementation_active "$state" || return 0
+  rid="$(jq -r .repository_id "$mp")"; name="$(jq -r .name "$mp")"; pid="$(jq -r .owner_pid "$mp")"
+  clone="$(jq -r '.clone_path // empty' "$mp")"; sid="$(jq -r '.opencode_session_id // empty' "$mp")"
+  lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"; lock_pid="$(cat "$lock/pid" 2>/dev/null || echo '')"
+  if kill -0 "$pid" 2>/dev/null; then return 0; fi
+  if [ ! -d "$lock" ] || [ "$lock_pid" != "$pid" ]; then
+    warn "dead implementation owner has ambiguous lock evidence; left untouched: $mp"; return 1
+  fi
+  if [ -n "$sid" ]; then
+    server_up || { warn "dead implementation owner cannot be reconciled while the server is unavailable: $mp"; return 1; }
+    permission_http GET "/session/$sid"
+    case "$HTTP_STATUS" in
+      200)
+        permission_http POST "/session/$sid/abort"
+        case "$HTTP_STATUS" in 2*) ;; *) warn "exact dead-owner session could not be aborted; left untouched: $sid"; return 1 ;; esac
+        permission_http DELETE "/session/$sid"
+        case "$HTTP_STATUS" in 2*) session_state=removed ;; *) warn "exact dead-owner session could not be deleted; left untouched: $sid"; return 1 ;; esac
+        ;;
+      404) session_state=absent ;;
+      *) warn "server state for dead implementation owner is ambiguous (HTTP $HTTP_STATUS); left untouched: $mp"; return 1 ;;
+    esac
+  fi
+  if [ -n "$clone" ] && [ -e "$clone" ]; then
+    rm -rf "$clone" 2>/dev/null || true
+    [ ! -e "$clone" ] || { warn "exact dead-owner clone could not be removed: $clone"; return 1; }
+    clone_state=removed
+  fi
+  implementation_update "$mp" \
+    '.status="failed" | .finished_at=$now | .exit_code=1 | .failure="owner-process-died" |
+     .cleanup={clone:$clone,server_session:$session}' \
+    --arg now "$(date -u +%FT%TZ)" --arg clone "$clone_state" --arg session "$session_state" \
+    || { warn "dead-owner resources were cleaned but terminal metadata could not be written: $mp"; return 1; }
+  lock_release "$lock"
+  warn "reconciled dead implementation owner for '$name'; terminal record retained."
+}
+
+reconcile_implementation_records() {
+  local f rc=0
+  shopt -s nullglob
+  for f in "$STATE_DIR"/sessions/*/*.json; do
+    reconcile_implementation_record "$f" || rc=1
+  done
+  return "$rc"
 }
 
 cmd_server() {
@@ -904,12 +1222,18 @@ cmd_doctor() {
     printf 'PASS  old glm-claude config removed\n'
   fi
   chk "retired ai-glm-agent fully gone"    bash -c "! command -v ai-glm-agent"
-  # Orphaned scratch worktrees: nothing ai-glm creates may outlive its command.
-  if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
-    printf 'WARN  orphaned scratch worktrees found under %s/wt (sweeping)\n' "$STATE_DIR"
-    find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d -exec rm -rf {} + 2>/dev/null || true
+  # Reconcile only records with exact schema, canonical clone, dead owner, matching
+  # stale lock, and exact server evidence. Old unrecorded directories have no such
+  # ownership proof and must never be swept automatically.
+  if reconcile_implementation_records; then
+    printf 'PASS  implementation job records reconciled safely\n'
   else
-    printf 'PASS  no orphaned scratch worktrees\n'
+    printf 'WARN  ambiguous implementation job state was preserved; inspect ai-glm list/show\n'
+  fi
+  if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
+    printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"
+  else
+    printf 'PASS  no unexplained scratch clones\n'
   fi
 
   printf '\n'
