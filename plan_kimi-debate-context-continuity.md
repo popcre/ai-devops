@@ -7,7 +7,7 @@
 | 1. Re-verify Kimi 0.32.0 STEP 0 behavior | ✅ complete | 2026-08-10 | Header re-qualified; live Read succeeded and hostile Write returned `CANNOT_WRITE` without changing the canary. |
 | 2. Add Kimi debate and context-health rules | ✅ complete | 2026-08-10 | Shared skill now requires exact-session delta turns, current-artifact re-read, bounded rebuttals, and no unavailable metrics. |
 | 3. Use the shared consensus ledger | ✅ complete | 2026-08-10 | Kimi consumes the Grok-owned provider-neutral template and stores durable state in the active artifact. |
-| 4. Extend offline and live tests | ✅ complete | 2026-08-10 | Pre-guard suites passed 54/0 offline and 62/0 live; final counts including the one-shot implement guard are recorded by this session below. |
+| 4. Extend offline and live tests | ✅ complete | 2026-08-10 | Final suites passed 56/0 offline and 64/0 live, including the one-shot implement guard. |
 | 5. Run the live K3 debate | ✅ complete | 2026-08-10 | Session `session_224373ef-2295-435e-860c-298b6e99e0f0`; one rebuttal; Kimi re-read the fix and reported no material Kimi objection. |
 | 6. Document, install, commit, and push | ✅ complete | 2026-08-10 | Docs, one-shot guard, tests, and matching installed skills shipped in `f738db7`; `origin/main` was verified at the same SHA. |
 
