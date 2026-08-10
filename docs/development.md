@@ -53,6 +53,12 @@ cache, token, cost, or returned-model values. Test exact-id session reuse, curre
 re-reading, and same-session durable-state recovery instead. Never inspect or edit its
 raw session files.
 
+Kimi 0.32.0 also has no prompt-file or stdin option for headless prompts, so `-p` puts
+brief text in the local process arguments. Never put secrets in a Kimi brief. Its
+implementation profile removes named web and subagent tools, but Bash still has network
+access by owner decision. Test the disposable-worktree, patch-recovery, and cleanup
+controls instead of claiming a network sandbox.
+
 Windows GLM service changes need both offline suites and a controlled live crash test.
 `tests/test-windows-scripts.sh` proves the generated recovery is bounded and observable;
 `tests/test-ai-glm.sh` protects the client. The live gate kills only the OpenCode child,

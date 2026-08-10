@@ -83,6 +83,7 @@ POLL_INTERVAL="${AI_KIMI_POLL_INTERVAL:-5}"
 _self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$_self")" && pwd)"
 RO_AGENT="${AI_KIMI_RO_AGENT:-$SELF_DIR/../config/kimi/readonly-review.md}"
+IMPL_AGENT="${AI_KIMI_IMPL_AGENT:-$SELF_DIR/../config/kimi/local-implement.md}"
 
 die()  { printf 'ai-kimi: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-kimi: warning: %s\n' "$*" >&2; }
@@ -160,7 +161,14 @@ repo_root() {
   git rev-parse --show-toplevel 2>/dev/null \
     || die "ai-kimi must be run inside a git repository."
 }
-repo_id()  { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
+legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
+repo_id() {
+  local root="$1" remote
+  root="$(cd "$root" && pwd -P)"
+  remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
+  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
+}
+repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 valid_name() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
 
 meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
@@ -193,10 +201,26 @@ lock_info() {
 write_meta() {
   local f="$1" tmp; mkdir -p "$(dirname "$f")"
   tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
-  printf '%s\n' "$2" > "$tmp"; mv -f "$tmp" "$f"
+  printf '%s\n' "$2" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true; mv -f "$tmp" "$f"
 }
 find_meta() {
-  local f; f="$(meta_path "$1" "$2")"
+  local f old repo remote cand found=""; f="$(meta_path "$1" "$2")"
+  if [ ! -f "$f" ]; then
+    repo="$(repo_root)"; old="$(meta_path "$(legacy_repo_id "$repo")" "$2")"
+    if [ -f "$old" ]; then mkdir -p "$(dirname "$f")"; mv "$old" "$f"; fi
+  fi
+  if [ ! -f "$f" ]; then
+    remote="$(repo_remote "$repo")"
+    [ -n "$remote" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-kimi list"
+    while IFS= read -r cand; do
+      [ "$(jq -r '.name // ""' "$cand")" = "$2" ] || continue
+      [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
+      [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
+      [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
+      found="$cand"
+    done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$2.json" 2>/dev/null)
+    [ -z "$found" ] || { mkdir -p "$(dirname "$f")"; mv "$found" "$f"; }
+  fi
   [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-kimi list"
   printf '%s' "$f"
 }
@@ -260,7 +284,12 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   elif [ "$mode" = review ]; then
     [ -f "$RO_AGENT" ] || die "read-only agent profile not found at $RO_AGENT — refusing to run a review without structural read-only enforcement."
     args+=(--agent-file "$RO_AGENT")
+  elif [ "$mode" = implement ]; then
+    [ -f "$IMPL_AGENT" ] || die "implementation agent profile not found at $IMPL_AGENT — refusing to run without its tool boundary."
+    args+=(--agent-file "$IMPL_AGENT")
   fi
+  # Kimi Code 0.32.0 exposes only -p/--prompt for headless input. This puts the
+  # brief in argv. Never put secrets in a Kimi brief on a shared host.
   args+=(-p "$(cat "$pf")")
 
   local as; as="$(run_as_user)"
@@ -273,8 +302,8 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   : > "$out"
   set +e
   if [ -n "$as" ]; then
-    # Prompt crosses the boundary on stdin, so no world-readable temp file is
-    # created for it. Quote every argument for the shell su spawns.
+    # Kimi has no prompt-file/stdin option. Quote every argument for the shell
+    # su spawns, but do not claim that this hides the prompt from process lists.
     local q="" a
     for a in "${args[@]}"; do q="$q $(printf '%q' "$a")"; done
     su - "$as" -c "cd $(printf '%q' "$repo") && \"\$HOME/.kimi-code/bin/kimi\"$q" \
@@ -370,6 +399,30 @@ Environment:
 EOF
 }
 
+doctor_worktrees() {
+  local root owner repo wt pid state expected
+  root="$STATE_DIR/worktrees"; [ -d "$root" ] || return 0
+  while IFS= read -r owner; do
+    repo="$(jq -r '.repo // ""' "$owner" 2>/dev/null)"
+    wt="$(jq -r '.worktree // ""' "$owner" 2>/dev/null)"
+    pid="$(jq -r '.pid // ""' "$owner" 2>/dev/null)"
+    state="$(jq -r '.state // ""' "$owner" 2>/dev/null)"
+    expected="${wt%/wt}/owner.json"
+    if [ "$owner" != "$expected" ] || [ "${wt#"$root"/}" = "$wt" ] || [ ! -d "$repo/.git" ]; then
+      warn "ambiguous Kimi worktree owner record left untouched: $owner"; continue
+    fi
+    if [ "$state" = preserved-recovery ]; then
+      warn "preserved Kimi recovery worktree left untouched: $wt"; continue
+    fi
+    [ "$state" = active ] || { warn "unknown Kimi worktree state left untouched: $owner"; continue; }
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && continue
+    git -C "$repo" worktree list --porcelain 2>/dev/null | grep -Fxq "worktree $wt" \
+      || { warn "unregistered Kimi worktree record left untouched: $owner"; continue; }
+    warn "removing stale wrapper-owned Kimi worktree: $wt"
+    cleanup_wt "$repo" "$wt" "$owner"
+  done < <(find "$root" -type f -name owner.json 2>/dev/null)
+}
+
 cmd_doctor() {
   local live=0 kimi rc=0
   [ "${1:-}" = "--live" ] && live=1
@@ -383,6 +436,11 @@ cmd_doctor() {
     echo "read-only     : $RO_AGENT"
   else
     echo "read-only     : MISSING ($RO_AGENT) — reviews will refuse to run"; rc=1
+  fi
+  if [ -f "$IMPL_AGENT" ]; then
+    echo "implement     : $IMPL_AGENT"
+  else
+    echo "implement     : MISSING ($IMPL_AGENT)"; rc=1
   fi
   echo
   # `kimi provider list` exits 0 even when it reports "No providers configured",
@@ -415,11 +473,12 @@ cmd_doctor() {
     if has_resume_hint "$tmp"; then echo "OK"; else echo "FAILED — no session.resume_hint"; rc=1; fi
     rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
   fi
+  doctor_worktrees
   return $rc
 }
 
 start_session() { # start_session NAME MODE
-  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt=""
+  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner=""
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(meta_path "$rid" "$name")"
@@ -429,18 +488,27 @@ start_session() { # start_session NAME MODE
   lock_acquire "$rid_lock" "$mode:$name" || die "another Kimi run is already active in this repository: $(lock_info "$rid_lock").
   Do not start a second one; wait for it, or continue it with 'ask'."
   # shellcheck disable=SC2064
-  trap "lock_release '$rid_lock'" EXIT INT TERM
+  trap "lock_release '$rid_lock'" EXIT
+  trap 'exit 130' INT TERM
 
   local workdir="$repo"
   if [ "$mode" = implement ]; then
-    wt="$(mktemp -d)/wt"
+    base="$(git -C "$repo" rev-parse HEAD)"
+    mkdir -p "$STATE_DIR/worktrees"
+    wt="$(mktemp -d "$STATE_DIR/worktrees/kimi.XXXXXX")/wt"
     git -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
       || die "could not create an isolated worktree for the implement run."
+    owner="${wt%/wt}/owner.json"
+    write_meta "$owner" "$(jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
+      '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
     workdir="$wt"
     note "implement run isolated in a throwaway worktree: $wt"
   fi
 
   pf="$(mktemp)"; out="$(mktemp)"
+  # Refresh the trap only after every exact lifecycle path is known. Values are
+  # expanded now, so later scope changes cannot redirect cleanup.
+  trap "cleanup_wt '$repo' '$wt' '$owner'; rm -f '$pf' '$out' '$out.err'; lock_release '$rid_lock'" EXIT
   build_prompt_file "$pf"
   before="$(tree_state "$repo")"
 
@@ -449,49 +517,65 @@ start_session() { # start_session NAME MODE
   if ! await_result "$out" "$mode '$name'"; then
     note "  kimi exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
-    cleanup_wt "$repo" "$wt"; rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   sid="$(session_id_from "$out")"
-  [ -n "$sid" ] || { cleanup_wt "$repo" "$wt"; rm -f "$pf" "$out" "$out.err"; die "Kimi returned no session id."; }
+  [ -n "$sid" ] || die "Kimi returned no session id."
 
   after="$(tree_state "$repo")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
-    cleanup_wt "$repo" "$wt"
     die "a READ-ONLY Kimi review changed the working tree. The agent profile's tool
   restriction is not holding — do not trust further reviews until this is understood.
   Inspect: git -C $repo status"
   fi
 
-  write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg name "$name" \
+  # Export write work before any bookkeeping that could fail. Once the patch is
+  # durable, later metadata failure cannot destroy the only copy of the change.
+  if [ "$mode" = implement ]; then emit_patch "$repo" "$name" "$wt" "$base" "$owner"; fi
+
+  write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
-    '{kimi_session_id:$sid, repo:$repo, name:$name, caller:$caller, mode:$mode,
+    '{kimi_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
       model:$model, created:$created, updated:$created, turns:$turns}')"
 
-  if [ "$mode" = implement ]; then emit_patch "$repo" "$name" "$wt"; fi
-  cleanup_wt "$repo" "$wt"
   finish_turn "$repo" "$name" "$out"
   rm -f "$pf" "$out" "$out.err"
 }
 
-cleanup_wt() { # cleanup_wt REPO WORKTREE — always runs; nothing outlives the delegation
-  local repo="$1" wt="${2:-}"
+cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
+  local repo="${1:-}" wt="${2:-}" owner="${3:-}"
   [ -n "$wt" ] || return 0
+  [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
   if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
     warn "the throwaway worktree $wt is STILL registered — remove it before continuing."
   fi
+  rm -f "$owner" 2>/dev/null || true
+  rmdir "${wt%/wt}" 2>/dev/null || true
 }
 
-emit_patch() { # emit_patch REPO NAME WORKTREE
-  local repo="$1" name="$2" wt="$3" dir patch
+emit_patch() { # emit_patch REPO NAME WORKTREE BASE OWNER
+  local repo="$1" name="$2" wt="$3" base="$4" owner="$5" dir patch tmp
   dir="$(reviews_dir "$repo")"
-  [ -n "$dir" ] || { warn "cannot save the patch: '.ai/reviews' is not git-ignored."; return 0; }
-  mkdir -p "$dir"
+  if [ -z "$dir" ]; then
+    dir="$STATE_DIR/recovery-patches"
+    mkdir -p "$dir" 2>/dev/null || dir=""
+  fi
+  if [ -z "$dir" ]; then
+    write_meta "$owner" "$(jq --arg state preserved-recovery '.state=$state' "$owner")"
+    die "cannot create a safe patch destination. Work is preserved at: $wt
+  Recover it there, then remove it with: git -C '$repo' worktree remove '$wt'"
+  fi
+  mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
   patch="$dir/kimi-${name}-$(date -u +%Y%m%dT%H%M%SZ).patch"
-  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --cached ) > "$patch" 2>/dev/null || true
+  tmp="$(mktemp "$dir/.kimi-patch.XXXXXX")"; chmod 0600 "$tmp" 2>/dev/null || true
+  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; write_meta "$owner" "$(jq '.state="preserved-recovery"' "$owner")"; die "could not export Kimi's work; it remains at $wt"; }
+  mv -f "$tmp" "$patch" \
+    || { write_meta "$owner" "$(jq '.state="preserved-recovery"' "$owner")"; die "could not finalize the patch; Kimi's work remains at $wt"; }
   if [ -s "$patch" ]; then
     note "patch written: $patch"
     note "  review it, then:  git apply --check '$patch' && git apply '$patch'"
@@ -557,10 +641,16 @@ cmd_list() {
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() { rm -f "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; note "deleted local session record '$1'."; }
 cmd_transcript() {
-  local sid kimi; sid="$(jq -r .kimi_session_id "$(find_meta "$(repo_id "$(repo_root)")" "$1")")"
+  local sid kimi repo dir out tmp; repo="$(repo_root)"
+  sid="$(jq -r .kimi_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
   kimi="$(resolve_kimi)"
-  note "Kimi exports a session as a ZIP archive, not text."
-  "$kimi" export "$sid" || die "'kimi export $sid' failed. Check: kimi export --help"
+  dir="$(reviews_dir "$repo")"; [ -n "$dir" ] || die "cannot export: '.ai/reviews' is not git-ignored."
+  mkdir -p "$dir"; out="$dir/kimi-$1-$(date -u +%Y%m%dT%H%M%SZ).zip"; tmp="$out.partial"
+  [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
+  "$kimi" export "$sid" -o "$tmp" -y --no-include-global-log >/dev/null \
+    || { rm -f "$tmp"; die "'kimi export $sid' failed. Check: kimi export --help"; }
+  chmod 0600 "$tmp" 2>/dev/null || true; mv "$tmp" "$out"
+  note "Kimi transcript archive written: $out"
 }
 
 # ---------------------------------------------------------------------------

@@ -124,10 +124,14 @@ repo_root() {
     || die "ai-grok-review must be run inside a git repository."
 }
 
+legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
-  local root; root="$1"
-  printf '%s' "$root" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'
+  local root="$1" remote
+  root="$(cd "$root" && pwd -P)"
+  remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
+  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
 }
+repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 
 valid_name() {
   case "$1" in
@@ -186,11 +190,28 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on one filesystem)
   mkdir -p "$(dirname "$f")"
   tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
   printf '%s\n' "$2" > "$tmp"
+  chmod 0600 "$tmp" 2>/dev/null || true
   mv -f "$tmp" "$f"
 }
 
 find_meta() {
-  local f; f="$(meta_path "$1" "$2")"
+  local f old repo remote cand found=""; f="$(meta_path "$1" "$2")"
+  if [ ! -f "$f" ]; then
+    repo="$(repo_root)"; old="$(meta_path "$(legacy_repo_id "$repo")" "$2")"
+    if [ -f "$old" ]; then mkdir -p "$(dirname "$f")"; mv "$old" "$f"; fi
+  fi
+  if [ ! -f "$f" ]; then
+    remote="$(repo_remote "$repo")"
+    [ -n "$remote" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-grok-review list"
+    while IFS= read -r cand; do
+      [ "$(jq -r '.name // ""' "$cand")" = "$2" ] || continue
+      [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
+      [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
+      [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
+      found="$cand"
+    done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$2.json" 2>/dev/null)
+    [ -z "$found" ] || { mkdir -p "$(dirname "$f")"; mv "$found" "$f"; }
+  fi
   [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-grok-review list"
   printf '%s' "$f"
 }
@@ -286,7 +307,17 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   case "$sr" in
     end_turn|EndTurn|stop|completed)
       return 0 ;;
-    cancelled|max_turns|max_turns_reached|max-turns*)
+    cancelled)
+      note ""
+      note "ai-grok-review: Grok cancelled without a final answer."
+      note "  stopReason  : $sr"
+      note "  session     : ${sid:-unknown} (saved as '$name')"
+      note ""
+      note "Grok 0.2.112 may not resume a cancelled session cleanly. Do not broaden"
+      note "permissions or keep retrying an empty resume. Start a fresh named session"
+      note "and include the last verified evidence in its brief."
+      return 1 ;;
+    max_turns|max_turns_reached|max-turns*)
       note ""
       note "ai-grok-review: Grok stopped WITHOUT a final answer — the turn budget ran out."
       note "  stopReason  : $sr"
@@ -493,13 +524,13 @@ cmd_new() {
   [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   write_meta "$meta" "$(jq -n \
-    --arg sid "$sid" --arg repo "$repo" --arg name "$name" --arg caller "$CALLER" \
+    --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
     --argjson turns 1 \
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
-    '{grok_session_id:$sid, repo:$repo, name:$name, caller:$caller,
+    '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
       turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
 

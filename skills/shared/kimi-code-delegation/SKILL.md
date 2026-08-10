@@ -43,6 +43,13 @@ Kimi 0.31.1:
 `ai-kimi` refuses to run a review at all if that profile is missing, and hard-fails if a
 review mutates the tree anyway.
 
+Implementation mode uses `config/kimi/local-implement.md`. It removes Kimi's named web
+and subagent tools, but it includes Bash so Kimi can build and test. Bash can still use
+the network. This is an accepted limit, confirmed by a live `curl` canary on 2026-08-10.
+The disposable worktree limits filesystem changes and the wrapper exports a patch, but
+neither control is a network sandbox. Never give an implementation brief access to
+secrets or private files that the task does not require.
+
 ## Continue a review session. Do not start a new one per question.
 
 Run `ai-kimi list` first; if a session covers this topic and repo, continue it with `ask`.
@@ -102,6 +109,9 @@ long session, and headless output provides no context-window or cache counters.
   and the evidence you want back. Tell Kimi to read the repo's `AGENTS.md`.
 - **Do not paste file contents** — Kimi has `Read`, and pasted text is prefix that
   changes every call.
+- Kimi Code 0.32.0 has no headless prompt-file or stdin option. The wrapper must use
+  `-p`, so the brief can be visible to other local users through the process list.
+  Never put secrets in a Kimi brief on a shared host.
 - Keep the opening stable across a workstream; put the new instruction last. Kimi exposes
   no cache counters, so this is prefix-stability best practice, **not a verified saving**.
   Do not claim a percentage you cannot show.

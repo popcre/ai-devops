@@ -133,10 +133,11 @@ repo_root() {
 }
 repo_id() {
   local root remote
-  root="$1"
+  root="$(cd "$1" && pwd -P)"
   remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
   printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
 }
+repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 valid_name() {
   case "$1" in
     ''|*[!a-zA-Z0-9._-]*) return 1 ;;
@@ -468,20 +469,25 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root rid mp sid pf msg text tokens report
+  local name="$1" root rid mp sid pf msg text tokens report lock
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
   rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  lock="$(lock_path "$rid" "$name")"
+  lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
   pf="$(read_prompt)"
   sid="$(create_session "$name" glm-review "$root")"
-  write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg rid "$rid" \
+  if ! write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
       --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
-      '{schema_version:1, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r,
+      '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, repository_remote:$remote,
         repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
-        created_at:$ts, last_activity_at:$ts, status:"active"}')"
+        created_at:$ts, last_activity_at:$ts, status:"active"}')"; then
+    api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
+    die "could not save local metadata for session '$name'."
+  fi
   send_prompt "$sid" "$pf"; rm -f "$pf"
   msg="$(await_turn "$sid" "$name" review "$root")"
   verify_model "$msg"
@@ -604,8 +610,20 @@ cmd_list() {
 }
 
 find_meta() { # find_meta NAME -> path
-  local root rid mp
+  local root rid mp remote cand found=""
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$1")"
+  if [ ! -f "$mp" ]; then
+    remote="$(repo_remote "$root")"
+    [ -n "$remote" ] || die "no session '$1' for caller '$CALLER' in this repo."
+    while IFS= read -r cand; do
+      [ "$(jq -r '.name // ""' "$cand")" = "$1" ] || continue
+      [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
+      [ "$(jq -r '.repository_remote // ""' "$cand")" = "$remote" ] || continue
+      [ -z "$found" ] || die "multiple moved-checkout records match session '$1'; refusing an ambiguous migration."
+      found="$cand"
+    done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$1.json" 2>/dev/null)
+    [ -z "$found" ] || { mkdir -p "$(dirname "$mp")"; mv "$found" "$mp"; }
+  fi
   [ -f "$mp" ] || die "no session '$1' for caller '$CALLER' in this repo."
   printf '%s' "$mp"
 }
@@ -637,8 +655,27 @@ cmd_server() {
       start)   schtasks //Run    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "started" ;;
       stop)    schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "stopped" ;;
       restart) schtasks //End //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 || true
-               sleep 3
-               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "restarted" ;;
+               local waited=0
+               # Task Scheduler can stop the Git Bash wrapper while leaving its
+               # native OpenCode child alive. Stop only the verified loopback
+               # listener; never kill an unrelated process that owns this port.
+               set +e
+               powershell.exe -NoProfile -Command "\$c=Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort $PORT -ErrorAction SilentlyContinue; if (\$c) { \$p=Get-Process -Id \$c.OwningProcess -ErrorAction Stop; if (\$p.ProcessName -notmatch 'opencode') { exit 42 }; Stop-Process -Id \$p.Id -Force }" >/dev/null 2>&1
+               local stop_rc=$?
+               set -e
+               [ "$stop_rc" -ne 42 ] || die "port 127.0.0.1:$PORT belongs to a non-OpenCode process; it was not stopped and the task was not restarted."
+               [ "$stop_rc" -eq 0 ] || die "could not inspect or stop the old OpenCode listener; the task was not restarted."
+               while powershell.exe -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort $PORT -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1; do
+                 [ "$waited" -lt 30 ] || die "port 127.0.0.1:$PORT stayed busy for 30 seconds; the task was not restarted."
+                 sleep 1; waited=$((waited + 1))
+               done
+               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not restart AiDevOps-OpenCodeGlm"
+               waited=0
+               until server_up; do
+                 [ "$waited" -lt 30 ] || die "AiDevOps-OpenCodeGlm restarted but did not become healthy within 30 seconds."
+                 sleep 1; waited=$((waited + 1))
+               done
+               note "restarted and healthy" ;;
       status)  schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20
                printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)" ;;
       *) die "usage: ai-glm server start|stop|restart|status" ;;

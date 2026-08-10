@@ -73,6 +73,15 @@ Kimi resumes an explicit named session but reports no context, cache, token, cos
 or returned-model data in headless mode. Its parent therefore treats session reuse
 as transport continuity only. Every material turn re-reads current artifacts, and
 the plan's consensus ledger is the durable source after automatic context compaction.
+Kimi implementation runs use a wrapper-owned disposable worktree with an owner record,
+export the final tree against the original base even if Kimi commits, and clean up from
+one lifecycle trap. The implementation profile removes named web and subagent tools,
+but its Bash tool can reach the network. That is a documented accepted limit, not a
+network sandbox.
+
+All three delegate wrappers identify repositories from the normalized root path plus
+the origin URL and keep caller names separate. Metadata files are atomic and private on
+Unix. Legacy path-only Grok and Kimi records migrate when first opened.
 
 ## Configuration boundary
 
