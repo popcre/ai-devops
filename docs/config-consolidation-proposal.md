@@ -7,9 +7,10 @@ Phase 3 COMPLETE 2026-08-10. Active Dropbox scripts are retired pointer stubs,
 both-OS restore guidance and portable Codex defaults are tracked, and the
 machine atlas names the three Windows machines correctly.
 **Companion docs:** [`config-inventory.md`](config-inventory.md) (the current
-scattered state, with all paths/aliases/1Password item titles) and
-the OPEN files in [`../HANDOFF.d/`](../HANDOFF.d/) — live next steps are in
-[`HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md).
+machine-config map) and
+[`../plan_phase3-config-consolidation.md`](../plan_phase3-config-consolidation.md)
+(the completed implementation and verification record). Current unfinished work,
+if any, is represented only by the files present in [`../HANDOFF.d/`](../HANDOFF.d/).
 
 ## Goal
 Make `ai-devops` the **single hub** that configures every machine (3 Windows dev

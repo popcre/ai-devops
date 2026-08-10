@@ -1,5 +1,21 @@
 # Credential exposure response — July 2026
 
+## Final status — closed 2026-08-10
+
+Albert closed the remaining credential-cleanup workstream on 2026-08-10 without
+authorizing further rotations. The three completed Synology Monitor rotation
+groups below remain the verified remediation performed. The wider transcript
+findings remain a historical risk record in
+[`transcript-leak-audit-2026-07-19.md`](transcript-leak-audit-2026-07-19.md), not
+an active work order.
+
+This closure is an explicit acceptance of the residual risk from credentials
+that may still be represented in historical private transcripts or unreachable
+Git history. It does not assert that every historical value was rotated,
+revoked, or proved dead. No credential was read, changed, or rotated during
+closure. Any future credential work requires a new, specifically authorized
+incident or rotation request.
+
 ## Purpose and scope
 
 This report records the production credential rotations completed after secrets
@@ -126,9 +142,10 @@ Verification evidence:
 - Edge2 values were not changed during the relay authentication rotation.
 - The already-rotated Synology Monitor Supabase service-role key was not changed.
 
-## Remaining incident work
+## Historical follow-up that was closed without further rotation
 
-The three known rotation groups are complete, but the incident is not closed.
+The three known rotation groups are complete. The broader work below was closed
+by owner decision on 2026-08-10 and must not be treated as an active task.
 The private transcript archive must be scanned for the full blast radius. Each
 credential-shaped finding must be classified and compared with its live source
 without printing values or hashes. The audit must explicitly include the leaked
@@ -137,7 +154,7 @@ by authenticating; mark it unknown unless a safe comparison source exists and
 recommend precautionary reset when necessary.
 
 Final audit artifacts belong under `/home/ai/rotation/` on `hetz`. GitHub Support
-requests for sensitive-data cleanup remain appropriate for unreachable public
+requests for sensitive-data cleanup may still be appropriate for unreachable public
 commit objects in `u2giants/ai-devops` and the still-leaking history of
 `u2giants/synology-monitor`. Rotation remains the primary remediation.
 

@@ -2,8 +2,10 @@
 
 **Purpose:** a durable, exhaustive map of all the AI-tool, shell, SSH, and cloud
 config spread across Albert's machines, so no future session (human or AI) has to
-rediscover it the hard way (this doc exists because one session did — see the
-dead-ends in [`../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md) §4). Read this to answer "where does X config live,
+rediscover it the hard way. The completed consolidation reasoning and failed
+approaches are retained in [`config-consolidation-proposal.md`](config-consolidation-proposal.md)
+and [`../plan_phase3-config-consolidation.md`](../plan_phase3-config-consolidation.md).
+Read this to answer "where does X config live,
 what manages it, and is it synced?"
 
 **Audience:** a developer or AI with zero prior context. Terms and paths are
@@ -263,7 +265,7 @@ secret is ever committed.
 
 ## See also
 - [`config-consolidation-proposal.md`](config-consolidation-proposal.md) — the phased migration plan.
-- [`../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](../HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md) — current state + exact next steps.
+- [`../plan_phase3-config-consolidation.md`](../plan_phase3-config-consolidation.md) — completed implementation, decisions, and verification evidence.
 - [`../memory/README.md`](../memory/README.md) — memory sync mechanics.
 - `AGENTS.md` §"Credentials and environment" — the repo's existing secret rules.
 - `docs/skills-usage-guide.md`, `docs/codex-skills-usage-guide.md` — how skills install per machine.
