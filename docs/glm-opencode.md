@@ -185,6 +185,13 @@ ai-glm implement fix-token-rotation --prompt-file /tmp/task.md
 git apply --check "$patch" && git apply "$patch"
 ```
 
+> Active defect, 2026-08-10: implementation jobs are not yet recorded in `ai-glm list`,
+> locked by name for the full run, or abortable by name. A missing list entry or patch
+> does not prove that the job stopped. Do not retry the same implementation name until
+> the first wrapper process reaches a terminal result. The permanent fix is specified in
+> [`../plan_glm-implementation-job-tracking.md`](../plan_glm-implementation-job-tracking.md);
+> read its STATUS table before changing this behavior.
+
 ### Diagnosing
 
 | Symptom | Cause | Fix |
