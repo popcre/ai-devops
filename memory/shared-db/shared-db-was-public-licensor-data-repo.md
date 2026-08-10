@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 774f5010-1b71-4c45-b45c-b250053f5c4d
-  modified: 2026-08-07T16:25:19.594Z
+  modified: 2026-08-07T16:09:38.516Z
 ---
 
 `u2giants/shared-db` was created **PUBLIC** (2026-06-20) and stayed public until
@@ -20,16 +20,8 @@ Albert had it made **private** immediately. Measured at the flip: **0 forks, 0
 stars, 0 watchers** — no evidence anyone copied it, though crawlers leave no trace.
 
 **Where licensor data goes now:** `u2giants/licensor-source-data` — created
-2026-08-07, **PRIVATE**, one folder per licensor portal (`disney-opa/`,
-`disney-dcpvault/`, `warner-bros/`). Never make it public. Never touch another
-session's folder. `shared-db` gets a **pointer only**, never the data.
-
-**The trap that nearly repeated the leak, same day:** a *schema design document*
-is genuinely a shared-db artifact, so writing it into `C:/repos/shared-db/docs/`
-feels correct — but if it quotes real style guide names, file names or licensor
-ids, it **is** licensor data. It was caught untracked, one `git add .` from a
-commit. Draft such docs in the private repo; only a sanitized version, with no
-licensor strings, goes to shared-db, placed by the coordinator.
+2026-08-07, **PRIVATE**, one folder per licensor (`disney-opa/`, `warner-bros/`).
+Never make it public. `shared-db` gets a **pointer only**, never the data.
 
 **Why:** these extracts come from licensee portals (Disney OPA, Warner Bros)
 under commercial licensing agreements. Publishing them is a licensor-relationship
