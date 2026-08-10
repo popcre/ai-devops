@@ -17,12 +17,12 @@
 # evidence below — this is not a prompt request, it is an absent capability.
 #
 # ---------------------------------------------------------------------------
-# STEP 0 VERIFICATION — captured 2026-08-05 against Kimi Code 0.31.1 on
-# hetz/Ubuntu as user `ai`. Re-run and update this block on any version bump.
+# STEP 0 VERIFICATION — re-qualified 2026-08-10 against Kimi Code 0.32.0 on
+# Windows 11 (916-alien). Re-run and update this block on any version bump.
 #
-#   Resume flag: `-S/--session [id]` is the DOCUMENTED form; `-r` is an
-#     undocumented alias that works and is what Kimi itself prints in its
-#     resume hint ("To resume this session: kimi -r session_…"). Both accepted.
+#   Resume flag: `-S/--session [id]` remains the DOCUMENTED form. `-r` remains
+#     an accepted undocumented alias and is still printed in the terminal
+#     resume hint. The wrapper uses the explicit id, never newest-by-directory.
 #   `-c/--continue` means "newest session for this directory", NOT "the session
 #     I was just using". Never used here.
 #   Output formats are ONLY `text` and `stream-json` — there is no `json`.
@@ -36,9 +36,9 @@
 #     enforce, so the Grok D4 invariant has no analogue here. Do not invent one.
 #   NO usage, token, cost, or model reporting in headless output. You cannot
 #     assert which model answered. This is why -m is pinned unconditionally.
-#   Default model on this machine is now `kimi-code/k3` (the skill's claim that
-#     it defaults to kimi-for-coding/K2.7 is stale here) — pin anyway, because
-#     the default is machine-local config and can differ per host.
+#   `provider list` still exits successfully even when it reports no providers;
+#     auth checks must inspect content. Default model here is `kimi-code/k3` —
+#     pin anyway, because defaults are machine-local and returned model is absent.
 #   Prompt mode rejects: --yolo ("Cannot combine --prompt with --yolo"), and
 #     per the CLI also --plan and --auto.
 #   --agent/--agent-file CANNOT be combined with --session/--continue, so the
@@ -61,8 +61,8 @@
 #       tool" and the canary survives for the wrong reason. Kimi's real names
 #       are capitalized: Read, Grep, Glob, ReadMediaFile, Bash, Edit, Write,
 #       FetchURL, WebSearch, Agent, AgentSwarm, Skill, Cron*, Task*, Todo*.
-#       ALWAYS verify BOTH directions after touching the profile: that a review
-#       can still read, and that it still cannot write. The live test does.
+#       Re-proved both directions on 0.32.0: Read observed a committed canary;
+#       the hostile Write request left it unchanged and returned CANNOT_WRITE.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -505,6 +505,9 @@ cmd_ask() {
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
+  [ "$mode" = review ] || die "session '$name' is an implement session and cannot be resumed.
+  Implement sessions are one-shot because their isolated worktree is removed after the patch
+  is emitted. Start a new 'ai-kimi implement <name>' run for another isolated write turn."
 
   sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"

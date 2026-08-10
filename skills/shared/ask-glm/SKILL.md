@@ -10,6 +10,12 @@ remembers everything said in it, survives a server restart, and keeps its contex
 the provider can serve most of it from cache. The point of this skill is to use that
 instead of starting a fresh conversation for every question.
 
+If `ai-glm doctor` says the Windows task is stopped or its bounded recovery attempts
+were exhausted, do not create a replacement conversation or bypass the local service.
+Fix any named error, run `ai-glm server start`, verify doctor passes, and continue the
+same named session with `ai-glm ask`. Unexpected child crashes are retried three times
+at one-minute intervals; an intentional service stop is not auto-restarted.
+
 ## Use `ai-glm`. Never call OpenCode directly.
 
 ```bash
@@ -109,15 +115,18 @@ the prompt. Pasted text changes the prefix on every turn and defeats caching.
 
 ## Relaying a debate
 
-When you are carrying an argument from another model, send that model's actual reasoning
-as ordinary message text, and ask GLM to re-inspect the repository rather than rely on
-memory. For example:
+Use the provider-neutral contract at `templates/delegation/debate-turn.md`. Keep its
+headings stable. Faithfully relay the other model's actual reasoning as ordinary message
+text, point to current plan or diff paths, add only the delta and new evidence, and ask
+GLM to re-read those paths before marking claims confirmed, unsupported, or wrong. Keep
+the consensus ledger current. Do not rewrite the session's system prompt to indicate who
+is speaking.
 
-> Codex objects that the existing Redis lock already serializes rotation. Re-read
-> `src/auth/rotate.ts` and evaluate that specific claim. Say which parts are confirmed,
-> unsupported, or wrong.
-
-Do not rewrite the session's system prompt to indicate who is speaking.
+Run `ai-glm list` first and reuse the exact named session with `ask`. Use the shared
+bounded-convergence rule: initial review plus at most three rebuttal turns unless the user
+explicitly asks otherwise. Stop on evidence-backed consensus or the turn bound, and
+report unresolved objections rather than pretending agreement. GLM does not report money,
+so the Grok dollar ceiling in the shared workflow does not apply to GLM.
 
 ## Verify before you believe it
 

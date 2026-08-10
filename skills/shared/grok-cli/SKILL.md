@@ -56,6 +56,26 @@ from Codex**; it defaults to `claude`, so without this both clients collide on o
 - The wrapper appends a formatting instruction asking Grok to put its conclusion under a
   `## Verdict` heading, and extracts from there. You do not need to ask for that.
 
+## Run a bounded debate
+
+Use `templates/delegation/debate-turn.md` as the one provider-neutral message contract.
+Run `ai-grok-review list`, reuse the exact named session with `ask`, and keep its opening
+and headings stable. On each turn, faithfully relay the other model's actual reasoning,
+point to the current plan or diff, add only changed evidence and objections, and require
+Grok to re-read those paths before checking each claim as confirmed, unsupported, or
+wrong. Keep the consensus ledger in the artifact current.
+
+The default bound is the initial review plus at most three rebuttal turns. The default
+total Grok ceiling is $1.50, including the initial turn. Add the reported
+`total_cost_usd` after every turn. Estimate the next turn using the largest observed
+per-turn cost in this session, or $0.46 before the first resume. Stop before the estimate
+would cross the ceiling and report unresolved objections plainly.
+
+Stop early only when Grok has re-read the current files and evidence and says no material
+objection remains. Also stop at the turn bound or cost ceiling. Agreement by itself is
+not consensus. Never broaden permissions, change the frozen prefix, start a new session,
+or run an unbounded loop to force convergence.
+
 ## Reading the result
 
 `ai-grok-review` prints the extracted answer on stdout and a usage line on stderr

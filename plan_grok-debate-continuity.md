@@ -4,12 +4,12 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Create the shared debate template | ⬜ open | 2026-08-09 | Not started |
-| 2. Update Grok and align GLM skills | ⬜ open | 2026-08-09 | Not started |
-| 3. Preserve the wrapper unless evidence changes scope | ⬜ open | 2026-08-09 | Not started |
-| 4. Extend Grok offline tests | ⬜ open | 2026-08-09 | Not started |
-| 5. Run the live debate within $0.75 | ⬜ open | 2026-08-09 | Not started |
-| 6. Document, install, commit, and push | ⬜ open | 2026-08-09 | Not started |
+| 1. Create the shared debate template | ✅ complete | 2026-08-10 | `templates/delegation/debate-turn.md` contains the stable provider-neutral fields and ledger. |
+| 2. Update Grok and align GLM skills | ✅ complete | 2026-08-10 | Both shared skills reference one contract; Grok adds the bounded cost-aware convergence loop. |
+| 3. Preserve the wrapper unless evidence changes scope | ✅ complete | 2026-08-10 | Live acceptance exposed terminal `EndTurn`; scope was amended first, then the wrapper narrowly accepted that exact measured spelling while unknown values remain fail-closed. |
+| 4. Extend Grok offline tests | ✅ complete | 2026-08-10 | Static contract/safety fixtures added; offline suite passes with more than 50 tests. |
+| 5. Run the live debate within $0.75 | ✅ complete | 2026-08-10 | Session `019fe9a8-c7c9-7ab1-84d7-93aac001508b` resumed with 376,576 cache-read tokens; turns cost $0.249788 + $0.1792688 = $0.4290568; final result had no objection to the narrow fix. |
+| 6. Document, install, commit, and push | 🔄 in progress | 2026-08-10 | Docs updated; Claude/Codex skill SHA-256 hashes match source after install. Commit, push, and remote verification are reserved for the root integrator because concurrent agents share `main`. |
 
 Fresh sessions start at the first open row and update this table after every completed gate. This plan owns the shared debate template and must land before `plan_kimi-debate-context-continuity.md`. Before editing or pushing, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-grok-debate-continuity.md` file cross-linked to this plan. Do not run this and the Kimi plan concurrently.
 

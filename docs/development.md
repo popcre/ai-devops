@@ -41,6 +41,24 @@ Add a new tool: drop an executable script in `bin/`, then re-run `./install.sh`
 (the symlink loop picks up any file in `bin/` automatically). Update `AGENTS.md`
 and `README.md` to list it.
 
+For Grok, GLM, or Kimi debate changes, keep the shared field contract in
+`templates/delegation/debate-turn.md`. Test headings and safety guidance
+offline in `tests/test-ai-grok-review.sh`. Do not add runtime parsing for
+semantic fields: missing evidence is a skill review failure, while the wrapper
+continues to enforce terminal completion, fixed permissions, session reuse,
+cache reporting, and cost reporting.
+
+Kimi is the exception to metrics reporting: its headless output exposes no context,
+cache, token, cost, or returned-model values. Test exact-id session reuse, current-file
+re-reading, and same-session durable-state recovery instead. Never inspect or edit its
+raw session files.
+
+Windows GLM service changes need both offline suites and a controlled live crash test.
+`tests/test-windows-scripts.sh` proves the generated recovery is bounded and observable;
+`tests/test-ai-glm.sh` protects the client. The live gate kills only the OpenCode child,
+waits for the same task to restore one loopback listener, then resumes the exact named
+session. A `Ready` task is not healthy.
+
 ## Testing
 
 Installer behavior has lightweight, dependency-free tests:

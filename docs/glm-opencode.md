@@ -125,6 +125,14 @@ Stop-ScheduledTask    -TaskName AiDevOps-OpenCodeGlm
 Get-ScheduledTaskInfo -TaskName AiDevOps-OpenCodeGlm
 ```
 
+The generated service wrapper owns bounded crash recovery: three retries, one minute
+apart, then a loud failure. Task Scheduler's native restart setting was removed after a
+controlled 2026-08-09 test showed that Git Bash translated a killed native OpenCode
+child to `0x8007007F`/127 and Task Scheduler recorded completion without retrying. The
+wrapper now remains the task process and keeps `server.log` below 1 MiB with one prior
+copy. An explicit task stop is intentional and is not auto-restarted; use
+`ai-glm server start` to recover it.
+
 Windows notes:
 - `HOME` must be the local profile. A roaming `Z:` home would send the install to a
   network drive nothing reads back; the installer uses `%USERPROFILE%` for that reason.
@@ -177,6 +185,7 @@ git apply --check "$patch" && git apply "$patch"
 | Symptom | Cause | Fix |
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
+| Windows task is `Ready`, no listener | The task is stopped or its four total attempts were exhausted | Run `ai-glm doctor`, fix the named fault, then run `ai-glm server start` |
 | `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns a successful permission envelope whose action is `external_directory` and whose `resources[]` names the outside path. | Run `ai-glm abort <name>`. For outside evidence, put a safe copy inside the repository or provide a small safe excerpt, then retry. Never approve everything or copy arbitrary files automatically. |
 | `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
@@ -390,3 +399,9 @@ first and then re-measure before touching it.
 26. **Fix a bug class, not one instance.** The hardcoded-path bug was fixed in
     `setup-machine.ps1` and left in `setup-opencode-glm.ps1`, which cost another round
     trip. When you fix something in one script, grep for it in all of them.
+27. **Windows crash recovery belongs in the generated service wrapper.** A killed native
+    OpenCode child returned through Git Bash as `0x8007007F`/127; Task Scheduler did not
+    apply its restart-on-failure policy. Keep the Bash wrapper as the task process,
+    retry only three times at one-minute intervals, and rotate `server.log` at 1 MiB
+    while retaining one prior log. Do not add an unbounded watchdog or restore the
+    ineffective native retry setting without a controlled live test.

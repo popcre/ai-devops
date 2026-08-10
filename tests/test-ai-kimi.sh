@@ -37,7 +37,7 @@ cat > "$STUB/kimi" <<'STUBEOF'
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
-  --version) echo "0.31.1"; exit 0 ;;
+  --version) echo "0.32.0"; exit 0 ;;
   provider)  [ "$mode" = noauth ] && exit 1; echo "managed:kimi-code type=kimi"; exit 0 ;;
   export)    echo "exported.zip"; exit 0 ;;
 esac
@@ -79,6 +79,21 @@ check "never uses --yolo"            "! grep -q -- '--yolo' '$TMP/argv.txt'"
 check "never uses --auto"            "! grep -q -- '--auto' '$TMP/argv.txt'"
 check "never uses -c/--continue"     "! grep -qE -- '(^| )-c( |$)|--continue' '$TMP/argv.txt'"
 
+echo "== debate contract and context rules =="
+TEMPLATE="$REPO_ROOT/templates/delegation/debate-turn.md"
+SKILL="$REPO_ROOT/skills/shared/kimi-code-delegation/SKILL.md"
+for heading in "Goal" "Disputed claim" "Other model.s reasoning" \
+  "Current plan or diff paths" "New test or runtime evidence" "Constraints" \
+  "What changed since the last turn" "Claim-by-claim check" "Material objections" \
+  "Required correction" "Consensus question" "Consensus ledger"; do
+  check "template has $heading" "grep -q '^## $heading$' '$TEMPLATE'"
+done
+check "skill requires exact-session ask" "grep -q 'then use.*ask.*every' '$SKILL'"
+check "skill has same-session recovery" "grep -q 'stay in the same session' '$SKILL'"
+check "skill requires current-artifact re-read" "grep -q 'current-artifact re-read' '$SKILL'"
+check "skill forbids numerical metric claims" "grep -q 'Never claim provider-cache savings' '$SKILL'"
+check "skill bounds rebuttals" "grep -q 'three rebuttal' '$SKILL'"
+
 echo "== review_refuses_without_agent_file =="
 OUT="$( cd "$REPO" && AI_KIMI_RO_AGENT="$TMP/nope.md" bash "$SCRIPT" new r2 --prompt x 2>&1 )"; RC=$?
 [ $RC -ne 0 ] && ok "review refuses to run with no read-only profile" || bad "review refuses to run with no read-only profile"
@@ -90,6 +105,21 @@ run ask r1 --prompt "follow up" >/dev/null 2>&1
 check "ask resumes with -r"          "grep -q -- '-r session_35e1a0a2' '$TMP/argv.txt'"
 # --agent-file cannot be combined with a resume; passing it would hard-error.
 check "ask does NOT pass --agent-file" "! grep -q -- '--agent-file' '$TMP/argv.txt'"
+
+echo "== caller separation =="
+( cd "$REPO" && AI_KIMI_CALLER=codex bash "$SCRIPT" new r1 --prompt "codex copy" ) >/dev/null 2>&1
+check "Claude record still resolves" "run show r1 | jq -e '.caller == \"claude\"'"
+check "Codex record is separate" "(cd '$REPO' && AI_KIMI_CALLER=codex bash '$SCRIPT' show r1) | jq -e '.caller == \"codex\"'"
+
+echo "== implement sessions are one-shot =="
+RID="$(printf '%s' "$(git -C "$REPO" rev-parse --show-toplevel)" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
+mkdir -p "$AI_KIMI_STATE_DIR/sessions/$RID"
+jq -n --arg sid session_implement --arg repo "$REPO" --arg name impl1 \
+  --arg caller claude '{kimi_session_id:$sid,repo:$repo,name:$name,caller:$caller,mode:"implement",turns:1}' \
+  > "$AI_KIMI_STATE_DIR/sessions/$RID/claude--impl1.json"
+OUT="$(run ask impl1 --prompt 'continue writing' 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "implement session resume is refused" || bad "implement session resume is refused"
+check "refusal explains one-shot isolation" "printf '%s' \"\$OUT\" | grep -q 'one-shot'"
 
 echo "== no_flag_passthrough =="
 run new r3 --prompt x --yolo >/dev/null 2>&1
@@ -172,6 +202,21 @@ if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then
   ( cd "$L" && bash "$SCRIPT" ask liveq --prompt 'What file did you just read?' ) >/dev/null 2>&1
   S2="$( cd "$L" && bash "$SCRIPT" show liveq | jq -r .kimi_session_id )"
   [ "$S1" = "$S2" ] && ok "live turn 2 reused the session" || bad "live turn 2 reused the session"
+
+  echo "== live: three-turn continuity and current artifact re-read =="
+  echo 'debate-state-v1' > "$L/debate-state.txt"
+  git -C "$L" add debate-state.txt; git -C "$L" commit -qm state-v1
+  O3="$( cd "$L" && bash "$SCRIPT" new livedebate --prompt 'Read debate-state.txt. Remember marker ORCHID-731. Reply with the file value and marker.' 2>/dev/null )"
+  check "live debate turn 1 read the artifact" "printf '%s' \"\$O3\" | grep -q 'debate-state-v1'"
+  D1="$( cd "$L" && bash "$SCRIPT" show livedebate | jq -r .kimi_session_id )"
+  echo 'debate-state-v2' > "$L/debate-state.txt"
+  O4="$( cd "$L" && bash "$SCRIPT" ask livedebate --prompt 'Re-read the current debate-state.txt. State its new value and the continuity marker from the prior turn.' 2>/dev/null )"
+  check "live debate turn 2 re-read changed artifact" "printf '%s' \"\$O4\" | grep -q 'debate-state-v2'"
+  check "live debate turn 2 kept marker" "printf '%s' \"\$O4\" | grep -q 'ORCHID-731'"
+  O5="$( cd "$L" && bash "$SCRIPT" ask livedebate --prompt 'Durable-state refresh: current file is debate-state.txt; agreed marker is ORCHID-731; current value must be read from disk. Re-read it and restate both facts.' 2>/dev/null )"
+  D3="$( cd "$L" && bash "$SCRIPT" show livedebate | jq -r .kimi_session_id )"
+  check "live debate turn 3 recovered durable state" "printf '%s' \"\$O5\" | grep -q 'debate-state-v2' && printf '%s' \"\$O5\" | grep -q 'ORCHID-731'"
+  [ "$D1" = "$D3" ] && ok "live debate all turns reused exact session" || bad "live debate all turns reused exact session"
 fi
 
 echo

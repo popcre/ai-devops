@@ -43,7 +43,7 @@ Kimi 0.31.1:
 `ai-kimi` refuses to run a review at all if that profile is missing, and hard-fails if a
 review mutates the tree anyway.
 
-## Continue a session. Do not start a new one per question.
+## Continue a review session. Do not start a new one per question.
 
 Run `ai-kimi list` first; if a session covers this topic and repo, continue it with `ask`.
 
@@ -55,6 +55,46 @@ yours. `ai-kimi` always resumes by explicit id.
 
 Claude and Codex keep separate sessions. **Set `AI_KIMI_CALLER=codex` when running from
 Codex**; it defaults to `claude`.
+
+## Relaying a debate
+
+Use `templates/delegation/debate-turn.md` for every material debate turn. Keep its
+headings and order. Start one named review session with `new`, then use `ask` for every
+rebuttal so the explicit Kimi session id is preserved. Never use `-c/--continue`.
+
+The parent agent owns the relay and the verdict. It must:
+
+1. Point Kimi at the current plan or diff paths and require those files to be re-read.
+2. Relay the other model's actual reasoning under **Other model's reasoning**. Do not
+   weaken it, omit its strongest point, or present a summary as a quotation.
+3. Send only new evidence, changed objections, and the current parent agent's remaining
+   objections after the initial turn. Do not paste the full transcript or plan again.
+4. Update the active artifact's design decisions, rejected alternatives, open questions,
+   and consensus ledger after each resolved turn. Kimi reads that durable state next turn.
+5. Stop when both sides list no material objections, or after the initial review plus at
+   most three rebuttal turns. At the bound, record unresolved objections and consequences.
+
+Agreement is not evidence. The parent must adjudicate each claim against current files and
+test results before calling consensus.
+
+## Context health
+
+An exact session id proves transport continuity, not perfect memory. Kimi may compact a
+long session, and headless output provides no context-window or cache counters.
+
+- Require a current-artifact re-read on every material turn. A remembered old file state
+  is not evidence.
+- If an answer contradicts the durable ledger, misses a continuity marker, or describes a
+  stale artifact, stay in the same session. Send a concise durable-state refresh with the
+  current paths, agreed decisions, unresolved objections, and exact new evidence, then ask
+  Kimi to re-read and restate the disputed facts.
+- If the refresh fails, stop the debate and record context continuity as an unresolved
+  risk. Do not silently start a fresh session or edit Kimi's session files.
+- Do not send `/compact` in prompt mode unless a future documented and live-tested CLI
+  surface proves it is supported there.
+- Never claim provider-cache savings, context size, token use, cost, or the returned model.
+  Kimi exposes none of those in headless output. The wrapper's model pin proves only what
+  was requested.
 
 ## Writing the brief
 
@@ -84,6 +124,10 @@ Planning and execution cannot share a session: `--agent`/`--agent-file` cannot b
 with a resume, so the agent is fixed when a session is created — which is exactly why a
 read-only review session can never later become a write session. Plan in a review session,
 amend the plan yourself, then start an `implement` session with the approved plan.
+
+Implementation sessions are deliberately one-shot. Their isolated worktree is removed
+after the patch is emitted, so `ai-kimi ask` refuses to resume them. Start a new named
+`implement` run for another write turn; never resume the old session in the live repo.
 
 **Kimi cannot run your tests** — the read-only profile has no `Bash`, and an implement run
 happens in a throwaway worktree. Run them yourself and feed exact failures back into the

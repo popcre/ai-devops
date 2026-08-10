@@ -83,6 +83,13 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "
   [ -f "$MCP_ENV" ] || { echo "Error: missing managed 1Password reference file: $MCP_ENV" >&2; exit 1; }
   export OP_SERVICE_ACCOUNT_TOKEN AI_DEEPSEEK_REEXEC=1
   OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
+  # Windows cannot execute an extensionless Bash script directly through
+  # `op run`. Re-enter through this exact Git Bash interpreter. Do not use a
+  # bare `bash`: Windows PATH may resolve that name to WSL instead.
+  if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
+    BASH_EXE="$(cygpath -w "$(command -v bash)")"
+    exec op run --env-file "$MCP_ENV" -- "$BASH_EXE" "$0" "$SUBCMD" "$@"
+  fi
   exec op run --env-file "$MCP_ENV" -- "$0" "$SUBCMD" "$@"
 fi
 

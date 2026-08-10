@@ -42,6 +42,13 @@ toolkit provides its own thread-preserving wrapper around the DeepSeek API.
 Every turn resends the full conversation so DeepSeek has real context, the
 same effect as `codex exec resume`.
 
+This text-and-file transport is intentional. As verified on 2026-08-10, Codex
+0.145.0 custom providers accept only the Responses API wire format, while the
+DeepSeek API exposes its agent tool calls through Chat Completions. Do not add a
+`deepseek` Codex provider/profile unless both vendors later document one common
+supported wire format and a live read/write canary re-proves structural read-only
+behavior. Attach the exact files DeepSeek needs with `--file` instead.
+
 ```bash
 # Turn 1 -- start the conversation, get back a SESSION_ID
 ai-deepseek-agent send "<the brief -- see Step 2>" [--file path/to/diff-or-plan.md]

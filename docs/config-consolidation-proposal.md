@@ -3,7 +3,9 @@
 **Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`). **Phase 2 COMPLETE
 2026-07-26**: 2a/2b/2c built 2026-07-14 (commits `5868f19`→`26c176f`), 2d closed
 2026-07-26. **Adopted + verified on t16 2026-07-15 and al8960ofc 2026-07-26.**
-Phase 3 PLANNED, not started.
+Phase 3 COMPLETE 2026-08-10. Active Dropbox scripts are retired pointer stubs,
+both-OS restore guidance and portable Codex defaults are tracked, and the
+machine atlas names the three Windows machines correctly.
 **Companion docs:** [`config-inventory.md`](config-inventory.md) (the current
 scattered state, with all paths/aliases/1Password item titles) and
 the OPEN files in [`../HANDOFF.d/`](../HANDOFF.d/) — live next steps are in
@@ -181,7 +183,7 @@ reverting is "keep using Dropbox." Don't delete them until Phase 3.
 
 ---
 
-## Phase 3 — retire Dropbox + document (low risk) — PLANNED
+## Phase 3 — retire Dropbox + document (low risk) — COMPLETE 2026-08-10
 
 > **Implementation plan: [`../plan_phase3-config-consolidation.md`](../plan_phase3-config-consolidation.md)**
 > (written 2026-07-26, self-contained, 13 sections). It covers the four rows below
@@ -196,6 +198,11 @@ reverting is "keep using Dropbox." Don't delete them until Phase 3.
 | One-command onboarding | Update `docs/restore-from-zero.md` + a Windows quick-start so a new machine is "clone ai-devops → run installer → done" |
 | Portable Codex prefs | Track the ~5 portable `config.toml` lines (`model`, `model_reasoning_effort`, `[windows] sandbox`, `[desktop]` prefs) as a template; apply without clobbering runtime paths |
 | Update machine-atlas | Reflect the single-path setup in `templates/system/machine-atlas.md` |
+
+Completion evidence: `docs/dropbox-credential-inventory.md`,
+`docs/restore-from-zero.md`, `config/codex-portable.toml`, and
+`templates/system/machine-atlas.md`. Recovery originals remain sensitive
+`.pre-phase3.bak` files in Dropbox. No credential was deleted or rotated.
 
 **Exit criteria:** Dropbox is no longer a config source; restore/atlas docs
 describe the single path; that handoff file can be deleted (project complete).

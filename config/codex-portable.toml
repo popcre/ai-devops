@@ -1,0 +1,9 @@
+# Portable Codex defaults for a new machine.
+# setup-machine.ps1 copies this file only when ~/.codex/config.toml is absent.
+# Established configs are never overwritten or given duplicate TOML keys.
+model_reasoning_effort = "low"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[windows]
+sandbox = "elevated"
