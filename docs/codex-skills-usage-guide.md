@@ -55,7 +55,8 @@ file.
 - `kimi-code-delegation`: delegates scoped coding tasks to Kimi Code CLI in
   headless mode. Write runs stay isolated and one-shot. Complete patches and
   clearly marked incomplete recovery patches both require local review and are
-  never applied automatically.
+  never applied automatically. Persistent write-session redesign is tracked in
+  `plan_kimi-persistent-implementation-sessions.md`; read its STATUS first.
 - `grok-cli`: locates the installed Grok Build CLI, reads its version-matched
   local docs, and delegates read-only reviews or explicitly authorized edits.
 - `implementation-plan-writer`: writes (or judges) an implementation plan a

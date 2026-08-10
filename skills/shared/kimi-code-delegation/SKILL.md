@@ -5,6 +5,11 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 
 # Kimi Code Delegation
 
+> **Active redesign:** before changing implementation-session behavior, read the STATUS
+> table in `plan_kimi-persistent-implementation-sessions.md`. It is the approved plan for
+> replacing one-shot writes with exact-session persistence and reconstructed disposable
+> worktrees. Do not re-derive or bypass that design while any row is open.
+
 ## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 
 ```bash
