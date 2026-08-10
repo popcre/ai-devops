@@ -59,6 +59,14 @@ implementation profile removes named web and subagent tools, but Bash still has 
 access by owner decision. Test the disposable-worktree, patch-recovery, and cleanup
 controls instead of claiming a network sandbox.
 
+A failed Kimi implementation remains nonzero. If Git proves that the disposable
+worktree changed, the wrapper exports a binary `.incomplete.patch` and adjacent
+`.incomplete.md` report, then removes the worktree. It creates no empty patch for a
+failure before changes and preserves the exact worktree only when safe artifact export
+fails. Tests must cover usage limits, generic provider failures, deadlines, cancellation,
+binary changes, bounded secret-safe reports, failed export, forged ownership, and
+idempotent finalization. No complete or incomplete patch is ever auto-applied.
+
 Windows GLM service changes need both offline suites and a controlled live crash test.
 `tests/test-windows-scripts.sh` proves the generated recovery is bounded and observable;
 `tests/test-ai-glm.sh` protects the client. The live gate kills only the OpenCode child,

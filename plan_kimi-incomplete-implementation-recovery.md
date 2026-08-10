@@ -4,9 +4,9 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Freeze the failure with offline tests | ⬜ open | N/A | N/A |
-| 2. Add truthful failure classification and incomplete artifact export | ⬜ open | N/A | N/A |
-| 3. Make cleanup and reporting safe on every exit path | ⬜ open | N/A | N/A |
+| 1. Freeze the failure with offline tests | ✅ done | 2026-08-10 | `tests/test-ai-kimi.sh` now covers usage, network, no-change, timeout, interrupt, binary patch, real-repo isolation, and exact required completion. |
+| 2. Add truthful failure classification and incomplete artifact export | ✅ done | 2026-08-10 | `bash tests/test-ai-kimi.sh`: 99 passed, 0 failed; complete and incomplete patch paths remain distinct and all incomplete runs return nonzero. |
+| 3. Make cleanup and reporting safe on every exit path | ✅ done | 2026-08-10 | Offline suite proves one finalizer, cancellation export, bounded secret-safe reports, destination/move failure preservation, doctor visibility, forged-owner refusal, and idempotence. |
 | 4. Verify live behavior, update docs, commit, and push | ⬜ open | N/A | N/A |
 
 Fresh sessions start at the first open row. Update this table after every gate. This
@@ -107,15 +107,20 @@ What works now:
 - `tests/test-ai-kimi.sh` proves structural read-only reviews, exact session resume,
   strict completion, successful patch export, cleanup, interruption cleanup, and locks.
 
-What is broken:
+What is now fixed in the working tree, pending final landing:
 
-- `bin/ai-kimi:515-520` exits immediately when `await_result` fails.
-- `bin/ai-kimi:533-535` calls `emit_patch` only after proven completion, so the EXIT
-  trap deletes all partial work on every incomplete turn.
-- There is no durable failure report, no incomplete filename, and no distinction
-  between failure before changes and failure after useful changes.
-- The current interruption test asserts cleanup only; it does not assert preservation
-  of changed work.
+- `bin/ai-kimi` uses one idempotent implementation finalizer for successful,
+  incomplete, cancelled, and failed-export paths.
+- Failed changed work becomes a binary `.incomplete.patch` plus adjacent bounded
+  `.incomplete.md` report and still returns nonzero. A failure before changes creates
+  no empty patch.
+- Signals stop the active child, record `cancelled`, and leave export and cleanup to
+  the EXIT finalizer.
+- Safe export removes the disposable worktree. Export failure alone marks and preserves
+  the exact wrapper-owned recovery worktree; forged or ambiguous ownership is never
+  deleted.
+- `tests/test-ai-kimi.sh` proves all required failure classes and safety boundaries with
+  99 passing offline assertions as of 2026-08-10.
 
 No source change for this fix existed when this plan was written. Unrelated untracked
 files already exist in the checkout and must not be staged. This toolkit has no deploy
