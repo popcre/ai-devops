@@ -1,16 +1,30 @@
 # Transcript leak audit — 2026-07-19
 
+## Final status — closed by owner decision 2026-08-10
+
+Albert closed this cleanup workstream on 2026-08-10 without approving any
+additional credential rotation. This document remains the evidence and risk
+record. Its recommended waves and incomplete classifications are historical,
+not open tasks.
+
+Closure does not mean every listed credential was rotated, revoked, or proved
+dead. It means the residual risk was explicitly accepted and the open-ended
+cleanup project was ended. No credential was read, changed, or rotated during
+closure. Future work must begin with a new, specifically authorized request for
+a named credential group.
+
 ## Executive verdict
 
-The original six Synology Monitor values are rotated, but the wider incident is
-not closed. The private transcript archive contains many additional credentials
+The original six Synology Monitor values are rotated. The wider incident was
+closed by owner decision on 2026-08-10. The private transcript archive contains many additional credentials
 that were current when the archive was publicly reachable. A vault-wide exact
 comparison found **61 current concealed 1Password fields** represented in the
 archive. Some are public values or non-secret text stored in concealed fields,
 but many are active production credentials.
 
-No credential was rotated during this audit. Every further rotation requires
-Albert's approval for its atomic rotation group.
+No credential was rotated during this audit or its 2026-08-10 closure. Any
+future rotation requires a new request and Albert's approval for its atomic
+rotation group.
 
 ## Safety and method
 
@@ -149,7 +163,7 @@ Identify its authoritative storage/host configuration by a non-login route or
 perform a precautionary password reset with the NAS lockout and dependent jobs
 planned in advance.
 
-## Recommended rotation waves
+## Historical recommended rotation waves — not active
 
 Each wave requires explicit approval before any value changes:
 
@@ -181,7 +195,10 @@ objects in `u2giants/ai-devops` and for the still-secret-bearing history of
 `u2giants/synology-monitor`. This limits casual retrieval but does not replace
 credential rotation.
 
-## Definition of done still outstanding
+## Work deliberately left incomplete at closure
+
+The items below were not completed. They are retained so the accepted residual
+risk is explicit, not because another session should resume them automatically.
 
 - Classify and safely verify every current-exposed vault field listed above.
 - Identify the four live OpenRouter owners and the one live historical Google key.

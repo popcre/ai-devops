@@ -697,9 +697,10 @@ removing `--` from both generated launchers. **Do not re-add `--` or remove
 | done | Config-consolidation **Phase 2** | Shipped 2026-07-14, `2d` closed 2026-07-26. Secret plumbing, MCP launchers with the 15-min cache, token-free MCP configs, SSH aliases, 916-alien key — all repo-owned (`bin/setup-machine.ps1`, `bin/setup-secrets.sh`). **Adopted on `t16` + `al8960ofc`; rollout still outstanding on `916` (off until ~2026-07-28) and Ubuntu servers beyond `hetz`** — one `git pull` + per-OS script each. |
 | done | Config-consolidation **Phase 3** | Completed 2026-08-10. Active Dropbox setup scripts are retired pointer stubs with sensitive recovery backups preserved; both-OS restore docs, credential inventory, portable Codex defaults, and machine atlas are current. See [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md). |
 
-Config-consolidation follow-through is in progress, so an **open handoff is present**
-in `HANDOFF.d/` ([`HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md`](HANDOFF.d/2026-07-30T1451Z-t16-claude-legacy-migrated-handoff.md)) — read it for the exact next steps. **For the remaining consolidation work, the one
-file to open is [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)**
-(self-contained; written for a session with zero context). Nobody has to remember its
-path: it is linked from here, from that handoff file, from both `sync-dotfiles` skills, and
-from `docs/config-consolidation-proposal.md`.
+Config consolidation is complete. The July credential-cleanup workstream was
+closed by owner decision on 2026-08-10 without further rotations; its durable
+evidence remains in `docs/security-incident-credential-rotation-2026-07.md` and
+`docs/transcript-leak-audit-2026-07-19.md`. The only current machine rollout is
+the powered-off `916` computer, recorded in the newest open file under
+`HANDOFF.d/`. [`plan_phase3-config-consolidation.md`](plan_phase3-config-consolidation.md)
+is retained as the completed implementation and verification record.
