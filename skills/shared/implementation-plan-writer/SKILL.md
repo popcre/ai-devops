@@ -1,6 +1,6 @@
 ---
 name: implementation-plan-writer
-description: Write (or judge) an implementation plan that a BRAND-NEW AI session with zero context can execute perfectly. Use when the user says "write an implementation plan", "write the plan for this feature/fix", "plan how we'll build X", "put the plan in PLAN.md / IMPLEMENTATION-PLAN.md", "give another session a plan to implement this", or asks whether an existing plan is detailed/comprehensive enough for a fresh implementing session. The plan is a handoff plus a build spec: it must carry the ultimate goal, all background, every constraint and nuance, and per-step verification. This skill is self-contained and must pass the self-audit gate BELOW before the plan is shown.
+description: "Write (or judge) an implementation plan that a BRAND-NEW AI session with zero context can execute perfectly. Use when the user says 'write an implementation plan', 'write the plan for this feature/fix', 'plan how we will build X', 'put the plan in PLAN.md / IMPLEMENTATION-PLAN.md', 'give another session a plan to implement this', or asks whether an existing plan is detailed/comprehensive enough for a fresh implementing session. The plan is a handoff plus a build spec: it must carry the ultimate goal, all background, every constraint and nuance, and per-step verification. This skill is self-contained and must pass the self-audit gate BELOW before the plan is shown."
 ---
 
 # implementation-plan-writer
@@ -119,6 +119,8 @@ could always be more detailed" is NOT an item on this list.
       defined or referenced.
 - [ ] Secrets referenced by location only, never by value.
 - [ ] Definition of done includes commit/push/CI/deploy verification.
+- [ ] The plan links to this session's new `HANDOFF.d/` file, and that handoff
+      links back to the plan. The root `HANDOFF.md` remains the static pointer.
 
 ## Mandatory self-audit gate (Mode A — BEFORE showing the plan)
 
@@ -179,10 +181,15 @@ When asked whether the plan is comprehensive/detailed enough:
 - For multi-phase work, mark the context cut points and instruct the implementer
   to **re-read the downstream phases before starting each one** (drift check);
   pair with the `fresh-session` skill at each cut.
-- When work has already happened, the plan complements — not replaces —
-  your own `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file (one write-once file
-  per session — never rewrite the shared root `HANDOFF.md`, which is a static
-  pointer to `HANDOFF.d/`); cross-link the two so neither is read alone.
+- **Every newly created plan must be registered in the handoff system.** Create
+  your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file and put a
+  direct relative Markdown link to the plan in it. Put a direct relative link
+  back to that handoff file in the plan. This applies even when no implementation
+  work has started: the open plan is itself unfinished work that a future session
+  must be able to discover.
+- Never rewrite the shared root `HANDOFF.md`; it is the static pointer to
+  `HANDOFF.d/`. In a legacy repo where `HANDOFF.md` is still the full handoff,
+  follow the `handoff-writer` migration rule first, then add your own file.
 - Delete/complete the plan file only when the work it describes is truly done.
 - **Put a STATUS table at the top from day one** — one row per step (done / partial /
   open, dated) plus a line naming where a fresh session starts. On a brand-new plan
@@ -197,7 +204,8 @@ When asked whether the plan is comprehensive/detailed enough:
   still described the pre-fix world, which would have made the next session redo
   finished work.
 - **Make it discoverable, not memorable.** Nobody will remember `plan_<topic>.md`
-  three months on. Link it from `AGENTS.md` (the router), your own `HANDOFF.d/` file, the topic doc,
+  three months on. The `HANDOFF.d/` backlink is mandatory. Also link the plan
+  from `AGENTS.md` (the router), the topic doc,
   and any skill whose trigger leads there; add a memory entry saying "read its STATUS
   table first — do not re-derive or re-plan".
 
