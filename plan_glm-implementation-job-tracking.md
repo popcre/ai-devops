@@ -8,14 +8,11 @@
 | 2. Add one-shot implementation job records | ✅ done | 2026-08-10 | Private v3 record exists in `starting` before clone creation, then gains only the canonical clone/session and successfully written artifact paths. Malformed records fail closed. |
 | 3. Lock implementation names for the full run | ✅ done | 2026-08-10 | Offline same-name race creates one record and no second clone/session/turn; different names run independently. Lock remains owned through terminal cleanup. |
 | 4. Add list, show, abort, delete, and safe reconciliation | ✅ done | 2026-08-10 | 155-check offline suite covers type/state controls, exact-session abort, active-delete refusal, terminal truth, cleanup, interrupts, and conservative reconciliation. |
-| 5. Verify, document, commit, and push | ⬜ open | N/A | N/A |
+| 5. Verify, document, commit, and push | ✅ done | 2026-08-10 | `7da90128089177860b2a85332555ce7f1bcd1cee` pushed to `main`; 155 offline, 25 Windows, 176 live checks, final bounded canary, doctor, diff/secret checks, and installed skill hashes passed. Closeout commit records final STATUS. |
 
-Fresh sessions start at the first open row. Before editing, pull `origin/main`, inspect
-concurrent work, list `HANDOFF.d/`, and read every open handoff newest-first. Update this
-table after every gate. The implementing session must create its own write-once
-`HANDOFF.d/<UTC>-<machine>-<agent>-glm-implementation-job-tracking.md` and link it here.
-This run's record is
-[`HANDOFF.d/2026-08-10T1955Z-al8960ofc-codex-glm-implementation-job-tracking.md`](HANDOFF.d/2026-08-10T1955Z-al8960ofc-codex-glm-implementation-job-tracking.md).
+All rows are complete. The implementation session's write-once handoff was committed in
+`7da90128089177860b2a85332555ce7f1bcd1cee`, then removed after push and remote-SHA
+verification because the workstream is proven done. Git history preserves it.
 
 ## 1. The ultimate goal
 
