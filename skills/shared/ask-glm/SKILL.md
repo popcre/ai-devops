@@ -163,3 +163,12 @@ repository, deliberately put a safe copy inside the repository or provide a smal
 excerpt. Never approve every permission and never copy an arbitrary outside file
 automatically. A `glob` or `grep` failure can also mean a very large untracked directory
 is being walked; add that directory to `.gitignore` when appropriate.
+
+TodoWrite is a narrow exception to the path rule. OpenCode 1.18.12 was measured to ask
+for normalized action `todowrite` with exactly `resources:["*"]` and `save:["*"]`;
+the pinned tool body only updates the current session's internal todo list. `ai-glm`
+approves only that exact shape. This does not make `*` generally safe, and unknown or
+changed permission shapes must still fail closed. For an implementation permission
+failure, use `ai-glm show <name>`: the durable record states the safe failure summary,
+whether the clone had unexported changes, and whether a patch exists. Do not ask the
+wrapper to export or apply incomplete work.

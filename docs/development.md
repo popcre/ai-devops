@@ -74,6 +74,14 @@ dead PID, matching stale lock, and exact server state; ambiguous evidence is a w
 not permission to delete. A terminal job name is reusable only after explicit
 `ai-glm delete <name>`.
 
+OpenCode 1.18.12 TodoWrite is allowed only in its measured permission form:
+normalized action `todowrite` with exactly `resources:["*"]` and `save:["*"]`.
+That wildcard names the session-internal todo store, not files or general tool access.
+Tests must reject every altered shape and every unknown action. An implementation
+permission failure must write its safe summary, first-observed time, change presence,
+and patch presence to the v3 record on the first poll that exposes the request; it must
+not export incomplete work as a patch.
+
 ## Testing
 
 Installer behavior has lightweight, dependency-free tests:

@@ -210,13 +210,13 @@ job never started; check `ai-glm list` and `ai-glm show <name>`.
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
 | Windows task is `Ready`, no listener | The task is stopped or its four total attempts were exhausted | Run `ai-glm doctor`, fix the named fault, then run `ai-glm server start` |
-| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns a successful permission envelope whose action is `external_directory` and whose `resources[]` names the outside path. | Run `ai-glm abort <name>`. For outside evidence, put a safe copy inside the repository or provide a small safe excerpt, then retry. Never approve everything or copy arbitrary files automatically. |
+| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns action `external_directory`. The one safe non-path wildcard is the exact pinned TodoWrite shape: action `todowrite`, `resources:["*"]`, and `save:["*"]`. | For a review, run `ai-glm abort <name>`. For an implementation, the first observable failure already records `failed`; inspect `ai-glm show <name>` for its safe summary, whether unexported changes existed, and whether a patch exists. Never approve everything or copy arbitrary files automatically. |
 | `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
 | `session is busy` | Another `ai-glm` call holds the lock | Wait, or raise `--lock-timeout` |
 | `implementation job ... is already starting/running` | The same repository, caller, and name already has an owner | Inspect `ai-glm show <name>`. Do not retry. Abort it by name if it must stop. |
-| `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse | Inspect its artifact and cleanup fields, then run `ai-glm delete <name>` when no longer needed. |
+| `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse. Permission failures also record `failure_summary`, `failure_detected_at`, `changes_present`, and `patch_exists` on the first poll that exposes the request. | Inspect its artifact and cleanup fields, then run `ai-glm delete <name>` when no longer needed. A failed permission turn never exports an incomplete patch. |
 | `ambiguous implementation job state was preserved` | Doctor could not prove record schema, canonical paths, dead owner, matching lock, and exact server state | Inspect `ai-glm list` and `show`. Do not delete the clone or metadata by hand. |
 | `review session CHANGED the working tree` | A review wrote something (should be impossible) | Session is marked failed; inspect `git status` before anything else |
 | `ZAI_API_KEY resolved EMPTY` | The `op://` reference points at a blank field | Fix `ZAI_API_KEY` in `config/mcp.env.example` and re-run `setup-secrets.sh` |
@@ -290,6 +290,11 @@ server; users invoke the installed `ai-glm` command from PowerShell or Codex/Cla
    a generic 500 is not sufficient evidence. In that fallback state the client may only
    act on the measured running read `state.input.filePath` boundary; it must never infer a
    deadlock from elapsed polls. Diagnostics are redacted and capped at 2 KiB.
+   TodoWrite is the only measured permission whose `*` is not a path: live and binary
+   inspection on 2026-08-10 proved action `todowrite` with exactly
+   `resources:["*"]` and `save:["*"]`. Its pinned tool body only updates the current
+   session todo store. Any changed/missing field, any unknown action, and every other
+   wildcard still fail closed.
 4. The Z.ai key is visible in `/proc/<pid>/environ` to the same user and to root. That is
    inherent to putting it in the process environment and is stated here rather than
    glossed over.
@@ -337,7 +342,11 @@ first and then re-measure before touching it.
    with `resources:["C:/tmp/*"]`. Preserve HTTP status, redact response fields before
    capping diagnostics at 2 KiB, and fail closed on malformed, unknown, external, or
    ineffective requests. Only `read`, `list`, `glob`, and `grep` with every V2 `resources[]` entry
-   validated inside the session directory may be approved. Never blanket-approve either
+   validated inside the session directory may be approved. The sole non-path exception
+   is normalized `todowrite` with exact `resources:["*"]` and `save:["*"]`, measured
+   against the pinned binary and live API on 2026-08-10. That action updates only the
+   current session's todo list. The wildcard is action-local and must never make `*`
+   generally acceptable. Never blanket-approve either
    agent mode and never turn repeated generic 500s into a tool-duration watchdog.
 6. **Keep `.claude/` and `claude_chats/` gitignored.** They reached 1.1 GB and 664 MB.
    AI worktrees live inside `.claude/`, so a `glob` from inside one walked its own parent

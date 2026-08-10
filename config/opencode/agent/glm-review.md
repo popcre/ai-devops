@@ -9,6 +9,7 @@ tools:
   bash: false
   webfetch: false
   task: false
+  todowrite: true
 permission:
   read: allow
   list: allow

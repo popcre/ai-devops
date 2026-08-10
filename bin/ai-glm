@@ -197,6 +197,10 @@ implementation_active() {
   case "$1" in starting|running|abort-requested) return 0 ;; *) return 1 ;; esac
 }
 
+implementation_cleanup_pending() {
+  jq -e '.cleanup.clone == "pending" or .cleanup.server_session == "pending"' "$1" >/dev/null 2>&1
+}
+
 implementation_clone_path() { # RID NAME
   printf '%s/wt/%s/%s--%s' "$STATE_DIR" "$1" "$CALLER" "$2"
 }
@@ -230,7 +234,11 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     (.base_sha|type)=="string" and (.owner_pid|type)=="number" and
     (.status|IN("starting","running","abort-requested","completed","failed","aborted")) and
     (.clone_path == null or (.clone_path|type)=="string") and
-    (.opencode_session_id == null or (.opencode_session_id|type)=="string")
+    (.opencode_session_id == null or (.opencode_session_id|type)=="string") and
+    (.failure_summary == null or (.failure_summary|type)=="string") and
+    (.failure_detected_at == null or (.failure_detected_at|type)=="string") and
+    (.changes_present == null or (.changes_present|type)=="boolean") and
+    (.patch_exists == null or (.patch_exists|type)=="boolean")
   ' "$f" >/dev/null 2>&1 || return 1
   root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
   name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
@@ -372,18 +380,58 @@ classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action r
     item="$(printf '%s' "$body" | jq -c --argjson i "$i" '.data[$i]')"
     id="$(printf '%s' "$item" | jq -r '.id // empty')"
     action="$(printf '%s' "$item" | jq -r '.action // empty' | tr '[:upper:]' '[:lower:]')"
-    resources="$(printf '%s' "$item" | jq -r '
-      if (.resources|type)=="array" and (.resources|length)>0
-      then .resources[] else empty end')"
+    if [ "$action" = todowrite ]; then
+      # Measured against the pinned OpenCode 1.18.12 binary and live API on
+      # 2026-08-10. TodoWrite asks for exactly resources:["*"] and save:["*"],
+      # then updates only the current session's internal todo store. This star is
+      # action-local data, never a general filesystem or tool wildcard.
+      printf '%s' "$item" | jq -e '
+        .resources == ["*"] and .save == ["*"]' >/dev/null 2>&1 \
+        || { printf 'todowrite permission shape is not the measured resources/save wildcard' >&2; return 1; }
+      resources='*'
+    else
+      resources="$(printf '%s' "$item" | jq -r '
+        if (.resources|type)=="array" and (.resources|length)>0
+        then .resources[] else empty end')"
+    fi
     [ -n "$id" ] || { printf 'permission entry is missing an id' >&2; return 1; }
-    case "$action" in read|list|glob|grep) ;; *) printf 'unknown permission action: %s' "${action:-missing}" >&2; return 1 ;; esac
+    case "$action" in read|list|glob|grep|todowrite) ;; *) printf 'unknown permission action: %s' "${action:-missing}" >&2; return 1 ;; esac
     [ -n "$resources" ] || { printf 'permission entry is missing resources' >&2; return 1; }
-    while IFS= read -r resource; do
-      category="$(path_category "$resource" "$root")"
-      [ "$category" = inside ] || { printf 'permission resource is %s' "$category" >&2; return 1; }
-    done <<< "$resources"
+    if [ "$action" != todowrite ]; then
+      while IFS= read -r resource; do
+        category="$(path_category "$resource" "$root")"
+        [ "$category" = inside ] || { printf 'permission resource is %s' "$category" >&2; return 1; }
+      done <<< "$resources"
+    fi
     printf '%s\t%s\t%s\n' "$id" "$action" "$(printf '%s' "$resources" | jq -Rs 'split("\n")|map(select(length>0))|join(",")')"
   done
+}
+
+record_implementation_permission_failure() { # META CLONE CODE SAFE_SUMMARY
+  local meta="$1" clone="$2" code="$3" summary="$4" changes=false patch_exists=false patch
+  [ -n "$meta" ] && [ -f "$meta" ] || return 0
+  [ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ] || changes=true
+  patch="$(jq -r '.patch_path // empty' "$meta" 2>/dev/null || true)"
+  [ -z "$patch" ] || [ ! -f "$patch" ] || patch_exists=true
+  implementation_update "$meta" \
+    '.status="failed" | .failure=$code | .failure_summary=$summary |
+     .failure_detected_at=$now | .changes_present=$changes | .patch_exists=$patch_exists' \
+    --arg code "$code" --arg summary "$summary" --arg now "$(date -u +%FT%TZ)" \
+    --argjson changes "$changes" --argjson patch_exists "$patch_exists" \
+    || die "permission failed, and its safe implementation-job evidence could not be recorded."
+}
+
+fail_permission() { # META CLONE CODE SAFE_SUMMARY USER_MESSAGE
+  record_implementation_permission_failure "$1" "$2" "$3" "$4"
+  die "$5"
+}
+
+permission_next_step() { # NAME [IMPLEMENTATION_META]
+  if [ -n "${2:-}" ]; then
+    printf 'Inspect the failed job with: ai-glm show %s. Its owner will finish exact cleanup before safe deletion' "$1"
+  else
+    printf 'Run: ai-glm abort %s' "$1"
+  fi
 }
 
 running_read_boundary() { # ASSISTANT_JSON SESSION_DIR -> inside|outside|invalid|missing
@@ -405,8 +453,9 @@ running_read_boundary() { # ASSISTANT_JSON SESSION_DIR -> inside|outside|invalid
 }
 
 APPROVED_PERMISSION_IDS=""
-handle_permissions() { # SID NAME MODE SESSION_DIR
-  local sid="$1" name="$2" mode="$3" root="$4" rows id action resources prior category err msg stuck boundary
+handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance
+  guidance="$(permission_next_step "$name" "$impl_meta")"
   permission_http GET "/api/session/$sid/permission"
   # OpenCode 1.18.12 emits the same metadata-free HTTP 500 UnknownError while a normal
   # read is running and while an outside-directory read is stuck. The status is not a
@@ -419,9 +468,11 @@ handle_permissions() { # SID NAME MODE SESSION_DIR
     boundary="$(running_read_boundary "$msg" "$root")"
     case "$boundary" in
       outside|invalid)
-        die "GLM permission failed: running read path is $boundary${stuck:+ (tool: $stuck)}.
+        fail_permission "$impl_meta" "$root" permission-outside-directory \
+          "blocked an outside-directory read permission on the first observable poll" \
+          "GLM permission failed: running read path is $boundary${stuck:+ (tool: $stuck)}.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$boundary" "$HTTP_BODY")
-       Run: ai-glm abort $name. For an outside-directory file, place a safe copy under
+       $guidance. For an outside-directory file, place a safe copy under
        the session repository or provide a small safe excerpt, then retry."
         ;;
       *) return 0 ;;
@@ -431,9 +482,16 @@ handle_permissions() { # SID NAME MODE SESSION_DIR
     err="$(cat "${TMPDIR:-/tmp}/ai-glm-perm-err-$$" 2>/dev/null)"; rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
     category=missing
     printf '%s' "$err" | grep -q 'outside' && category=outside
-    die "GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
+    case "$err" in
+      unknown\ permission\ action:*) code=permission-unsupported-action; summary="blocked an unsupported permission action on the first observable poll" ;;
+      todowrite\ permission\ shape*) code=permission-unsupported-shape; summary="blocked an unmeasured todowrite permission shape on the first observable poll" ;;
+      *outside*) code=permission-outside-directory; summary="blocked an outside-directory permission on the first observable poll" ;;
+      *) code=permission-invalid-response; summary="blocked an invalid or unsupported permission response on the first observable poll" ;;
+    esac
+    fail_permission "$impl_meta" "$root" "$code" "$summary" \
+      "GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
-       Run: ai-glm abort $name. For an outside-directory file, place a safe copy under
+       $guidance. For an outside-directory file, place a safe copy under
        the session repository or provide a small safe excerpt, then retry."
   fi
   rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
@@ -441,13 +499,17 @@ handle_permissions() { # SID NAME MODE SESSION_DIR
   while IFS=$'\t' read -r id action resources; do
     prior="$(printf '%s\n' "$APPROVED_PERMISSION_IDS" | grep -cxF "$id" || true)"
     if [ "$prior" -ge 2 ]; then
-      die "GLM permission approval did not clear after two polls (action: $action, path: inside).
-       Run: ai-glm abort $name"
+      fail_permission "$impl_meta" "$root" permission-approval-ineffective \
+        "permission approval for $action remained pending after two follow-up polls" \
+        "GLM permission approval did not clear after two polls (action: $action, path: inside).
+       $guidance"
     fi
     permission_http POST "/api/session/$sid/permission/$id/reply" '{"reply":"always"}'
-    case "$HTTP_STATUS" in 2*) ;; *) die "GLM permission approval failed (HTTP $HTTP_STATUS, action: $action, path: inside).
+    case "$HTTP_STATUS" in 2*) ;; *) fail_permission "$impl_meta" "$root" permission-approval-failed \
+      "permission approval for $action failed on its first reply" \
+      "GLM permission approval failed (HTTP $HTTP_STATUS, action: $action, path: inside).
        $(permission_diagnostic "$HTTP_STATUS" "$mode" inside "$HTTP_BODY")
-       Run: ai-glm abort $name" ;; esac
+       $guidance" ;; esac
     APPROVED_PERMISSION_IDS="${APPROVED_PERMISSION_IDS}${id}"$'\n'
   done <<< "$rows"
 }
@@ -473,7 +535,7 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
   APPROVED_PERMISSION_IDS=""
   sleep 6
   while [ "$waited" -lt "$TIMEOUT" ]; do
-    handle_permissions "$sid" "$name" "$mode" "$root"
+    handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta"
     if api GET /session/status | grep -q "$sid"; then
       idle=0
     else
@@ -718,7 +780,9 @@ cmd_implement() {
         repository_id:$rid,caller:$c,agent:"glm-implement",provider:$provider,model:$model,
         base_sha:$b,owner_pid:$pid,created_at:$ts,updated_at:$ts,status:"starting",
         clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
-        finished_at:null,exit_code:null,failure:null,cleanup:{clone:"pending",server_session:"pending"}}')" \
+        finished_at:null,exit_code:null,failure:null,failure_summary:null,
+        failure_detected_at:null,changes_present:null,patch_exists:null,
+        cleanup:{clone:"pending",server_session:"pending"}}')" \
     || die "could not save implementation job record '$mp'."
   implementation_meta_valid "$IMPL_META" "$root" || die "new implementation record failed validation."
   trap 'implementation_cleanup "$?"' EXIT
@@ -769,7 +833,12 @@ EXCL
     if [ "$turn_rc" -eq 130 ] || implementation_abort_requested "$IMPL_META"; then
       IMPL_FINAL_STATE=aborted; IMPL_FAILURE="abort-requested"; return 130
     fi
-    IMPL_FAILURE="turn-failed"; return "$turn_rc"
+    if [ "$(jq -r '.status // empty' "$IMPL_META" 2>/dev/null)" = failed ]; then
+      IMPL_FAILURE="$(jq -r '.failure // "turn-failed"' "$IMPL_META")"
+    else
+      IMPL_FAILURE="turn-failed"
+    fi
+    return "$turn_rc"
   fi
   verify_model "$msg"
   git -C "$IMPL_CLONE" add -A >/dev/null 2>&1 || true
@@ -849,7 +918,8 @@ cmd_show() {
     implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to display it as trusted state."
     jq '{schema_version,name,type,status,repository_root,repository_remote,repository_id,caller,agent,provider,model,
          base_sha,owner_pid,created_at,updated_at,finished_at,clone_path,opencode_session_id,
-         patch_path,report_path,exit_code,failure,cleanup}' "$mp"
+         patch_path,report_path,exit_code,failure,failure_summary,failure_detected_at,
+         changes_present,patch_exists,cleanup}' "$mp"
   else
     cat "$mp"
   fi
@@ -902,6 +972,7 @@ cmd_delete() {
     implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to delete it."
     state="$(jq -r .status "$mp")"; clone="$(jq -r '.clone_path // empty' "$mp")"
     implementation_active "$state" && die "implementation job '$1' is $state. Abort it and wait for a terminal state before deleting it."
+    implementation_cleanup_pending "$mp" && die "implementation job '$1' has failed, but its owner has not finished exact cleanup. Wait, then inspect it with: ai-glm show $1"
     [ -z "$clone" ] || [ ! -e "$clone" ] || die "recorded clone still exists at $clone; refusing to erase its ownership record."
     if [ -n "$sid" ] && [ "$(jq -r '.cleanup.server_session // "pending"' "$mp")" != removed ]; then
       server_up || die "the exact server session still needs cleanup, but the server is unavailable. Retry delete after: ai-glm server start"
@@ -922,7 +993,10 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   if [ -z "$root" ] || [ -z "$caller" ] || ! implementation_record_path_valid "$mp" || ! implementation_meta_valid "$mp" "$root" "$caller"; then
     warn "malformed implementation record left untouched: $mp"; return 1
   fi
-  state="$(jq -r .status "$mp")"; implementation_active "$state" || return 0
+  state="$(jq -r .status "$mp")"
+  if ! implementation_active "$state"; then
+    [ "$state" = failed ] && implementation_cleanup_pending "$mp" || return 0
+  fi
   rid="$(jq -r .repository_id "$mp")"; name="$(jq -r .name "$mp")"; pid="$(jq -r .owner_pid "$mp")"
   clone="$(jq -r '.clone_path // empty' "$mp")"; sid="$(jq -r '.opencode_session_id // empty' "$mp")"
   lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"; lock_pid="$(cat "$lock/pid" 2>/dev/null || echo '')"
@@ -950,7 +1024,8 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
     clone_state=removed
   fi
   implementation_update "$mp" \
-    '.status="failed" | .finished_at=$now | .exit_code=1 | .failure="owner-process-died" |
+    '.status="failed" | .finished_at=$now | .exit_code=1 |
+     .failure=(.failure // "owner-process-died") |
      .cleanup={clone:$clone,server_session:$session}' \
     --arg now "$(date -u +%FT%TZ)" --arg clone "$clone_state" --arg session "$session_state" \
     || { warn "dead-owner resources were cleaned but terminal metadata could not be written: $mp"; return 1; }
