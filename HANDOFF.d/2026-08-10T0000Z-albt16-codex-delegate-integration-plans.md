@@ -16,7 +16,7 @@ Three open plans now exist:
 - `plan_grok-debate-continuity.md`
 - `plan_kimi-debate-context-continuity.md`
 
-`AGENTS.md` routes future sessions to their STATUS tables. All implementation rows remain open because this session wrote plans only. The Grok plan owns the shared debate template and must precede the Kimi plan; GLM may proceed separately but overlaps the Grok plan in disjoint sections of `skills/shared/ask-glm/SKILL.md`. The plans and this handoff are uncommitted at the moment this file is written; the planning session must commit and push them before closing.
+`AGENTS.md` routes future sessions to their STATUS tables. All implementation rows remain open because this session wrote plans only. The Grok plan owns the shared debate template and must precede the Kimi plan; GLM may proceed separately but overlaps the Grok plan in disjoint sections of `skills/shared/ask-glm/SKILL.md`. The plans, router row, and this handoff were committed and pushed to `main` in commit `8c3d26b34971737c43a77bba9a5c635b42536cdf`; this follow-up handoff-state correction is committed immediately afterward.
 
 Kimi review used one persistent Codex-owned session, `session_d07689c1-71f8-4775-89a6-e92897c7de51`, named `delegate-integration-plans`. Final Kimi report: `.ai/reviews/kimi-delegate-integration-plans-20260809T235958Z.md` (local, git-ignored). Kimi explicitly concluded all three plans are implementation-ready with no material objection.
 
@@ -34,11 +34,10 @@ The first drafts were not ready. They incorrectly described GLM as lacking a ret
 
 ## 6. Exact next steps
 
-1. Commit and push this planning work to `main`. Gate: local and `origin/main` share the new SHA and the worktree is clean.
-2. Choose the GLM plan or Grok plan as the first implementation workstream. They may proceed independently only if edits to `ask-glm/SKILL.md` stay in their assigned sections. Gate: its STATUS table and a new workstream-specific `HANDOFF.d` file show ownership.
-3. Complete and land the Grok plan before starting the Kimi plan. Gate: `templates/delegation/debate-turn.md` and aligned Grok/GLM skills are committed and the Grok STATUS table is complete.
-4. Execute the Kimi plan, beginning with 0.32.0 STEP 0 re-verification. Gate: measured wrapper assumptions are updated before any debate/context change.
-5. For every plan, run the exact tests and live gates it names, update STATUS/current state as each row lands, verify Albert's author/committer identity, pull before push, and remote-verify the SHA.
+1. Choose the GLM plan or Grok plan as the first implementation workstream. They may proceed independently only if edits to `ask-glm/SKILL.md` stay in their assigned sections. Gate: its STATUS table and a new workstream-specific `HANDOFF.d` file show ownership.
+2. Complete and land the Grok plan before starting the Kimi plan. Gate: `templates/delegation/debate-turn.md` and aligned Grok/GLM skills are committed and the Grok STATUS table is complete.
+3. Execute the Kimi plan, beginning with 0.32.0 STEP 0 re-verification. Gate: measured wrapper assumptions are updated before any debate/context change.
+4. For every plan, run the exact tests and live gates it names, update STATUS/current state as each row lands, verify Albert's author/committer identity, pull before push, and remote-verify the SHA.
 
 ## 7. Constraints and gotchas
 
