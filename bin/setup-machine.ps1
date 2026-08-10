@@ -580,9 +580,41 @@ if (-not $codexRealBin) {
 # 6c. Kimi Code CLI - optional local delegation target
 # --------------------------------------------------------------------------
 # Kimi delegation is distributed as a shared skill (`skills/shared/kimi-code-delegation`).
-# It is not an MCP server and has no repo-stored secret. The only machine setup is
-# proving that the local CLI exists; auth is the user's interactive `kimi` login.
+# It is not an MCP server and has no repo-stored secret. Install both a PowerShell/cmd
+# shim and an extensionless Git Bash launcher for the repo-owned wrapper. A .cmd file
+# alone is not found by Bash when the skill invokes plain `ai-kimi`.
 Step "Kimi Code CLI (optional delegation target)"
+$delegateBinDir = Join-Path $env:USERPROFILE ".local\bin"
+New-Item -ItemType Directory -Force -Path $delegateBinDir | Out-Null
+$gitBashForKimi = @(
+  (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
+  (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$aiKimiSource = Join-Path $RepoPath "bin\ai-kimi"
+if ($gitBashForKimi -and (Test-Path -LiteralPath $aiKimiSource)) {
+  $homeBash = "/" + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+  $kimiBash = "/" + (($aiKimiSource -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+  @"
+#!/usr/bin/env bash
+# Managed by ai-devops setup-machine.ps1.
+export HOME="$homeBash"
+exec "$kimiBash" "`$@"
+"@ | Set-Content -NoNewline -Encoding ASCII -Path (Join-Path $delegateBinDir "ai-kimi")
+  @"
+@echo off
+rem Managed by ai-devops setup-machine.ps1.
+set "HOME=$env:USERPROFILE"
+"$gitBashForKimi" "$kimiBash" %*
+"@ | Set-Content -Encoding ASCII -Path (Join-Path $delegateBinDir "ai-kimi.cmd")
+  $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+  if (($userPath -split ';') -notcontains $delegateBinDir) {
+    [Environment]::SetEnvironmentVariable("PATH", ($delegateBinDir + ';' + $userPath), "User")
+  }
+  $env:Path = $delegateBinDir + ';' + $env:Path
+  Ok "ai-kimi wrapper installed for PowerShell and Git Bash"
+} else {
+  Warn "Git Bash or $aiKimiSource is missing; the ai-kimi wrapper could not be installed."
+}
 if (Get-Command kimi -ErrorAction SilentlyContinue) {
   try {
     $kimiVersion = (& kimi --version 2>$null) -join " "
