@@ -58,6 +58,22 @@ review gates:
 Run/review artifacts (`.ai/runs/`, `.ai/reviews/`) are created **inside the
 target application repo**, not in this toolkit repo, and are git-ignored.
 
+## Delegate debate continuity
+
+Grok, GLM, and Kimi debates use the provider-neutral
+`templates/delegation/debate-turn.md` contract. The parent agent reuses one
+named provider session, points it to current files, relays the other model's
+actual reasoning, and keeps a consensus ledger. The wrapper keeps provider
+identity, permissions, and cache-relevant settings stable; ordinary turn text
+carries only changed evidence and objections. A debate stops on verified
+consensus, its turn bound, or its cost bound, with unresolved objections stated
+plainly.
+
+Kimi resumes an explicit named session but reports no context, cache, token, cost,
+or returned-model data in headless mode. Its parent therefore treats session reuse
+as transport continuity only. Every material turn re-reads current artifacts, and
+the plan's consensus ledger is the durable source after automatic context compaction.
+
 ## Configuration boundary
 
 Scripts read machine-local config from `/etc/ai-devops/{models.env,server.env}`.

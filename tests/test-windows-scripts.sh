@@ -68,7 +68,9 @@ else bad "no launcher smoke test; failures would be silent"; fi
 echo "== the generated Windows launcher must be valid bash =="
 # It is written from a PowerShell here-string, so a quoting slip yields a broken shell
 # script that only fails on Windows. Render it and check it here instead.
-if rendered="$(python3 tests/render-windows-launcher.py 2>&1)"; then
+PYTHON=python3
+if ! "$PYTHON" -c 'import sys' >/dev/null 2>&1; then PYTHON=python; fi
+if rendered="$("$PYTHON" tests/render-windows-launcher.py 2>&1)"; then
   if printf '%s' "$rendered" | bash -n 2>/dev/null; then ok "rendered launcher is valid bash"
   else bad "rendered launcher is not valid bash"; fi
   # op.exe is a native Windows process and cannot exec an extension-less shell script.
@@ -92,6 +94,30 @@ if grep -q 'opencode-glm-service' bin/setup-opencode-glm.ps1 && grep -q 'server.
 else bad "scheduled task output is discarded"; fi
 if grep -q 'Wait-PortFree' bin/setup-opencode-glm.ps1; then ok "waits for the port before starting the task"
 else bad "no port wait; the smoke test can block the real server"; fi
+
+echo "== GLM task recovery policy =="
+if grep -q 'max_attempts=4' bin/setup-opencode-glm.ps1 && grep -q 'sleep 60' bin/setup-opencode-glm.ps1; then
+  ok "wrapper has bounded three-at-one-minute recovery"
+else bad "wrapper recovery count or interval changed"; fi
+if grep -q 'New-ScheduledTaskTrigger -AtLogOn' bin/setup-opencode-glm.ps1; then ok "task starts at logon"
+else bad "task no longer starts at logon"; fi
+if grep -q 'wc -c' bin/setup-opencode-glm.ps1 && grep -q '"`$log.1"' bin/setup-opencode-glm.ps1; then
+  ok "service wrapper rotates its log"
+else bad "service wrapper does not rotate its log"; fi
+if grep -q 'bounded recovery exhausted' bin/setup-opencode-glm.ps1 && ! grep -q 'exec "\$launchBash"' bin/setup-opencode-glm.ps1; then
+  ok "service wrapper normalizes child failure"
+else bad "service wrapper does not return a restartable failure"; fi
+if grep -q 'service wrapper retries 3 times at 1 minute' bin/ai-glm; then ok "doctor verifies the recovery policy"
+else bad "doctor does not verify the recovery policy"; fi
+
+echo "== portable Codex defaults =="
+if grep -q 'codex-portable.toml' bin/setup-machine.ps1 && grep -q -- '-not (Test-Path -LiteralPath $codexConfigPath)' bin/setup-machine.ps1; then
+  ok "setup seeds Codex defaults only when config is absent"
+else bad "Codex defaults may overwrite an established config"; fi
+if grep -q 'model_reasoning_effort = "low"' config/codex-portable.toml &&
+   ! grep -q '^model = ' config/codex-portable.toml; then
+  ok "portable Codex defaults pin safe effort without hard-coding a model"
+else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

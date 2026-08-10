@@ -70,6 +70,11 @@ file.
 - `cleanup-worktree`: safely inventories, recovers, and removes stale Codex,
   Claude, and delegated-agent worktrees or temp clones across Windows and
   POSIX systems without losing unique work.
+- `deepseek-second-opinion`: runs a genuine bounded debate through
+  `ai-deepseek-agent`. DeepSeek receives only the text and files explicitly
+  attached by the parent. A Codex custom-provider path was cancelled on
+  2026-08-10 because Codex 0.145.0 requires the Responses API wire format and
+  DeepSeek documents tool calls through Chat Completions.
 
 The installer fails before copying when a shared skill name collides with a
 client-specific skill. It warns about the retired ShareSync skill without

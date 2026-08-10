@@ -38,7 +38,8 @@
 #     modelUsage, total_cost_usd, total_cost_usd_ticks
 #     There is NO top-level `model` field; the real model id is the modelUsage
 #     key (`grok-4.5-build` for `--model grok-4.5`).
-#   Success stopReason observed: "end_turn".
+#   Success stopReason observed: "end_turn" on 2026-08-05 and "EndTurn" on
+#     2026-08-10. Both are terminal success spellings from Grok 0.2.118.
 #   `grok doctor` is a TERMINAL diagnostic ("Check terminal, clipboard, color,
 #     and input support") — it is not an auth check at all. This is the whole
 #     explanation for the 2026-08-05 "not authenticated" contradiction.
@@ -283,7 +284,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
   case "$sr" in
-    end_turn|stop|completed)
+    end_turn|EndTurn|stop|completed)
       return 0 ;;
     cancelled|max_turns|max_turns_reached|max-turns*)
       note ""

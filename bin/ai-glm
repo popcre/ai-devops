@@ -770,6 +770,16 @@ cmd_doctor() {
     else
       printf 'FAIL  scheduled task registered\n'; FAILS=$((FAILS+1))
     fi
+    local task_facts
+    task_facts="$(powershell.exe -NoProfile -NonInteractive -Command \
+      '$t=Get-ScheduledTask -TaskName AiDevOps-OpenCodeGlm -ErrorAction SilentlyContinue; if(-not $t){exit 1}; $i=Get-ScheduledTaskInfo -TaskName AiDevOps-OpenCodeGlm; "state=$($t.State);last=$($i.LastTaskResult)"' \
+      2>/dev/null | tr -d '\r' || true)"
+    if [ -n "$task_facts" ]; then
+      printf 'INFO  scheduled task %s\n' "$task_facts"
+      chk "service wrapper retries 3 times at 1 minute" grep -q 'max_attempts=4' "$HOME/.local/bin/opencode-glm-service"
+    else
+      printf 'FAIL  scheduled task state and recovery policy readable\n'; FAILS=$((FAILS+1))
+    fi
   else
     chk "systemd unit installed"           test -f "$HOME/.config/systemd/user/opencode-glm.service"
     chk "service enabled"                  systemctl --user is-enabled opencode-glm.service

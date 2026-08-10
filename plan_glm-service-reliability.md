@@ -4,12 +4,12 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Reproduce and classify the service exit | ⬜ open | 2026-08-09 | Not started |
-| 2. Add durable service supervision | ⬜ open | 2026-08-09 | Not started |
-| 3. Make setup and doctor prove recovery | ⬜ open | 2026-08-09 | Not started |
-| 4. Add Windows regression tests | ⬜ open | 2026-08-09 | Not started |
-| 5. Run live continuity and cache tests | ⬜ open | 2026-08-09 | Not started |
-| 6. Document, install, commit, and push | ⬜ open | 2026-08-09 | Not started |
+| 1. Reproduce and classify the service exit | ✅ complete | 2026-08-09 | Event 201 recorded Git Bash return `0x8007007F`/127 after a controlled OpenCode child kill; no native retry followed. The earlier `0xC000013A` was an intentional task interruption, which is not retryable. |
+| 2. Add durable service supervision | ✅ complete | 2026-08-09 | Generated wrapper stays resident, retries three times at 60 seconds, stops after four total attempts, and rotates `server.log` at 1 MiB with one prior copy. Controlled child kill restored one listener after 60 seconds. |
+| 3. Make setup and doctor prove recovery | ✅ complete | 2026-08-09 | Setup replaced the task twice with equivalent normalized XML. Doctor reports task state/last result and validates the installed wrapper bound. |
+| 4. Add Windows regression tests | ✅ complete | 2026-08-09 | `tests/test-windows-scripts.sh`: 21 passed, 0 failed. `tests/test-ai-glm.sh` offline coverage retained and extended through doctor source checks. |
+| 5. Run live continuity and cache tests | ✅ complete | 2026-08-09 | Clean detached `AI_GLM_LIVE=1 bash tests/test-ai-glm.sh`: 145 passed, 0 failed. Same named session remembered the marker across server restart; report recorded cache tokens; review tree stayed clean. |
+| 6. Document, install, commit, and push | 🟨 integration pending | 2026-08-09 | Docs, shared skill guidance, setup, doctor, plan, and handoff are updated; installer and final checks completed locally. Commit/push are reserved for the coordinating root session because Grok/Kimi agents share this branch. CI/deploy N/A. |
 
 Fresh sessions start at the first open row and must update this table as work lands. This plan is independent of the Grok/Kimi plans and may land first. Before any edit or push, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-glm-service-reliability.md` file cross-linked to this plan. Never rewrite another session's handoff.
 

@@ -82,11 +82,39 @@ EOF
 cat > "$TMP/weird.json" <<'EOF'
 {"text":"x","sessionId":"s","stopReason":"banana","usage":{},"modelUsage":{},"total_cost_usd":0}
 EOF
+cat > "$TMP/endturn.json" <<'EOF'
+{"text":"## Verdict\nAPPROVE","sessionId":"s-endturn","stopReason":"EndTurn","num_turns":1,
+ "usage":{"cache_read_input_tokens":10},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.01}
+EOF
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
 echo "ai-grok-review tests"
+
+echo "== debate_contract_and_skill_guidance =="
+TEMPLATE="$REPO_ROOT/templates/delegation/debate-turn.md"
+GROK_SKILL="$REPO_ROOT/skills/shared/grok-cli/SKILL.md"
+GLM_SKILL="$REPO_ROOT/skills/shared/ask-glm/SKILL.md"
+check "debate template exists" "test -f '$TEMPLATE'"
+for heading in "Goal" "Disputed claim" "Other model's reasoning" \
+  "Current plan or diff paths" "New test or runtime evidence" "Constraints" \
+  "What changed since the last turn" "Claim-by-claim check" "Material objections" \
+  "Required correction" "Consensus question" "Consensus ledger" \
+  "Agreed decisions" "Rejected alternatives" "Unresolved objections" \
+  "Evidence still needed" "Last verified commit and path state"; do
+  check "template has $heading" "grep -Fqx \"## $heading\" '$TEMPLATE' || grep -Fqx \"### $heading\" '$TEMPLATE'"
+done
+check "template requires current path re-read" "grep -qi 're-read.*current' '$TEMPLATE'"
+check "Grok skill uses shared template" "grep -Fq 'templates/delegation/debate-turn.md' '$GROK_SKILL'"
+check "GLM skill uses shared template" "grep -Fq 'templates/delegation/debate-turn.md' '$GLM_SKILL'"
+check "Grok debate reuses exact named session" "grep -qi 'reuse the exact named session' '$GROK_SKILL'"
+check "Grok debate has three-rebuttal bound" "grep -qi 'at most three rebuttal turns' '$GROK_SKILL'"
+check "Grok debate has default cost ceiling" "grep -Fq '\$1.50' '$GROK_SKILL'"
+check "Grok debate reports unresolved objections" "grep -qi 'report unresolved objections' '$GROK_SKILL'"
+check "Grok skill keeps frozen prefix" "grep -qi 'Never broaden permissions, change the frozen prefix' '$GROK_SKILL'"
+check "wrapper still reports cached tokens" "grep -Fq 'cached:' '$SCRIPT'"
+check "wrapper still reports cost" "grep -Fq 'cost:' '$SCRIPT'"
 
 # 1 -------------------------------------------------------------------------
 echo "== usage_and_exit_codes =="
@@ -177,6 +205,11 @@ echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1
 [ $? -ne 0 ] && ok "unknown stopReason exits non-zero" || bad "unknown stopReason exits non-zero"
 echo ok > "$TMP/mode"
+cp "$TMP/fixture.json" "$TMP/fixture.lower.bak"
+cp "$TMP/endturn.json" "$TMP/fixture.json"
+run new t5-endturn --prompt x >/dev/null 2>&1
+[ $? -eq 0 ] && ok "current EndTurn spelling succeeds" || bad "current EndTurn spelling succeeds"
+cp "$TMP/fixture.lower.bak" "$TMP/fixture.json"
 
 # 9/10 ----------------------------------------------------------------------
 echo "== json_field_extraction =="
@@ -252,7 +285,7 @@ if [ "${AI_GROK_LIVE:-0}" = 1 ]; then
   printf '.ai/\n' > "$LREPO/.gitignore"; echo 'hello world' > "$LREPO/a.txt"
   git -C "$LREPO" add -A; git -C "$LREPO" commit -qm i
   O1="$( cd "$LREPO" && bash "$SCRIPT" new live --prompt 'Read a.txt and say what it contains.' --max-turns 5 --json 2>/dev/null )"
-  check "live turn 1 has a terminal stopReason" "printf '%s' \"\$O1\" | jq -e '.stopReason==\"end_turn\"'"
+  check "live turn 1 has a terminal stopReason" "printf '%s' \"\$O1\" | jq -e '.stopReason==\"end_turn\" or .stopReason==\"EndTurn\"'"
   check "live turn 1 has non-empty text"        "printf '%s' \"\$O1\" | jq -e '.text|length>0'"
   O2="$( cd "$LREPO" && bash "$SCRIPT" ask live --prompt 'What file did you just read?' --max-turns 5 --json 2>/dev/null )"
   S1="$(printf '%s' "$O1" | jq -r .sessionId)"; S2="$(printf '%s' "$O2" | jq -r .sessionId)"

@@ -54,7 +54,7 @@ changes; convert to that machine's reality, don't guess.
 - Bridge-agent containers at `/volume1/docker/popdam` on the NAS; Watchtower
   updates images but not compose config. Windows render agent does thumbnails.
 
-## 916 ("916-alien") and t16 and 4837 — Windows 11 dev machines
+## 916 ("916-alien"), t16, and al8960ofc (formerly 4837) — Windows 11 dev machines
 
 - User `ahazan2`. PowerShell 7 primary; WSL Ubuntu available (used for Ansible
   on t16 — Ansible doesn't run on native Windows).
@@ -81,10 +81,10 @@ changes; convert to that machine's reality, don't guess.
   `config/ssh-config.template`; it already trusts `916-alien.pub`.
 - Claude Desktop is the Store/MSIX install — config is at
   `C:\Users\ahazan2\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`,
-  NOT `%APPDATA%\Claude`. MCP servers are added via the two Dropbox scripts
-  (`setup-claude-mcps.ps1` / `setup-codex-mcps.ps1` under
-  `C:\Dropbox\vibe coding\set up synology and VPS MCP servers…`) — never
-  hand-edit configs, never let Claude scripts touch Codex config
+  NOT `%APPDATA%\Claude`. Machine, SSH, MCP, secret, Codex-path, skills, and
+  memory-task setup comes only from `bin/setup-machine.ps1` in
+  `C:\repos\ai-devops`. The old Dropbox scripts are retired pointer stubs.
+  Never hand-edit configs, and never let Claude scripts touch Codex config
   (`C:\Users\ahazan2\.codex\config.toml`).
 
 ### Codex on Windows — the junction trap (2026-07-16)

@@ -94,10 +94,15 @@ Shared/client name collisions fail before anything is copied.
 - `kimi-code-delegation` (headless Kimi Code CLI delegation) is repo-owned under
   `skills/shared/`. It is a skill/instruction package, not an MCP server or
   Ansible role; the dev-machine setup scripts install the skill and check whether
-  the local `kimi` CLI is available.
+  the local `kimi` CLI is available. Kimi uses the same provider-neutral debate
+  fields as Grok and GLM, while keeping exact-id resume, read-only, bounded-turn,
+  and context-refresh rules specific to Kimi. Its headless output has no usable
+  cache, token, cost, context-size, or returned-model metrics.
 - `grok-cli` (xAI Grok Build discovery, documentation, and safe delegation) is
   repo-owned under `skills/shared/`. The CLI, login, and version-matched docs
-  remain machine-local under `~/.grok/`.
+  remain machine-local under `~/.grok/`. Grok, GLM, and Kimi use the same stable
+  provider-neutral debate fields from `templates/delegation/debate-turn.md`;
+  their skills retain provider-specific session, safety, cache, and cost rules.
 - `cleanup-worktree` is repo-owned under `skills/shared/`. It handles Codex,
   Claude, and delegated-agent linked worktrees or temp clones across Windows,
   Linux, WSL, and macOS, with recovery-before-deletion safeguards.

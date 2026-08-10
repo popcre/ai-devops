@@ -4,12 +4,12 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Re-verify Kimi 0.32.0 STEP 0 behavior | ⬜ open | 2026-08-09 | Not started |
-| 2. Add Kimi debate and context-health rules | ⬜ open | 2026-08-09 | Not started |
-| 3. Use the shared consensus ledger | ⬜ open | 2026-08-09 | Not started |
-| 4. Extend offline and live tests | ⬜ open | 2026-08-09 | Not started |
-| 5. Run the live K3 debate | ⬜ open | 2026-08-09 | Not started |
-| 6. Document, install, commit, and push | ⬜ open | 2026-08-09 | Not started |
+| 1. Re-verify Kimi 0.32.0 STEP 0 behavior | ✅ complete | 2026-08-10 | Header re-qualified; live Read succeeded and hostile Write returned `CANNOT_WRITE` without changing the canary. |
+| 2. Add Kimi debate and context-health rules | ✅ complete | 2026-08-10 | Shared skill now requires exact-session delta turns, current-artifact re-read, bounded rebuttals, and no unavailable metrics. |
+| 3. Use the shared consensus ledger | ✅ complete | 2026-08-10 | Kimi consumes the Grok-owned provider-neutral template and stores durable state in the active artifact. |
+| 4. Extend offline and live tests | ✅ complete | 2026-08-10 | Pre-guard suites passed 54/0 offline and 62/0 live; final counts including the one-shot implement guard are recorded by this session below. |
+| 5. Run the live K3 debate | ✅ complete | 2026-08-10 | Session `session_224373ef-2295-435e-860c-298b6e99e0f0`; one rebuttal; Kimi re-read the fix and reported no material Kimi objection. |
+| 6. Document, install, commit, and push | 🟨 partial | 2026-08-10 | Docs updated; install and local verification are being completed here; commit/push belong to the root integrator. |
 
 Fresh sessions start at the first open row and keep this table current. This plan depends on the completed shared-template rows in `plan_grok-debate-continuity.md` and must not run concurrently with that plan. Before editing or pushing, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-kimi-debate-context-continuity.md` file cross-linked to this plan.
 
@@ -61,6 +61,31 @@ Transport continuity is reliable because `ai-kimi` resumes an explicit ID. Seman
 Locked on 2026-08-09: explicit session IDs; separate Claude/Codex records; pinned K3 request; no cache/model/cost claims; no session-file edits; read-only agent unchanged; shared stable debate headings; current files re-read every material turn; bounded initial review plus at most three rebuttal turns; durable conclusions stored in the plan/artifact rather than only in chat.
 
 Open: whether the `kimi` CLI's own supported output exposes non-sensitive context metadata. Do not add any direct read of `~/.kimi-code` files, including `state.json`; if the CLI does not expose it, remain deliberately unmeasured.
+
+### Consensus ledger, verified 2026-08-10
+
+#### Agreed decisions
+
+- Exact named review sessions prove transport continuity only; current-file re-reading and this durable ledger protect semantic continuity.
+- Debate turns use `templates/delegation/debate-turn.md`, delta-only rebuttals, an initial review plus at most three rebuttals, and explicit unresolved objections at the bound.
+- Kimi headless output supports no cache, context-size, token, cost, or returned-model claim. The wrapper proves only the requested model pin.
+- Implement sessions are one-shot. Their throwaway worktree is deleted after patch emission, so `ask` must never resume a write-capable session in the live repository.
+
+#### Rejected alternatives
+
+Newest-directory resume, raw session-file edits, unsupported headless `/compact`, full transcript re-paste, polite agreement as consensus, and implement-session continuation in the live repo.
+
+#### Unresolved objections
+
+None in Kimi scope. Kimi's first turn found the implement-resume safety hole; Codex agreed and fixed it. Kimi's same-session rebuttal re-read the changed wrapper, skill, and regression test and reported no material Kimi safety, context, or convergence objection.
+
+#### Evidence still needed
+
+Commit and remote verification by the root integrator. CI and deployment are N/A for this script-and-doc toolkit.
+
+#### Last verified commit and path state
+
+Base commit `281539d122c1ba2d2470cefa27099a649629fbc2` on `main`. The live debate ran in an isolated worktree containing only the exact integrated GLM, Grok, and Kimi changes because unrelated sessions were actively editing the shared checkout. Kimi re-read the current Kimi wrapper, test, skill, plan, and shared template on the rebuttal turn.
 
 ## 9. Ordered implementation plan
 

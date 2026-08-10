@@ -116,6 +116,17 @@ if ([string]::IsNullOrWhiteSpace($RepoPath)) {
     $RepoPath = Join-Path $env:USERPROFILE "repos\ai-devops"
   }
 }
+
+# Seed portable Codex defaults only on a brand-new Codex home. Existing TOML is
+# never rewritten or appended to: duplicate keys have broken Codex before, and
+# machine-specific paths, plugins, and trust entries must remain local.
+$codexConfigPath = Join-Path $env:USERPROFILE ".codex\config.toml"
+$codexPortableTemplate = Join-Path $RepoPath "config\codex-portable.toml"
+if (-not (Test-Path -LiteralPath $codexConfigPath) -and
+    (Test-Path -LiteralPath $codexPortableTemplate)) {
+  New-Item -ItemType Directory -Force -Path (Split-Path $codexConfigPath -Parent) | Out-Null
+  Copy-Item -LiteralPath $codexPortableTemplate -Destination $codexConfigPath
+}
 # %USERPROFILE%, never $HOME: on a machine with a roaming profile $HOME can point at a
 # network drive (Z:) that nothing reads back, which has silently misplaced installs here
 # before.

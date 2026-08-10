@@ -328,16 +328,37 @@ $logFwd = ConvertTo-BashPath (Join-Path $OcHome "server.log")
 @"
 #!/usr/bin/env bash
 # Managed by ai-devops setup-opencode-glm.ps1. Wrapper so the scheduled task's output
-# lands in a file instead of being thrown away by Task Scheduler.
-exec >>"$logFwd" 2>&1
+# lands in a bounded file instead of being thrown away by Task Scheduler.
+set -u
+log="$logFwd"
+if [ -f "`$log" ] && [ "`$(wc -c <"`$log")" -ge 1048576 ]; then
+  mv -f "`$log" "`$log.1"
+fi
+exec >>"`$log" 2>&1
 echo "--- starting `$(date) ---"
-exec "$launchBash"
+# Keep this shell as the task process. Git Bash can translate a killed native child
+# into 0x8007007F/127, which Task Scheduler does not treat as a restartable failure.
+attempt=0
+max_attempts=4
+while [ "`$attempt" -lt "`$max_attempts" ]; do
+  attempt=`$((attempt + 1))
+  "$launchBash"
+  status=`$?
+  [ "`$status" -eq 0 ] && exit 0
+  if [ "`$attempt" -ge "`$max_attempts" ]; then
+    echo "FATAL: OpenCode child exited with status `$status; bounded recovery exhausted after `$attempt attempts."
+    exit 1
+  fi
+  echo "WARN: OpenCode child exited with status `$status; retry `$attempt of 3 in 60 seconds."
+  sleep 60
+done
+exit 1
 "@ | Set-Content -NoNewline -Encoding ASCII -Path $svcSh
 $svcBash = ConvertTo-BashPath $svcSh
 $action  = New-ScheduledTaskAction -Execute $GitBash -Argument "`"$svcBash`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-              -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+              -StartWhenAvailable `
               -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 try {
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
