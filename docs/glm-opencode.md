@@ -198,6 +198,16 @@ the observed result as `completed`, `failed`, or `aborted`, removes its exact re
 clone and disposable server session, and retains the terminal record with artifact and
 cleanup evidence. Completion wins an abort race if a valid patch already completed.
 
+If strict completion is not proven because of an abort, timeout, usage limit, provider
+or service failure, or safely rejected permission, the owner checks the clone before
+cleanup. Changed work is exported as a binary `.incomplete.patch` plus adjacent
+`.incomplete.md` report and the command remains nonzero. No-change failures create no
+empty patch. These artifacts explicitly say INCOMPLETE and are never applied
+automatically. Only a durable-export failure preserves the exact validated clone, with
+loud recovery instructions. `show` reports a bounded outcome such as
+`usage-limit-partial` or `permission-failed-no-changes`; in-progress usage is pending
+and failed usage is unavailable, never a misleading zero.
+
 Terminal records require explicit `delete <name>` before that name can be reused. Delete
 refuses active jobs and any record whose clone still exists. `ask`, `transcript`, and
 server `diff` reject implementation records because their disposable clone and server
@@ -210,13 +220,14 @@ job never started; check `ai-glm list` and `ai-glm show <name>`.
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
 | Windows task is `Ready`, no listener | The task is stopped or its four total attempts were exhausted | Run `ai-glm doctor`, fix the named fault, then run `ai-glm server start` |
-| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns action `external_directory`. The one safe non-path wildcard is the exact pinned TodoWrite shape: action `todowrite`, `resources:["*"]`, and `save:["*"]`. | For a review, run `ai-glm abort <name>`. For an implementation, the first observable failure already records `failed`; inspect `ai-glm show <name>` for its safe summary, whether unexported changes existed, and whether a patch exists. Never approve everything or copy arbitrary files automatically. |
+| `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns action `external_directory`. The one safe non-path wildcard is the exact pinned TodoWrite shape: action `todowrite`, `resources:["*"]`, and `save:["*"]`. | For a review, run `ai-glm abort <name>`. An implementation stays nonzero; changed work is exported only as a clearly incomplete artifact before cleanup. Inspect `ai-glm show <name>`. Never approve everything or copy arbitrary files automatically. |
 | `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
 | `session is busy` | Another `ai-glm` call holds the lock | Wait, or raise `--lock-timeout` |
 | `implementation job ... is already starting/running` | The same repository, caller, and name already has an owner | Inspect `ai-glm show <name>`. Do not retry. Abort it by name if it must stop. |
-| `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse. Permission failures also record `failure_summary`, `failure_detected_at`, `changes_present`, and `patch_exists` on the first poll that exposes the request. | Inspect its artifact and cleanup fields, then run `ai-glm delete <name>` when no longer needed. A failed permission turn never exports an incomplete patch. |
+| `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse. `outcome` distinguishes completed, partial, no-change, abort, timeout, usage, permission, and artifact-export failure. | Inspect the artifact and cleanup fields, manually review any `.incomplete.patch`, then run `ai-glm delete <name>` when no longer needed. Never treat an incomplete patch as safe or tested. |
+| `outcome: artifact-export-failed` | Changed incomplete work could not be made durable in both patch and report files. | The exact validated remote-less clone is preserved and named in stderr. Inspect it in place. Never add a remote or copy it over the real repository. |
 | `ambiguous implementation job state was preserved` | Doctor could not prove record schema, canonical paths, dead owner, matching lock, and exact server state | Inspect `ai-glm list` and `show`. Do not delete the clone or metadata by hand. |
 | `review session CHANGED the working tree` | A review wrote something (should be impossible) | Session is marked failed; inspect `git status` before anything else |
 | `ZAI_API_KEY resolved EMPTY` | The `op://` reference points at a blank field | Fix `ZAI_API_KEY` in `config/mcp.env.example` and re-run `setup-secrets.sh` |
@@ -450,3 +461,15 @@ first and then re-measure before touching it.
     lock, and exact server response. Old or forged scratch paths are warned about and
     preserved. Removing any one of these checks recreates duplicate paid turns or turns
     recovery into unsafe deletion.
+29. **Incomplete implementation work is evidence, never success.** When strict
+    completion is not proven, changed work is exported only as a binary
+    `.incomplete.patch` plus INCOMPLETE report, the command stays nonzero, and neither
+    artifact is auto-applied. No-change failure creates no patch. The exact remote-less
+    clone is preserved only when durable artifact export itself fails. One owner
+    finalizer and the repository/caller/name lock must validate the record, canonical
+    clone, and lock PID before export or deletion. Removing these distinctions either
+    loses useful paid work or makes unfinished work look trusted.
+    On Windows, clone checkout and exact cleanup must use Git's long-path support.
+    OpenCode can leave a tool child alive briefly after exact abort/delete, so cleanup
+    waits at most two minutes for the clone handle. It never kills arbitrary descendants
+    of the shared server, because they may belong to another concurrent session.

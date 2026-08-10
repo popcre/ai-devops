@@ -255,12 +255,28 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
           HTTP_STATUS=200; HTTP_BODY="{}"
         fi
       }
-      create_session(){ printf "%s\n" "$JOB_NAME" >> "$JOB_CALLS"; printf "sid-%s" "$JOB_NAME"; }
+      make_fixture_change(){
+        case "$JOB_CHANGE" in
+          0) ;;
+          tracked) printf "changed by fixture\n" > "$1/f.txt" ;;
+          binary) printf "\000\001\002GLM-PARTIAL\377" > "$1/partial.bin" ;;
+          *) printf "unexported partial work\n" > "$1/partial.txt" ;;
+        esac
+      }
+      create_session(){ printf "%s\n" "$JOB_NAME" >> "$JOB_CALLS"; make_fixture_change "$3"; printf "sid-%s" "$JOB_NAME"; }
       send_prompt(){ :; }
+      last_assistant(){
+        if [ "$JOB_TURN" = usage ]; then
+          printf "%s" '\''{"finish":"error","content":[{"type":"text","text":"Usage limit reached for this billing cycle. SECRET-FIXTURE-MUST-NOT-PERSIST"}]}'\''
+        else printf "{}"; fi
+      }
       await_turn(){
         if [ "$JOB_TURN" = permission ]; then
-          [ "$JOB_CHANGE" = 0 ] || printf "unexported partial work\n" > "$4/partial.txt"
           handle_permissions "$1" "$2" "$3" "$4" "$5"
+        fi
+        if [ "$JOB_TURN" = timeout ]; then
+          implementation_update "$5" '\''.failure="turn-timeout" | .failure_summary="turn deadline passed without proven completion"'\''
+          return 124
         fi
         [ "$JOB_TURN" = success ] || return 1
         printf "%s" '\''{"finish":"stop","model":{"id":"glm-5.2"},"content":[{"type":"text","text":"done"}],"tokens":null}'\''
@@ -283,7 +299,7 @@ before_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
 run_fake_impl exclusive >"$TMP/duplicate.out" 2>&1; duplicate_rc=$?
 after_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
 check "concurrent_same_name_implement_creates_one_job_and_session" "test $duplicate_rc -ne 0 -a '$before_calls' = '$after_calls' && grep -q 'No clone, server session, or provider turn' '$TMP/duplicate.out'"
-check "implement_record_is_private_and_contains_no_prompt_or_secret" "(case \"\$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) grep -q 'chmod 0600' '$AI_GLM' ;; *) test \"\$(stat -c %a '$EX_META')\" = 600 ;; esac) && ! grep -qiE 'fixture|prompt|token|secret|credential|password' '$EX_META'"
+check "implement_record_is_private_and_contains_no_prompt_or_secret" "(case \"\$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) grep -q 'chmod 0600' '$AI_GLM' ;; *) test \"\$(stat -c %a '$EX_META')\" = 600 ;; esac) && ! jq -r 'tostring' '$EX_META' | grep -qiE 'fixture|prompt text|secret-value|credential-value|password-value'"
 check "implement_ask_is_rejected_as_one_shot" "! (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' ask exclusive --prompt again) >/dev/null 2>&1"
 check "delete_refuses_active_implementation_job" "! (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' delete exclusive) >/dev/null 2>&1"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" \
@@ -302,25 +318,53 @@ check "abort_targets_exact_active_implementation_session" "grep -q 'POST /sessio
 check "abort_never_deletes_live_clone_from_control_process" "test -d '$EXACT_CLONE'"
 touch "$SESSION_RELEASE"; wait "$exact_abort_pid" || true
 check "abort owner records terminal state and cleans exact resources" "test \"\$(jq -r .status '$EXACT_META')\" = aborted -a ! -e '$EXACT_CLONE' -a \"\$(jq -r .cleanup.server_session '$EXACT_META')\" = removed"
+check "aborted-no-changes outcome creates no patch" "jq -e '.outcome==\"aborted-no-changes\" and .incomplete_patch_path==null and .patch_exists==false' '$EXACT_META' >/dev/null"
 
 SIGNAL_READY="$TMP/signal-ready"; SIGNAL_RELEASE="$TMP/signal-release"
-run_fake_impl interrupted session "$SIGNAL_READY" "$SIGNAL_RELEASE" >"$TMP/interrupted.out" 2>&1 & signal_pid=$!
+run_fake_impl interrupted session "$SIGNAL_READY" "$SIGNAL_RELEASE" success '' untracked >"$TMP/interrupted.out" 2>&1 & signal_pid=$!
 wait_file "$SIGNAL_READY"; SIGNAL_META="$(job_meta interrupted)"; SIGNAL_CLONE="$JOB_STATE/wt/$JOB_ID/codex--interrupted"
 kill -TERM "$signal_pid" 2>/dev/null || true; wait "$signal_pid" || true
 check "interrupt_records_terminal_state_and_cleans" "test \"\$(jq -r .status '$SIGNAL_META')\" = aborted -a \"\$(jq -r .failure '$SIGNAL_META')\" = interrupted -a ! -e '$SIGNAL_CLONE'"
+check "aborted-partial exports before cleanup" "jq -e '.outcome==\"aborted-partial\" and .patch_exists==true and (.incomplete_patch_path|endswith(\".incomplete.patch\"))' '$SIGNAL_META' >/dev/null"
 
 run_fake_impl normal >"$TMP/normal.out" 2>&1; normal_rc=$?
 NORMAL_META="$(job_meta normal)"; NORMAL_CLONE="$JOB_STATE/wt/$JOB_ID/codex--normal"
 check "implement_record_adds_clone_and_session_atomically" "jq -e '.opencode_session_id==\"sid-normal\" and .clone_path!=null' '$NORMAL_META' >/dev/null"
 check "normal_and_no_change_completion_clean_resources" "test $normal_rc -eq 0 -a \"\$(jq -r .status '$NORMAL_META')\" = completed -a ! -e '$NORMAL_CLONE' -a \"\$(jq -r .cleanup.server_session '$NORMAL_META')\" = removed"
+check "complete run keeps distinct normal artifacts" "jq -e '.outcome==\"completed\" and .incomplete_patch_path==null and (.patch_path|endswith(\".patch\")) and (.patch_path|contains(\".incomplete.\")|not)' '$NORMAL_META' >/dev/null"
 run_fake_impl failed '' "$TMP/no-ready" "$TMP/no-release" failure >"$TMP/failed.out" 2>&1; failed_rc=$?
 FAILED_META="$(job_meta failed)"; FAILED_CLONE="$JOB_STATE/wt/$JOB_ID/codex--failed"
 check "provider_and_permission_failures_record_failure_and_clean" "test $failed_rc -ne 0 -a \"\$(jq -r .status '$FAILED_META')\" = failed -a ! -e '$FAILED_CLONE'"
+check "failed-no-changes is truthful and has no empty patch" "jq -e '.outcome==\"failed-no-changes\" and .failure_kind==\"provider-or-service\" and .changes_present==false and .patch_exists==false and .incomplete_patch_path==null and .provider_usage_state==\"unavailable\"' '$FAILED_META' >/dev/null"
+
+run_fake_impl failed-partial '' "$TMP/no-ready" "$TMP/no-release" failure '' untracked >"$TMP/failed-partial.out" 2>&1; failed_partial_rc=$?
+FAILED_PARTIAL_META="$(job_meta failed-partial)"; FAILED_PARTIAL_PATCH="$(jq -r .incomplete_patch_path "$FAILED_PARTIAL_META")"
+check "failed-partial exports and stays nonzero" "test $failed_partial_rc -ne 0 -a -s '$FAILED_PARTIAL_PATCH' && jq -e '.outcome==\"failed-partial\" and .artifact_state==\"durable\"' '$FAILED_PARTIAL_META' >/dev/null"
+check "untracked incomplete patch applies to captured base" "git -C '$TMP/repoA' apply --check '$FAILED_PARTIAL_PATCH'"
+
+run_fake_impl usage-partial '' "$TMP/no-ready" "$TMP/no-release" usage '' binary >"$TMP/usage-partial.out" 2>&1; usage_partial_rc=$?
+USAGE_META="$(job_meta usage-partial)"; USAGE_PATCH="$(jq -r .incomplete_patch_path "$USAGE_META")"; USAGE_REPORT="$(jq -r .incomplete_report_path "$USAGE_META")"
+check "usage-limit-partial is truthful and binary" "test $usage_partial_rc -ne 0 -a -s '$USAGE_PATCH' && grep -q 'GIT binary patch' '$USAGE_PATCH' && jq -e '.outcome==\"usage-limit-partial\" and .failure_kind==\"usage-limit\"' '$USAGE_META' >/dev/null"
+check "incomplete report is clear bounded and secret-safe" "grep -q 'INCOMPLETE' '$USAGE_REPORT' && grep -q 'Tests: not confirmed complete' '$USAGE_REPORT' && grep -q 'git apply --check' '$USAGE_REPORT' && ! grep -q 'SECRET-FIXTURE-MUST-NOT-PERSIST' '$USAGE_REPORT' && test \"\$(wc -c < '$USAGE_REPORT')\" -lt 8192"
+check "in-progress or failed usage is never zero" "jq -e '.provider_usage_state==\"unavailable\" and .provider_tokens==null' '$USAGE_META' >/dev/null"
+
+run_fake_impl usage-none '' "$TMP/no-ready" "$TMP/no-release" usage >"$TMP/usage-none.out" 2>&1; usage_none_rc=$?
+USAGE_NONE_META="$(job_meta usage-none)"
+check "usage-limit-no-changes creates no patch" "test $usage_none_rc -ne 0 && jq -e '.outcome==\"usage-limit-no-changes\" and .incomplete_patch_path==null and .patch_exists==false' '$USAGE_NONE_META' >/dev/null"
+
+run_fake_impl timeout-partial '' "$TMP/no-ready" "$TMP/no-release" timeout '' tracked >"$TMP/timeout-partial.out" 2>&1; timeout_partial_rc=$?
+TIMEOUT_META="$(job_meta timeout-partial)"
+check "timed-out-partial is truthful" "test $timeout_partial_rc -ne 0 && jq -e '.outcome==\"timed-out-partial\" and .failure_kind==\"timed-out\" and .patch_exists==true' '$TIMEOUT_META' >/dev/null"
+run_fake_impl timeout-none '' "$TMP/no-ready" "$TMP/no-release" timeout >"$TMP/timeout-none.out" 2>&1; timeout_none_rc=$?
+check "timed-out-no-changes is truthful" "test $timeout_none_rc -ne 0 && jq -e '.outcome==\"timed-out-no-changes\" and .patch_exists==false' \"$(job_meta timeout-none)\" >/dev/null"
 run_fake_impl permission-failed '' "$TMP/no-ready" "$TMP/no-release" permission '' 1 >"$TMP/permission-failed.out" 2>&1; permission_rc=$?
 PERMISSION_META="$(job_meta permission-failed)"; PERMISSION_CLONE="$JOB_STATE/wt/$JOB_ID/codex--permission-failed"
 check "unsupported permission fails on first exposed poll" "test $permission_rc -ne 0 -a \"\$(grep -c '^GET /api/session/.*/permission$' '$TMP/job-permission-calls')\" -eq 1"
-check "permission failure records truthful terminal evidence" "jq -e '.status==\"failed\" and .failure==\"permission-unsupported-action\" and (.failure_summary|contains(\"first observable poll\")) and .changes_present==true and .patch_exists==false and .patch_path==null' '$PERMISSION_META' >/dev/null"
-check "permission failure cleanup preserves evidence without partial patch" "test ! -e '$PERMISSION_CLONE' -a \"\$(jq -r .cleanup.clone '$PERMISSION_META')\" = removed -a \"\$(jq -r .cleanup.server_session '$PERMISSION_META')\" = removed"
+check "permission failure records truthful terminal evidence" "jq -e '.status==\"failed\" and .failure==\"permission-unsupported-action\" and .outcome==\"permission-failed-partial\" and .failure_kind==\"permission-failed\" and (.failure_summary|contains(\"first observable poll\")) and .changes_present==true and .patch_exists==true and (.incomplete_patch_path|endswith(\".incomplete.patch\"))' '$PERMISSION_META' >/dev/null"
+check "permission failure exports incomplete work then cleans" "test ! -e '$PERMISSION_CLONE' -a -s \"\$(jq -r .incomplete_patch_path '$PERMISSION_META')\" -a \"\$(jq -r .cleanup.clone '$PERMISSION_META')\" = removed -a \"\$(jq -r .cleanup.server_session '$PERMISSION_META')\" = removed"
+run_fake_impl permission-none '' "$TMP/no-ready" "$TMP/no-release" permission >"$TMP/permission-none.out" 2>&1; permission_none_rc=$?
+PERMISSION_NONE_META="$(job_meta permission-none)"
+check "permission-failed-no-changes creates no patch" "test $permission_none_rc -ne 0 && jq -e '.outcome==\"permission-failed-no-changes\" and .failure_kind==\"permission-failed\" and .patch_exists==false' '$PERMISSION_NONE_META' >/dev/null"
 cp "$PERMISSION_META" "$PERMISSION_META.saved"
 jq '.cleanup={clone:"pending",server_session:"pending"}' "$PERMISSION_META.saved" > "$PERMISSION_META"
 check "failed job cannot be deleted before cleanup finishes" "! (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' delete permission-failed) >/dev/null 2>&1"
@@ -328,9 +372,33 @@ mv "$PERMISSION_META.saved" "$PERMISSION_META"
 run_fake_impl metadata-failed '' "$TMP/no-ready" "$TMP/no-release" success session-metadata >"$TMP/metadata-failed.out" 2>&1; metadata_rc=$?
 METADATA_META="$(job_meta metadata-failed)"; METADATA_CLONE="$JOB_STATE/wt/$JOB_ID/codex--metadata-failed"
 check "metadata_failure_cleans_new_server_session" "test $metadata_rc -ne 0 -a \"\$(jq -r .status '$METADATA_META')\" = failed -a ! -e '$METADATA_CLONE' -a \"\$(jq -r .cleanup.server_session '$METADATA_META')\" = removed"
+run_fake_impl clone-create-failed '' "$TMP/no-ready" "$TMP/no-release" success clone-create >"$TMP/clone-create-failed.out" 2>&1; clone_create_rc=$?
+CLONE_CREATE_META="$(job_meta clone-create-failed)"; CLONE_CREATE_PATH="$JOB_STATE/wt/$JOB_ID/codex--clone-create-failed"
+check "partial clone failure is not mislabeled as recovery work" "test $clone_create_rc -ne 0 -a ! -e '$CLONE_CREATE_PATH' && jq -e '.outcome==\"failed-no-changes\" and .failure_kind==\"wrapper-setup-failed\" and .artifact_state==\"none\" and .cleanup.clone==\"removed\" and .incomplete_patch_path==null' '$CLONE_CREATE_META' >/dev/null"
+check "Windows clone enables long paths before checkout" "grep -q 'git -c core.longpaths=true clone' '$AI_GLM'"
+check "Windows exact cleanup uses Git long-path removal" "grep -q 'core.longpaths=true -C.*rm -rf' '$AI_GLM'"
 run_fake_impl patch-failed '' "$TMP/no-ready" "$TMP/no-release" success patch >"$TMP/patch-failed.out" 2>&1; patch_rc=$?
 PATCH_META="$(job_meta patch-failed)"; PATCH_CLONE="$JOB_STATE/wt/$JOB_ID/codex--patch-failed"
 check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .report_path '$PATCH_META')\" != null -a ! -e '$PATCH_CLONE'"
+
+for export_fail in incomplete-destination incomplete-move incomplete-metadata; do
+  run_fake_impl "export-$export_fail" '' "$TMP/no-ready" "$TMP/no-release" failure "$export_fail" untracked >"$TMP/export-$export_fail.out" 2>&1; export_rc=$?
+  EXPORT_META="$(job_meta "export-$export_fail")"; EXPORT_CLONE="$JOB_STATE/wt/$JOB_ID/codex--export-$export_fail"
+  check "$export_fail records artifact-export-failed" "test $export_rc -ne 0 -a -d '$EXPORT_CLONE' && jq -e '.outcome==\"artifact-export-failed\" and .failure_kind==\"artifact-export-failed\" and .artifact_state==\"failed\" and .cleanup.clone==\"preserved\"' '$EXPORT_META' >/dev/null"
+  check "$export_fail gives loud exact recovery" "grep -q 'exact recovery clone was preserved' '$TMP/export-$export_fail.out' && grep -qF '$EXPORT_CLONE' '$TMP/export-$export_fail.out'"
+done
+
+OWN_META="$(job_meta export-incomplete-destination)"; OWN_CLONE="$JOB_STATE/wt/$JOB_ID/codex--export-incomplete-destination"
+OWN_LOCK="$JOB_STATE/locks/$JOB_ID--codex--export-incomplete-destination.lock.d"; mkdir -p "$OWN_LOCK"; printf 99999999 > "$OWN_LOCK/pid"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" OWN_META="$OWN_META" OWN_CLONE="$OWN_CLONE" OWN_LOCK="$OWN_LOCK" \
+  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; IMPL_META="$OWN_META"; IMPL_CLONE="$OWN_CLONE"; IMPL_LOCK="$OWN_LOCK"; ! write_incomplete_artifacts "$OWN_META" "$OWN_CLONE" turn-failed' >/dev/null 2>&1
+check "artifact export requires exact live lock ownership" "test -d '$OWN_CLONE' -a \"\$(cat '$OWN_LOCK/pid')\" = 99999999"
+
+NORMAL_HASH_BEFORE="$(sha256sum "$NORMAL_META" | awk '{print $1}')"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" NORMAL_META="$NORMAL_META" \
+  bash -c 'source "$AI_GLM_SOURCE"; IMPL_META="$NORMAL_META"; IMPL_CLONE="$(jq -r .clone_path "$NORMAL_META")"; implementation_cleanup 0; implementation_cleanup 0' >/dev/null 2>&1
+NORMAL_HASH_AFTER="$(sha256sum "$NORMAL_META" | awk '{print $1}')"
+check "repeated finalization is idempotent" "test '$NORMAL_HASH_BEFORE' = '$NORMAL_HASH_AFTER'"
 
 RECON_META="$(job_meta reconcile-dead)"; RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--reconcile-dead"; RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--reconcile-dead.lock.d"
 mkdir -p "$RECON_CLONE" "$RECON_LOCK"
@@ -369,7 +437,13 @@ wait_file "$READY_A"; wait_file "$READY_B"
 check "different_implementation_names_run_independently" "test -f \"\$(job_meta parallel-a)\" -a -f \"\$(job_meta parallel-b)\""
 touch "$RELEASE_A" "$RELEASE_B"; wait "$pid_a"; wait "$pid_b"
 
-check "abort_completion_race_records_observed_truth" "grep -q 'implementation_abort_requested.*finish.*stop\|finish.*stop' '$AI_GLM'"
+RACE_READY="$TMP/race-ready"; RACE_RELEASE="$TMP/race-release"
+run_fake_impl completion-race completed-turn "$RACE_READY" "$RACE_RELEASE" success '' tracked >"$TMP/completion-race.out" 2>&1 & race_pid=$!
+wait_file "$RACE_READY"; RACE_META="$(job_meta completion-race)"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" \
+  bash -c 'source "$AI_GLM_SOURCE"; require_server(){ :; }; permission_http(){ HTTP_STATUS=200; HTTP_BODY="{}"; }; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex; cmd_abort completion-race' >/dev/null 2>&1
+touch "$RACE_RELEASE"; wait "$race_pid" || true
+check "abort_completion_race_records_observed_truth" "jq -e '.status==\"completed\" and .outcome==\"completed\" and .incomplete_patch_path==null' '$RACE_META' >/dev/null"
 check "ambiguous_server_state_is_reported_not_deleted" "grep -q 'server state.*ambiguous' '$AI_GLM'"
 (cd "$TMP/repoA" && AI_GLM_CALLER=codex AI_GLM_STATE_DIR="$JOB_STATE" "$AI_GLM" delete normal >/dev/null 2>&1)
 check "terminal_record_can_be_cleared_for_safe_name_reuse" "test ! -e '$NORMAL_META'"
@@ -447,21 +521,27 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   AI_GLM_CALLER=codex "$AI_GLM" delete "$UNSUP_JOB" >/dev/null 2>&1 || true
 
   LIVE_JOB="implementation-job-tracking-live-$(date -u +%Y%m%d%H%M%S)"
-  LIVE_READY="$TMP/live-job-ready"; LIVE_RELEASE="$TMP/live-job-release"
-  AI_GLM_CALLER=codex AI_GLM_TEST_MODE=1 AI_GLM_TEST_PAUSE_AT=session \
-    AI_GLM_TEST_READY="$LIVE_READY" AI_GLM_TEST_RELEASE="$LIVE_RELEASE" \
-    "$AI_GLM" implement "$LIVE_JOB" --prompt "Create harmless-canary.txt containing: bounded canary" \
+  AI_GLM_CALLER=codex "$AI_GLM" implement "$LIVE_JOB" --timeout 120 --prompt \
+    "Create harmless-canary.txt containing exactly: bounded canary. Then run sleep 120 with Bash. Do not finish before that sleep." \
     >"$TMP/live-job-owner" 2>&1 & live_job_pid=$!
-  wait_file "$LIVE_READY"
+  LIVE_CLONE=""; LIVE_CHANGED=0
+  for _ in {1..60}; do
+    AI_GLM_CALLER=codex "$AI_GLM" show "$LIVE_JOB" >"$TMP/live-job-running" 2>/dev/null || true
+    LIVE_CLONE="$(jq -r '.clone_path // empty' "$TMP/live-job-running" 2>/dev/null || true)"
+    if [ -n "$LIVE_CLONE" ] && [ -f "$LIVE_CLONE/harmless-canary.txt" ]; then LIVE_CHANGED=1; break; fi
+    sleep 1
+  done
+  check "live implementation made harmless isolated change" "test '$LIVE_CHANGED' = 1 -a ! -e '$LIVE/harmless-canary.txt'"
   check "live implementation is visible while active" "AI_GLM_CALLER=codex '$AI_GLM' list | grep -qE '$LIVE_JOB.*implementation.*running'"
   AI_GLM_CALLER=codex "$AI_GLM" implement "$LIVE_JOB" --lock-timeout 0 --prompt duplicate >"$TMP/live-job-duplicate" 2>&1
   live_duplicate_rc=$?
   check "live duplicate is rejected before another session" "test $live_duplicate_rc -ne 0 && grep -q 'No clone, server session, or provider turn' '$TMP/live-job-duplicate'"
   AI_GLM_CALLER=codex "$AI_GLM" abort "$LIVE_JOB" >"$TMP/live-job-abort" 2>&1
   check "live abort targets the named implementation" "grep -q 'abort requested' '$TMP/live-job-abort'"
-  touch "$LIVE_RELEASE"; wait "$live_job_pid" || true
+  wait "$live_job_pid" || true
   AI_GLM_CALLER=codex "$AI_GLM" show "$LIVE_JOB" >"$TMP/live-job-show"
-  check "live abort records terminal truth" "jq -e '.status==\"aborted\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$TMP/live-job-show' >/dev/null"
+  check "live abort records terminal truth" "jq -e '.status==\"aborted\" and .outcome==\"aborted-partial\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$TMP/live-job-show' >/dev/null"
+  check "live abort exports incomplete artifact" "test -s \"\$(jq -r .incomplete_patch_path '$TMP/live-job-show')\" && git -C '$LIVE' apply --check \"\$(jq -r .incomplete_patch_path '$TMP/live-job-show')\""
   check "live abort leaves no canonical clone" "test ! -e \"\$(jq -r .clone_path '$TMP/live-job-show')\""
   AI_GLM_CALLER=codex "$AI_GLM" delete "$LIVE_JOB" >/dev/null 2>&1
 

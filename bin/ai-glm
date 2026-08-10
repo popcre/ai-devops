@@ -205,6 +205,31 @@ implementation_clone_path() { # RID NAME
   printf '%s/wt/%s/%s--%s' "$STATE_DIR" "$1" "$CALLER" "$2"
 }
 
+remove_owned_clone_tree() { # exact ownership must be validated by the caller first
+  local clone="$1" attempt=0
+  # OpenCode 1.18.12 can leave a Windows tool child alive briefly after the exact
+  # session abort/delete returns. Wait at most two minutes for its directory handle;
+  # never kill descendants of the shared server because they may belong to another
+  # concurrent session.
+  while [ "$attempt" -lt 120 ]; do
+    if [ "$IS_WINDOWS" = 1 ] && [ -d "$clone/.git" ]; then
+      # The canonical state prefix plus a legal 64-character job name can push tracked
+      # files beyond MAX_PATH. Git for Windows honors core.longpaths during removal;
+      # ordinary MSYS rm does not. Remove repository content through Git first, then the
+      # now-short administrative remainder. This is used only after exact ownership proof.
+      git -c core.longpaths=true -C "$clone" rm -rf --ignore-unmatch . >/dev/null 2>&1 || true
+      git -c core.longpaths=true -C "$clone" clean -ffdx >/dev/null 2>&1 || true
+    fi
+    rm -rf "$clone" 2>/dev/null || true
+    # MSYS rm can remove every long-path child yet leave the now-empty top directory.
+    rmdir "$clone" 2>/dev/null || true
+    [ ! -e "$clone" ] && return 0
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+  [ ! -e "$clone" ]
+}
+
 metadata_lock_acquire() { # lock used only for one atomic record transition
   local d="$1" waited=0 owner
   while ! mkdir "$d" 2>/dev/null; do
@@ -238,7 +263,24 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     (.failure_summary == null or (.failure_summary|type)=="string") and
     (.failure_detected_at == null or (.failure_detected_at|type)=="string") and
     (.changes_present == null or (.changes_present|type)=="boolean") and
-    (.patch_exists == null or (.patch_exists|type)=="boolean")
+    (.patch_exists == null or (.patch_exists|type)=="boolean") and
+    (.outcome == null or (.outcome|IN(
+      "completed","failed-partial","failed-no-changes",
+      "aborted-partial","aborted-no-changes",
+      "timed-out-partial","timed-out-no-changes",
+      "usage-limit-partial","usage-limit-no-changes",
+      "permission-failed-partial","permission-failed-no-changes",
+      "artifact-export-failed"))) and
+    (.failure_kind == null or (.failure_kind|IN(
+      "provider-or-service","usage-limit","timed-out","permission-failed",
+      "aborted","artifact-export-failed","artifact-metadata-failed",
+      "report-write-failed","patch-export-failed","resource-cleanup-failed",
+      "owner-process-died","interrupted","wrapper-setup-failed"))) and
+    (.incomplete_patch_path == null or (.incomplete_patch_path|type)=="string") and
+    (.incomplete_report_path == null or (.incomplete_report_path|type)=="string") and
+    (.artifact_state == null or (.artifact_state|IN("pending","none","durable","failed"))) and
+    (.provider_usage_state == null or (.provider_usage_state|IN("pending","unavailable","final"))) and
+    (.provider_tokens == null or (.provider_tokens|type)=="object")
   ' "$f" >/dev/null 2>&1 || return 1
   root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
   name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
@@ -555,6 +597,12 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
   msg="$(last_assistant "$sid")"
   stuck="$(running_tools "$msg")"
   finish="$(printf '%s' "$msg" | jq -r '.finish // "none"')"
+  if [ -n "$impl_meta" ]; then
+    implementation_update "$impl_meta" \
+      '.failure="turn-timeout" | .failure_summary="turn deadline passed without proven completion" |
+       .failure_detected_at=$now' --arg now "$(date -u +%FT%TZ)" || return 1
+    return 124
+  fi
   die "GLM turn did not complete within ${TIMEOUT}s (last finish='$finish'${stuck:+, tool still running: $stuck}).
        Run: ai-glm abort $2"
 }
@@ -704,28 +752,166 @@ cmd_ask() {
 }
 
 IMPL_META=""; IMPL_LOCK=""; IMPL_CLONE=""; IMPL_SID=""; IMPL_PF=""; IMPL_CARRY=""
-IMPL_FINAL_STATE=""; IMPL_FAILURE=""; IMPL_CLEANING=0
+IMPL_FINAL_STATE=""; IMPL_FAILURE=""; IMPL_CLEANING=0; IMPL_PRESERVE_CLONE=0; IMPL_CHANGES_PROVEN=0
+
+implementation_failure_kind() { # FAILURE -> bounded failure kind
+  case "$1" in
+    usage-limit) printf usage-limit ;;
+    turn-timeout) printf timed-out ;;
+    permission-*) printf permission-failed ;;
+    abort-requested) printf aborted ;;
+    interrupted) printf interrupted ;;
+    artifact-export-failed) printf artifact-export-failed ;;
+    artifact-metadata-failed) printf artifact-metadata-failed ;;
+    report-write-failed) printf report-write-failed ;;
+    patch-export-failed) printf patch-export-failed ;;
+    resource-cleanup-failed) printf resource-cleanup-failed ;;
+    owner-process-died) printf owner-process-died ;;
+    clone-create-failed) printf wrapper-setup-failed ;;
+    *) printf provider-or-service ;;
+  esac
+}
+
+implementation_failure_family() { # FINAL_STATE FAILURE
+  case "$2" in
+    usage-limit) printf usage-limit ;;
+    turn-timeout) printf timed-out ;;
+    permission-*) printf permission-failed ;;
+    abort-requested|interrupted) printf aborted ;;
+    *) [ "$1" = aborted ] && printf aborted || printf failed ;;
+  esac
+}
+
+implementation_safe_reason() { # FAILURE
+  case "$1" in
+    usage-limit) printf 'The provider reported a usage or billing limit.' ;;
+    turn-timeout) printf 'The wrapper deadline passed without proven terminal completion.' ;;
+    permission-*) printf 'The wrapper rejected a permission state that was not proven safe.' ;;
+    abort-requested) printf 'A named abort was requested for the exact implementation session.' ;;
+    interrupted) printf 'The owner process received an interrupt or termination request.' ;;
+    *) printf 'GLM did not reach the wrapper required terminal completion state.' ;;
+  esac
+}
+
+implementation_changed() { # CLONE BASE
+  git -C "$1" add -A >/dev/null 2>&1 || return 2
+  [ -n "$(git -C "$1" diff --cached --name-only "$2" 2>/dev/null)" ]
+}
+
+write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 1 export failed
+  local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome
+  implementation_record_path_valid "$meta" && implementation_meta_valid "$meta" || return 1
+  root="$(jq -r .repository_root "$meta")"; name="$(jq -r .name "$meta")"; base="$(jq -r .base_sha "$meta")"
+  sid="$(jq -r '.opencode_session_id // "unavailable"' "$meta")"
+  [ "$(canonical_path "$clone" "$STATE_DIR")" = "$(canonical_path "$(jq -r .clone_path "$meta")" "$STATE_DIR")" ] || return 1
+  [ -n "$IMPL_LOCK" ] && [ "$(cat "$IMPL_LOCK/pid" 2>/dev/null || echo '')" = "$$" ] || return 1
+  local changed_rc=0
+  implementation_changed "$clone" "$base" || changed_rc=$?
+  case "$changed_rc" in 0) ;; 1) return 2 ;; *) return 1 ;; esac
+  IMPL_CHANGES_PROVEN=1
+  test_failure incomplete-destination && return 1
+  dir="$root/.ai/reviews"; mkdir -p "$dir" 2>/dev/null || return 1
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  patch="$dir/glm-$name-$ts.incomplete.patch"; report="$dir/glm-$name-$ts.incomplete.md"
+  patch_tmp="$(mktemp "$dir/.glm-incomplete-patch.XXXXXX")" || return 1
+  report_tmp="$(mktemp "$dir/.glm-incomplete-report.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
+  chmod 0600 "$patch_tmp" "$report_tmp" 2>/dev/null || true
+  git -C "$clone" diff --cached --binary "$base" > "$patch_tmp" 2>/dev/null || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+  [ -s "$patch_tmp" ] || { rm -f "$patch_tmp" "$report_tmp"; return 2; }
+  stat="$(git -C "$clone" diff --cached --stat "$base" 2>/dev/null | head -40 | cut -c1-240)"
+  family="$(implementation_failure_family "${IMPL_FINAL_STATE:-failed}" "$failure")"; outcome="$family-partial"
+  {
+    printf '# INCOMPLETE GLM implementation - %s\n\n' "$name"
+    printf 'This work is INCOMPLETE. It is not proof that the task is correct, tested, or safe.\n\n'
+    printf -- '- Job: `%s`\n' "$name"
+    printf -- '- OpenCode session ID: `%s`\n' "$sid"
+    printf -- '- Repository: `%s`\n' "$root"
+    printf -- '- Base SHA: `%s`\n' "$base"
+    printf -- '- Requested model: `%s/%s`\n' "$PROVIDER" "$MODEL"
+    printf -- '- Terminal outcome: `%s`\n' "$outcome"
+    printf -- '- Safe reason: %s\n' "$(implementation_safe_reason "$failure")"
+    printf -- '- Provider usage: `unavailable`\n'
+    printf -- '- Tests: not confirmed complete\n'
+    printf -- '- Patch: `%s`\n\n' "$patch"
+    printf '## Changed-file summary\n\n```text\n%s\n```\n\n' "${stat:-Git recorded changes, but no bounded stat text was available.}"
+    printf '## Manual inspection\n\n'
+    printf '1. Inspect only: `git apply --stat '\''%s'\''`\n' "$patch"
+    printf '2. Verify against the captured base: `git apply --check '\''%s'\''`\n' "$patch"
+    printf '3. Never apply this incomplete patch without reviewing every change and running the required tests.\n'
+  } > "$report_tmp" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+  test_failure incomplete-move && { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+  if ! mv "$report_tmp" "$report"; then rm -f "$patch" "$report_tmp"; return 1; fi
+  test_failure incomplete-metadata && { rm -f "$patch" "$report"; return 1; }
+  if ! implementation_update "$meta" \
+      '.outcome=$outcome | .failure_kind=$kind | .incomplete_patch_path=$patch |
+       .incomplete_report_path=$report | .patch_path=$patch | .report_path=$report |
+       .artifact_state="durable" | .changes_present=true | .patch_exists=true |
+       .provider_usage_state="unavailable" | .provider_tokens=null' \
+      --arg outcome "$outcome" --arg kind "$(implementation_failure_kind "$failure")" \
+      --arg patch "$patch" --arg report "$report"; then
+    rm -f "$patch" "$report"; return 1
+  fi
+  note "INCOMPLETE patch written: $patch"
+  note "INCOMPLETE report written: $report"
+  note "Inspect only: git apply --stat '$patch'"
+  note "Verify only:  git apply --check '$patch'"
+  return 0
+}
 
 implementation_cleanup() {
-  local rc="${1:-1}" clone_state=none session_state=none final="$IMPL_FINAL_STATE" safe=1 terminal_recorded=0 recorded_clone expected_clone lock_pid
+  local rc="${1:-1}" clone_state=none session_state=none final="$IMPL_FINAL_STATE" safe=1 terminal_recorded=0 recorded_clone expected_clone lock_pid artifact_rc=2 family outcome kind
   [ "$IMPL_CLEANING" = 0 ] || return 0
+  if [ -n "$IMPL_META" ] && [ -f "$IMPL_META" ] &&
+     implementation_terminal "$(jq -r '.status // empty' "$IMPL_META" 2>/dev/null)" &&
+     ! implementation_cleanup_pending "$IMPL_META"; then
+    return 0
+  fi
   IMPL_CLEANING=1; trap - EXIT INT TERM HUP
   rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
-  if [ -n "$IMPL_CLONE" ] && [ -e "$IMPL_CLONE" ]; then
-    recorded_clone="$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null || true)"
-    expected_clone="$(implementation_clone_path "$(jq -r '.repository_id // empty' "$IMPL_META" 2>/dev/null)" "$(jq -r '.name // empty' "$IMPL_META" 2>/dev/null)")"
-    lock_pid="$(cat "$IMPL_LOCK/pid" 2>/dev/null || echo '')"
-    if [ -n "$IMPL_META" ] && implementation_record_path_valid "$IMPL_META" && implementation_meta_valid "$IMPL_META" &&
-       [ "$lock_pid" = "$$" ] &&
-       [ "$(canonical_path "$expected_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ] &&
-       { [ -z "$recorded_clone" ] || [ "$(canonical_path "$recorded_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ]; }; then
-      rm -rf "$IMPL_CLONE" 2>/dev/null || true
-      [ ! -e "$IMPL_CLONE" ] && clone_state=removed || { clone_state=failed; safe=0; }
-    else
-      clone_state=ambiguous; safe=0
-      warn "implementation clone ownership is ambiguous; left untouched: $IMPL_CLONE"
-    fi
+  if [ -z "$final" ]; then
+    if [ -n "$IMPL_META" ] && implementation_abort_requested "$IMPL_META"; then final=aborted
+    else final=failed; fi
   fi
+  if [ "$final" != completed ] && [ -n "$IMPL_CLONE" ] && [ -d "$IMPL_CLONE" ] &&
+     [ -n "$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null)" ]; then
+    set +e
+    write_incomplete_artifacts "$IMPL_META" "$IMPL_CLONE" "${IMPL_FAILURE:-turn-failed}"
+    artifact_rc=$?
+    set -e
+    if [ "$artifact_rc" -eq 1 ]; then
+      IMPL_PRESERVE_CLONE=1; final=failed; IMPL_FAILURE=artifact-export-failed
+      implementation_update "$IMPL_META" \
+        '.status="failed" | .outcome="artifact-export-failed" | .failure_kind="artifact-export-failed" |
+         .failure="artifact-export-failed" | .artifact_state="failed" |
+         .provider_usage_state="unavailable" | .provider_tokens=null | .changes_present=$changes' \
+        --argjson changes "$([ "$IMPL_CHANGES_PROVEN" = 1 ] && echo true || echo null)" \
+        || warn "artifact export failed and its terminal evidence could not be updated."
+      warn "INCOMPLETE artifact export failed. The exact recovery clone was preserved: $IMPL_CLONE"
+      warn "Inspect it in place. Do not add a remote or copy it over the real repository."
+      warn "After manual recovery, use 'ai-glm show $(jq -r .name "$IMPL_META")' and remove only this recorded clone."
+    elif [ "$artifact_rc" -eq 2 ]; then
+      family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
+      kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
+      implementation_update "$IMPL_META" \
+        '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+         .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
+         .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
+        || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
+      note "implementation ended without proven completion and made no changes; no empty patch was created."
+    fi
+  elif [ "$final" != completed ] && [ -n "$IMPL_META" ] && [ -f "$IMPL_META" ]; then
+    family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
+    kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
+    implementation_update "$IMPL_META" \
+      '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+       .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
+       .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
+      || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
+  fi
+  # Dispose the exact server session before clone removal. On Windows, OpenCode keeps
+  # file handles below its session directory until deletion, and removing the clone
+  # first both fails on long paths and risks racing a still-live tool.
   if [ -n "$IMPL_SID" ]; then
     if server_up && delete_exact_server_session "$IMPL_SID"; then
       session_state=removed
@@ -734,9 +920,22 @@ implementation_cleanup() {
       warn "implementation server session $IMPL_SID could not be removed; its exact id remains in the job record."
     fi
   fi
-  if [ -z "$final" ]; then
-    if [ -n "$IMPL_META" ] && implementation_abort_requested "$IMPL_META"; then final=aborted
-    else final=failed; fi
+  if [ -n "$IMPL_CLONE" ] && [ -e "$IMPL_CLONE" ]; then
+    recorded_clone="$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null || true)"
+    expected_clone="$(implementation_clone_path "$(jq -r '.repository_id // empty' "$IMPL_META" 2>/dev/null)" "$(jq -r '.name // empty' "$IMPL_META" 2>/dev/null)")"
+    lock_pid="$(cat "$IMPL_LOCK/pid" 2>/dev/null || echo '')"
+    if [ "$IMPL_PRESERVE_CLONE" = 1 ]; then
+      clone_state=preserved
+    elif [ -n "$IMPL_META" ] && implementation_record_path_valid "$IMPL_META" && implementation_meta_valid "$IMPL_META" &&
+       [ "$lock_pid" = "$$" ] &&
+       [ "$(canonical_path "$expected_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ] &&
+       { [ -z "$recorded_clone" ] || [ "$(canonical_path "$recorded_clone" "$STATE_DIR")" = "$(canonical_path "$IMPL_CLONE" "$STATE_DIR")" ]; }; then
+      if remove_owned_clone_tree "$IMPL_CLONE"; then clone_state=removed
+      else clone_state=failed; safe=0; fi
+    else
+      clone_state=ambiguous; safe=0
+      warn "implementation clone ownership is ambiguous; left untouched: $IMPL_CLONE"
+    fi
   fi
   [ "$safe" = 1 ] || { final=failed; IMPL_FAILURE="${IMPL_FAILURE:-resource-cleanup-failed}"; }
   if [ -n "$IMPL_META" ] && [ -f "$IMPL_META" ] && implementation_record_path_valid "$IMPL_META" && implementation_meta_valid "$IMPL_META"; then
@@ -782,6 +981,8 @@ cmd_implement() {
         clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
         finished_at:null,exit_code:null,failure:null,failure_summary:null,
         failure_detected_at:null,changes_present:null,patch_exists:null,
+        outcome:null,failure_kind:null,incomplete_patch_path:null,incomplete_report_path:null,
+        artifact_state:"pending",provider_usage_state:"pending",provider_tokens:null,
         cleanup:{clone:"pending",server_session:"pending"}}')" \
     || die "could not save implementation job record '$mp'."
   implementation_meta_valid "$IMPL_META" "$root" || die "new implementation record failed validation."
@@ -792,7 +993,15 @@ cmd_implement() {
   IMPL_PF="$(read_prompt)"
   mkdir -p "$(dirname "$IMPL_CLONE")"
   [ ! -e "$IMPL_CLONE" ] || die "canonical implementation clone already exists without a reusable job: $IMPL_CLONE"
-  git clone --quiet --no-hardlinks "$root" "$IMPL_CLONE" 2>/dev/null || die "could not create the GLM sandbox at $IMPL_CLONE"
+  if test_failure clone-create; then
+    mkdir -p "$IMPL_CLONE"; printf 'partial clone fixture\n' > "$IMPL_CLONE/.partial-clone"
+    IMPL_FAILURE=clone-create-failed
+    die "simulated partial clone creation failure"
+  fi
+  if ! git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$IMPL_CLONE" 2>/dev/null; then
+    IMPL_FAILURE=clone-create-failed
+    die "could not create the GLM sandbox at $IMPL_CLONE"
+  fi
   git -C "$IMPL_CLONE" checkout --quiet --detach "$base" 2>/dev/null || die "could not check out $base in the sandbox"
   git -C "$IMPL_CLONE" remote remove origin >/dev/null 2>&1 || true
   implementation_update "$IMPL_META" '.clone_path=$clone' --arg clone "$IMPL_CLONE" || die "could not attach the clone to the implementation record."
@@ -833,7 +1042,19 @@ EXCL
     if [ "$turn_rc" -eq 130 ] || implementation_abort_requested "$IMPL_META"; then
       IMPL_FINAL_STATE=aborted; IMPL_FAILURE="abort-requested"; return 130
     fi
-    if [ "$(jq -r '.status // empty' "$IMPL_META" 2>/dev/null)" = failed ]; then
+    if [ "$(jq -r '.failure // empty' "$IMPL_META" 2>/dev/null)" = turn-timeout ]; then
+      IMPL_FAILURE=turn-timeout
+    elif server_up; then
+      msg="$(last_assistant "$IMPL_SID" 2>/dev/null || printf '{}')"
+      if printf '%s' "$msg" | jq -r '[.content[]? | select(.type=="text") | .text] | join(" ")' 2>/dev/null |
+         grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)'; then
+        IMPL_FAILURE=usage-limit
+      elif [ "$(jq -r '.status // empty' "$IMPL_META" 2>/dev/null)" = failed ]; then
+        IMPL_FAILURE="$(jq -r '.failure // "turn-failed"' "$IMPL_META")"
+      else
+        IMPL_FAILURE=turn-failed
+      fi
+    elif [ "$(jq -r '.status // empty' "$IMPL_META" 2>/dev/null)" = failed ]; then
       IMPL_FAILURE="$(jq -r '.failure // "turn-failed"' "$IMPL_META")"
     else
       IMPL_FAILURE="turn-failed"
@@ -841,11 +1062,12 @@ EXCL
     return "$turn_rc"
   fi
   verify_model "$msg"
+  test_pause completed-turn
   git -C "$IMPL_CLONE" add -A >/dev/null 2>&1 || true
   patch="$root/.ai/reviews/glm-$name-$(date -u +%Y%m%dT%H%M%SZ).patch"
   mkdir -p "$(dirname "$patch")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached "$base" > "$patch"; then
+  if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached --binary "$base" > "$patch"; then
     rm -f "$patch"; IMPL_FAILURE="patch-export-failed"
     report="$(write_report "$root" "$name" "implementation failure" "$text
 
@@ -871,6 +1093,18 @@ $(git -C "$IMPL_CLONE" diff --cached --stat "$base")
   note "Patch written to: $patch"
   note "Apply it only after review:  git apply --check '$patch' && git apply '$patch'"
   emit "$name" implement "$IMPL_SID" "$text" "$tokens" "$report"
+  if [ "$tokens" = null ]; then
+    implementation_update "$IMPL_META" \
+      '.outcome="completed" | .artifact_state="durable" | .changes_present=($changes) |
+       .patch_exists=true | .provider_usage_state="unavailable" | .provider_tokens=null' \
+      --argjson changes "$([ -s "$patch" ] && echo true || echo false)" || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
+  else
+    implementation_update "$IMPL_META" \
+      '.outcome="completed" | .artifact_state="durable" | .changes_present=($changes) |
+       .patch_exists=true | .provider_usage_state="final" | .provider_tokens=$tokens' \
+      --argjson changes "$([ -s "$patch" ] && echo true || echo false)" --argjson tokens "$tokens" \
+      || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
+  fi
   IMPL_FINAL_STATE=completed
 }
 
@@ -919,7 +1153,8 @@ cmd_show() {
     jq '{schema_version,name,type,status,repository_root,repository_remote,repository_id,caller,agent,provider,model,
          base_sha,owner_pid,created_at,updated_at,finished_at,clone_path,opencode_session_id,
          patch_path,report_path,exit_code,failure,failure_summary,failure_detected_at,
-         changes_present,patch_exists,cleanup}' "$mp"
+         outcome,failure_kind,changes_present,patch_exists,incomplete_patch_path,
+         incomplete_report_path,artifact_state,provider_usage_state,provider_tokens,cleanup}' "$mp"
   else
     cat "$mp"
   fi
@@ -1019,8 +1254,7 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
     esac
   fi
   if [ -n "$clone" ] && [ -e "$clone" ]; then
-    rm -rf "$clone" 2>/dev/null || true
-    [ ! -e "$clone" ] || { warn "exact dead-owner clone could not be removed: $clone"; return 1; }
+    remove_owned_clone_tree "$clone" || { warn "exact dead-owner clone could not be removed: $clone"; return 1; }
     clone_state=removed
   fi
   implementation_update "$mp" \
