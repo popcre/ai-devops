@@ -85,6 +85,13 @@ changed.
 
 Use `ai-glm implement` only when the user explicitly asks GLM to write or change code.
 
+**Known active defect (2026-08-10):** implementation jobs are not yet shown by
+`ai-glm list`, locked by name for the full run, or abortable by name. A missing list
+entry or patch does not mean the wrapper process stopped. Never retry the same
+implementation name until the original `ai-glm implement` command reaches a terminal
+result. The permanent fix is tracked in `plan_glm-implementation-job-tracking.md` in the
+ai-devops repo; read its STATUS table before modifying the harness.
+
 It creates a throwaway clone with its git remote removed, lets GLM edit and run
 builds/tests inside it, writes the result out as a patch under `.ai/reviews/`, and
 **deletes the sandbox before it exits** - every time, including on crash or interrupt.

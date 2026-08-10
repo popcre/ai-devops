@@ -16,6 +16,12 @@ deleted.
 `docs/glm-opencode.md` section 5 "Hard-won constraints".** It lists 23 rules, each
 of which cost a real failure. `AGENTS.md` routes there.
 
+**Also read the STATUS table in `plan_glm-implementation-job-tracking.md` while it
+has open rows.** A 2026-08-10 incident proved that active implementation jobs are
+invisible to `ai-glm list`, lack a full-run name lock, and cannot be aborted by
+name. Do not retry a missing implementation until its original wrapper command is
+terminal; the plan owns the permanent metadata, locking, abort, and cleanup fix.
+
 The two least obvious, because they look like things worth simplifying:
 
 - In OpenCode 1.18.12 **only the agent-file `tools:` map enforces anything**. The
