@@ -1,5 +1,35 @@
 # Master handoff: complete every open ai-devops workstream
 
+## STATUS update: 2026-08-10T0405Z
+
+Completed and pushed:
+
+- Config consolidation Phase 3, the live hidden memory task, GLM reliability,
+  Grok debate continuity, Kimi debate continuity, DeepSeek Phase 1 repair and
+  Phase 2 cancellation, and the production-trigger root-cause investigation.
+- Implementation commit `f738db79d8ace9a6aef8eac7657275789ea2ddc8` and
+  completion-record commit `04bbfc02a6cbcf132cf3c1085e898932ad24ecb1`
+  were pushed and verified on `origin/main`.
+- The production-trigger, DeepSeek, hidden-memory, and delegate-integration
+  handoffs were deleted only after their evidence was preserved in plans/docs.
+- `4837` resolves to this same physical machine (`al8960ofc`). Repo setup ran
+  successfully through PowerShell 7, the four delegate skill hashes match
+  source, and `ai-memory-sync` uses hidden `wscript.exe`, `PT15M`, `IgnoreNew`.
+
+Still open, with exact reason:
+
+- The legacy handoff remains because its credential-incident section requires
+  explicit approval for each rotation wave. This work order explicitly forbids
+  credential rotation without that approval. No credentials were changed.
+- SSH to `916` (`100.110.219.31:22`) timed out on 2026-08-10. Its machine-local
+  rollout cannot be verified until that computer is online and reachable.
+- Unrelated concurrent local files under `.ai/`, `.ai-kimi-test-debug.txt`, and
+  `docs/claude-remote-control-hardening-v2.md` were preserved and not committed.
+
+Resume at the legacy handoff's section S5 only after Albert approves a named
+credential wave. Recheck `916` reachability before its rollout. Do not repeat
+the completed phases above.
+
 ## 0. Owner request and authority
 
 Albert Hazan, the repository owner, asked for one fresh AI session to **investigate and complete every currently open workstream**, not merely summarize them. Work autonomously. Do not ask Albert to run commands or make routine technical choices that you can handle with the available CLI, filesystem, SSH, or browser tools.
