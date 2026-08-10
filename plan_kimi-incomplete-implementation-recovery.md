@@ -7,7 +7,7 @@
 | 1. Freeze the failure with offline tests | ✅ done | 2026-08-10 | `tests/test-ai-kimi.sh` now covers usage, network, no-change, timeout, interrupt, binary patch, real-repo isolation, and exact required completion. |
 | 2. Add truthful failure classification and incomplete artifact export | ✅ done | 2026-08-10 | `bash tests/test-ai-kimi.sh`: 99 passed, 0 failed; complete and incomplete patch paths remain distinct and all incomplete runs return nonzero. |
 | 3. Make cleanup and reporting safe on every exit path | ✅ done | 2026-08-10 | Offline suite proves one finalizer, cancellation export, bounded secret-safe reports, destination/move failure preservation, doctor visibility, forged-owner refusal, and idempotence. |
-| 4. Verify live behavior, update docs, commit, and push | ⬜ open | N/A | N/A |
+| 4. Verify live behavior, update docs, commit, and push | ✅ done | 2026-08-10 | Offline: 99 passed. Authenticated bounded cancellation: 105 passed, including patch apply-check and worktree removal. Shared skills reinstalled and hash-matched in Claude and Codex. Implementation commit `1a22598a5dbdc86fdeae3e0fd0dd7b0dd90e3778` was pushed to `origin/main`; the final STATUS commit records this gate. |
 
 Fresh sessions start at the first open row. Update this table after every gate. This
 plan is complete only when no row remains open and the evidence is dated.
@@ -107,7 +107,7 @@ What works now:
 - `tests/test-ai-kimi.sh` proves structural read-only reviews, exact session resume,
   strict completion, successful patch export, cleanup, interruption cleanup, and locks.
 
-What is now fixed in the working tree, pending final landing:
+What is now fixed and landed on `origin/main`:
 
 - `bin/ai-kimi` uses one idempotent implementation finalizer for successful,
   incomplete, cancelled, and failed-export paths.
@@ -120,7 +120,13 @@ What is now fixed in the working tree, pending final landing:
   the exact wrapper-owned recovery worktree; forged or ambiguous ownership is never
   deleted.
 - `tests/test-ai-kimi.sh` proves all required failure classes and safety boundaries with
-  99 passing offline assertions as of 2026-08-10.
+  99 passing offline assertions and 105 passing assertions in the authenticated bounded
+  cancellation run as of 2026-08-10.
+- Wider verification passed `test-ai-install-skills.sh`, `test-ai-memory-sync.sh`,
+  `test-mcp-env-launch.ps1`, and `test-memory-sync-scheduled-task.ps1`. The unrelated
+  `test-install-ai-devops-windows.ps1` suite still expects the retired opt-in migration
+  warning even though the current installer and `AGENTS.md` say managed orphan
+  quarantine is automatic; this Kimi change did not edit that stale test or installer.
 
 No source change for this fix existed when this plan was written. Unrelated untracked
 files already exist in the checkout and must not be staged. This toolkit has no deploy
