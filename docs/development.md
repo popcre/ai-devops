@@ -86,9 +86,13 @@ OpenCode 1.18.12 TodoWrite is allowed only in its measured permission form:
 normalized action `todowrite` with exactly `resources:["*"]` and `save:["*"]`.
 That wildcard names the session-internal todo store, not files or general tool access.
 Tests must reject every altered shape and every unknown action. An implementation
-permission failure must write its safe summary, first-observed time, change presence,
-and patch presence to the v3 record on the first poll that exposes the request; it must
-not export incomplete work as a patch.
+permission failure must write its safe summary and first-observed time to the v3 record
+on the first poll that exposes the request. If Git proves the remote-less clone changed,
+finalization exports a binary `.incomplete.patch` and `.incomplete.md` before cleanup
+and keeps the command nonzero. No-change failures make no empty patch. Export failure
+preserves only the exact validated clone. Tests cover every bounded outcome,
+unavailable rather than invented usage, exact ownership, atomic export failure, abort
+races, and idempotent finalization.
 
 ## Testing
 

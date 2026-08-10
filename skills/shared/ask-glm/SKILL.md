@@ -95,9 +95,13 @@ Never treat a missing patch as proof that no job started. Check `ai-glm list`, t
 
 Stop an active implementation with `ai-glm abort <name>`. The control call targets the
 exact recorded server session and never deletes the live clone. The owner process cleans
-its exact clone and records `completed`, `failed`, or `aborted`. After inspecting the
-terminal evidence, use `ai-glm delete <name>` to clear the record before reusing the
-name. `ask`, `transcript`, and `diff` do not resume one-shot implementation jobs.
+its exact clone and records `completed`, `failed`, or `aborted`. A failed or aborted job
+that changed files remains nonzero but preserves a binary `.incomplete.patch` and
+adjacent INCOMPLETE report before cleanup. A failure before changes creates no empty
+patch. If artifact export itself fails, the exact validated remote-less clone is kept
+and named loudly. After inspecting the terminal evidence, use `ai-glm delete <name>` to
+clear the record before reusing the name. `ask`, `transcript`, and `diff` do not resume
+one-shot implementation jobs.
 
 It creates a throwaway clone with its git remote removed, lets GLM edit and run
 builds/tests inside it, writes the result out as a patch under `.ai/reviews/`, and
@@ -171,4 +175,7 @@ approves only that exact shape. This does not make `*` generally safe, and unkno
 changed permission shapes must still fail closed. For an implementation permission
 failure, use `ai-glm show <name>`: the durable record states the safe failure summary,
 whether the clone had unexported changes, and whether a patch exists. Do not ask the
-wrapper to export or apply incomplete work.
+wrapper to apply incomplete work. Inspect incomplete artifacts with `git apply --stat`
+and `git apply --check`, review every hunk, and rerun all required tests. The report is
+not a claim that the patch is safe, complete, or tested. Provider usage is recorded only
+when officially returned; failed or interrupted turns say `unavailable`, never zero.
