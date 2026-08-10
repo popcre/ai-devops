@@ -108,8 +108,10 @@ Not in this plan:
 
 ## 5. Current state of the code
 
-Current `main` is commit `52704f98549e23044e53da4c9190e48ca59e2757`, pushed to
-`origin/main` when this plan was written.
+The current one-shot implementation code was last changed in commit
+`52704f98549e23044e53da4c9190e48ca59e2757`. The original plan and all GLM amendments
+are committed and pushed through `405afe4b948a2859e95b73f6418cef3c062d30aa` on
+`main`. No persistent-session implementation has started.
 
 Working and required to remain working:
 
