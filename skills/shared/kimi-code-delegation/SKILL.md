@@ -121,14 +121,22 @@ long session, and headless output provides no context-window or cache counters.
 
 ## Implementation runs
 
-`ai-kimi implement` creates a throwaway git worktree, lets Kimi work inside it, writes the
-result out as a patch under `.ai/reviews/`, and **removes the worktree before it exits**.
-Nothing accumulates and nothing is left for Albert to clean up. Review the patch yourself
-before applying:
+`ai-kimi implement` creates a throwaway git worktree, lets Kimi work inside it, writes a
+completed result out as a normal patch under `.ai/reviews/`, and removes the worktree.
+Review the patch yourself before applying:
 
 ```bash
 git apply --check "$patch" && git apply "$patch"
 ```
+
+If a usage limit, timeout, cancellation, network error, or provider failure stops a run
+after it changed files, the command remains unsuccessful and exports two clearly marked
+recovery files: `*.incomplete.patch` and `*.incomplete.md`. The report says why completion
+is unproven and gives `git apply --stat` and `git apply --check` commands. Inspect every
+change and run the required tests before deciding whether to apply it. The wrapper never
+auto-applies complete or incomplete patches. A failure before any change creates no empty
+patch. Only an artifact-export failure preserves the exact recovery worktree and prints
+its path; ordinary failed worktrees are still removed.
 
 Planning and execution cannot share a session: `--agent`/`--agent-file` cannot be combined
 with a resume, so the agent is fixed when a session is created — which is exactly why a
@@ -136,12 +144,14 @@ read-only review session can never later become a write session. Plan in a revie
 amend the plan yourself, then start an `implement` session with the approved plan.
 
 Implementation sessions are deliberately one-shot. Their isolated worktree is removed
-after the patch is emitted, so `ai-kimi ask` refuses to resume them. Start a new named
+after a complete or safely preserved incomplete patch is emitted, so `ai-kimi ask`
+refuses to resume them. Start a new named
 `implement` run for another write turn; never resume the old session in the live repo.
 
-**Kimi cannot run your tests** — the read-only profile has no `Bash`, and an implement run
-happens in a throwaway worktree. Run them yourself and feed exact failures back into the
-same session with `ask`.
+Read-only Kimi cannot run tests because its profile has no `Bash`. An implementation run
+can run tests inside its throwaway worktree, but a stopped run's report always says tests
+are not confirmed complete. Run the relevant tests yourself against any patch you accept.
+Do not resume an implementation session with `ask`; start another isolated write run.
 
 ## Verifying the install
 

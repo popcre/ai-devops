@@ -67,7 +67,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 STATE_DIR="${AI_KIMI_STATE_DIR:-$HOME/.local/state/ai-devops/kimi}"
 CALLER="${AI_KIMI_CALLER:-claude}"
@@ -239,8 +239,10 @@ has_resume_hint() { # has_resume_hint FILE
 }
 session_id_from() { tail -5 "$1" | jq -r 'select(.type=="session.resume_hint")|.session_id' 2>/dev/null | tail -1; }
 
+AWAIT_RESULT_REASON=""
 await_result() { # await_result FILE LABEL
   local f="$1" label="$2" waited=0 empty=0 saw=0
+  AWAIT_RESULT_REASON=""
   while [ "$waited" -lt "$WAIT_TIMEOUT" ]; do
     has_resume_hint "$f" && return 0
     # Fast-fail ONLY if a kimi process was positively seen and then vanished.
@@ -255,6 +257,7 @@ await_result() { # await_result FILE LABEL
         note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
         note "  elapsed  : ${waited}s"
         note "  diagnose : tail -20 ~/.kimi-code/logs/kimi-code.log"
+        AWAIT_RESULT_REASON="process-ended"
         return 1
       fi
     fi
@@ -266,12 +269,15 @@ await_result() { # await_result FILE LABEL
   note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
   note "  diagnose : tail -20 ~/.kimi-code/logs/kimi-code.log"
   note "  Raise the ceiling with AI_KIMI_WAIT_TIMEOUT=<seconds> for a genuinely long run."
+  AWAIT_RESULT_REASON="timeout"
   return 1
 }
 
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
+RUN_TURN_RC=unavailable
+RUN_TURN_PID=""
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
   local kimi; kimi="$(resolve_kimi)"
@@ -307,14 +313,47 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     local q="" a
     for a in "${args[@]}"; do q="$q $(printf '%q' "$a")"; done
     su - "$as" -c "cd $(printf '%q' "$repo") && \"\$HOME/.kimi-code/bin/kimi\"$q" \
-      < /dev/null > "$out" 2>"$out.err"
+      < /dev/null > "$out" 2>"$out.err" &
   else
-    ( cd "$repo" && "$kimi" "${args[@]}" ) > "$out" 2>"$out.err"
+    ( cd "$repo" && exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
   fi
-  local rc=$?
+  RUN_TURN_PID=$!
+  wait "$RUN_TURN_PID"
+  RUN_TURN_RC=$?
+  RUN_TURN_PID=""
   set -e
-  printf '%s' "$rc"
+  return 0
 }
+
+child_pids() { # child_pids PARENT
+  if ps -W >/dev/null 2>&1; then
+    ps -W 2>/dev/null | awk -v p="$1" 'NR>1 && $2==p {print $1}'
+  else
+    ps -eo pid=,ppid= 2>/dev/null | awk -v p="$1" '$2==p {print $1}'
+  fi
+}
+
+signal_run_tree() { # signal_run_tree SIGNAL PID
+  local signal="$1" pid="$2" child
+  for child in $(child_pids "$pid"); do signal_run_tree "$signal" "$child"; done
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+stop_run_turn() {
+  if [ -n "$RUN_TURN_PID" ]; then
+    local pid="$RUN_TURN_PID" i
+    signal_run_tree TERM "$pid"
+    for i in 1 2 3 4 5; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -0 "$pid" 2>/dev/null && signal_run_tree KILL "$pid"
+    set +e; wait "$pid" 2>/dev/null; set -e
+    RUN_TURN_PID=""
+  fi
+}
+
+cancel_plain_turn() { stop_run_turn; exit 130; }
 
 extract_answer() { # extract_answer FILE
   local text
@@ -477,6 +516,204 @@ cmd_doctor() {
   return $rc
 }
 
+# One implementation lifecycle owns artifact export, worktree cleanup, temporary
+# files, and the repository lock. Signal handlers only record cancellation and
+# exit; this finalizer does every state-changing cleanup action exactly once.
+LIFECYCLE_ACTIVE=0
+LIFECYCLE_MODE=""
+LIFECYCLE_STATE="failed"
+LIFECYCLE_NAME=""
+LIFECYCLE_REPO=""
+LIFECYCLE_WT=""
+LIFECYCLE_OWNER=""
+LIFECYCLE_BASE=""
+LIFECYCLE_PF=""
+LIFECYCLE_OUT=""
+LIFECYCLE_LOCK=""
+LIFECYCLE_COMMAND_RC="unavailable"
+LIFECYCLE_ARTIFACT_DURABLE=0
+LIFECYCLE_PRESERVE=0
+
+classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
+  local out="$1" err="$2" reason="$3"
+  [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
+  if { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
+    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
+    printf 'usage-limit'
+  elif [ "$LIFECYCLE_COMMAND_RC" != unavailable ] && [ "$LIFECYCLE_COMMAND_RC" -ne 0 ] 2>/dev/null; then
+    printf 'failed'
+  elif [ "$reason" = timeout ]; then
+    printf 'timed-out'
+  else
+    printf 'failed'
+  fi
+}
+
+valid_owner_record() { # valid_owner_record REPO WORKTREE OWNER [STATE]
+  local repo="$1" wt="$2" owner="$3" wanted="${4:-}" root expected recorded_repo recorded_wt state
+  [ -n "$repo" ] && [ -n "$wt" ] && [ -n "$owner" ] && [ -f "$owner" ] || return 1
+  root="${STATE_DIR%/}/worktrees"
+  case "$wt" in "$root"/kimi.*/wt) ;; *) return 1 ;; esac
+  expected="${wt%/wt}/owner.json"
+  [ "$owner" = "$expected" ] || return 1
+  recorded_repo="$(jq -r '.repo // ""' "$owner" 2>/dev/null)"
+  recorded_wt="$(jq -r '.worktree // ""' "$owner" 2>/dev/null)"
+  state="$(jq -r '.state // ""' "$owner" 2>/dev/null)"
+  [ "$recorded_repo" = "$repo" ] && same_path "$recorded_wt" "$wt" || return 1
+  [ -z "$wanted" ] || [ "$state" = "$wanted" ]
+}
+
+same_path() { # same_path A B - accounts for Git Bash /tmp to Windows argv conversion
+  local a="$1" b="$2"
+  if command -v cygpath >/dev/null 2>&1; then
+    a="$(cygpath -aw "$a" 2>/dev/null | tr '\\' '/' || printf '%s' "$a")"
+    b="$(cygpath -aw "$b" 2>/dev/null | tr '\\' '/' || printf '%s' "$b")"
+  fi
+  [ "$a" = "$b" ]
+}
+
+mark_preserved() { # mark_preserved OWNER
+  local owner="$1" json
+  json="$(jq '.state="preserved-recovery"' "$owner" 2>/dev/null)" || return 1
+  write_meta "$owner" "$json" || return 1
+  [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ]
+}
+
+safe_report_detail() { # safe_report_detail TERMINAL_STATE
+  case "$1" in
+    usage-limit) printf 'Kimi reported a usage or billing limit.' ;;
+    timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
+    cancelled)   printf 'The wrapper received an interrupt or termination request.' ;;
+    *)           printf 'Kimi did not emit the required terminal completion record.' ;;
+  esac
+}
+
+artifact_dir() { # artifact_dir REPO
+  local dir
+  [ "${AI_KIMI_TEST_FAIL_EXPORT:-}" = destination ] && return 1
+  dir="$(reviews_dir "$1")"
+  if [ -z "$dir" ]; then
+    dir="$STATE_DIR/recovery-patches"
+    mkdir -p "$dir" 2>/dev/null || return 1
+  fi
+  mkdir -p "$dir" 2>/dev/null || return 1
+  chmod 0700 "$dir" 2>/dev/null || true
+  printf '%s' "$dir"
+}
+
+emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT
+  local repo="$1" name="$2" wt="$3" base="$4" owner="$5" kind="$6" state="$7" rc="$8" out="$9"
+  local dir ts suffix patch report patch_tmp report_tmp sid summary detail
+  valid_owner_record "$repo" "$wt" "$owner" active || {
+    warn "refusing artifact export from an ambiguous Kimi worktree owner record: $owner"
+    return 1
+  }
+  dir="$(artifact_dir "$repo")" || return 1
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  [ "$kind" = incomplete ] && suffix=.incomplete || suffix=""
+  patch="$dir/kimi-${name}-${ts}${suffix}.patch"
+  report="$dir/kimi-${name}-${ts}.incomplete.md"
+  patch_tmp="$(mktemp "$dir/.kimi-patch.XXXXXX")" || return 1
+  chmod 0600 "$patch_tmp" 2>/dev/null || true
+  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$patch_tmp" 2>/dev/null \
+    || { rm -f "$patch_tmp"; return 1; }
+  if [ ! -s "$patch_tmp" ]; then
+    rm -f "$patch_tmp"
+    [ "$kind" = incomplete ] && note "ai-kimi: failed before changes (terminal state: $state); no empty patch was created." \
+      || warn "the implement run produced no changes."
+    return 2
+  fi
+  if [ "$kind" = incomplete ]; then
+    report_tmp="$(mktemp "$dir/.kimi-report.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
+    chmod 0600 "$report_tmp" 2>/dev/null || true
+    sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
+    summary="$(cd "$wt" && git diff --stat "$base" 2>/dev/null | head -40 | cut -c1-240)"
+    detail="$(safe_report_detail "$state")"
+    {
+      echo "# INCOMPLETE Kimi implementation - $name"; echo
+      echo "This work is INCOMPLETE. It is not proof that the task is correct, tested, or safe."; echo
+      echo "- Job: \`$name\`"
+      echo "- Repository: \`$repo\`"
+      echo "- Base SHA: \`$base\`"
+      echo "- Model requested: \`$KIMI_MODEL\` (returned model: unavailable)"
+      echo "- Terminal state: \`$state\`"
+      echo "- Command exit status: \`$rc\`"
+      echo "- Kimi session ID: \`$sid\`"
+      echo "- Usage, tokens, cache, cost, and context: \`unavailable\`"
+      echo "- Tests: not confirmed complete"
+      echo "- Patch: \`$patch\`"
+      echo "- Safe detail: $detail"; echo
+      echo "## Changed-file summary"; echo; echo '```text'
+      printf '%s\n' "${summary:-Git recorded changes, but no bounded stat text was available.}"
+      echo '```'; echo
+      echo "## Recovery"; echo
+      echo "1. Inspect only: \`git apply --stat '$patch'\`"
+      echo "2. Verify against the captured base: \`git apply --check '$patch'\`"
+      echo "3. Never apply this incomplete patch without reviewing every change and running the required tests."
+    } > "$report_tmp" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+  fi
+  if [ "${AI_KIMI_TEST_FAIL_EXPORT:-}" = move ]; then
+    rm -f "$patch_tmp" "${report_tmp:-}"
+    return 1
+  fi
+  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${report_tmp:-}"; return 1; }
+  if [ "$kind" = incomplete ]; then
+    mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
+    note "ai-kimi: $state with partial changes; command remains unsuccessful."
+    note "INCOMPLETE patch written: $patch"
+    note "INCOMPLETE report written: $report"
+    note "  inspect: git apply --stat '$patch'"
+    note "  verify:  git apply --check '$patch'"
+  else
+    note "patch written: $patch"
+    note "  review it, then:  git apply --check '$patch' && git apply '$patch'"
+  fi
+  return 0
+}
+
+lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
+  local original="${1:-1}" artifact_rc=0 final
+  final="$original"
+  [ "$LIFECYCLE_ACTIVE" = 1 ] || return "$original"
+  LIFECYCLE_ACTIVE=0
+  if [ "$LIFECYCLE_MODE" = implement ] && [ -n "$LIFECYCLE_WT" ]; then
+    if [ "$LIFECYCLE_STATE" = completed ]; then
+      emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" complete completed "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
+    else
+      emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
+    fi
+    if [ "$artifact_rc" = 1 ]; then
+      LIFECYCLE_PRESERVE=1; final=1
+      mark_preserved "$LIFECYCLE_OWNER" || true
+      warn "could not safely export Kimi's work. The exact recovery worktree remains at: $LIFECYCLE_WT"
+      warn "after recovery, remove it with: git -C '$LIFECYCLE_REPO' worktree remove '$LIFECYCLE_WT'"
+    elif [ "$artifact_rc" = 0 ]; then
+      LIFECYCLE_ARTIFACT_DURABLE=1
+    fi
+    [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
+  fi
+  rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
+  return "$final"
+}
+
+lifecycle_exit_trap() {
+  local original=$? final
+  trap - EXIT INT TERM
+  set +e
+  lifecycle_finalize "$original"; final=$?
+  exit "$final"
+}
+
+lifecycle_cancel() {
+  LIFECYCLE_STATE=cancelled
+  LIFECYCLE_COMMAND_RC=130
+  stop_run_turn
+  exit 130
+}
+
 start_session() { # start_session NAME MODE
   local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner=""
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
@@ -487,9 +724,13 @@ start_session() { # start_session NAME MODE
   rid_lock="$(repolock_path "$rid")"
   lock_acquire "$rid_lock" "$mode:$name" || die "another Kimi run is already active in this repository: $(lock_info "$rid_lock").
   Do not start a second one; wait for it, or continue it with 'ask'."
-  # shellcheck disable=SC2064
-  trap "lock_release '$rid_lock'" EXIT
-  trap 'exit 130' INT TERM
+  LIFECYCLE_LOCK="$rid_lock"
+  trap lifecycle_exit_trap EXIT
+  trap lifecycle_cancel INT TERM
+  LIFECYCLE_ACTIVE=1; LIFECYCLE_MODE="$mode"; LIFECYCLE_STATE=failed
+  LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"; LIFECYCLE_WT=""
+  LIFECYCLE_OWNER=""; LIFECYCLE_BASE=""; LIFECYCLE_PF=""; LIFECYCLE_OUT=""
+  LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
 
   local workdir="$repo"
   if [ "$mode" = implement ]; then
@@ -499,22 +740,23 @@ start_session() { # start_session NAME MODE
     git -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
       || die "could not create an isolated worktree for the implement run."
     owner="${wt%/wt}/owner.json"
-    write_meta "$owner" "$(jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
+    LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
+    write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
       '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
     workdir="$wt"
     note "implement run isolated in a throwaway worktree: $wt"
   fi
 
-  pf="$(mktemp)"; out="$(mktemp)"
-  # Refresh the trap only after every exact lifecycle path is known. Values are
-  # expanded now, so later scope changes cannot redirect cleanup.
-  trap "cleanup_wt '$repo' '$wt' '$owner'; rm -f '$pf' '$out' '$out.err'; lock_release '$rid_lock'" EXIT
+  pf="$(mktemp)"; LIFECYCLE_PF="$pf"
+  out="$(mktemp)"; LIFECYCLE_OUT="$out"
   build_prompt_file "$pf"
   before="$(tree_state "$repo")"
 
   note "Kimi $mode '$name' starting (model $KIMI_MODEL)…"
-  rc="$(run_turn "$workdir" "$out" "$pf" "$mode")"
+  run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
+  LIFECYCLE_COMMAND_RC="$rc"
   if ! await_result "$out" "$mode '$name'"; then
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
     note "  kimi exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     exit 1
@@ -522,6 +764,7 @@ start_session() { # start_session NAME MODE
 
   sid="$(session_id_from "$out")"
   [ -n "$sid" ] || die "Kimi returned no session id."
+  LIFECYCLE_STATE=completed
 
   after="$(tree_state "$repo")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
@@ -530,10 +773,6 @@ start_session() { # start_session NAME MODE
   Inspect: git -C $repo status"
   fi
 
-  # Export write work before any bookkeeping that could fail. Once the patch is
-  # durable, later metadata failure cannot destroy the only copy of the change.
-  if [ "$mode" = implement ]; then emit_patch "$repo" "$name" "$wt" "$base" "$owner"; fi
-
   write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
@@ -541,12 +780,16 @@ start_session() { # start_session NAME MODE
       model:$model, created:$created, updated:$created, turns:$turns}')"
 
   finish_turn "$repo" "$name" "$out"
-  rm -f "$pf" "$out" "$out.err"
+  lifecycle_finalize 0
 }
 
 cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
   local repo="${1:-}" wt="${2:-}" owner="${3:-}"
   [ -n "$wt" ] || return 0
+  valid_owner_record "$repo" "$wt" "$owner" || {
+    warn "ambiguous Kimi worktree owner record left untouched: ${owner:-unavailable}"
+    return 1
+  }
   [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
@@ -555,33 +798,6 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
   fi
   rm -f "$owner" 2>/dev/null || true
   rmdir "${wt%/wt}" 2>/dev/null || true
-}
-
-emit_patch() { # emit_patch REPO NAME WORKTREE BASE OWNER
-  local repo="$1" name="$2" wt="$3" base="$4" owner="$5" dir patch tmp
-  dir="$(reviews_dir "$repo")"
-  if [ -z "$dir" ]; then
-    dir="$STATE_DIR/recovery-patches"
-    mkdir -p "$dir" 2>/dev/null || dir=""
-  fi
-  if [ -z "$dir" ]; then
-    write_meta "$owner" "$(jq --arg state preserved-recovery '.state=$state' "$owner")"
-    die "cannot create a safe patch destination. Work is preserved at: $wt
-  Recover it there, then remove it with: git -C '$repo' worktree remove '$wt'"
-  fi
-  mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
-  patch="$dir/kimi-${name}-$(date -u +%Y%m%dT%H%M%SZ).patch"
-  tmp="$(mktemp "$dir/.kimi-patch.XXXXXX")"; chmod 0600 "$tmp" 2>/dev/null || true
-  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$tmp" 2>/dev/null \
-    || { rm -f "$tmp"; write_meta "$owner" "$(jq '.state="preserved-recovery"' "$owner")"; die "could not export Kimi's work; it remains at $wt"; }
-  mv -f "$tmp" "$patch" \
-    || { write_meta "$owner" "$(jq '.state="preserved-recovery"' "$owner")"; die "could not finalize the patch; Kimi's work remains at $wt"; }
-  if [ -s "$patch" ]; then
-    note "patch written: $patch"
-    note "  review it, then:  git apply --check '$patch' && git apply '$patch'"
-  else
-    rm -f "$patch"; warn "the implement run produced no changes."
-  fi
 }
 
 cmd_ask() {
@@ -599,12 +815,13 @@ cmd_ask() {
     lock_release "$sess_lock"; die "another Kimi run is active in this repository: $(lock_info "$rid_lock")"
   fi
   # shellcheck disable=SC2064
-  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT INT TERM
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
+  trap cancel_plain_turn INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"; build_prompt_file "$pf"
   before="$(tree_state "$repo")"
   note "Kimi '$name' continuing session $sid…"
-  rc="$(run_turn "$repo" "$out" "$pf" "$mode" "$sid")"
+  run_turn "$repo" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   if ! await_result "$out" "'$name'"; then
     note "  kimi exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
