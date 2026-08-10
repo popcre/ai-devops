@@ -9,7 +9,7 @@
 | 3. Use the shared consensus ledger | ✅ complete | 2026-08-10 | Kimi consumes the Grok-owned provider-neutral template and stores durable state in the active artifact. |
 | 4. Extend offline and live tests | ✅ complete | 2026-08-10 | Pre-guard suites passed 54/0 offline and 62/0 live; final counts including the one-shot implement guard are recorded by this session below. |
 | 5. Run the live K3 debate | ✅ complete | 2026-08-10 | Session `session_224373ef-2295-435e-860c-298b6e99e0f0`; one rebuttal; Kimi re-read the fix and reported no material Kimi objection. |
-| 6. Document, install, commit, and push | 🟨 partial | 2026-08-10 | Docs updated; install and local verification are being completed here; commit/push belong to the root integrator. |
+| 6. Document, install, commit, and push | ✅ complete | 2026-08-10 | Docs, one-shot guard, tests, and matching installed skills shipped in `f738db7`; `origin/main` was verified at the same SHA. |
 
 Fresh sessions start at the first open row and keep this table current. This plan depends on the completed shared-template rows in `plan_grok-debate-continuity.md` and must not run concurrently with that plan. Before editing or pushing, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-kimi-debate-context-continuity.md` file cross-linked to this plan.
 
