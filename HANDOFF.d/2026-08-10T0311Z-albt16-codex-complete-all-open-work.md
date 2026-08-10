@@ -2,6 +2,20 @@
 
 ## STATUS update: 2026-08-10T0405Z
 
+### Recheck: 2026-08-10T1129Z
+
+- Pulled `origin/main` cleanly to `134a78aa361b9b5cceb8205319b0b9c006ae250e`.
+- Reconciled both remaining handoffs against current Git, plans, code, and the
+  master completion evidence. No completed phase needs to be repeated.
+- `916` (`100.110.219.31:22`) still timed out using Git for Windows SSH with an
+  eight-second connection timeout. Its machine-local rollout remains blocked
+  until that computer is online.
+- The legacy credential-incident work remains approval-gated. The current work
+  order forbids credential rotation without explicit approval, so no credential
+  was read, changed, or rotated.
+- All plan STATUS tables named by this work order remain complete. No source,
+  test, or runtime change was needed in this recheck.
+
 Completed and pushed:
 
 - Config consolidation Phase 3, the live hidden memory task, GLM reliability,
