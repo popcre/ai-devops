@@ -1,5 +1,11 @@
 # Handoff: GLM amendments to persistent Kimi implementation plan
 
+## 0. Decisions only the owner can make
+
+None. Albert already decided on 2026-08-10 that Kimi implementation sessions should
+become persistent. The plan's remaining questions are measured technical gates, not
+owner choices. The next session must run those gates and follow their stated stop rules.
+
 ## 1. What this application is
 
 `u2giants/ai-devops` is Albert Hazan's public AI workflow toolkit. `bin/ai-kimi` is its
@@ -20,6 +26,8 @@ is [`../plan_kimi-persistent-implementation-sessions.md`](../plan_kimi-persisten
   required and minor item passed, and it found no remaining blocking defect.
 - The saved read-only GLM report is under ignored `.ai/reviews/` and is not committed.
 - Current source behavior remains one-shot and safe.
+- The approved plan and amendments are committed and pushed through
+  `405afe4b948a2859e95b73f6418cef3c062d30aa` on `main` before this closeout update.
 
 ## 4. Everything tried that did not work
 
@@ -68,9 +76,35 @@ plan and reconsider a private Git ref. Do not improvise either change.
 
 ## Mandatory self-audit
 
-1. Yes. The linked amended plan gives a fresh session all files, decisions, steps, tests,
-   and proof gates.
-2. Yes. Sections 4-5 preserve every GLM objection and why it matters.
-3. Yes. Sections 6-9 give exact next steps, constraints, access, and stop rules.
+1. **Yes, a street-newcomer can continue without questions.** Sections 1-3 define the
+   toolkit, goal, branch, current behavior, plan, approval, and commit. Section 6 gives
+   the exact ordered entry point and verification gates.
+2. **Yes, they can continue as effectively as this session.** Sections 4-5 preserve why
+   the first plan failed review and every non-obvious GLM finding that changed the design.
+3. **Yes, failed attempts are included.** Section 4 records the first self-audited plan's
+   missing ignored-state, drift, generation, locking, storage, migration, reconstruction,
+   long-path, and write-warning details and why they were unsafe.
+4. **Yes, every next step is concrete and verifiable.** Section 6 points to the first
+   open STATUS row, names all Phase 1 measurements, requires phases 2-5 in order, and
+   defines the commit/push completion gate.
+5. **Yes, terms and identifiers are explained.** Sections 1, 3, 5, and 8 define the repo,
+   wrapper, branch, commit, plan path, Kimi version, machine, shell, credential location,
+   and private Git-ref fallback.
+6. **Yes, the section-0 sweep passed.** Sections 1-9 contain no unanswered owner decision.
+   Albert's persistence choice is already settled; Phase 1 outcomes are technical proof
+   gates with locked stop behavior, so section 0 correctly says none.
 
-Self-audit passed on 2026-08-10.
+Final synthesis:
+
+1. **Yes.** This handoff is comprehensive enough for a brand-new developer with no chat
+   context. Sections 1-9 plus the linked 13-section plan carry the complete workstream.
+2. **Yes.** They can continue as well as this session because sections 4-5 preserve the
+   rejected plan gaps and section 6 routes directly into the approved measured plan.
+3. **Yes.** Background, goal, outcome, current state, failed review, decisions,
+   constraints, risks, next actions, and evidence are present across sections 0-9 and the
+   linked plan.
+4. **Yes.** Reading section 0 alone shows every needed owner decision: none remain. A
+   line-by-line sweep of sections 1-9 found only settled owner intent and technical gates,
+   with no approval, choice, or outside-work ruling omitted.
+
+Self-audit re-passed on 2026-08-10 against the current 10-section standard.
