@@ -100,11 +100,9 @@ full-document form: read it as one open workstream and migrate it per
 verbatim into `HANDOFF.d/` as open workstreams.
 
 The OPEN files in `HANDOFF.d/` are required reading — each one means work is in
-progress. There are currently **two**. The immediate unfinished work is proving
-the Windows minimum-touch bootstrap on a disposable Windows 11 machine and then
-proving a second run makes no unintended changes. Older config-consolidation
-rollout work is also recorded there. Do not apply the unproven bootstrap to an
-established workstation merely as a test.
+progress. Never hard-code their count here; list the directory at session start
+and read every current file newest-first. Do not apply an unproven bootstrap to
+an established workstation merely as a test.
 
 ## Repository structure
 
