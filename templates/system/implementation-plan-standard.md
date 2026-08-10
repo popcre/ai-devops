@@ -86,6 +86,8 @@ What could break, the rollback, what's still uncertain and how to decide it.
 - [ ] Every term, path, URL, identifier, SHA a newcomer wouldn't know is defined.
 - [ ] Secrets by location only, never by value.
 - [ ] Definition of done includes commit/push/CI/deploy verification.
+- [ ] The plan and this session's new `HANDOFF.d/` file link directly to each
+      other; root `HANDOFF.md` remains the static pointer.
 
 ## Mandatory self-audit gate (BEFORE showing the plan)
 
@@ -124,8 +126,13 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   commit and push. Hand the implementing session the file path, not a summary.
 - For multi-phase work, instruct the implementer to re-read downstream phases
   before starting each one (drift check); pair with the `fresh-session` skill.
-- Cross-link with your session's `HANDOFF.d/` file when work has already happened — neither should
-  be read alone.
+- **Every new plan must be registered in the handoff system.** Create your own
+  new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file even when implementation
+  has not started. Link that file directly to the plan, and link the plan back
+  to that handoff file. The open plan is unfinished work and must not float
+  outside the session-start route.
+- Never rewrite root `HANDOFF.md`; it is the static pointer to `HANDOFF.d/`.
+  Migrate a legacy full-document handoff per `handoff-standard.md` first.
 - **STATUS table at the top from day one:** one row per step (done / partial / open,
   dated) plus a line naming where a fresh session starts. On a new plan every row is
   `open`; it exists so the first thing a reader sees is what is still true.
@@ -135,5 +142,6 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   keep the reasoning as history (a session that loses the *why* undoes the fix), mark
   verification that already passed, and record what is open and blocked on whom.
 - **Discoverability beats memory.** Nobody recalls `plan_<topic>.md` months later.
-  Link it from `AGENTS.md`, your own `HANDOFF.d/` file, the topic doc, and any skill whose trigger
+  The `HANDOFF.d/` backlink is mandatory. Also link it from `AGENTS.md`, the
+  topic doc, and any skill whose trigger
   leads there, and add a memory entry pointing at its STATUS table.
