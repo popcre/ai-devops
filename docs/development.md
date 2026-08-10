@@ -65,6 +65,15 @@ Windows GLM service changes need both offline suites and a controlled live crash
 waits for the same task to restore one loopback listener, then resumes the exact named
 session. A `Ready` task is not healthy.
 
+GLM implementation jobs use a v3 record written before clone creation and an atomic
+directory lock held until terminal cleanup. Tests must pause the owner at the record,
+clone, and server-session boundaries and prove `list`, duplicate rejection, exact abort,
+terminal truth, and cleanup from another shell. Never make a test sweep an unrecorded
+scratch directory. Dead-owner reconciliation requires a valid record, canonical clone,
+dead PID, matching stale lock, and exact server state; ambiguous evidence is a warning,
+not permission to delete. A terminal job name is reusable only after explicit
+`ai-glm delete <name>`.
+
 ## Testing
 
 Installer behavior has lightweight, dependency-free tests:

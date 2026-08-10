@@ -4,16 +4,18 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Reproduce and freeze the failure | ⬜ open | N/A | N/A |
-| 2. Add one-shot implementation job records | ⬜ open | N/A | N/A |
-| 3. Lock implementation names for the full run | ⬜ open | N/A | N/A |
-| 4. Add list, show, abort, delete, and safe reconciliation | ⬜ open | N/A | N/A |
+| 1. Reproduce and freeze the failure | ✅ done | 2026-08-10 | Baseline: 131 GLM checks, 25 Windows checks, syntax, and doctor passed. Controlled paused fixture proved the pre-fix lifecycle gap without paid turns. |
+| 2. Add one-shot implementation job records | ✅ done | 2026-08-10 | Private v3 record exists in `starting` before clone creation, then gains only the canonical clone/session and successfully written artifact paths. Malformed records fail closed. |
+| 3. Lock implementation names for the full run | ✅ done | 2026-08-10 | Offline same-name race creates one record and no second clone/session/turn; different names run independently. Lock remains owned through terminal cleanup. |
+| 4. Add list, show, abort, delete, and safe reconciliation | ✅ done | 2026-08-10 | 155-check offline suite covers type/state controls, exact-session abort, active-delete refusal, terminal truth, cleanup, interrupts, and conservative reconciliation. |
 | 5. Verify, document, commit, and push | ⬜ open | N/A | N/A |
 
 Fresh sessions start at the first open row. Before editing, pull `origin/main`, inspect
 concurrent work, list `HANDOFF.d/`, and read every open handoff newest-first. Update this
 table after every gate. The implementing session must create its own write-once
 `HANDOFF.d/<UTC>-<machine>-<agent>-glm-implementation-job-tracking.md` and link it here.
+This run's record is
+[`HANDOFF.d/2026-08-10T1955Z-al8960ofc-codex-glm-implementation-job-tracking.md`](HANDOFF.d/2026-08-10T1955Z-al8960ofc-codex-glm-implementation-job-tracking.md).
 
 ## 1. The ultimate goal
 
@@ -116,6 +118,23 @@ Exact defect:
   liveness, server state, or whether deletion is safe.
 - `plan_delegate-wrapper-hardening.md` intentionally accepted invisible implementation
   jobs. That completed plan is historical. This plan corrects that disproven decision.
+
+Implementation state on 2026-08-10:
+
+- `bin/ai-glm` writes a v3 `type:"implementation"` record before clone creation and
+  holds the existing atomic-directory lock for the whole run.
+- State is `starting`, `running`, `abort-requested`, `completed`, `failed`, or `aborted`.
+  Terminal records are retained until explicit safe deletion, so names never silently
+  overwrite the only failure evidence.
+- `list` and safe `show` cover both record types. `ask`, `transcript`, and server `diff`
+  reject one-shot implementations. Abort targets the exact recorded server session and
+  leaves live-clone cleanup to its owner.
+- One idempotent EXIT/signal cleanup owns prompt/carry files, the canonical remote-less
+  clone, exact server session, terminal record, and lock. Failed cleanup is recorded and
+  never reported as success.
+- Doctor reconciles a dead owner only when schema, canonical path, dead PID, matching
+  stale lock, and exact server state agree. It preserves malformed, live, foreign,
+  forged, outside-root, and legacy unrecorded paths.
 
 ## 6. Key findings and root cause
 
@@ -339,13 +358,15 @@ Rollback is a focused Git revert plus shared-skill reinstall. Do not delete job 
 or server sessions during rollback without exact ownership proof. Keep backward reading
 of any new record schema for at least one release cycle if rollback could strand it.
 
-Open evidence questions:
+Evidence questions resolved on 2026-08-10:
 
-- Should terminal records require explicit `delete`, or use a conservative archive rule?
-- Does OpenCode expose a stable difference between user abort and other cancellation?
-- Can the exact disposable server session always be deleted after abort? If not, retain
-  its ID and give a safe recovery command.
-- Can legacy scratch ownership ever be proven? Default to warning only.
+- Terminal records require explicit `delete`; there is no silent retention timer.
+- The wrapper records its own `abort-requested` transition, then records the terminal
+  truth it observes. It does not depend on an undocumented provider cancellation label.
+- Controlled exits delete the exact disposable server session. A failed deletion keeps
+  its ID and marks cleanup failed so `delete` can retry only that ID later.
+- Legacy scratch ownership cannot be proven from a directory name. Doctor warns and
+  preserves it.
 
 ## Mandatory self-audit
 
