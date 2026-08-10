@@ -4,16 +4,16 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Capture baselines and re-check every review claim | ⬜ open | 2026-08-10 | Not started |
-| 2. Make Kimi worktree cleanup unconditional | ⬜ open | 2026-08-10 | Not started |
-| 3. Make Kimi patch export preserve committed work | ⬜ open | 2026-08-10 | Not started |
-| 4. Remove Kimi prompt text from process arguments | ⬜ open | 2026-08-10 | Not started |
-| 5. Lock GLM session creation and document disposable implementation sessions | ⬜ open | 2026-08-10 | Not started |
-| 6. Make Windows GLM restart wait for the port safely | ⬜ open | 2026-08-10 | Not started |
-| 7. Measure and correct Grok resumed-cost accounting | ⬜ open | 2026-08-10 | Not started |
-| 8. Align repository identity, cancellation messages, metadata permissions, and transcript output | ⬜ open | 2026-08-10 | Not started |
-| 9. Decide and enforce Kimi implementation network policy | ⬜ open | 2026-08-10 | Not started |
-| 10. Run full offline/live verification, install skills, document, commit, and push | ⬜ open | 2026-08-10 | Not started |
+| 1. Capture baselines and re-check every review claim | ✅ complete | 2026-08-10 | Base `77b4592`; baselines: Kimi 56, GLM 129, Grok 79, Windows 23; doctors confirmed Kimi 0.32.0, Grok 0.2.112, OpenCode 1.18.12. |
+| 2. Make Kimi worktree cleanup unconditional | ✅ complete | 2026-08-10 | One exact lifecycle trap plus wrapper-owned records; interrupt test removes worktree and owner record; doctor skips preserved recovery. |
+| 3. Make Kimi patch export preserve committed work | ✅ complete | 2026-08-10 | Patch diffs original base with binary support; committed-work fixture applies cleanly; private fallback and preserved-recovery state added. |
+| 4. Remove Kimi prompt text from process arguments | ✅ complete | 2026-08-10 | Kimi 0.32.0 help exposes only `-p`; false stdin claim removed and argv visibility plus no-secrets rule documented for direct/delegated paths. |
+| 5. Lock GLM session creation and document disposable implementation sessions | ✅ complete | 2026-08-10 | Full create/write sequence locked; failed metadata writes delete the server session; live same-name race returned one success and one already-exists result. |
+| 6. Make Windows GLM restart wait for the port safely | ✅ complete | 2026-08-10 | Live restart found and fixed lingering native child; verified OpenCode-only stop, bounded port-free and health waits, one listener, exact-session resume. |
+| 7. Measure and correct Grok resumed-cost accounting | ✅ complete | 2026-08-10 | Grok 0.2.112 live costs were $0.0651744 then $0.0109524; per-call semantics confirmed, addition retained, parent-only $1.50 ceiling documented. |
+| 8. Align repository identity, cancellation messages, metadata permissions, and transcript output | ✅ complete | 2026-08-10 | Normalized path+origin IDs, legacy/moved lookup, 0600 metadata, distinct cancellation guidance, and private named Kimi ZIP export implemented. |
+| 9. Decide and enforce Kimi implementation network policy | ✅ complete | 2026-08-10 | Kimi 0.32.0 profile can edit/test and removes named web/subagent tools, but live Bash `curl` reached example.com. Albert chose to keep implementation mode with this limit documented. |
+| 10. Run full offline/live verification, install skills, document, commit, and push | ✅ complete | 2026-08-10 | Final offline: Kimi 65, GLM 131, Grok 79, Windows 25. Live GLM restart/resume/concurrency, Grok cost, and Kimi edit/test/network canaries passed. Shared skill hashes match Claude and Codex. Commit/push evidence recorded in Git history. |
 
 Fresh sessions start at the first open row. Update this table after every completed gate. Before editing, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-delegate-wrapper-hardening.md` file cross-linked to this plan. Never rewrite `HANDOFF.md` or another session's handoff.
 

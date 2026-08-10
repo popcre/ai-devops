@@ -39,13 +39,23 @@ mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "0.32.0"; exit 0 ;;
   provider)  [ "$mode" = noauth ] && exit 1; echo "managed:kimi-code type=kimi"; exit 0 ;;
-  export)    echo "exported.zip"; exit 0 ;;
+  export)
+    while [ $# -gt 0 ]; do
+      if [ "$1" = -o ]; then printf 'zip-fixture' > "$2"; exit 0; fi
+      shift
+    done
+    exit 1 ;;
 esac
 case "$mode" in
   ok)      cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   nohint)  printf '{"role":"assistant","content":"partial answer"}\n' ;;   # no terminal record
   empty)   : ;;
   writes)  cat "$TMPDIR_FOR_TEST/fixture.jsonl"; echo tampered >> "$TMPDIR_FOR_TEST/repo/a.txt" ;;
+  implcommit)
+    printf 'committed delegate work\n' > committed.txt
+    git add committed.txt && git -c user.email=t@example.com -c user.name=T commit -qm delegate
+    cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
+  slow) sleep 30 ;;
 esac
 exit 0
 STUBEOF
@@ -121,6 +131,20 @@ OUT="$(run ask impl1 --prompt 'continue writing' 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "implement session resume is refused" || bad "implement session resume is refused"
 check "refusal explains one-shot isolation" "printf '%s' \"\$OUT\" | grep -q 'one-shot'"
 
+echo "== committed implementation work is preserved and cleaned =="
+echo implcommit > "$TMP/mode"
+run implement implcommit --prompt 'make one committed change' >/dev/null 2>&1
+PATCH="$(ls "$REPO"/.ai/reviews/kimi-implcommit-*.patch 2>/dev/null | head -1)"
+check "committed changes are in patch" "grep -q committed.txt '$PATCH'"
+check "committed patch applies to original base" "git -C '$REPO' apply --check '$PATCH'"
+check "implementation worktree is removed" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
+check "implementation agent profile is used" "grep -q -- 'local-implement.md' '$TMP/argv.txt'"
+echo slow > "$TMP/mode"
+timeout --signal=TERM --kill-after=2 2 bash -c "cd '$REPO' && exec bash '$SCRIPT' implement implinterrupt --prompt wait" >/dev/null 2>&1 || true
+check "implement interrupt removes worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
+check "implement interrupt removes owner record" "! find '$AI_KIMI_STATE_DIR/worktrees' -name owner.json -print -quit 2>/dev/null | grep -q ."
+echo ok > "$TMP/mode"
+
 echo "== no_flag_passthrough =="
 run new r3 --prompt x --yolo >/dev/null 2>&1
 [ $? -ne 0 ] && ok "--yolo is rejected" || bad "--yolo is rejected"
@@ -167,7 +191,9 @@ check "no token/cost is claimed"  "printf '%s' \"\$ERR\" | grep -qi 'reports no 
 
 echo "== duplicate run refused (per-repo lock) =="
 RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
-LOCK="$AI_KIMI_STATE_DIR/locks/repo--$(printf '%s' "$RROOT" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//').lock.d"
+RREMOTE="$(git -C "$RROOT" config --get remote.origin.url 2>/dev/null || echo '')"
+RID_NEW="$(printf '%s\n%s' "$(cd "$RROOT" && pwd -P)" "$RREMOTE" | sha256sum | cut -c1-12)"
+LOCK="$AI_KIMI_STATE_DIR/locks/repo--$RID_NEW.lock.d"
 mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "new:other" > "$LOCK/label"
 OUT="$(run new r8 --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ $RC -ne 0 ] && ok "a second concurrent run is refused" || bad "a second concurrent run is refused"
@@ -182,6 +208,10 @@ check "doctor resolves binary"   "run doctor | grep -q 'kimi binary'"
 check "doctor shows the profile" "run doctor | grep -q 'read-only'"
 check "doctor reports auth"      "run doctor | grep -q 'auth *: OK'"
 check "review file was written"  "ls '$REPO'/.ai/reviews/kimi-r7-*.md"
+OUT="$(run transcript r7 2>&1)"
+check "transcript writes a named archive" "printf '%s' \"\$OUT\" | grep -q 'transcript archive written'"
+check "transcript archive exists" "ls '$REPO'/.ai/reviews/kimi-r7-*.zip"
+check "transcript archive is not binary stdout" "! printf '%s' \"\$OUT\" | grep -q 'zip-fixture'"
 
 # --- live ---------------------------------------------------------------------
 if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then

@@ -173,6 +173,11 @@ ai-glm doctor                   # full PASS/WARN/FAIL check, nonzero on failure
 ai-glm server status|start|stop|restart
 ```
 
+Named session creation is locked across the full check, server create, and local
+metadata write. Two same-name calls cannot create an untracked duplicate. On Windows,
+restart waits up to 30 seconds for loopback port 4096 to become free, starts the task
+only after proof, and then waits for health instead of relying on a fixed sleep.
+
 Scoped implementation:
 ```bash
 ai-glm implement fix-token-rotation --prompt-file /tmp/task.md

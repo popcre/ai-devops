@@ -94,6 +94,10 @@ if grep -q 'opencode-glm-service' bin/setup-opencode-glm.ps1 && grep -q 'server.
 else bad "scheduled task output is discarded"; fi
 if grep -q 'Wait-PortFree' bin/setup-opencode-glm.ps1; then ok "waits for the port before starting the task"
 else bad "no port wait; the smoke test can block the real server"; fi
+if grep -q "ProcessName -notmatch 'opencode'" bin/ai-glm; then ok "restart verifies the old listener before stopping it"
+else bad "restart may stop an unrelated listener"; fi
+if grep -q 'stayed busy for 30 seconds' bin/ai-glm; then ok "restart has a bounded port-free wait"
+else bad "restart can race the old listener"; fi
 
 echo "== GLM task recovery policy =="
 if grep -q 'max_attempts=4' bin/setup-opencode-glm.ps1 && grep -q 'sleep 60' bin/setup-opencode-glm.ps1; then

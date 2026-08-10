@@ -196,10 +196,10 @@ echo "== stop_reason handling =="
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "cancelled exits non-zero" || bad "cancelled exits non-zero"
-check "cancelled message names the turn budget" "printf '%s' \"\$OUT\" | grep -qi 'turn budget'"
+check "cancelled has cancellation recovery message" "printf '%s' \"\$OUT\" | grep -qi 'cancelled without a final answer'"
 check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
-check "cancelled message says NOT permissions"  "printf '%s' \"\$OUT\" | grep -qi 'not a permissions problem'"
-check "cancelled message gives the recovery cmd" "printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
+check "cancelled does not recommend resume"     "! printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
+check "cancelled recommends a fresh session"   "printf '%s' \"\$OUT\" | grep -qi 'fresh named session'"
 
 echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1
@@ -241,7 +241,9 @@ echo "== duplicate_new_is_refused (per-repo in-flight lock) =="
 # Derive the repo id exactly as the script does — from git's own toplevel, which
 # on Windows is a C:/… path and not the mktemp path in $REPO.
 RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
-LOCKDIR="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' "$RROOT" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//').lock.d"
+RREMOTE="$(git -C "$RROOT" config --get remote.origin.url 2>/dev/null || echo '')"
+RID_NEW="$(printf '%s\n%s' "$(cd "$RROOT" && pwd -P)" "$RREMOTE" | sha256sum | cut -c1-12)"
+LOCKDIR="$AI_GROK_STATE_DIR/locks/repo--$RID_NEW.lock.d"
 mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:other\n' > "$LOCKDIR/label"
 OUT="$(run new t9 --prompt x 2>&1)"; RC=$?
 rm -rf "$LOCKDIR"

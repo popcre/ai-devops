@@ -66,8 +66,10 @@ Grok to re-read those paths before checking each claim as confirmed, unsupported
 wrong. Keep the consensus ledger in the artifact current.
 
 The default bound is the initial review plus at most three rebuttal turns. The default
-total Grok ceiling is $1.50, including the initial turn. Add the reported
-`total_cost_usd` after every turn. Estimate the next turn using the largest observed
+total Grok ceiling is $1.50, including the initial turn. The parent skill enforces this
+planning ceiling; the wrapper cannot stop a turn mid-spend. Measured on Grok 0.2.112 on
+2026-08-10, resumed `total_cost_usd` is per-call, not cumulative. Add the reported value
+after every turn exactly once. Estimate the next turn using the largest observed
 per-turn cost in this session, or $0.46 before the first resume. Stop before the estimate
 would cross the ceiling and report unresolved objections plainly.
 
@@ -98,8 +100,9 @@ The wrapper tells you which case you are in and what to do. The one thing to int
 > the cached prefix.
 
 Recovery is an `ask` on the same session with a higher `--max-turns`, which the error
-message spells out for you. An empty *resumed* run after a cancellation is a known
-0.2.118 behaviour: start a fresh session rather than retrying that one.
+message spells out for you. Cancellation is different: an empty resumed run after a
+cancellation is a known 0.2.112/0.2.118 behaviour, so start a fresh session rather than
+retrying that one.
 
 ## Verifying the install
 
