@@ -9,7 +9,7 @@
 | 3. Make setup and doctor prove recovery | ✅ complete | 2026-08-09 | Setup replaced the task twice with equivalent normalized XML. Doctor reports task state/last result and validates the installed wrapper bound. |
 | 4. Add Windows regression tests | ✅ complete | 2026-08-09 | `tests/test-windows-scripts.sh`: 21 passed, 0 failed. `tests/test-ai-glm.sh` offline coverage retained and extended through doctor source checks. |
 | 5. Run live continuity and cache tests | ✅ complete | 2026-08-09 | Clean detached `AI_GLM_LIVE=1 bash tests/test-ai-glm.sh`: 145 passed, 0 failed. Same named session remembered the marker across server restart; report recorded cache tokens; review tree stayed clean. |
-| 6. Document, install, commit, and push | 🟨 integration pending | 2026-08-09 | Docs, shared skill guidance, setup, doctor, plan, and handoff are updated; installer and final checks completed locally. Commit/push are reserved for the coordinating root session because Grok/Kimi agents share this branch. CI/deploy N/A. |
+| 6. Document, install, commit, and push | ✅ complete | 2026-08-10 | Docs, shared skill, setup, doctor, and tests shipped in `f738db7`; `origin/main` was verified at the same SHA. CI/deploy N/A. |
 
 Fresh sessions start at the first open row and must update this table as work lands. This plan is independent of the Grok/Kimi plans and may land first. Before any edit or push, pull `origin/main`, inspect concurrent work, and create one write-once `HANDOFF.d/<UTC>-<machine>-<agent>-glm-service-reliability.md` file cross-linked to this plan. Never rewrite another session's handoff.
 
