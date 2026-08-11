@@ -1,6 +1,6 @@
 ---
 name: shared-db-change
-description: Discipline for any change to the shared supabase.com backend. Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says "make db changes the proper way", "mirror it to shared-db", or "re-author it properly in shared-db".
+description: Discipline for any CHANGE to the shared supabase.com backend. Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says "make db changes the proper way", "mirror it to shared-db", or "re-author it properly in shared-db". Also states Rule 0 — read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch — so load it too when the ask is "does the shared database fit our data", "compare our data shape to the schema", "review the schema", or "what columns exist".
 ---
 
 # shared-db-change
@@ -15,7 +15,9 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > GitHub issue and stops —
 > `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
 > This skill tells you how to author a correct change once you have been
-> dispatched; it is not permission to start one.
+> dispatched; it is not permission to start one. **This STOP is about changing,
+> not looking** — read-only inspection of the schema is always allowed from
+> anywhere (Rule 0 below).
 >
 > **Working IN the shared-db repo, or running more than one workstream?** Load the
 > **`shared-db-orchestrator`** skill as well. This skill covers how to author a
@@ -44,7 +46,40 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
 > A required check fails any PR that writes work back into the old file.
 
-## Hard rules
+## Rule 0 — read-only inspection is ALLOWED, from every repo, always
+
+**None of the gates below apply to reading.** This skill governs *changes*. Any AI
+session, in any application repository, may inspect the shared database in full
+without a GitHub issue, an orchestrator dispatch, or a handoff:
+
+- schemas; tables and columns; keys and relationships; indexes and constraints
+- views; functions and RPCs; triggers; row-security (RLS) policies
+- migration history; generated types; metadata; safe sample data when a review
+  genuinely needs it
+
+It may compare all of that against application code, scraper output, source-data
+shapes, expected business rules and proposed features, and report the gaps. That
+is normal engineering work. Deciding whether the shared database fits an app's
+data **requires** seeing the whole schema, so refusing to look is a failure, not
+caution.
+
+Three conditions on a read-only review:
+
+1. **Read only.** No `ALTER`/`CREATE`/`DROP`, no `INSERT`/`UPDATE`/`DELETE`, no
+   `apply_migration`, no migration file, no branch — in preview or production. The
+   moment you mutate anything, it stops being a review and the rules below apply.
+2. **Know what you are pointed at** before every call — `get_project_url` for the
+   MCP, `cat supabase/.temp/project-ref` for the CLI — and quote it in your report.
+   Use the approved read-only AI identity wherever one is required.
+3. **Licensed data stays put.** A review may read private licensor source data
+   inside its approved private repository; licensed rows never go into a public
+   repo, a GitHub issue, logs, prompts sent to outside services, commit messages
+   or pull requests.
+
+Everything below — the issue, the orchestrator, the branch/PR/preview process —
+starts the moment the answer is "and now change it".
+
+## Hard rules (these govern CHANGES)
 
 1. ~~**DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.~~
    **SUPERSEDED — see the box above.** Never `execute_sql` for DDL still holds; "via MCP

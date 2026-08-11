@@ -68,9 +68,18 @@ in the issue and leave a ten-page briefing in `HANDOFF.d/`. A ten-page briefing 
 into an issue is a ten-page briefing nobody reads.
 
 **Right path.** If you had **already started** work, this is a handover — this path.
-If you had **not** started and simply need database work done, that is a **request**,
-and the skill is `shared-db-orchestrator`. Filing one as the other sends it to the
-wrong triage.
+If you had **not** started and simply need a database **change** made, that is a
+**request**, and the skill is `shared-db-orchestrator`. Filing one as the other sends
+it to the wrong triage.
+
+**Read-only inspection is neither.** If all you did was *look* — schemas, tables,
+columns, keys, indexes, views, functions/RPCs, triggers, RLS policies, migration
+history, generated types, safe sample data — and compare it to your app's data
+shape, you have nothing to hand over and nothing to request. Reading the shared
+schema is allowed from every application repo, always, with no issue and no
+dispatch. Say what you learned and carry on. A handover is only owed once you
+mutated something (DDL, DML, `apply_migration`, a migration file, a branch, a
+preview or production push).
 
 Your block must cover, at minimum:
 
