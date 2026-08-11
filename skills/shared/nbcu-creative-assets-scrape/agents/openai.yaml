@@ -1,0 +1,4 @@
+interface:
+  display_name: "NBCU Scrape"
+  short_description: "Capture NBCU licensed catalogue metadata"
+  default_prompt: "Use $nbcu-creative-assets-scrape to refresh the authorized NBCU catalogue and relationships."
