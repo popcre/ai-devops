@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST database work instead of starting it. Load it for THREE situations, before doing anything else. (0) ANYONE who needs shared-database work done — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST a database CHANGE instead of starting it. NOTE — this skill gates CHANGES ONLY; read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types, safe samples) is ALLOWED from every application repo with no issue and no dispatch, so do NOT load this skill merely to look at the schema. Load it for THREE situations, before doing anything else. (0) ANYONE who needs a shared-database CHANGE made — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
@@ -55,7 +55,31 @@ correct migration), `handoff-writer` (the 9-section handoff standard) and
 for the repo's own rules — §4 anti-collision, §5 merge protocol, §5.1 bounded
 production promotion, §5.2 stale CI verdicts.
 
-## If you need database work done: REQUEST it, do not start it
+## FIRST: reading is not "database work". Reading is always allowed.
+
+**This whole skill governs CHANGES. It does not gate reading, and it never has
+authority to.** Any AI session, in any application repository, may inspect the
+shared database in full — with no GitHub issue, no dispatch from the orchestrator
+and no handoff:
+
+schemas; tables and columns; keys and relationships; indexes and constraints;
+views; functions and RPCs; triggers; row-security policies; migration history;
+generated types; metadata; and safe sample data when a review genuinely needs it.
+
+It may compare that against application code, scraper output, source-data shapes,
+expected business rules and proposed features, and report gaps. Every app on this
+database must be able to judge whether the database fits its data, and that is
+impossible without seeing the schema. **Do not file an issue to read.** Do not tell
+a user that looking at the schema is queued for the orchestrator.
+
+The line is mutation. The moment a session runs `ALTER`/`CREATE`/`DROP`, any
+`INSERT`/`UPDATE`/`DELETE`, `apply_migration`, or opens a migration file or
+branch — in preview or in production — it has left read-only territory and
+everything below applies. (A read-only session still proves its connection target
+before every call and still keeps licensed rows inside their approved private
+repo.)
+
+## If you need a database CHANGE: REQUEST it, do not start it
 
 This is the most common — and most commonly skipped — path in this repo. It
 applies to every session and every person who is **not** the current orchestrator.
@@ -99,9 +123,11 @@ ones people feel entitled to make directly, and this database is shared by four
 applications that will not find out until a user does. Size is not the test —
 whether it touches the shared database is the test.
 
-**If you are an AI session and a user asks you for database work:** do not start
-it, do not "just check", do not open a migration file, and do not create a
-background task chip. Open the issue, tell the user in
+**If you are an AI session and a user asks you to CHANGE the database:** do not
+start it, do not open a migration file, and do not create a
+background task chip. (You *may* read the live schema first to write an accurate
+request — reading is always allowed; see the top of this skill.) Open the issue,
+tell the user in
 plain English that it is queued for the orchestrator and give them the issue
 link, and stop. Being asked directly by a user is not an exemption — the
 orchestrator exists precisely because four sessions were each asked directly.
@@ -112,7 +138,10 @@ The orchestrator session **reads reports, decides, asks Albert, dispatches.** Th
 is all. It performs **no** implementation work of its own:
 
 - no file edits, no commits, no pushes, no merges
-- no database calls of any kind
+- no database calls of any kind — this one is a **context-budget** rule for the
+  orchestrator role only, not the read-only rule. Read-only inspection is allowed
+  everywhere (top of this skill); the orchestrator delegates it because its
+  context window is the scarce resource, not because reading is forbidden.
 - no long file reads it can delegate
 
 **Five exceptions, and only these — the orchestrator's own bookkeeping.** They are

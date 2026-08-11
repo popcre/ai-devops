@@ -136,7 +136,9 @@ Never silently discard a detail record. Maintain one `dropped.csv` with `href,st
 
 For a recovery of known missing details, use `asset-index.csv` as the authoritative href list and preserve the exact detail form already stored there (`details.html`, `details/image.html`, `details/video.html`, or `details/document.html`). Preserve percent encoding such as `%20`; do not decode and rebuild URLs.
 
-Do not load a database. Database design and promotion are separate shared-db work.
+Do not load a database, and do not change one. Database design changes and promotion are separate `shared-db` work: open a GitHub issue — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>` — and stop.
+
+**Reading the shared database is allowed and needs no issue.** You may inspect the live shared Supabase structure in full (schemas, tables, columns, keys and relationships, indexes, constraints, views, functions/RPCs, triggers, RLS policies, migration history, generated types, metadata, safe sample data) and compare it against the NBCU source shape to report gaps. That is a review, not a load. The confidentiality rules above are unchanged while you do it: licensed NBCU rows, rights lists and examples stay under `nbcu/` in the private `u2giants/licensor-source-data` repo and never appear in a public repo, a GitHub issue, logs, prompts sent to outside services, commit messages or PR text — describe the shape, never paste the data.
 
 ## Learning loop
 

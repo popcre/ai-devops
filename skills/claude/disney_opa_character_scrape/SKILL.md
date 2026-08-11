@@ -35,9 +35,16 @@ names**. The 2026-08-06 baseline was 10,262 / 1,445 / 9,591.
 3. **Close the tab you opened** when finished.
 4. **The data is business-confidential.** It comes from a commercial licensing
    relationship. Do not publish it and do not send it to any third-party service.
-5. **Database work is a separate job with its own rules.** If the ask is "put
-   this in the database", that is the shared Supabase database and it goes
+5. **Changing the database is a separate job with its own rules.** If the ask is
+   "put this in the database", that is the shared Supabase database and it goes
    through `shared-db-orchestrator` — file a request, do not build a table.
+   **Reading it is not gated:** you may inspect the live shared schema in full
+   (schemas, tables, columns, keys and relationships, indexes, constraints, views,
+   functions/RPCs, triggers, RLS policies, migration history, generated types,
+   metadata, safe sample data) and compare it against the OPA source shape to
+   report gaps — no issue, no dispatch. Rule 4 still binds: OPA data is
+   business-confidential and never goes into a public repo, an issue, logs, an
+   outside service, a commit message or a PR.
 
 ---
 
@@ -185,8 +192,10 @@ Do not let the user believe this is "the Disney character list" without these:
 ## If asked to put this in the database
 
 **Stop and file a request.** The shared Supabase database is used by four live
-apps, and a session asked directly for database work files a request rather than
-starting it. Load `shared-db-orchestrator` and follow it.
+apps, and a session asked directly to *change* it files a request rather than
+starting it. Load `shared-db-orchestrator` and follow it. (Reading the schema
+first — to write an accurate request, or to answer "does the database already fit
+this?" — is allowed and needs no request.)
 
 Existing material, as of 2026-08-06:
 
@@ -226,5 +235,6 @@ Still untested: whether `characterID` is stable enough to be that identity key.
 
 ## Related skills
 
-- `shared-db-orchestrator` — required before any shared-database work.
+- `shared-db-orchestrator` — required before any shared-database **change**
+  (read-only schema inspection needs nothing).
 - `shared-db-change` — how to author a correct migration, once dispatched.

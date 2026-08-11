@@ -124,7 +124,9 @@ Do not load rows unless validation passes and every crawl gap is explained.
 
 ## Shared database gate
 
-Do not start database work. If the extract implies a schema change, **open a GitHub issue** and stop — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>`. The active orchestrator owns migrations and database writes. Never place scraped rows or examples in that request. *(Corrected 2026-08-09: this said to copy a request template into `COORDINATOR_INTAKE.md` under `## REQUEST QUEUE`; that file was retired on 2026-08-07 and a required check now fails any PR that writes into it.)*
+**Reading is allowed; changing is not.** You may inspect the live shared Supabase structure in full — schemas, tables, columns, keys and relationships, indexes, constraints, views, functions/RPCs, triggers, RLS policies, migration history, generated types, metadata, and safe sample data — and compare it against the Warner source shape to decide whether the database fits. That review needs **no** GitHub issue and no dispatch. Never place scraped Warner rows or examples in anything you write outside the approved private source-data repo.
+
+Do not start a database **change**. If the extract implies a schema change, **open a GitHub issue** and stop — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>`. The active orchestrator owns migrations and database writes. Never place scraped rows or examples in that request. *(Corrected 2026-08-09: this said to copy a request template into `COORDINATOR_INTAKE.md` under `## REQUEST QUEUE`; that file was retired on 2026-08-07 and a required check now fails any PR that writes into it.)*
 
 The source layer must preserve Warner values. Promotion into `core.property`, `core.character`, and the many-to-many property-character bridge is a later, idempotent reconciliation step. Unresolved labels are reported, never invented.
 

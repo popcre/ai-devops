@@ -209,14 +209,48 @@ agent automation; stop and switch to the dedicated read-only AI identity.
       shared branch**. Anything already in `develop`/`main` stays; rewriting it
       breaks every clone and the release history.
 
-> **Database = `u2giants/shared-db`, always.** Any schema/DDL change to the shared
-> supabase backend (`<removed-protected-project-ref>`) — column/table/view/RPC/trigger/RLS/
-> seed/migration or cross-app data contract — is authored in `u2giants/shared-db`
-> (branch + PR, preview-first, you merge it) BEFORE app code. NEVER add app-repo
-> migrations (e.g. a Sequelize `models/db.js` startup `ALTER`/`CREATE`) and NEVER
-> run direct `ALTER`/`CREATE`/`DROP` (psql/MCP) against the shared DB. If an app
-> repo's own docs still teach an inline-migration pattern, they are stale —
-> shared-db wins. [full: shared-db-change]
+> ## Shared database: reading is open, changing is not
+>
+> The shared supabase backend (`<removed-protected-project-ref>`) serves many applications.
+> Each application must be able to see the whole thing to judge whether it fits
+> its data. So the rule splits in two, and the split is global — it is not
+> limited to Paramount, to any one scraper, or to any one app.
+>
+> **1. Read-only inspection is ALLOWED from EVERY application repository.** It
+> needs no GitHub issue, no orchestrator dispatch, no handoff, and no permission.
+> Any AI session in any repo may inspect: schemas; tables and columns; keys and
+> relationships; indexes and constraints; views; functions and RPCs; triggers;
+> row-security (RLS) policies; migration history; generated types; metadata; and
+> safe sample data when a review genuinely needs it.
+>
+> **2. It may compare** the live Supabase structure against application code,
+> scraper output, source-data shapes, expected business rules, and proposed
+> features — and report the gaps. That is normal engineering work. Do not call it
+> "database work" and refuse it.
+>
+> **3. Every CHANGE is authored in `u2giants/shared-db` FIRST** (branch + PR,
+> preview-first, you merge it) BEFORE app code. This covers: schema changes;
+> tables or columns; views; functions or RPCs; triggers; row-security policies;
+> indexes and constraints; seeds; migrations; and shared data contracts.
+>
+> **4. From an application repo, NEVER:** create its own shared-database
+> migration (e.g. a Sequelize `models/db.js` startup `ALTER`/`CREATE`); run
+> direct `ALTER`/`CREATE`/`DROP` or any other structure-changing SQL (psql, MCP
+> or CLI); change shared Supabase data or structure during a review; or bypass
+> the shared-db preview → branch → pull-request process. A review that mutates
+> anything has stopped being a review.
+>
+> **5. Production and shared-cloud safety rules are unchanged.** Read-only access
+> must use the approved read-only AI identity wherever one is required; never use
+> privileged personal credentials for agent automation.
+>
+> **6. Licensed-data protection is unchanged.** A schema review may read private
+> licensor source data inside its approved private repository, but licensed rows
+> must never be copied into a public repo, a GitHub issue, logs, prompts sent to
+> outside services, commit messages, or pull requests.
+>
+> If an app repo's own docs still teach an inline-migration pattern, they are
+> stale — shared-db wins. [full: shared-db-change]
 
 ## Session protocol
 

@@ -168,14 +168,33 @@ agent automation; stop and switch to the dedicated read-only AI identity.
   `u2giants/shared-db`); sweep new secrets into 1Password with rich notes;
   leave no repo with mystery untracked files. [full: session-docs-update,
   secrets-to-1password]
-- **DB changes = `u2giants/shared-db`, always.** Any schema/DDL change to the
-  shared supabase backend (`<removed-protected-project-ref>`) — column/table/view/RPC/
-  trigger/RLS/seed/migration or cross-app data contract — is authored in
-  `u2giants/shared-db` (branch + PR, preview-first, AI merges) BEFORE app code.
-  NEVER add app-repo migrations (e.g. Sequelize `models/db.js` startup DDL) and
-  NEVER run direct `ALTER`/`CREATE`/`DROP` against the shared DB. App-repo docs
-  that still teach an inline-migration pattern are stale — shared-db wins.
-  Matching timestamps; regenerate types after. [full: codex-shared-db-change]
+- **Shared database — READING is open, CHANGING is not.** The shared supabase
+  backend (`<removed-protected-project-ref>`) serves many apps, and every app must be able to
+  see the whole thing to judge whether it fits its data. This split is global — not
+  Paramount-only, not scraper-only.
+  - **Read-only inspection is ALLOWED from EVERY application repo**, with no
+    GitHub issue, no orchestrator dispatch and no handoff: schemas; tables and
+    columns; keys and relationships; indexes and constraints; views; functions and
+    RPCs; triggers; row-security policies; migration history; generated types;
+    metadata; and safe sample data when a review needs it. Comparing that against
+    app code, scraper output, source-data shapes, business rules or a proposed
+    feature — and reporting the gaps — is normal work. Do not refuse it as
+    "database work".
+  - **Every CHANGE is authored in `u2giants/shared-db` first** (branch + PR,
+    preview-first, AI merges) BEFORE app code: schema, tables/columns, views,
+    functions/RPCs, triggers, RLS policies, indexes/constraints, seeds,
+    migrations, shared data contracts. Matching timestamps; regenerate types after.
+  - **From an app repo, NEVER** create its own shared-DB migration (e.g. Sequelize
+    `models/db.js` startup DDL), run direct `ALTER`/`CREATE`/`DROP` or other
+    structure-changing SQL, mutate shared Supabase data or structure during a
+    review, or bypass the shared-db preview → branch → PR process.
+  - **Unchanged:** production/shared-cloud safety (use the approved read-only AI
+    identity where required, never privileged personal credentials for
+    automation), and licensed-data protection (a review may read private licensor
+    source data in its approved private repo; licensed rows never go into a public
+    repo, issue, log, outside-service prompt, commit message or PR).
+  - App-repo docs that still teach an inline-migration pattern are stale —
+    shared-db wins. [full: codex-shared-db-change]
 - **Deploy verify (hetz apps):** Actions green → GHCR image → Coolify (services
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).
