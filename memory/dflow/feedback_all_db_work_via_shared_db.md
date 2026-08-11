@@ -1,15 +1,13 @@
 ---
 name: feedback_all_db_work_via_shared_db
-description: All shared-Supabase DB CHANGES must be authored/applied through the u2giants/shared-db repo — read-only inspection is allowed from every app repo
+description: All shared-Supabase DB changes must be authored/applied through the u2giants/shared-db repo
 metadata: 
   node_type: memory
   type: feedback
   originSessionId: 5398de33-e7ff-49c8-a5a3-1529add38755
 ---
 
-**Scope correction, 2026-08-10 (owner ruling).** This memory is about **CHANGES**, not reading. Read-only inspection of the shared database is **allowed from every application repository**, with no GitHub issue, no orchestrator dispatch and no handover: schemas, tables and columns, keys and relationships, indexes, constraints, views, functions/RPCs, triggers, RLS policies, migration history, generated types, metadata and safe sample data — plus comparison against app code, scraper output, source-data shapes, business rules and proposed features. Do not treat "DB work" as a blanket that also blocks looking. See `shared-db` `AGENTS.md` §0.0-A and `shared-db-change` Rule 0.
-
-**All DB CHANGES must go through `https://github.com/u2giants/shared-db`** (local clone `C:\repos\shared-db`). The user corrected me after I fixed a bug by (a) running a direct `ALTER` on the shared sandbox DB via psycopg and (b) adding an inline migration to `designflow-backend/models/db.js`. Both are wrong as the canonical path — even the legacy `dflow` schema now goes through shared-db (a concurrent session added `20260710140000_dflow_product_user_assignment.sql` there).
+**All DB work must go through `https://github.com/u2giants/shared-db`** (local clone `C:\repos\shared-db`). The user corrected me after I fixed a bug by (a) running a direct `ALTER` on the shared sandbox DB via psycopg and (b) adding an inline migration to `designflow-backend/models/db.js`. Both are wrong as the canonical path — even the legacy `dflow` schema now goes through shared-db (a concurrent session added `20260710140000_dflow_product_user_assignment.sql` there).
 
 **Why:** the shared Supabase project `qsllyeztdwjgirsysgai` backs CRM/DAM/PIM/PM/PLM; ad-hoc DDL or app-repo-only migrations cause drift and can break other apps.
 
