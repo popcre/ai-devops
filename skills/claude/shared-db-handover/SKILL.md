@@ -305,8 +305,20 @@ The handover is where unverified claims become someone else's false assumptions.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
 5b. **Close your orchestrator marker** — the open GitHub issue labelled
-   `orchestrator-marker` you opened at step 0 of the orchestrator sweep. Close it
-   **last**, after the handover PR is merged. Leaving it open makes the next
+   `orchestrator-marker` you opened at step 0 of the orchestrator sweep.
+
+   > ⚠️ **"Last" means AFTER STEP 9, not here at 5b.** This step is numbered 5b for
+   > readability — it sits next to the PR merge it depends on — but **do not perform
+   > it in numbered order.** Steps 6 through 9 (secrets sweep, docs pass, sweep
+   > confirmation, queue check, the fresh-developer gate) all still run, and step 6b
+   > says its output "goes in the handover PR". Closing the marker at 5b would drop
+   > the single-orchestrator lock with five steps of closeout still to go, and would
+   > tell the next orchestrator the board is clear while you are still working.
+   > **Close the marker as the final external action of the session, after step 9
+   > passes.** *(Ordering contradiction found 2026-08-11 by an independent Codex
+   > GPT-5.6 review, shared-db issue #530.)*
+
+   Close it **last**, after the handover PR is merged. Leaving it open makes the next
    orchestrator stop and ask Albert about a session that ended cleanly; that stop
    is the correct behaviour for a *dead* orchestrator and pure noise for a clean
    handover. If you are handing over without ending (a fresh session continues
