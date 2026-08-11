@@ -30,7 +30,7 @@ description: Open and run a session as ONE orchestrator that does no work itself
 >
 > | Skill | When |
 > |---|---|
-> | **`shared-db-orchestrator`** (this one) | **OPENING and running** a session. You are in charge and you dispatch; you do no work yourself. Also the skill for anyone who needs database work and must request it. |
+> | **`shared-db-orchestrator`** (this one) | **OPENING and running** a session. You are in charge and you dispatch; you do no work yourself. Also the skill for anyone who needs a database **change** and must request it (reading needs no request).  |
 > | `shared-db-change` | **AUTHORING** a schema change — the migration discipline itself |
 > | `shared-db-handover` | **ENDING or STOPPING** a session |
 
