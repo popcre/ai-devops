@@ -9,6 +9,7 @@
 | 3. Resume exact sessions in reconstructed disposable worktrees | ✅ complete | 2026-08-10 | Live session `session_fb473043-5d4e-485a-bf2c-60021a3dd954` completed two turns; patch hash `5041641cb3d6c0fea58cd6815edb10bf27741f4a3132c4b13f87791c528eb1f2`. |
 | 4. Add failure recovery, controls, reconciliation, and migration | ✅ complete | 2026-08-10 | `reset-context`, strict legacy refusal, owned deletion, lock coverage, incomplete-state blocking, and ignored-file cleanup pass. |
 | 5. Verify, document, commit, and push | ✅ complete | 2026-08-10 | `bash -n`, 115 Kimi tests, 25 Windows tests, live proof, doctor, installed-skill byte comparison, identity, commit, and push verified. |
+| 6. Close post-review P3 reliability items | ✅ complete | 2026-08-11 | Version 1.3.0 adds same-name and cross-mode collision proof, moved-checkout listing, ten-turn continuity coverage, and turn-only failed-continuation patches. The offline suite passes 134 tests. |
 
 This plan was completed on 2026-08-10.
 
@@ -23,6 +24,16 @@ GLM 5.2's required-change review is incorporated and registered by
 GLM 5.2 re-reviewed the amended file in the same named session on 2026-08-10,
 marked R1-R9 and all three minor notes PASS, returned `APPROVE`, and confirmed a
 brand-new session can execute it without questions.
+
+The remaining P3 follow-up was completed on 2026-08-11 in version 1.3.0. A failed
+continuation now keeps its cumulative recovery patch while also exporting a separate
+turn-only patch and turn-only changed-file summary. `list` discovers sessions after a
+checkout move by matching the repository remote. Direct tests now cover same-name
+concurrency, review-versus-implementation name collisions, one exact session through ten
+turns, and the split cumulative/turn-only recovery output.
+GLM 5.2 then reviewed the final diff, found no P1 or P2 issues, identified one P3
+temporary-file cleanup omission, and returned `APPROVE` with no remaining findings after
+that omission was fixed. The 134-test suite passed again after the fix.
 
 ## 1. The ultimate goal
 

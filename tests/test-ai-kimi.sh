@@ -71,6 +71,11 @@ case "$mode" in
       mkdir -p ignored-build; printf ephemeral > ignored-build/marker.txt
     fi
     cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
+  continuationpartial)
+    test -f first-turn.txt && test -f second-turn.txt || exit 9
+    printf 'failed-turn-only\n' > failed-turn-only.txt
+    printf '{"role":"assistant","content":"provider interrupted before completion"}\n'
+    exit 7 ;;
   usagepartial)
     printf 'partial source work\n' > partial.txt
     printf '\000\001\002KIMI-PARTIAL\377' > partial.bin
@@ -153,6 +158,26 @@ echo "== caller separation =="
 ( cd "$REPO" && AI_KIMI_CALLER=codex bash "$SCRIPT" new r1 --prompt "codex copy" ) >/dev/null 2>&1
 check "Claude record still resolves" "run show r1 | jq -e '.caller == \"claude\"'"
 check "Codex record is separate" "(cd '$REPO' && AI_KIMI_CALLER=codex bash '$SCRIPT' show r1) | jq -e '.caller == \"codex\"'"
+ARGV_BEFORE="$(wc -l < "$TMP/argv.txt")"
+OUT="$(run implement r1 --prompt 'must not cross modes' 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "review and implementation names cannot collide" || bad "review and implementation names cannot collide"
+check "mode collision starts no provider turn" "test \"\$(wc -l < '$TMP/argv.txt')\" -eq '$ARGV_BEFORE' && printf '%s' \"\$OUT\" | grep -q 'review session'"
+
+echo "== same-name implementation concurrency =="
+echo slow > "$TMP/mode"; : > "$TMP/argv.txt"
+( cd "$REPO" && exec bash "$SCRIPT" implement same-name --prompt wait ) >/dev/null 2>&1 &
+SAME_PID=$!
+for _ in 1 2 3 4 5; do
+  find "$AI_KIMI_STATE_DIR/worktrees" -path '*/same-name/owner.json' -print -quit 2>/dev/null | grep -q . && break
+  sleep 1
+done
+SAME_ARGV="$(wc -l < "$TMP/argv.txt")"
+OUT="$(run implement same-name --prompt duplicate 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "same-name concurrent implementation is refused" || bad "same-name concurrent implementation is refused"
+check "concurrent refusal starts no second provider turn" "test \"\$(wc -l < '$TMP/argv.txt')\" -eq '$SAME_ARGV' && printf '%s' \"\$OUT\" | grep -q 'already active'"
+kill -TERM "$SAME_PID" 2>/dev/null || true; wait "$SAME_PID" 2>/dev/null || true
+check "concurrency test leaves no disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
+echo ok > "$TMP/mode"
 
 echo "== legacy implementation sessions are not guessed =="
 RID="$(printf '%s' "$(git -C "$REPO" rev-parse --show-toplevel)" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
@@ -208,10 +233,25 @@ MOVED="$TMP/repo-moved"; mv "$REPO" "$MOVED"
 OUT="$(cd "$MOVED" && bash "$SCRIPT" ask persistent1 --prompt 'continue after repository move' 2>&1 >/dev/null)"; RC=$?
 [ $RC -eq 0 ] && ok "moved checkout persistent ask succeeds" || { bad "moved checkout persistent ask succeeds"; printf '  diagnostic: %s\n' "$OUT"; }
 check "moved checkout keeps original session state directory" "test -f '$META' && jq -e '.generation==5' '$META'"
+check "list discovers a persistent session after checkout move" "(cd '$MOVED' && bash '$SCRIPT' list) | grep -q persistent1"
 mv "$MOVED" "$REPO"
 OUT="$(run implement persistent1 --prompt 'continue by implement after moving back' 2>&1 >/dev/null)"; RC=$?
 [ $RC -eq 0 ] && ok "implement finds moved persistent session instead of duplicating it" || bad "implement finds moved persistent session instead of duplicating it"
 check "implement after move advances the original record" "jq -e '.generation==6' '$META' && test \"\$(find '$AI_KIMI_STATE_DIR/sessions' -path '*/claude--persistent1.d/metadata.json' | wc -l)\" -eq 1"
+for TURN in 7 8 9 10; do
+  run ask persistent1 --prompt "long conversation turn $TURN" >/dev/null 2>&1 || bad "persistent conversation reaches turn $TURN"
+done
+check "ten-turn conversation keeps exact identity and one state record" "jq -e '.generation==10 and .turns==10 and .kimi_session_id==\"session_35e1a0a2-139f-4095-afdd-fce90a32ed2d\"' '$META' && test \"\$(find '$AI_KIMI_STATE_DIR/sessions' -path '*/claude--persistent1.d/metadata.json' | wc -l)\" -eq 1"
+check "ten-turn conversation leaves one registered worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
+echo continuationpartial > "$TMP/mode"
+OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run ask persistent1 --prompt 'fail after prior proven work' 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "failed continuation remains unsuccessful" || bad "failed continuation remains unsuccessful"
+TURN_PATCH="$(ls -t "$REPO"/.ai/reviews/kimi-persistent1-*.turn.incomplete.patch 2>/dev/null | head -1)"
+CUM_PATCH="$(ls -t "$REPO"/.ai/reviews/kimi-persistent1-*.incomplete.patch 2>/dev/null | grep -v '\.turn\.' | head -1)"
+TURN_REPORT="$(ls -t "$REPO"/.ai/reviews/kimi-persistent1-*.incomplete.md 2>/dev/null | head -1)"
+check "failed continuation exports cumulative recovery and turn-only patches" "test -s '$CUM_PATCH' && test -s '$TURN_PATCH' && grep -q first-turn.txt '$CUM_PATCH' && grep -q failed-turn-only.txt '$TURN_PATCH' && ! grep -q first-turn.txt '$TURN_PATCH'"
+check "failed continuation report describes only this turn" "grep -q failed-turn-only.txt '$TURN_REPORT' && ! grep -q first-turn.txt '$TURN_REPORT' && grep -q 'This turn only' '$TURN_REPORT'"
+echo persistent > "$TMP/mode"
 HUMAN_BEFORE="$(find "$REPO/.ai/reviews" -name 'kimi-persistent1-*' | wc -l)"
 jq '.patch_sha256="deliberately-corrupt"' "$META" > "$META.tmp"; mv "$META.tmp" "$META"
 run delete persistent1 >/dev/null 2>&1
