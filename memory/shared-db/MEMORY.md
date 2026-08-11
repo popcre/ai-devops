@@ -4,3 +4,4 @@
 - [shared-db apply mechanics](shared-db-apply-mechanics.md) — Supabase MCP is read-only; apply via the GitHub workflow or the Management API query endpoint; the preview ledger is unreliable
 - [PopDAM two permission systems](popdam-two-permission-systems.md) — public schema (admin|user) vs app schema (administrator/designer/viewer); Master Data open writes are INTENTIONAL — never restrict them (see shared-db AGENTS.md 0.4)
 - [1Password MCP token race](onepassword-mcp-token-race.md) — "Service account token is required" = the MCP started tokenless, not a bad token; fixed in the ai-devops launcher + 1password-mcp 2.7.0 (published/live 2026-07-27); `op` CLI still works meanwhile
+- [Shared DB read-only is open](shared-db-read-only-is-open.md) — owner ruling 2026-08-10: every app repo may inspect the schema with no issue or dispatch; only changes go through shared-db
