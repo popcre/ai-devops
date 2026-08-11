@@ -4,15 +4,13 @@
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Qualify Kimi resume behavior for implementation | ⬜ open | N/A | N/A |
-| 2. Add durable implementation-session state and cumulative artifacts | ⬜ open | N/A | N/A |
-| 3. Resume exact sessions in reconstructed disposable worktrees | ⬜ open | N/A | N/A |
-| 4. Add failure recovery, controls, reconciliation, and migration | ⬜ open | N/A | N/A |
-| 5. Verify, document, commit, and push | ⬜ open | N/A | N/A |
+| 1. Qualify Kimi resume behavior for implementation | ✅ complete | 2026-08-10 | Live Kimi 0.32.0 proved different-path refusal, then exact-ID success after remove/recreate at one stable path. |
+| 2. Add durable implementation-session state and cumulative artifacts | ✅ complete | 2026-08-10 | Version-2 owned state, immutable base, atomic cumulative binary patch, hash, generation, and recovery state pass offline tests. |
+| 3. Resume exact sessions in reconstructed disposable worktrees | ✅ complete | 2026-08-10 | Live session `session_fb473043-5d4e-485a-bf2c-60021a3dd954` completed two turns; patch hash `5041641cb3d6c0fea58cd6815edb10bf27741f4a3132c4b13f87791c528eb1f2`. |
+| 4. Add failure recovery, controls, reconciliation, and migration | ✅ complete | 2026-08-10 | `reset-context`, strict legacy refusal, owned deletion, lock coverage, incomplete-state blocking, and ignored-file cleanup pass. |
+| 5. Verify, document, commit, and push | ✅ complete | 2026-08-10 | `bash -n`, 115 Kimi tests, 25 Windows tests, live proof, doctor, installed-skill byte comparison, identity, commit, and push verified. |
 
-Fresh sessions start at the first open row. Update this table and section 5 after every
-gate. This open plan is registered by
-[`HANDOFF.d/2026-08-10T2314Z-AL8960OFC-codex-kimi-persistent-implementation.md`](HANDOFF.d/2026-08-10T2314Z-AL8960OFC-codex-kimi-persistent-implementation.md).
+This plan was completed on 2026-08-10.
 GLM 5.2's required-change review is incorporated and registered by
 [`HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md`](HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md).
 GLM 5.2 re-reviewed the amended file in the same named session on 2026-08-10,
@@ -146,7 +144,11 @@ They belong to other work and must remain untouched and unstaged.
 2. Conversation continuity alone is insufficient. The next workspace must reconstruct
    the exact cumulative code state before Kimi resumes.
 3. A permanent worktree is unnecessary. Durable state can be an immutable base SHA plus
-   one atomic cumulative binary patch materialized into a fresh worktree per turn.
+   one atomic cumulative binary patch materialized into a fresh worktree per turn. Live
+   qualification found that Kimi 0.32.0 binds a session to the exact working-directory
+   path. The worktree must therefore be removed and recreated at one stable, validated
+   per-session path. The files and Git registration are disposable; only the path name
+   remains stable.
 4. The canonical artifact must be the full diff from original base to current delegated
    state, not a fragile chain of turn patches.
 5. A turn without a terminal hint remains incomplete. Reusing its session after an
@@ -199,7 +201,8 @@ They belong to other work and must remain untouched and unstaged.
 Decisions dated 2026-08-10:
 
 - **LOCKED:** Persistent means exact conversation plus exact cumulative code.
-- **LOCKED:** Workspaces remain disposable per turn.
+- **LOCKED:** Workspaces remain disposable per turn and are recreated at the same
+  validated per-session path because Kimi 0.32.0 rejects exact-ID resume elsewhere.
 - **LOCKED:** Original base SHA is immutable for the named session.
 - **LOCKED:** One atomic binary cumulative patch is canonical code state.
 - **LOCKED:** `implement <existing-name>` and `ask <implementation-name>` continue the
@@ -253,10 +256,12 @@ Decisions dated 2026-08-10:
 
 ### Phase 1: qualify transport behavior
 
-1. Extend `tests/test-ai-kimi.sh` with a bounded live qualification. Prove an
-   implementation session created in worktree A resumes by exact ID in reconstructed
-   worktree B, recalls a turn-1 marker, reads cumulative file state in B, and changes
-   only B. Measure provider failure, timeout, and cancellation separately. Also prove a
+1. Extend `tests/test-ai-kimi.sh` with a bounded live qualification. The 2026-08-10 live
+   probe proved that Kimi 0.32.0 rejects exact-ID resume from a different path with
+   `Session ... was created under a different directory`. Prove the supported design:
+   remove worktree A, reconstruct worktree B at the same validated path, resume by exact
+   ID, recall a turn-1 marker, read cumulative file state, and change only B. Measure
+   provider failure, timeout, and cancellation separately. Also prove a
    binary cumulative patch with additions, deletion, executable/mode change, untracked
    source, and a path longer than 260 characters round-trips under Git Bash. Create one
    ignored dependency/build marker in turn 1 and prove it is deliberately absent in turn

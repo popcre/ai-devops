@@ -7,8 +7,9 @@
 # isolation for write runs.
 #
 #   ai-kimi new <name>       [--prompt T | --prompt-file F | stdin]   read-only review
-#   ai-kimi ask <name>       [--prompt T | --prompt-file F | stdin]   continue it
-#   ai-kimi implement <name> [--prompt T | --prompt-file F | stdin]   write run, isolated
+#   ai-kimi ask <name>       [--prompt T | --prompt-file F | stdin]   continue its saved mode
+#   ai-kimi implement <name> [--prompt T | --prompt-file F | stdin]   create/continue write run
+#   ai-kimi reset-context <name> [--prompt T | --prompt-file F]       visible recovery
 #   ai-kimi list | show <name> | transcript <name> | delete <name>
 #   ai-kimi doctor [--live]
 #
@@ -44,6 +45,11 @@
 #   --agent/--agent-file CANNOT be combined with --session/--continue, so the
 #     agent is fixed when a session is created. That is why review and
 #     implement are different sessions and can never be the same one.
+#   Exact implementation resume is DIRECTORY-BOUND. A live 0.32.0 probe refused
+#     the exact ID in a different folder with "was created under a different
+#     directory". The wrapper removes the worktree, then reconstructs a new one
+#     at the same validated per-session path. Conversation and Git-visible source
+#     continuity survive; ignored files do not.
 #
 #   STRUCTURAL READ-ONLY, PROVEN (this is the finding that justifies the script):
 #     Negative control, plain `kimi -m kimi-code/k3 -p "Write HACKED into
@@ -67,7 +73,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 STATE_DIR="${AI_KIMI_STATE_DIR:-$HOME/.local/state/ai-devops/kimi}"
 CALLER="${AI_KIMI_CALLER:-claude}"
@@ -172,8 +178,11 @@ repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; 
 valid_name() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
 
 meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
 lock_path()     { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 repolock_path() { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+workspace_path(){ printf '%s/worktrees/kimi.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
 lock_acquire() {
@@ -204,7 +213,8 @@ write_meta() {
   printf '%s\n' "$2" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true; mv -f "$tmp" "$f"
 }
 find_meta() {
-  local f old repo remote cand found=""; f="$(meta_path "$1" "$2")"
+  local f old repo remote cand found=""; f="$(impl_meta_path "$1" "$2")"
+  [ -f "$f" ] || f="$(meta_path "$1" "$2")"
   if [ ! -f "$f" ]; then
     repo="$(repo_root)"; old="$(meta_path "$(legacy_repo_id "$repo")" "$2")"
     if [ -f "$old" ]; then mkdir -p "$(dirname "$f")"; mv "$old" "$f"; fi
@@ -271,6 +281,50 @@ await_result() { # await_result FILE LABEL
   note "  Raise the ceiling with AI_KIMI_WAIT_TIMEOUT=<seconds> for a genuinely long run."
   AWAIT_RESULT_REASON="timeout"
   return 1
+}
+
+sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+
+valid_impl_record() { # valid_impl_record RID NAME META
+  local rid="$1" name="$2" meta="$3" dir manifest patch
+  dir="$(impl_dir "$rid" "$name")"; manifest="$dir/owner.json"; patch="$dir/cumulative.patch"
+  [ "$meta" = "$dir/metadata.json" ] && [ -f "$manifest" ] && [ -f "$patch" ] || return 1
+  jq -e --arg repo "$(repo_root)" --arg remote "$(repo_remote "$(repo_root)")" \
+    --arg caller "$CALLER" --arg name "$name" --arg patch "$patch" --arg meta "$meta" \
+    '.version==2 and .mode=="implement" and .repo==$repo and .repo_remote==$remote and
+     .caller==$caller and .name==$name and (.base_sha|type=="string") and (.base_sha|length==40) and
+     (.patch_sha256|type=="string") and (.generation|type=="number") and
+     (.continuity_state|type=="string")' "$meta" >/dev/null 2>&1 || return 1
+  jq -e --arg dir "$dir" --arg meta "$meta" --arg patch "$patch" \
+    '.version==1 and .owner_dir==$dir and .metadata==$meta and .cumulative_patch==$patch' \
+    "$manifest" >/dev/null 2>&1 || return 1
+  [ "$(sha256_file "$patch")" = "$(jq -r .patch_sha256 "$meta")" ]
+}
+
+write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
+  local rid="$1" name="$2" repo="$3" base="$4" sid="$5" wt="$6" terminal="$7" continuity="$8" old="${9:-}"
+  local dir meta patch manifest tmp_patch hash now turns generation created
+  dir="$(impl_dir "$rid" "$name")"; meta="$dir/metadata.json"; patch="$dir/cumulative.patch"; manifest="$dir/owner.json"
+  mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
+  tmp_patch="$(mktemp "$dir/.cumulative.XXXXXX")" || return 1
+  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$tmp_patch" || { rm -f "$tmp_patch"; return 1; }
+  git -C "$wt" diff --check "$base" >/dev/null 2>&1 || { rm -f "$tmp_patch"; return 1; }
+  hash="$(sha256_file "$tmp_patch")"; now="$(date -u +%FT%TZ)"
+  if [ -n "$old" ] && [ -f "$old" ]; then
+    turns=$(( $(jq -r '.turns // 0' "$old") + 1 )); generation=$(( $(jq -r '.generation // 0' "$old") + 1 )); created="$(jq -r .created "$old")"
+  else turns=1; generation=1; created="$now"; fi
+  mv -f "$tmp_patch" "$patch" || return 1; chmod 0600 "$patch" 2>/dev/null || true
+  write_meta "$manifest" "$(jq -n --arg dir "$dir" --arg meta "$meta" --arg patch "$patch" \
+    '{version:1,owner_dir:$dir,metadata:$meta,cumulative_patch:$patch}')" || return 1
+  write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
+    --arg name "$name" --arg caller "$CALLER" --arg model "$KIMI_MODEL" --arg base "$base" \
+    --arg patch "$patch" --arg hash "$hash" --arg created "$created" --arg updated "$now" \
+    --arg terminal "$terminal" --arg continuity "$continuity" --argjson turns "$turns" --argjson generation "$generation" \
+    '{version:2,kimi_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"implement",
+      model:$model,base_sha:$base,canonical_patch:$patch,patch_sha256:$hash,generation:$generation,turns:$turns,
+      created:$created,updated:$updated,last_terminal_state:$terminal,incomplete_state:($terminal!="completed"),
+      continuity_state:$continuity,lifecycle_status:(if $continuity=="exact" then "ready" else "recovery-required" end),
+      ephemeral_state_notice:"Ignored dependencies, build output, downloads, caches, and secrets are not preserved. Generation is wrapper bookkeeping, not a Kimi turn counter."}')"
 }
 
 # ---------------------------------------------------------------------------
@@ -420,14 +474,17 @@ ai-kimi $VERSION — Kimi Code delegation in persistent, named sessions.
   ai-kimi new <name>       [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi ask <name>       [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-kimi reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi list | show <name> | transcript <name> | delete <name>
   ai-kimi doctor [--live]
 
-'new'/'ask' are STRUCTURALLY read-only — they run under an agent profile with no
-write, edit, patch or bash tool. 'implement' is an explicit write run and is
-isolated in a throwaway git worktree; its diff is emitted as a patch for you to
-review and apply. Model is pinned ($KIMI_MODEL) because Kimi does not report
-which model answered.
+'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
+read-only for reviews, but an implementation continuation (write run) for an
+implementation session. 'implement' creates or continues an isolated write
+session. Each write turn uses a new disposable worktree reconstructed from the
+immutable base and cumulative patch. Ignored build and dependency state does
+not persist. No patch is applied to the live repository automatically. Model is
+pinned ($KIMI_MODEL) because Kimi does not report which model answered.
 
 Environment:
   AI_KIMI_CALLER       'claude' (default) or 'codex' — keeps sessions separate
@@ -530,9 +587,13 @@ LIFECYCLE_BASE=""
 LIFECYCLE_PF=""
 LIFECYCLE_OUT=""
 LIFECYCLE_LOCK=""
+LIFECYCLE_SESSION_LOCK=""
 LIFECYCLE_COMMAND_RC="unavailable"
 LIFECYCLE_ARTIFACT_DURABLE=0
 LIFECYCLE_PRESERVE=0
+LIFECYCLE_RID=""
+LIFECYCLE_META=""
+LIFECYCLE_SID=""
 
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
   local out="$1" err="$2" reason="$3"
@@ -672,7 +733,7 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT
 }
 
 lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
-  local original="${1:-1}" artifact_rc=0 final
+  local original="${1:-1}" artifact_rc=0 state_rc=0 final continuity
   final="$original"
   [ "$LIFECYCLE_ACTIVE" = 1 ] || return "$original"
   LIFECYCLE_ACTIVE=0
@@ -684,18 +745,33 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
       emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
         "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
     fi
+    if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
+      continuity=exact
+      [ "$LIFECYCLE_STATE" = completed ] || continuity=recovery-required
+      [ -n "$LIFECYCLE_SID" ] || LIFECYCLE_SID="$(session_id_from "$LIFECYCLE_OUT")"
+      [ -n "$LIFECYCLE_SID" ] || continuity=recovery-required
+      write_impl_state "$LIFECYCLE_RID" "$LIFECYCLE_NAME" "$LIFECYCLE_REPO" \
+        "$LIFECYCLE_BASE" "${LIFECYCLE_SID:-unavailable}" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_STATE" "$continuity" "$LIFECYCLE_META" || state_rc=1
+      if [ "$state_rc" = 1 ]; then
+        LIFECYCLE_PRESERVE=1; final=1
+        mark_preserved "$LIFECYCLE_OWNER" || true
+        warn "canonical Kimi state could not be saved. Exact-session resume is blocked; recovery worktree: $LIFECYCLE_WT"
+      fi
+    fi
     if [ "$artifact_rc" = 1 ]; then
       LIFECYCLE_PRESERVE=1; final=1
       mark_preserved "$LIFECYCLE_OWNER" || true
       warn "could not safely export Kimi's work. The exact recovery worktree remains at: $LIFECYCLE_WT"
       warn "after recovery, remove it with: git -C '$LIFECYCLE_REPO' worktree remove '$LIFECYCLE_WT'"
-    elif [ "$artifact_rc" = 0 ]; then
+    elif [ "$artifact_rc" = 0 ] && [ "$state_rc" = 0 ]; then
       LIFECYCLE_ARTIFACT_DURABLE=1
     fi
     [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
   fi
   rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
   [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
+  [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
   return "$final"
 }
 
@@ -719,6 +795,7 @@ start_session() { # start_session NAME MODE
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(meta_path "$rid" "$name")"
+  [ "$mode" = implement ] && meta="$(impl_meta_path "$rid" "$name")"
   [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-kimi ask $name"
 
   rid_lock="$(repolock_path "$rid")"
@@ -731,12 +808,14 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"; LIFECYCLE_WT=""
   LIFECYCLE_OWNER=""; LIFECYCLE_BASE=""; LIFECYCLE_PF=""; LIFECYCLE_OUT=""
   LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
+  LIFECYCLE_RID="$rid"; LIFECYCLE_META=""; LIFECYCLE_SID=""
 
   local workdir="$repo"
   if [ "$mode" = implement ]; then
     base="$(git -C "$repo" rev-parse HEAD)"
-    mkdir -p "$STATE_DIR/worktrees"
-    wt="$(mktemp -d "$STATE_DIR/worktrees/kimi.XXXXXX")/wt"
+    wt="$(workspace_path "$rid" "$name")"
+    [ ! -e "${wt%/wt}" ] || die "the stable disposable Kimi workspace path is still occupied: ${wt%/wt}"
+    mkdir -p "${wt%/wt}"
     git -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
       || die "could not create an isolated worktree for the implement run."
     owner="${wt%/wt}/owner.json"
@@ -765,6 +844,7 @@ start_session() { # start_session NAME MODE
   sid="$(session_id_from "$out")"
   [ -n "$sid" ] || die "Kimi returned no session id."
   LIFECYCLE_STATE=completed
+  LIFECYCLE_SID="$sid"
 
   after="$(tree_state "$repo")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
@@ -773,11 +853,13 @@ start_session() { # start_session NAME MODE
   Inspect: git -C $repo status"
   fi
 
-  write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
+  if [ "$mode" = review ]; then
+    write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
     '{kimi_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
       model:$model, created:$created, updated:$created, turns:$turns}')"
+  fi
 
   finish_turn "$repo" "$name" "$out"
   lifecycle_finalize 0
@@ -795,7 +877,11 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
   if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
     warn "the throwaway worktree $wt is STILL registered — remove it before continuing."
+    return 1
   fi
+  # `git worktree remove --force` can leave ignored build/dependency files behind.
+  # The owner record and validated wrapper-only path make this narrow cleanup safe.
+  rm -rf "$wt" 2>/dev/null || true
   rm -f "$owner" 2>/dev/null || true
   rmdir "${wt%/wt}" 2>/dev/null || true
 }
@@ -805,9 +891,7 @@ cmd_ask() {
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
-  [ "$mode" = review ] || die "session '$name' is an implement session and cannot be resumed.
-  Implement sessions are one-shot because their isolated worktree is removed after the patch
-  is emitted. Start a new 'ai-kimi implement <name>' run for another isolated write turn."
+  if [ "$mode" = implement ]; then continue_implementation "$name" "$rid" "$meta"; return; fi
 
   sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
@@ -836,6 +920,54 @@ cmd_ask() {
   rm -f "$pf" "$out" "$out.err"
 }
 
+continue_implementation() { # NAME RID META [RESET]
+  local name="$1" rid="$2" meta="$3" reset="${4:-0}" repo sid base patch expected actual sess_lock rid_lock wt owner pf out rc
+  [ "$(jq -r '.version // 1' "$meta")" = 2 ] || die "session '$name' is a legacy one-shot implementation and cannot be guessed or resumed.
+  Archive it with 'ai-kimi transcript $name', delete it with 'ai-kimi delete $name', then start persistent work with 'ai-kimi implement <new-name>'."
+  valid_impl_record "$rid" "$name" "$meta" || die "persistent implementation state for '$name' failed ownership, identity, or patch validation. No Kimi turn was started."
+  if [ "$reset" != 1 ]; then
+    [ "$(jq -r .continuity_state "$meta")" = exact ] || die "session '$name' requires recovery because conversation and canonical code may differ. Exact-session resume is blocked. Run: ai-kimi reset-context $name --prompt 'Restate the task and continue from the reconstructed code.'"
+  fi
+  repo="$(repo_root)"; sid="$(jq -r .kimi_session_id "$meta")"; base="$(jq -r .base_sha "$meta")"; patch="$(jq -r .canonical_patch "$meta")"
+  git -C "$repo" cat-file -e "$base^{commit}" 2>/dev/null || die "recorded immutable base $base is unavailable."
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
+  lock_acquire "$sess_lock" "implement-continuation:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  if ! lock_acquire "$rid_lock" "implement-continuation:$name"; then lock_release "$sess_lock"; die "another Kimi run is active: $(lock_info "$rid_lock")"; fi
+  LIFECYCLE_SESSION_LOCK="$sess_lock"; LIFECYCLE_LOCK="$rid_lock"
+  trap lifecycle_exit_trap EXIT; trap lifecycle_cancel INT TERM
+  LIFECYCLE_ACTIVE=1; LIFECYCLE_MODE=implement; LIFECYCLE_STATE=failed; LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"
+  LIFECYCLE_BASE="$base"; LIFECYCLE_RID="$rid"; LIFECYCLE_META="$meta"; LIFECYCLE_SID="$sid"
+  LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
+  wt="$(workspace_path "$rid" "$name")"
+  [ ! -e "${wt%/wt}" ] || die "the stable disposable Kimi workspace path is still occupied: ${wt%/wt}"
+  mkdir -p "${wt%/wt}"
+  git -c core.longpaths=true -C "$repo" worktree add -q --detach "$wt" "$base" >/dev/null 2>&1 || die "could not reconstruct the disposable implementation workspace."
+  git -C "$wt" config core.longpaths true
+  owner="${wt%/wt}/owner.json"; LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"
+  write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:"active"}')"
+  git -C "$wt" apply --check "$patch" >/dev/null 2>&1 && git -C "$wt" apply "$patch" >/dev/null 2>&1 || die "canonical patch cannot be applied to immutable base $base."
+  git -C "$wt" add -A >/dev/null 2>&1
+  expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
+  git -C "$wt" diff --binary "$base" > "$actual"; [ "$(sha256_file "$actual")" = "$expected" ] || die "reconstructed source hash does not equal the canonical patch hash."
+  rm -f "$actual"
+  pf="$(mktemp)"; out="$(mktemp)"; LIFECYCLE_PF="$pf"; LIFECYCLE_OUT="$out"; build_prompt_file "$pf"
+  { printf '%s\n\n' "NOTICE: This implementation continuation (write run) uses a newly reconstructed workspace. Git-visible source is exact. Ignored dependencies, build output, downloads, caches, and secrets did not persist. Recreate what is needed and rerun tests."; cat "$pf"; } > "$pf.notice"; mv "$pf.notice" "$pf"
+  if [ "$reset" = 1 ]; then
+    note "Kimi CONTEXT RESET (write run) '$name': preserving canonical code but starting a new conversation generation."
+    LIFECYCLE_SID=""; run_turn "$wt" "$out" "$pf" implement
+  else
+    note "Kimi implementation continuation (write run) '$name' resuming exact session $sid in a disposable workspace."
+    run_turn "$wt" "$out" "$pf" implement "$sid"
+  fi
+  rc="$RUN_TURN_RC"; LIFECYCLE_COMMAND_RC="$rc"
+  if ! await_result "$out" "implementation continuation '$name'"; then
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"; exit 1
+  fi
+  if [ "$reset" = 1 ]; then LIFECYCLE_SID="$(session_id_from "$out")"
+  else [ "$(session_id_from "$out")" = "$sid" ] || die "Kimi returned a different session id; refusing to advance canonical state."; fi
+  LIFECYCLE_STATE=completed; finish_turn "$repo" "$name" "$out"; lifecycle_finalize 0
+}
+
 finish_turn() {
   local repo="$1" name="$2" out="$3" path
   if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
@@ -854,9 +986,25 @@ cmd_list() {
     jq -r '[.name,.caller,.mode,.kimi_session_id,(.turns|tostring)]|@tsv' "$f" \
       | awk -F'\t' '{printf "%-24s %-8s %-11s %-46s %6s\n",$1,$2,$3,$4,$5}'
   done
+  for f in "$dir"/*.d/metadata.json; do
+    [ -f "$f" ] || continue
+    jq -r '[.name,.caller,.mode,.kimi_session_id,(.turns|tostring)]|@tsv' "$f" \
+      | awk -F'\t' '{printf "%-24s %-8s %-11s %-46s %6s\n",$1,$2,$3,$4,$5}'
+  done
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
-cmd_delete() { rm -f "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; note "deleted local session record '$1'."; }
+cmd_delete() {
+  local rid meta dir manifest sess_lock
+  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"; sess_lock="$(lock_path "$rid" "$1")"
+  [ ! -d "$sess_lock" ] || die "session '$1' has an active turn and cannot be deleted."
+  if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
+    valid_impl_record "$rid" "$1" "$meta" || die "refusing to delete untrusted implementation state."
+    dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
+    rm -f "$(jq -r .metadata "$manifest")" "$(jq -r .cumulative_patch "$manifest")" "$manifest"
+    rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
+  else rm -f "$meta"; fi
+  note "deleted local session record '$1'. Human-facing review and patch files were kept."
+}
 cmd_transcript() {
   local sid kimi repo dir out tmp; repo="$(repo_root)"
   sid="$(jq -r .kimi_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
@@ -868,6 +1016,24 @@ cmd_transcript() {
     || { rm -f "$tmp"; die "'kimi export $sid' failed. Check: kimi export --help"; }
   chmod 0600 "$tmp" 2>/dev/null || true; mv "$tmp" "$out"
   note "Kimi transcript archive written: $out"
+}
+
+cmd_implement() {
+  local name="$1" rid meta
+  rid="$(repo_id "$(repo_root)")"; meta="$(impl_meta_path "$rid" "$name")"
+  if [ -f "$meta" ]; then continue_implementation "$name" "$rid" "$meta"
+  elif [ -f "$(meta_path "$rid" "$name")" ]; then
+    meta="$(meta_path "$rid" "$name")"
+    [ "$(jq -r '.mode // ""' "$meta")" = implement ] && continue_implementation "$name" "$rid" "$meta"
+    die "session '$name' is a review session. Choose a different name for implementation."
+  else start_session "$name" implement; fi
+}
+
+cmd_reset_context() {
+  local rid meta
+  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
+  [ "$(jq -r '.mode // ""' "$meta")" = implement ] || die "reset-context applies only to implementation sessions."
+  continue_implementation "$1" "$rid" "$meta" 1
 }
 
 # ---------------------------------------------------------------------------
@@ -888,12 +1054,13 @@ need jq
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-kimi new <name> …";       start_session "$ARG" review ;;
-  implement)  [ -n "$ARG" ] || die "usage: ai-kimi implement <name> …"; start_session "$ARG" implement ;;
+  implement)  [ -n "$ARG" ] || die "usage: ai-kimi implement <name> …"; cmd_implement "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-kimi ask <name> …";       cmd_ask "$ARG" ;;
   list)       cmd_list ;;
   show)       [ -n "$ARG" ] || die "usage: ai-kimi show <name>";        cmd_show "$ARG" ;;
   transcript) [ -n "$ARG" ] || die "usage: ai-kimi transcript <name>";  cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-kimi delete <name>";      cmd_delete "$ARG" ;;
+  reset-context) [ -n "$ARG" ] || die "usage: ai-kimi reset-context <name> …"; cmd_reset_context "$ARG" ;;
   doctor)     cmd_doctor "$OPT_LIVE" ;;
   -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
   *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
