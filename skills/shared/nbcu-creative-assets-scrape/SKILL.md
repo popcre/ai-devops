@@ -108,6 +108,8 @@ Valid asset detail pages do not all use the title `Details`. The 2026-08-09 full
 
 Keep detail concurrency conservative. A jump to roughly 250 simultaneous reads caused HTTP 429 responses. Thirty-two workers completed the full pass reliably. Checkpoint every few thousand rows and retry only HTTP/network failures after a cool-down.
 
+When normal Chrome detail navigation is too slow because it renders previews, keep one authenticated NBCU detail tab and use its permitted CDP `Runtime.evaluate` command to run a same-origin `fetch` batch inside the page. Parse each returned HTML document with `DOMParser` in that page context and return only the metadata record. Use one `Promise.all` containing at most 32 URLs per command, then append every valid record before starting the next batch. Do not inspect cookies or request headers. Playwright's read-only evaluate scope does not expose `fetch`, and multiple concurrent CDP commands on one tab serialize; one page-native `Promise.all` is the fast, reliable form.
+
 Browser resets do not necessarily close controlled in-app-browser tabs. Before restarting a stalled detail pass, inspect `browser.tabs.list()` and finalize stale capture tabs. A 2026-08-10 recovery found 129 leftover tabs; they made normal detail navigation appear hung. Keep the user's signed-in handoff tab, close only agent-owned search/detail tabs, then resume from durable href checkpoints.
 
 ## Relationships
