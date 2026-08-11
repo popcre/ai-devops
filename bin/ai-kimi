@@ -73,7 +73,7 @@
 
 set -euo pipefail
 
-VERSION="1.2.1"
+VERSION="1.3.0"
 
 STATE_DIR="${AI_KIMI_STATE_DIR:-$HOME/.local/state/ai-devops/kimi}"
 CALLER="${AI_KIMI_CALLER:-claude}"
@@ -641,6 +641,7 @@ LIFECYCLE_PRESERVE=0
 LIFECYCLE_RID=""
 LIFECYCLE_META=""
 LIFECYCLE_SID=""
+LIFECYCLE_PRIOR_TREE=""
 
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
   local out="$1" err="$2" reason="$3"
@@ -709,9 +710,9 @@ artifact_dir() { # artifact_dir REPO
   printf '%s' "$dir"
 }
 
-emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT
+emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PRIOR_TREE]
   local repo="$1" name="$2" wt="$3" base="$4" owner="$5" kind="$6" state="$7" rc="$8" out="$9"
-  local dir ts suffix patch report patch_tmp report_tmp sid summary detail
+  local prior="${10:-$base}" dir ts suffix patch report turn_patch="" patch_tmp turn_tmp="" report_tmp sid summary detail
   valid_owner_record "$repo" "$wt" "$owner" active || {
     warn "refusing artifact export from an ambiguous Kimi worktree owner record: $owner"
     return 1
@@ -732,10 +733,16 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT
     return 2
   fi
   if [ "$kind" = incomplete ]; then
-    report_tmp="$(mktemp "$dir/.kimi-report.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
+    if [ "$prior" != "$base" ]; then
+      turn_patch="$dir/kimi-${name}-${ts}.turn.incomplete.patch"
+      turn_tmp="$(mktemp "$dir/.kimi-turn-patch.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
+      ( cd "$wt" && git diff --binary "$prior" ) > "$turn_tmp" 2>/dev/null || { rm -f "$patch_tmp" "$turn_tmp"; return 1; }
+      [ -s "$turn_tmp" ] || { rm -f "$turn_tmp"; turn_patch=""; }
+    fi
+    report_tmp="$(mktemp "$dir/.kimi-report.XXXXXX")" || { rm -f "$patch_tmp" "${turn_tmp:-}"; return 1; }
     chmod 0600 "$report_tmp" 2>/dev/null || true
     sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
-    summary="$(cd "$wt" && git diff --stat "$base" 2>/dev/null | head -40 | cut -c1-240)"
+    summary="$(cd "$wt" && git diff --stat "$prior" 2>/dev/null | head -40 | cut -c1-240)"
     detail="$(safe_report_detail "$state")"
     {
       echo "# INCOMPLETE Kimi implementation - $name"; echo
@@ -750,26 +757,30 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT
       echo "- Usage, tokens, cache, cost, and context: \`unavailable\`"
       echo "- Tests: not confirmed complete"
       echo "- Patch: \`$patch\`"
+      [ -z "$turn_patch" ] || echo "- This turn only: \`$turn_patch\`"
       echo "- Safe detail: $detail"; echo
       echo "## Changed-file summary"; echo; echo '```text'
       printf '%s\n' "${summary:-Git recorded changes, but no bounded stat text was available.}"
       echo '```'; echo
       echo "## Recovery"; echo
-      echo "1. Inspect only: \`git apply --stat '$patch'\`"
-      echo "2. Verify against the captured base: \`git apply --check '$patch'\`"
-      echo "3. Never apply this incomplete patch without reviewing every change and running the required tests."
-    } > "$report_tmp" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+      echo "1. Inspect cumulative work: \`git apply --stat '$patch'\`"
+      [ -z "$turn_patch" ] || echo "2. Inspect only this failed turn: \`git apply --stat '$turn_patch'\`"
+      echo "3. Verify the cumulative patch against the captured base: \`git apply --check '$patch'\`"
+      echo "4. Never apply an incomplete patch without reviewing every change and running the required tests."
+    } > "$report_tmp" || { rm -f "$patch_tmp" "${turn_tmp:-}" "$report_tmp"; return 1; }
   fi
   if [ "${AI_KIMI_TEST_FAIL_EXPORT:-}" = move ]; then
-    rm -f "$patch_tmp" "${report_tmp:-}"
+    rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"
     return 1
   fi
-  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${report_tmp:-}"; return 1; }
+  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"; return 1; }
   if [ "$kind" = incomplete ]; then
+    [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
     note "ai-kimi: $state with partial changes; command remains unsuccessful."
     note "INCOMPLETE patch written: $patch"
     note "INCOMPLETE report written: $report"
+    [ -z "$turn_patch" ] || note "THIS-TURN patch written: $turn_patch"
     note "  inspect: git apply --stat '$patch'"
     note "  verify:  git apply --check '$patch'"
   else
@@ -790,7 +801,8 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
         "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" complete completed "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
     else
       emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
-        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
+        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" \
+        "${LIFECYCLE_PRIOR_TREE:-$LIFECYCLE_BASE}" || artifact_rc=$?
     fi
     if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
       continuity=exact
@@ -860,6 +872,7 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_OWNER=""; LIFECYCLE_BASE=""; LIFECYCLE_PF=""; LIFECYCLE_OUT=""
   LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
   LIFECYCLE_RID="$rid"; LIFECYCLE_META=""; LIFECYCLE_SID=""
+  LIFECYCLE_PRIOR_TREE=""
 
   local workdir="$repo"
   if [ "$mode" = implement ]; then
@@ -1005,6 +1018,7 @@ continue_implementation() { # NAME RID META [RESET]
   expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
   git -C "$wt" diff --binary "$base" > "$actual"; [ "$(sha256_file "$actual")" = "$expected" ] || die "reconstructed source hash does not equal the canonical patch hash."
   rm -f "$actual"
+  LIFECYCLE_PRIOR_TREE="$(git -C "$wt" write-tree)" || die "could not capture the proven pre-turn source tree."
   pf="$(mktemp)"; out="$(mktemp)"; LIFECYCLE_PF="$pf"; LIFECYCLE_OUT="$out"; build_prompt_file "$pf"
   { printf '%s\n\n' "NOTICE: This implementation continuation (write run) uses a newly reconstructed workspace. Git-visible source is exact. Ignored dependencies, build output, downloads, caches, and secrets did not persist. Recreate what is needed and rerun tests."; cat "$pf"; } > "$pf.notice"; mv "$pf.notice" "$pf"
   if [ "$reset" = 1 ]; then
@@ -1033,19 +1047,19 @@ finish_turn() {
 }
 
 cmd_list() {
-  local rid dir f; rid="$(repo_id "$(repo_root)")"; dir="$STATE_DIR/sessions/$rid"
+  local repo rid remote f stored_rid
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; remote="$(repo_remote "$repo")"
   printf '%-24s %-8s %-11s %-46s %6s\n' NAME CALLER MODE SESSION TURNS
-  [ -d "$dir" ] || return 0
-  for f in "$dir"/*.json; do
-    [ -f "$f" ] || continue
+  [ -d "$STATE_DIR/sessions" ] || return 0
+  while IFS= read -r f; do
+    stored_rid="$(basename "$(dirname "$f")")"
+    [ "$(basename "$f")" != metadata.json ] || stored_rid="$(basename "$(dirname "$(dirname "$f")")")"
+    if [ "$stored_rid" != "$rid" ]; then
+      [ -n "$remote" ] && [ "$(jq -r '.repo_remote // ""' "$f" 2>/dev/null)" = "$remote" ] || continue
+    fi
     jq -r '[.name,.caller,.mode,.kimi_session_id,(.turns|tostring)]|@tsv' "$f" \
       | awk -F'\t' '{printf "%-24s %-8s %-11s %-46s %6s\n",$1,$2,$3,$4,$5}'
-  done
-  for f in "$dir"/*.d/metadata.json; do
-    [ -f "$f" ] || continue
-    jq -r '[.name,.caller,.mode,.kimi_session_id,(.turns|tostring)]|@tsv' "$f" \
-      | awk -F'\t' '{printf "%-24s %-8s %-11s %-46s %6s\n",$1,$2,$3,$4,$5}'
-  done
+  done < <(find "$STATE_DIR/sessions" -type f \( -name '*.json' ! -name owner.json -o -name metadata.json \) -print 2>/dev/null | sort -u)
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() {

@@ -138,6 +138,12 @@ auto-applies complete or incomplete patches. A failure before any change creates
 patch. Only an artifact-export failure preserves the exact recovery worktree and prints
 its path; ordinary failed worktrees are still removed.
 
+When a continuation fails, the cumulative `*.incomplete.patch` remains the recovery file
+that applies to the immutable base. The wrapper also writes a
+`*.turn.incomplete.patch` containing only changes made during that failed turn. The report's
+changed-file summary uses that turn-only view, so older proven work is not mislabeled as
+new failed work.
+
 Planning and execution cannot share a session: `--agent`/`--agent-file` cannot be combined
 with a resume, so the agent is fixed when a session is created — which is exactly why a
 read-only review session can never later become a write session. Plan in a review session,
