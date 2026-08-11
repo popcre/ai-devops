@@ -28,7 +28,7 @@ export AI_KIMI_WAIT_TIMEOUT=15
 REPO="$TMP/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" config user.email t@example.com; git -C "$REPO" config user.name T
-printf '.ai/\n' > "$REPO/.gitignore"; echo hi > "$REPO/a.txt"
+printf '.ai/\nignored-build/\n' > "$REPO/.gitignore"; echo hi > "$REPO/a.txt"
 git -C "$REPO" add -A; git -C "$REPO" commit -qm init
 
 STUB="$TMP/bin"; mkdir -p "$STUB"
@@ -54,6 +54,20 @@ case "$mode" in
   implcommit)
     printf 'committed delegate work\n' > committed.txt
     git add committed.txt && git -c user.email=t@example.com -c user.name=T commit -qm delegate
+    cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
+  persistent)
+    if printf '%s\n' "$*" | grep -q -- '-r session_35e1a0a2'; then
+      printf 'continued\n' >> "$TMPDIR_FOR_TEST/persistent-calls.txt"
+      test -f first-turn.txt || exit 9
+      grep -q first-turn first-turn.txt || exit 9
+      test ! -e ignored-build/marker.txt || exit 9
+      printf 'second-turn\n' > second-turn.txt
+      printf '\003\004TURN-TWO\376' >> persistent.bin
+    else
+      printf 'first-turn\n' > first-turn.txt
+      printf '\000\001TURN-ONE\377' > persistent.bin
+      mkdir -p ignored-build; printf ephemeral > ignored-build/marker.txt
+    fi
     cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   usagepartial)
     printf 'partial source work\n' > partial.txt
@@ -138,15 +152,15 @@ echo "== caller separation =="
 check "Claude record still resolves" "run show r1 | jq -e '.caller == \"claude\"'"
 check "Codex record is separate" "(cd '$REPO' && AI_KIMI_CALLER=codex bash '$SCRIPT' show r1) | jq -e '.caller == \"codex\"'"
 
-echo "== implement sessions are one-shot =="
+echo "== legacy implementation sessions are not guessed =="
 RID="$(printf '%s' "$(git -C "$REPO" rev-parse --show-toplevel)" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
 mkdir -p "$AI_KIMI_STATE_DIR/sessions/$RID"
 jq -n --arg sid session_implement --arg repo "$REPO" --arg name impl1 \
   --arg caller claude '{kimi_session_id:$sid,repo:$repo,name:$name,caller:$caller,mode:"implement",turns:1}' \
   > "$AI_KIMI_STATE_DIR/sessions/$RID/claude--impl1.json"
 OUT="$(run ask impl1 --prompt 'continue writing' 2>&1)"; RC=$?
-[ $RC -ne 0 ] && ok "implement session resume is refused" || bad "implement session resume is refused"
-check "refusal explains one-shot isolation" "printf '%s' \"\$OUT\" | grep -q 'one-shot'"
+[ $RC -ne 0 ] && ok "legacy implement resume is refused" || bad "legacy implement resume is refused"
+check "refusal gives restart guidance" "printf '%s' \"\$OUT\" | grep -q 'legacy one-shot'"
 
 echo "== committed implementation work is preserved and cleaned =="
 echo implcommit > "$TMP/mode"
@@ -156,6 +170,35 @@ check "committed changes are in patch" "grep -q committed.txt '$PATCH'"
 check "committed patch applies to original base" "git -C '$REPO' apply --check '$PATCH'"
 check "implementation worktree is removed" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 check "implementation agent profile is used" "grep -q -- 'local-implement.md' '$TMP/argv.txt'"
+
+echo "== persistent implementation resumes exact conversation and code =="
+echo persistent > "$TMP/mode"; : > "$TMP/argv.txt"
+run implement persistent1 --prompt 'turn one' >/dev/null 2>&1
+META="$(find "$AI_KIMI_STATE_DIR/sessions" -path '*/claude--persistent1.d/metadata.json' -print -quit)"
+CANON="$(jq -r .canonical_patch "$META")"; BASE="$(jq -r .base_sha "$META")"; HASH1="$(jq -r .patch_sha256 "$META")"
+check "persistent metadata is version 2" "jq -e '.version==2 and .generation==1 and .continuity_state==\"exact\"' '$META'"
+check "canonical patch has first-turn text and binary" "grep -q first-turn.txt '$CANON' && grep -q 'GIT binary patch' '$CANON'"
+POUT="$(run ask persistent1 --prompt 'turn two' 2>&1 >/dev/null)"; PRC=$?
+[ $PRC -eq 0 ] || printf '  diagnostic: persistent turn two: %s\n' "$POUT"
+check "implementation ask uses exact session id" "grep -q -- '-r session_35e1a0a2' '$TMP/argv.txt'"
+check "implementation stub executed the continuation branch" "grep -q continued '$TMP/persistent-calls.txt'"
+check "implementation ask warns that it is a write run" "printf '%s' \"\$POUT\" | grep -q 'implementation continuation (write run)'"
+check "generation advances after durable continuation" "jq -e '.generation==2 and .turns==2 and .base_sha==\"'$BASE'\"' '$META'"
+check "cumulative patch contains both turns" "grep -q first-turn.txt '$CANON' && grep -q second-turn.txt '$CANON'"
+check "canonical hash matches exact bytes" "test \"\$(sha256sum '$CANON' | awk '{print \$1}')\" = \"\$(jq -r .patch_sha256 '$META')\""
+check "canonical hash changed after continuation" "test '$HASH1' != \"\$(jq -r .patch_sha256 '$META')\""
+check "real repository remains unchanged" "test ! -e '$REPO/first-turn.txt' && test ! -e '$REPO/second-turn.txt'"
+check "every persistent turn removes disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
+check "implement existing name shares continuation path" "run implement persistent1 --prompt 'turn three' >/dev/null 2>&1 && jq -e '.generation==3' '$META'"
+write_recovery="$(jq '.continuity_state="recovery-required" | .lifecycle_status="recovery-required"' "$META")"; printf '%s\n' "$write_recovery" > "$META"
+OUT="$(run ask persistent1 --prompt blocked 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "recovery-required blocks exact resume" || bad "recovery-required blocks exact resume"
+check "blocked resume gives explicit reset command" "printf '%s' \"\$OUT\" | grep -q 'reset-context persistent1'"
+run reset-context persistent1 --prompt 'visible context reset' >/dev/null 2>&1
+check "explicit reset starts a proven new conversation generation" "jq -e '.generation==4 and .continuity_state==\"exact\"' '$META'"
+HUMAN_BEFORE="$(find "$REPO/.ai/reviews" -name 'kimi-persistent1-*' | wc -l)"
+run delete persistent1 >/dev/null 2>&1
+check "delete removes only private persistent state" "test ! -e '$META' && test \"\$(find '$REPO/.ai/reviews' -name 'kimi-persistent1-*' | wc -l)\" -eq '$HUMAN_BEFORE'"
 echo slow > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" implement implinterrupt --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!

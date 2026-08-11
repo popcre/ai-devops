@@ -5,11 +5,6 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 
 # Kimi Code Delegation
 
-> **Active redesign:** before changing implementation-session behavior, read the STATUS
-> table in `plan_kimi-persistent-implementation-sessions.md`. It is the approved plan for
-> replacing one-shot writes with exact-session persistence and reconstructed disposable
-> worktrees. Do not re-derive or bypass that design while any row is open.
-
 ## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 
 ```bash
@@ -148,15 +143,25 @@ with a resume, so the agent is fixed when a session is created — which is exac
 read-only review session can never later become a write session. Plan in a review session,
 amend the plan yourself, then start an `implement` session with the approved plan.
 
-Implementation sessions are deliberately one-shot. Their isolated worktree is removed
-after a complete or safely preserved incomplete patch is emitted, so `ai-kimi ask`
-refuses to resume them. Start a new named
-`implement` run for another write turn; never resume the old session in the live repo.
+Implementation sessions persist by exact session ID and one cumulative binary patch.
+Each turn reconstructs that patch on the immutable starting commit in a new disposable
+worktree. Kimi 0.32.0 binds resume to the original folder name, so the wrapper removes
+and recreates the worktree at one validated per-session path. Both
+`ai-kimi implement <existing-name>` and `ai-kimi ask <implementation-name>`
+continue the same write-capable session. `ask` is therefore an implementation
+continuation (write run), not a read-only review, when the named session is implementation.
+The wrapper never applies the cumulative patch to the live repo.
+
+Ignored dependencies, build output, downloads, caches, and secrets do not persist across
+turns. Recreate them when needed and rerun tests. If a failed turn or state-save failure
+could leave Kimi's conversation ahead of canonical code, the wrapper marks the session
+recovery-required and refuses exact-session continuation instead of guessing.
 
 Read-only Kimi cannot run tests because its profile has no `Bash`. An implementation run
 can run tests inside its throwaway worktree, but a stopped run's report always says tests
 are not confirmed complete. Run the relevant tests yourself against any patch you accept.
-Do not resume an implementation session with `ask`; start another isolated write run.
+Continue a healthy implementation session with `ask` or `implement` using its existing
+name. Review the newly emitted cumulative patch and run the relevant tests yourself.
 
 ## Verifying the install
 

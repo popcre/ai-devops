@@ -53,10 +53,10 @@ file.
 - `synology-sharesync-triage`: proves and narrowly repairs Synology Drive
   ShareSync stalls using NAS state, logs, and SQLite evidence.
 - `kimi-code-delegation`: delegates scoped coding tasks to Kimi Code CLI in
-  headless mode. Write runs stay isolated and one-shot. Complete patches and
-  clearly marked incomplete recovery patches both require local review and are
-  never applied automatically. Persistent write-session redesign is tracked in
-  `plan_kimi-persistent-implementation-sessions.md`; read its STATUS first.
+  headless mode. Write sessions keep the exact Kimi conversation and one
+  cumulative patch while rebuilding a disposable worktree for every turn.
+  `ask` is a write run for an implementation session. Complete and incomplete
+  patches require local review and are never applied automatically.
 - `grok-cli`: locates the installed Grok Build CLI, reads its version-matched
   local docs, and delegates read-only reviews or explicitly authorized edits.
 - `implementation-plan-writer`: writes (or judges) an implementation plan a
