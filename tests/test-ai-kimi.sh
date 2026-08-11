@@ -28,6 +28,7 @@ export AI_KIMI_WAIT_TIMEOUT=15
 REPO="$TMP/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" config user.email t@example.com; git -C "$REPO" config user.name T
+git -C "$REPO" remote add origin https://example.invalid/test/repo.git
 printf '.ai/\nignored-build/\n' > "$REPO/.gitignore"; echo hi > "$REPO/a.txt"
 git -C "$REPO" add -A; git -C "$REPO" commit -qm init
 
@@ -56,6 +57,7 @@ case "$mode" in
     git add committed.txt && git -c user.email=t@example.com -c user.name=T commit -qm delegate
     cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   persistent)
+    test "$(git config --bool core.longpaths)" = true || exit 8
     if printf '%s\n' "$*" | grep -q -- '-r session_35e1a0a2'; then
       printf 'continued\n' >> "$TMPDIR_FOR_TEST/persistent-calls.txt"
       test -f first-turn.txt || exit 9
@@ -64,7 +66,7 @@ case "$mode" in
       printf 'second-turn\n' > second-turn.txt
       printf '\003\004TURN-TWO\376' >> persistent.bin
     else
-      printf 'first-turn\n' > first-turn.txt
+      printf 'first-turn \n' > first-turn.txt
       printf '\000\001TURN-ONE\377' > persistent.bin
       mkdir -p ignored-build; printf ephemeral > ignored-build/marker.txt
     fi
@@ -184,21 +186,36 @@ check "implementation ask uses exact session id" "grep -q -- '-r session_35e1a0a
 check "implementation stub executed the continuation branch" "grep -q continued '$TMP/persistent-calls.txt'"
 check "implementation ask warns that it is a write run" "printf '%s' \"\$POUT\" | grep -q 'implementation continuation (write run)'"
 check "generation advances after durable continuation" "jq -e '.generation==2 and .turns==2 and .base_sha==\"'$BASE'\"' '$META'"
-check "cumulative patch contains both turns" "grep -q first-turn.txt '$CANON' && grep -q second-turn.txt '$CANON'"
-check "canonical hash matches exact bytes" "test \"\$(sha256sum '$CANON' | awk '{print \$1}')\" = \"\$(jq -r .patch_sha256 '$META')\""
+CANON2="$(jq -r .canonical_patch "$META")"
+check "cumulative patch contains both turns" "grep -q first-turn.txt '$CANON2' && grep -q second-turn.txt '$CANON2'"
+check "canonical hash matches exact bytes" "test \"\$(sha256sum '$CANON2' | awk '{print \$1}')\" = \"\$(jq -r .patch_sha256 '$META')\""
 check "canonical hash changed after continuation" "test '$HASH1' != \"\$(jq -r .patch_sha256 '$META')\""
 check "real repository remains unchanged" "test ! -e '$REPO/first-turn.txt' && test ! -e '$REPO/second-turn.txt'"
 check "every persistent turn removes disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 check "implement existing name shares continuation path" "run implement persistent1 --prompt 'turn three' >/dev/null 2>&1 && jq -e '.generation==3' '$META'"
-write_recovery="$(jq '.continuity_state="recovery-required" | .lifecycle_status="recovery-required"' "$META")"; printf '%s\n' "$write_recovery" > "$META"
+HASH3="$(jq -r .patch_sha256 "$META")"
+OUT="$(AI_KIMI_TEST_FAIL_STATE=after-patch run ask persistent1 --prompt 'state save failure' 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "state persistence failure remains unsuccessful" || bad "state persistence failure remains unsuccessful"
+check "state failure keeps prior canonical patch" "test \"\$(jq -r .patch_sha256 '$META')\" = '$HASH3' && test -f \"\$(jq -r .canonical_patch '$META')\""
+check "state failure marks recovery required" "jq -e '.continuity_state==\"recovery-required\" and .last_terminal_state==\"state-save-failed\"' '$META'"
+check "state failure cleans disposable worktree after durable human patch" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 OUT="$(run ask persistent1 --prompt blocked 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "recovery-required blocks exact resume" || bad "recovery-required blocks exact resume"
 check "blocked resume gives explicit reset command" "printf '%s' \"\$OUT\" | grep -q 'reset-context persistent1'"
 run reset-context persistent1 --prompt 'visible context reset' >/dev/null 2>&1
 check "explicit reset starts a proven new conversation generation" "jq -e '.generation==4 and .continuity_state==\"exact\"' '$META'"
+MOVED="$TMP/repo-moved"; mv "$REPO" "$MOVED"
+OUT="$(cd "$MOVED" && bash "$SCRIPT" ask persistent1 --prompt 'continue after repository move' 2>&1 >/dev/null)"; RC=$?
+[ $RC -eq 0 ] && ok "moved checkout persistent ask succeeds" || { bad "moved checkout persistent ask succeeds"; printf '  diagnostic: %s\n' "$OUT"; }
+check "moved checkout keeps original session state directory" "test -f '$META' && jq -e '.generation==5' '$META'"
+mv "$MOVED" "$REPO"
+OUT="$(run implement persistent1 --prompt 'continue by implement after moving back' 2>&1 >/dev/null)"; RC=$?
+[ $RC -eq 0 ] && ok "implement finds moved persistent session instead of duplicating it" || bad "implement finds moved persistent session instead of duplicating it"
+check "implement after move advances the original record" "jq -e '.generation==6' '$META' && test \"\$(find '$AI_KIMI_STATE_DIR/sessions' -path '*/claude--persistent1.d/metadata.json' | wc -l)\" -eq 1"
 HUMAN_BEFORE="$(find "$REPO/.ai/reviews" -name 'kimi-persistent1-*' | wc -l)"
+jq '.patch_sha256="deliberately-corrupt"' "$META" > "$META.tmp"; mv "$META.tmp" "$META"
 run delete persistent1 >/dev/null 2>&1
-check "delete removes only private persistent state" "test ! -e '$META' && test \"\$(find '$REPO/.ai/reviews' -name 'kimi-persistent1-*' | wc -l)\" -eq '$HUMAN_BEFORE'"
+check "delete cleans hash-mismatched state but keeps human artifacts" "test ! -e '$META' && test \"\$(find '$REPO/.ai/reviews' -name 'kimi-persistent1-*' | wc -l)\" -eq '$HUMAN_BEFORE'"
 echo slow > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" implement implinterrupt --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!

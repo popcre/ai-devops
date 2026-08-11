@@ -11,6 +11,13 @@
 | 5. Verify, document, commit, and push | ✅ complete | 2026-08-10 | `bash -n`, 115 Kimi tests, 25 Windows tests, live proof, doctor, installed-skill byte comparison, identity, commit, and push verified. |
 
 This plan was completed on 2026-08-10.
+
+GLM 5.2's post-implementation critique on 2026-08-11 found two P1 and three P2
+issues. Version 1.2.1 corrected them: whitespace is no longer mistaken for patch
+invalidity; generation-addressed patch files make metadata the atomic commit point and
+interrupted saves force recovery; damaged records remain safely deletable; moved
+checkouts reuse the original session; and first-turn Windows worktrees enable long
+paths. The offline suite now includes direct regression coverage for these cases.
 GLM 5.2's required-change review is incorporated and registered by
 [`HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md`](HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md).
 GLM 5.2 re-reviewed the amended file in the same named session on 2026-08-10,
