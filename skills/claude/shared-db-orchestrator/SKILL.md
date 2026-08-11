@@ -202,10 +202,27 @@ Run all eight steps, **in this order**, before the first brief goes out:
    one machine, at a time. The marker is a GitHub issue in `u2giants/shared-db`
    labelled `orchestrator-marker` — a tracked file cannot serve, because branch
    protection puts it behind a PR and the orchestrator does not commit.
-   `gh issue list --label orchestrator-marker --state open`, then:
+   `gh issue list --repo u2giants/shared-db --label orchestrator-marker --state open`,
+   then:
+   - **`--repo u2giants/shared-db` is NOT optional — it is the whole safety of this
+     step.** This skill loads into sessions working in OTHER repositories, which is
+     the entire reason it exists as a portable summary. Without `--repo`, `gh`
+     queries whatever repository you happen to be standing in, **succeeds with exit
+     0, and returns zero markers** — which is indistinguishable from a clear board.
+     You would then open a SECOND orchestrator while one is already live, defeating
+     the single-orchestrator lock this step exists to enforce. *(Found 2026-08-11 by
+     an independent Codex GPT-5.6 review, shared-db issue #530. The command was the
+     only labelled `gh issue list` in this file missing `--repo`.)*
    - **A failed `gh` call is UNKNOWN, never "none open".** Empty output from an
      unauthenticated or erroring `gh` reads exactly like a clear board. Confirm
-     the command succeeded before believing zero results.
+     the command succeeded before believing zero results — **check the exit status,
+     do not eyeball the output**. `gh` exits `0` on success *including a successful
+     query with zero results*, `1` on ordinary failure and `4` when authentication
+     is required, so the status is the only thing that tells the two apart:
+     ```bash
+     markers=$(gh issue list --repo u2giants/shared-db --label orchestrator-marker \
+       --state open) || { echo "UNKNOWN: gh failed (exit $?). STOP — do not dispatch."; exit 1; }
+     ```
    - **An open marker that is not yours: STOP, do not dispatch.** Show Albert its
      session id, machine and start time, and ask whether to close it. A dead
      orchestrator's marker stays open **on purpose**.
@@ -277,7 +294,7 @@ Run all eight steps, **in this order**, before the first brief goes out:
    sitting on it, and the orchestrator makes no database calls. Dispatch a
    read-only **preview observer** and record `UNKNOWN` in the register until its
    report lands. **Dispatch no preview writer while it reads `UNKNOWN`.**
-7. **Release stale object claims.** `gh issue list --label db-claim --state open`.
+7. **Release stale object claims.** `gh issue list --repo u2giants/shared-db --label db-claim --state open`.
    Every open claim blocks its objects for every future dispatch, so a claim left
    behind by a dead agent silently freezes part of the schema. For each one,
    check whether its work actually landed:
