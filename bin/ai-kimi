@@ -73,7 +73,7 @@
 
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.2.1"
 
 STATE_DIR="${AI_KIMI_STATE_DIR:-$HOME/.local/state/ai-devops/kimi}"
 CALLER="${AI_KIMI_CALLER:-claude}"
@@ -212,7 +212,7 @@ write_meta() {
   tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
   printf '%s\n' "$2" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true; mv -f "$tmp" "$f"
 }
-find_meta() {
+find_meta_optional() {
   local f old repo remote cand found=""; f="$(impl_meta_path "$1" "$2")"
   [ -f "$f" ] || f="$(meta_path "$1" "$2")"
   if [ ! -f "$f" ]; then
@@ -221,19 +221,30 @@ find_meta() {
   fi
   if [ ! -f "$f" ]; then
     remote="$(repo_remote "$repo")"
-    [ -n "$remote" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-kimi list"
+    [ -n "$remote" ] || return 1
     while IFS= read -r cand; do
       [ "$(jq -r '.name // ""' "$cand")" = "$2" ] || continue
       [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$2.json" 2>/dev/null)
-    [ -z "$found" ] || { mkdir -p "$(dirname "$f")"; mv "$found" "$f"; }
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" \) 2>/dev/null)
+    if [ -n "$found" ]; then
+      case "$found" in
+        */"$CALLER--$2.d/metadata.json") f="$found" ;; # Keep the rid: Kimi binds resume to its stable workspace path.
+        *) mkdir -p "$(dirname "$f")"; mv "$found" "$f" ;;
+      esac
+    fi
   fi
-  [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-kimi list"
+  [ -f "$f" ] || return 1
   printf '%s' "$f"
 }
+find_meta() {
+  local f
+  f="$(find_meta_optional "$1" "$2")" || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-kimi list"
+  printf '%s' "$f"
+}
+rid_from_meta() { basename "$(dirname "$(dirname "$1")")"; }
 
 # ---------------------------------------------------------------------------
 # The completion rule.
@@ -286,36 +297,42 @@ await_result() { # await_result FILE LABEL
 sha256_file() { sha256sum "$1" | awk '{print $1}'; }
 
 valid_impl_record() { # valid_impl_record RID NAME META
-  local rid="$1" name="$2" meta="$3" dir manifest patch
-  dir="$(impl_dir "$rid" "$name")"; manifest="$dir/owner.json"; patch="$dir/cumulative.patch"
-  [ "$meta" = "$dir/metadata.json" ] && [ -f "$manifest" ] && [ -f "$patch" ] || return 1
-  jq -e --arg repo "$(repo_root)" --arg remote "$(repo_remote "$(repo_root)")" \
+  local rid="$1" name="$2" meta="$3" dir manifest patch base
+  dir="$(impl_dir "$rid" "$name")"; manifest="$dir/owner.json"; patch="$(jq -r '.canonical_patch // ""' "$meta" 2>/dev/null)"
+  same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] && [ -f "$patch" ] || return 1
+  same_path "$(dirname "$patch")" "$dir" || return 1
+  base="$(basename "$patch")"; [ "$base" = cumulative.patch ] || printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' || return 1
+  jq -e --arg remote "$(repo_remote "$(repo_root)")" \
     --arg caller "$CALLER" --arg name "$name" --arg patch "$patch" --arg meta "$meta" \
-    '.version==2 and .mode=="implement" and .repo==$repo and .repo_remote==$remote and
+    '.version==2 and .mode=="implement" and .repo_remote==$remote and
      .caller==$caller and .name==$name and (.base_sha|type=="string") and (.base_sha|length==40) and
      (.patch_sha256|type=="string") and (.generation|type=="number") and
      (.continuity_state|type=="string")' "$meta" >/dev/null 2>&1 || return 1
-  jq -e --arg dir "$dir" --arg meta "$meta" --arg patch "$patch" \
-    '.version==1 and .owner_dir==$dir and .metadata==$meta and .cumulative_patch==$patch' \
+  jq -e --arg dir "$dir" --arg meta "$meta" \
+    '.version==1 and .owner_dir==$dir and .metadata==$meta' \
     "$manifest" >/dev/null 2>&1 || return 1
   [ "$(sha256_file "$patch")" = "$(jq -r .patch_sha256 "$meta")" ]
 }
 
 write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
   local rid="$1" name="$2" repo="$3" base="$4" sid="$5" wt="$6" terminal="$7" continuity="$8" old="${9:-}"
-  local dir meta patch manifest tmp_patch hash now turns generation created
-  dir="$(impl_dir "$rid" "$name")"; meta="$dir/metadata.json"; patch="$dir/cumulative.patch"; manifest="$dir/owner.json"
+  local dir meta patch manifest tmp_patch hash now turns generation created old_patch
+  dir="$(impl_dir "$rid" "$name")"; meta="$dir/metadata.json"; manifest="$dir/owner.json"
   mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
   tmp_patch="$(mktemp "$dir/.cumulative.XXXXXX")" || return 1
   ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$tmp_patch" || { rm -f "$tmp_patch"; return 1; }
-  git -C "$wt" diff --check "$base" >/dev/null 2>&1 || { rm -f "$tmp_patch"; return 1; }
   hash="$(sha256_file "$tmp_patch")"; now="$(date -u +%FT%TZ)"
   if [ -n "$old" ] && [ -f "$old" ]; then
     turns=$(( $(jq -r '.turns // 0' "$old") + 1 )); generation=$(( $(jq -r '.generation // 0' "$old") + 1 )); created="$(jq -r .created "$old")"
   else turns=1; generation=1; created="$now"; fi
-  mv -f "$tmp_patch" "$patch" || return 1; chmod 0600 "$patch" 2>/dev/null || true
-  write_meta "$manifest" "$(jq -n --arg dir "$dir" --arg meta "$meta" --arg patch "$patch" \
-    '{version:1,owner_dir:$dir,metadata:$meta,cumulative_patch:$patch}')" || return 1
+  patch="$dir/cumulative-$generation-$hash.patch"
+  if [ -f "$patch" ]; then [ "$(sha256_file "$patch")" = "$hash" ] || return 1; rm -f "$tmp_patch"
+  else mv -f "$tmp_patch" "$patch" || return 1; fi
+  chmod 0600 "$patch" 2>/dev/null || true
+  [ "${AI_KIMI_TEST_FAIL_STATE:-}" != after-patch ] || return 1
+  write_meta "$manifest" "$(jq -n --arg dir "$dir" --arg meta "$meta" \
+    '{version:1,owner_dir:$dir,metadata:$meta,patch_pattern:"cumulative-<generation>-<sha256>.patch"}')" || return 1
+  old_patch=""; [ -n "$old" ] && [ -f "$old" ] && old_patch="$(jq -r '.canonical_patch // ""' "$old")"
   write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
     --arg name "$name" --arg caller "$CALLER" --arg model "$KIMI_MODEL" --arg base "$base" \
     --arg patch "$patch" --arg hash "$hash" --arg created "$created" --arg updated "$now" \
@@ -325,6 +342,36 @@ write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
       created:$created,updated:$updated,last_terminal_state:$terminal,incomplete_state:($terminal!="completed"),
       continuity_state:$continuity,lifecycle_status:(if $continuity=="exact" then "ready" else "recovery-required" end),
       ephemeral_state_notice:"Ignored dependencies, build output, downloads, caches, and secrets are not preserved. Generation is wrapper bookkeeping, not a Kimi turn counter."}')"
+  [ -z "$old_patch" ] || [ "$old_patch" = "$patch" ] || rm -f "$old_patch" 2>/dev/null || true
+}
+
+reconcile_impl_patches() { # META RESET_ALLOWED
+  local meta="$1" reset="${2:-0}" dir canonical generation f base fgen
+  dir="$(dirname "$meta")"; canonical="$(jq -r .canonical_patch "$meta")"; generation="$(jq -r .generation "$meta")"
+  for f in "$dir"/cumulative-*.patch; do
+    [ -f "$f" ] || continue
+    same_path "$f" "$canonical" && continue
+    base="$(basename "$f")"
+    fgen="$(printf '%s' "$base" | sed -nE 's/^cumulative-([0-9]+)-[0-9a-f]{64}\.patch$/\1/p')"
+    [ -n "$fgen" ] || return 1
+    if [ "$fgen" -gt "$generation" ]; then
+      if [ "$reset" = 1 ]; then rm -f "$f" || return 1
+      else
+        mark_impl_recovery_required "$meta" uncommitted-state-detected || return 1
+        return 2
+      fi
+    else rm -f "$f" || return 1; fi
+  done
+  return 0
+}
+
+mark_impl_recovery_required() { # META TERMINAL
+  local meta="$1" terminal="$2" json
+  [ -n "$meta" ] && [ -f "$meta" ] || return 1
+  json="$(jq --arg u "$(date -u +%FT%TZ)" --arg t "$terminal" \
+    '.updated=$u | .last_terminal_state=$t | .incomplete_state=true |
+     .continuity_state="recovery-required" | .lifecycle_status="recovery-required"' "$meta")" || return 1
+  write_meta "$meta" "$json"
 }
 
 # ---------------------------------------------------------------------------
@@ -754,9 +801,13 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
         "$LIFECYCLE_BASE" "${LIFECYCLE_SID:-unavailable}" "$LIFECYCLE_WT" \
         "$LIFECYCLE_STATE" "$continuity" "$LIFECYCLE_META" || state_rc=1
       if [ "$state_rc" = 1 ]; then
-        LIFECYCLE_PRESERVE=1; final=1
-        mark_preserved "$LIFECYCLE_OWNER" || true
-        warn "canonical Kimi state could not be saved. Exact-session resume is blocked; recovery worktree: $LIFECYCLE_WT"
+        final=1
+        if mark_impl_recovery_required "$LIFECYCLE_META" state-save-failed; then
+          warn "canonical Kimi state could not be saved. The prior proven code was kept and exact-session resume is blocked."
+        else
+          LIFECYCLE_PRESERVE=1; mark_preserved "$LIFECYCLE_OWNER" || true
+          warn "canonical Kimi state and recovery metadata could not be saved. Recovery worktree: $LIFECYCLE_WT"
+        fi
       fi
     fi
     if [ "$artifact_rc" = 1 ]; then
@@ -816,8 +867,9 @@ start_session() { # start_session NAME MODE
     wt="$(workspace_path "$rid" "$name")"
     [ ! -e "${wt%/wt}" ] || die "the stable disposable Kimi workspace path is still occupied: ${wt%/wt}"
     mkdir -p "${wt%/wt}"
-    git -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
+    git -c core.longpaths=true -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
       || die "could not create an isolated worktree for the implement run."
+    git -C "$wt" config core.longpaths true
     owner="${wt%/wt}/owner.json"
     LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
     write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
@@ -891,7 +943,7 @@ cmd_ask() {
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
-  if [ "$mode" = implement ]; then continue_implementation "$name" "$rid" "$meta"; return; fi
+  if [ "$mode" = implement ]; then rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return; fi
 
   sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
@@ -921,10 +973,13 @@ cmd_ask() {
 }
 
 continue_implementation() { # NAME RID META [RESET]
-  local name="$1" rid="$2" meta="$3" reset="${4:-0}" repo sid base patch expected actual sess_lock rid_lock wt owner pf out rc
+  local name="$1" rid="$2" meta="$3" reset="${4:-0}" repo sid base patch expected actual sess_lock rid_lock wt owner pf out rc rrc=0
   [ "$(jq -r '.version // 1' "$meta")" = 2 ] || die "session '$name' is a legacy one-shot implementation and cannot be guessed or resumed.
   Archive it with 'ai-kimi transcript $name', delete it with 'ai-kimi delete $name', then start persistent work with 'ai-kimi implement <new-name>'."
   valid_impl_record "$rid" "$name" "$meta" || die "persistent implementation state for '$name' failed ownership, identity, or patch validation. No Kimi turn was started."
+  reconcile_impl_patches "$meta" "$reset" || rrc=$?
+  [ "$rrc" != 2 ] || die "session '$name' has an uncommitted newer state artifact from an interrupted save. Exact-session resume is blocked. Run: ai-kimi reset-context $name --prompt 'Restate the task and continue from the prior proven code.'"
+  [ "$rrc" = 0 ] || die "persistent implementation patch reconciliation failed; no Kimi turn was started."
   if [ "$reset" != 1 ]; then
     [ "$(jq -r .continuity_state "$meta")" = exact ] || die "session '$name' requires recovery because conversation and canonical code may differ. Exact-session resume is blocked. Run: ai-kimi reset-context $name --prompt 'Restate the task and continue from the reconstructed code.'"
   fi
@@ -994,13 +1049,26 @@ cmd_list() {
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() {
-  local rid meta dir manifest sess_lock
-  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"; sess_lock="$(lock_path "$rid" "$1")"
+  local rid meta dir manifest sess_lock f base
+  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
+  [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
+  sess_lock="$(lock_path "$rid" "$1")"
   [ ! -d "$sess_lock" ] || die "session '$1' has an active turn and cannot be deleted."
   if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
-    valid_impl_record "$rid" "$1" "$meta" || die "refusing to delete untrusted implementation state."
     dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
-    rm -f "$(jq -r .metadata "$manifest")" "$(jq -r .cumulative_patch "$manifest")" "$manifest"
+    same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] || die "refusing to delete untrusted implementation state."
+    jq -e --arg dir "$dir" --arg meta "$meta" '.version==1 and .owner_dir==$dir and .metadata==$meta' "$manifest" >/dev/null 2>&1 \
+      || die "refusing to delete an implementation directory with an invalid owner manifest."
+    for f in "$dir"/* "$dir"/.[!.]*; do
+      [ -e "$f" ] || continue; base="$(basename "$f")"
+      case "$base" in
+        owner.json|metadata.json|cumulative.patch|.tmp.*|.cumulative.*) ;;
+        cumulative-*.patch) printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' \
+          || die "implementation state directory contains an unowned file and was left in place: $f" ;;
+        *) die "implementation state directory contains an unowned file and was left in place: $f" ;;
+      esac
+    done
+    rm -f "$dir"/metadata.json "$dir"/owner.json "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/.tmp.* "$dir"/.cumulative.*
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
   else rm -f "$meta"; fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
@@ -1019,9 +1087,15 @@ cmd_transcript() {
 }
 
 cmd_implement() {
-  local name="$1" rid meta
-  rid="$(repo_id "$(repo_root)")"; meta="$(impl_meta_path "$rid" "$name")"
-  if [ -f "$meta" ]; then continue_implementation "$name" "$rid" "$meta"
+  local name="$1" rid meta=""
+  rid="$(repo_id "$(repo_root)")"
+  meta="$(find_meta_optional "$rid" "$name")" || meta=""
+  if [ -n "$meta" ]; then
+    if [ "$(jq -r '.mode // ""' "$meta")" = implement ]; then
+      rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"
+    else
+      die "session '$name' is a review session. Choose a different name for implementation."
+    fi
   elif [ -f "$(meta_path "$rid" "$name")" ]; then
     meta="$(meta_path "$rid" "$name")"
     [ "$(jq -r '.mode // ""' "$meta")" = implement ] && continue_implementation "$name" "$rid" "$meta"
@@ -1033,6 +1107,7 @@ cmd_reset_context() {
   local rid meta
   rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
   [ "$(jq -r '.mode // ""' "$meta")" = implement ] || die "reset-context applies only to implementation sessions."
+  rid="$(rid_from_meta "$meta")"
   continue_implementation "$1" "$rid" "$meta" 1
 }
 

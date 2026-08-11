@@ -152,6 +152,11 @@ continue the same write-capable session. `ask` is therefore an implementation
 continuation (write run), not a read-only review, when the named session is implementation.
 The wrapper never applies the cumulative patch to the live repo.
 
+Moving the live repository does not move that stable private workspace. The wrapper
+finds the session by repository remote, keeps its original private session identity, and
+updates the recorded live checkout only after a proven turn. `implement` and `ask` share
+that lookup, so a move cannot silently create a duplicate conversation.
+
 Ignored dependencies, build output, downloads, caches, and secrets do not persist across
 turns. Recreate them when needed and rerun tests. If a failed turn or state-save failure
 could leave Kimi's conversation ahead of canonical code, the wrapper marks the session
