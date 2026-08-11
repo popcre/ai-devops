@@ -415,7 +415,7 @@ silent skip and a clean result look identical, and only one of them is finished.
   summary; §12 "Standing facts an incoming session must know" is the canonical
   version of the safety rules restated here.
 - `shared-db-orchestrator` — how the session is opened and run (the request path
-  for anyone who needs database work, the session-start hygiene sweep,
+  for anyone who needs a database change, the session-start hygiene sweep,
   orchestrator + sub-agents, single-writer ownership, the never-use-task-chips
   rule, and the incident ledger behind each rule).
 - `cleanup-worktree` — the safe procedure for retiring worktrees and branches;
