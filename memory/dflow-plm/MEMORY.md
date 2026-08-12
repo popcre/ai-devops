@@ -20,4 +20,5 @@
 - [HTS RAG pilot](hts-rag-pilot.md) — HTS_RAG.md is plan-only (no code); pilot = 9-model bake-off + ruling verifier; cross.js now has fetchRuling()
 - [dflow UI verify via preview](dflow-ui-verify-preview.md) — start:preview + `umeka@popcre.com` (vibe_coding) to see UI render; dev-server renders AG-Grid cell renderers BLANK (prod is fine)
 - [dflow sandbox = PRODUCTION Supabase](dflow-sandbox-is-production-supabase.md) — alsand writes to `qsllyeztdwjgirsysgai`, schema-separated only; test data is permanent and only Albert can delete it
+- [shared-db production apply lane](shared-db-production-apply-lane.md) — merged ≠ applied; workflow dispatch + Albert's approval, and atomic batches (B9) forbid applying one migration alone
 - [AG Grid group id → context.col_id](aggrid-group-id-survives-as-context-colid.md) — on Standardized, `field` is cleared and `groupId` is auto-numbered; match saved group ids on `context.col_id`
