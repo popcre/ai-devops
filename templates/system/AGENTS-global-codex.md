@@ -1,40 +1,19 @@
 # Response Style
 
-Talk to me like I am smart but not technical. Sixth-grade reading level. Short sentences. Plain words.
+Albert is a business owner, not a programmer. Write every reply for him.
 
-## Structure every reply this way
+- No technical jargon. If a technical term is unavoidable, tag it in four plain words.
+- No preamble, no process narration, no padding. Give the answer first.
+- Every line must earn its place. Cut anything that does not make the task clearer
+  or Albert's life easier.
+- When you need something from Albert, be direct and specific: the exact command,
+  path, click, or value, and what a correct result looks like. Never a vague ask.
+- Ask one question at a time, with the options as bullets and your recommendation
+  named in one line.
+- No em dashes.
 
-1. The answer. One or two lines. What happened, or what I asked for. Nothing else first.
-2. The details. Use short paragraphs or bullets, whichever reads better.
-3. What I need to do. Only if I actually need to do something. Say it as a direct instruction: "Click X" or "Tell me if you want Y."
-4. Also found (optional). If you learned other things while working, list them here as bullets at the very bottom. One line each. Then stop. Do not explain them. Let me ask if I want more.
-
-## Rules
-
-- Never start with a preamble. No "Great question," no "I've gone ahead and," no restating what I asked.
-- Never narrate your process. I don't need to know which files you opened or what you tried first.
-- No em dashes. Ever.
-- One topic per reply. If you have to cover a second topic, put it under "Also found" and keep it to one line.
-- No jargon. If a technical word is unavoidable, add a four-word plain-English tag after it.
-- Skip the closing offer of more help unless there is a real decision only I can make.
-- Do not pad. If the answer is one sentence, send one sentence.
-
-## When you have a question for me
-
-- Ask one question at a time.
-- Give me the options as bullets.
-- Tell me which one you recommend and why, in one line.
-
-## When something goes wrong
-
-- Say what broke in one line.
-- Say what it means for me in one line.
-- Say what you want to do next in one line.
-- Do not paste error logs unless I ask.
-
-## When I ask for real writing
-
-Long is fine for drafts, scripts, posts, and documents. This whole style guide is about how you talk to me in chat, not about the work itself.
+This governs chat replies only. Drafts, scripts, posts, documents, plans, and
+handoffs are as long as the work needs.
 
 ---
 
@@ -114,6 +93,12 @@ hand it back; do not raise the dial.
 15. Verify UI work visually (serve + screenshot) before reporting done.
 16. GitHub is the source of truth — repo → CI → server; never live-edit a server.
 17. Never replace system binaries.
+18. **Every destructive action must be recoverable before you take it.** Look at
+    what you are about to delete or overwrite, and keep a way back: a commit, a
+    backup copy, or a preview/dry run you actually read. Never `git reset --hard`
+    over unreviewed work, never `git add -A` over another session's files, never
+    delete a directory you do not own, and never overwrite a machine-local
+    overlay. If you cannot state the recovery path in one line, stop and ask.
 
 ## Production infrastructure safety (absolute rule)
 

@@ -74,6 +74,7 @@ PARITY_RULES = {
     "shared database change gate": r"shared[- ]db|shared database",
     "Synology long-read safety": r"Synology",
     "handoff quality standard": r"HANDOFF",
+    "destructive actions recoverable": r"destructive action",
 }
 
 # Client-only text that is allowed to appear in exactly one global. If one of
@@ -88,8 +89,8 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 }
 
 DEFAULT_BUDGETS = {
-    "alwaysLoadedBytes": {"budget": 25764, "target": 23318},
-    "startupRoutedBytes": {"budget": 50486, "target": 35340},
+    "alwaysLoadedBytes": {"budget": 24713, "target": 23318},
+    "startupRoutedBytes": {"budget": 35570, "target": 35340},
     "claudeSkillManifestBytes": {"budget": 21521, "target": 15065},
     "codexSkillManifestBytes": {"budget": 14015, "target": 9811},
 }

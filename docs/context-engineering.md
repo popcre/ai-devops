@@ -14,7 +14,7 @@ measures four context classes:
 | Class | Meaning | Current measured source |
 |---|---|---:|
 | Always loaded | User-level Claude and Codex global templates | 2 files, 33,311 bytes, about 8,329 estimated tokens (step 4 cut this to 25,764 bytes / about 6,442 tokens on 2026-08-12) |
-| Startup routed | This repo's `AGENTS.md` and `CLAUDE.md` entry files | 2 files, 49,401 bytes, about 12,351 estimated tokens |
+| Startup routed | This repo's `AGENTS.md` and `CLAUDE.md` entry files | 2 files, 49,401 bytes, about 12,351 estimated tokens (this grew to 50,729 before step 5, which cut it to 35,570 bytes / about 8,893 tokens on 2026-08-12) |
 | Task triggered | Skill bodies read only when selected | 48 files, 405,271 bytes, about 101,333 estimated tokens |
 | Archive or ignored | Transcripts, chats, `.ai`, dependencies, generated output, worktrees, secrets, and network roots | excluded and never opened |
 
@@ -206,8 +206,8 @@ status, including under `--strict`.
 
 | Budget | Measured 2026-08-12 | `budget` (warns above) | `target` (steps 4-6 aim) |
 |---|---:|---:|---:|
-| Always-loaded globals | 25,764 bytes | 25,764 | 23,318 |
-| Startup-routed repo entry files | 50,486 bytes | 50,486 | 35,340 |
+| Always-loaded globals | 24,713 bytes | 24,713 | 23,318 |
+| Startup-routed repo entry files | 35,570 bytes | 35,570 | 35,340 |
 | Claude skill manifest | 21,521 bytes | 21,521 | 15,065 |
 | Codex skill manifest | 14,015 bytes | 14,015 | 9,811 |
 
@@ -229,6 +229,29 @@ gap to the 23,318-byte target is deliberate: the next candidates are the shared
 response-style contract and the Codex ritual summaries, and the ritual summaries
 cannot be cut until Codex trigger evidence exists (plan step 4/6).
 
+**Ratchet on 2026-08-12 (step 5).** Two budgets moved again.
+
+- **Startup-routed: 50,729 → 35,570 bytes, a 29.9% cut**, 230 bytes above the
+  35,340 target. `AGENTS.md` alone went 48,451 → 33,292 bytes. Nothing was deleted: the ten "intentional quirks"
+  narratives moved verbatim to [`design-decisions.md`](design-decisions.md), the
+  two incident narratives moved verbatim to
+  [`critical-incidents.md`](critical-incidents.md) (one paragraph that appeared
+  twice in the source is now single), and the router keeps a one-line rule plus a
+  pointer for each. The three oversized delegate-wrapper rows (GLM, Grok, Kimi)
+  now point at the STEP 0 VERIFICATION headers and `glm-opencode.md` section 5
+  that already hold the same constraints in full.
+- **Always-loaded: 25,764 → 24,713 bytes**, now 25.8% below the original 33,311
+  baseline. Albert replaced the long response-style contract with a short one on
+  2026-08-12 (his own decision, superseding the step-4 note that it should not be
+  touched). The same commit **added** a new always-loaded rule to both globals:
+  destructive actions must be recoverable before they are taken.
+
+That rule closed a real gap the step-4 handoff had already flagged. The
+"destructive actions" safety marker had only ever been satisfied incidentally, by
+prose inside the `AGENTS.md` quirks section, and it failed the moment that prose
+moved to its own doc. No global had ever carried the rule. It is now in both, and
+covered by the parity check.
+
 ### Locked safety markers
 
 Six categories must be present in the always-loaded and startup-routed text:
@@ -241,11 +264,12 @@ independently, and proves that removing one does not disturb the other five.
 ### Cross-client parity and its divergence allowlist
 
 Claude and Codex load different global files, so identical behavior has to be
-asserted rather than assumed. Ten rules must appear in both globals: the
+asserted rather than assumed. Eleven rules must appear in both globals: the
 response-style contract, GPT-5.6 low/medium, production infrastructure safety,
 no `terraform apply` against prod, verifying the Git committer identity, secrets
 in 1Password, serialized 1Password access, the shared-database change gate,
-Synology long-read safety, and the handoff quality standard.
+Synology long-read safety, the handoff quality standard, and (added in step 5)
+destructive actions being recoverable.
 
 Text that genuinely belongs to one client only lives in a small divergence
 allowlist (each client's own install line, and the Codex edition framing). If an
@@ -299,12 +323,13 @@ Two runs with the same `--generated-at` value must produce byte-identical JSON.
 The fixture test proves that `.env`, `.ai`, transcript, and dependency content
 does not enter the report.
 
-## Where the removed global detail now lives
+## Where the removed global and router detail now lives
 
-Step 4 slimmed the two always-loaded globals on 2026-08-12. Nothing was deleted
-outright: every removed passage already had a canonical owner under the
-ownership map, and the global now carries the rule plus a pointer that says when
-to open that owner. The table is the audit trail for anyone who misses text.
+Step 4 slimmed the two always-loaded globals and step 5 slimmed the repo router,
+both on 2026-08-12. Nothing was deleted outright: every removed passage already
+had a canonical owner under the ownership map, or was given one, and the global
+or router now carries the rule plus a pointer that says when to open that owner.
+The table is the audit trail for anyone who misses text.
 
 | Removed from | What moved | Canonical owner now | Trigger written into the global |
 |---|---|---|---|
@@ -315,6 +340,16 @@ to open that owner. The table is the audit trail for anyone who misses text.
 | Claude global | The dev-server-proxy visual-testing recipe | `docs/future-visual-testing.md` | When a UI screen needs a backend to reach it |
 | Claude global | The Git-identity mechanics beyond the check itself | `bin/ai-git-identity` | Before the first commit in an unfamiliar repo |
 | Both globals | The 9 handoff sections, the self-audit gate, legacy `HANDOFF.md` migration, and the `merge=union` ban | `templates/system/handoff-standard.md` and `skills/shared/handoff-writer/` | Before writing any handoff |
+| Both globals (step 5) | The long response-style contract, replaced by a six-bullet version | Nothing: Albert shortened it by decision on 2026-08-12. The full former text is in git history at commit `24f709e` | Not applicable |
+| `AGENTS.md` (step 5) | The ten "looks like / actually / why / do not change" narratives | [`design-decisions.md`](design-decisions.md) | Before changing, simplifying, or "fixing" any listed behavior |
+| `AGENTS.md` (step 5) | The two incident narratives with their root causes and lessons | [`critical-incidents.md`](critical-incidents.md) | When a tool reports success but changes nothing, on any Codex Windows sandbox failure, or on any 1Password rate limit |
+| `AGENTS.md` (step 5) | The GLM, Grok, and Kimi constraint paragraphs in the documentation map | `docs/glm-opencode.md` section 5, and the STEP 0 VERIFICATION headers in `bin/ai-grok-review`, `bin/ai-grok-implement`, `bin/ai-kimi` | Before touching that wrapper, its permissions, or its completion check |
+
+One rule moved the other way. Step 5 **added** "every destructive action must be
+recoverable before you take it" to both globals. The audit's destructive-action
+safety marker had only ever been satisfied by incidental prose inside the
+`AGENTS.md` quirks section, so it failed the moment that prose moved to its own
+doc. No global had ever carried the rule. It is now in both and is a parity rule.
 
 What deliberately stayed always-loaded: the response-style contract, who Albert
 is, the access-first and manual-action rules, secret and 1Password-serialization
@@ -328,6 +363,6 @@ that stops an unsafe action before any pointer could be followed.
 
 Phase A (steps 1 and 2) and phase B (step 3) are done: the baseline is frozen,
 the ownership map is defined, and the enforcement checks and warning budgets are
-in place. Step 4 is done for the two global templates; `AGENTS.md` and the repo
-`CLAUDE.md` are untouched and belong to step 5, and no skill, installer, or
-machine file has been changed yet.
+in place. Step 4 is done for the two global templates and step 5 is done for `AGENTS.md`.
+No skill, installer, or machine file has been changed yet, and nothing has been
+installed on any machine: that is step 7 and step 8 work.

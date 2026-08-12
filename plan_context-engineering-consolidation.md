@@ -7,17 +7,71 @@
 | 1. Freeze a measured baseline | ✅ done | 2026-08-12 | Parser corrected for YAML block scalars; regression test fails on the old parser and passes on the new one; corrected manifests Claude 21,521 bytes / about 5,381 tokens, Codex 14,015 bytes / about 3,504 tokens; two fixed-timestamp runs byte-identical; all Bash and PowerShell suites pass |
 | 2. Define the context ownership map | ✅ done | 2026-08-12 | Ownership map added to `docs/context-engineering.md` (per-class owner table, eight-row decision table, pointer definition, stale/retention rules, ten real rules classified); router row in `AGENTS.md`; pointers plus corrected Windows installer routing in both skills usage guides; all cited paths verified to exist; no instruction file trimmed |
 | 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
-| 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
-| 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | `AGENTS.md` is now 48,208 bytes / about 12,052 estimated tokens; the 47,123-byte / 11,731-token figure in section 5 is the step-1 measurement and is superseded |
+| 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 (revised in step 5) | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
+| 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,570 bytes (29.9%), 230 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,292. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
 | 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with step 5, tightening `AGENTS.md` as a router.
-Steps 1-3 are done and step 4's source work is done. Before each phase, re-read
+**Fresh-session start:** begin with step 6, consolidating cross-client skill
+duplication, and open it by writing the first Codex trigger eval sets. Steps 1-3
+and 5 are done, and step 4's source work is done. Before each phase, re-read
 that phase and sections 1, 4, 8, 11, and 13 to catch drift.
+
+**Decisions Albert made on 2026-08-12 (binding, do not re-ask).**
+
+1. **The response-style contract was shortened by Albert himself.** He replaced
+   the long version in both globals with six bullets: no jargon, no preamble, no
+   padding, be direct and specific when asking him for something, one question at
+   a time, no em dashes. This supersedes the step-4 note that the block must not
+   be touched. The former text is in git history at commit `24f709e`.
+2. **22.7% was accepted as good enough for the globals.** Step 5 nonetheless took
+   them to 25.8% below baseline as a side effect. Step 10 still sets the final
+   number.
+3. **The second pilot repo is `popdam`, not `poppim-web`.** `shared-db` remains
+   the third. Step 8 must still check for concurrent work in both first.
+4. **Step 7 keeps `bin/install-ai-devops-windows.ps1` PowerShell 5.1-safe.** Do
+   not introduce PowerShell 7-only syntax into that child path and do not migrate
+   `bin/setup-machine.ps1:187,192` to `pwsh`. Albert does not use 5.1 himself; the
+   decision is that the migration is not worth a new machine requirement.
+5. **Writing the first Codex trigger eval sets is the opening task of step 6.**
+   Nothing else in step 6, and no correction of the stale Codex "no skills
+   system" sentence, may be decided before they exist.
+
+**Drift recorded by step 5 (read before starting step 6).**
+
+1. **Two new documents exist and are now load-bearing.**
+   `docs/design-decisions.md` owns the ten "intentional quirks" narratives and
+   `docs/critical-incidents.md` owns the two incident narratives. `AGENTS.md`
+   keeps a one-line rule plus a pointer for each. Renaming or merging either file
+   means updating `AGENTS.md`, `docs/context-engineering.md`, and the
+   documentation map in the same commit.
+2. **An eleventh parity rule now exists: "destructive actions recoverable".**
+   Step 5 discovered the audit's destructive-action safety marker had only ever
+   been satisfied incidentally, by prose inside the `AGENTS.md` quirks section,
+   and it failed the moment that prose moved out. No global had ever carried the
+   rule. Both globals now carry it and `PARITY_RULES` enforces it. Any later step
+   that touches it must touch both globals. Step 3's "ten rules" evidence line is
+   superseded by eleven.
+3. **Both budgets moved and are ratcheted in all three places.**
+   `alwaysLoadedBytes` 25,764 to 24,713 and `startupRoutedBytes` 50,486 to 35,570.
+   The startup-routed `target` stays 35,340; the router is 230 bytes above it, and
+   that gap is left for step 6 or step 10. Step 6 and step 10 must not measure
+   against any older number.
+4. **Open question 3 is answered: do not enable `@AGENTS.md`.** The repo
+   `CLAUDE.md` keeps its explicit read instruction. An import would pull the full
+   router into every Claude session in this repo unconditionally, including
+   trivial ones, which is the opposite of what step 5 just achieved. Never enable
+   both mechanisms. Step 8 may revisit this with real loaded-context evidence, but
+   the default is now explicitly "explicit read, no import".
+5. **The plan's own "Newest handoff" link was broken** and is fixed. It named a
+   step-1 handoff that was deleted when that work closed. The audit's broken-link
+   count is back to zero; keep it there.
+6. **Nothing changed in the installers, skills, globals-on-disk, or machine
+   files.** Steps 6 and 7 still start from the step-3 source layout, and no
+   machine has the new text.
 
 **Drift recorded by step 4 (read before starting step 5).**
 
@@ -115,7 +169,8 @@ step's text) before you cut to a fresh session. Finishing a phase without that
 sweep is an incomplete phase.
 
 **Newest handoff:**
-[`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`](HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md)
+[`HANDOFF.d/2026-08-12T2010Z-al8960ofc-claude-context-step4-globals-slimmed.md`](HANDOFF.d/2026-08-12T2010Z-al8960ofc-claude-context-step4-globals-slimmed.md)
+(the step-1 parser-fix handoff it used to name was deleted when that work closed)
 
 ## 1. The ultimate goal: what we are actually trying to achieve
 
@@ -488,9 +543,8 @@ not a one-time edit.
 2. Initial context budgets. Establish baselines first; do not invent hard limits.
    A reasonable first target is a 25-40% reduction in always-loaded global plus
    repo-start text with zero safety-test failures, but measured quality decides.
-3. Which application repo is the second pilot after `ai-devops`. Prefer one
-   medium repo and one high-risk large repo, likely `poppim-web` and `shared-db`,
-   after checking for concurrent work.
+3. **Settled 2026-08-12:** the pilots after `ai-devops` are `popdam` and
+   `shared-db`, after checking for concurrent work.
 4. Whether installed-global reconciliation uses explicit managed markers or a
    separate generated base plus machine overlay. Choose based on safe preservation
    tests, not convenience.
@@ -629,7 +683,8 @@ the exit status, including under the new `--strict` flag. `--strict` exits 1 on 
 missing safety marker, a cross-client parity mismatch, or a stale
 divergence-allowlist entry. `tests/test-context-audit.ps1` removes each of the six
 locked safety categories independently and requires a plain-English reason naming
-that category, and proves the other five are unaffected. Parity covers ten rules
+that category, and proves the other five are unaffected. Parity covered ten
+rules (step 5 added an eleventh, destructive actions recoverable)
 that must appear in both globals plus an allowlist for genuinely client-only
 text. Duplicate detection now covers both skill-body paragraphs and
 always-loaded-global versus skill-description overlap. `codex-trigger-eval.py`
@@ -699,6 +754,20 @@ the correct source; a fresh Claude and Codex session can orient in under five
 minutes; link tests pass; incident-specific probes find the detail only when
 triggered; startup context is lower than baseline.
 
+**Completed 2026-08-12.** Startup-routed context fell from 50,729 to 35,570
+bytes, a 29.9% cut that lands 230 bytes above the 35,340 target; `AGENTS.md`
+alone went from 48,451 to 33,292 bytes. Nothing was deleted. The ten "intentional quirks"
+narratives moved verbatim into `docs/design-decisions.md`, the two incident
+narratives into `docs/critical-incidents.md` (one paragraph the source repeated
+twice is now single), and the router keeps a one-line rule plus a pointer with a
+stated trigger for each. The three oversized delegate-wrapper rows now point at
+`docs/glm-opencode.md` section 5 and the STEP 0 VERIFICATION headers in
+`bin/ai-grok-review`, `bin/ai-grok-implement`, and `bin/ai-kimi`, which were
+verified to contain the same constraints in full. `--strict` exits 0 with zero
+missing safety markers, zero parity mismatches, zero overlaps, zero broken links,
+and zero budget warnings. Both moved budgets are ratcheted in all three places.
+Open question 3 is answered: no `@AGENTS.md` import.
+
 **Natural context cut:** start a fresh session after global/router changes are
 committed, pushed, and proven on local fixtures. Do not install them broadly yet.
 
@@ -740,8 +809,9 @@ native PowerShell installers. Do not add a second sync system.
 Windows PowerShell 5.1 (`powershell`), even though setup itself requires
 PowerShell 7. The implementation must either keep
 `bin/install-ai-devops-windows.ps1` fully 5.1-compatible or deliberately change
-those calls to `pwsh` and add a regression test for the new requirement. Decide
-explicitly; do not introduce PowerShell 7-only syntax into a 5.1 child path.
+those calls to `pwsh` and add a regression test for the new requirement.
+**Decided by Albert on 2026-08-12: keep the child path 5.1-safe.** Do not migrate
+those calls and do not introduce PowerShell 7-only syntax into that child path.
 
 **Dependencies:** stable source layout after steps 4-6.
 
@@ -756,7 +826,8 @@ prove both installers produce the same managed skill/global outcome.
 #### Step 8. Pilot on one Windows machine
 
 **Targets:** `al8960ofc` first unless concurrent work makes another dev box safer;
-the current repo plus one medium and one large/high-risk application repo.
+the current repo plus `popdam` (medium) and `shared-db` (large/high-risk), chosen
+by Albert on 2026-08-12. Check for concurrent work in both before starting.
 
 Before install, save hashes and recoverable copies of the installed global files,
 list managed skills, and record real usage from matched Claude and Codex tasks.
@@ -972,8 +1043,11 @@ unowned skill directories, or overwrite local overlays to roll back.
    facts, is deterministic, and is reviewable without a custom parser.
 2. **What budget should become a gate?** Use pilot distributions. Warn first;
    fail only after safe stable baselines exist.
-3. **Does `@AGENTS.md` improve Claude startup behavior?** Test actual loaded
-   context and task quality. Do not infer from syntax alone.
+3. **Does `@AGENTS.md` improve Claude startup behavior? Answered 2026-08-12: no,
+   do not enable it.** An import loads the whole router into every Claude session
+   in this repo unconditionally, undoing step 5's reduction. `CLAUDE.md` keeps its
+   explicit read instruction, and the two mechanisms are never both enabled.
+   Step 8 may revisit with real loaded-context measurements.
 4. **Which application repos need their own follow-up plan?** Use the audit to
    rank always-loaded size, duplication, risk, and task frequency. Do not bulk
    rewrite them under this plan.
