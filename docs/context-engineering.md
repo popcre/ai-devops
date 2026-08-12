@@ -192,6 +192,85 @@ applying the decision table above reaches the same owner for each row.
 | 9 | Git silently invents a committer identity from the OS/AD account when none is configured (this put 231 wrong-identity commits in merged history) | Memory (`memory/ai-devops/git-identity-silent-guess.md`) | The standing rule "verify identity before first commit" is a Global rule |
 | 10 | New skills are authored in `skills/shared/` by default; a name may live in `shared/` or a client tree, never both | Repo router (`AGENTS.md`, docs map plus skills-map note) | `CLAUDE.md` restates it for Claude; `docs/skills-map.md` and `docs/skills-usage-guide.md` carry pointers |
 
+## Enforcement (step 3)
+
+Enforcement lands before any reduction, so steps 4-6 cannot quietly remove a
+safety rule or trade one duplication for another. Everything here reports;
+nothing here rewrites a file.
+
+### Warning budgets, never hard failures
+
+`tools/context-audit/budgets.json` sets one warning budget per always-loaded or
+startup class. Budgets **only warn** — they never change the audit's exit
+status, including under `--strict`.
+
+| Budget | Measured 2026-08-12 | `budget` (warns above) | `target` (steps 4-6 aim) |
+|---|---:|---:|---:|
+| Always-loaded globals | 33,311 bytes | 33,311 | 23,318 |
+| Startup-routed repo entry files | 50,486 bytes | 50,486 | 35,340 |
+| Claude skill manifest | 21,521 bytes | 21,521 | 15,065 |
+| Codex skill manifest | 14,015 bytes | 14,015 | 9,811 |
+
+`budget` is the size at the last accepted baseline, so any growth warns from the
+next run. `target` is roughly a 30% cut, the middle of the plan's 25-40% band.
+Ratchet `budget` down toward `target` only after a measured reduction has landed
+and its behavior tests still pass. Never raise a budget to silence a warning.
+
+Note that startup-routed grew from the 49,401 bytes recorded in the step-1
+baseline above to 50,486 bytes, because `AGENTS.md` gained rows after step 1.
+That growth is exactly what the budget now catches.
+
+### Locked safety markers
+
+Six categories must be present in the always-loaded and startup-routed text:
+production mutation, shared database routing, secret handling, destructive
+actions, Git identity, and the GPT-5.6 low/medium limit. Removing any one of
+them from a fixture produces a plain-English failure naming that category and
+what protection was lost. `tests/test-context-audit.ps1` proves all six
+independently, and proves that removing one does not disturb the other five.
+
+### Cross-client parity and its divergence allowlist
+
+Claude and Codex load different global files, so identical behavior has to be
+asserted rather than assumed. Ten rules must appear in both globals: the
+response-style contract, GPT-5.6 low/medium, production infrastructure safety,
+no `terraform apply` against prod, verifying the Git committer identity, secrets
+in 1Password, serialized 1Password access, the shared-database change gate,
+Synology long-read safety, and the handoff quality standard.
+
+Text that genuinely belongs to one client only lives in a small divergence
+allowlist (each client's own install line, and the Codex edition framing). If an
+allowlisted, supposedly client-only string later appears in both globals, the
+allowlist entry itself is reported as stale. A rule that merely *mentions* the
+other client — the Claude global names `~/.codex/config.toml` inside the GPT-5.6
+rule — is not a divergence, so the allowlist patterns anchor on text each client
+actually owns.
+
+### Duplicate startup text
+
+Skill bodies are compared with each other (the 12 duplicate paragraph groups
+above). Separately, always-loaded global text is compared against the per-client
+skill **descriptions**, because both are startup context: a sentence in both is
+paid for twice. Shared ten-word phrases are reported with an example. The
+current real sources report zero such overlaps.
+
+### Selection quality is measured separately
+
+The audit measures size and duplication. It does not measure whether a skill
+fires. Trigger quality uses `tools/skill-trigger-eval/skill-trigger-eval.py`
+for Claude and the new `tools/skill-trigger-eval/codex-trigger-eval.py` for
+Codex, which watches for Codex opening the installed `SKILL.md` because Codex
+emits no `Skill` tool event. The Codex runner always passes an explicit
+`low`/`medium` reasoning effort and a read-only sandbox. Neither tool replaces
+the other.
+
+### Run the enforcement checks
+
+```powershell
+python tools/context-audit/context-audit.py --root . --strict
+pwsh -NoProfile -File tests/test-context-audit.ps1
+```
+
 ## Reproduce the baseline
 
 From `C:\repos\ai-devops` on Windows:
@@ -213,8 +292,8 @@ does not enter the report.
 
 ## Current boundary
 
-Phases A steps 1 and 2 are done: the baseline is frozen and this ownership map
-is defined. No global, repo instruction, skill, installer, or machine file has
-been trimmed or changed — that reduction belongs to steps 4-6. Enforcement tests
-and warning budgets belong to step 3. The map only names owners; it does not
-move or shorten any rule.
+Phase A (steps 1 and 2) and phase B (step 3) are done: the baseline is frozen,
+the ownership map is defined, and the enforcement checks and warning budgets are
+in place. No global, repo instruction, skill, installer, or machine file has been
+trimmed or changed — that reduction belongs to steps 4-6. The map only names
+owners; enforcement only reports. Neither moves or shortens any rule.

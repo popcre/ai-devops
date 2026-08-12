@@ -6,22 +6,58 @@
 |---|---|---:|---|
 | 1. Freeze a measured baseline | ✅ done | 2026-08-12 | Parser corrected for YAML block scalars; regression test fails on the old parser and passes on the new one; corrected manifests Claude 21,521 bytes / about 5,381 tokens, Codex 14,015 bytes / about 3,504 tokens; two fixed-timestamp runs byte-identical; all Bash and PowerShell suites pass |
 | 2. Define the context ownership map | ✅ done | 2026-08-12 | Ownership map added to `docs/context-engineering.md` (per-class owner table, eight-row decision table, pointer definition, stale/retention rules, ten real rules classified); router row in `AGENTS.md`; pointers plus corrected Windows installer routing in both skills usage guides; all cited paths verified to exist; no instruction file trimmed |
-| 3. Add context-audit tooling and tests | ⬜ open | 2026-08-12 | Test design in sections 9 and 10 |
-| 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6 |
-| 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | Current 11,731-token measurement |
+| 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
+| 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6; budget to ratchet: `alwaysLoadedBytes` 33,311 → target 23,318 |
+| 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | `AGENTS.md` is now 48,208 bytes / about 12,052 estimated tokens; the 47,123-byte / 11,731-token figure in section 5 is the step-1 measurement and is superseded |
 | 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with step 3, context-audit tooling and regression
-tests. Steps 1 and 2 are done: the manifest totals in
-`docs/context-engineering.md` come from the corrected parser and are safe to use
-for budgets, and the ownership map in that same file is the authority for where
-any rule lives. Enforcement (step 3) comes before any reduction (steps 4-6).
-Before each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch
-drift.
+**Fresh-session start:** begin with step 4, slimming the always-loaded global
+files. Steps 1-3 are done: the manifest totals in `docs/context-engineering.md`
+come from the corrected parser and are safe to use for budgets, the ownership
+map in that same file is the authority for where any rule lives, and the
+enforcement checks that step 4 must not break are in place. Enforcement came
+before reduction on purpose. Before each phase, re-read that phase and sections
+1, 4, 8, 11, and 13 to catch drift.
+
+**Drift recorded by step 3 (read before starting step 4).**
+
+1. **Budgets are a file, not a number in prose.** Every reduction in steps 4-6
+   must ratchet the matching entry in `tools/context-audit/budgets.json` down and
+   update the budget table in `docs/context-engineering.md`. Never raise a budget
+   to silence a warning. Budgets warn only; they never fail a run.
+2. **Two baseline measurements moved.** `AGENTS.md` is now 48,208 bytes (about
+   12,052 estimated tokens), not the 47,123 bytes / 11,731 tokens in section 5,
+   and startup-routed context totals 50,486 bytes, not 49,401. Step 5 must
+   measure before/after against the current number, not the section-5 number.
+3. **Steps 4-6 have a new hard gate.** `python tools/context-audit/context-audit.py
+   --root . --strict` must exit 0 after every trim. It fails on a missing safety
+   marker, a cross-client parity mismatch, or a stale divergence-allowlist entry.
+   In particular, step 4 cannot delete a rule from only one client global: the ten
+   parity rules must stay in both, or the rule must be added to the divergence
+   allowlist in `context-audit.py` with a stated reason.
+4. **Step 4's Codex trigger evidence now has a tool.** The gate "only runtime
+   trigger tests may decide what summary can be removed" is served by
+   `tools/skill-trigger-eval/codex-trigger-eval.py`. It counts a trigger when
+   Codex opens the installed `SKILL.md`, which proves selection, not obedience —
+   do not over-claim from its score. It needs eval sets, which do not exist yet
+   for any Codex skill; writing them is step 4 or 6 work.
+5. **Step 6 gained a second duplication signal.** Besides the 12 duplicate
+   paragraph groups across skill bodies, the audit now reports overlap between an
+   always-loaded global and a per-client skill description. It is currently zero,
+   so step 4 must not create one by pasting a skill's description into a global.
+6. **Steps 8-9 should run the enforcement checks.** Add `--strict` and
+   `pwsh -NoProfile -File tests/test-context-audit.ps1` to the pilot and per-machine
+   probes. Step 10 sets final budgets by editing `budgets.json`, not by inventing
+   numbers in prose.
+7. **No installer file changed.** Step 3 named `tests/test-ai-install-skills.sh`,
+   `tests/test-install-ai-devops-windows.ps1`, and `tests/test-windows-scripts.sh`
+   as targets, but no enforcement change needed them; all three were run and pass
+   unchanged. Steps 6-7 still own installer behavior, and their targets are
+   unaffected by step 3.
 
 **End-of-phase reciprocal instruction (applies to every step below).** When you
 finish a phase, re-read **all remaining phases through step 10** and report any
@@ -539,6 +575,22 @@ measure selection quality. Neither replaces the other.
 passes with the real sources, and emits a plain reason. Budgets warn on current
 state and can be ratcheted only after measured reductions.
 
+**Completed 2026-08-12.** Budgets live in `tools/context-audit/budgets.json` set
+at the measured baseline, so any growth warns from the next run, with the
+step-4-6 `target` recorded beside each one. Budgets warn only and never change
+the exit status, including under the new `--strict` flag. `--strict` exits 1 on a
+missing safety marker, a cross-client parity mismatch, or a stale
+divergence-allowlist entry. `tests/test-context-audit.ps1` removes each of the six
+locked safety categories independently and requires a plain-English reason naming
+that category, and proves the other five are unaffected. Parity covers ten rules
+that must appear in both globals plus an allowlist for genuinely client-only
+text. Duplicate detection now covers both skill-body paragraphs and
+always-loaded-global versus skill-description overlap. `codex-trigger-eval.py`
+is the separate Codex runner; it pins `low`/`medium` reasoning and a read-only
+sandbox, and its `--print-command` dry run is asserted offline. The real sources
+pass `--strict` cleanly. Eval sets for Codex skills are not written yet; that is
+step 4 or 6 work.
+
 ### Phase C: reduce always-loaded context
 
 #### Step 4. Slim the global files
@@ -560,7 +612,11 @@ tests capture current behavior.
 
 **Dependencies:** step 3 enforcement.
 
-**Verification gate:** required-marker tests pass; both installed-client fixtures
+**Verification gate:** `python tools/context-audit/context-audit.py --root .
+--strict` exits 0 after every trim (it now also fails on a one-sided parity
+deletion); the matching budget in `tools/context-audit/budgets.json` is ratcheted
+down and the budget table in `docs/context-engineering.md` updated;
+required-marker tests pass; both installed-client fixtures
 load the correct global and overlay; a representative Claude and Codex session
 correctly answers safety and routing probes without opening unrelated docs;
 always-loaded measured text falls materially from baseline with no quality loss.

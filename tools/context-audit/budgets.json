@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Warning budgets for the context audit. These NEVER fail a run: they warn.",
+    "'budget' is the size measured at the last accepted baseline (2026-08-12), so",
+    "any growth warns immediately. 'target' is the smaller number the reduction",
+    "steps (plan_context-engineering-consolidation.md steps 4-6) are aiming for,",
+    "about a 30% cut. Tighten 'budget' toward 'target' only after a measured",
+    "reduction has actually landed and its behavior tests still pass. Never raise",
+    "a budget to silence a warning."
+  ],
+  "budgets": {
+    "alwaysLoadedBytes": { "budget": 33311, "target": 23318 },
+    "startupRoutedBytes": { "budget": 50486, "target": 35340 },
+    "claudeSkillManifestBytes": { "budget": 21521, "target": 15065 },
+    "codexSkillManifestBytes": { "budget": 14015, "target": 9811 }
+  }
+}
