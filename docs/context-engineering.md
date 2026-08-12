@@ -1,7 +1,8 @@
 # Context engineering
 
-This document records the measured baseline for reducing repeated Claude and
-Codex context safely. The active implementation and decisions remain in
+This document records the measured baseline and the context ownership map for
+reducing repeated Claude and Codex context safely. The active implementation and
+decisions remain in
 [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
 ## Baseline frozen on 2026-08-12
@@ -67,6 +68,130 @@ Git worktree checked out with different CRLF normalization, can report extra
 drifted skills that have identical content. Always measure drift from
 `C:\repos\ai-devops` for comparability with this baseline.
 
+## Context ownership map (step 2)
+
+One rule, one home. Every class of information below has exactly one canonical
+owner in this repo. Anywhere else the same information appears, it is either a
+pointer (path plus trigger) or a short client adapter — never a second owner. Two
+canonical owners for the same rule is the drift defect this map exists to
+prevent. Trimming or moving any rule is a later plan step; this map only names
+owners. The plan, phases, and gates live in
+[`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
+
+The map uses the four loading classes measured by the baseline above:
+
+- **Always loaded** — read into every session at startup (the user-level
+  globals). The most expensive context; keep only universal, high-frequency,
+  safety-critical rules here.
+- **Startup routed** — read at startup for this repo (the repo router and the
+  Claude adapter).
+- **Task triggered** — read only when a task needs it, reached through a pointer
+  with a trigger.
+- **Archive / ignored** — never loaded (transcripts, chats, `.ai`, deps,
+  generated output, secrets).
+
+### Per-class ownership
+
+| Class of information | Canonical owner | Who loads it | When it loads | Maximum useful detail | How other artifacts link to it |
+|---|---|---|---|---|---|
+| Universal standing rules (every project, every session) | `templates/system/CLAUDE-global.md` (Claude) and `templates/system/AGENTS-global-codex.md` (Codex) | Claude reads `~/.claude/CLAUDE.md`; Codex reads `~/.codex/AGENTS.md` | Always loaded | The rule, a one-line reason, and a pointer to the full procedure. Incident narratives and long procedures live elsewhere. | `[full: skill-name]` or a path with a trigger ("for the full procedure, load skills/shared/<name>"). |
+| Per-machine facts (paths, hosts, quirks, install state) | `templates/system/machine-atlas.md` | The machine's atlas section, appended to that machine's global | Startup, but only the section for the machine you are on | The fact plus which machine plus a one-line consequence | "see machine-atlas §<machine>" from any rule that depends on it. |
+| Repo router plus repo-wide invariants (this toolkit) | `AGENTS.md` | Claude (told by `CLAUDE.md` to read it first) and Codex | Startup routed | One-screen orientation, the task-to-doc map, and the invariants that hold across this whole repo. Deep incident narratives and specialist procedures live behind pointers. | Doc-map rows are pointers (path plus trigger). |
+| Repo-specific Claude adapter | `CLAUDE.md` | Claude Code | Startup routed | Only what Claude needs that `AGENTS.md` does not already cover (client-specific ignore/tool notes). Must not duplicate `AGENTS.md`. | Points to `AGENTS.md`; never restates it. |
+| Topic detail (deep procedures, incident histories, how-to) | A `docs/<topic>.md` file | Nobody automatically | Task triggered | As much as needed — length is cheap here because it is not startup context. | A pointer in a global/repo/skill file: relative path plus the exact trigger condition. |
+| Triggered procedures (skills) | `skills/shared/<name>/SKILL.md` (both clients) by default; `skills/claude/<name>/` or `skills/codex/<name>/` only when genuinely client-specific | The client skill loader | The per-client `name` plus `description` manifest is startup context (selection); the skill body is task triggered | Manifest: precise enough to trigger, not longer. Body: full procedure plus tool-specific safety. | `[full: skill-name]` or `/skill-name` with the trigger phrase. |
+| Durable learned facts (cross-session, cross-machine) | `memory/` (per-project `MEMORY.md` plus fact files), synced by `bin/ai-sync-memory` | Claude memory recall; manually when needed | Project-scoped recall; not always loaded globally | Concise facts, not procedures. Memory is "what we learned", not "how to do X". | Referenced by path when a session needs it; never copied into a global. |
+| Non-secret config templates (model commands, server settings) | `config/*.env.example` | `install.sh` and `bin/install-ai-devops-windows.ps1` | Install/update only (seeded to `/etc/ai-devops/*.env` if absent) | Default command strings plus comments | `AGENTS.md` credentials table and `docs/configuration.md`. |
+| Forward work (phases, targets, gates, status) | A `plan_<slug>.md` at repo root | Nobody automatically | Task triggered | Goal, scope, per-step targets, verification gates, status table | `AGENTS.md` doc map or a handoff points to the active plan with a trigger. |
+| Active session state (what this session did, what is next) | `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (one write-once file per session); root `HANDOFF.md` is a static pointer | The next session | Session start reads the OPEN files newest-first | The full nine-section handoff per `templates/system/handoff-standard.md` | Root `HANDOFF.md` pointer plus the "How handoffs work" section of `AGENTS.md`. |
+
+### Decision table: where a new rule or fact goes
+
+Walk the questions top to bottom; the first yes wins. Each row is a different
+owner, so no rule can be assigned to two.
+
+| # | If the information is… | Canonical owner | Belongs here (example) | Does NOT belong here |
+|---|---|---|---|---|
+| 1 | A universal safety or behavior rule every project needs, every session | Global (`CLAUDE-global.md` / `AGENTS-global-codex.md`) | "GPT-5.6 runs at low/medium reasoning only" | Procedures, machine-specific paths, one-off incident detail |
+| 2 | True only on a specific machine (path, host, quirk, install state) | Machine atlas (`machine-atlas.md`) | "On 4837 the interactive logon maps home to `Z:`" | Rules that hold on every machine |
+| 3 | About THIS repo's layout, install, or a repo-wide invariant | Repo router (`AGENTS.md`) | "Toolkit home is `/worksp/ai-devops`, never `/opt/ai-devops`" | Deep procedures, incident narratives, per-machine facts |
+| 4 | A deep procedure, incident history, or how-to too long for startup | Topic doc (`docs/<topic>.md`) | The 2026-07-23 1Password rate-limit storm and the caching fix | One-line invariants that belong in the router |
+| 5 | A repeatable procedure triggered by a task ("when X, do Y") | Skill (`skills/shared/...` by default) | "How to make a shared-db change: preview to branch to PR to regenerate types" | Universal rules, machine facts, one-off session state |
+| 6 | A learned fact to recall later, not a procedure | Memory (`memory/...`) | "Git silently invents a committer identity when none is configured" | Procedures, rules of conduct, forward work |
+| 7 | Forward work to implement (phases, gates, status) | Plan (`plan_<slug>.md`) | This consolidation plan's phases and verification gates | Rules of conduct, completed history |
+| 8 | State from the current or just-finished session | Handoff (`HANDOFF.d/<...>.md`) | "Step 1 is done; step 2 is the open row; here is what was tried" | Standing rules, procedures, machine facts |
+
+`CLAUDE.md` (this repo's adapter) is not a destination for new rules: it only
+carries Claude-specific notes that point at `AGENTS.md`. A new cross-client
+authoring rule belongs in `AGENTS.md`, not in `CLAUDE.md`.
+
+### What counts as a pointer
+
+A pointer is a **path or link plus a clear trigger** that says when to follow
+it. The trigger is the load-bearing part.
+
+- "See `docs/foo.md`" is **not** a pointer — no trigger.
+- "If you are changing skill installation, read `docs/skills-usage-guide.md`" is
+  a pointer.
+- `[full: shared-db-change]` is a pointer — it names the skill and implies the
+  trigger ("the full procedure for a shared-db change").
+
+Every topic doc, skill, plan, and machine section is reached only through a
+pointer with a trigger. Nothing is "just read every .md." A pointer whose target
+no longer matches its trigger is a defect.
+
+### Stale state, deletion, and retention ownership
+
+- **One owner moves, the old copy must not linger.** When a rule moves to a new
+  owner, the old location either deletes it or replaces it with a pointer to the
+  new owner. Two live copies is the duplication defect this map exists to
+  prevent.
+- **A claim that contradicts reality is itself a defect.** A sentence in a
+  canonical owner that is no longer true (for example, "Codex has no skills
+  system" in `AGENTS-global-codex.md`) is an ownership bug. Fix it in its owner.
+  Which fix belongs to which plan step is tracked in the plan; this map only
+  names owners.
+- **Skills are retired by deletion, not hand-editing.** Delete the skill from
+  `skills/` and commit; `bin/ai-install-skills` and
+  `bin/install-ai-devops-windows.ps1` quarantine the installed copy on the next
+  sync via the `.ai-devops-managed` marker. Never hand-delete installed skill
+  directories; vendor skills without the marker are never touched.
+- **Handoffs are write-once and self-deleting.** Delete only your own
+  `HANDOFF.d/` file when its work is proven done; never edit or delete another
+  session's file. Root `HANDOFF.md` is a static pointer and is never rewritten.
+- **Plans are retained as the completed record.** A `plan_*.md` stays after its
+  STATUS rows are all done — it documents the decisions. Its open handoff is
+  deleted only when every reachable rollout is proven.
+- **Memory is corrected in place.** Update an outdated fact where it stands; do
+  not append a corrected copy beside it.
+- **Installed globals are intentionally not auto-overwritten.** Source changes
+  do not clobber installed `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`
+  (non-clobber policy). Installed/source drift is therefore expected and only
+  reported, not force-fixed. Safe reconciliation (managed markers or overlays)
+  is a later plan step.
+- **The full skill library is not startup context.** Skill bodies are
+  task-triggered; only the name/description manifest loads at startup. Do not
+  treat the sum of all skill bodies as a per-turn cost.
+
+### Worked examples (ten real rules, classified)
+
+These exist in the repo today. Each has exactly one canonical owner; anything in
+the last column is a pointer or adapter, not a second owner. A second reviewer
+applying the decision table above reaches the same owner for each row.
+
+| # | Rule or fact (real) | Canonical owner | Pointer or adapter elsewhere |
+|---|---|---|---|
+| 1 | GPT-5.6 reasoning must stay `low`/`medium`, never `high`/`none`, every machine and session | Global (`CLAUDE-global.md` "AI model settings"; matched in `AGENTS-global-codex.md`) | Restated as a standing constraint in the plan, section 11 |
+| 2 | Never run `terraform apply` or mutating `gcloud` against prod (`lithe-breaker-323913`) with personal credentials | Global ("Production infrastructure safety") | Incident detail in `docs/cloud-build-prod-trigger-incident-2026-07-20.md` |
+| 3 | `codex exec` can look healthy and silently write nothing on Windows; fix is `…\.codex\packages\standalone\current\bin` first on PATH | Machine atlas ("Codex on Windows — the junction trap") | Summarized in `AGENTS.md` "Critical incidents" (a pointer, not a second owner) |
+| 4 | Toolkit home is `/worksp/ai-devops`; never `/opt/ai-devops` | Repo router (`AGENTS.md`, Data model) | Restated in `CLAUDE.md` and `machine-atlas.md` as adapters |
+| 5 | How to make a shared-db change: preview, then branch plus PR in `u2giants/shared-db` first, then regenerate types; never an inline migration from an app repo | Skill (`shared-db-change` / `codex-shared-db-change`) | The split principle (reading open, changing gated) is a Global rule; the skill is the procedure |
+| 6 | The MCP launcher resolves 1Password secrets once and reuses a 15-minute DPAPI cache (2026-07-23 rate-limit storm) | Topic doc (`docs/mcp-1password-rate-limit-hardening.md`) | One-line quirk in `AGENTS.md`; learned fact in `memory/ai-devops/mcp-1password-launcher-storm.md` |
+| 7 | The context-engineering consolidation: phases, per-step targets, verification gates, STATUS | Plan (`plan_context-engineering-consolidation.md`) | This doc and the open `HANDOFF.d/` files point to it |
+| 8 | "Step 1 is done and corrected; step 2 is the open row; the parser fix was implemented and verified" | Handoff (`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`) | Root `HANDOFF.md` is the static pointer |
+| 9 | Git silently invents a committer identity from the OS/AD account when none is configured (this put 231 wrong-identity commits in merged history) | Memory (`memory/ai-devops/git-identity-silent-guess.md`) | The standing rule "verify identity before first commit" is a Global rule |
+| 10 | New skills are authored in `skills/shared/` by default; a name may live in `shared/` or a client tree, never both | Repo router (`AGENTS.md`, docs map plus skills-map note) | `CLAUDE.md` restates it for Claude; `docs/skills-map.md` and `docs/skills-usage-guide.md` carry pointers |
+
 ## Reproduce the baseline
 
 From `C:\repos\ai-devops` on Windows:
@@ -88,6 +213,8 @@ does not enter the report.
 
 ## Current boundary
 
-This is phase A, step 1 only. No global, repo instruction, skill, installer, or
-machine file has been trimmed or changed. The ownership map and warning budgets
-belong to later plan steps.
+Phases A steps 1 and 2 are done: the baseline is frozen and this ownership map
+is defined. No global, repo instruction, skill, installer, or machine file has
+been trimmed or changed — that reduction belongs to steps 4-6. Enforcement tests
+and warning budgets belong to step 3. The map only names owners; it does not
+move or shorten any rule.
