@@ -101,7 +101,13 @@ Installer behavior has lightweight, dependency-free tests:
 ```bash
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
+bash tests/test-codex-trigger-eval.sh
 ```
+
+`tests/test-codex-trigger-eval.sh` is offline and calls no model. It pins the
+Codex trigger runner's two hard rules (explicit `low`/`medium` effort, read-only
+sandbox) and its trigger detection: an escaped Windows path in the event stream
+must count, and the skill path appearing in a command's OUTPUT must not.
 
 ```powershell
 pwsh -File tests/test-install-ai-devops-windows.ps1

@@ -7,10 +7,15 @@ tool event, so it needs its own runner rather than a shared one.
 
 How a trigger is detected here, and why it is a weaker signal than Claude's:
 Codex reaches a skill by READING its installed `SKILL.md`. So a run counts as a
-trigger when the JSON event stream shows the installed skill path or the skill
-directory name. That is evidence the skill was selected, not proof the model
-followed it. Read a score as "did Codex go and look at the right skill", never
-as "did Codex obey the skill".
+trigger when the event stream shows a `command_execution` whose COMMAND opens
+that path. That is evidence the skill was selected, not proof the model followed
+it. Read a score as "did Codex go and look at the right skill", never as "did
+Codex obey the skill".
+
+Only the command counts, never the command's output. Matching anywhere in the
+event line makes any file that merely mentions the skill path — including this
+runner's own test fixture — score as a trigger, which cost 4 unearned false
+positives on the first real run.
 
 Two hard rules this runner enforces and must keep enforcing:
 
@@ -38,6 +43,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,8 +73,13 @@ def build_command(query: str, effort: str) -> list[str]:
 
 
 def run_query(query: str, skill: str, installed: Path, project: Path,
-              effort: str, timeout: int) -> bool | None:
-    """Return True if the skill was opened, False if not, None if the run failed."""
+              effort: str, timeout: int) -> tuple[bool, str] | None:
+    """Return (opened, evidence) for one run, or None if the run failed.
+
+    `evidence` is the matching event line, truncated. Without it a surprising
+    score cannot be audited: the first real run reported three false positives
+    that did not reproduce, and there was no record of what had matched.
+    """
     env = {k: v for k, v in os.environ.items() if k != "CODEX_SANDBOX"}
     try:
         proc = subprocess.run(
@@ -81,14 +92,59 @@ def run_query(query: str, skill: str, installed: Path, project: Path,
         return None
 
     text = proc.stdout.decode("utf-8", errors="replace")
-    needles = (str(installed), installed.as_posix(), f"skills/{skill}", f"skills\\{skill}")
     for line in text.splitlines():
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
-        if any(needle in line for needle in needles):
-            return True
-    return False
+        command = _opened_command(line, skill, installed)
+        if command is not None:
+            return True, command[:400]
+    return False, ""
+
+
+def _normalize(text: str) -> str:
+    """Flatten a JSON event line so a Windows path can be matched literally.
+
+    Codex emits the command it ran inside a JSON string, and that command is
+    itself a quoted shell string, so one real separator in
+    `C:\\Users\\...\\SKILL.md` can arrive as two or four backslashes. Matching the
+    raw line against the real path therefore never fires — the first eval run
+    scored 0/1 on a query where Codex had visibly opened the skill. Collapse any
+    run of backslashes to a single `/` and lowercase (Windows paths are
+    case-insensitive and Codex may echo a different casing than `Path` built).
+    """
+    return re.sub(r"\\+", "/", text).lower()
+
+
+def _mentions_skill(line: str, skill: str, installed: Path) -> bool:
+    """True only when the run EXECUTED a command that opens the installed skill.
+
+    Deliberately narrow. Matching anywhere in the event line counts a run as a
+    trigger whenever the skill's path merely *appears* in some file the model
+    read — and this repo contains several such files, including this runner's
+    own test fixture. That produced 4 unearned false positives out of 10
+    negatives on 2026-08-12, in a set whose negatives are all legitimate. The
+    command a model chose to run is a decision; text scrolling past in output is
+    not.
+    """
+    return _opened_command(line, skill, installed) is not None
+
+
+def _opened_command(line: str, skill: str, installed: Path) -> str | None:
+    """Return the command that opened the skill, or None."""
+    try:
+        item = json.loads(line).get("item") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if item.get("type") != "command_execution":
+        return None
+    command = str(item.get("command") or "")
+    hay = _normalize(command)
+    needles = (
+        _normalize(str(installed)),
+        _normalize(installed.as_posix()),
+        f"skills/{skill}".lower(),
+    )
+    return command if any(needle in hay for needle in needles) else None
 
 
 def main() -> int:
@@ -128,7 +184,7 @@ def main() -> int:
                       args.effort, args.timeout): item
             for item, _ in jobs
         }
-        fired: dict[str, list[bool | None]] = {}
+        fired: dict[str, list[tuple[bool, str] | None]] = {}
         for fut in cf.as_completed(futures):
             item = futures[fut]
             fired.setdefault(item["query"], []).append(fut.result())
@@ -137,11 +193,13 @@ def main() -> int:
     for item in evals:
         outcomes = fired.get(item["query"], [])
         ok = [o for o in outcomes if o is not None]
+        evidence = [ev for opened, ev in ok if opened]
         results.append({
             **item,
-            "trigger_rate": (sum(ok) / len(ok)) if ok else 0.0,
+            "trigger_rate": (sum(opened for opened, _ in ok) / len(ok)) if ok else 0.0,
             "runs": len(ok),
             "errors": len(outcomes) - len(ok),
+            "evidence": evidence,
         })
 
     pos = [r for r in results if r["should_trigger"]]
@@ -158,6 +216,10 @@ def main() -> int:
     print(f"\nShould-trigger opened the skill:     {tp}/{len(pos)}   (higher is better)")
     print(f"Should-NOT-trigger opened the skill: {fp}/{len(neg)}   (lower is better)")
     print(f"Reasoning effort used: {args.effort} (low or medium only, by standing rule)")
+    if fp:
+        print("Read the `evidence` field before believing a false positive: a run that "
+              "merely browsed the skills directory, or echoed a repo path, is not a "
+              "selection. Re-run the query alone before acting on it.")
     if total_err:
         print(f"WARNING: {total_err} run(s) errored or timed out and were excluded — "
               f"treat these numbers as incomplete.")

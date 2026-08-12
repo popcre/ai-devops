@@ -147,10 +147,10 @@ no longer matches its trigger is a defect.
   new owner. Two live copies is the duplication defect this map exists to
   prevent.
 - **A claim that contradicts reality is itself a defect.** A sentence in a
-  canonical owner that is no longer true (for example, "Codex has no skills
-  system" in `AGENTS-global-codex.md`) is an ownership bug. Fix it in its owner.
-  Which fix belongs to which plan step is tracked in the plan; this map only
-  names owners.
+  canonical owner that is no longer true is an ownership bug; fix it in its
+  owner. The standing example, "Codex has no skills system" in
+  `AGENTS-global-codex.md`, was **corrected on 2026-08-12** once a real eval
+  showed Codex opening the installed `SKILL.md` on 10 of 10 fitting prompts.
 - **Skills are retired by deletion, not hand-editing.** Delete the skill from
   `skills/` and commit; `bin/ai-install-skills` and
   `bin/install-ai-devops-windows.ps1` quarantine the installed copy on the next
@@ -297,6 +297,15 @@ Codex, which watches for Codex opening the installed `SKILL.md` because Codex
 emits no `Skill` tool event. The Codex runner always passes an explicit
 `low`/`medium` reasoning effort and a read-only sandbox. Neither tool replaces
 the other.
+
+The first Codex sets landed on 2026-08-12: `codex-qwen-code.eval.json` (the
+exact-body Claude/Codex merge candidate, one set scoring both clients) and
+`codex-shared-db-change.eval.json` (load-bearing — both globals name it).
+`codex-qwen-code` scores **10/10 should-fire, 0/10 should-not-fire**. Getting
+there required fixing two detection bugs that first understated and then
+overstated the score; both are described in `tools/skill-trigger-eval/README.md`
+and locked by `tests/test-codex-trigger-eval.sh`. **A trigger score is evidence
+only when its `evidence` field names a command the model chose to run.**
 
 ### Run the enforcement checks
 

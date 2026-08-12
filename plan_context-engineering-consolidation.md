@@ -9,16 +9,18 @@
 | 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
 | 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 (revised in step 5) | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
 | 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,972 bytes (29.1%), 632 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,694. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
-| 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
+| 6. Remove cross-client skill duplication safely | 🟡 opening task done, consolidation open | 2026-08-12 | **Eval sets exist.** `tools/skill-trigger-eval/codex-qwen-code.eval.json` and `codex-shared-db-change.eval.json`, 10 positive + 10 negative each. `codex-qwen-code` scores **10/10 should-fire, 0/10 should-not-fire** against the real `codex` CLI at `low` effort in a read-only sandbox, reproducibly. Two detection bugs in `codex-trigger-eval.py` were found and fixed by that run (escaped path separators understated the score to 0/1; matching command OUTPUT rather than the command overstated it by 4 unearned false positives from this repo's own files). Every hit now records the matching command in an `evidence` field, locked by the new offline `tests/test-codex-trigger-eval.sh`. The stale "Codex has no skills system" sentence in `AGENTS-global-codex.md` is corrected. Always-loaded 24,703 bytes, still under budget; `--strict` exits 0; all seven named suites pass. Twelve duplicate paragraph groups remain unconsolidated |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with step 6, consolidating cross-client skill
-duplication, and open it by writing the first Codex trigger eval sets. Steps 1-3
-and 5 are done, and step 4's source work is done. Before each phase, re-read
-that phase and sections 1, 4, 8, 11, and 13 to catch drift.
+**Fresh-session start:** continue step 6 at its main task, consolidating
+cross-client skill duplication, beginning with the exact-body Qwen pair — its
+eval set now exists and scores 10/10, so it can be re-run before and after any
+merge. Steps 1-3 and 5 are done, step 4's source work is done, and step 6's
+opening task is done. Before each phase, re-read that phase and sections 1, 4, 8,
+11, and 13 to catch drift.
 
 **Decisions Albert made on 2026-08-12 (binding, do not re-ask).**
 
@@ -37,8 +39,29 @@ that phase and sections 1, 4, 8, 11, and 13 to catch drift.
    `bin/setup-machine.ps1:187,192` to `pwsh`. Albert does not use 5.1 himself; the
    decision is that the migration is not worth a new machine requirement.
 5. **Writing the first Codex trigger eval sets is the opening task of step 6.**
-   Nothing else in step 6, and no correction of the stale Codex "no skills
-   system" sentence, may be decided before they exist.
+   **Done on 2026-08-12**, and the stale Codex "no skills system" sentence is
+   corrected in the same commit on that evidence. The rest of step 6 is unblocked.
+
+**Drift recorded by step 6 so far (its opening task; the phase is NOT finished).**
+
+1. **`codex-trigger-eval.py` changed shape.** `run_query` now returns
+   `(opened, evidence)` rather than a bool, and every result row carries an
+   `evidence` list. Anything that consumed its JSON output must expect the new
+   field.
+2. **A trigger only counts when the model RAN a command opening the skill.**
+   Output text no longer counts. Any earlier Codex trigger number, including one
+   quoted in a later step, is not comparable to a number measured after
+   2026-08-12.
+3. **Do not run a Codex eval from a checkout that contains the eval fixtures**
+   without reading the `evidence` field. Self-contamination is what produced the
+   4 unearned false positives.
+4. **`AGENTS-global-codex.md` changed twice more** (the skills sentence and the
+   session-rituals heading). Always-loaded is 24,703 bytes, 10 under the ratcheted
+   24,713 budget, so **step 6's remaining work has almost no headroom**; measure
+   from `C:\repos\ai-devops` after committing.
+5. **The ritual summaries under that sentence are NOT yet trimmed.** They are
+   still the main always-loaded reduction candidate, and each now needs its own
+   eval set before removal.
 
 **Drift recorded by step 5 (read before starting step 6).**
 

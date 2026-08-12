@@ -1,0 +1,23 @@
+[
+  {"query": "ask qwen what it thinks of the retry logic in bin/ai-memory-sync", "should_trigger": true},
+  {"query": "run this by qwen code before i commit it", "should_trigger": true},
+  {"query": "get me a qwen second opinion on the migration plan", "should_trigger": true},
+  {"query": "have qwen review the diff on this branch and tell me if it disagrees with you", "should_trigger": true},
+  {"query": "use qwen3.8-max to analyze this repo and summarize how the installer decides what is managed", "should_trigger": true},
+  {"query": "i want a totally separate model to look at this. use the qwen cli thats installed here", "should_trigger": true},
+  {"query": "delegate the powershell test rewrite to qwen code and then check its work", "should_trigger": true},
+  {"query": "qwen 3.8 - can it read the whole tools directory and find dead code?", "should_trigger": true},
+  {"query": "have qwen code do a read-only pass over the skills folder and list contradictions", "should_trigger": true},
+  {"query": "is qwen installed on this box, and if so use it to sanity check my regex", "should_trigger": true},
+
+  {"query": "ask codex what it thinks of the retry logic in bin/ai-memory-sync", "should_trigger": false},
+  {"query": "run this by glm and tell me if you agree", "should_trigger": false},
+  {"query": "get a second opinion on the migration plan from deepseek", "should_trigger": false},
+  {"query": "use grok to review this branch", "should_trigger": false},
+  {"query": "hand the powershell test rewrite to kimi", "should_trigger": false},
+  {"query": "read the entire codebase and tell me if you find any bugs or poorly written code", "should_trigger": false},
+  {"query": "which reasoning effort are we allowed to run gpt-5.6 at?", "should_trigger": false},
+  {"query": "wrap up this session and update the md files", "should_trigger": false},
+  {"query": "install the alibaba cloud cli and log me in", "should_trigger": false},
+  {"query": "whats the difference between a shared skill and a codex-only skill in this repo?", "should_trigger": false}
+]
