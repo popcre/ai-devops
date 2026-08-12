@@ -456,6 +456,19 @@ first and then re-measure before touching it.
     Everything written there goes through `sanitize_permission_body`; never persist a raw
     response body.
 
+32. **Implement mode is not asked for write-class permissions at all.** Measured against
+    the pinned 1.18.12 binary and the live API on 2026-08-12, through `ai-glm implement`
+    only, on a throwaway fixture: `read`, `list`, `glob`, `grep`, `edit` of an existing
+    file, `write` of a new file, appending to a file, and one `bash` command all ran with
+    **zero** permission requests reaching the wrapper, reproduced twice. An
+    outside-directory read produced no ask either, because the agent file's own
+    constraints made GLM refuse before it called the tool. So do NOT add `edit`, `write`,
+    `patch`, or `bash` to `classify_permissions` on the strength of reading the agent
+    file: there is no measured payload to validate against, and adding them would widen
+    the gate for a request that has never been observed. The remote-less clone remains
+    the real control, per constraints 1 and 2. Full table:
+    `../plan_ai-glm-permission-failures.md` finding 6.
+
 ### Process lessons
 
 24. **Do not edit a script while a copy of it is running.** Bash re-reads the file as it
