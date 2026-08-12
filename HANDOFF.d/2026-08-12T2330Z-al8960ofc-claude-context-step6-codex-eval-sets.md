@@ -5,9 +5,10 @@
 - **Repo:** `u2giants/ai-devops`. Worked in the worktree
   `C:\repos\ai-devops-worktrees\router-tightened-step-6-2b48cf` on branch
   `claude/router-tightened-step-6-2b48cf`. The commit is on `origin/main`.
-- **Status:** step 6's **opening task is complete, committed, and pushed**
-  (`92d36ff`). Step 6's **main task — consolidating the 12 duplicate paragraph
-  groups — has not been started.** Steps 7, 8, 9, 10 remain, and step 4 still owes
+- **Status:** step 6 is **substantially complete, committed, and pushed**
+  (`92d36ff` the opening task, `29ea53f` the merge). Duplicate paragraph groups
+  are 12 → 2. **One safety finding is open and unfixed: `codex-shared-db-change`
+  scores 8/10 (see §5 and §6).** Steps 7, 8, 9, 10 remain, and step 4 still owes
   its probes to step 8. The plan is
   [`plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
@@ -24,15 +25,15 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### A wrong guess is recoverable, but the rework is wasteful
 
-2. **Merging the Qwen pair is now measurable, but it is still a real change.**
-   `skills/claude/qwen-code` and `skills/codex/codex-qwen-code` have identical
-   descriptions and near-identical bodies. Merging into `skills/shared/` changes
-   which file a future session edits and changes the installed skill NAME on the
-   Codex side (`codex-qwen-code` → whatever the shared name is), which invalidates
-   the eval set's `--skill` argument and any muscle memory.
-   *Recommendation: merge it, because the eval set can now prove both clients
-   still fire — run the set before, merge, reinstall, run it again, and only keep
-   the merge if the score holds at 10/10 and 0/10.*
+2. **`codex-shared-db-change` under-fires, and fixing it means editing the
+   routing of the most safety-critical skill Albert has.** It scores 8/10, missing
+   its own verbatim trigger phrase. The obvious fix is to shorten and front-load
+   its ~1,000-character description, but that description is also what stops it
+   firing on unrelated work, and it currently has a perfect 0/10 false-positive
+   record worth protecting.
+   *Recommendation: fix it, but only against a re-score — change the description,
+   re-run the set, and keep the change only if should-fire improves AND
+   should-not-fire stays at 0. Budget about 40 Codex runs, roughly 20 minutes.*
 3. **The always-loaded globals have almost no headroom left: 10 bytes.** Any
    further step-6 addition to a global warns immediately.
    *Recommendation: treat 24,713 as frozen for step 6 and let step 10 set the
@@ -107,7 +108,30 @@ would have no way to tell that it was the skill rather than the model.
 - **Measured result, reproducible:** `codex-qwen-code` scores **10/10 should-fire
   and 0/10 should-not-fire** against the real `codex` CLI (0.145.0) at `low`
   effort in a read-only sandbox.
-- **`codex-shared-db-change` has NOT been run yet.** The set exists; no score.
+- **`codex-shared-db-change` scores 8/10 should-fire, 0/10 should-not-fire.** The
+  two misses are its own verbatim trigger phrase, "make db changes the proper
+  way", and Rule 0 schema inspection. **Re-tested with
+  `--project C:\repos\popdam3`, a real app repo on the shared database: both
+  still miss.** It is not a wrong-repo artifact. Unfixed on purpose — see §0
+  item 2.
+
+**Also done, committed, and pushed to `main` as `29ea53f` (step 6's main task).**
+
+- **The Qwen pair is merged into `skills/shared/qwen-code`.** The two files were
+  identical apart from the name, including `agents/openai.yaml`. Duplicate
+  paragraph groups **12 → 2**; task-triggered text fell about 5.5 KB and one file.
+- **The merged skill still scores 10/10 and 0/10** after installing to both
+  clients — identical to its pre-merge score. Eval set renamed
+  `qwen-code.eval.json`.
+- **Installed on this machine.** `bin/ai-install-skills` put the shared skill in
+  both `~/.claude/skills/qwen-code` and `~/.codex/skills/qwen-code`, and moved the
+  old copy to `~/.codex/skills-quarantine/codex-qwen-code`, recoverable. It did
+  **not** touch either global, which is correct until step 8.
+- **The last 2 duplicates are kept on purpose**, with reasons in
+  `docs/context-engineering.md`: a credential-incident STOP banner and the handoff
+  self-audit gate. No other client pair was merged; their bodies genuinely differ.
+- `docs/codex-skills-usage-guide.md`, `docs/skills-map.md`, and both READMEs are
+  updated. Task-triggered is **401,671 bytes** measured from `C:\repos\ai-devops`.
 - **`tools/skill-trigger-eval/codex-trigger-eval.py` has two bug fixes** (see §4)
   and a new `evidence` field on every hit. `run_query` now returns
   `(opened, evidence)` instead of a bool.
@@ -201,27 +225,29 @@ the repo. That remains correct until step 8.
 
 These cover the whole remaining plan, steps 6 through 10, in order.
 
-1. **Step 6, main task — consolidate cross-client skill duplication.** Work the 12
-   measured duplicate paragraph groups, beginning with the exact-body Qwen pair.
-   The gate now exists: run
-   `python tools/skill-trigger-eval/codex-trigger-eval.py --skill codex-qwen-code
-   --eval-set tools/skill-trigger-eval/codex-qwen-code.eval.json`, merge into
-   `skills/shared/`, reinstall, and run it again against the NEW installed name.
-   Separate shared policy from a small client adapter only where invocation
-   genuinely differs. Retire old managed copies through the existing quarantine
-   mechanism. Correct `docs/codex-skills-usage-guide.md:84` (`--migrate-obsolete`
-   is a no-op now; quarantine is automatic). **Four skills are load-bearing**
-   because the globals name them: `synology-long-running-operations`,
-   `shared-db-change`, `codex-shared-db-change`, `handoff-writer`. Renaming or
-   merging any of them means updating both globals in the same commit — and the
-   globals have 10 bytes of headroom.
-   *You'll know it worked when* the duplicate-paragraph count falls, the installer
-   still fails closed on a name collision, both client fixtures receive the
-   intended skill, the Qwen eval still scores 10/10 and 0/10 after the merge, and
-   overlap stays zero.
-2. **Also in step 6 — score `codex-shared-db-change`.** The set is written and
-   unrun. It is the load-bearing safety skill, so a low score there is a finding,
-   not a formality. Budget about 20 Codex runs.
+1. **Close the `codex-shared-db-change` finding — the only step-6 work left, and
+   the most important thing on this list.** A Codex session in an app repo can
+   currently be told "make db changes the proper way" and not open the skill that
+   stops app repos authoring their own shared-database migrations. Method:
+   re-score first to confirm 8/10 still holds, edit the DESCRIPTION only (never
+   the name — both globals point at it), re-score, and keep the edit only if
+   should-fire improves and should-not-fire stays 0/10.
+   ```bash
+   python tools/skill-trigger-eval/codex-trigger-eval.py \
+     --skill codex-shared-db-change \
+     --eval-set tools/skill-trigger-eval/codex-shared-db-change.eval.json \
+     --workers 4 --timeout 300
+   ```
+   Reinstall with `bash bin/ai-install-skills` between edits — **the runner tests
+   the INSTALLED skill, not the repo copy**, so an unreinstalled edit measures
+   nothing. Keep global-versus-skill-description overlap at 0.
+   *You'll know it worked when* should-fire is above 8/10, should-not-fire is
+   still 0/10, `--strict` exits 0, and the plan's step-6 drift item 6 can be
+   deleted rather than reworded.
+2. **Optional, and only if a later step needs it: merge another client pair.**
+   None is queued. The remaining pairs' bodies genuinely differ, and each would
+   need its own eval set written and scored before and after. Do not merge on a
+   matching name.
 3. **Step 7 — repair installation drift safely.** Preview-first reconciliation in
    BOTH `bin/ai-install-skills` and `bin/install-ai-devops-windows.ps1`, keeping
    machine overlays. Re-measure drift first (`installed source drift` reads 0 on
@@ -339,10 +365,16 @@ These cover the whole remaining plan, steps 6 through 10, in order.
   machine was seeded. Step 7's preview will show a large diff; that is expected.
 - **Open question: what should the final budgets be?** 23,318 and 35,340 were flat
   30% guesses from step 3, never measurements. Step 10 sets the real ones.
-- **Open question: what is a passing trigger score?** 10/10 and 0/10 is the only
-  data point that exists. Nobody has decided what score justifies keeping a merge,
-  or what score should block one. Step 6's remaining work needs that line drawn;
-  a defensible starting point is "no regression against the pre-merge score".
+- **Open question: what is a passing trigger score?** Two data points exist:
+  `qwen-code` at 10/10 and 0/10, and `codex-shared-db-change` at 8/10 and 0/10.
+  The merge used "no regression against the pre-merge score", which worked. Nobody
+  has decided what score is acceptable for a skill in isolation — 8/10 on a
+  safety skill is clearly not, but the line is undrawn.
+- **Risk: an under-firing safety skill is invisible.** Nothing in the audit,
+  the tests, or `--strict` would ever have surfaced the 8/10. Only a written eval
+  set found it. Every load-bearing skill the globals name
+  (`synology-long-running-operations`, `shared-db-change`,
+  `codex-shared-db-change`, `handoff-writer`) deserves a set; only one has one.
 - **Decision, 2026-08-12 (step 6):** Codex has a skills system, measured, and the
   global says so.
 - **Decision, 2026-08-12 (step 6):** only a command the model ran counts as a
