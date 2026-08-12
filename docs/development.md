@@ -111,7 +111,7 @@ pwsh -File tests/test-memory-sync-scheduled-task.ps1
 
 The tests use temporary repositories and temporary Claude/Codex homes. They
 cover shared-skill installation, counts, dry-run safety, source-name collisions,
-and opt-in quarantine of the retired ShareSync skill. Also verify manually:
+and automatic quarantine of the retired ShareSync skill. Also verify manually:
 
 - `bash -n` on every changed script (fast syntax gate).
 - `ai-devops doctor` should stay green for required checks (warnings are OK when

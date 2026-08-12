@@ -120,25 +120,26 @@ try {
     Assert-True (-not (Test-Path (Join-Path $claude "skills"))) "Codex collision partially changed Claude home"
     Assert-True (-not (Test-Path (Join-Path $codex "skills"))) "Codex collision partially changed Codex home"
 
-    Write-Host "5/5 obsolete skill warns, then quarantines only by opt-in"
+    Write-Host "5/5 obsolete managed skill quarantines automatically"
     $fixture = New-Fixture "migrate"
+    New-Item -ItemType Directory -Path (Join-Path $fixture "config") -Force | Out-Null
+    "synology-sharesync-stuck-triage" | Set-Content -LiteralPath (Join-Path $fixture "config\retired-skills.txt")
     $claude = Join-Path $TempRoot "migrate\claude"
     $codex = Join-Path $TempRoot "migrate\codex"
     New-TestSkill $claude "" "synology-sharesync-stuck-triage"
     New-TestSkill $codex "" "synology-sharesync-stuck-triage"
-    $output = Invoke-Installer $fixture $claude $codex
-    Assert-True (Test-Path (Join-Path $claude "skills\synology-sharesync-stuck-triage")) "default run moved Claude obsolete skill"
-    Assert-True (Test-Path (Join-Path $codex "skills\synology-sharesync-stuck-triage")) "default run moved Codex obsolete skill"
-    Assert-True ($output -match "Re-run with -MigrateObsolete") "migration warning missing"
-    $preview = Invoke-Installer $fixture $claude $codex -SkillsDryRun -MigrateObsolete
+    $preview = Invoke-Installer $fixture $claude $codex -SkillsDryRun
     Assert-True (Test-Path (Join-Path $claude "skills\synology-sharesync-stuck-triage")) "preview moved Claude obsolete skill"
     Assert-True (Test-Path (Join-Path $codex "skills\synology-sharesync-stuck-triage")) "preview moved Codex obsolete skill"
-    Assert-True ($preview -match "\[skills-dry-run\] move") "migration preview missing"
-    Invoke-Installer $fixture $claude $codex -MigrateObsolete | Out-Null
+    Assert-True ($preview -match "\[skills-dry-run\] retire") "automatic quarantine preview missing"
+    Invoke-Installer $fixture $claude $codex | Out-Null
     Assert-True (-not (Test-Path (Join-Path $claude "skills\synology-sharesync-stuck-triage"))) "Claude obsolete skill remains active"
     Assert-True (-not (Test-Path (Join-Path $codex "skills\synology-sharesync-stuck-triage"))) "Codex obsolete skill remains active"
     Assert-True (Test-Path (Join-Path $claude "skills-quarantine\synology-sharesync-stuck-triage\SKILL.md")) "Claude quarantine missing"
     Assert-True (Test-Path (Join-Path $codex "skills-quarantine\synology-sharesync-stuck-triage\SKILL.md")) "Codex quarantine missing"
+
+    # The old switch remains accepted as a no-op for older scripts.
+    Invoke-Installer $fixture $claude $codex -MigrateObsolete | Out-Null
 
     Write-Host "PASS: install-ai-devops-windows"
 } finally {
