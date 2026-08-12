@@ -23,6 +23,14 @@ any rule lives. Enforcement (step 3) comes before any reduction (steps 4-6).
 Before each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch
 drift.
 
+**End-of-phase reciprocal instruction (applies to every step below).** When you
+finish a phase, re-read **all remaining phases through step 10** and report any
+drift your work created: a renamed or moved file, a changed interface or report
+field, a decision that invalidates a later approach, or a measurement a later
+step assumed. Record the drift in this plan (STATUS evidence plus the affected
+step's text) before you cut to a fresh session. Finishing a phase without that
+sweep is an incomplete phase.
+
 **Newest handoff:**
 [`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`](HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md)
 
@@ -509,8 +517,9 @@ assigned to two canonical owners.
 
 **Targets:** the audit tool from step 1; `tests/test-ai-install-skills.sh`,
 `tests/test-install-ai-devops-windows.ps1`, `tests/test-windows-scripts.sh`, and
-new focused tests such as
-`tests/test-context-audit.ps1` if PowerShell is required.
+`tests/test-context-audit.ps1`, which step 1 already created and listed in
+`docs/development.md`. Extend that file rather than creating a second audit
+test.
 
 Add configurable warning budgets, not immediate hard failures, for global,
 repo-start, and per-client skill-description context. Add exact safety-marker
@@ -770,6 +779,14 @@ machine.
   `HANDOFF.md`.
 - Any unavoidable workaround must be labeled TEMPORARY in the implementing
   session's own handoff.
+- **Do not delegate a step of this plan to `ai-glm implement` until the GLM
+  permission bug is fixed.** On 2026-08-12 step 2 was dispatched to GLM as job
+  `context-ownership-map-step2` and the wrapper's permission gate killed it after
+  GLM had already edited three files. The partial patch was preserved, but the
+  step had to be completed by hand. Root cause and fix are tracked in
+  [`plan_ai-glm-permission-failures.md`](plan_ai-glm-permission-failures.md).
+  GLM **review** sessions are unaffected and remain the right tool for a second
+  opinion on steps 4-6.
 
 ## 12. Access and environment
 

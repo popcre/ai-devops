@@ -9,10 +9,25 @@
 | 3. Widen the implement-mode allowlist to the measured write actions | ⬜ open | 2026-08-12 | Section 6, finding 2 |
 | 4. Accept the measured non-`resources` permission shapes | ⬜ open | 2026-08-12 | Section 6, finding 3 |
 | 5. Add regression tests for every classifier branch | ⬜ open | 2026-08-12 | Section 10 |
+| 7. Separate transport failure from unsafe permission state | ⬜ open | 2026-08-12 | Section 6, finding 3 (resolved by recovered stderr); section 9, step 7 |
 | 6. Re-run the two real failed jobs and close | ⬜ open | 2026-08-12 | Section 9, step 6 |
 
 **Fresh-session start:** begin at step 1. Do not widen any allowlist before step 1
 ships, because today the wrapper cannot tell you which branch rejected the run.
+Step 7 was added on 2026-08-12 after the dispatching session's stderr was
+recovered; it fixes a different defect (a dropped local HTTP poll reported as a
+permission failure) and is independent of steps 2-4, so a second session may take
+it concurrently. Step 6 stays last regardless.
+
+**Concurrency and file ownership.** This plan touches only `bin/ai-glm`,
+`config/opencode/*`, `tests/test-ai-glm.sh`, `docs/glm-opencode.md`, and
+`skills/shared/ask-glm/SKILL.md`. It shares no file with
+`plan_context-engineering-consolidation.md`, which owns the global instruction
+files, `AGENTS.md`, `docs/context-engineering.md`, the skills usage guides, and
+the context-audit tooling. The two plans can therefore run at the same time in
+separate sessions. Pull `main` immediately before committing either one.
+`plan_ai-glm-permission-deadlock.md` is complete and shipped; treat it as the
+historical record of the original fail-closed design and do not reopen it.
 
 ## 1. The ultimate goal
 
@@ -215,17 +230,44 @@ wrapper's allowlist does not contain them. Any write-class permission ask is
 therefore fatal. `popcrm-codebase-audit-remediation` failed exactly this way
 with `permission-unsupported-action` and no changes.
 
-### Finding 3 (hypothesis, must be measured in step 2): the step-2 failure is a shape mismatch, not an action mismatch
+### Finding 3 (RESOLVED 2026-08-12 by recovered stderr): the step-2 failure was a transport failure, not a permission shape at all
 
-`context-ownership-map-step2` did **not** get `permission-unsupported-action`.
-It got the fallback code, so the rejected reason was one of: un-approvable
-request, HTTP error, malformed JSON, unsupported envelope, missing id, or
-missing resources. Given that GLM had already edited three files when it was
-blocked, the most probable branch is **`permission entry is missing resources`**
-(`bin/ai-glm:441`): an entry whose paths arrive under a key other than
-`.resources`, for example `filePath` or `pattern`. This is a hypothesis. Step 1
-must ship before it can be confirmed, and step 2 must measure it rather than
-assume it.
+**This finding originally hypothesized a missing-`resources` shape mismatch.
+That hypothesis is wrong.** The dispatching Claude session's stderr was
+recovered from its background-task output file before it was lost, and it names
+the branch exactly:
+
+```text
+ai-glm: error: GLM permission failed: permission endpoint returned HTTP 000.
+       status=000 mode=implement path=missing sanitized_response=
+```
+
+That is `bin/ai-glm:413`, the HTTP-status branch, and `000` is not a status the
+OpenCode server can send. It is the value `permission_http` assigns at
+`bin/ai-glm:360` when the `curl` call itself returns nonzero — connection
+refused, connection reset, or the 20-second `-m 20` timeout expiring. The body
+was empty and the path category was `missing`, both consistent with "no reply
+was ever received". The permission payload was never seen, so no allowlist,
+action, or key shape was involved.
+
+`classify_permissions` then treats `000` like any other non-2xx status and fails
+closed, killing an eight-minute job and reporting it to the user as a permission
+problem. **A dropped local HTTP request is being classified as an unsafe
+permission state.** Those are different failures with different correct
+responses: an unsafe permission must stop the run, whereas a single dropped poll
+against a loopback server that is still healthy should be retried a bounded
+number of times before the run is destroyed.
+
+Corroborating evidence: `ai-glm doctor` was run minutes after the failure and
+passed every check, with the scheduled task `Running` and the health endpoint
+answering. The service did not go down. This is consistent with a transient
+loopback stall — note hard-won constraint 24 in `docs/glm-opencode.md`, which
+already records that the permission endpoint can fail to answer while a
+`glob`/`grep` permission is pending.
+
+This finding no longer blocks on step 2. Its fix is step 7 below. Findings 1, 2,
+4, and 5 are unchanged, and the popcrm failure
+(`permission-unsupported-action`) is still a genuine allowlist gap.
 
 ### Finding 4 (proven): the failure is intermittent
 
@@ -400,6 +442,51 @@ versus implement divergence, inside/outside/invalid path categories, the
 
 **Verification gate:** every test fails when its guard is removed from the
 source and passes against the real source, with a plain-English reason.
+
+### Step 7. Separate transport failure from unsafe permission state
+
+**Targets:** `bin/ai-glm` (`permission_http`, `classify_permissions`, and the
+`handle_permissions` code mapping), `tests/test-ai-glm.sh`,
+`docs/glm-opencode.md` troubleshooting table, `skills/shared/ask-glm/SKILL.md`.
+
+This step exists because of finding 3. It is **independent of steps 2-4**: it
+touches the transport layer, not the permission allowlist or the path
+extractors, so a second session can work it at the same time as the measurement
+work. Take step 1 first if both are being done by the same session, because step
+1's durable detail field is what proves this branch fired next time.
+
+Required behavior:
+
+1. **Distinguish "no reply" from "a reply we refuse."** `permission_http`
+   already sets `000` on a nonzero `curl` exit; carry that fact through as an
+   explicit transport-failure state rather than letting it fall into the generic
+   non-2xx branch of `classify_permissions`.
+2. **Retry a dropped poll, bounded and free.** A transport failure costs no
+   provider tokens: nothing is re-sent to Z.ai, because the poll is a local
+   loopback GET against our own OpenCode server. Retry a small fixed number of
+   times (three is the same bound the Windows service wrapper already uses)
+   with a short backoff, then fail. This does **not** violate rejected approach
+   4 in section 7, which forbids retrying whole paid provider *turns*.
+3. **Fail with the truth if the retries are exhausted.** The message must say
+   the local permission endpoint did not answer, name the retry count and the
+   timeout, and tell the caller to check `ai-glm doctor` and `server status`.
+   It must not say "GLM permission failed", which sends the reader hunting for a
+   permission problem that never existed.
+4. **Give it its own durable code**, for example `transport-failed`, distinct
+   from `permission-invalid-response`, so the two never merge again in the job
+   record.
+5. **Do not weaken any permission rule.** A real non-2xx status from a server
+   that did answer keeps failing closed exactly as it does today. Only the
+   never-answered case changes.
+
+**Dependencies:** step 1 preferred but not blocking. Independent of steps 2-4.
+
+**Verification gate:** an offline fixture that forces `curl` to fail proves the
+retry runs the configured number of times and then produces the transport code
+and message, not a permission code; a fixture returning a genuine HTTP 500 still
+fails closed as a permission error with no retry; a fixture that fails twice and
+succeeds on the third poll completes the turn normally; `tests/test-ai-glm.sh`
+passes; the troubleshooting table and skill guidance name the new message.
 
 ### Step 6. Re-run the two real failed jobs and close
 
