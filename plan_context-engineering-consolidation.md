@@ -8,7 +8,7 @@
 | 2. Define the context ownership map | ✅ done | 2026-08-12 | Ownership map added to `docs/context-engineering.md` (per-class owner table, eight-row decision table, pointer definition, stale/retention rules, ten real rules classified); router row in `AGENTS.md`; pointers plus corrected Windows installer routing in both skills usage guides; all cited paths verified to exist; no instruction file trimmed |
 | 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
 | 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 (revised in step 5) | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
-| 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,570 bytes (29.9%), 230 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,292. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
+| 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,972 bytes (29.1%), 632 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,694. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
 | 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
@@ -56,8 +56,8 @@ that phase and sections 1, 4, 8, 11, and 13 to catch drift.
    that touches it must touch both globals. Step 3's "ten rules" evidence line is
    superseded by eleven.
 3. **Both budgets moved and are ratcheted in all three places.**
-   `alwaysLoadedBytes` 25,764 to 24,713 and `startupRoutedBytes` 50,486 to 35,570.
-   The startup-routed `target` stays 35,340; the router is 230 bytes above it, and
+   `alwaysLoadedBytes` 25,764 to 24,713 and `startupRoutedBytes` 50,486 to 35,972.
+   The startup-routed `target` stays 35,340; the router is 632 bytes above it, and
    that gap is left for step 6 or step 10. Step 6 and step 10 must not measure
    against any older number.
 4. **Open question 3 is answered: do not enable `@AGENTS.md`.** The repo
@@ -754,9 +754,11 @@ the correct source; a fresh Claude and Codex session can orient in under five
 minutes; link tests pass; incident-specific probes find the detail only when
 triggered; startup context is lower than baseline.
 
-**Completed 2026-08-12.** Startup-routed context fell from 50,729 to 35,570
-bytes, a 29.9% cut that lands 230 bytes above the 35,340 target; `AGENTS.md`
-alone went from 48,451 to 33,292 bytes. Nothing was deleted. The ten "intentional quirks"
+**Completed 2026-08-12.** Startup-routed context fell from 50,729 to 35,972
+bytes, a 29.1% cut that lands 632 bytes above the 35,340 target; `AGENTS.md`
+alone went from 48,451 to 33,694 bytes. Measure from `C:
+eposi-devops`: a
+worktree whose files still have LF endings reports about 400 bytes less. Nothing was deleted. The ten "intentional quirks"
 narratives moved verbatim into `docs/design-decisions.md`, the two incident
 narratives into `docs/critical-incidents.md` (one paragraph the source repeated
 twice is now single), and the router keeps a one-line rule plus a pointer with a
