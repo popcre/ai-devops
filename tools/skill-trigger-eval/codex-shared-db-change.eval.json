@@ -1,0 +1,23 @@
+[
+  {"query": "add a nullable licensor_code column to the properties table so popdam can group by licensor", "should_trigger": true},
+  {"query": "we need a new view that joins characters to style guides for the pim search screen", "should_trigger": true},
+  {"query": "write the migration for the new rfq_status enum value", "should_trigger": true},
+  {"query": "make db changes the proper way please, dont just run sql", "should_trigger": true},
+  {"query": "mirror it to shared-db", "should_trigger": true},
+  {"query": "the rls policy on assets is blocking the crm service role. fix the policy", "should_trigger": true},
+  {"query": "add an index on source_id, the paramount reconcile query is doing a seq scan", "should_trigger": true},
+  {"query": "does the shared database fit the data the nbcu scraper is producing? compare our shape to the schema", "should_trigger": true},
+  {"query": "review the schema - what columns exist on the character table and which are keys?", "should_trigger": true},
+  {"query": "we want a new rpc that returns a property with its whole character list in one call", "should_trigger": true},
+
+  {"query": "the poppim frontend is showing a blank grid, the api returns 200 with an empty array. debug the angular side", "should_trigger": false},
+  {"query": "add SENDINBLUE_API_KEY as an env var on the designflow-backend container in coolify", "should_trigger": false},
+  {"query": "wrap up this session and write the handoff", "should_trigger": false},
+  {"query": "our github action is failing on the lint step, fix it", "should_trigger": false},
+  {"query": "ask qwen for a second opinion on this refactor", "should_trigger": false},
+  {"query": "the nas share is stuck syncing one file over and over, figure out why", "should_trigger": false},
+  {"query": "bump the node version in the dockerfile and rebuild the image", "should_trigger": false},
+  {"query": "write unit tests for the date formatting helper in this repo", "should_trigger": false},
+  {"query": "check whether the prod cloud build triggers are still enabled", "should_trigger": false},
+  {"query": "put the new supabase preview anon key in 1password with good notes", "should_trigger": false}
+]

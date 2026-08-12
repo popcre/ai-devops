@@ -22,8 +22,8 @@ handoffs are as long as the work needs.
 Install as `~/.codex/AGENTS.md` (Windows: `C:\Users\<user>\.codex\AGENTS.md`).
 Codex reads this at the start of every session, the way Claude Code reads
 `~/.claude/CLAUDE.md`. Same rules as `CLAUDE-global.md`, adapted for Codex.
-Codex has no skills system, so the ritual procedures are summarized here with
-pointers to the full versions in `u2giants/ai-devops` → `skills/claude/`.
+Codex has skills: it opens `~/.codex/skills/<name>/SKILL.md` when a task fits
+(measured 2026-08-12). Rituals are summarized here; full text in that folder.
 
 ## Who you're working for
 
@@ -141,7 +141,7 @@ before touching any prod trigger or Terraform state.
     serves every agent, so this is per-machine, never per-agent.
 21. State target repo and branch before any merge/push.
 
-## Session rituals (full procedures: ai-devops repo, skills/claude/)
+## Session rituals (full procedures: `~/.codex/skills/`)
 
 - **Session start (dflow):** sync develop → sandbox branch on GitHub, then pull
   locally, all six designflow repos; AG-Grid work per the AG-Grid MCP docs

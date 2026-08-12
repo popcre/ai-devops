@@ -45,8 +45,10 @@ id_ed25519
 # skill above a single file-level negation is enough.
 !tools/skill-trigger-eval/*secret*.eval.json
 
-# Per-run output from that tool — regenerated on every run, never worth tracking.
-tools/skill-trigger-eval/*.results.json
+# Per-run output from both runners — regenerated on every run, never worth
+# tracking. The Codex runner writes `<set>.codex-results.json`, which a
+# `*.results.json` pattern does NOT match, so the glob is deliberately loose.
+tools/skill-trigger-eval/*results.json
 
 # === OS / editor noise ===
 .DS_Store
