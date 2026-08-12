@@ -7,7 +7,7 @@
 | 1. Freeze a measured baseline | ✅ done | 2026-08-12 | Parser corrected for YAML block scalars; regression test fails on the old parser and passes on the new one; corrected manifests Claude 21,521 bytes / about 5,381 tokens, Codex 14,015 bytes / about 3,504 tokens; two fixed-timestamp runs byte-identical; all Bash and PowerShell suites pass |
 | 2. Define the context ownership map | ✅ done | 2026-08-12 | Ownership map added to `docs/context-engineering.md` (per-class owner table, eight-row decision table, pointer definition, stale/retention rules, ten real rules classified); router row in `AGENTS.md`; pointers plus corrected Windows installer routing in both skills usage guides; all cited paths verified to exist; no instruction file trimmed |
 | 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
-| 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6; budget to ratchet: `alwaysLoadedBytes` 33,311 → target 23,318 |
+| 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
 | 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | `AGENTS.md` is now 48,208 bytes / about 12,052 estimated tokens; the 47,123-byte / 11,731-token figure in section 5 is the step-1 measurement and is superseded |
 | 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
@@ -15,13 +15,42 @@
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with step 4, slimming the always-loaded global
-files. Steps 1-3 are done: the manifest totals in `docs/context-engineering.md`
-come from the corrected parser and are safe to use for budgets, the ownership
-map in that same file is the authority for where any rule lives, and the
-enforcement checks that step 4 must not break are in place. Enforcement came
-before reduction on purpose. Before each phase, re-read that phase and sections
-1, 4, 8, 11, and 13 to catch drift.
+**Fresh-session start:** begin with step 5, tightening `AGENTS.md` as a router.
+Steps 1-3 are done and step 4's source work is done. Before each phase, re-read
+that phase and sections 1, 4, 8, 11, and 13 to catch drift.
+
+**Drift recorded by step 4 (read before starting step 5).**
+
+1. **Two step-4 gates are deferred to step 8, not skipped.** The live "a
+   representative Claude and Codex session answers safety and routing probes"
+   gate needs the trimmed globals installed on a machine, and the plan forbids
+   installing before the pilot. Step 8 must run those probes against the trimmed
+   globals and roll back on any failure. Do not treat step 4 as fully closed
+   until it does.
+2. **The stale `AGENTS-global-codex.md` "Codex has no skills system" claim is
+   still there** (now around line 43). Step 4 deliberately did not touch it,
+   because the plan gates that correction on Codex skill-loading and trigger
+   evidence, and no Codex eval set exists yet. Step 6 owns writing the eval sets
+   and then correcting the sentence and the ritual summaries under it.
+3. **The always-loaded target was not reached, on purpose.** 25,764 versus the
+   23,318 target. The only remaining candidates are the shared response-style
+   contract (identical in both globals and governing every turn) and the Codex
+   ritual summaries (gated by item 2). Do not close the gap by shaving safety
+   prose. Step 10 may set the final budget to whatever proves safe.
+4. **Pointers are prose paths, not Markdown links, so the audit's broken-link
+   check does not cover them.** All nine were verified to exist by hand on
+   2026-08-12. If a later step renames `templates/system/handoff-standard.md`,
+   `docs/cloud-build-prod-trigger-incident-2026-07-20.md`,
+   `docs/future-visual-testing.md`, `bin/ai-git-identity`, or the
+   `synology-long-running-operations`, `shared-db-change`,
+   `codex-shared-db-change`, or `handoff-writer` skills, it must fix both
+   globals in the same commit. A step-5 or step-10 improvement worth making:
+   teach the audit to check backticked paths in the globals.
+5. **Step 5's startup-routed baseline moved again.** `AGENTS.md` plus `CLAUDE.md`
+   now measure 50,729 bytes, over the 50,486 warning budget by 243. Step 5 must
+   measure against 50,729 and ratchet that budget when it lands.
+6. **Nothing changed in the installers, skills, or machine files.** Steps 6 and 7
+   start from the same source layout the step-3 evidence describes.
 
 **Drift recorded by step 3 (read before starting step 4).**
 
@@ -620,6 +649,19 @@ required-marker tests pass; both installed-client fixtures
 load the correct global and overlay; a representative Claude and Codex session
 correctly answers safety and routing probes without opening unrelated docs;
 always-loaded measured text falls materially from baseline with no quality loss.
+
+**Source side completed 2026-08-12.** Both globals were trimmed from 33,311 to
+25,764 bytes (22.7%) with no rule deleted: each removed passage now sits with its
+canonical owner and the global carries the rule plus a pointer stating when to
+open that owner. The moves are tabulated in `docs/context-engineering.md` under
+"Where the removed global detail now lives". `--strict` exits 0; safety markers,
+cross-client parity, and global-vs-skill-description overlap are all clean; the
+`alwaysLoadedBytes` budget is ratcheted to 25,764 in both
+`tools/context-audit/budgets.json` and the tool's fallback defaults; all seven
+named Bash/PowerShell suites pass. Two gates remain and are recorded as drift
+above: the live client probes belong to step 8, and the stale Codex
+"no skills system" sentence with its ritual summaries stays until step 6 has
+Codex trigger evidence.
 
 #### Step 5. Tighten `AGENTS.md` as a router
 

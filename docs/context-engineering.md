@@ -13,7 +13,7 @@ measures four context classes:
 
 | Class | Meaning | Current measured source |
 |---|---|---:|
-| Always loaded | User-level Claude and Codex global templates | 2 files, 33,311 bytes, about 8,329 estimated tokens |
+| Always loaded | User-level Claude and Codex global templates | 2 files, 33,311 bytes, about 8,329 estimated tokens (step 4 cut this to 25,764 bytes / about 6,442 tokens on 2026-08-12) |
 | Startup routed | This repo's `AGENTS.md` and `CLAUDE.md` entry files | 2 files, 49,401 bytes, about 12,351 estimated tokens |
 | Task triggered | Skill bodies read only when selected | 48 files, 405,271 bytes, about 101,333 estimated tokens |
 | Archive or ignored | Transcripts, chats, `.ai`, dependencies, generated output, worktrees, secrets, and network roots | excluded and never opened |
@@ -206,7 +206,7 @@ status, including under `--strict`.
 
 | Budget | Measured 2026-08-12 | `budget` (warns above) | `target` (steps 4-6 aim) |
 |---|---:|---:|---:|
-| Always-loaded globals | 33,311 bytes | 33,311 | 23,318 |
+| Always-loaded globals | 25,764 bytes | 25,764 | 23,318 |
 | Startup-routed repo entry files | 50,486 bytes | 50,486 | 35,340 |
 | Claude skill manifest | 21,521 bytes | 21,521 | 15,065 |
 | Codex skill manifest | 14,015 bytes | 14,015 | 9,811 |
@@ -219,6 +219,15 @@ and its behavior tests still pass. Never raise a budget to silence a warning.
 Note that startup-routed grew from the 49,401 bytes recorded in the step-1
 baseline above to 50,486 bytes, because `AGENTS.md` gained rows after step 1.
 That growth is exactly what the budget now catches.
+
+**Ratchet on 2026-08-12 (step 4).** The always-loaded budget moved from 33,311
+to 25,764 bytes after the two global templates were slimmed: 22.7% smaller, with
+zero missing safety markers, zero parity mismatches, and zero
+global-versus-skill-description overlaps. What moved and where it went is
+recorded under "Where the removed global detail now lives" below. The remaining
+gap to the 23,318-byte target is deliberate: the next candidates are the shared
+response-style contract and the Codex ritual summaries, and the ritual summaries
+cannot be cut until Codex trigger evidence exists (plan step 4/6).
 
 ### Locked safety markers
 
@@ -290,10 +299,35 @@ Two runs with the same `--generated-at` value must produce byte-identical JSON.
 The fixture test proves that `.env`, `.ai`, transcript, and dependency content
 does not enter the report.
 
+## Where the removed global detail now lives
+
+Step 4 slimmed the two always-loaded globals on 2026-08-12. Nothing was deleted
+outright: every removed passage already had a canonical owner under the
+ownership map, and the global now carries the rule plus a pointer that says when
+to open that owner. The table is the audit trail for anyone who misses text.
+
+| Removed from | What moved | Canonical owner now | Trigger written into the global |
+|---|---|---|---|
+| Both globals | The 25-second NAS read procedure (managed SSH, PID/status, durable output) | `skills/shared/synology-long-running-operations/SKILL.md` | Before any NAS read that will exceed 25 seconds |
+| Claude global | The standalone "No `terraform apply` against prod" section, merged into production safety | Same file, one section; the 2026-07-20 narrative is in `docs/cloud-build-prod-trigger-incident-2026-07-20.md` | Before touching any prod trigger or Terraform state |
+| Both globals | The 2026-07-20 incident narrative | `docs/cloud-build-prod-trigger-incident-2026-07-20.md` | Same as above |
+| Both globals | The itemized shared-database procedure | `skills/claude/shared-db-change/` and `skills/codex/codex-shared-db-change/` | Before making any shared-database change |
+| Claude global | The dev-server-proxy visual-testing recipe | `docs/future-visual-testing.md` | When a UI screen needs a backend to reach it |
+| Claude global | The Git-identity mechanics beyond the check itself | `bin/ai-git-identity` | Before the first commit in an unfamiliar repo |
+| Both globals | The 9 handoff sections, the self-audit gate, legacy `HANDOFF.md` migration, and the `merge=union` ban | `templates/system/handoff-standard.md` and `skills/shared/handoff-writer/` | Before writing any handoff |
+
+What deliberately stayed always-loaded: the response-style contract, who Albert
+is, the access-first and manual-action rules, secret and 1Password-serialization
+rules, the GPT-5.6 low/medium limit, production and shared-cloud read-only
+safety, the shared-database read-open/change-gated split, branch and commit-
+identity gates, the engineering standards, and the session-start routing
+contract. Each of those either governs behavior on every turn or is the gate
+that stops an unsafe action before any pointer could be followed.
+
 ## Current boundary
 
 Phase A (steps 1 and 2) and phase B (step 3) are done: the baseline is frozen,
 the ownership map is defined, and the enforcement checks and warning budgets are
-in place. No global, repo instruction, skill, installer, or machine file has been
-trimmed or changed — that reduction belongs to steps 4-6. The map only names
-owners; enforcement only reports. Neither moves or shortens any rule.
+in place. Step 4 is done for the two global templates; `AGENTS.md` and the repo
+`CLAUDE.md` are untouched and belong to step 5, and no skill, installer, or
+machine file has been changed yet.

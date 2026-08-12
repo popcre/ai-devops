@@ -41,11 +41,9 @@ Long is fine for drafts, scripts, posts, and documents. This whole style guide i
 # Global system instructions — Albert's standing rules
 
 Install this as the **user-level** `~/.claude/CLAUDE.md` on every machine
-(Windows: `C:\Users\<user>\.claude\CLAUDE.md`). It applies to every project.
-It encodes the corrections Albert had to type hundreds of times across
-machines, so any model — including Opus — starts every session already knowing
-them. Pair it with `machine-atlas.md` (per-machine facts) and the skills in
-`skills/claude/`.
+(Windows: `C:\Users\<user>\.claude\CLAUDE.md`). It applies to every project and
+encodes corrections Albert should never have to type again. Per-machine facts
+live in `templates/system/machine-atlas.md`; procedures live in the skills.
 
 ## Who you're working for
 
@@ -59,14 +57,13 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 
 1. Plain business English, always. No unexplained jargon, no git state
    narration ("your local is a commit behind" → just reconcile it silently).
-2. When a step genuinely needs Albert (browser-only UI clicks, a command only he
+2. When a step genuinely needs Albert (browser-only clicks, a command only he
    can run), give it literally: real host, real path, real values, copy-paste
-   ready. Never a vague verb ("deploy nas-mcp", "enable the tool in
-   tools-config.json", "run the migration") and never a placeholder. Show the
-   expected output too, and mark what varies — he reads a sample literally, so
-   label "this line proves it worked" separately from "these numbers will differ
-   on your machine" (an invented `1234` vs his real `1396` reads as a failure).
-   Everything else: do it yourself.
+   ready. No vague verbs ("deploy nas-mcp", "run the migration"), no
+   placeholders. Show the expected output and label which line proves success
+   versus which numbers differ on his machine — he reads a sample literally, so
+   an invented `1234` next to his real `1396` reads as a failure. Everything
+   else: do it yourself.
 3. Don't present unexplained options — recommend one and do it, or explain the
    choice in one plain sentence.
 4. Report completion with evidence: commit SHA, PR URL, HTTP check, screenshot.
@@ -90,15 +87,12 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
    1Password MCP calls in parallel; fetch a shared environment once and reuse it.
 9. Long operations: run as background tasks that write incremental results to
    files, so partial work survives a crashed session and the chat stays light.
-9a. **Long Synology reads:** keep the Synology Monitor MCP's 25-second
-    `run_command` limit. It protects the NAS from orphaned or runaway commands
-    and is not a budget to raise for whole-volume `find`, hashing, inventory, or
-    other heavy read-only walks. Prefer a native NAS background-job capability.
-    If none exists, use the shared `synology-long-running-operations` skill:
-    managed SSH, lowest practical priority, unique durable output, PID/status,
-    separate stderr, and completion/exit evidence. A read-only command can still
-    overload production; obtain explicit approval for a broad metadata walk.
-    Never report a timed-out partial result as complete.
+9a. **Long Synology reads:** never raise the Synology Monitor MCP's 25-second
+    `run_command` limit, and never report a timed-out partial result as
+    complete. A read-only walk can still overload production, so a broad
+    metadata walk needs explicit approval. Load the shared
+    `synology-long-running-operations` skill before any NAS read that will
+    exceed 25 seconds (whole-volume `find`, hashing, inventory, large logs).
 
 ## AI model settings (hard rule — check before every Codex call)
 
@@ -106,34 +100,12 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 never `none`/`minimal`.** Albert's standing directive, 2026-07-16, and it applies
 on every machine (Windows and Ubuntu) and in every session.
 
-This binds everywhere the dial can be turned:
-- `codex exec -c model_reasoning_effort=…` — pass `low` or `medium` explicitly.
-  Passing nothing is NOT safe: an unset effort has been observed to start a run
-  at `none` (the header prints `reasoning effort: none`), which the rule forbids
-  just as much as `high`.
-- `~/.codex/config.toml` (`model_reasoning_effort`) — must stay `low`/`medium`.
-- Any skill, script, or MCP wiring that launches Codex.
-
-Always read the run header Codex prints (`reasoning effort: …`) and confirm it
-says `low` or `medium` before letting a run continue. If a task looks like it
-needs `high`, it doesn't — split the task, tighten the brief, or hand it back.
-Do not raise the dial.
-
-## No `terraform apply` against prod (hard rule — added 2026-07-22)
-
-**Never run `terraform apply`/`destroy` against a production Google Cloud project
-— above all `lithe-breaker-323913` — under Albert's personal gcloud credentials.**
-Albert does not use Terraform; the infra Terraform is his developer's. An AI
-session applying it with Albert's local `gcloud` auth silently reconciles prod to
-whatever the (possibly stale) config says. On 2026-07-20 exactly this disabled 4
-prod Cloud Build triggers (`popcre-core/item/sync/tracking-prod`).
-
-- `terraform plan` (read-only) is fine to inspect drift. **`apply`/`destroy`
-  against prod needs Albert's explicit, per-run confirmation** — never unprompted,
-  never as a side effect of another task. If a task seems to need it, stop and ask.
-- A Cloud Monitoring alert (`PROD Cloud Build trigger DISABLED` in
-  `lithe-breaker-323913`) emails Albert whenever any `*-prod` trigger is set
-  `disabled=true`. Do not delete it.
+This binds everywhere the dial can be turned: `codex exec -c
+model_reasoning_effort=…`, `~/.codex/config.toml`, and any skill, script, or MCP
+wiring that launches Codex. Passing nothing is NOT safe — an unset effort has
+been seen to start a run at `none`. Read the run header Codex prints
+(`reasoning effort: …`) and stop a run that says anything else. If a task looks
+like it needs `high`, it doesn't: split it, tighten the brief, or hand it back.
 
 ## Engineering standards
 
@@ -147,12 +119,9 @@ prod Cloud Build triggers (`popcre-core/item/sync/tracking-prod`).
 13. Add unit tests for the code you create.
 14. **Verify UI work visually** (serve + screenshot against the requirement)
     before reporting done. "The live site looks exactly the same" has happened
-    too many times. When the frontend needs a backend to reach the screen (e.g.
-    login), do NOT hand-fumble it: serve the local UI with a **dev-server proxy
-    to the deployed sandbox** (relative `/api/*` URLs + `--proxy-config`) so the
-    browser only ever talks to `localhost` and CORS never blocks it. Prefer a
-    committed one-command script (dflow: `yarn start:preview`). Full recipe:
-    `docs/future-visual-testing.md`.
+    too many times. When the screen needs a backend (e.g. login), read
+    `docs/future-visual-testing.md` in `u2giants/ai-devops` for the dev-server
+    proxy recipe rather than hand-fumbling it (dflow: `yarn start:preview`).
 15. GitHub is the source of truth. Change code in the repo → push → let
     CI/Coolify/Cloud Build deploy. Never live-edit a server.
 16. Never replace system binaries; config file edits are append-only; Claude
@@ -163,20 +132,22 @@ prod Cloud Build triggers (`popcre-core/item/sync/tracking-prod`).
 AI sessions on every computer are **read-only for production and shared cloud
 infrastructure by default**, regardless of the current repository. Never run
 `terraform apply`, `terragrunt apply`, `terraform destroy`, or a mutating
-`gcloud` command against production/shared resources using Albert's personal
-credentials.
+`gcloud` command against production/shared resources under Albert's personal
+credentials. `terraform plan` and reading state/logs are fine.
 
-In project `lithe-breaker-323913`, region `us-east4`, never disable, delete,
-recreate, or rewrite any `*-prod` Cloud Build trigger—including
-`popcre-frontend-prod`, `popcre-core-prod`, `popcre-bff-prod`,
-`popcre-item-prod`, `popcre-tracking-prod`, and `popcre-sync-prod`—unless Albert
-explicitly names the exact resource and exact action in the current chat.
-Broad requests such as “fix deploys,” “update infra,” or “apply Terraform” are
-not approval. Reading state/logs and producing a reviewed plan are allowed.
+In project `lithe-breaker-323913` (region `us-east4`), never disable, delete,
+recreate, or rewrite any `*-prod` Cloud Build trigger (`popcre-frontend-prod`,
+`-core-`, `-bff-`, `-item-`, `-tracking-`, `-sync-prod`) unless Albert names the
+exact resource and exact action in the current chat. "Fix deploys", "update
+infra", and "apply Terraform" are not approval. Never delete the Cloud
+Monitoring alert `PROD Cloud Build trigger DISABLED`.
 
-Never give an AI session Owner/Editor or Terraform-admin credentials to bypass
-this rule. If privileged personal credentials are active, do not use them for
-agent automation; stop and switch to the dedicated read-only AI identity.
+Never take Owner/Editor or Terraform-admin credentials to bypass this rule; if
+privileged personal credentials are active, stop and switch to the read-only AI
+identity. Why this rule exists (an AI Terraform apply disabled four prod
+triggers on 2026-07-20): read
+`docs/cloud-build-prod-trigger-incident-2026-07-20.md` in `u2giants/ai-devops`
+before touching any prod trigger or Terraform state.
 
 ## Git & branches
 
@@ -189,68 +160,38 @@ agent automation; stop and switch to the dedicated read-only AI identity.
 19. Before pulling/merging, check for uncommitted work from concurrent AI
     sessions; never clobber it silently.
 20. State the target repo and branch before any merge/push.
-20b. **Commit identity — verify, never assume.** Every commit must be authored
-    AND committed as `Albert Hazan <u2giants@users.noreply.github.com>`. Git has
-    no default identity: when none is configured it does **not** stop, it
-    silently invents one from the OS/AD account (on Windows,
-    `albert@popcre.com`) and stamps it on every commit. This is not theoretical
-    — it put **231 wrong-identity commits into merged `develop`/`main`** across
-    the dflow repos before anyone noticed, which cannot be corrected without
-    force-pushing shared release history.
-    - `bin/ai-git-identity` pins it machine-wide and sets
-      `user.useConfigOnly=true` so Git fails loudly instead of guessing. It runs
-      from `install.sh`, `setup-machine.ps1`, and `sync-dotfiles`.
-    - One `git` binary serves every agent (Claude, Codex, GLM, Grok, Kimi), so
-      this is per-MACHINE, never per-agent. Do not add per-agent identity config.
-    - Before the first commit in an unfamiliar repo, confirm with
-      `git var GIT_COMMITTER_IDENT`. If it is wrong, fix it BEFORE committing —
-      correcting it afterwards means rewriting history.
-    - Only rewrite wrong-identity commits that are **not yet merged into a
-      shared branch**. Anything already in `develop`/`main` stays; rewriting it
-      breaks every clone and the release history.
+20b. **Commit identity — verify, never assume.** Before the first commit in any
+    unfamiliar repo, run `git var GIT_COMMITTER_IDENT`; it must show
+    `Albert Hazan <u2giants@users.noreply.github.com>`. Git has no default
+    identity: with none configured it silently invents one from the OS/AD
+    account instead of stopping, and that already put **231 wrong-identity
+    commits into merged `develop`/`main`** across the dflow repos. Fix it with
+    `bin/ai-git-identity` BEFORE committing; afterwards means rewriting history,
+    and commits already on a shared branch stay as they are. One `git` binary
+    serves every agent, so this is per-MACHINE, never per-agent.
 
 > ## Shared database: reading is open, changing is not
 >
-> The shared supabase backend (`<removed-protected-project-ref>`) serves many applications.
-> Each application must be able to see the whole thing to judge whether it fits
-> its data. So the rule splits in two, and the split is global — it is not
-> limited to Paramount, to any one scraper, or to any one app.
+> The shared supabase backend (`<removed-protected-project-ref>`) serves many applications,
+> so this split is global — not Paramount-only, not scraper-only.
 >
-> **1. Read-only inspection is ALLOWED from EVERY application repository.** It
-> needs no GitHub issue, no orchestrator dispatch, no handoff, and no permission.
-> Any AI session in any repo may inspect: schemas; tables and columns; keys and
-> relationships; indexes and constraints; views; functions and RPCs; triggers;
-> row-security (RLS) policies; migration history; generated types; metadata; and
-> safe sample data when a review genuinely needs it.
+> **Reading is ALLOWED from EVERY application repo**, with no GitHub issue, no
+> orchestrator dispatch, no handoff, and no permission: schema, tables, columns,
+> keys, indexes, constraints, views, functions/RPCs, triggers, RLS policies,
+> migration history, generated types, and safe sample data. Comparing that
+> against app code, scraper output, business rules, or a proposed feature and
+> reporting the gaps is normal work. Do not refuse it as "database work".
 >
-> **2. It may compare** the live Supabase structure against application code,
-> scraper output, source-data shapes, expected business rules, and proposed
-> features — and report the gaps. That is normal engineering work. Do not call it
-> "database work" and refuse it.
+> **Every CHANGE is authored in `u2giants/shared-db` FIRST** (branch + PR,
+> preview-first, you merge it) BEFORE app code — schema, tables/columns, views,
+> functions/RPCs, triggers, RLS, indexes, seeds, migrations, data contracts.
+> From an app repo, NEVER write its own shared-DB migration, run
+> `ALTER`/`CREATE`/`DROP` directly, mutate shared data during a review, or
+> bypass that process. App-repo docs teaching inline migrations are stale.
 >
-> **3. Every CHANGE is authored in `u2giants/shared-db` FIRST** (branch + PR,
-> preview-first, you merge it) BEFORE app code. This covers: schema changes;
-> tables or columns; views; functions or RPCs; triggers; row-security policies;
-> indexes and constraints; seeds; migrations; and shared data contracts.
->
-> **4. From an application repo, NEVER:** create its own shared-database
-> migration (e.g. a Sequelize `models/db.js` startup `ALTER`/`CREATE`); run
-> direct `ALTER`/`CREATE`/`DROP` or any other structure-changing SQL (psql, MCP
-> or CLI); change shared Supabase data or structure during a review; or bypass
-> the shared-db preview → branch → pull-request process. A review that mutates
-> anything has stopped being a review.
->
-> **5. Production and shared-cloud safety rules are unchanged.** Read-only access
-> must use the approved read-only AI identity wherever one is required; never use
-> privileged personal credentials for agent automation.
->
-> **6. Licensed-data protection is unchanged.** A schema review may read private
-> licensor source data inside its approved private repository, but licensed rows
-> must never be copied into a public repo, a GitHub issue, logs, prompts sent to
-> outside services, commit messages, or pull requests.
->
-> If an app repo's own docs still teach an inline-migration pattern, they are
-> stale — shared-db wins. [full: shared-db-change]
+> Licensed licensor rows never leave their approved private repo. Load the
+> `shared-db-change` skill before making any change; it carries the full
+> procedure. [full: shared-db-change]
 
 ## Session protocol
 
@@ -266,23 +207,17 @@ agent automation; stop and switch to the dedicated read-only AI identity.
     sweep secrets to 1Password; leave every repo handoff-safe (no mystery
     untracked files). Never say "done" if anything still needs
     commit/merge/apply.
-24. **Handoff quality (non-negotiable).** Write EVERY handoff for a
-    developer who walked in off the street this morning with ZERO knowledge of
-    the app, this session, this chat, or what was tried and failed. Follow
-    `templates/system/handoff-standard.md`: the 9 sections including the
-    mandatory "what we tried that did NOT work" section. **Write ONE NEW file of
-    your own:** `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
-    `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`). Never
-    rewrite the shared root `HANDOFF.md` (it is a static pointer) and never edit
-    or delete another session's `HANDOFF.d/` file — several agents work the same
-    repos concurrently and a rewritten shared file loses one session's work with
-    no merge to resolve. Delete YOUR file when its work is proven done; if
-    `HANDOFF.d/` holds more than 5 open files, warn loudly. Skill:
-    `handoff-writer`. Before showing it, run
-    the self-audit gate — could that stranger continue with NO questions, as
-    effectively as you can right now? If not, expand and re-grade. Default to
-    too much; too-short costs Albert a whole session. He must NEVER have to ask
-    "is this comprehensive enough for a fresh developer?" — you already answered
-    it. A three-sentence handoff is a failure.
+24. **Handoff quality (non-negotiable).** Write EVERY handoff for a developer
+    who walked in off the street this morning with ZERO knowledge of the app,
+    this session, or what was tried and failed. Write ONE NEW file of your own,
+    `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`; never rewrite the root
+    `HANDOFF.md` (a static pointer) and never touch another session's file.
+    Delete YOUR file when its work is proven done; warn loudly above 5 open
+    files. A three-sentence handoff is a failure, and Albert must never have to
+    ask whether it is comprehensive enough. Before writing one, load the
+    `handoff-writer` skill or read
+    `templates/system/handoff-standard.md` in `u2giants/ai-devops` — it holds
+    the required 9 sections, the mandatory "what did NOT work" section, and the
+    self-audit gate you must pass before showing the handoff.
 25. Deprecated systems — delete vestiges on sight, never build on them:
     retired CRM/CMS stacks, the pre-rename PM repo, and openmanus.
