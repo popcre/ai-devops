@@ -4,7 +4,7 @@
 
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
-| 1. Freeze a measured baseline | ✅ done | 2026-08-12 | `tools/context-audit/`, `tests/test-context-audit.ps1`, and `docs/context-engineering.md`; focused and existing installer/memory suites pass |
+| 1. Freeze a measured baseline | 🟨 correction open | 2026-08-12 | Kimi review found folded YAML descriptions parsed as literal `>-`; fix parser, fixture, and manifest totals before step 2 |
 | 2. Define the context ownership map | ⬜ open | 2026-08-12 | Proposed map in sections 8 and 9 |
 | 3. Add context-audit tooling and tests | ⬜ open | 2026-08-12 | Test design in sections 9 and 10 |
 | 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6 |
@@ -15,12 +15,13 @@
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin at step 2. Step 1 froze the reproducible baseline
-and passed its verification gate. Before
+**Fresh-session start:** begin with the step 1 correction below, then continue to
+step 2. Do not use the current skill-manifest totals for budgets until folded
+descriptions are parsed and the baseline is regenerated. Before
 each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch drift.
 
-**Handoff:**
-[`HANDOFF.d/2026-08-12T1135Z-al8960ofc-codex-context-engineering-audit.md`](HANDOFF.d/2026-08-12T1135Z-al8960ofc-codex-context-engineering-audit.md)
+**Newest handoff:**
+[`HANDOFF.d/2026-08-12T1431Z-al8960ofc-codex-kimi-baseline-correction.md`](HANDOFF.d/2026-08-12T1431Z-al8960ofc-codex-kimi-baseline-correction.md)
 
 ## 1. The ultimate goal: what we are actually trying to achieve
 
@@ -429,6 +430,35 @@ report and human summary; two consecutive runs match apart from timestamps; a
 fixture containing a secret-like `.env` proves the audit skips it; the existing
 test suites remain green.
 
+**Required correction from Kimi K3 review, 2026-08-12:**
+`tools/context-audit/context-audit.py:77-88` treats YAML folded or literal
+frontmatter descriptions (`description: >-`, `>`, `|-`, or `|`) as the marker
+text instead of joining the following indented lines. Seven current skills use
+folded descriptions. This materially understates both client manifests in
+`docs/context-engineering.md:29-30` and the step-1 handoff. Before step 2:
+
+1. Parse single-line and folded/literal frontmatter descriptions without adding
+   a dependency; preserve deterministic whitespace folding.
+2. Add fixtures for folded descriptions and CRLF input. Assert the real
+   description text enters both applicable client manifests and the literal
+   scalar marker does not.
+3. Regenerate the real baseline and correct the Claude/Codex manifest bytes and
+   estimated-token rows in `docs/context-engineering.md`.
+4. Add `tests/test-context-audit.ps1` to the named PowerShell suites in
+   `docs/development.md`.
+5. Change `tools/context-audit/README.md` from “characters divided by four” to
+   “bytes divided by four,” and describe installer parity as a static capability
+   check rather than measured behavioral equivalence.
+6. Reconcile the earlier manual count of fourteen duplicate paragraphs with the
+   tool's count of twelve by documenting the method difference or fixing the
+   detector if the difference is a bug.
+
+**Correction gate:** the folded-description fixture fails against commit
+`f20ea6b` and passes after the parser fix; two real runs remain byte-identical
+with a fixed timestamp; corrected manifest totals are reproducible; all step-1
+and existing installer/memory suites pass. Then mark step 1 done again and begin
+step 2.
+
 **Natural context cut:** start a fresh session after the audit tool and fixtures
 are committed and pushed. Re-read the remaining phases before continuing.
 
@@ -659,7 +689,9 @@ machine.
    canonical fragment identity; allowed client differences are explicit.
 6. **Skill-description manifest test:** measure name/description startup text per
    client; warn on descriptions that are long, duplicative, or too vague to
-   trigger reliably. Reuse the existing Claude trigger-eval harness and add a
+   trigger reliably. Cover single-line, folded/literal YAML descriptions and
+   CRLF files so scalar markers can never replace real text. Reuse the existing
+   Claude trigger-eval harness and add a
    separate Codex runner; do not pretend size measurement proves trigger quality.
 7. **Duplicate-skill test:** shared/client name collisions fail; exact duplicate
    client skills and global ritual-summary versus skill-description overlap
@@ -903,6 +935,28 @@ resolved, found no new conflict, and reported no remaining material objection.
 The follow-up used 300,046 tokens, 279,424 cached tokens, three turns, and cost
 `$0.1340952`. Total Grok review cost was `$0.5189288`, below the `$1.50` ceiling.
 
+### Kimi K3 implementation review
+
+Kimi reviewed the completed step-1 implementation through the protected
+read-only `ai-kimi` session `context-engineering-step1-review`. The wrapper
+requested `kimi-code/k3`; Kimi headless output does not report the returned
+model, tokens, cache, or cost, so none are claimed.
+
+Kimi found one material defect, accepted by Codex after direct source review:
+seven skill files use folded YAML descriptions, while the audit's frontmatter
+parser records only the literal scalar marker `>-`. The published Claude and
+Codex manifest totals are therefore understated. The correction and its gate are
+now part of step 1 above, and step 1 is marked correction-open until proven.
+
+Kimi also confirmed that secret exclusions, deterministic tracked-path
+discovery, drift reporting, the Windows automatic-quarantine test correction,
+and the fresh-session handoff were otherwise sound. Its non-blocking findings
+were folded into the correction: list the new test in `docs/development.md`, say
+bytes rather than characters, describe installer parity as a static capability
+check, and reconcile the manual fourteen-versus-tool twelve duplicate-paragraph
+count. The saved review is untracked at
+`.ai/reviews/kimi-context-engineering-step1-review-20260812T142135Z.md`.
+
 ### Final consensus ledger
 
 #### Agreed decisions
@@ -944,6 +998,8 @@ and Grok's six practical gaps are resolved in the current plan.
 2. Live Claude and Codex trigger evidence before deleting ritual summaries or
    merging client skills.
 3. Pilot discovery of which official token/cache/cost fields each product exposes.
+4. Corrected per-client manifest totals after folded YAML descriptions are parsed;
+   the current published totals are not valid budget inputs.
 
 These are implementation gates already assigned to steps 1, 4, 6, and 8. They do
 not require Albert to answer a planning question.
