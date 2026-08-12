@@ -5,7 +5,7 @@
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
 | 1. Freeze a measured baseline | ✅ done | 2026-08-12 | Parser corrected for YAML block scalars; regression test fails on the old parser and passes on the new one; corrected manifests Claude 21,521 bytes / about 5,381 tokens, Codex 14,015 bytes / about 3,504 tokens; two fixed-timestamp runs byte-identical; all Bash and PowerShell suites pass |
-| 2. Define the context ownership map | ⬜ open | 2026-08-12 | Proposed map in sections 8 and 9 |
+| 2. Define the context ownership map | ✅ done | 2026-08-12 | Ownership map added to `docs/context-engineering.md` (per-class owner table, eight-row decision table, pointer definition, stale/retention rules, ten real rules classified); router row in `AGENTS.md`; pointers plus corrected Windows installer routing in both skills usage guides; all cited paths verified to exist; no instruction file trimmed |
 | 3. Add context-audit tooling and tests | ⬜ open | 2026-08-12 | Test design in sections 9 and 10 |
 | 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6 |
 | 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | Current 11,731-token measurement |
@@ -15,11 +15,13 @@
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with step 2, the context ownership map. Step 1 is
-done and its correction is closed: the manifest totals in
+**Fresh-session start:** begin with step 3, context-audit tooling and regression
+tests. Steps 1 and 2 are done: the manifest totals in
 `docs/context-engineering.md` come from the corrected parser and are safe to use
-for budgets. Before each phase, re-read that phase and sections 1, 4, 8, 11, and
-13 to catch drift.
+for budgets, and the ownership map in that same file is the authority for where
+any rule lives. Enforcement (step 3) comes before any reduction (steps 4-6).
+Before each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch
+drift.
 
 **Newest handoff:**
 [`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`](HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md)
