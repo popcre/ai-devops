@@ -1,16 +1,23 @@
 # Codex skills usage guide
 
 Codex now has repo-owned skills under `skills/codex/`, plus cross-client skills
-under `skills/shared/`. Install them on a
-machine with:
+under `skills/shared/`. Install them on **Ubuntu or Git Bash** with:
 
 ```bash
 ./bin/ai-install-skills
 ```
 
+On **Windows** use the native PowerShell installer instead — see
+[Windows install/update](#windows-installupdate) below.
+
 The installer copies them to `~/.codex/skills/` when `~/.codex` exists and keeps
 `templates/system/AGENTS-global-codex.md` as the global standing instruction
 file.
+
+If you are deciding **where a rule or fact should live** (global vs machine vs
+repo vs topic doc vs skill vs memory vs plan vs handoff), read the context
+ownership map in
+[`context-engineering.md`](context-engineering.md) before adding it here.
 
 ## What replaces what
 
