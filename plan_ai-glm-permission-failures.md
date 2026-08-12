@@ -4,20 +4,29 @@
 
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
-| 1. Make the failure diagnosable | ⬜ open | 2026-08-12 | Section 6, finding 1 |
+| 1. Make the failure diagnosable | ✅ done | 2026-08-12 | `bin/ai-glm` `permission_reason_id` / `permission_failure_detail`; new `failure_detail` field in the record and in `ai-glm show`; `tests/test-ai-glm.sh` section "permission failure is diagnosable (step 1)" proves 10 distinct branch ids and secret redaction |
 | 2. Measure the real permission shapes OpenCode 1.18.12 sends | ⬜ open | 2026-08-12 | Section 6, findings 2 and 3 |
 | 3. Widen the implement-mode allowlist to the measured write actions | ⬜ open | 2026-08-12 | Section 6, finding 2 |
 | 4. Accept the measured non-`resources` permission shapes | ⬜ open | 2026-08-12 | Section 6, finding 3 |
 | 5. Add regression tests for every classifier branch | ⬜ open | 2026-08-12 | Section 10 |
-| 7. Separate transport failure from unsafe permission state | ⬜ open | 2026-08-12 | Section 6, finding 3 (resolved by recovered stderr); section 9, step 7 |
+| 7. Separate transport failure from unsafe permission state | ✅ done | 2026-08-12 | `permission_http` retries a dropped local poll 3× (`AI_GLM_PERMISSION_HTTP_ATTEMPTS`); `classify_permissions` gives status `000` its own branch; new durable code + failure_kind `transport-failed`; docs constraint 30 + troubleshooting row; skill guidance; `tests/test-ai-glm.sh` section "transport failure is not a permission failure (step 7)" |
 | 6. Re-run the two real failed jobs and close | ⬜ open | 2026-08-12 | Section 9, step 6 |
 
-**Fresh-session start:** begin at step 1. Do not widen any allowlist before step 1
-ships, because today the wrapper cannot tell you which branch rejected the run.
-Step 7 was added on 2026-08-12 after the dispatching session's stderr was
-recovered; it fixes a different defect (a dropped local HTTP poll reported as a
-permission failure) and is independent of steps 2-4, so a second session may take
-it concurrently. Step 6 stays last regardless.
+**Fresh-session start:** steps 1 and 7 shipped on 2026-08-12; begin at step 2.
+Step 1's `failure_detail` field is now the thing that tells you which branch
+rejected a run, so use `ai-glm show <name>` and read `failure_detail.reason_id`
+before touching any allowlist. Step 7 fixed a different defect (a dropped local
+HTTP poll reported as a permission failure) and is independent of steps 2-4.
+Step 6 stays last regardless.
+
+**Note for step 2 onward:** the step-1 and step-7 work was done in the worktree
+`C:\repos\ai-devops-worktrees\glm-permission-failures-a7e4a8` on branch
+`claude/glm-permission-failures-a7e4a8`, not directly on `main`. Merge or
+cherry-pick it to `main` before continuing. One unrelated pre-existing test was
+also repaired: `sandbox is a clone, not a worktree` grepped for
+`git clone --quiet --no-hardlinks`, which stopped matching when Windows
+long-path support inserted `-c core.longpaths=true`. It now matches the clone
+flags and additionally forbids `git worktree add`.
 
 **Concurrency and file ownership.** This plan touches only `bin/ai-glm`,
 `config/opencode/*`, `tests/test-ai-glm.sh`, `docs/glm-opencode.md`, and
