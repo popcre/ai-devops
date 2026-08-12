@@ -174,7 +174,16 @@ the pinned tool body only updates the current session's internal todo list. `ai-
 approves only that exact shape. This does not make `*` generally safe, and unknown or
 changed permission shapes must still fail closed. For an implementation permission
 failure, use `ai-glm show <name>`: the durable record states the safe failure summary,
-whether the clone had unexported changes, and whether a patch exists. Do not ask the
+whether the clone had unexported changes, whether a patch exists, and a sanitized
+`failure_detail` naming the exact rejection branch (`failure_detail.reason_id`). Quote
+that slug when reporting a permission fault; it is the only durable record of which
+check fired.
+
+`failure: transport-failed` is NOT a permission problem. It means the local OpenCode
+permission endpoint never answered, on every retry, so no permission was ever seen or
+refused. Do not report it as "GLM refused a permission" and do not ask for any allowlist
+change. Run `ai-glm doctor`, then `ai-glm server status`, and retry the job once the
+server is proven healthy. Do not ask the
 wrapper to apply incomplete work. Inspect incomplete artifacts with `git apply --stat`
 and `git apply --check`, review every hunk, and rerun all required tests. The report is
 not a claim that the patch is safe, complete, or tested. Provider usage is recorded only
