@@ -14,7 +14,7 @@ measures four context classes:
 | Class | Meaning | Current measured source |
 |---|---|---:|
 | Always loaded | User-level Claude and Codex global templates | 2 files, 33,311 bytes, about 8,329 estimated tokens (step 4 cut this to 25,764 bytes / about 6,442 tokens on 2026-08-12) |
-| Startup routed | This repo's `AGENTS.md` and `CLAUDE.md` entry files | 2 files, 49,401 bytes, about 12,351 estimated tokens (this grew to 50,729 before step 5, which cut it to 35,570 bytes / about 8,893 tokens on 2026-08-12) |
+| Startup routed | This repo's `AGENTS.md` and `CLAUDE.md` entry files | 2 files, 49,401 bytes, about 12,351 estimated tokens (this grew to 50,729 before step 5, which cut it to 35,972 bytes / about 8,994 tokens on 2026-08-12) |
 | Task triggered | Skill bodies read only when selected | 48 files, 405,271 bytes, about 101,333 estimated tokens |
 | Archive or ignored | Transcripts, chats, `.ai`, dependencies, generated output, worktrees, secrets, and network roots | excluded and never opened |
 
@@ -207,7 +207,7 @@ status, including under `--strict`.
 | Budget | Measured 2026-08-12 | `budget` (warns above) | `target` (steps 4-6 aim) |
 |---|---:|---:|---:|
 | Always-loaded globals | 24,713 bytes | 24,713 | 23,318 |
-| Startup-routed repo entry files | 35,570 bytes | 35,570 | 35,340 |
+| Startup-routed repo entry files | 35,972 bytes | 35,972 | 35,340 |
 | Claude skill manifest | 21,521 bytes | 21,521 | 15,065 |
 | Codex skill manifest | 14,015 bytes | 14,015 | 9,811 |
 
@@ -231,8 +231,9 @@ cannot be cut until Codex trigger evidence exists (plan step 4/6).
 
 **Ratchet on 2026-08-12 (step 5).** Two budgets moved again.
 
-- **Startup-routed: 50,729 → 35,570 bytes, a 29.9% cut**, 230 bytes above the
-  35,340 target. `AGENTS.md` alone went 48,451 → 33,292 bytes. Nothing was deleted: the ten "intentional quirks"
+- **Startup-routed: 50,729 → 35,972 bytes, a 29.1% cut**, 632 bytes above the
+  35,340 target. `AGENTS.md` alone went 48,451 → 33,694 bytes. All figures are
+  CRLF measurements taken from `C:eposi-devops`, per the drift note above. Nothing was deleted: the ten "intentional quirks"
   narratives moved verbatim to [`design-decisions.md`](design-decisions.md), the
   two incident narratives moved verbatim to
   [`critical-incidents.md`](critical-incidents.md) (one paragraph that appeared

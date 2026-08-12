@@ -90,7 +90,7 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 
 DEFAULT_BUDGETS = {
     "alwaysLoadedBytes": {"budget": 24713, "target": 23318},
-    "startupRoutedBytes": {"budget": 35570, "target": 35340},
+    "startupRoutedBytes": {"budget": 35972, "target": 35340},
     "claudeSkillManifestBytes": {"budget": 21521, "target": 15065},
     "codexSkillManifestBytes": {"budget": 14015, "target": 9811},
 }
