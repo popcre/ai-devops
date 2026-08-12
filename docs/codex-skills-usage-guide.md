@@ -87,8 +87,9 @@ ownership map in
   DeepSeek documents tool calls through Chat Completions.
 
 The installer fails before copying when a shared skill name collides with a
-client-specific skill. It warns about the retired ShareSync skill without
-touching it; `--migrate-obsolete` performs the explicit, recoverable quarantine.
+client-specific skill. Quarantine of an obsolete managed skill is **automatic and
+recoverable**; `--migrate-obsolete` is still accepted but is now a no-op, kept
+only so older commands do not break. See `docs/design-decisions.md`.
 
 ## Maintenance rule
 

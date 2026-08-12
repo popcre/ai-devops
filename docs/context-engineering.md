@@ -298,14 +298,39 @@ emits no `Skill` tool event. The Codex runner always passes an explicit
 `low`/`medium` reasoning effort and a read-only sandbox. Neither tool replaces
 the other.
 
-The first Codex sets landed on 2026-08-12: `codex-qwen-code.eval.json` (the
-exact-body Claude/Codex merge candidate, one set scoring both clients) and
-`codex-shared-db-change.eval.json` (load-bearing — both globals name it).
-`codex-qwen-code` scores **10/10 should-fire, 0/10 should-not-fire**. Getting
+The first Codex sets landed on 2026-08-12: `qwen-code.eval.json` (the exact-body
+Claude/Codex pair, since merged into `skills/shared/qwen-code`; one set scores
+both clients) and `codex-shared-db-change.eval.json` (load-bearing — both globals
+name it). `qwen-code` scores **10/10 should-fire, 0/10 should-not-fire**. Getting
 there required fixing two detection bugs that first understated and then
 overstated the score; both are described in `tools/skill-trigger-eval/README.md`
 and locked by `tests/test-codex-trigger-eval.sh`. **A trigger score is evidence
 only when its `evidence` field names a command the model chose to run.**
+
+### Two duplicate paragraphs are kept on purpose
+
+The audit reported 12 duplicate paragraph groups. Merging the Qwen pair into
+`skills/shared/qwen-code` on 2026-08-12 removed 10 of them and 5.5 KB of
+task-triggered text. The remaining **2 are deliberate and must not be
+"fixed"**:
+
+- The transcripts-moved-to-a-private-repo STOP banner, in both
+  `claude-transcript-backup` and `codex-transcript-miner`. Live credentials were
+  once committed to a public repo; the two skills do different jobs and a reader
+  of either one needs the warning in front of them, not behind a pointer.
+- The handoff self-audit gate, in both `session-docs-update` and
+  `codex-docs-update`. Its owner is `templates/system/handoff-standard.md`, but a
+  gate that is pointed at rather than stated is a gate that gets skipped.
+
+Both are task-triggered, which is unbudgeted, so the trade is a few hundred bytes
+against a safety rule being missed. **Safety outranks token reduction.**
+
+No other client pair was merged. The bodies of the remaining pairs
+(`session-docs-update`/`codex-docs-update`, `wrap-up`/`codex-session-closeout`,
+`new-app-setup`/`codex-new-application`, and the rest) genuinely differ — which is
+why they produce no duplicate paragraphs — and the rule is to merge on proven
+identical content, never on a matching name. Each would need its own eval set
+first.
 
 ### Run the enforcement checks
 

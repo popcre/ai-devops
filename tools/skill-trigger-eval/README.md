@@ -45,7 +45,7 @@ believing any surprising score, and re-run the single query alone to confirm.
 
 | Set | Why |
 | --- | --- |
-| `codex-qwen-code.eval.json` | `skills/codex/codex-qwen-code` and `skills/claude/qwen-code` are the exact-body merge candidate. The descriptions are identical, so **one set scores both clients** — run it before and after any merge. |
+| `qwen-code.eval.json` | Scored the exact-body Claude/Codex pair before and after they were merged into `skills/shared/qwen-code` on 2026-08-12. One set scores both clients. Re-run it whenever that skill changes. |
 | `codex-shared-db-change.eval.json` | Load-bearing: both always-loaded globals name this skill. Its positives cover schema changes *and* Rule 0 read-only inspection, which the description also routes here. |
 
 Needs the `claude` CLI logged in (`claude auth status`) and the skill installed
