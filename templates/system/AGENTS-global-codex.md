@@ -79,15 +79,12 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
    Serialize all 1Password reads. Never fan out `op read`, `op run`, or
    1Password MCP calls in parallel; fetch a shared environment once and reuse it.
 9. Long operations: background them and write incremental results to files.
-9a. **Long Synology reads:** keep the Synology Monitor MCP's 25-second
-    `run_command` limit. It protects the NAS from orphaned or runaway commands
-    and is not a budget to raise for whole-volume `find`, hashing, inventory, or
-    other heavy read-only walks. Prefer a native NAS background-job capability.
-    If none exists, use the shared `synology-long-running-operations` skill:
-    managed SSH, lowest practical priority, unique durable output, PID/status,
-    separate stderr, and completion/exit evidence. A read-only command can still
-    overload production; obtain explicit approval for a broad metadata walk.
-    Never report a timed-out partial result as complete.
+9a. **Long Synology reads:** never raise the Synology Monitor MCP's 25-second
+    `run_command` limit, and never report a timed-out partial result as
+    complete. A read-only walk can still overload production, so a broad
+    metadata walk needs explicit approval. Load the shared
+    `synology-long-running-operations` skill before any NAS read that will
+    exceed 25 seconds (whole-volume `find`, hashing, inventory, large logs).
 10. **Config hygiene:** Codex config is `~/.codex/config.toml` — edits are
     append-only and must be valid TOML (a duplicate key has corrupted it
     before). NEVER touch Claude's config files, and Claude setup scripts must
@@ -123,20 +120,22 @@ hand it back; do not raise the dial.
 AI sessions on every computer are **read-only for production and shared cloud
 infrastructure by default**, regardless of the current repository. Never run
 `terraform apply`, `terragrunt apply`, `terraform destroy`, or a mutating
-`gcloud` command against production/shared resources using Albert's personal
-credentials.
+`gcloud` command against production/shared resources under Albert's personal
+credentials. `terraform plan` and reading state/logs are fine.
 
-In project `lithe-breaker-323913`, region `us-east4`, never disable, delete,
-recreate, or rewrite any `*-prod` Cloud Build trigger—including
-`popcre-frontend-prod`, `popcre-core-prod`, `popcre-bff-prod`,
-`popcre-item-prod`, `popcre-tracking-prod`, and `popcre-sync-prod`—unless Albert
-explicitly names the exact resource and exact action in the current chat.
-Broad requests such as “fix deploys,” “update infra,” or “apply Terraform” are
-not approval. Reading state/logs and producing a reviewed plan are allowed.
+In project `lithe-breaker-323913` (region `us-east4`), never disable, delete,
+recreate, or rewrite any `*-prod` Cloud Build trigger (`popcre-frontend-prod`,
+`-core-`, `-bff-`, `-item-`, `-tracking-`, `-sync-prod`) unless Albert names the
+exact resource and exact action in the current chat. "Fix deploys", "update
+infra", and "apply Terraform" are not approval. Never delete the Cloud
+Monitoring alert `PROD Cloud Build trigger DISABLED`.
 
-Never give an AI session Owner/Editor or Terraform-admin credentials to bypass
-this rule. If privileged personal credentials are active, do not use them for
-agent automation; stop and switch to the dedicated read-only AI identity.
+Never take Owner/Editor or Terraform-admin credentials to bypass this rule; if
+privileged personal credentials are active, stop and switch to the read-only AI
+identity. Why this rule exists (an AI Terraform apply disabled four prod
+triggers on 2026-07-20): read
+`docs/cloud-build-prod-trigger-incident-2026-07-20.md` in `u2giants/ai-devops`
+before touching any prod trigger or Terraform state.
 
 ## Git & branches
 
@@ -169,32 +168,22 @@ agent automation; stop and switch to the dedicated read-only AI identity.
   leave no repo with mystery untracked files. [full: session-docs-update,
   secrets-to-1password]
 - **Shared database — READING is open, CHANGING is not.** The shared supabase
-  backend (`qsllyeztdwjgirsysgai`) serves many apps, and every app must be able to
-  see the whole thing to judge whether it fits its data. This split is global — not
-  Paramount-only, not scraper-only.
-  - **Read-only inspection is ALLOWED from EVERY application repo**, with no
-    GitHub issue, no orchestrator dispatch and no handoff: schemas; tables and
-    columns; keys and relationships; indexes and constraints; views; functions and
-    RPCs; triggers; row-security policies; migration history; generated types;
-    metadata; and safe sample data when a review needs it. Comparing that against
-    app code, scraper output, source-data shapes, business rules or a proposed
-    feature — and reporting the gaps — is normal work. Do not refuse it as
-    "database work".
+  backend (`qsllyeztdwjgirsysgai`) serves many apps, so this split is global —
+  not Paramount-only, not scraper-only.
+  - **Reading is ALLOWED from EVERY application repo**, with no GitHub issue, no
+    orchestrator dispatch and no handoff: schema, tables, columns, keys, indexes,
+    constraints, views, functions/RPCs, triggers, RLS policies, migration
+    history, generated types, and safe sample data. Comparing that against app
+    code, scraper output, business rules or a proposed feature and reporting the
+    gaps is normal work. Do not refuse it as "database work".
   - **Every CHANGE is authored in `u2giants/shared-db` first** (branch + PR,
-    preview-first, AI merges) BEFORE app code: schema, tables/columns, views,
-    functions/RPCs, triggers, RLS policies, indexes/constraints, seeds,
-    migrations, shared data contracts. Matching timestamps; regenerate types after.
-  - **From an app repo, NEVER** create its own shared-DB migration (e.g. Sequelize
-    `models/db.js` startup DDL), run direct `ALTER`/`CREATE`/`DROP` or other
-    structure-changing SQL, mutate shared Supabase data or structure during a
-    review, or bypass the shared-db preview → branch → PR process.
-  - **Unchanged:** production/shared-cloud safety (use the approved read-only AI
-    identity where required, never privileged personal credentials for
-    automation), and licensed-data protection (a review may read private licensor
-    source data in its approved private repo; licensed rows never go into a public
-    repo, issue, log, outside-service prompt, commit message or PR).
-  - App-repo docs that still teach an inline-migration pattern are stale —
-    shared-db wins. [full: codex-shared-db-change]
+    preview-first, AI merges) BEFORE app code — schema, tables/columns, views,
+    functions/RPCs, triggers, RLS, indexes, seeds, migrations, data contracts.
+    From an app repo, NEVER write its own shared-DB migration, run
+    `ALTER`/`CREATE`/`DROP` directly, mutate shared data during a review, or
+    bypass that process. App-repo docs teaching inline migrations are stale.
+  - Licensed licensor rows never leave their approved private repo. Read the
+    full procedure before any change. [full: codex-shared-db-change]
 - **Deploy verify (hetz apps):** Actions green → GHCR image → Coolify (services
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).
@@ -205,74 +194,31 @@ agent automation; stop and switch to the dedicated read-only AI identity.
 ## HANDOFF quality standard (non-negotiable, every session)
 
 Albert starts new sessions with clean context windows; the handoff is the ONLY
-memory carried forward. Skimpy handoffs are his #1 pain — they trap him in long
-sessions. This is a hard standard.
+memory carried forward. Skimpy handoffs are his #1 pain. This is a hard
+standard, and these five rules always apply:
 
-**Where it goes — ONE WRITE-ONCE FILE PER SESSION.** Several agents (Claude,
-Codex, Grok, GLM, Kimi, Qwen) work the same repos concurrently, sometimes in the
-SAME working copy. So never rewrite a shared handoff document; create exactly one
-new file:
+1. **Write ONE new file of your own,**
+   `HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md` (e.g.
+   `HANDOFF.d/2026-07-29T2140Z-t16-codex-supabase-mcp-scoping.md`). All four
+   fields required, timestamp includes the time.
+2. **Never rewrite the root `HANDOFF.md`** (a one-screen static pointer) and
+   never open, edit, tidy, or delete another session's `HANDOFF.d/` file.
+   Several agents work the same repos at once, sometimes the same working copy.
+3. **Session start:** list `HANDOFF.d/` and read the OPEN files newest-first.
+   Each file is one open workstream.
+4. **Retention:** delete YOUR file when its work is proven done. More than 5
+   open files → warn loudly, oldest-first with dates.
+5. **Write it for a developer who walked in off the street this morning** with
+   zero knowledge of the app, this session, or what was tried and failed.
+   Default to TOO MUCH. A three-sentence handoff is a failure, and Albert must
+   never have to ask whether it is comprehensive enough.
 
-```
-HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md
-```
-
-e.g. `HANDOFF.d/2026-07-29T2140Z-t16-codex-supabase-mcp-scoping.md` — timestamp
-from `date -u +%Y-%m-%dT%H%MZ` (time included, not just the date), `<machine>` the
-short hostname lowercased, `<agent>` = `codex`, `<slug>` a 2-5 word kebab-case
-topic. All four fields required.
-
-- **Never rewrite the root `HANDOFF.md`** — it is a one-screen static pointer to
-  `HANDOFF.d/`, so "read HANDOFF.md on start" still has one entry point.
-- **Never open, edit, tidy, or delete another session's `HANDOFF.d/` file.**
-- **Session start:** list `HANDOFF.d/` and read the OPEN files newest-first; each
-  file present is one open workstream.
-- **Legacy repos:** a root `HANDOFF.md` whose line 1 lacks `handoff-pointer: v1`
-  is the old full-document form — `git mv` it verbatim into `HANDOFF.d/` as one
-  open workstream, then write the pointer, then write your own file.
-- **Retention:** delete YOUR file when its work is proven done (git history keeps
-  the text). More than 5 open files → warn loudly, oldest-first with dates.
-- **Never add `.gitattributes merge=union`** for handoffs; unioning lines yields a
-  silently wrong Markdown document instead of a loud conflict.
-
-**Mindset:** write EVERY handoff for a developer who walked in off the street
-this morning. They have ZERO knowledge of the application, of what this session
-was trying to do, of anything discussed here, and of what was tried and failed.
-When this chat is gone, it's gone. Make that stranger able to continue as
-effectively as you can right now. Default to TOO MUCH — too-long costs minutes,
-too-short costs Albert a whole session. Never symmetric; always err long.
-
-**Required structure** (never drop a section; write "N/A" + why if truly
-inapplicable):
-
-1. **What this application is** — plain English: what it does, who uses it, why
-   it exists; repos, stack, where it runs (URLs/hosts). Assume zero knowledge.
-2. **What we set out to do this session, and why** — goal in business + technical
-   terms, and what triggered it.
-3. **Current state** — what works (verified how), what's half-done and its EXACT
-   state (file:line), what's not started; committed/pushed/deployed? which
-   branch/environment?
-4. **Everything we tried that did NOT work** — the most-skipped, most-important
-   section. Each dead end: what, why it seemed right, how it failed, why. Stops
-   the next session repeating your hours of mistakes.
-5. **Root causes and key findings** — with file:line and non-obvious discoveries.
-6. **Exact next steps** — numbered, executable without judgment calls, each with
-   a verification gate ("you'll know it worked when ___").
-7. **Constraints and gotchas** in force.
-8. **Access and environment** — authenticated CLIs/MCPs, which env/branch/URL,
-   where secrets live (1Password vault name, never values).
-9. **Open questions and risks** — decisions made and why, with dates.
-
-**Mandatory self-audit gate — run BEFORE showing the handoff.** Grade it: (1)
-could a street newcomer continue with NO questions? (2) as effectively as you
-can right now? (3) did you include what failed and why? (4) is every next step
-concrete + verifiable? (5) is every term/path/URL explained? If any "no," expand
-and re-grade. Only then present it, and state the self-audit passed. Albert must
-NEVER have to ask "is this comprehensive enough for a fresh developer?" — you
-already answered it. A three-sentence handoff is a failure (the per-session file
-does not lower the bar — all 9 sections still apply). Write it to your own new
-`HANDOFF.d/` file, commit and push; delete that file only when its work is truly
-complete.
+**Before writing any handoff, read `templates/system/handoff-standard.md` in
+`u2giants/ai-devops`.** It carries the parts too long to keep here and that you
+must not improvise: the required 9 sections (including the most-skipped
+"everything we tried that did NOT work"), the mandatory self-audit gate to run
+before showing the handoff, the legacy-`HANDOFF.md` migration step, and the ban on
+`.gitattributes merge=union`.
 
 ## Environment
 
