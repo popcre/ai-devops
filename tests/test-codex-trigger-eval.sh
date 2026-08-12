@@ -44,18 +44,18 @@ if argv[argv.index("--sandbox") + 1] != "read-only":
 # Detection: Codex reports the command it ran inside a JSON string, so a real
 # Windows path arrives with doubled backslashes. Matching the raw line scored
 # 0/1 on a query where Codex had visibly opened the skill.
-installed = Path(r"C:\Users\ahazan2\.codex\skills\codex-qwen-code\SKILL.md")
+installed = Path(r"C:\Users\ahazan2\.codex\skills\qwen-code\SKILL.md")
 line = json.dumps({"type": "item.completed", "item": {
     "type": "command_execution",
     "command": r'pwsh -Command "Get-Content -Raw '
-               r"'C:\\Users\\ahazan2\\.codex\\skills\\codex-qwen-code\\SKILL.md'\"",
+               r"'C:\\Users\\ahazan2\\.codex\\skills\\qwen-code\\SKILL.md'\"",
 }})
-if not m._mentions_skill(line, "codex-qwen-code", installed):
+if not m._mentions_skill(line, "qwen-code", installed):
     fail("a JSON-escaped Windows path to the installed SKILL.md is not detected")
 
 if m._mentions_skill(json.dumps({"item": {"type": "command_execution",
                                           "command": "git status"}}),
-                     "codex-qwen-code", installed):
+                     "qwen-code", installed):
     fail("an unrelated command counted as a trigger")
 
 # Contamination: several files in THIS repo contain the installed skill path,
@@ -64,9 +64,9 @@ noise = json.dumps({"type": "item.completed", "item": {
     "type": "command_execution",
     "command": "pwsh -Command \"Get-Content -Raw 'tests/test-codex-trigger-eval.sh'\"",
     "aggregated_output": r"installed = Path(r'C:\Users\ahazan2\.codex\skills"
-                         r"\codex-qwen-code\SKILL.md')",
+                         r"\qwen-code\SKILL.md')",
 }})
-if m._mentions_skill(noise, "codex-qwen-code", installed):
+if m._mentions_skill(noise, "qwen-code", installed):
     fail("the skill path appearing in command OUTPUT counted as a trigger")
 
 print("PASS: codex-trigger-eval effort, sandbox, and trigger detection")
