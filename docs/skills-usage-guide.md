@@ -4,6 +4,11 @@ How the skills in `skills/claude/` and `skills/shared/` map to the things Albert
 used to type manually, and how to install them. Built from an analysis of ~1,790 prompts
 across 179 archived sessions (six machines) in `claude_chats/`.
 
+If you are deciding **where a rule or fact should live** (global vs machine vs
+repo vs topic doc vs skill vs memory vs plan vs handoff), read the context
+ownership map in
+[`context-engineering.md`](context-engineering.md) before adding it anywhere.
+
 ## Install
 
 On each machine, after cloning/pulling this repo:
@@ -18,9 +23,20 @@ instructions (`templates/system/CLAUDE-global.md`) to `~/.claude/CLAUDE.md` if
 absent. Then append the machine's section from
 `templates/system/machine-atlas.md` to that CLAUDE.md.
 
-Windows (PowerShell): run the same script via Git Bash
-(`bash ./bin/ai-install-skills`), or ask any Claude Code session to
-"install the skills from ai-devops" — the script is self-explanatory.
+Windows: use the **native PowerShell installer**
+`bin/install-ai-devops-windows.ps1`, not the Bash script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bin\install-ai-devops-windows.ps1
+```
+
+It is the Windows-native counterpart of `bin/ai-install-skills`: it copies
+Claude and Codex skills, stamps each with the `.ai-devops-managed` marker,
+quarantines retired managed skills, and seeds `CLAUDE.md`/`AGENTS.md` only if
+absent. The full machine setup `bin/setup-machine.ps1` (PowerShell 7) calls it
+itself, so the two never diverge in behavior. `bin/ai-install-skills` is the
+**Ubuntu / Git Bash** path — on Windows it is only a fallback (a bare `bash`
+there may be WSL, whose isolated env does not inherit the Windows process env).
 
 ## How skills reach each machine (there is no automatic push)
 
