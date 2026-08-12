@@ -74,17 +74,72 @@ def measurement(path: Path, root: Path, classification: str) -> dict:
     }
 
 
+def dedent_block(lines: list[str]) -> list[str]:
+    indents = [len(line) - len(line.lstrip(" \t")) for line in lines if line.strip()]
+    if not indents:
+        return []
+    base = min(indents)
+    return [line[base:] if line.strip() else "" for line in lines]
+
+
+def block_scalar(style: str, chomp: str, raw_lines: list[str]) -> str:
+    """Render a YAML block scalar deterministically.
+
+    Folded (``>``) joins the lines of a paragraph with single spaces and keeps
+    one newline between paragraphs. Literal (``|``) preserves every line break.
+    Strip chomping (``-``) removes the trailing newline; ``|``/``>`` and ``+``
+    both end with exactly one newline so repeated runs stay byte-identical.
+    """
+    lines = dedent_block(raw_lines)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if style == "|":
+        body = "\n".join(lines)
+    else:
+        paragraphs: list[str] = []
+        current: list[str] = []
+        for line in lines:
+            if line.strip():
+                current.append(line.strip())
+            else:
+                paragraphs.append(" ".join(current))
+                current = []
+        paragraphs.append(" ".join(current))
+        body = "\n".join(paragraphs)
+    if chomp == "-" or not body:
+        return body
+    return body + "\n"
+
+
+BLOCK_MARKER_RE = re.compile(r"^([>|])([+-]?)$")
+
+
 def frontmatter(text: str) -> dict[str, str]:
     if not text.startswith("---\n"):
         return {}
     end = text.find("\n---", 4)
     if end < 0:
         return {}
+    lines = text[4:end].splitlines()
     values: dict[str, str] = {}
-    for line in text[4:end].splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            values[key.strip()] = value.strip().strip('"\'')
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        if not line.strip() or line.startswith(("#", " ", "\t")) or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        marker = BLOCK_MARKER_RE.match(value)
+        if marker:
+            block: list[str] = []
+            while index < len(lines) and (not lines[index].strip() or lines[index][:1] in (" ", "\t")):
+                block.append(lines[index])
+                index += 1
+            values[key] = block_scalar(marker.group(1), marker.group(2), block)
+        else:
+            values[key] = value.strip('"\'')
     return values
 
 

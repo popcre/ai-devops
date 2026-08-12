@@ -4,24 +4,25 @@
 
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
-| 1. Freeze a measured baseline | 🟨 correction open | 2026-08-12 | Kimi review found folded YAML descriptions parsed as literal `>-`; fix parser, fixture, and manifest totals before step 2 |
+| 1. Freeze a measured baseline | ✅ done | 2026-08-12 | Parser corrected for YAML block scalars; regression test fails on the old parser and passes on the new one; corrected manifests Claude 21,521 bytes / about 5,381 tokens, Codex 14,015 bytes / about 3,504 tokens; two fixed-timestamp runs byte-identical; all Bash and PowerShell suites pass |
 | 2. Define the context ownership map | ⬜ open | 2026-08-12 | Proposed map in sections 8 and 9 |
 | 3. Add context-audit tooling and tests | ⬜ open | 2026-08-12 | Test design in sections 9 and 10 |
 | 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6 |
 | 5. Turn `AGENTS.md` into a tighter router | ⬜ open | 2026-08-12 | Current 11,731-token measurement |
-| 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Fourteen duplicate paragraph groups found |
+| 6. Remove cross-client skill duplication safely | ⬜ open | 2026-08-12 | Twelve duplicate paragraph groups measured by the tool; the earlier manual count of fourteen is superseded |
 | 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with the step 1 correction below, then continue to
-step 2. Do not use the current skill-manifest totals for budgets until folded
-descriptions are parsed and the baseline is regenerated. Before
-each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch drift.
+**Fresh-session start:** begin with step 2, the context ownership map. Step 1 is
+done and its correction is closed: the manifest totals in
+`docs/context-engineering.md` come from the corrected parser and are safe to use
+for budgets. Before each phase, re-read that phase and sections 1, 4, 8, 11, and
+13 to catch drift.
 
 **Newest handoff:**
-[`HANDOFF.d/2026-08-12T1431Z-al8960ofc-codex-kimi-baseline-correction.md`](HANDOFF.d/2026-08-12T1431Z-al8960ofc-codex-kimi-baseline-correction.md)
+[`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`](HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md)
 
 ## 1. The ultimate goal: what we are actually trying to achieve
 
@@ -197,9 +198,12 @@ by four. They help compare files; they are not billing claims.
 - Four installed skill sources differ from the current repository on this
   machine: Claude `kimi-code-delegation`, Claude `shared-db-handover`, Claude
   `shared-db-orchestrator`, and Codex `kimi-code-delegation`.
-- Fourteen exact duplicate paragraph groups of at least 180 characters exist
-  across skills. Most are deliberate client pairs, especially Qwen; one large
-  group is shared between Claude and Codex documentation-update skills.
+- Twelve exact duplicate paragraph groups of at least 180 characters exist
+  across skills, spanning 6 files and 3 distinct file pairs. Most are deliberate
+  client pairs, especially Qwen; one large group is shared between Claude and
+  Codex documentation-update skills. An earlier manual estimate said fourteen;
+  it is superseded, because the tool returns 12 at 100, 120, and 180 normalized
+  characters alike.
 - `templates/system/AGENTS-global-codex.md:44-47` still says Codex has no skills
   system. That statement is stale: the repo has `skills/codex/`, installs them
   into `~/.codex/skills/`, documents Codex skills, and the current Codex runtime
@@ -429,6 +433,20 @@ not one glob pass. During this audit GLM's glob silently omitted the real tracke
 report and human summary; two consecutive runs match apart from timestamps; a
 fixture containing a secret-like `.env` proves the audit skips it; the existing
 test suites remain green.
+
+**Correction closed, 2026-08-12.** All six items below were implemented and
+verified. `frontmatter()` now parses YAML block scalars (`>`, `>-`, `|`, `|-`,
+and the `+` forms) with documented folding rules; `tests/test-context-audit.ps1`
+adds folded and CRLF fixtures that fail against the old parser and pass against
+the new one; the real audit was rerun twice with a fixed timestamp to
+byte-identical output; `docs/context-engineering.md` now shows Claude 21,521
+bytes / about 5,381 tokens and Codex 14,015 bytes / about 3,504 tokens, records
+the superseded values, and describes installer parity as static capability
+matching; `docs/development.md` lists the audit test; the audit README says
+bytes divided by four. The fourteen-versus-twelve duplicate-paragraph question
+resolved as a stale manual estimate: the tool returns 12 groups over skill files
+at 100, 120, and 180 normalized characters, so 12 stands and 14 is retired.
+The original correction brief follows for the record.
 
 **Required correction from Kimi K3 review, 2026-08-12:**
 `tools/context-audit/context-audit.py:77-88` treats YAML folded or literal
@@ -945,16 +963,17 @@ model, tokens, cache, or cost, so none are claimed.
 Kimi found one material defect, accepted by Codex after direct source review:
 seven skill files use folded YAML descriptions, while the audit's frontmatter
 parser records only the literal scalar marker `>-`. The published Claude and
-Codex manifest totals are therefore understated. The correction and its gate are
-now part of step 1 above, and step 1 is marked correction-open until proven.
+Codex manifest totals were therefore understated. The correction was implemented
+and verified on 2026-08-12; step 1 is done again and its totals are corrected.
 
 Kimi also confirmed that secret exclusions, deterministic tracked-path
 discovery, drift reporting, the Windows automatic-quarantine test correction,
 and the fresh-session handoff were otherwise sound. Its non-blocking findings
-were folded into the correction: list the new test in `docs/development.md`, say
-bytes rather than characters, describe installer parity as a static capability
-check, and reconcile the manual fourteen-versus-tool twelve duplicate-paragraph
-count. The saved review is untracked at
+were folded into the correction and are all now applied: the new test is listed
+in `docs/development.md`, the audit README says bytes rather than characters,
+installer parity is described as a static capability check, and the manual
+fourteen-versus-tool twelve duplicate-paragraph count is reconciled in favor of
+twelve. The saved review is untracked at
 `.ai/reviews/kimi-context-engineering-step1-review-20260812T142135Z.md`.
 
 ### Final consensus ledger
