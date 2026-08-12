@@ -191,9 +191,9 @@ intentional.
   `Albert Hazan <u2giants@users.noreply.github.com>`; verified this session.
 - `.ai/` and `docs/claude-remote-control-hardening-v2.md` are unrelated
   untracked work in the primary checkout `C:\repos\ai-devops`. Leave them alone.
-- **`HANDOFF.d/` now holds 8 open files, above the 5-file warning line.** Several
-  are step-1/step-2 context-engineering files whose work is now proven done. The
-  owning session must delete its own; nobody may delete another session's.
+- `HANDOFF.d/` holds 4 open files, under the 5-file warning line. A concurrent
+  session cleared five finished files in `c6b5686` while this work was in
+  flight, so this branch was rebased onto that commit.
 
 ## 8. Access and environment
 
