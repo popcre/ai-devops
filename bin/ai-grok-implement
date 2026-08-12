@@ -1,0 +1,445 @@
+#!/usr/bin/env bash
+# ai-grok-implement — bounded Grok 4.5 implementation runs in a REAL isolated
+# git worktree.
+#
+# Companion to `ai-grok-review` (read-only). This script is the ONLY supported
+# way to let Grok edit code. Never hand-compose a `grok --worktree=... ` command
+# again: that shape is silently broken on Windows and it cost real money.
+#
+#   ai-grok-implement run <name> --repo <path> --prompt-file <f> [--ref <ref>]
+#                                [--max-turns N] [--allow-shell] [--keep]
+#   ai-grok-implement cleanup <name> [--force]
+#   ai-grok-implement list
+#   ai-grok-implement doctor
+#
+# ---------------------------------------------------------------------------
+# STEP 0 VERIFICATION — captured 2026-08-12 against Grok 0.2.112 on al8960ofc
+# (Windows 11, Git Bash). Re-run and update this block on any version bump.
+#
+#   ROOT CAUSE THIS SCRIPT EXISTS FOR:
+#   `--worktree[=NAME]` is ACCEPTED and SILENTLY IGNORED in headless mode
+#   (`--prompt-file` / `-p`). Measured: a run with `--worktree=fixture-a`
+#   returned stopReason "EndTurn", wrote its new file into the PRIMARY
+#   checkout, and left `grok worktree list` reporting "No worktrees found."
+#   and `git worktree list` showing only the primary. There is no error, no
+#   warning, and no exit-status signal. Grok therefore runs in whatever
+#   `--cwd` points at — including a stale detached HEAD.
+#
+#   Consequences observed in the 2026-08-12 shared-db runs:
+#     - Grok ran in C:\repos\shared-db (session dir key proves the cwd).
+#     - That checkout was detached at bc00945 while origin/main was 7a4f90e,
+#       so paths that exist only on origin/main were genuinely absent. The
+#       "tool_output_error" for read_file/list_dir was an ordinary NotFound:
+#         {"type":"ListDir","NotFound":"Error: C:\\repos\\shared-db\\docs/...
+#          does not exist.\nNote: your current working directory is
+#          C:\\repos\\shared-db"}
+#     - stopReason "Cancelled" came from a DIFFERENT tool: under
+#       `--permission-mode auto`, `run_terminal_command` was auto-cancelled
+#       ("User cancelled the execution for tool `run_terminal_command`").
+#       An auto-cancel DOES end the run — unlike an explicit `--deny`, which
+#       Grok reports and works around. So this script never uses `auto`.
+#
+#   `--cwd` is a NATIVE path argument. `grok --cwd /c/repos/x` fails with
+#   `Failed to set working directory ... (os error 3)` whenever MSYS path
+#   conversion is off. Git Bash normally rewrites a lone `/c/...` argument, but
+#   that is a heuristic, not a contract, so this script converts explicitly
+#   with `cygpath -w` and never relies on it.
+#
+#   `grok worktree remove` DOES NOT EXIST. The subcommand is `grok worktree rm
+#   <IDS>...` (`-f`, `--dry-run`). `grok worktree list` only ever lists
+#   worktrees Grok itself created, so after a headless run it is always empty.
+#
+#   Result keys / terminal stopReason spellings are as documented in
+#   bin/ai-grok-review's STEP 0 block: EndTurn / end_turn / stop / completed.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
+IMPL_DIR="$STATE_DIR/implement"
+CALLER="${AI_GROK_CALLER:-claude}"
+
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+DEFAULT_MAX_TURNS="${AI_GROK_IMPL_MAX_TURNS:-20}"
+
+die()  { printf 'ai-grok-implement: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-grok-implement: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+# ---------------------------------------------------------------------------
+# Platform + path handling
+#
+# Everything this script hands to grok.exe must be a NATIVE path. Everything it
+# hands to git or the shell stays a POSIX path. Mixing the two is exactly the
+# class of bug this wrapper exists to remove, so the conversion lives in one
+# place and is never left to MSYS heuristics.
+# ---------------------------------------------------------------------------
+is_windows() { case "$(uname -s 2>/dev/null || echo)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+
+native_path() { # native_path POSIX_PATH
+  if is_windows && command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+resolve_grok() {
+  if [ -n "${AI_GROK_BIN:-}" ]; then
+    [ -x "$AI_GROK_BIN" ] || die "AI_GROK_BIN=$AI_GROK_BIN is not executable."
+    printf '%s' "$AI_GROK_BIN"; return 0
+  fi
+  local c
+  for c in "$(command -v grok 2>/dev/null || true)" \
+           "$HOME/.local/bin/grok" \
+           "$HOME/.grok/bin/grok" \
+           "$HOME/.grok/bin/grok.exe" \
+           /home/ai/.local/bin/grok \
+           /usr/local/bin/grok; do
+    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  die "grok binary not found. Set AI_GROK_BIN, or install Grok."
+}
+
+# ---------------------------------------------------------------------------
+# Base ref selection.
+#
+# `grok --worktree` defaults its base to "the current HEAD of the source
+# checkout". That default is what exposed a stale detached HEAD to Grok on
+# 2026-08-12. This script never inherits a detached HEAD silently: it defaults
+# to the remote's main line and refuses to guess when it cannot find one.
+# ---------------------------------------------------------------------------
+default_ref() { # default_ref REPO
+  local repo="$1" r
+  for r in origin/main origin/master; do
+    git -C "$repo" rev-parse --verify --quiet "$r^{commit}" >/dev/null 2>&1 && { printf '%s' "$r"; return 0; }
+  done
+  if git -C "$repo" symbolic-ref --quiet HEAD >/dev/null 2>&1; then
+    git -C "$repo" symbolic-ref --short HEAD; return 0
+  fi
+  return 1
+}
+
+primary_fingerprint() { # primary_fingerprint REPO — HEAD + working tree state
+  local repo="$1"
+  printf 'HEAD=%s\n' "$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" status --porcelain
+}
+
+# ---------------------------------------------------------------------------
+# Records
+# ---------------------------------------------------------------------------
+record_path() { printf '%s/%s__%s.json' "$IMPL_DIR" "$CALLER" "$1"; }
+
+write_record() { # write_record NAME JSON
+  mkdir -p "$IMPL_DIR"
+  printf '%s\n' "$2" > "$(record_path "$1")"
+}
+
+read_record() { # read_record NAME
+  local f; f="$(record_path "$1")"
+  [ -f "$f" ] || die "no run named '$1' for caller '$CALLER'. Try: ai-grok-implement list"
+  cat "$f"
+}
+
+# ---------------------------------------------------------------------------
+# Completion rule.
+#
+# Exit status proves NOTHING. A run is finished only when stdout holds exactly
+# one JSON object carrying a terminal, non-cancelled stopReason.
+# ---------------------------------------------------------------------------
+terminal_json_ok() { # terminal_json_ok FILE -> 0 ok
+  local f="$1"
+  [ -s "$f" ] || return 1
+  jq -e 'has("stopReason")' "$f" >/dev/null 2>&1 || return 1
+  [ "$(jq -s 'length' "$f" 2>/dev/null || echo 0)" = "1" ] || return 1
+  case "$(jq -r '.stopReason' "$f")" in
+    end_turn|EndTurn|stop|completed) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+report_usage() { # report_usage FILE
+  jq -r '"tokens: \(.usage.total_tokens // "?") "
+       + "(cached: \(.usage.cache_read_input_tokens // 0)) "
+       + "turns: \(.num_turns // "?") "
+       + "cost: $\(.total_cost_usd // 0) "
+       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' "$1" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Worktree lifecycle
+# ---------------------------------------------------------------------------
+worktree_root() { # worktree_root REPO
+  if [ -n "${AI_GROK_WORKTREE_ROOT:-}" ]; then printf '%s' "$AI_GROK_WORKTREE_ROOT"; return; fi
+  printf '%s-grok-worktrees' "$1"
+}
+
+is_primary() { # is_primary REPO PATH — refuse to ever remove the main checkout
+  local a b
+  a="$(cd "$1" && pwd -P)"; b="$(cd "$2" 2>/dev/null && pwd -P || echo /nonexistent)"
+  [ "$a" = "$b" ]
+}
+
+remove_worktree() { # remove_worktree REPO WT NAME -> 0 removed and proven gone
+  local repo="$1" wt="$2" name="$3" grok; grok="$(resolve_grok)"
+  is_primary "$repo" "$wt" && die "refusing to remove the primary checkout ($repo)."
+
+  # Grok's own bookkeeping first, as the skill requires. The subcommand is `rm`,
+  # not `remove`. A headless run never registers a Grok worktree, so "not found"
+  # here is the expected case and is not an error.
+  "$grok" worktree rm "$name" >/dev/null 2>&1 || true
+
+  git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
+  git -C "$repo" worktree prune >/dev/null 2>&1 || true
+
+  # Prove it is gone in BOTH ledgers. `-Fw` and not a bare substring match: a
+  # short run name like `nd` is a substring of Grok's own "No worktrees found."
+  # banner, which made an empty ledger read as "still present".
+  if "$grok" worktree list 2>/dev/null | grep -Fwq -- "$name"; then
+    note "ai-grok-implement: grok worktree list STILL shows '$name'."
+    return 1
+  fi
+  if git -C "$repo" worktree list --porcelain 2>/dev/null | grep -Fq -- "/$name"; then
+    note "ai-grok-implement: git worktree list STILL shows '$wt'."
+    return 1
+  fi
+  [ -e "$wt" ] && { note "ai-grok-implement: worktree directory still exists: $wt"; return 1; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# run
+# ---------------------------------------------------------------------------
+cmd_run() {
+  local name="${1:-}"; shift || true
+  [ -n "$name" ] || die "usage: ai-grok-implement run <name> --repo <path> --prompt-file <f> [--ref <ref>] [--max-turns N] [--allow-shell] [--keep]"
+  case "$name" in *[!A-Za-z0-9._-]*) die "run name must be [A-Za-z0-9._-] only: '$name'";; esac
+
+  local repo="" pf="" ref="" turns="$DEFAULT_MAX_TURNS" allow_shell=0 keep=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)        repo="${2:-}"; shift 2 ;;
+      --prompt-file) pf="${2:-}";   shift 2 ;;
+      --ref)         ref="${2:-}";  shift 2 ;;
+      --max-turns)   turns="${2:-}"; shift 2 ;;
+      --allow-shell) allow_shell=1; shift ;;
+      --keep)        keep=1; shift ;;
+      *) die "unknown option '$1'. This wrapper deliberately refuses to forward arbitrary grok flags." ;;
+    esac
+  done
+  [ -n "$repo" ] || die "--repo is required."
+  [ -n "$pf" ] && [ -f "$pf" ] || die "--prompt-file must name an existing file."
+  case "$turns" in ''|*[!0-9]*) die "--max-turns must be a positive integer.";; esac
+  [ "$turns" -gt 0 ] || die "--max-turns must be a positive integer."
+
+  need jq; need git
+  repo="$(cd "$repo" && git rev-parse --show-toplevel)" || die "--repo is not inside a git repository."
+
+  [ -n "$ref" ] || ref="$(default_ref "$repo")" || die \
+"cannot pick a base ref: '$repo' has no origin/main or origin/master and HEAD is detached.
+Pass --ref <branch|tag|commit> explicitly. Inheriting a detached HEAD is what served
+stale content to Grok on 2026-08-12; this wrapper will not do it silently."
+  git -C "$repo" rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1 \
+    || die "base ref '$ref' does not resolve in $repo."
+  local base_sha; base_sha="$(git -C "$repo" rev-parse "$ref^{commit}")"
+
+  local wt_root wt branch
+  wt_root="$(worktree_root "$repo")"; wt="$wt_root/$name"; branch="grok/$name"
+  [ -e "$wt" ] && die "worktree path already exists: $wt (run 'ai-grok-implement cleanup $name' first)."
+  git -C "$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 \
+    && die "branch '$branch' already exists in $repo. Clean up the previous run first."
+
+  local before; before="$(primary_fingerprint "$repo")"
+
+  mkdir -p "$wt_root"
+  git -C "$repo" worktree add -q -b "$branch" "$wt" "$base_sha" \
+    || die "failed to create worktree $wt from $ref."
+  note "ai-grok-implement: worktree $wt on branch $branch @ ${base_sha:0:7} (from $ref)"
+
+  # The brief is copied INSIDE the worktree. A prompt file living outside the
+  # isolated tree is one more path Grok can be told to look for and fail on.
+  # It is excluded from the worktree's git view so it can never be mistaken for
+  # Grok's own work when the diff is collected.
+  local run_dir="$wt/.grok-run"
+  mkdir -p "$run_dir"
+  printf '/.grok-run/\n' >> "$(git -C "$wt" rev-parse --git-path info/exclude)"
+
+  # Artifacts live in the STATE dir, not the worktree: the diff and the result
+  # JSON must outlive the worktree that produced them.
+  local art="$IMPL_DIR/${CALLER}__${name}.d"
+  rm -rf "$art"; mkdir -p "$art"
+  {
+    printf '# Working directory contract\n\n'
+    printf 'Your current working directory is `%s`.\n' "$(native_path "$wt")"
+    printf 'It IS the isolated git worktree for this task, on branch `%s`, based on `%s` (%s).\n' \
+           "$branch" "$ref" "${base_sha:0:7}"
+    printf 'Do NOT look for another worktree. Do NOT touch any other checkout of this repository.\n'
+    printf 'Do NOT commit, push, merge, or run destructive commands. Edit files in place; the diff is collected for you.\n'
+    printf 'Read files with bounded chunks. If a path is missing, list the directory you are in rather than guessing another root.\n\n'
+    printf -- '---\n\n'
+    cat "$pf"
+  } > "$run_dir/brief.md"
+
+  local out="$art/result.json" err="$art/result.err" diff="$art/changes.diff"
+  cp "$run_dir/brief.md" "$art/brief.md"
+  local grok; grok="$(resolve_grok)"
+
+  # Permission set. NOT `--permission-mode auto`: auto-cancelling a tool ends the
+  # run with stopReason "Cancelled" (measured 2026-08-12). An explicit --deny is
+  # reported to Grok, which then works around it and still finishes.
+  local perms=(--permission-mode acceptEdits
+               --allow Read --allow Grep --allow Edit --allow Write
+               --disable-web-search --no-memory)
+  if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
+
+  # NOTE: --worktree is deliberately NOT passed. It is silently ignored in
+  # headless mode on Grok 0.2.112 and its absence is the whole point of this
+  # wrapper. Do not "restore" it.
+  local args=(--cwd "$(native_path "$wt")"
+              --model "$GROK_MODEL"
+              --prompt-file "$(native_path "$run_dir/brief.md")"
+              --max-turns "$turns"
+              "${perms[@]}"
+              --output-format json)
+
+  set +e
+  "$grok" "${args[@]}" > "$out" 2> "$err"
+  local rc=$?
+  set -e
+
+  # Diff first: it must survive every failure path, and it lives outside the
+  # worktree so cleanup cannot destroy the evidence.
+  git -C "$wt" add -A -N >/dev/null 2>&1 || true
+  git -C "$wt" diff -- . ':(exclude).grok-run' > "$diff" 2>/dev/null || : > "$diff"
+
+  local after; after="$(primary_fingerprint "$repo")"
+  local primary_ok=1
+  [ "$before" = "$after" ] || primary_ok=0
+
+  local stop cost tokens
+  stop="$(jq -r '.stopReason // "missing"' "$out" 2>/dev/null || echo missing)"
+  cost="$(jq -r '.total_cost_usd // 0' "$out" 2>/dev/null || echo 0)"
+  tokens="$(jq -r '.usage.total_tokens // 0' "$out" 2>/dev/null || echo 0)"
+
+  local status="ok" reasons=""
+  terminal_json_ok "$out" || { status="failed"; reasons="$reasons no-terminal-json(stopReason=$stop);"; }
+  [ -s "$diff" ] || { status="failed"; reasons="$reasons empty-diff;"; }
+  [ "$primary_ok" -eq 1 ] || { status="failed"; reasons="$reasons primary-checkout-changed;"; }
+
+  write_record "$name" "$(jq -n \
+    --arg name "$name" --arg caller "$CALLER" --arg repo "$repo" --arg wt "$wt" \
+    --arg branch "$branch" --arg ref "$ref" --arg base "$base_sha" \
+    --arg status "$status" --arg stop "$stop" --arg reasons "$reasons" \
+    --argjson rc "$rc" --argjson cost "${cost:-0}" --argjson tokens "${tokens:-0}" \
+    --arg diff "$diff" --arg out "$out" \
+    '{name:$name,caller:$caller,repo:$repo,worktree:$wt,branch:$branch,ref:$ref,
+      base_sha:$base,status:$status,stopReason:$stop,failure_reasons:$reasons,
+      exit_code:$rc,cost_usd:$cost,tokens:$tokens,diff:$diff,result:$out}')"
+
+  note ""
+  note "ai-grok-implement: exit=$rc (recorded, never trusted) stopReason=$stop"
+  [ -s "$out" ] && report_usage "$out"
+  note "  diff       : $diff ($(wc -l < "$diff" | tr -d ' ') lines)"
+  note "  worktree   : $wt"
+  note "  primary    : $([ "$primary_ok" -eq 1 ] && echo unchanged || echo CHANGED)"
+
+  if [ "$status" != "ok" ]; then
+    note ""
+    note "ai-grok-implement: RUN FAILED —$reasons"
+    note "  The worktree is PRESERVED so nothing unique is lost. Inspect it, then:"
+    note "    ai-grok-implement cleanup $name --force"
+    [ -s "$err" ] && note "  stderr: $err"
+    return 1
+  fi
+
+  cat "$out"
+  if [ "$keep" -eq 0 ]; then
+    if remove_worktree "$repo" "$wt" "$name"; then
+      git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
+      note "ai-grok-implement: worktree removed and proven absent from grok + git ledgers."
+    else
+      die "cleanup verification FAILED for '$name'. Do not treat this run as finished."
+    fi
+  else
+    note "ai-grok-implement: --keep given; worktree left in place. Remove it with: ai-grok-implement cleanup $name"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# cleanup
+# ---------------------------------------------------------------------------
+cmd_cleanup() {
+  local name="${1:-}"; shift || true
+  [ -n "$name" ] || die "usage: ai-grok-implement cleanup <name> [--force]"
+  local force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in --force) force=1; shift ;; *) die "unknown option '$1'." ;; esac
+  done
+  need jq
+  local rec repo wt branch diff status
+  rec="$(read_record "$name")"
+  repo="$(printf '%s' "$rec" | jq -r .repo)"
+  wt="$(printf '%s'   "$rec" | jq -r .worktree)"
+  branch="$(printf '%s' "$rec" | jq -r .branch)"
+  diff="$(printf '%s' "$rec" | jq -r .diff)"
+  status="$(printf '%s' "$rec" | jq -r .status)"
+
+  if [ "$status" != "ok" ] && [ "$force" -eq 0 ] && [ -s "$diff" ]; then
+    die "run '$name' FAILED and its worktree holds a non-empty diff ($diff).
+Review it before deleting unique work, then re-run with --force."
+  fi
+  if remove_worktree "$repo" "$wt" "$name"; then
+    git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
+    note "ai-grok-implement: '$name' removed and proven absent."
+    return 0
+  fi
+  die "cleanup verification FAILED for '$name'."
+}
+
+cmd_list() {
+  need jq
+  mkdir -p "$IMPL_DIR"
+  local f found=0
+  for f in "$IMPL_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    found=1
+    jq -r '[.name,.caller,.status,.stopReason,("$"+(.cost_usd|tostring)),.worktree]|@tsv' "$f"
+  done
+  [ "$found" -eq 1 ] || echo "(no runs recorded)"
+}
+
+cmd_doctor() {
+  need jq; need git
+  local grok; grok="$(resolve_grok)"
+  echo "binary       : $grok"
+  echo "version      : $("$grok" --version 2>&1 | head -1)"
+  echo "platform     : $(uname -s) (windows=$(is_windows && echo yes || echo no))"
+  echo "cygpath      : $(command -v cygpath >/dev/null 2>&1 && echo present || echo absent)"
+  printf 'auth (models): '
+  if "$grok" models >/dev/null 2>&1; then echo OK; else echo "FAILED — run 'grok login'"; fi
+  echo "state dir    : $IMPL_DIR"
+  echo ""
+  echo "NOTE: 'grok --worktree' is silently ignored in headless mode on 0.2.112."
+  echo "      This wrapper creates the worktree with git and passes only --cwd."
+}
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    run)     cmd_run "$@" ;;
+    cleanup) cmd_cleanup "$@" ;;
+    list)    cmd_list "$@" ;;
+    doctor)  cmd_doctor "$@" ;;
+    --version|-v) echo "ai-grok-implement $VERSION" ;;
+    ''|-h|--help|help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$cmd'. Try: run | cleanup | list | doctor" ;;
+  esac
+}
+
+main "$@"
