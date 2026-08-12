@@ -107,6 +107,7 @@ bash tests/test-ai-memory-sync.sh
 pwsh -File tests/test-install-ai-devops-windows.ps1
 pwsh -File tests/test-mcp-env-launch.ps1
 pwsh -File tests/test-memory-sync-scheduled-task.ps1
+pwsh -NoProfile -File tests/test-context-audit.ps1
 ```
 
 The tests use temporary repositories and temporary Claude/Codex homes. They

@@ -16,8 +16,14 @@ python tools/context-audit/context-audit.py `
 ```
 
 Generated reports belong under `.ai/` and are not committed. The report labels
-the characters-divided-by-four value as an estimate. It is not a provider token
+the bytes-divided-by-four value as an estimate. It is not a provider token
 or billing claim.
+
+Skill frontmatter is parsed without a YAML dependency. Single-line values and
+YAML block scalars (`>`, `>-`, `|`, `|-`, and the `+` forms) are supported.
+Folded values join a paragraph's lines with single spaces and keep one newline
+between paragraphs; literal values keep every line break. Windows CRLF files
+parse identically to LF files.
 
 The audit gets tracked source paths from `git ls-files`. In a fixture without a
 Git checkout, it uses a deterministic sorted file walk. It skips `.git`, `.ai`,
