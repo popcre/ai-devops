@@ -5,14 +5,26 @@
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
 | 1. Make the failure diagnosable | ✅ done | 2026-08-12 | `bin/ai-glm` `permission_reason_id` / `permission_failure_detail`; new `failure_detail` field in the record and in `ai-glm show`; `tests/test-ai-glm.sh` section "permission failure is diagnosable (step 1)" proves 10 distinct branch ids and secret redaction |
-| 2. Measure the real permission shapes OpenCode 1.18.12 sends | ⬜ open | 2026-08-12 | Section 6, findings 2 and 3 |
-| 3. Widen the implement-mode allowlist to the measured write actions | ⬜ open | 2026-08-12 | Section 6, finding 2 |
-| 4. Accept the measured non-`resources` permission shapes | ⬜ open | 2026-08-12 | Section 6, finding 3 |
+| 2. Measure the real permission shapes OpenCode 1.18.12 sends | ✅ done | 2026-08-12 | Section 6, finding 6. Three paid probe runs against a throwaway fixture; measured table in section 6 |
+| 3. Widen the implement-mode allowlist to the measured write actions | ⚠️ open, premise now disputed | 2026-08-12 | Section 6, finding 6: no write-class action asked in any measured run, so there is nothing measured to widen to. Re-scope before doing this |
+| 4. Accept the measured non-`resources` permission shapes | ⚠️ open, premise now disputed | 2026-08-12 | Section 6, finding 6: no non-`resources` shape was observed. Finding 3's original hypothesis is already disproven |
 | 5. Add regression tests for every classifier branch | ⬜ open | 2026-08-12 | Section 10 |
 | 7. Separate transport failure from unsafe permission state | ✅ done | 2026-08-12 | `permission_http` retries a dropped local poll 3× (`AI_GLM_PERMISSION_HTTP_ATTEMPTS`); `classify_permissions` gives status `000` its own branch; new durable code + failure_kind `transport-failed`; docs constraint 30 + troubleshooting row; skill guidance; `tests/test-ai-glm.sh` section "transport failure is not a permission failure (step 7)" |
 | 6. Re-run the two real failed jobs and close | ⬜ open | 2026-08-12 | Section 9, step 6 |
 
-**Fresh-session start:** steps 1 and 7 shipped on 2026-08-12; begin at step 2.
+**Fresh-session start (updated 2026-08-12, second pass):** steps 1, 7, and 2 are
+done. **Do NOT simply proceed to step 3.** Step 2's measurement (finding 6)
+removed the evidence step 3 was built on: OpenCode 1.18.12 never asked the
+wrapper for `edit`, `write`, `patch`, or `bash` in three live implement runs, so
+there is no measured write-class shape to widen the allowlist to, and widening it
+would weaken the sandbox for no observed benefit. Steps 3 and 4 need re-scoping
+by a human decision before anyone writes code for them. The one genuinely
+unexplained failure left is `popcrm-codebase-audit-remediation`
+(`permission-unsupported-action`); step 1 now makes the next occurrence fully
+diagnosable, which is the cheapest way to learn what actually asked. Step 6 can
+run whenever Albert wants the two stale records re-tried.
+
+**Superseded first-pass note:** steps 1 and 7 shipped on 2026-08-12; begin at step 2.
 Step 1's `failure_detail` field is now the thing that tells you which branch
 rejected a run, so use `ai-glm show <name>` and read `failure_detail.reason_id`
 before touching any allowlist. Step 7 fixed a different defect (a dropped local
@@ -292,6 +304,68 @@ exported as `.incomplete.patch` with an INCOMPLETE report, the clone was cleaned
 the primary checkout was untouched, the job record stayed durable, and the exit
 code was nonzero. Nothing about the fail-closed posture should be weakened. Only
 its blindness should be fixed.
+
+### Finding 6 (measured 2026-08-12, step 2): implement mode does not ask at all
+
+Measured against the pinned OpenCode 1.18.12 binary and the live API on
+2026-08-12, machine `al8960ofc`, through `ai-glm implement` only, using a
+throwaway three-file git fixture. Three paid runs, tokens per run under 400.
+
+| Action forced | Did OpenCode ask? | Evidence |
+|---|---|---|
+| `read` (inside the clone) | no | runs 1 and 2 completed |
+| `list` (inside the clone) | no | runs 1 and 2 completed |
+| `glob` (`src/*.md`) | no | runs 1 and 2 completed |
+| `grep` (`MARKER_ALPHA`) | no | runs 1 and 2 completed |
+| `edit` on an EXISTING file | no | runs 1 and 2; the exported patch really contains the edit |
+| `write` of a NEW file | no | runs 1 and 2; `src/created.txt` is in the patch |
+| `patch`/append to an existing file | no | runs 1 and 2 |
+| `bash` (`git status --porcelain`) | no | runs 1 and 2; GLM reported the command's real output |
+| `todowrite` | not triggered | the task was too small for GLM to open a todo list; the 2026-08-10 measurement stands |
+| outside-directory `read` (`C:/Windows/win.ini`) | **no ask reached the wrapper** | run 3: GLM refused on its own, citing its agent-file constraints, and never called the tool |
+
+**No permission request of any kind reached `classify_permissions` in any of the
+three runs.** Reproduced twice for every row except the two marked otherwise.
+
+Consequences, and they are large:
+
+1. **Step 3's premise is not supported by measurement.** The plan assumed a
+   write-class ask was killing jobs. In practice OpenCode 1.18.12 never asked for
+   `edit`, `write`, `patch`, or `bash` in implement mode. Widening the allowlist
+   would reduce sandbox guarantees while fixing nothing observed. Do not widen it
+   on the strength of code reading alone; find a payload first.
+2. **Step 4 has nothing to accept.** No non-`resources` shape was seen at all.
+3. **Open decision 1 (`bash`) resolves itself for now.** The wrapper is never
+   asked about `bash`, so there is nothing to approve. The remote-less clone
+   remains the actual control, exactly as hard-won constraint 1 says.
+4. **The `popcrm-codebase-audit-remediation` failure
+   (`permission-unsupported-action`) is still unexplained.** Something did ask,
+   with an action outside the allowlist, and this fixture did not reproduce it.
+   Its record predates `failure_detail`, so the action is not recoverable. The
+   honest next move is to wait for the next occurrence, which step 1 now makes
+   fully diagnosable, rather than to guess at an allowlist.
+
+### Finding 7 (2026-08-12): the intermittency in finding 4 was the transport bug
+
+Finding 4 asked why four jobs succeeded and two failed. The answer is not a
+conditional permission ask. A concurrent investigation compared the durable
+records of the two `permission-invalid-response` failures and found they share
+`failure_detected_at` to the second:
+
+- `context-ownership-map-step2` (caller `claude`, repo `ai-devops` worktree)
+- `orderlist-production-package-837` (caller `codex`, repo `shared-db`) - a
+  **third** permission failure that no earlier handoff had noticed
+
+Both were detected at 16:20:47 and finished at 16:21:10 on 2026-08-12, in
+different repositories under different callers. Two independent jobs cannot hit a
+genuine permission wall in the same second. One transient stall of the local
+OpenCode server hit both, and both were mislabelled as permission problems. Both
+had `changes_present: true` and real exported work; the orderlist patch is
+ordinary migration-checker output with no sign of a blocked action.
+
+That is exactly the defect step 7 fixed. Neither record carries `failure_detail`
+because both predate it, so this rests on the timestamp match plus the shared
+code. It is corroboration, not proof, and it is strong.
 
 ### Root cause
 
