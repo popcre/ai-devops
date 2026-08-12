@@ -16,12 +16,10 @@ None. No code work is pending in this workstream.
 
 ### Recoverable, but he is the only one allowed to decide
 
-1. **Four `HANDOFF.d/` files look finished and should probably be deleted.** The
-   folder holds 8 files, well over the 5-file warning line, and every file in it
-   means "work in progress" to the next session. Recommendation: delete the four
-   named in section 6 item 1. They belong to other sessions, and the standing
-   rule is that only their owner or Albert removes them. This is the second time
-   in one day this has been raised and nobody has answered it.
+1. ~~Clear the finished `HANDOFF.d/` files.~~ **DONE 2026-08-12.** Albert
+   authorized it, each candidate was verified against git and the current plan
+   STATUS tables, and five were deleted. The folder is back to 3. Detail and the
+   keep/delete reasoning are in section 6 item 1.
 2. **Remove this session's merged worktree**
    `C:\repos\ai-devops-worktrees\glm-permission-failures-a7e4a8`. Its commits are
    in `origin/main`. Recommendation: remove it with the `cleanup-worktree` skill.
@@ -221,21 +219,35 @@ is gitignored and therefore **exists only on this machine**.
 
 Only two, and both are Albert's call.
 
-1. **Clear the finished `HANDOFF.d/` files.** The folder holds 8. Oldest first:
+1. **DONE 2026-08-12: `HANDOFF.d/` cleared from 8 files to 3.** Each file was
+   checked against git history and the live plan STATUS tables, not against
+   memory or age. Recorded here so nobody re-audits the same files.
 
-   | File | Assessment |
+   Deleted, all verifiably finished (git history keeps the text):
+
+   | File | Why it was safe to delete |
    |---|---|
-   | `2026-08-10T1138Z-albt16-codex-916-rollout.md` | Unknown. The `916` machine was powered off; leave unless Albert knows. |
-   | `2026-08-12T1135Z-al8960ofc-codex-context-engineering-audit.md` | Looks finished — its audit produced the context plan. |
-   | `2026-08-12T1339Z-al8960ofc-codex-context-baseline-step1.md` | Looks finished — step 1 closed by `f13e4af`. |
-   | `2026-08-12T1431Z-al8960ofc-codex-kimi-baseline-correction.md` | Looks finished — closed by `f13e4af`. |
-   | `2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md` | Looks finished — parser fix shipped. |
-   | `2026-08-12T1656Z-al8960ofc-claude-glm-permission-plan-and-step2-verify.md` | **Superseded.** Its next steps are all done. Its finding 3 was already disproven. |
-   | `2026-08-12T1659Z-al8960ofc-claude-context-step2-landed-glm-transport-fix.md` | **Superseded.** Its "exact next steps" 1 and 2 both shipped today. |
-   | this file | Delete once items 1 and 2 here are done. |
+   | `...T1339Z-codex-context-baseline-step1.md` | Its entire next-step list was context-plan step 2, now `✅ done` |
+   | `...T1431Z-codex-kimi-baseline-correction.md` | The parser correction shipped in `f13e4af`; step 1 is `✅ done` |
+   | `...T1552Z-claude-context-audit-parser-fix.md` | Its next steps were step 2, now `✅ done` |
+   | `...T1656Z-claude-glm-permission-plan-and-step2-verify.md` | Superseded: the GLM plan is closed and its finding 3 was already disproven |
+   | `...T1659Z-claude-context-step2-landed-glm-transport-fix.md` | Its two next steps both shipped: GLM steps 1+7, and context step 3 |
 
-   You'll know it worked when `ls HANDOFF.d/` shows 5 or fewer files and each
-   remaining one describes work that is genuinely still open.
+   Kept, and why:
+
+   | File | Why it stays open |
+   |---|---|
+   | `2026-08-10T1138Z-albt16-codex-916-rollout.md` | Genuinely blocked. `916` is still unreachable: `<removed-protected-address>:22` refused a connection when tested 2026-08-12T1959Z. Its blocker is machine availability, nothing else |
+   | `2026-08-12T1135Z-codex-context-engineering-audit.md` | Its own retention rule says keep it until the full context implementation, pilot, and machine rollout are proven. Plan steps 4 through 10 are still open |
+   | this file | Delete once item 2 below is done |
+
+   **One lesson was rescued before deleting.** The two Codex context handoffs
+   recorded that the persistent GLM review session
+   `context-engineering-consolidation-review` accepted a prompt and returned no
+   answer three times, including after a service restart, while `ai-glm doctor`
+   passed. That was recorded nowhere else, so it is now a row in the
+   `docs/glm-opencode.md` troubleshooting table. It is NOT the transport bug,
+   which fails loudly. It has never been diagnosed.
 
 2. **Remove this session's merged worktree.** Use the `cleanup-worktree` skill on
    `C:\repos\ai-devops-worktrees\glm-permission-failures-a7e4a8`, branch
