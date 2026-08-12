@@ -97,7 +97,9 @@ context-engineering plan shrinks that safely, without dropping a safety rule.
   `docs/cloud-build-prod-trigger-incident-2026-07-20.md`, `docs/skills-map.md`,
   and the two named memory files). All present.
 - **New plan written and pushed:** `plan_ai-glm-permission-failures.md`, commit
-  `4dda7ff`. Six steps, not started.
+  `4dda7ff`. Not started. **A concurrent session then added a step 7 in commit
+  `92a23c5` and disproved my finding 3 — see section 5.** The plan now has seven
+  steps and its step 7 row sits between steps 5 and 6 in the STATUS table.
 - **Empty GLM scratch folders swept.** Sixteen directories under
   `C:\Users\ahazan2\.local\state\ai-devops\glm\wt` contained zero files
   (verified recursively, including hidden). Deleted. `ai-glm doctor` now passes
@@ -186,9 +188,15 @@ Two defects proven from source, both in `bin/ai-glm`:
    So any write-class permission ask is fatal. That is exactly what killed
    `popcrm-codebase-audit-remediation`.
 
-Unproven but most likely for the step-2 failure: an entry whose paths arrive
-under a key other than `.resources`, hitting "permission entry is missing
-resources" at `bin/ai-glm:441`. Recorded as a hypothesis, not a fact.
+**My hypothesis for the step-2 failure was wrong, and it has been disproved.** I
+guessed an entry whose paths arrive under a key other than `.resources`. A
+concurrent session recovered the dispatching session's stderr and measured the
+actual reason: `permission endpoint returned HTTP 000`. That is curl's
+transport-failure value coming out of `permission_http`, not a permission
+payload the server ever sent. In other words the step-2 job was killed by a
+failed local HTTP call being treated as an unsafe permission state. That is now
+step 7 of the plan (commit `92a23c5`), and it is the real cause of the failure
+that started all of this. Defects 1 and 2 above still stand on their own.
 
 Also proven: the failure is **intermittent**. `issue-729-safe-launch-v3`,
 `issue-617-digest-pin-local`, `catalog-verifier-net-acl-v2`, and
