@@ -630,6 +630,45 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
 }
 
 # --------------------------------------------------------------------------
+# 6d. Grok CLI wrappers - ai-grok-review (read-only) and ai-grok-implement
+# --------------------------------------------------------------------------
+# Both are repo-owned Bash scripts. Without these shims they are only reachable
+# when C:\repos\ai-devops\bin happens to be on the Git Bash PATH, so a session
+# that could not find `ai-grok-implement` hand-composed a raw `grok --worktree`
+# command instead. That command shape is SILENTLY BROKEN in Grok headless mode
+# (the worktree is never created and Grok edits the primary checkout), and on
+# 2026-08-12 it burned ~$0.59 on three cancelled shared-db runs. Same two-shim
+# pattern as ai-kimi: an extensionless launcher for Git Bash plus a .cmd for
+# PowerShell.
+Step "Grok CLI wrappers (ai-grok-review, ai-grok-implement)"
+if ($gitBashForKimi) {
+  $homeBashG = "/" + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+  foreach ($grokWrapper in @("ai-grok-review", "ai-grok-implement")) {
+    $src = Join-Path $RepoPath "bin\$grokWrapper"
+    if (-not (Test-Path -LiteralPath $src)) {
+      Warn "$src is missing; $grokWrapper was not installed."
+      continue
+    }
+    $srcBash = "/" + (($src -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+    @"
+#!/usr/bin/env bash
+# Managed by ai-devops setup-machine.ps1.
+export HOME="$homeBashG"
+exec "$srcBash" "`$@"
+"@ | Set-Content -NoNewline -Encoding ASCII -Path (Join-Path $delegateBinDir $grokWrapper)
+    @"
+@echo off
+rem Managed by ai-devops setup-machine.ps1.
+set "HOME=$env:USERPROFILE"
+"$gitBashForKimi" "$srcBash" %*
+"@ | Set-Content -Encoding ASCII -Path (Join-Path $delegateBinDir "$grokWrapper.cmd")
+    Ok "$grokWrapper installed for PowerShell and Git Bash"
+  }
+} else {
+  Warn "Git Bash is missing; the Grok wrappers could not be installed."
+}
+
+# --------------------------------------------------------------------------
 # 7. Claude Code (CLI) MCP config - same token-free treatment
 # --------------------------------------------------------------------------
 # Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.

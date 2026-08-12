@@ -120,31 +120,49 @@ consulting for anything below: `~/.grok/README.md`,
 `grok --help` — the CLI surface changes between versions, so re-verify rather than
 trusting any statement here, **including this one**.
 
-## Implementation runs — the one path still driven by hand
+## Implementation runs — use `ai-grok-implement`. Never hand-compose one.
 
-`ai-grok-review` is read-only by design. Use implementation mode **only when the user
-explicitly asks Grok to edit code**, and drive it directly:
+`ai-grok-review` is read-only by design. When the user **explicitly asks Grok to edit
+code**, use the companion wrapper:
 
 ```bash
-grok --cwd "$repo" --worktree=grok-task --model grok-4.5 --prompt-file "$brief" \
-     --max-turns 20 --permission-mode auto --output-format json --no-memory > "$out"
+ai-grok-implement run <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
+ai-grok-implement cleanup <name> [--force]
+ai-grok-implement list | doctor
 ```
 
-Record `git status` first and preserve unrelated work. Use `--worktree=<name>` with `=`.
+It creates the isolated worktree itself with `git worktree add`, bases it on `origin/main`
+by default, converts every path to native Windows form, keeps the brief inside the
+worktree, validates the JSON, exports the diff to a location that outlives the worktree,
+proves the primary checkout is unchanged, verifies removal in both ledgers, and reports
+the cost. On success it exits 0 and prints the raw JSON; on any failure it exits nonzero
+and **preserves the worktree** so unique work is never silently deleted.
+
+### Why hand-composing is banned
+
+`grok --worktree=<name>` is **accepted and silently ignored in headless mode**
+(measured on Grok 0.2.112, Windows, 2026-08-12). No error, no warning, no exit-status
+signal. Grok then runs in whatever `--cwd` points at — the primary checkout. On
+2026-08-12 that checkout was on a stale detached HEAD, so `read_file` and `list_dir`
+returned ordinary `NotFound` errors for paths that only existed on `origin/main`, and
+three runs died for ~$0.59 with no changes.
+
+Three more facts that make hand-composed commands wrong:
+
+- **`--cwd` takes a NATIVE path.** `grok --cwd /c/repos/x` fails with
+  `Failed to set working directory ... (os error 3)`. Git Bash usually rewrites a lone
+  `/c/...` argument, but that is a heuristic, not a contract.
+- **`--permission-mode auto` can end a run.** An auto-cancelled `run_terminal_command`
+  produces `stopReason: "Cancelled"` and no diff. An explicit `--deny` does not — Grok
+  reports it and works around it. The wrapper uses `acceptEdits` plus explicit
+  allow/deny rules, never `auto`.
+- **`grok worktree remove` does not exist.** The subcommand is `grok worktree rm <IDS>...`.
+  And `grok worktree list` only ever lists worktrees Grok itself created, so after a
+  headless run it is always empty — its emptiness proves nothing on its own. The wrapper
+  checks the git ledger and the directory too.
+
 Repeat every branch, database, production, destructive-action, and test constraint inside
-the prompt. Because you are hand-composing here, the wrapper's protections do **not**
-apply: pass `--max-turns` yourself, and do not trust exit status — wait for valid JSON
-carrying a terminal `stopReason` before believing the run finished.
-
-**Cleanup is a gate, not a suggestion.** In the same task, after extracting the diff:
-
-```bash
-grok worktree remove grok-task            # Grok's own command, not `git worktree`
-grok worktree list                        # MUST no longer list grok-task
-```
-
-If it still appears, say so loudly and stop; do not report the task finished. Do not
-assume `git worktree prune` clears Grok's bookkeeping.
+the prompt. Never trust exit status: only valid JSON with a terminal `stopReason` counts.
 
 On Windows, do not claim `--sandbox read-only` protects a run: the installed docs list OS
 sandbox enforcement for Linux and macOS only. Permission rules are the control there.
