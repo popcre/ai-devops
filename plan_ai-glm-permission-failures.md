@@ -6,25 +6,54 @@
 |---|---|---:|---|
 | 1. Make the failure diagnosable | ✅ done | 2026-08-12 | `bin/ai-glm` `permission_reason_id` / `permission_failure_detail`; new `failure_detail` field in the record and in `ai-glm show`; `tests/test-ai-glm.sh` section "permission failure is diagnosable (step 1)" proves 10 distinct branch ids and secret redaction |
 | 2. Measure the real permission shapes OpenCode 1.18.12 sends | ✅ done | 2026-08-12 | Section 6, finding 6. Three paid probe runs against a throwaway fixture; measured table in section 6 |
-| 3. Widen the implement-mode allowlist to the measured write actions | ⚠️ open, premise now disputed | 2026-08-12 | Section 6, finding 6: no write-class action asked in any measured run, so there is nothing measured to widen to. Re-scope before doing this |
-| 4. Accept the measured non-`resources` permission shapes | ⚠️ open, premise now disputed | 2026-08-12 | Section 6, finding 6: no non-`resources` shape was observed. Finding 3's original hypothesis is already disproven |
-| 5. Add regression tests for every classifier branch | ⬜ open | 2026-08-12 | Section 10 |
+| 3. Widen the implement-mode allowlist to the measured write actions | 🔒 closed, no measured payload | 2026-08-12 | Section 6, finding 6: no write-class action asked in any of three live runs, so there is nothing measured to widen to. Reopen only under the standing rule below |
+| 4. Accept the measured non-`resources` permission shapes | 🔒 closed, no measured payload | 2026-08-12 | Section 6, finding 6: no non-`resources` shape was observed at all. Finding 3's original hypothesis is disproven. Reopen only under the standing rule below |
+| 5. Add regression tests for every classifier branch | ✅ done, scoped to what shipped | 2026-08-12 | `tests/test-ai-glm.sh` covers every shipped classifier branch, the durable diagnostic, transport vs permission, redaction, path containment, the `todowrite` exception, approval-ineffective, artifact preservation, and idempotence. The write-action fixtures that step 3 would have needed are deliberately absent: there is no payload to write them against |
 | 7. Separate transport failure from unsafe permission state | ✅ done | 2026-08-12 | `permission_http` retries a dropped local poll 3× (`AI_GLM_PERMISSION_HTTP_ATTEMPTS`); `classify_permissions` gives status `000` its own branch; new durable code + failure_kind `transport-failed`; docs constraint 30 + troubleshooting row; skill guidance; `tests/test-ai-glm.sh` section "transport failure is not a permission failure (step 7)" |
-| 6. Re-run the two real failed jobs and close | ⬜ open | 2026-08-12 | Section 9, step 6 |
+| 6. Re-run the two real failed jobs and close | ❌ cancelled | 2026-08-12 | Superseded by step 2's live runs plus step 7's offline tests. Re-running a transport-class failure proves nothing about an allowlist, and after steps 3 and 4 closed there is no allowlist work to prove. Re-running the `popcrm` job is paid fishing: success would not reveal the old action, and failure gives the same `failure_detail` an ordinary job would give for free |
 
-**Fresh-session start (updated 2026-08-12, second pass):** steps 1, 7, and 2 are
-done. **Do NOT simply proceed to step 3.** Step 2's measurement (finding 6)
-removed the evidence step 3 was built on: OpenCode 1.18.12 never asked the
-wrapper for `edit`, `write`, `patch`, or `bash` in three live implement runs, so
-there is no measured write-class shape to widen the allowlist to, and widening it
-would weaken the sandbox for no observed benefit. Steps 3 and 4 need re-scoping
-by a human decision before anyone writes code for them. The one genuinely
-unexplained failure left is `popcrm-codebase-audit-remediation`
-(`permission-unsupported-action`); step 1 now makes the next occurrence fully
-diagnosable, which is the cheapest way to learn what actually asked. Step 6 can
-run whenever Albert wants the two stale records re-tried.
+## THIS PLAN IS CLOSED (2026-08-12)
 
-**Superseded first-pass note:** steps 1 and 7 shipped on 2026-08-12; begin at step 2.
+Steps 1, 2, 5, and 7 shipped. Steps 3 and 4 are closed without code because the
+measurement disproved their premise. Step 6 is cancelled. **There is no open work
+here. Do not pick this file up and start step 3.**
+
+Closure was reviewed by Grok 4.5 through `ai-grok-review`, session
+`glm-permission-plan-close-decisions`, on 2026-08-12: 313,091 tokens, $0.26. It
+independently read `AGENTS.md`, this plan, `docs/glm-opencode.md` section 5,
+`bin/ai-glm`, `tests/test-ai-glm.sh`, and the OpenCode config, agreed with
+closing steps 3 and 4, recommended cancelling paid step 6, and found no defect in
+the shipped step 1 and step 7 code. Report:
+`.ai/reviews/grok-glm-permission-plan-close-decisions-20260812T195116Z.md`
+(untracked).
+
+### Standing reopen rule - the ONLY thing that reopens this plan
+
+This replaces steps 3 and 4 as open work. Do not act on a code reading; act on a
+recorded payload.
+
+1. When any `ai-glm` job fails with a `permission-*` code, run `ai-glm show <name>`
+   from the job's recorded `repository_root`.
+2. Read `failure_detail.reason_id` and `failure_detail.action`. Step 1 exists so
+   this is always available.
+3. **Reopen step 3 only if** `failure_detail.action` names a write-class tool
+   (`edit`, `write`, `patch`, `bash`) with a real payload in
+   `failure_detail.sanitized_response`. Then widen the allowlist to exactly that
+   measured shape, with a comment naming the date and OpenCode version, and keep
+   the inside-the-clone path proof.
+4. **Reopen step 4 only if** `failure_detail.sanitized_response` shows paths
+   arriving under a key other than `.resources`.
+5. Anything else: leave the gate alone. An unmeasured shape must keep failing
+   closed. That is the whole design.
+
+A `transport-failed` code is not a permission failure and never reopens this
+plan. It means the local OpenCode server did not answer; run `ai-glm doctor` and
+`ai-glm server status`.
+
+**Superseded notes, kept for history:** the first-pass note said "steps 1 and 7
+shipped, begin at step 2." The second-pass note said steps 3 and 4 needed
+re-scoping by a human decision. That decision was taken on 2026-08-12 and is the
+closure above.
 Step 1's `failure_detail` field is now the thing that tells you which branch
 rejected a run, so use `ai-glm show <name>` and read `failure_detail.reason_id`
 before touching any allowlist. Step 7 fixed a different defect (a dropped local
@@ -652,16 +681,26 @@ patch, the primary checkouts are unchanged, the clones are cleaned, and
 
 ### Definition of done
 
-- [ ] Every permission rejection is recoverable from the durable job record.
-- [ ] The real payload shapes for OpenCode 1.18.12 are measured and written down.
-- [ ] Implement mode approves exactly the measured write actions, no more.
-- [ ] Unmeasured actions and unmeasured path keys still fail closed.
-- [ ] Review mode is provably still read-only.
-- [ ] Secrets never reach a record, report, or patch.
-- [ ] Both real failed jobs re-run to a terminal non-failed outcome.
-- [ ] All named local Bash and PowerShell suites pass.
-- [ ] Focused commits are pushed to `main`; local and `origin/main` match.
-- [ ] The plan STATUS table and the implementing session's handoff are current.
+Revised on 2026-08-12 at closure. Two original rows were removed because the
+measurement disproved them: "implement mode approves exactly the measured write
+actions" (nothing asks, so there is nothing to approve) and "both real failed
+jobs re-run to a terminal non-failed outcome" (step 6 cancelled). The safety rows
+are unchanged and all hold.
+
+- [x] Every permission rejection is recoverable from the durable job record.
+- [x] The real permission traffic for OpenCode 1.18.12 is measured and written
+      down, including the measured answer "it does not ask".
+- [x] Ordinary implement work completes under that measured zero-ask traffic.
+- [x] A dropped local poll is distinct from a permission refusal, retried a
+      bounded number of times, and reported as `transport-failed`.
+- [x] Unmeasured actions and unmeasured path keys still fail closed.
+- [x] Review mode is provably still read-only.
+- [x] Secrets never reach a record, report, or patch.
+- [x] All named local Bash and PowerShell suites pass
+      (`tests/test-ai-glm.sh` 211/211, `tests/test-windows-scripts.sh` 25/25).
+- [x] Focused commits are pushed to `main`; local and `origin/main` match.
+- [x] The plan STATUS table is current and the standing reopen rule is written
+      down in place of the closed steps.
 
 ### Rollback
 
