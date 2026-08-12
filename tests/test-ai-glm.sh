@@ -50,7 +50,10 @@ check "glm-review explicitly allows todowrite" "grep -q '^  todowrite: true' '$R
 check "glm-implement can write"             "grep -q '^  write: true'  '$REPO_ROOT/config/opencode/agent/glm-implement.md'"
 check "glm-implement HAS a bash tool"       "grep -q '^  bash: true'   '$REPO_ROOT/config/opencode/agent/glm-implement.md'"
 check "glm-implement explicitly allows todowrite" "grep -q '^  todowrite: true' '$REPO_ROOT/config/opencode/agent/glm-implement.md'"
-check "sandbox is a clone, not a worktree"  "grep -q 'git clone --quiet --no-hardlinks' '$AI_GLM'"
+# The assertion text went stale when Windows long-path support added `-c core.longpaths`
+# between `git` and `clone`. Match the clone flags and forbid `worktree add` instead, so
+# the real constraint (hard-won constraint 2) is what is being checked.
+check "sandbox is a clone, not a worktree"  "grep -q 'clone --quiet --no-hardlinks' '$AI_GLM' && ! grep -q 'git worktree add' '$AI_GLM'"
 check "sandbox removes its git remote"      "grep -q 'remote remove origin' '$AI_GLM'"
 
 echo "== systemd unit =="
@@ -228,6 +231,61 @@ check "diagnostic marks truncation"          "printf '%s' '$LONG_SAN' | grep -q 
 check "failed approval fails closed"         "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ if [ \"\$1\" = GET ]; then HTTP_STATUS=200; HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"resources\\\":[\\\"\$IN_FIX\\\"]}]}\"; else HTTP_STATUS=500; HTTP_BODY=\"{\\\"error\\\":\\\"reply failed\\\"}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
 check "uncleared approval fails by third poll" "! AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' IN_FIX='$IN_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; permission_http(){ HTTP_STATUS=200; if [ \"\$1\" = GET ]; then HTTP_BODY=\"{\\\"data\\\":[{\\\"id\\\":\\\"p1\\\",\\\"action\\\":\\\"read\\\",\\\"resources\\\":[\\\"\$IN_FIX\\\"]}]}\"; else HTTP_BODY=\"{}\"; fi; }; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"; handle_permissions s n review \"\$ROOT_FIX\"' >/dev/null 2>&1"
 
+echo "== permission failure is diagnosable (step 1) =="
+reason_id() { # REASON -> stable branch slug
+  AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" REASON_FIX="$1" \
+    bash -c 'source "$AI_GLM_SOURCE"; permission_reason_id "$REASON_FIX"'
+}
+capture_reason() { # MODE ROOT STATUS BODY -> the exact classifier stderr reason
+  run_classifier "$1" "$2" "$3" "$4" 2>&1 >/dev/null
+}
+# Every classifier rejection branch must be recoverable from the durable record. Before
+# 2026-08-12 five of these collapsed into one code and the reason went only to stderr.
+BRANCH_IDS=""
+add_branch() { BRANCH_IDS="$BRANCH_IDS$(reason_id "$(capture_reason "$@")")"$'\n'; }
+add_branch review "$ROOT_FIX" 000 ''
+add_branch review "$ROOT_FIX" 400 '{"_tag":"InvalidRequestError"}'
+add_branch review "$ROOT_FIX" 503 '{"error":"down"}'
+add_branch review "$ROOT_FIX" 200 '{oops'
+add_branch review "$ROOT_FIX" 200 '{"items":[]}'
+add_branch review "$ROOT_FIX" 200 "{\"data\":[{\"action\":\"read\",\"resources\":[\"$IN_FIX\"]}]}"
+add_branch review "$ROOT_FIX" 200 "{\"data\":[{\"id\":\"px\",\"action\":\"bash\",\"resources\":[\"$IN_FIX\"]}]}"
+add_branch review "$ROOT_FIX" 200 '{"data":[{"id":"pm","action":"read"}]}'
+add_branch review "$ROOT_FIX" 200 '{"data":[{"id":"pt","action":"todowrite","resources":["*"]}]}'
+add_branch review "$ROOT_FIX" 200 "{\"data\":[{\"id\":\"po\",\"action\":\"read\",\"resources\":[\"$OUT_FIX\"]}]}"
+BRANCH_COUNT="$(printf '%s' "$BRANCH_IDS" | grep -c . || true)"
+BRANCH_UNIQUE="$(printf '%s' "$BRANCH_IDS" | grep . | sort -u | wc -l | tr -d ' ')"
+check "every classifier branch is distinguishable" "test '$BRANCH_COUNT' -eq 10 -a '$BRANCH_UNIQUE' -eq 10"
+check "no branch falls through unclassified"       "! printf '%s' '$BRANCH_IDS' | grep -q unclassified"
+check "unknown action branch names its action" "test \"\$(AI_GLM_SOURCE='$AI_GLM' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' REASON_FIX=\"\$(capture_reason review '$ROOT_FIX' 200 '{\"data\":[{\"id\":\"px\",\"action\":\"bash\",\"resources\":[\"$IN_FIX\"]}]}')\" bash -c 'source \"\$AI_GLM_SOURCE\"; permission_reason_action \"\$REASON_FIX\"')\" = bash"
+DETAIL="$(AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" BODY_FIX="$SECRET_FIX" \
+  bash -c 'source "$AI_GLM_SOURCE"; permission_failure_detail "unknown permission action: bash" 200 implement missing "$BODY_FIX"')"
+check "failure detail is valid JSON with a branch id" "printf '%s' '$DETAIL' | jq -e '.reason_id==\"unknown-action\" and .action==\"bash\" and .status==\"200\" and .mode==\"implement\"' >/dev/null"
+check "failure detail redacts secrets"                "! printf '%s' '$DETAIL' | grep -qE 'tok-visible|auth-visible|sec-visible|cred-visible|pw-visible|body-visible|val-visible'"
+
+echo "== transport failure is not a permission failure (step 7) =="
+transport_probe() { # CURL_RC ATTEMPTS -> prints one line per curl attempt, then STATUS
+  AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" CURL_RC="$1" \
+    AI_GLM_PERMISSION_HTTP_ATTEMPTS="$2" AI_GLM_PERMISSION_HTTP_RETRY_SECS=0 \
+    CALL_LOG="$TMP/curl-calls" \
+    bash -c 'source "$AI_GLM_SOURCE"; server_pw(){ printf pw; }
+      : > "$CALL_LOG"
+      curl(){ printf "attempt\n" >> "$CALL_LOG"; [ "$(wc -l < "$CALL_LOG")" -ge "$CURL_RC" ] && { printf 200; return 0; }; return 7; }
+      permission_http GET /api/session/s/permission; printf "%s" "$HTTP_STATUS"'
+}
+TRANSPORT_STATUS="$(transport_probe 99 3)"; TRANSPORT_TRIES="$(wc -l < "$TMP/curl-calls" | tr -d ' ')"
+check "a dropped local poll is retried to the bound" "test '$TRANSPORT_TRIES' -eq 3 -a '$TRANSPORT_STATUS' = 000"
+RECOVER_STATUS="$(transport_probe 3 3)"; RECOVER_TRIES="$(wc -l < "$TMP/curl-calls" | tr -d ' ')"
+check "a poll that recovers stops retrying"          "test '$RECOVER_TRIES' -eq 3 -a '$RECOVER_STATUS' = 200"
+check "status 000 is classified as transport"        "capture_reason review '$ROOT_FIX' 000 '' | grep -q 'local permission endpoint did not answer'"
+check "status 000 is not called a permission problem" "! capture_reason review '$ROOT_FIX' 000 '' | grep -qi 'permission response\\|unknown permission action'"
+check "transport branch has its own id"              "test \"\$(reason_id \"\$(capture_reason review '$ROOT_FIX' 000 '')\")\" = transport-no-reply"
+check "a real HTTP 500 still fails closed as permission" "capture_reason review '$ROOT_FIX' 500 '{\"error\":\"boom\"}' | grep -q 'permission endpoint returned HTTP 500'"
+TRANSPORT_MSG="$(AI_GLM_SOURCE="$AI_GLM" ROOT_FIX="$ROOT_FIX" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" \
+  bash -c 'source "$AI_GLM_SOURCE"; permission_http(){ HTTP_STATUS=000; HTTP_BODY=""; }; handle_permissions s n review "$ROOT_FIX"' 2>&1 || true)"
+check "transport message names doctor and server status" "printf '%s' \"\$TRANSPORT_MSG\" | grep -q 'ai-glm doctor' && printf '%s' \"\$TRANSPORT_MSG\" | grep -q 'ai-glm server status'"
+check "transport message does not claim a permission failure" "! printf '%s' \"\$TRANSPORT_MSG\" | grep -q 'GLM permission failed'"
+
 RUNNING_OUTSIDE="{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"filePath\":\"$OUT_FIX\"}}}]}"
 RUNNING_INSIDE="{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"filePath\":\"$IN_FIX\"}}}]}"
 check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_OUTSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = outside'"
@@ -251,6 +309,11 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
           printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"
           HTTP_STATUS=200
           HTTP_BODY='\''{"data":[{"id":"blocked-1","action":"question","resources":["*"]}]}'\''
+        elif [ "$JOB_TURN" = transport ]; then
+          case "$1 $2" in
+            "GET "*/permission) printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"; HTTP_STATUS=000; HTTP_BODY="" ;;
+            *) HTTP_STATUS=200; HTTP_BODY="{}" ;;
+          esac
         else
           HTTP_STATUS=200; HTTP_BODY="{}"
         fi
@@ -271,7 +334,7 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
         else printf "{}"; fi
       }
       await_turn(){
-        if [ "$JOB_TURN" = permission ]; then
+        if [ "$JOB_TURN" = permission ] || [ "$JOB_TURN" = transport ]; then
           handle_permissions "$1" "$2" "$3" "$4" "$5"
         fi
         if [ "$JOB_TURN" = timeout ]; then
@@ -362,6 +425,13 @@ PERMISSION_META="$(job_meta permission-failed)"; PERMISSION_CLONE="$JOB_STATE/wt
 check "unsupported permission fails on first exposed poll" "test $permission_rc -ne 0 -a \"\$(grep -c '^GET /api/session/.*/permission$' '$TMP/job-permission-calls')\" -eq 1"
 check "permission failure records truthful terminal evidence" "jq -e '.status==\"failed\" and .failure==\"permission-unsupported-action\" and .outcome==\"permission-failed-partial\" and .failure_kind==\"permission-failed\" and (.failure_summary|contains(\"first observable poll\")) and .changes_present==true and .patch_exists==true and (.incomplete_patch_path|endswith(\".incomplete.patch\"))' '$PERMISSION_META' >/dev/null"
 check "permission failure exports incomplete work then cleans" "test ! -e '$PERMISSION_CLONE' -a -s \"\$(jq -r .incomplete_patch_path '$PERMISSION_META')\" -a \"\$(jq -r .cleanup.clone '$PERMISSION_META')\" = removed -a \"\$(jq -r .cleanup.server_session '$PERMISSION_META')\" = removed"
+check "permission failure records the exact classifier branch" "jq -e '.failure_detail.reason_id==\"unknown-action\" and .failure_detail.action==\"question\" and (.failure_detail.reason|startswith(\"unknown permission action\"))' '$PERMISSION_META' >/dev/null"
+check "show exposes the durable failure detail" "(cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' show permission-failed | jq -e '.failure_detail.reason_id==\"unknown-action\"' >/dev/null)"
+run_fake_impl transport-drop '' "$TMP/no-ready" "$TMP/no-release" transport '' 1 >"$TMP/transport-drop.out" 2>&1; transport_rc=$?
+TRANSPORT_META="$(job_meta transport-drop)"; TRANSPORT_CLONE="$JOB_STATE/wt/$JOB_ID/codex--transport-drop"
+check "a dropped poll is recorded as transport, not permission" "test $transport_rc -ne 0 && jq -e '.failure==\"transport-failed\" and .failure_kind==\"transport-failed\" and .failure_detail.reason_id==\"transport-no-reply\"' '$TRANSPORT_META' >/dev/null"
+check "transport failure still preserves incomplete work" "test ! -e '$TRANSPORT_CLONE' && jq -e '.outcome==\"failed-partial\" and .changes_present==true and .artifact_state==\"durable\"' '$TRANSPORT_META' >/dev/null"
+check "transport failure message avoids permission wording" "! grep -q 'GLM permission failed' '$TMP/transport-drop.out' && grep -q 'transport failure' '$TMP/transport-drop.out'"
 run_fake_impl permission-none '' "$TMP/no-ready" "$TMP/no-release" permission >"$TMP/permission-none.out" 2>&1; permission_none_rc=$?
 PERMISSION_NONE_META="$(job_meta permission-none)"
 check "permission-failed-no-changes creates no patch" "test $permission_none_rc -ne 0 && jq -e '.outcome==\"permission-failed-no-changes\" and .failure_kind==\"permission-failed\" and .patch_exists==false' '$PERMISSION_NONE_META' >/dev/null"

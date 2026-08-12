@@ -261,6 +261,9 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     (.clone_path == null or (.clone_path|type)=="string") and
     (.opencode_session_id == null or (.opencode_session_id|type)=="string") and
     (.failure_summary == null or (.failure_summary|type)=="string") and
+    (.failure_detail == null or ((.failure_detail|type)=="object" and
+      (.failure_detail.reason_id|type)=="string" and
+      (.failure_detail.reason|type)=="string")) and
     (.failure_detected_at == null or (.failure_detected_at|type)=="string") and
     (.changes_present == null or (.changes_present|type)=="boolean") and
     (.patch_exists == null or (.patch_exists|type)=="boolean") and
@@ -272,7 +275,7 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
       "permission-failed-partial","permission-failed-no-changes",
       "artifact-export-failed"))) and
     (.failure_kind == null or (.failure_kind|IN(
-      "provider-or-service","usage-limit","timed-out","permission-failed",
+      "provider-or-service","usage-limit","timed-out","permission-failed","transport-failed",
       "aborted","artifact-export-failed","artifact-metadata-failed",
       "report-write-failed","patch-export-failed","resource-cleanup-failed",
       "owner-process-died","interrupted","wrapper-setup-failed"))) and
@@ -344,20 +347,41 @@ test_failure() { # internal deterministic failure hook; inert outside the test s
 # empty review as a finished one.
 # --------------------------------------------------------------------------------
 HTTP_STATUS=""; HTTP_BODY=""
+# Transport retry bound for the permission endpoint.
+#
+# A permission poll is a LOCAL loopback request against our own OpenCode server. When
+# curl itself exits nonzero - connection refused, connection reset, or this timeout
+# expiring - no reply was ever received, so nothing was refused and no provider tokens
+# were spent. Retrying it is free and re-sends nothing to Z.ai, which is why this does
+# not break the standing rule against retrying paid provider turns. On 2026-08-12 a
+# single dropped poll killed an 8-minute implement job and was reported to the user as a
+# permission failure. Three attempts matches the Windows service wrapper's own bound.
+PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
+PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
+PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" pw tmp rc=0
-  pw="$(server_pw)"; tmp="$(mktemp)"
-  if [ -n "$json" ]; then
-    HTTP_STATUS="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' \
-      -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
-      -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
-  else
-    HTTP_STATUS="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' \
-      -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
-      2>/dev/null)" || rc=$?
-  fi
-  HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
-  [ "$rc" -eq 0 ] || HTTP_STATUS="000"
+  local method="$1" path="$2" json="${3:-}" pw tmp rc attempt=1
+  pw="$(server_pw)"
+  while :; do
+    rc=0; tmp="$(mktemp)"
+    if [ -n "$json" ]; then
+      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
+        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+        -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
+    else
+      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
+        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+        2>/dev/null)" || rc=$?
+    fi
+    HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
+    [ "$rc" -eq 0 ] && return 0
+    # A server that DID answer keeps its real status and still fails closed elsewhere.
+    # Only the never-answered case reaches here and is retried.
+    HTTP_STATUS="000"
+    [ "$attempt" -lt "$PERMISSION_HTTP_ATTEMPTS" ] || return 0
+    attempt=$((attempt + 1))
+    sleep "$PERMISSION_HTTP_RETRY_SECS"
+  done
 }
 
 delete_exact_server_session() { # SID; 404 is already clean
@@ -403,9 +427,67 @@ permission_diagnostic() { # STATUS MODE CATEGORY BODY
     "$1" "$2" "$3" "$(sanitize_permission_body "$4")"
 }
 
+# --------------------------------------------------------------------------------
+# Durable permission diagnostics
+#
+# classify_permissions has many distinct rejection branches but handle_permissions maps
+# them onto a handful of durable codes, so before 2026-08-12 five different branches all
+# recorded permission-invalid-response and the exact reason went only to the caller's
+# stderr. For an unattended background job that destroyed the one fact needed to fix the
+# bug. Every rejection now also records a bounded, sanitized failure_detail object with a
+# stable reason_id, so ai-glm show names the branch that fired.
+# --------------------------------------------------------------------------------
+permission_reason_id() { # REASON -> stable slug naming the classifier branch
+  case "$1" in
+    local\ permission\ endpoint\ did\ not\ answer*) printf transport-no-reply ;;
+    un-approvable*)                                printf unapprovable-request ;;
+    permission\ endpoint\ returned\ HTTP*)         printf http-status ;;
+    malformed\ permission\ response*)              printf malformed-json ;;
+    unsupported\ permission\ response\ envelope*)  printf unsupported-envelope ;;
+    *missing\ an\ id*)                             printf missing-id ;;
+    unknown\ permission\ action:*)                 printf unknown-action ;;
+    *missing\ resources*)                          printf missing-resources ;;
+    todowrite\ permission\ shape*)                 printf todowrite-shape ;;
+    permission\ resource\ is\ *)                   printf resource-out-of-bounds ;;
+    running\ read\ path\ is\ *)                    printf running-read-out-of-bounds ;;
+    permission\ approval\ did\ not\ clear*)        printf approval-ineffective ;;
+    permission\ approval\ reply\ failed*)          printf approval-reply-failed ;;
+    *) printf unclassified ;;
+  esac
+}
+
+permission_reason_action() { # REASON -> the offending action, or "missing"
+  local tail
+  case "$1" in
+    unknown\ permission\ action:*) printf '%s' "${1#unknown permission action: }" ;;
+    *\(action:\ *) tail="${1##*\(action: }"; printf '%s' "${tail%%\)*}" ;;
+    *) printf missing ;;
+  esac
+}
+
+permission_failure_detail() { # REASON STATUS MODE CATEGORY BODY -> sanitized JSON object
+  # Everything written here is either wrapper-authored text or output of
+  # sanitize_permission_body. A raw response body must never reach a durable record.
+  jq -nc --arg reason_id "$(permission_reason_id "$1")" --arg reason "$1" \
+    --arg action "$(permission_reason_action "$1")" --arg status "$2" --arg mode "$3" \
+    --arg path "$4" --arg sanitized_response "$(sanitize_permission_body "$5")" \
+    '{reason_id:$reason_id,reason:$reason,action:$action,status:$status,
+      mode:$mode,path:$path,sanitized_response:$sanitized_response}' 2>/dev/null \
+    || printf '{"reason_id":"unclassified","reason":"detail could not be encoded","action":"missing","status":"","mode":"","path":"","sanitized_response":""}'
+}
+
 classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action resources
   local mode="$1" root="$2" status="$3" body="$4" shape count i item id action resources resource category
   [ "$mode" = review ] || [ "$mode" = implement ] || { printf 'unknown mode' >&2; return 1; }
+  if [ "$status" = 000 ]; then
+    # 000 is not a status any server can send. permission_http assigns it only when curl
+    # itself failed after every retry, so this is a dropped LOCAL request, not a
+    # permission the wrapper refused. Keep it out of the non-2xx branch below: those are
+    # real answers from a live server and must keep failing closed.
+    printf 'local permission endpoint did not answer after %s attempts (%ss timeout each)' \
+      "$PERMISSION_HTTP_ATTEMPTS" "$PERMISSION_HTTP_TIMEOUT" >&2
+    return 1
+  fi
   if [ "$status" -lt 200 ] 2>/dev/null || [ "$status" -ge 300 ] 2>/dev/null; then
     if printf '%s' "$body" | jq -e '._tag? == "InvalidRequestError"' >/dev/null 2>&1; then
       printf 'un-approvable OpenCode permission request' >&2
@@ -429,42 +511,45 @@ classify_permissions() { # MODE SESSION_DIR HTTP_STATUS BODY -> TSV: id action r
       # action-local data, never a general filesystem or tool wildcard.
       printf '%s' "$item" | jq -e '
         .resources == ["*"] and .save == ["*"]' >/dev/null 2>&1 \
-        || { printf 'todowrite permission shape is not the measured resources/save wildcard' >&2; return 1; }
+        || { printf 'todowrite permission shape is not the measured resources/save wildcard (action: todowrite)' >&2; return 1; }
       resources='*'
     else
       resources="$(printf '%s' "$item" | jq -r '
         if (.resources|type)=="array" and (.resources|length)>0
         then .resources[] else empty end')"
     fi
-    [ -n "$id" ] || { printf 'permission entry is missing an id' >&2; return 1; }
+    [ -n "$id" ] || { printf 'permission entry is missing an id (action: %s)' "${action:-missing}" >&2; return 1; }
     case "$action" in read|list|glob|grep|todowrite) ;; *) printf 'unknown permission action: %s' "${action:-missing}" >&2; return 1 ;; esac
-    [ -n "$resources" ] || { printf 'permission entry is missing resources' >&2; return 1; }
+    [ -n "$resources" ] || { printf 'permission entry is missing resources (action: %s)' "${action:-missing}" >&2; return 1; }
     if [ "$action" != todowrite ]; then
       while IFS= read -r resource; do
         category="$(path_category "$resource" "$root")"
-        [ "$category" = inside ] || { printf 'permission resource is %s' "$category" >&2; return 1; }
+        [ "$category" = inside ] || { printf 'permission resource is %s (action: %s)' "$category" "${action:-missing}" >&2; return 1; }
       done <<< "$resources"
     fi
     printf '%s\t%s\t%s\n' "$id" "$action" "$(printf '%s' "$resources" | jq -Rs 'split("\n")|map(select(length>0))|join(",")')"
   done
 }
 
-record_implementation_permission_failure() { # META CLONE CODE SAFE_SUMMARY
-  local meta="$1" clone="$2" code="$3" summary="$4" changes=false patch_exists=false patch
+record_implementation_permission_failure() { # META CLONE CODE SAFE_SUMMARY [DETAIL_JSON]
+  local meta="$1" clone="$2" code="$3" summary="$4" detail="${5:-null}" changes=false patch_exists=false patch
   [ -n "$meta" ] && [ -f "$meta" ] || return 0
+  printf '%s' "$detail" | jq -e . >/dev/null 2>&1 || detail=null
   [ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ] || changes=true
   patch="$(jq -r '.patch_path // empty' "$meta" 2>/dev/null || true)"
   [ -z "$patch" ] || [ ! -f "$patch" ] || patch_exists=true
   implementation_update "$meta" \
     '.status="failed" | .failure=$code | .failure_summary=$summary |
+     .failure_detail=$detail |
      .failure_detected_at=$now | .changes_present=$changes | .patch_exists=$patch_exists' \
     --arg code "$code" --arg summary "$summary" --arg now "$(date -u +%FT%TZ)" \
+    --argjson detail "$detail" \
     --argjson changes "$changes" --argjson patch_exists "$patch_exists" \
     || die "permission failed, and its safe implementation-job evidence could not be recorded."
 }
 
-fail_permission() { # META CLONE CODE SAFE_SUMMARY USER_MESSAGE
-  record_implementation_permission_failure "$1" "$2" "$3" "$4"
+fail_permission() { # META CLONE CODE SAFE_SUMMARY USER_MESSAGE [DETAIL_JSON]
+  record_implementation_permission_failure "$1" "$2" "$3" "$4" "${6:-null}"
   die "$5"
 }
 
@@ -515,7 +600,9 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
           "GLM permission failed: running read path is $boundary${stuck:+ (tool: $stuck)}.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$boundary" "$HTTP_BODY")
        $guidance. For an outside-directory file, place a safe copy under
-       the session repository or provide a small safe excerpt, then retry."
+       the session repository or provide a small safe excerpt, then retry." \
+          "$(permission_failure_detail "running read path is $boundary (action: read)" \
+             "$HTTP_STATUS" "$mode" "$boundary" "$HTTP_BODY")"
         ;;
       *) return 0 ;;
     esac
@@ -525,16 +612,31 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
     category=missing
     printf '%s' "$err" | grep -q 'outside' && category=outside
     case "$err" in
+      local\ permission\ endpoint\ did\ not\ answer*)
+        # Transport, not permission. permission_http never received a reply, so no
+        # permission request was ever seen and nothing was refused. Reporting this as
+        # "GLM permission failed" sent a reader hunting for a permission problem that
+        # did not exist, and killed an 8-minute job on 2026-08-12.
+        code=transport-failed
+        summary="the local OpenCode permission endpoint did not answer after ${PERMISSION_HTTP_ATTEMPTS} attempts" ;;
       unknown\ permission\ action:*) code=permission-unsupported-action; summary="blocked an unsupported permission action on the first observable poll" ;;
       todowrite\ permission\ shape*) code=permission-unsupported-shape; summary="blocked an unmeasured todowrite permission shape on the first observable poll" ;;
       *outside*) code=permission-outside-directory; summary="blocked an outside-directory permission on the first observable poll" ;;
       *) code=permission-invalid-response; summary="blocked an invalid or unsupported permission response on the first observable poll" ;;
     esac
-    fail_permission "$impl_meta" "$root" "$code" "$summary" \
-      "GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
+    if [ "$code" = transport-failed ]; then
+      msg="GLM run stopped: ${err}. This is a LOCAL transport failure, not a permission
+       problem: the wrapper never received a permission request, so nothing was refused.
+       $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
+       Check the server first: ai-glm doctor, then ai-glm server status. $guidance."
+    else
+      msg="GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
        $guidance. For an outside-directory file, place a safe copy under
        the session repository or provide a small safe excerpt, then retry."
+    fi
+    fail_permission "$impl_meta" "$root" "$code" "$summary" "$msg" \
+      "$(permission_failure_detail "${err:-unknown response}" "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")"
   fi
   rm -f "${TMPDIR:-/tmp}/ai-glm-perm-err-$$"
   [ -n "$rows" ] || { APPROVED_PERMISSION_IDS=""; return 0; }
@@ -544,14 +646,28 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
       fail_permission "$impl_meta" "$root" permission-approval-ineffective \
         "permission approval for $action remained pending after two follow-up polls" \
         "GLM permission approval did not clear after two polls (action: $action, path: inside).
-       $guidance"
+       $guidance" \
+        "$(permission_failure_detail "permission approval did not clear after two polls (action: $action)" \
+           "$HTTP_STATUS" "$mode" inside "")"
     fi
     permission_http POST "/api/session/$sid/permission/$id/reply" '{"reply":"always"}'
-    case "$HTTP_STATUS" in 2*) ;; *) fail_permission "$impl_meta" "$root" permission-approval-failed \
+    case "$HTTP_STATUS" in
+      2*) ;;
+      000) fail_permission "$impl_meta" "$root" transport-failed \
+        "the local OpenCode permission endpoint did not answer the approval reply after ${PERMISSION_HTTP_ATTEMPTS} attempts" \
+        "GLM run stopped: local permission endpoint did not answer after ${PERMISSION_HTTP_ATTEMPTS} attempts (${PERMISSION_HTTP_TIMEOUT}s timeout each) while approving action $action.
+       This is a LOCAL transport failure, not a permission problem.
+       Check the server first: ai-glm doctor, then ai-glm server status. $guidance." \
+        "$(permission_failure_detail "local permission endpoint did not answer the approval reply after ${PERMISSION_HTTP_ATTEMPTS} attempts (action: $action)" \
+           "$HTTP_STATUS" "$mode" inside "$HTTP_BODY")" ;;
+      *) fail_permission "$impl_meta" "$root" permission-approval-failed \
       "permission approval for $action failed on its first reply" \
       "GLM permission approval failed (HTTP $HTTP_STATUS, action: $action, path: inside).
        $(permission_diagnostic "$HTTP_STATUS" "$mode" inside "$HTTP_BODY")
-       $guidance" ;; esac
+       $guidance" \
+      "$(permission_failure_detail "permission approval reply failed (action: $action)" \
+         "$HTTP_STATUS" "$mode" inside "$HTTP_BODY")" ;;
+    esac
     APPROVED_PERMISSION_IDS="${APPROVED_PERMISSION_IDS}${id}"$'\n'
   done <<< "$rows"
 }
@@ -758,6 +874,7 @@ implementation_failure_kind() { # FAILURE -> bounded failure kind
   case "$1" in
     usage-limit) printf usage-limit ;;
     turn-timeout) printf timed-out ;;
+    transport-failed) printf transport-failed ;;
     permission-*) printf permission-failed ;;
     abort-requested) printf aborted ;;
     interrupted) printf interrupted ;;
@@ -786,6 +903,7 @@ implementation_safe_reason() { # FAILURE
   case "$1" in
     usage-limit) printf 'The provider reported a usage or billing limit.' ;;
     turn-timeout) printf 'The wrapper deadline passed without proven terminal completion.' ;;
+    transport-failed) printf 'The local OpenCode permission endpoint never answered, so the run stopped without any permission decision.' ;;
     permission-*) printf 'The wrapper rejected a permission state that was not proven safe.' ;;
     abort-requested) printf 'A named abort was requested for the exact implementation session.' ;;
     interrupted) printf 'The owner process received an interrupt or termination request.' ;;
@@ -980,6 +1098,7 @@ cmd_implement() {
         base_sha:$b,owner_pid:$pid,created_at:$ts,updated_at:$ts,status:"starting",
         clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
         finished_at:null,exit_code:null,failure:null,failure_summary:null,
+        failure_detail:null,
         failure_detected_at:null,changes_present:null,patch_exists:null,
         outcome:null,failure_kind:null,incomplete_patch_path:null,incomplete_report_path:null,
         artifact_state:"pending",provider_usage_state:"pending",provider_tokens:null,
@@ -1152,7 +1271,7 @@ cmd_show() {
     implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to display it as trusted state."
     jq '{schema_version,name,type,status,repository_root,repository_remote,repository_id,caller,agent,provider,model,
          base_sha,owner_pid,created_at,updated_at,finished_at,clone_path,opencode_session_id,
-         patch_path,report_path,exit_code,failure,failure_summary,failure_detected_at,
+         patch_path,report_path,exit_code,failure,failure_summary,failure_detail,failure_detected_at,
          outcome,failure_kind,changes_present,patch_exists,incomplete_patch_path,
          incomplete_report_path,artifact_state,provider_usage_state,provider_tokens,cleanup}' "$mp"
   else

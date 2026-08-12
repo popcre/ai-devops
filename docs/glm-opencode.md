@@ -221,6 +221,7 @@ job never started; check `ai-glm list` and `ai-glm show <name>`.
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |
 | Windows task is `Ready`, no listener | The task is stopped or its four total attempts were exhausted | Run `ai-glm doctor`, fix the named fault, then run `ai-glm server start` |
 | `GLM permission failed` | OpenCode exposed a malformed, unknown, unsafe, or unsuccessful permission state. A measured outside-directory read returns action `external_directory`. The one safe non-path wildcard is the exact pinned TodoWrite shape: action `todowrite`, `resources:["*"]`, and `save:["*"]`. | For a review, run `ai-glm abort <name>`. An implementation stays nonzero; changed work is exported only as a clearly incomplete artifact before cleanup. Inspect `ai-glm show <name>`. Never approve everything or copy arbitrary files automatically. |
+| `GLM run stopped: local permission endpoint did not answer` (`failure: transport-failed`) | The LOCAL loopback poll of `/api/session/<id>/permission` got no reply at all - connection refused, reset, or the 20-second curl timeout - on all 3 attempts. No permission request was ever seen, so nothing was refused. Retrying the poll costs no provider tokens. | This is a server-health problem, not a permission problem. Run `ai-glm doctor`, then `ai-glm server status`, then `ai-glm show <name>`. Changed work is still exported as an incomplete artifact. Do not widen any allowlist in response to this code. |
 | `permission approval did not clear` | OpenCode kept returning the same request after two successful approval polls | Run `ai-glm abort <name>` and retain the sanitized error when reporting the server fault. |
 | Turn times out, tool still running | No observable permission failure was returned and the strict completion rule was not met | `ai-glm abort <name>`, then retry |
 | `session is orphaned` | Local metadata exists, server session does not | `ai-glm delete <name>` then `ai-glm new <name>`. A silent replacement would falsely imply continuity |
@@ -436,6 +437,24 @@ first and then re-measure before touching it.
     test is worthless — it passes for the wrong reason. This produced a false "4837 is
     fine" before reading the task's actual DACL showed it was not. Check permissions by
     reading them, never by attempting the write.
+
+30. **A dropped local poll is a transport failure, never a permission decision.**
+    `permission_http` assigns HTTP status `000` when `curl` itself exits nonzero, which
+    means no reply was ever received. Until 2026-08-12 that fell into the generic non-2xx
+    branch, so a single stalled loopback GET killed an eight-minute implement job and was
+    reported to the user as `permission-invalid-response`. The poll is a LOCAL request
+    against our own server and re-sends nothing to Z.ai, so it is retried
+    `AI_GLM_PERMISSION_HTTP_ATTEMPTS` times (default 3) before failing with its own
+    `transport-failed` code and a message naming `ai-glm doctor`. This is not a licence
+    to retry paid provider turns. A real non-2xx status from a server that *did* answer
+    still fails closed unchanged.
+31. **Every permission rejection records a sanitized `failure_detail`.** The classifier
+    has many rejection branches but only a handful of durable codes, so the exact reason
+    used to exist solely in the caller's stderr - unreadable for an unattended job. The
+    record now carries `failure_detail.reason_id` (a stable branch slug), the reason, the
+    offending action, the status, and the sanitized body, and `ai-glm show` prints it.
+    Everything written there goes through `sanitize_permission_body`; never persist a raw
+    response body.
 
 ### Process lessons
 
