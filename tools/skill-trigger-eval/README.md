@@ -8,6 +8,20 @@ python tools/skill-trigger-eval/skill-trigger-eval.py \
   --eval-set tools/skill-trigger-eval/secrets-to-1password.eval.json
 ```
 
+For Codex, use the sibling runner — Codex has no `Skill` tool event, so the
+Claude harness cannot be pointed at it:
+
+```bash
+python tools/skill-trigger-eval/codex-trigger-eval.py \
+  --skill <installed-skill-name> \
+  --eval-set tools/skill-trigger-eval/<name>.eval.json
+```
+
+It counts a trigger when Codex **opens** the installed `SKILL.md`, which proves
+selection, not obedience. It always passes an explicit `low` (or `medium`)
+reasoning effort and a read-only sandbox; `--print-command` shows the exact argv
+without calling a model. Eval-set format is identical, so one set feeds both.
+
 Needs the `claude` CLI logged in (`claude auth status`) and the skill installed
 (`bin/ai-install-skills`) — it tests the real skill in `~/.claude/skills`, via
 the real `Skill`-tool mechanism.

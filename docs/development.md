@@ -110,6 +110,14 @@ pwsh -File tests/test-memory-sync-scheduled-task.ps1
 pwsh -NoProfile -File tests/test-context-audit.ps1
 ```
 
+`tests/test-context-audit.ps1` also covers the context enforcement checks: each
+of the six locked safety categories failing on its own with a plain-English
+reason, cross-client global parity plus its divergence allowlist, duplicated
+startup text between a global and a skill description, and the warning budgets
+in `tools/context-audit/budgets.json`. **Budgets warn and never fail a run**,
+even under `--strict`; ratchet a budget down only after a measured reduction has
+landed, and never raise one to silence a warning.
+
 The tests use temporary repositories and temporary Claude/Codex homes. They
 cover shared-skill installation, counts, dry-run safety, source-name collisions,
 and automatic quarantine of the retired ShareSync skill. Also verify manually:

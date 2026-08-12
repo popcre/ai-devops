@@ -32,6 +32,77 @@ SAFETY_MARKERS = {
     "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
 }
 
+# Plain-English consequence printed when a safety category is missing. The audit
+# never guesses which file lost it; it names the category and why it matters.
+SAFETY_REASONS = {
+    "production mutation": (
+        "no always-loaded rule keeps production and shared cloud read-only, so a "
+        "session could run terraform apply or a mutating gcloud command"
+    ),
+    "shared database routing": (
+        "no always-loaded rule sends shared-database changes through shared-db "
+        "with a branch and pull request, so an app repo could alter the schema"
+    ),
+    "secret handling": (
+        "no always-loaded rule says secrets live in 1Password and never in files, "
+        "commits, or prompts"
+    ),
+    "destructive actions": (
+        "no always-loaded rule requires destructive actions to be recoverable, so "
+        "a delete or overwrite could be unrecoverable"
+    ),
+    "Git identity": (
+        "no always-loaded rule requires verifying GIT_COMMITTER_IDENT, so Git can "
+        "silently invent a wrong commit identity"
+    ),
+    "GPT-5.6 effort": (
+        "no always-loaded rule pins GPT-5.6 reasoning to low or medium, so a run "
+        "could start at high or none"
+    ),
+}
+
+# Rules that must be present in BOTH client globals. Claude and Codex load
+# different entry files, so identical behavior has to be asserted, not assumed.
+PARITY_RULES = {
+    "response style contract": r"^# Response Style",
+    "GPT-5.6 low or medium only": r"GPT-5\.6",
+    "production infrastructure safety": r"production infrastructure safety",
+    "no terraform apply against prod": r"terraform apply",
+    "verify Git committer identity": r"GIT_COMMITTER_IDENT",
+    "secrets live in 1Password": r"1Password",
+    "serialize 1Password access": r"serializ",
+    "shared database change gate": r"shared[- ]db|shared database",
+    "Synology long-read safety": r"Synology",
+    "handoff quality standard": r"HANDOFF",
+}
+
+# Client-only text that is allowed to appear in exactly one global. If one of
+# these ever appears in both, the allowlist entry is stale and is reported.
+# A shared rule that merely *mentions* the other client (the GPT-5.6 rule names
+# ~/.codex/config.toml in the Claude global) is not a divergence, so these
+# patterns anchor on text that is genuinely one client's own.
+PARITY_DIVERGENCE_ALLOWLIST = {
+    "Claude global install line": ("claude", r"Install this as the \*\*user-level\*\*"),
+    "Codex global install line": ("codex", r"Install as `~/\.codex/AGENTS\.md`"),
+    "Codex edition framing": ("codex", r"Codex edition"),
+}
+
+DEFAULT_BUDGETS = {
+    "alwaysLoadedBytes": {"budget": 33311, "target": 23318},
+    "startupRoutedBytes": {"budget": 50486, "target": 35340},
+    "claudeSkillManifestBytes": {"budget": 21521, "target": 15065},
+    "codexSkillManifestBytes": {"budget": 14015, "target": 9811},
+}
+
+BUDGET_LABELS = {
+    "alwaysLoadedBytes": "always-loaded global templates",
+    "startupRoutedBytes": "startup-routed repo entry files",
+    "claudeSkillManifestBytes": "Claude skill name and description manifest",
+    "codexSkillManifestBytes": "Codex skill name and description manifest",
+}
+
+SHINGLE_WORDS = 10
+
 
 def posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
@@ -227,6 +298,143 @@ def installer_capabilities(root: Path) -> dict:
     return result
 
 
+def load_budgets(path: Path | None) -> tuple[dict, str]:
+    """Return the warning budgets and where they came from.
+
+    Budgets only ever warn. They are a ratchet against silent growth: `budget`
+    is the measured size at the last accepted baseline, and `target` is the
+    smaller number a later reduction step is aiming for. Tighten `budget` only
+    after a real measured reduction has landed.
+    """
+    if path is None:
+        default = Path(__file__).resolve().parent / "budgets.json"
+        path = default if default.is_file() else None
+    if path is None or not path.is_file():
+        return dict(DEFAULT_BUDGETS), "built-in defaults"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entries = data.get("budgets", data)
+    merged = dict(DEFAULT_BUDGETS)
+    for name, value in entries.items():
+        if isinstance(value, dict):
+            merged[name] = value
+        else:
+            merged[name] = {"budget": int(value), "target": int(value)}
+    return merged, path.name
+
+
+def budget_report(budgets: dict, measured: dict) -> dict:
+    entries = []
+    for name in sorted(set(budgets) | set(measured)):
+        limits = budgets.get(name, {})
+        actual = measured.get(name)
+        if actual is None:
+            continue
+        limit = limits.get("budget")
+        target = limits.get("target")
+        if limit is None:
+            status, reason = "unbudgeted", f"no warning budget is configured for {name}"
+        elif actual > limit:
+            status = "warning"
+            reason = (
+                f"{BUDGET_LABELS.get(name, name)} grew to {actual} bytes, over the "
+                f"{limit}-byte warning budget by {actual - limit} bytes. This is a "
+                f"warning, not a failure."
+            )
+        else:
+            status = "ok"
+            reason = f"{BUDGET_LABELS.get(name, name)} is {actual} bytes, within the {limit}-byte warning budget."
+        entries.append({
+            "name": name, "label": BUDGET_LABELS.get(name, name), "bytes": actual,
+            "budgetBytes": limit, "targetBytes": target, "status": status, "reason": reason,
+        })
+    return {
+        "entries": entries,
+        "warnings": sum(1 for item in entries if item["status"] == "warning"),
+        "note": "Budgets warn only. They never change the audit exit status.",
+    }
+
+
+def cross_client_parity(claude_text: str, codex_text: str) -> dict:
+    rules = []
+    for name, pattern in sorted(PARITY_RULES.items()):
+        in_claude = re.search(pattern, claude_text, re.I | re.M) is not None
+        in_codex = re.search(pattern, codex_text, re.I | re.M) is not None
+        if in_claude and in_codex:
+            status, reason = "match", f"'{name}' is present in both client globals."
+        elif in_claude or in_codex:
+            missing = "Codex" if in_claude else "Claude"
+            status = "mismatch"
+            reason = (
+                f"'{name}' is present in one client global but missing from the "
+                f"{missing} global. Both clients must carry this rule, or it must "
+                f"be added to the divergence allowlist with a stated reason."
+            )
+        else:
+            status = "missing-everywhere"
+            reason = f"'{name}' is missing from both client globals."
+        rules.append({"name": name, "inClaude": in_claude, "inCodex": in_codex,
+                      "status": status, "reason": reason})
+
+    divergences = []
+    for name, (client, pattern) in sorted(PARITY_DIVERGENCE_ALLOWLIST.items()):
+        in_claude = re.search(pattern, claude_text, re.I | re.M) is not None
+        in_codex = re.search(pattern, codex_text, re.I | re.M) is not None
+        both = in_claude and in_codex
+        divergences.append({
+            "name": name, "allowedClient": client, "inClaude": in_claude, "inCodex": in_codex,
+            "status": "stale-allowlist-entry" if both else "allowed",
+            "reason": (
+                f"'{name}' is allowlisted as {client}-only but now appears in both "
+                f"globals, so the allowlist entry is stale."
+            ) if both else f"'{name}' is allowed to appear only in the {client} global.",
+        })
+    return {
+        "rules": rules,
+        "mismatches": [item["name"] for item in rules if item["status"] != "match"],
+        "allowedDivergences": divergences,
+        "staleAllowlistEntries": [d["name"] for d in divergences if d["status"] != "allowed"],
+    }
+
+
+def shingles(text: str) -> set[tuple[str, ...]]:
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if len(words) < SHINGLE_WORDS:
+        return set()
+    return {tuple(words[i:i + SHINGLE_WORDS]) for i in range(len(words) - SHINGLE_WORDS + 1)}
+
+
+def global_skill_overlap(global_texts: dict[str, str], manifests: dict) -> list[dict]:
+    """Report ritual summaries in an always-loaded global that repeat a skill description.
+
+    Both are startup context, so the same sentence in both is paid for twice.
+    """
+    overlaps = []
+    for global_path in sorted(global_texts):
+        global_shingles = shingles(global_texts[global_path])
+        if not global_shingles:
+            continue
+        seen: set[str] = set()
+        for client in ("claude", "codex"):
+            for entry in manifests[client]:
+                key = f"{client}:{entry['source']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                shared = sorted(global_shingles & shingles(entry["description"]))
+                if shared:
+                    overlaps.append({
+                        "global": global_path, "client": client, "skill": entry["name"],
+                        "source": entry["source"], "sharedPhrases": len(shared),
+                        "examplePhrase": " ".join(shared[0]),
+                        "reason": (
+                            f"the always-loaded global '{global_path}' repeats text from the "
+                            f"'{entry['name']}' skill description, which is already startup "
+                            f"context for {client}."
+                        ),
+                    })
+    return sorted(overlaps, key=lambda item: (item["global"], item["client"], item["skill"]))
+
+
 def run(args: argparse.Namespace) -> dict:
     root = args.root.resolve()
     if str(root).startswith(("\\\\", "//")):
@@ -282,8 +490,38 @@ def run(args: argparse.Namespace) -> dict:
 
     safety_text = "\n".join(read_text(root / p) for p in classifications if (root / p).exists())
     safety = {}
+    safety_issues = []
     for category, patterns in SAFETY_MARKERS.items():
-        safety[category] = all(re.search(pattern, safety_text, re.I | re.S) is not None for pattern in patterns)
+        present = all(re.search(pattern, safety_text, re.I | re.S) is not None for pattern in patterns)
+        safety[category] = present
+        if not present:
+            safety_issues.append({
+                "category": category,
+                "reason": f"Missing safety marker '{category}': {SAFETY_REASONS[category]}.",
+            })
+
+    class_bytes: dict[str, int] = defaultdict(int)
+    for item in files + skill_records:
+        class_bytes[item["classification"]] += item["bytes"]
+    budgets, budget_source = load_budgets(args.budgets)
+    measured = {
+        "alwaysLoadedBytes": class_bytes["always-loaded"],
+        "startupRoutedBytes": class_bytes["startup-routed"],
+        "claudeSkillManifestBytes": manifest_report["claude"]["bytes"],
+        "codexSkillManifestBytes": manifest_report["codex"]["bytes"],
+    }
+    budget_section = budget_report(budgets, measured)
+    budget_section["source"] = budget_source
+
+    global_texts = {
+        relative: read_text(root / relative)
+        for relative, classification in classifications.items()
+        if classification == "always-loaded" and (root / relative).is_file()
+    }
+    parity = cross_client_parity(
+        global_texts.get("templates/system/CLAUDE-global.md", ""),
+        global_texts.get("templates/system/AGENTS-global-codex.md", ""),
+    )
 
     generated_at = args.generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     report = {
@@ -305,6 +543,10 @@ def run(args: argparse.Namespace) -> dict:
         "installedDrift": installed_drift(root, skill_records, args.claude_home, args.codex_home),
         "installerCapabilities": installer_capabilities(root),
         "safetyMarkers": safety,
+        "safetyMarkerIssues": safety_issues,
+        "budgets": budget_section,
+        "crossClientParity": parity,
+        "globalSkillOverlap": global_skill_overlap(global_texts, manifests),
         "excludedPathClasses": sorted(EXCLUDED_PARTS) + ["secret file suffixes", "network roots"],
     }
     return report
@@ -330,8 +572,27 @@ def summary(report: dict) -> str:
         f"broken relative links: {len(report['brokenLinks'])}",
         f"installed source drift: {len(report['installedDrift'])}",
         f"installer parity differences: {len(report['installerCapabilities']['differences'])}",
-        f"missing safety markers: {sum(1 for value in report['safetyMarkers'].values() if not value)}",
+        f"missing safety markers: {len(report['safetyMarkerIssues'])}",
+        f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
+        f"global vs skill-description overlaps: {len(report['globalSkillOverlap'])}",
+        f"budget warnings: {report['budgets']['warnings']} (warnings only, never a failure)",
     ])
+    for issue in report["safetyMarkerIssues"]:
+        lines.append(f"SAFETY: {issue['reason']}")
+    for item in report["crossClientParity"]["rules"]:
+        if item["status"] != "match":
+            lines.append(f"PARITY: {item['reason']}")
+    for item in report["crossClientParity"]["allowedDivergences"]:
+        if item["status"] != "allowed":
+            lines.append(f"PARITY: {item['reason']}")
+    for item in report["budgets"]["entries"]:
+        if item["status"] == "warning":
+            lines.append(f"BUDGET WARNING: {item['reason']}")
+    for item in report["globalSkillOverlap"]:
+        lines.append(
+            f"OVERLAP: {item['reason']} Shared phrases: {item['sharedPhrases']}; "
+            f"example: \"{item['examplePhrase']}\"."
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -343,6 +604,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--claude-home", type=Path)
     parser.add_argument("--codex-home", type=Path)
     parser.add_argument("--generated-at", help="fixed value for reproducible fixture tests")
+    parser.add_argument("--budgets", type=Path,
+                        help="JSON file of warning budgets (default: tools/context-audit/budgets.json)")
+    parser.add_argument("--strict", action="store_true",
+                        help="exit 1 when a required safety marker is missing or client parity "
+                             "breaks. Budget overruns still only warn.")
     return parser.parse_args()
 
 
@@ -359,6 +625,21 @@ def main() -> int:
         args.summary.write_text(rendered_summary, encoding="utf-8")
     if not args.json and not args.summary:
         sys.stdout.write(rendered_summary)
+    if args.strict:
+        blocking = list(report["safetyMarkerIssues"])
+        blocking += [
+            {"reason": item["reason"]}
+            for item in report["crossClientParity"]["rules"] if item["status"] != "match"
+        ]
+        blocking += [
+            {"reason": item["reason"]}
+            for item in report["crossClientParity"]["allowedDivergences"]
+            if item["status"] != "allowed"
+        ]
+        if blocking:
+            for item in blocking:
+                sys.stderr.write(f"FAIL: {item['reason']}\n")
+            return 1
     return 0
 
 

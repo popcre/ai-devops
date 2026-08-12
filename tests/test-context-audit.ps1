@@ -2,37 +2,79 @@ $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
 $tool = Join-Path $repo "tools\context-audit\context-audit.py"
-$temp = Join-Path ([System.IO.Path]::GetTempPath()) ("context-audit-" + [guid]::NewGuid())
+$codexRunner = Join-Path $repo "tools\skill-trigger-eval\codex-trigger-eval.py"
+$root = Join-Path ([System.IO.Path]::GetTempPath()) ("context-audit-" + [guid]::NewGuid())
 
-try {
-    New-Item -ItemType Directory -Path $temp | Out-Null
-    foreach ($path in @(
+# Each locked safety category, and the one fixture line that carries it. The
+# marker tests delete exactly one of these lines and require the audit to name
+# that category in plain English.
+$safetyLines = [ordered]@{
+    "production mutation"     = "Production infrastructure is read-only. Never run terraform apply or mutating gcloud."
+    "shared database routing" = "Shared database changes are authored in shared-db with a branch and PR."
+    "secret handling"         = "Never expose a secret. Use the 1Password vault."
+    "destructive actions"     = "Destructive actions such as delete or overwrite must be recoverable."
+    "Git identity"            = "Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com."
+    "GPT-5.6 effort"          = "GPT-5.6 must use low or medium effort."
+}
+
+# Rules that must appear in BOTH client globals, carried separately from the
+# safety lines so a safety deletion does not accidentally decide parity.
+$parityLines = @(
+    "# Response Style",
+    "Production infrastructure safety is absolute.",
+    "Serialize every 1Password read.",
+    "Synology long reads use the managed long-running skill.",
+    "Write a HANDOFF file at session end."
+)
+
+$overlapSentence = "The quiet fixture sentence about pointer triggers exists only to prove overlap detection works correctly here."
+
+function Write-Utf8 {
+    param([string]$Path, [string]$Text)
+    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function New-AuditFixture {
+    param(
+        [string]$Path,
+        [string[]]$OmitSafety = @(),
+        [string[]]$OmitSafetyFromCodexOnly = @(),
+        [string]$ClaudeExtra = "",
+        [string]$CodexExtra = "",
+        [string]$SkillDescription = "Use for a small fixture."
+    )
+
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
+    foreach ($dir in @(
         "templates\system", "skills\shared\sample", "skills\claude",
         "skills\claude\folded", "skills\codex", "skills\codex\literal",
         "bin", ".ai", "transcripts", "node_modules")) {
-        New-Item -ItemType Directory -Path (Join-Path $temp $path) -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $Path $dir) -Force | Out-Null
     }
 
-    $safety = @'
-Production infrastructure is read-only. Never run terraform apply or mutating gcloud.
-Shared database changes are authored in shared-db with a branch and PR.
-Never expose a secret. Use the 1Password vault.
-Destructive actions such as delete or overwrite must be recoverable.
-Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com.
-GPT-5.6 must use low or medium effort.
-'@
-    Set-Content -LiteralPath (Join-Path $temp "templates\system\CLAUDE-global.md") -Value $safety -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "templates\system\AGENTS-global-codex.md") -Value $safety -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "AGENTS.md") -Value "[Skill](skills/shared/sample/SKILL.md)" -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "CLAUDE.md") -Value "Read AGENTS.md." -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "skills\shared\sample\SKILL.md") -Value @'
----
-name: sample
-description: Use for a small fixture.
----
+    $claudeKeys = $safetyLines.Keys | Where-Object { $OmitSafety -notcontains $_ }
+    $codexKeys = $claudeKeys | Where-Object { $OmitSafetyFromCodexOnly -notcontains $_ }
+    $claudeBody = (@($parityLines) + @($claudeKeys | ForEach-Object { $safetyLines[$_] }) + @($ClaudeExtra)) -join "`n"
+    # Genuinely Codex-only text, so the divergence allowlist has something real
+    # to allow. A test that also puts this in the Claude global must be reported
+    # as a stale allowlist entry.
+    $codexBody = (@($parityLines) + @($codexKeys | ForEach-Object { $safetyLines[$_] }) +
+        @("This file is the Codex edition of the standing rules.", $CodexExtra)) -join "`n"
+    Write-Utf8 (Join-Path $Path "templates\system\CLAUDE-global.md") ($claudeBody + "`n")
+    Write-Utf8 (Join-Path $Path "templates\system\AGENTS-global-codex.md") ($codexBody + "`n")
 
-This deliberately long paragraph exists to exercise paragraph handling without containing sensitive data. It continues beyond one hundred and eighty characters so the duplicate detector has a realistic input to normalize and hash safely.
-'@ -Encoding utf8
+    Write-Utf8 (Join-Path $Path "AGENTS.md") "[Skill](skills/shared/sample/SKILL.md)`n"
+    Write-Utf8 (Join-Path $Path "CLAUDE.md") "Read the router first.`n"
+
+    $sample = @(
+        "---",
+        "name: sample",
+        "description: $SkillDescription",
+        "---",
+        "",
+        "This deliberately long paragraph exists to exercise paragraph handling without containing sensitive data. It continues beyond one hundred and eighty characters so the duplicate detector has a realistic input to normalize and hash safely."
+    ) -join "`n"
+    Write-Utf8 (Join-Path $Path "skills\shared\sample\SKILL.md") ($sample + "`n")
 
     # Folded frontmatter (LF endings). The parser must return the continuation
     # text, never the bare block-scalar marker.
@@ -50,10 +92,7 @@ This deliberately long paragraph exists to exercise paragraph handling without c
         "",
         "Body text for the folded fixture."
     )
-    [System.IO.File]::WriteAllText(
-        (Join-Path $temp "skills\claude\folded\SKILL.md"),
-        ($foldedLines -join "`n") + "`n",
-        (New-Object System.Text.UTF8Encoding $false))
+    Write-Utf8 (Join-Path $Path "skills\claude\folded\SKILL.md") (($foldedLines -join "`n") + "`n")
 
     # Literal frontmatter written with CRLF endings, to prove Windows line
     # endings do not break block-scalar parsing.
@@ -67,27 +106,50 @@ This deliberately long paragraph exists to exercise paragraph handling without c
         "",
         "Body text for the literal fixture."
     )
-    [System.IO.File]::WriteAllText(
-        (Join-Path $temp "skills\codex\literal\SKILL.md"),
-        ($literalLines -join "`r`n") + "`r`n",
-        (New-Object System.Text.UTF8Encoding $false))
+    Write-Utf8 (Join-Path $Path "skills\codex\literal\SKILL.md") (($literalLines -join "`r`n") + "`r`n")
 
     foreach ($installer in @("bin\ai-install-skills", "bin\install-ai-devops-windows.ps1")) {
-        Set-Content -LiteralPath (Join-Path $temp $installer) -Value ".ai-devops-managed Shared skill also exists skills-quarantine not overwriting local edits dry-run" -Encoding utf8
+        Write-Utf8 (Join-Path $Path $installer) ".ai-devops-managed Shared skill also exists skills-quarantine not overwriting local edits dry-run`n"
     }
 
     $secret = "DO_NOT_READ_SECRET_FIXTURE_71c8"
-    Set-Content -LiteralPath (Join-Path $temp ".env") -Value $secret -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp ".ai\hidden.md") -Value $secret -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "transcripts\hidden.md") -Value $secret -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $temp "node_modules\hidden.md") -Value $secret -Encoding utf8
+    foreach ($leak in @(".env", ".ai\hidden.md", "transcripts\hidden.md", "node_modules\hidden.md")) {
+        Write-Utf8 (Join-Path $Path $leak) $secret
+    }
+}
 
-    $json1 = Join-Path $temp "report-1.json"
-    $json2 = Join-Path $temp "report-2.json"
-    $summary = Join-Path $temp "summary.txt"
-    & python $tool --root $temp --json $json1 --summary $summary --generated-at "fixture-time"
+function Invoke-Audit {
+    param([string]$Path, [switch]$Strict, [string]$Budgets)
+
+    $json = Join-Path $root ("report-" + [guid]::NewGuid() + ".json")
+    $arguments = @($tool, "--root", $Path, "--json", $json, "--generated-at", "fixture-time")
+    if ($Strict) { $arguments += "--strict" }
+    if ($Budgets) { $arguments += @("--budgets", $Budgets) }
+    $stderrFile = Join-Path $root ("stderr-" + [guid]::NewGuid() + ".txt")
+    $out = & python @arguments 2> $stderrFile
+    $code = $LASTEXITCODE
+    return [pscustomobject]@{
+        exit    = $code
+        report  = (Get-Content -LiteralPath $json -Raw | ConvertFrom-Json)
+        raw     = (Get-Content -LiteralPath $json -Raw)
+        stderr  = (Get-Content -LiteralPath $stderrFile -Raw)
+        stdout  = ($out -join "`n")
+    }
+}
+
+try {
+    New-Item -ItemType Directory -Path $root | Out-Null
+    $fixture = Join-Path $root "repo"
+    $secret = "DO_NOT_READ_SECRET_FIXTURE_71c8"
+
+    # ---------------------------------------------------------------- baseline
+    New-AuditFixture -Path $fixture
+    $summary = Join-Path $root "summary.txt"
+    $json1 = Join-Path $root "report-1.json"
+    $json2 = Join-Path $root "report-2.json"
+    & python $tool --root $fixture --json $json1 --summary $summary --generated-at "fixture-time"
     if ($LASTEXITCODE -ne 0) { throw "First audit failed." }
-    & python $tool --root $temp --json $json2 --generated-at "fixture-time"
+    & python $tool --root $fixture --json $json2 --generated-at "fixture-time"
     if ($LASTEXITCODE -ne 0) { throw "Second audit failed." }
 
     $one = Get-Content -LiteralPath $json1 -Raw
@@ -125,14 +187,130 @@ This deliberately long paragraph exists to exercise paragraph handling without c
     if (@($report.safetyMarkers.PSObject.Properties | Where-Object { -not $_.Value }).Count -ne 0) {
         throw "A required safety marker was not found in the positive fixture."
     }
+    if (@($report.safetyMarkerIssues).Count -ne 0) { throw "The positive fixture reported a safety issue." }
     if (@($report.installerCapabilities.differences).Count -ne 0) {
         throw "Equivalent installer fixtures reported a parity difference."
     }
+    if (@($report.crossClientParity.mismatches).Count -ne 0) {
+        throw "The positive fixture reported a cross-client parity mismatch: $($report.crossClientParity.mismatches -join ', ')"
+    }
+    if (@($report.crossClientParity.staleAllowlistEntries).Count -ne 0) {
+        throw "The positive fixture reported a stale divergence-allowlist entry."
+    }
+    if (@($report.globalSkillOverlap).Count -ne 0) {
+        throw "The positive fixture reported a global/skill-description overlap."
+    }
+    if ($report.budgets.warnings -ne 0) { throw "The tiny positive fixture exceeded a real warning budget." }
     if (-not (Test-Path -LiteralPath $summary)) { throw "Human summary was not written." }
 
-    Write-Host "PASS: context audit classification, stable output, manifests, parity, safety markers, and secret exclusions"
+    $strictBaseline = Invoke-Audit -Path $fixture -Strict
+    if ($strictBaseline.exit -ne 0) { throw "Strict mode failed on a clean fixture: $($strictBaseline.stderr)" }
+    Write-Host "PASS: baseline classification, stable output, manifests, parity, safety markers, secret exclusions"
+
+    # ------------------------------------------------- safety marker removal
+    foreach ($category in $safetyLines.Keys) {
+        New-AuditFixture -Path $fixture -OmitSafety @($category)
+        $result = Invoke-Audit -Path $fixture -Strict
+        if ($result.report.safetyMarkers.$category) {
+            throw "Removing the '$category' line did not clear its safety marker."
+        }
+        $issue = $result.report.safetyMarkerIssues | Where-Object { $_.category -eq $category }
+        if (-not $issue) { throw "No safety issue was reported for the missing '$category' rule." }
+        if ($issue.reason.Length -lt 40 -or $issue.reason -notmatch [regex]::Escape($category)) {
+            throw "The '$category' failure reason is not a plain-English sentence naming the category: '$($issue.reason)'"
+        }
+        foreach ($other in $safetyLines.Keys) {
+            if ($other -ne $category -and -not $result.report.safetyMarkers.$other) {
+                throw "Removing '$category' also cleared the unrelated marker '$other'."
+            }
+        }
+        if ($result.exit -eq 0) { throw "Strict mode passed with the '$category' safety rule missing." }
+        if ($result.stderr -notmatch "FAIL: Missing safety marker") {
+            throw "Strict mode did not print a plain reason for the missing '$category' rule."
+        }
+    }
+    Write-Host "PASS: all six locked safety categories fail individually with a plain-English reason"
+
+    # ------------------------------------------------------ cross-client parity
+    New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("GPT-5.6 effort")
+    $result = Invoke-Audit -Path $fixture -Strict
+    if ($result.report.crossClientParity.mismatches -notcontains "GPT-5.6 low or medium only") {
+        throw "A rule present only in the Claude global was not reported as a parity mismatch."
+    }
+    $rule = $result.report.crossClientParity.rules | Where-Object { $_.name -eq "GPT-5.6 low or medium only" }
+    if ($rule.reason -notmatch "Codex") { throw "The parity reason does not name the client that is missing the rule." }
+    if ($result.exit -eq 0) { throw "Strict mode passed with a cross-client parity mismatch." }
+    if ($result.report.safetyMarkers."GPT-5.6 effort" -ne $true) {
+        throw "Parity fixture unexpectedly cleared the safety marker; the two checks must be independent."
+    }
+
+    New-AuditFixture -Path $fixture -ClaudeExtra "This is the Codex edition framing sentence."
+    $result = Invoke-Audit -Path $fixture -Strict
+    if ($result.report.crossClientParity.staleAllowlistEntries -notcontains "Codex edition framing") {
+        throw "Client-only text appearing in both globals was not reported as a stale allowlist entry."
+    }
+    if ($result.exit -eq 0) { throw "Strict mode passed with a stale divergence-allowlist entry." }
+    Write-Host "PASS: cross-client parity mismatch and stale divergence-allowlist entry both fail with a reason"
+
+    # -------------------------------------------------------- warning budgets
+    New-AuditFixture -Path $fixture
+    $budgetFile = Join-Path $root "tiny-budgets.json"
+    Write-Utf8 $budgetFile (@{
+        budgets = @{
+            alwaysLoadedBytes        = @{ budget = 10; target = 5 }
+            startupRoutedBytes       = @{ budget = 10; target = 5 }
+            claudeSkillManifestBytes = @{ budget = 10; target = 5 }
+            codexSkillManifestBytes  = @{ budget = 10; target = 5 }
+        }
+    } | ConvertTo-Json -Depth 5)
+    $result = Invoke-Audit -Path $fixture -Strict -Budgets $budgetFile
+    if ($result.report.budgets.warnings -ne 4) {
+        throw "Expected four budget warnings, got $($result.report.budgets.warnings)."
+    }
+    foreach ($entry in $result.report.budgets.entries) {
+        if ($entry.status -ne "warning") { throw "Budget '$($entry.name)' did not warn when it was exceeded." }
+        if ($entry.reason -notmatch "warning, not a failure") {
+            throw "Budget '$($entry.name)' did not say plainly that it is a warning: '$($entry.reason)'"
+        }
+    }
+    if ($result.exit -ne 0) {
+        throw "A budget overrun changed the exit status. Budgets must warn only, even in strict mode."
+    }
+    Write-Host "PASS: exceeded budgets warn with a plain reason and never fail the run"
+
+    # -------------------------------- always-loaded global vs skill descriptions
+    New-AuditFixture -Path $fixture -SkillDescription $overlapSentence `
+        -ClaudeExtra $overlapSentence -CodexExtra $overlapSentence
+    $result = Invoke-Audit -Path $fixture
+    if (@($result.report.globalSkillOverlap).Count -lt 2) {
+        throw "A sentence duplicated between both globals and a skill description was not reported as overlap."
+    }
+    $overlap = $result.report.globalSkillOverlap[0]
+    if ($overlap.skill -ne "sample") { throw "The overlap report named the wrong skill." }
+    if ($overlap.examplePhrase.Split(" ").Count -ne 10) {
+        throw "The overlap example phrase is not the documented ten-word shingle."
+    }
+    if ($overlap.reason -notmatch "already startup") {
+        throw "The overlap reason does not explain why duplicated startup text costs twice."
+    }
+    if ($result.exit -ne 0) { throw "An overlap warning changed the exit status." }
+    Write-Host "PASS: global text repeating a skill description is reported as duplicated startup context"
+
+    # -------------------------------------------------- Codex trigger-eval runner
+    $printed = & python $codexRunner --skill sample --eval-set $budgetFile --print-command
+    if ($LASTEXITCODE -ne 0) { throw "The Codex trigger-eval runner failed to print its command." }
+    $argv = $printed | ConvertFrom-Json
+    if ($argv -notcontains "model_reasoning_effort=low") {
+        throw "The Codex runner does not pass an explicit low reasoning effort."
+    }
+    if ($argv -notcontains "read-only") { throw "The Codex runner does not force a read-only sandbox." }
+    & python $codexRunner --skill sample --eval-set $budgetFile --effort high --print-command 2>$null
+    if ($LASTEXITCODE -eq 0) { throw "The Codex runner accepted a high reasoning effort." }
+    Write-Host "PASS: Codex trigger-eval runner pins low/medium reasoning and a read-only sandbox"
+
+    Write-Host "PASS: context audit enforcement suite"
 } finally {
-    if (Test-Path -LiteralPath $temp) {
-        Remove-Item -LiteralPath $temp -Recurse -Force
+    if (Test-Path -LiteralPath $root) {
+        Remove-Item -LiteralPath $root -Recurse -Force
     }
 }
