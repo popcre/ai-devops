@@ -51,6 +51,24 @@ that phase and sections 1, 4, 8, 11, and 13 to catch drift.
    measure against 50,729 and ratchet that budget when it lands.
 6. **Nothing changed in the installers, skills, or machine files.** Steps 6 and 7
    start from the same source layout the step-3 evidence describes.
+7. **A budget lives in three places, not one.** Ratcheting means editing
+   `tools/context-audit/budgets.json`, the `DEFAULT_BUDGETS` fallback in
+   `tools/context-audit/context-audit.py`, and the budget table in
+   `docs/context-engineering.md`. Step 4 updated all three for
+   `alwaysLoadedBytes`. Steps 5, 6, and 10 must do the same for theirs or the
+   numbers silently disagree.
+8. **Installed globals on every machine are now far behind source.** Both
+   installers seed a global only when absent, so no machine has the trimmed text.
+   The gap is no longer "source plus a machine overlay"; it is a substantial
+   rewrite plus an overlay. Step 7's reconciliation preview must be judged
+   against that larger diff, and step 8 must prove the new text actually landed
+   rather than assuming installer success means the file changed.
+9. **Step 6 must treat four skills as load-bearing.** The globals now point at
+   `synology-long-running-operations`, `shared-db-change`,
+   `codex-shared-db-change`, and `handoff-writer` by name. Consolidating,
+   renaming, or merging any of them requires updating both globals in the same
+   commit, and must not create a global-versus-skill-description overlap, which
+   is currently zero.
 
 **Drift recorded by step 3 (read before starting step 4).**
 
