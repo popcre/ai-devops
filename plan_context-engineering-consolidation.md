@@ -4,7 +4,7 @@
 
 | Step | Status | Last updated | Evidence |
 |---|---|---:|---|
-| 1. Freeze a measured baseline | ⬜ open | 2026-08-12 | Audit measurements in section 6 |
+| 1. Freeze a measured baseline | ✅ done | 2026-08-12 | `tools/context-audit/`, `tests/test-context-audit.ps1`, and `docs/context-engineering.md`; focused and existing installer/memory suites pass |
 | 2. Define the context ownership map | ⬜ open | 2026-08-12 | Proposed map in sections 8 and 9 |
 | 3. Add context-audit tooling and tests | ⬜ open | 2026-08-12 | Test design in sections 9 and 10 |
 | 4. Slim the always-loaded global files | ⬜ open | 2026-08-12 | Candidate material in section 6 |
@@ -15,7 +15,8 @@
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin at step 1. No implementation has started. Before
+**Fresh-session start:** begin at step 2. Step 1 froze the reproducible baseline
+and passed its verification gate. Before
 each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch drift.
 
 **Handoff:**
