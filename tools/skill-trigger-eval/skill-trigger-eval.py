@@ -34,6 +34,19 @@ Reading the output: a should-trigger query only counts as a real miss if the
 model *could* have acted. If the prompt asks to store a secret but never
 includes the value, Claude asks for the value first — correct behaviour, not a
 triggering failure. Keep those out of the eval set or you will chase a phantom.
+
+Contamination trap, found 2026-08-13 on the first three-set run. Only a `Skill`
+tool call counts. Two earlier looseness bugs both inflated scores:
+
+  1. The streaming-delta path matched the skill name in ANY tool's input, so a
+     `Grep`/`Read` whose path merely contained the name scored as a trigger.
+     Deltas are now attributed to their block via `content_block_start`, and
+     only a `Skill` block's delta counts.
+  2. The default project was the caller's cwd. Run inside this repo — which
+     names every skill in its docs, globals, and eval sets — ordinary reading
+     produced false positives on prompts that must NOT fire. The default is now
+     an empty scratch directory; pass `--project` only when a repo's own content
+     is deliberately part of the test.
 """
 from __future__ import annotations
 
@@ -43,6 +56,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -70,6 +84,8 @@ def run_query(query: str, skill: str, project: Path, timeout: int) -> bool | Non
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
+    skill_blocks: dict[int, bool] = {}
+
     for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
@@ -87,15 +103,66 @@ def run_query(query: str, skill: str, project: Path, timeout: int) -> bool | Non
                         return True
 
         # Streaming tool-input deltas catch the call before the tool executes,
-        # which keeps runs short for skills that would do real work.
+        # which keeps runs short for skills that would do real work. A delta
+        # carries no tool name, so track which block it belongs to: matching the
+        # name in ANY tool's input counts a Grep or Read of a file that merely
+        # mentions the skill, which is reading, not selection.
         if event.get("type") == "stream_event":
             se = event.get("event", {})
-            if se.get("type") == "content_block_delta":
+            if se.get("type") == "content_block_start":
+                cb = se.get("content_block", {})
+                if cb.get("type") == "tool_use":
+                    skill_blocks[se.get("index")] = cb.get("name") == "Skill"
+            elif se.get("type") == "content_block_stop":
+                skill_blocks.pop(se.get("index"), None)
+            elif se.get("type") == "content_block_delta":
                 delta = se.get("delta", {})
                 if delta.get("type") == "input_json_delta":
-                    if skill in delta.get("partial_json", ""):
+                    if skill_blocks.get(se.get("index")) and skill in delta.get("partial_json", ""):
                         return True
     return False
+
+
+NEUTRAL_FILES = {
+    "README.md": (
+        "# widget-service\n\n"
+        "Small internal service that keeps the widget catalogue in sync.\n\n"
+        "- `src/sync.py` pulls the upstream feed\n"
+        "- `src/store.py` writes rows to the catalogue database\n"
+    ),
+    "src/sync.py": (
+        "def fetch_feed(url):\n"
+        "    \"\"\"Return the upstream catalogue feed.\"\"\"\n"
+        "    raise NotImplementedError\n"
+    ),
+    "src/store.py": (
+        "def upsert_rows(rows):\n"
+        "    \"\"\"Write catalogue rows to the database.\"\"\"\n"
+        "    raise NotImplementedError\n"
+    ),
+    "notes/status.md": (
+        "# Status\n\n"
+        "The feed parser handles the current format. Pagination is unfinished.\n"
+    ),
+}
+
+
+def make_neutral_project() -> Path:
+    """A plausible small project that names no skill, tool, host, or repo of ours.
+
+    An EMPTY directory is not neutral, it is inert: prompts that ask the model to
+    act on the work at hand have nothing to act on, so the model asks a question
+    instead of selecting a skill and the run scores as a miss it did not earn.
+    Seeding a small ordinary project removes that phantom without reintroducing
+    the contamination an eval run inside this repo produces.
+    """
+    root = Path(tempfile.mkdtemp(prefix="skill-trigger-eval-"))
+    for rel, body in NEUTRAL_FILES.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    (root / "HANDOFF.d").mkdir(exist_ok=True)
+    return root
 
 
 def main() -> int:
@@ -103,7 +170,8 @@ def main() -> int:
     ap.add_argument("--skill", required=True, help="Installed skill name, e.g. secrets-to-1password")
     ap.add_argument("--eval-set", required=True, type=Path)
     ap.add_argument("--project", type=Path, default=None,
-                    help="Directory to run claude -p in (default: a temp-free cwd)")
+                    help="Directory to run claude -p in (default: a fresh neutral scratch "
+                         "project, so repo content cannot be mistaken for a trigger)")
     ap.add_argument("--runs", type=int, default=1, help="Runs per query (>1 gives a trigger rate)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--timeout", type=int, default=240)
@@ -117,7 +185,11 @@ def main() -> int:
         return 2
 
     evals = json.loads(args.eval_set.read_text(encoding="utf-8"))
-    project = args.project or Path.cwd()
+    if args.project:
+        project = args.project
+    else:
+        project = make_neutral_project()
+        print(f"neutral project dir: {project}")
 
     jobs = [(item, r) for item in evals for r in range(args.runs)]
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:

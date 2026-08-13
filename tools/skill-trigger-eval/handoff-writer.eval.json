@@ -1,0 +1,23 @@
+[
+  {"query": "write a handoff for what we did in this session", "should_trigger": true},
+  {"query": "put that plan in handoff.md", "should_trigger": true},
+  {"query": "give me a detailed prompt for the new chat so it can pick up where we left off", "should_trigger": true},
+  {"query": "is that handoff comprehensive enough for a fresh developer who knows nothing about this app?", "should_trigger": true},
+  {"query": "im out of context. write down everything the next session needs to continue this migration", "should_trigger": true},
+  {"query": "the handoff you wrote looks thin. would someone who walked in this morning really be able to continue with no questions?", "should_trigger": true},
+  {"query": "document the state of this work so another agent can take over tomorrow", "should_trigger": true},
+  {"query": "add a handoff file under HANDOFF.d for the scraper work thats still open", "should_trigger": true},
+  {"query": "before i start a fresh session, write the handoff and include what we tried that didnt work", "should_trigger": true},
+  {"query": "judge whether the existing handoff in this repo is detailed enough or needs expanding", "should_trigger": true},
+
+  {"query": "wrap up", "should_trigger": false},
+  {"query": "update the .md files", "should_trigger": false},
+  {"query": "commit and push everything", "should_trigger": false},
+  {"query": "write an implementation plan for the new rfq feature so another session can build it", "should_trigger": false},
+  {"query": "should this be a new session? is the context window getting full?", "should_trigger": false},
+  {"query": "do a full documentation overhaul and make AGENTS.md the canonical operating guide", "should_trigger": false},
+  {"query": "secrets sweep before we finish", "should_trigger": false},
+  {"query": "this chat is a week old, is there anything left to merge or commit?", "should_trigger": false},
+  {"query": "summarize what you changed in the last three files", "should_trigger": false},
+  {"query": "hand this off to codex and have it finish the tests", "should_trigger": false}
+]
