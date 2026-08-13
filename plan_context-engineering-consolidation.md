@@ -10,17 +10,44 @@
 | 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 (revised in step 5) | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
 | 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,972 bytes (29.1%), 632 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,694. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
 | 6. Remove cross-client skill duplication safely | ✅ done | 2026-08-12 | **Eval sets exist.** `tools/skill-trigger-eval/qwen-code.eval.json` and `codex-shared-db-change.eval.json`, 10 positive + 10 negative each. `qwen-code` scores **10/10 should-fire, 0/10 should-not-fire** against the real `codex` CLI at `low` effort in a read-only sandbox, reproducibly. Two detection bugs in `codex-trigger-eval.py` were found and fixed by that run (escaped path separators understated the score to 0/1; matching command OUTPUT rather than the command overstated it by 4 unearned false positives from this repo's own files). Every hit now records the matching command in an `evidence` field, locked by the new offline `tests/test-codex-trigger-eval.sh`. The stale "Codex has no skills system" sentence in `AGENTS-global-codex.md` is corrected. Always-loaded 24,703 bytes, still under budget; `--strict` exits 0; all seven named suites pass. **Consolidation done: duplicate paragraph groups 12 → 2.** The exact-body Qwen pair (identical `SKILL.md` apart from the name, identical `agents/openai.yaml`) is merged into `skills/shared/qwen-code`; task-triggered text fell 408,341 → 402,831 bytes and the merged skill **still scores 10/10 and 0/10** after installing to both clients, with the old Codex copy quarantined recoverably. The last 2 duplicates are kept deliberately (a credential-incident STOP banner and the handoff self-audit gate) with reasons in `docs/context-engineering.md`. No other pair was merged: their bodies genuinely differ. `docs/codex-skills-usage-guide.md` `--migrate-obsolete` line corrected. **`codex-shared-db-change` fixed and verified: 8/10 → 10/10 should-fire, still 0/10 should-not-fire.** It had been missing its own verbatim trigger phrase. Description-only change (the name is load-bearing), reinstalled and re-scored; overlap stays 0 |
-| 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | **"Four installed skill drifts" is STALE** — `bin/ai-install-skills` was run on `al8960ofc` during step 6, so this machine reads `installed source drift: 0`. Re-measure before designing anything. A real obsolete-managed fixture now exists at `~/.codex/skills-quarantine/codex-qwen-code`. Neither global was installed |
+| 7. Repair installation drift without clobbering local facts | ✅ done | 2026-08-13 | **Drift re-measured first: 3, not four** (1 skill + both globals) — the audit reports 0 unless `--claude-home`/`--codex-home` are passed, which is why earlier numbers disagreed. Both installers now reconcile preview-first: every skill is classified (absent, identical, update, local-edits, unmanaged) and printed before anything is written, and the same lines appear in a dry run and a real run. **The `rm -rf`-then-copy step is gone**, so a file added inside a managed skill is no longer silently deleted; only files the installer wrote and the repo has since dropped are removed. Anything replaced that held hand edits is copied to `<client>/skills-backup/<name>` first, and a global is never replaced without the explicit `--adopt-globals` / `-AdoptGlobals` boundary, which backs it up to `<client>/globals-backup/` and prints the restore command. The `.ai-devops-managed` marker now records a SHA-256 per installed file — that record is what distinguishes a hand edit from a source update. New `tests/test-installer-parity.sh` proves both installers write the same files and byte-identical markers, and that refreshing one's install with the other reports "up to date" rather than phantom edits; `tests/test-ai-install-skills.sh` 5 → 9 cases and `tests/test-install-ai-devops-windows.ps1` 5 → 8 cases cover the full fixture matrix plus idempotence. Audit parity gained `previewClassification`, `recoverableBackup`, `globalAdoptFlag`; parity differences stay 0. **Applied on `al8960ofc`: skill drift 1 → 0, second apply changed nothing, globals untouched as required until step 8.** PowerShell child path stayed 5.1-safe. All named suites pass |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** first **score the three unmeasured load-bearing skills**
-(Albert's 2026-08-12 gate on step 8, decision 6 below), then **step 7, repairing
-installation drift**.
-Steps 1-3, 5, and 6 are done; step 4's source work is done and owes two probes to
-step 8. Read the step-6 drift block first — it resets step 7's drift baseline. Before each phase, re-read that phase and sections 1, 4, 8,
+**Fresh-session start:** **score the three unmeasured load-bearing skills**
+(Albert's 2026-08-12 gate on step 8, decision 6 below), then **step 8, the
+pilot** — the first step that needs Albert.
+Steps 1-3 and 5-7 are done; step 4's source work is done and owes two probes to
+step 8. Read the step-7 drift block first. Before each phase, re-read that phase and sections 1, 4, 8,
 11, and 13 to catch drift.
+
+**Drift recorded by step 7 (read before starting step 8).**
+
+1. **The globals on `al8960ofc` are still the OLD text, deliberately.** Step 7
+   built the `--adopt-globals` boundary but did not cross it. `installed source
+   drift` on this machine is now exactly 2, both globals, and that is the correct
+   reading until the pilot.
+2. **`installed source drift: 0` means "not measured" unless you pass the homes.**
+   `context-audit.py` skips the check when `--claude-home`/`--codex-home` are
+   absent, and every summary in this plan before step 7 was run without them. Use
+   `--claude-home "$USERPROFILE/.claude" --codex-home "$USERPROFILE/.codex"`.
+3. **The marker format changed and both installers write it.** It now carries
+   `<sha256>  <path>` per installed file, LF endings, ordinal-sorted. A legacy
+   empty marker still proves ownership, but a skill under one that differs is
+   reported as `local-edits` and backed up — expect that once per machine on the
+   first sync after this, and it is not a fault.
+4. **Line endings are real drift.** The one skill drift found on this machine was
+   `codex-shared-db-change` installed with LF from a step-6 worktree against a
+   CRLF source. Whichever checkout you install from decides the bytes on disk, so
+   install and audit from the same checkout or the diff never closes.
+5. **A backup and a quarantine now sit on this machine** —
+   `~/.codex/skills-backup/codex-shared-db-change` and
+   `~/.codex/skills-quarantine/codex-qwen-code`. Both are recoverable copies, not
+   rubbish; step 8's rollback plan can use the same mechanism.
+6. **`tests/test-installer-parity.sh` is new and needs `pwsh`.** It skips itself
+   elsewhere. It is the slowest suite in the repo (about 2 minutes) because it
+   hashes every installed file twice.
 
 **Decisions Albert made on 2026-08-12 (binding, do not re-ask).**
 

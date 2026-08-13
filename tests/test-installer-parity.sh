@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# Both installers must produce the SAME managed outcome from the same source.
+#
+# Why this test exists: Windows has two installers (bin/ai-install-skills for
+# Git Bash, bin/install-ai-devops-windows.ps1 for native PowerShell), and step 7
+# gave both a reconciliation engine. If they drift apart, a machine installed
+# with one and refreshed with the other sees phantom local edits and pointless
+# backups. The managed marker is the contract, so it is compared byte for byte.
+#
+# Skips (exit 0) when pwsh is not installed — Linux/macOS have one installer.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! command -v pwsh >/dev/null 2>&1; then
+  echo "SKIP: pwsh not installed — nothing to compare against."
+  exit 0
+fi
+
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+fixture="$TMP_ROOT/repo"
+mkdir -p "$fixture/bin" "$fixture/config" "$fixture/templates/system" \
+  "$fixture/skills/claude/client-claude" "$fixture/skills/codex/client-codex" \
+  "$fixture/skills/shared/shared-one/agents"
+cp "$REPO_ROOT/bin/ai-install-skills" "$fixture/bin/ai-install-skills"
+printf '%s\n' '---' 'name: client-claude' 'description: test' '---' > "$fixture/skills/claude/client-claude/SKILL.md"
+printf '%s\n' '---' 'name: client-codex' 'description: test' '---' > "$fixture/skills/codex/client-codex/SKILL.md"
+printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$fixture/skills/shared/shared-one/SKILL.md"
+# A nested file proves both engines record sub-paths the same way.
+printf '%s\n' 'model: test' > "$fixture/skills/shared/shared-one/agents/openai.yaml"
+: > "$fixture/config/retired-skills.txt"
+printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
+printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
+git -C "$fixture" init -q -b main
+git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
+  -c commit.gpgsign=false add . >/dev/null
+git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
+  -c commit.gpgsign=false commit -qm fixture >/dev/null
+
+echo "1/2 fresh install: Bash and PowerShell agree file for file"
+mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex"
+CLAUDE_HOME="$TMP_ROOT/bash/claude" CODEX_HOME="$TMP_ROOT/bash/codex" \
+  bash "$fixture/bin/ai-install-skills" >/dev/null 2>&1
+pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+  -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
+  -ClaudeHome "$(cygpath -w "$TMP_ROOT/ps/claude" 2>/dev/null || echo "$TMP_ROOT/ps/claude")" \
+  -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
+  -SkipGitInstall >/dev/null 2>&1
+
+listing() { (cd "$1" && find skills -type f | LC_ALL=C sort); }
+for client in claude codex; do
+  diff <(listing "$TMP_ROOT/bash/$client") <(listing "$TMP_ROOT/ps/$client") \
+    || fail "$client: installers wrote different file sets"
+  # The marker is the contract between the two engines: same hashes, same paths.
+  diff "$TMP_ROOT/bash/$client/skills/shared-one/.ai-devops-managed" \
+       "$TMP_ROOT/ps/$client/skills/shared-one/.ai-devops-managed" \
+    || fail "$client: managed markers differ between installers"
+done
+
+echo "2/2 cross-installer refresh reports 'up to date', not local edits"
+# The real failure this guards: install with one, refresh with the other. If the
+# marker formats disagreed at all, the second installer would see local edits,
+# back everything up, and rewrite it.
+out="$(CLAUDE_HOME="$TMP_ROOT/ps/claude" CODEX_HOME="$TMP_ROOT/ps/codex" \
+  bash "$fixture/bin/ai-install-skills" 2>&1)"
+grep -Fq 'LOCAL EDITS' <<<"$out" && fail "Bash saw PowerShell's install as locally edited"
+grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
+[[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
+
+out="$(pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+  -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
+  -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
+  -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
+  -SkipGitInstall 2>&1)"
+grep -Fq 'LOCAL EDITS' <<<"$out" && fail "PowerShell saw Bash's install as locally edited"
+grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
+[[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
+
+echo "PASS: installer parity"

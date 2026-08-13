@@ -6,6 +6,18 @@
 #   ai-install-skills                      # install/refresh skills + globals
 #   ai-install-skills --dry-run            # show actions without changing files
 #   ai-install-skills --keep-orphans       # do NOT quarantine retired skills
+#   ai-install-skills --adopt-globals      # replace a locally-edited global
+#                                          # (backs the old one up first)
+#
+# Preview-first reconciliation:
+# every install classifies each skill before touching it — absent, identical,
+# update (source moved, no local edits), local-edits (someone edited an
+# installed file), or unmanaged (a directory we never installed). --dry-run
+# prints that classification and the exact files that would change, and writes
+# nothing. Files inside a managed skill that the repo does not ship are NEVER
+# deleted, so a local extension survives every update. Anything replaced that
+# held local edits is copied to <client>/skills-backup/<name> first, so every
+# destructive step is recoverable.
 #
 # Orphan pruning (the permanent fix for "obsolete skill remains active"):
 # every skill this script installs is stamped with a .ai-devops-managed marker
@@ -21,6 +33,13 @@
 # touched. config/retired-skills.txt is a one-time migration list covering
 # skills ai-devops installed BEFORE markers existed; nothing needs to be added
 # to it going forward.
+#
+# The marker also records "<sha256>  <path>" for every file this script wrote.
+# That record is what tells a local edit apart from a plain source update: if an
+# installed file no longer hashes to what we wrote, a human changed it. Markers
+# written before this existed are empty; an empty marker is still proof of
+# ownership, but a differing skill under one is treated as locally edited (and
+# therefore backed up) because there is no record to prove otherwise.
 #
 # - Claude skills:  skills/claude/<name>/ + skills/shared/<name>/ -> ~/.claude/skills/<name>/
 # - Codex skills:   skills/codex/<name>/ + skills/shared/<name>/ -> ~/.codex/skills/<name>/
@@ -54,14 +73,18 @@ CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 DRY_RUN=false
 KEEP_ORPHANS=false
+ADOPT_GLOBALS=false
 
 usage() {
   cat <<'EOF'
-Usage: ai-install-skills [--dry-run] [--keep-orphans]
+Usage: ai-install-skills [--dry-run] [--keep-orphans] [--adopt-globals]
 
   --dry-run        Show every planned action without changing files.
   --keep-orphans   Leave retired/unknown skills active instead of moving them
                    into <client>/skills-quarantine/ (default is to quarantine).
+  --adopt-globals  Replace an installed global that differs from the repo copy.
+                   Without this flag a differing global is never overwritten.
+                   The old file is copied to <client>/globals-backup/ first.
 EOF
 }
 
@@ -69,6 +92,7 @@ while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
     --keep-orphans) KEEP_ORPHANS=true ;;
+    --adopt-globals) ADOPT_GLOBALS=true ;;
     # Deprecated: pruning is now the default and needs no flag. Accepted so
     # older docs, scripts and muscle memory do not fail.
     --migrate-obsolete) ;;
@@ -82,10 +106,159 @@ run() { if $DRY_RUN; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; el
 
 MARKER=".ai-devops-managed"
 
-# Stamp an installed skill as ours, so a later run may retire it. Vendor skills
-# in the same root never get this file and are therefore never touched.
-mark_managed() {
-  if $DRY_RUN; then echo "[dry-run] touch $1/$MARKER"; else : > "$1/$MARKER"; fi
+# --- reconciliation primitives ---------------------------------------------
+# Every write below goes through do_write, so --dry-run is a property of the
+# engine and not something each call site has to remember.
+
+do_write() { if $DRY_RUN; then return 0; fi; "$@"; }
+
+# Hash every file in a directory in ONE pass. Per-file `sha256sum` calls made a
+# single install take about 8 seconds on Windows, where spawning a process is
+# expensive; one pass per directory brings it back under a second.
+# Output: "<sha256> <relative path>", marker excluded.
+hash_tree() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  (cd "$dir" && find . -type f ! -name "$MARKER" -print0 |
+     xargs -0 -r sha256sum 2>/dev/null |
+     awk '{ h = $1; sub(/^[0-9a-fA-F]+ [ *]/, ""); sub(/^\.\//, ""); print h, $0 }')
+}
+
+# Load a "<sha> <path>" listing into an associative array named by $1.
+load_hashes() {
+  local -n _map="$1"; local path hash
+  _map=()
+  while read -r hash path; do
+    [[ -n "${path:-}" ]] && _map["$path"]="$hash"
+  done
+}
+
+# Load a marker's records the same way. A legacy marker has none, which is the
+# signal that we cannot prove who changed an installed file.
+load_marker() {
+  local -n _rec="$1"; local file="$2" hash path
+  _rec=()
+  [[ -f "$file" ]] || return 0
+  while read -r hash path; do
+    [[ "$hash" == \#* || -z "${path:-}" ]] && continue
+    _rec["$path"]="$hash"
+  done < "$file"
+}
+
+# Stamp an installed skill as ours AND record what we wrote, so a later run can
+# tell a local edit from a source update. Vendor skills in the same root never
+# get this file and are therefore never touched.
+write_marker() {
+  local dst="$1" path
+  $DRY_RUN && return 0
+  {
+    echo "# ai-devops managed skill. Rewritten on every install; do not edit."
+    echo "# <sha256>  <path relative to this skill directory>"
+    for path in "${!SRC_HASHES[@]}"; do printf '%s  %s\n' "${SRC_HASHES[$path]}" "$path"; done | LC_ALL=C sort -k2
+  } > "$dst/$MARKER"
+}
+
+# Copy an installed skill somewhere recoverable before overwriting it.
+backup_skill() {
+  local dst="$1" client_home="$2" name="$3" backup="$2/skills-backup/$3"
+  echo "    backup: $dst -> $backup"
+  do_write mkdir -p "$client_home/skills-backup"
+  do_write rm -rf "$backup"
+  do_write cp -a "$dst" "$backup"
+}
+
+# Write the changed source files over an installed skill WITHOUT touching files
+# the repo does not ship. That is what keeps a local extension alive across an
+# update; the old `rm -rf` destroyed it silently.
+sync_skill_files() {
+  local src="$1" dst="$2" entry path
+  do_write mkdir -p "$dst"
+  for entry in "${CHANGED[@]:-}"; do
+    [[ -n "$entry" ]] || continue
+    if [[ "$entry" == -* ]]; then
+      # Only files WE installed that the repo has since dropped.
+      path="${entry#-}"
+      do_write rm -f "$dst/$path"
+    else
+      do_write mkdir -p "$dst/$(dirname "$entry")"
+      do_write cp -a "$src/$entry" "$dst/$entry"
+    fi
+  done
+}
+
+# Classify one skill into STATE, and fill SRC_HASHES, RECORDS and CHANGED for
+# the caller. Sets a variable rather than echoing so it can run in this shell —
+# a command substitution would throw the arrays away with the subshell.
+# States: absent | identical | update | local-edits | unmanaged.
+#   update      source moved, nothing edited locally
+#   local-edits an installed file no longer hashes to what we wrote (or the
+#               marker is legacy, so nothing can prove otherwise)
+#   unmanaged   a directory of that name exists that we never installed
+classify_skill() {
+  local src="$1" dst="$2" path edited=0
+  load_hashes SRC_HASHES < <(hash_tree "$src")
+  CHANGED=()
+  RECORDS=()
+  [[ -d "$dst" ]] || { STATE=absent; return; }
+  [[ -f "$dst/$MARKER" ]] || { STATE=unmanaged; return; }
+  load_hashes DST_HASHES < <(hash_tree "$dst")
+  load_marker RECORDS "$dst/$MARKER"
+
+  for path in "${!RECORDS[@]}"; do
+    [[ "${DST_HASHES[$path]:-}" == "${RECORDS[$path]}" ]] || edited=1
+  done
+  for path in "${!SRC_HASHES[@]}"; do
+    [[ "${DST_HASHES[$path]:-}" == "${SRC_HASHES[$path]}" ]] || CHANGED+=("$path")
+  done
+  for path in "${!RECORDS[@]}"; do
+    [[ -n "${SRC_HASHES[$path]:-}" ]] && continue
+    [[ -n "${DST_HASHES[$path]:-}" ]] && CHANGED+=("-$path")
+  done
+
+  ((${#CHANGED[@]})) || { STATE=identical; return; }
+  if ((edited)) || ((${#RECORDS[@]} == 0)); then STATE=local-edits; else STATE=update; fi
+}
+
+# Reconcile one skill. Prints one classified line per skill, always — this IS
+# the preview, and it is identical in --dry-run and in a real run.
+reconcile_skill() {
+  local src="$1" dst_root="$2" name="$3" label="$4" client_home="$5"
+  local dst="$dst_root/$name"
+  declare -gA SRC_HASHES DST_HASHES RECORDS
+  declare -ga CHANGED
+  STATE=
+  classify_skill "$src" "$dst"
+  case "$STATE" in
+    identical)
+      echo "  = $name ($label) up to date"
+      # One-time upgrade of a legacy marker so the NEXT run can tell a local
+      # edit apart. Writes only the marker, and only once.
+      ((${#RECORDS[@]})) || write_marker "$dst"
+      return 0
+      ;;
+    absent)
+      echo "  + $name ($label) install"
+      CHANGED=("${!SRC_HASHES[@]}")
+      sync_skill_files "$src" "$dst"
+      ;;
+    update)
+      echo "  ~ $name ($label) update, ${#CHANGED[@]} file(s): ${CHANGED[*]}"
+      sync_skill_files "$src" "$dst"
+      ;;
+    local-edits)
+      echo "  ! $name ($label) LOCAL EDITS — backing up, then updating: ${CHANGED[*]}" >&2
+      backup_skill "$dst" "$client_home" "$name"
+      sync_skill_files "$src" "$dst"
+      ;;
+    unmanaged)
+      echo "  ! $name ($label) exists but ai-devops never installed it — backing up, then adopting" >&2
+      backup_skill "$dst" "$client_home" "$name"
+      do_write rm -rf "$dst"
+      CHANGED=("${!SRC_HASHES[@]}")
+      sync_skill_files "$src" "$dst"
+      ;;
+  esac
+  write_marker "$dst"
 }
 
 # Names ai-devops installed before markers existed (see config/retired-skills.txt).
@@ -119,34 +292,24 @@ check_shared_collisions() {
 
 count_skills() { skill_names "$1" | awk 'END { print NR + 0 }'; }
 
-echo "Installing skills from $REPO_ROOT/skills/claude -> $CLAUDE_HOME/skills"
-check_shared_collisions
-run mkdir -p "$CLAUDE_HOME/skills"
-for d in "$REPO_ROOT"/skills/claude/*/; do
-  name="$(basename "$d")"
-  [[ -f "$d/SKILL.md" ]] || continue
-  run rm -rf "$CLAUDE_HOME/skills/$name"
-  run cp -a "$d" "$CLAUDE_HOME/skills/$name"
-  mark_managed "$CLAUDE_HOME/skills/$name"
-  echo "  + $name"
-done
-claude_count="$(count_skills "$REPO_ROOT/skills/claude")"
-
 install_skill_tree() {
-  local src_root="$1" dst_root="$2" label="$3"
+  local src_root="$1" dst_root="$2" label="$3" client_home="$4"
   [[ -d "$src_root" ]] || return 0
   for d in "$src_root"/*/; do
     [[ -f "$d/SKILL.md" ]] || continue
     local name
     name="$(basename "$d")"
-    run rm -rf "$dst_root/$name"
-    run cp -a "$d" "$dst_root/$name"
-    mark_managed "$dst_root/$name"
-    echo "  + $name ($label)"
+    reconcile_skill "${d%/}" "$dst_root" "$name" "$label" "$client_home"
   done
 }
 
-install_skill_tree "$REPO_ROOT/skills/shared" "$CLAUDE_HOME/skills" "shared"
+echo "Installing skills from $REPO_ROOT/skills/claude -> $CLAUDE_HOME/skills"
+check_shared_collisions
+run mkdir -p "$CLAUDE_HOME/skills"
+install_skill_tree "$REPO_ROOT/skills/claude" "$CLAUDE_HOME/skills" "Claude" "$CLAUDE_HOME"
+claude_count="$(count_skills "$REPO_ROOT/skills/claude")"
+
+install_skill_tree "$REPO_ROOT/skills/shared" "$CLAUDE_HOME/skills" "shared" "$CLAUDE_HOME"
 shared_count="$(count_skills "$REPO_ROOT/skills/shared")"
 echo "$claude_count Claude skills + $shared_count shared skills installed for Claude."
 
@@ -205,8 +368,13 @@ prune_orphan_skills() {
 prune_orphan_skills "$CLAUDE_HOME" "Claude" \
   "$REPO_ROOT/skills/claude" "$REPO_ROOT/skills/shared"
 
+# A global is the one file that carries per-machine additions, so replacing it
+# needs an explicit managed boundary: --adopt-globals. Without that flag a
+# differing global is reported and left alone, exactly as before. With it, the
+# installed copy is backed up first and the replacement is announced.
 install_global() {
-  local src="$1" dst="$2" label="$3"
+  local src="$1" dst="$2" label="$3" backup_dir
+  backup_dir="$(dirname "$dst")/globals-backup"
   if [[ ! -f "$dst" ]]; then
     run mkdir -p "$(dirname "$dst")"
     run cp "$src" "$dst"
@@ -214,9 +382,17 @@ install_global() {
     echo "NOTE: append this machine's section from templates/system/machine-atlas.md"
   elif cmp -s "$src" "$dst"; then
     echo "$label already up to date."
+  elif $ADOPT_GLOBALS; then
+    echo "$dst differs — --adopt-globals given, replacing it."
+    echo "    backup: $dst -> $backup_dir/$(basename "$dst")"
+    do_write mkdir -p "$backup_dir"
+    do_write cp "$dst" "$backup_dir/$(basename "$dst")"
+    do_write cp "$src" "$dst"
+    echo "    restore with:  cp \"$backup_dir/$(basename "$dst")\" \"$dst\""
   else
     echo "$dst exists and differs (may contain machine-specific additions)"
     echo "— NOT overwriting. Compare with:  diff \"$dst\" \"$src\""
+    echo "  Replace it deliberately with:  ai-install-skills --adopt-globals"
   fi
 }
 
@@ -228,17 +404,10 @@ install_global "$REPO_ROOT/templates/system/CLAUDE-global.md" \
 if [[ -d "$CODEX_HOME" ]]; then
   echo "Installing Codex skills from $REPO_ROOT/skills/codex -> $CODEX_HOME/skills"
   run mkdir -p "$CODEX_HOME/skills"
-  for d in "$REPO_ROOT"/skills/codex/*/; do
-    name="$(basename "$d")"
-    [[ -f "$d/SKILL.md" ]] || continue
-    run rm -rf "$CODEX_HOME/skills/$name"
-    run cp -a "$d" "$CODEX_HOME/skills/$name"
-    mark_managed "$CODEX_HOME/skills/$name"
-    echo "  + $name"
-  done
+  install_skill_tree "$REPO_ROOT/skills/codex" "$CODEX_HOME/skills" "Codex" "$CODEX_HOME"
   codex_count="$(count_skills "$REPO_ROOT/skills/codex")"
 
-  install_skill_tree "$REPO_ROOT/skills/shared" "$CODEX_HOME/skills" "shared"
+  install_skill_tree "$REPO_ROOT/skills/shared" "$CODEX_HOME/skills" "shared" "$CODEX_HOME"
   echo "$codex_count Codex skills + $shared_count shared skills installed for Codex."
   prune_orphan_skills "$CODEX_HOME" "Codex" \
     "$REPO_ROOT/skills/codex" "$REPO_ROOT/skills/shared"

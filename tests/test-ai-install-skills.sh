@@ -34,7 +34,7 @@ run_installer() {
     bash "$fixture/bin/ai-install-skills" "$@"
 }
 
-echo "1/5 shared directory absent"
+echo "1/9 shared directory absent"
 fixture="$TMP_ROOT/absent/repo"; claude="$TMP_ROOT/absent/claude"; codex="$TMP_ROOT/absent/codex"
 make_fixture "$fixture"
 rm -rf "$fixture/skills/shared"
@@ -43,7 +43,7 @@ assert_file "$claude/skills/client-claude/SKILL.md"
 assert_file "$codex/skills/client-codex/SKILL.md"
 grep -Fq '1 Claude skills + 0 shared skills installed for Claude.' <<<"$output" || fail "wrong absent-shared count"
 
-echo "2/5 dual-client install and counts"
+echo "2/9 dual-client install and counts"
 fixture="$TMP_ROOT/dual/repo"; claude="$TMP_ROOT/dual/claude"; codex="$TMP_ROOT/dual/codex"
 make_fixture "$fixture"
 output="$(run_installer "$fixture" "$claude" "$codex")"
@@ -52,7 +52,7 @@ assert_file "$codex/skills/shared-one/SKILL.md"
 grep -Fq '1 Claude skills + 2 shared skills installed for Claude.' <<<"$output" || fail "wrong Claude count"
 grep -Fq '1 Codex skills + 2 shared skills installed for Codex.' <<<"$output" || fail "wrong Codex count"
 
-echo "3/5 dry-run makes no changes"
+echo "3/9 dry-run makes no changes"
 fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"
 make_fixture "$fixture"
 mkdir -p "$codex"
@@ -61,7 +61,7 @@ assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq '[dry-run]' <<<"$output" || fail "dry-run actions not reported"
 
-echo "4/5 collision fails before mutation"
+echo "4/9 collision fails before mutation"
 fixture="$TMP_ROOT/collision/repo"; claude="$TMP_ROOT/collision/claude"; codex="$TMP_ROOT/collision/codex"
 make_fixture "$fixture"
 mkdir -p "$fixture/skills/shared/client-claude"
@@ -85,7 +85,7 @@ assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq "skills/codex" "$TMP_ROOT/collision-codex.out" || fail "Codex collision error missing"
 
-echo "5/5 orphans quarantine by default, marker-scoped"
+echo "5/9 orphans quarantine by default, marker-scoped"
 fixture="$TMP_ROOT/migrate/repo"; claude="$TMP_ROOT/migrate/claude"; codex="$TMP_ROOT/migrate/codex"
 make_fixture "$fixture"
 # Three kinds of installed skill the repo no longer ships:
@@ -138,5 +138,92 @@ for home in "$claude" "$codex"; do
   assert_file "$home/skills-quarantine/synology-sharesync-stuck-triage/SKILL.md"
   assert_file "$home/skills/vendor-skill/SKILL.md"
 done
+
+echo "6/9 reconciliation fixture matrix: absent, identical, extended, conflicting"
+fixture="$TMP_ROOT/matrix/repo"; claude="$TMP_ROOT/matrix/claude"; codex="$TMP_ROOT/matrix/codex"
+make_fixture "$fixture"
+# absent: nothing installed yet -> full install, and the marker records hashes.
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/m1.out" 2>&1
+grep -Fq '+ client-claude (Claude) install' "$TMP_ROOT/m1.out" || fail "absent not classified as install"
+grep -q '^[0-9a-f]\{64\}  SKILL.md$' "$claude/skills/client-claude/.ai-devops-managed" ||
+  fail "marker does not record the installed file hash"
+
+# identical: a second run must classify everything as up to date and write nothing.
+before="$(find "$claude/skills" "$codex/skills" -type f -exec sha256sum {} + | sort)"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/m2.out" 2>&1
+grep -Fq '= client-claude (Claude) up to date' "$TMP_ROOT/m2.out" || fail "identical not classified"
+grep -Fq '~ ' "$TMP_ROOT/m2.out" && fail "second apply reported an update"
+after="$(find "$claude/skills" "$codex/skills" -type f -exec sha256sum {} + | sort)"
+[[ "$before" == "$after" ]] || fail "second apply changed files (not idempotent)"
+
+# locally extended: a file the repo does not ship must survive an update.
+echo 'local note' > "$claude/skills/client-claude/LOCAL-NOTES.md"
+printf '%s\n' '---' 'name: client-claude' 'description: test v2' '---' \
+  > "$fixture/skills/claude/client-claude/SKILL.md"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/m3.out" 2>&1
+grep -Fq '~ client-claude (Claude) update' "$TMP_ROOT/m3.out" || fail "source change not classified as update"
+assert_file "$claude/skills/client-claude/LOCAL-NOTES.md"
+grep -Fq 'description: test v2' "$claude/skills/client-claude/SKILL.md" || fail "update did not land"
+assert_absent "$claude/skills-backup/client-claude"
+
+# locally conflicting: an edited installed file is backed up before replacement.
+echo 'hand edited' >> "$claude/skills/client-claude/SKILL.md"
+printf '%s\n' '---' 'name: client-claude' 'description: test v3' '---' \
+  > "$fixture/skills/claude/client-claude/SKILL.md"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/m4.out" 2>&1
+grep -Fq 'LOCAL EDITS' "$TMP_ROOT/m4.out" || fail "local edit not detected"
+grep -Fq 'hand edited' "$claude/skills-backup/client-claude/SKILL.md" || fail "local edit not backed up"
+grep -Fq 'description: test v3' "$claude/skills/client-claude/SKILL.md" || fail "conflicting update did not land"
+assert_file "$claude/skills-backup/client-claude/LOCAL-NOTES.md"
+
+echo "7/9 unmanaged directory is backed up before adoption, dropped files removed"
+fixture="$TMP_ROOT/unmanaged/repo"; claude="$TMP_ROOT/unmanaged/claude"; codex="$TMP_ROOT/unmanaged/codex"
+make_fixture "$fixture"
+mkdir -p "$claude/skills/client-claude"
+echo 'someone elses copy' > "$claude/skills/client-claude/SKILL.md"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/u1.out" 2>&1
+grep -Fq 'ai-devops never installed it' "$TMP_ROOT/u1.out" || fail "unmanaged directory not reported"
+grep -Fq 'someone elses copy' "$claude/skills-backup/client-claude/SKILL.md" || fail "unmanaged copy not backed up"
+# A file we installed and the repo later dropped is removed; unowned files are not.
+echo 'x' > "$fixture/skills/claude/client-claude/EXTRA.md"
+run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
+assert_file "$claude/skills/client-claude/EXTRA.md"
+rm "$fixture/skills/claude/client-claude/EXTRA.md"
+echo 'mine' > "$claude/skills/client-claude/UNOWNED.md"
+run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
+assert_absent "$claude/skills/client-claude/EXTRA.md"
+assert_file "$claude/skills/client-claude/UNOWNED.md"
+
+echo "8/9 dry-run previews the classification and writes nothing"
+fixture="$TMP_ROOT/preview2/repo"; claude="$TMP_ROOT/preview2/claude"; codex="$TMP_ROOT/preview2/codex"
+make_fixture "$fixture"
+run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
+echo 'hand edited' >> "$claude/skills/client-claude/SKILL.md"
+printf '%s\n' '---' 'name: client-claude' 'description: preview' '---' \
+  > "$fixture/skills/claude/client-claude/SKILL.md"
+before="$(find "$claude" -type f -exec sha256sum {} + | sort)"
+run_installer "$fixture" "$claude" "$codex" --dry-run >"$TMP_ROOT/p1.out" 2>&1
+grep -Fq 'LOCAL EDITS' "$TMP_ROOT/p1.out" || fail "dry-run did not classify the local edit"
+grep -Fq 'backup:' "$TMP_ROOT/p1.out" || fail "dry-run did not name the backup path"
+after="$(find "$claude" -type f -exec sha256sum {} + | sort)"
+[[ "$before" == "$after" ]] || fail "dry-run wrote to disk"
+assert_absent "$claude/skills-backup"
+
+echo "9/9 globals: never clobbered without --adopt-globals, backed up with it"
+fixture="$TMP_ROOT/globals/repo"; claude="$TMP_ROOT/globals/claude"; codex="$TMP_ROOT/globals/codex"
+make_fixture "$fixture"
+run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
+grep -Fq '# test Claude global' "$claude/CLAUDE.md" || fail "global not seeded when absent"
+printf '%s\n' '# test Claude global' '## machine-specific section' > "$claude/CLAUDE.md"
+run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/g1.out" 2>&1
+grep -Fq 'NOT overwriting' "$TMP_ROOT/g1.out" || fail "differing global was not protected"
+grep -Fq 'machine-specific section' "$claude/CLAUDE.md" || fail "global was clobbered by default"
+run_installer "$fixture" "$claude" "$codex" --adopt-globals --dry-run >"$TMP_ROOT/g2.out" 2>&1
+grep -Fq 'machine-specific section' "$claude/CLAUDE.md" || fail "dry-run adopted the global"
+assert_absent "$claude/globals-backup"
+run_installer "$fixture" "$claude" "$codex" --adopt-globals >"$TMP_ROOT/g3.out" 2>&1
+grep -Fq 'machine-specific section' "$claude/globals-backup/CLAUDE.md" || fail "old global not backed up"
+grep -Fq 'machine-specific section' "$claude/CLAUDE.md" && fail "--adopt-globals did not replace the global"
+grep -Fq 'restore with' "$TMP_ROOT/g3.out" || fail "restore hint missing"
 
 echo "PASS: ai-install-skills"

@@ -102,7 +102,14 @@ Installer behavior has lightweight, dependency-free tests:
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
 bash tests/test-codex-trigger-eval.sh
+bash tests/test-installer-parity.sh
 ```
+
+`tests/test-installer-parity.sh` runs BOTH installers against one fixture and
+compares the result: same files, byte-identical `.ai-devops-managed` markers, and
+no phantom "local edits" when one installer refreshes the other's install. It
+skips itself where `pwsh` is not installed. It is slower than the rest because it
+hashes every installed file twice.
 
 `tests/test-codex-trigger-eval.sh` is offline and calls no model. It pins the
 Codex trigger runner's two hard rules (explicit `low`/`medium` effort, read-only

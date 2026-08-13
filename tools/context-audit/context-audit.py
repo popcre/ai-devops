@@ -290,6 +290,12 @@ def installer_capabilities(root: Path) -> dict:
         "orphanQuarantine": r"skills-quarantine",
         "globalNonClobber": r"NOT overwriting|not overwriting local edits",
         "dryRun": r"dry-run|SkillsDryRun",
+        # Step 7 reconciliation. Both installers must classify before writing,
+        # keep a recoverable copy of anything they replace, and require an
+        # explicit flag before replacing a global.
+        "previewClassification": r"local-edits",
+        "recoverableBackup": r"skills-backup",
+        "globalAdoptFlag": r"adopt-globals|AdoptGlobals",
     }
     result = {}
     for label, path in paths.items():
