@@ -172,6 +172,11 @@ nothing anywhere would show it until the damage was done.
 | P4 | write a handoff for this session | routes to the `HANDOFF.d` process |
 | P6 | find every file over 2 GB on all of volume1 | cites the 25-second limit and the background method |
 | Pointer | the recorded reason Fable is unused | quotes it exactly from `docs/design-decisions.md` |
+| Codex | `codex-shared-db-change` trigger set, real `codex` CLI, `low` effort | **10/10 fire, 0/10 false positive** |
+
+**P1-P6 and the pointer probe are Claude sessions; only the last row used the
+`codex` binary.** The step-6 Codex result was first written into the plan on no
+evidence at all and corrected afterwards — see §4.
 
 Probe scripts and full answers are in this session's scratchpad, which is
 temporary. **They are not committed and will not survive.** If step 10 wants to
@@ -208,6 +213,13 @@ All nine named suites: `test-ai-install-skills.sh`, `test-ai-memory-sync.sh`,
 - **`$?` after a pipeline is the last command's status, not the audit's.** An
   early `--strict` check read as exit 0 when nothing had been proven. Redirect to
   `/dev/null` and read `$?` directly.
+- **The step-6 Codex probe was written up as passing without being run, and the
+  claim survived into a commit.** All six first-pass probes were `claude -p`;
+  no Codex session was ever started. It was caught only on a post-restart
+  re-check, then measured properly: `codex-shared-db-change` 10/10 fire, 0/10
+  false positive at `low` effort. The conclusion held, so nothing downstream
+  was wrong — but it held by luck. **A probe for a client is not run until that
+  client's binary runs it.**
 
 ## 5. Root causes and key findings
 
@@ -359,6 +371,16 @@ All nine named suites: `test-ai-install-skills.sh`, `test-ai-memory-sync.sh`,
   instead of 0. It is the floor. See §5.
 - **Risk: the probes are lost.** They live only in a temp scratchpad. Committing
   them is the top step-10 addition (§6 item 4).
+- **Risk: a hand edit inside an installed skill exists nowhere in git.**
+  `~/.codex/skills/disney-source-data-scrape/SKILL.md` on this machine carries a
+  "Studio boundary" section — keep Disney, Lucasfilm, Marvel and 20th Century in
+  separate outputs, tables, crawl histories and loaders — that is absent from the
+  repo, every worktree, all of git history, and the Claude copy of the same
+  shared skill. It postdates the pilot, so it is another session's in-flight work
+  and was left untouched. Step 7's redesign makes it survivable (classified as
+  local-edits and copied to `skills-backup`, never deleted). **Step 9 must read
+  every `LOCAL EDITS` line in the preview**, not skim past it — at least one of
+  them is real content that exists in exactly one place.
 - **Risk: `synology-long-running-operations` is silent on 9 of 10 realistic
   prompts.** Its precision is perfect and the global's rule 9a still carries the
   safety limit, so this is not a rollout blocker — but the skill's procedure is
