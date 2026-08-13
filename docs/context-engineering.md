@@ -301,11 +301,34 @@ the other.
 The first Codex sets landed on 2026-08-12: `qwen-code.eval.json` (the exact-body
 Claude/Codex pair, since merged into `skills/shared/qwen-code`; one set scores
 both clients) and `codex-shared-db-change.eval.json` (load-bearing — both globals
-name it). `qwen-code` scores **10/10 should-fire, 0/10 should-not-fire**. Getting
+name it). Both now score **10/10 should-fire, 0/10 should-not-fire**. Getting
 there required fixing two detection bugs that first understated and then
 overstated the score; both are described in `tools/skill-trigger-eval/README.md`
 and locked by `tests/test-codex-trigger-eval.sh`. **A trigger score is evidence
 only when its `evidence` field names a command the model chose to run.**
+
+### A description is routing, and it is measurable
+
+`codex-shared-db-change` first scored **8/10**. It missed **its own verbatim
+trigger phrase**, "make db changes the proper way", and it missed Rule 0 schema
+inspection. It was re-tested inside a real app repo on the shared database and
+still missed, so it was not a wrong-repo artifact. A Codex session could have
+changed the shared database without opening the discipline that keeps app repos
+from authoring their own migrations.
+
+Nothing in the audit, the test suites, or `--strict` would ever have surfaced
+that. **Only a written eval set found it.**
+
+The fix was description-only — the name is load-bearing, because both globals
+point at it. The quoted trigger phrases were buried behind a long slash-list of
+object types, so they were moved to the front, `"what columns exist"` was added,
+and a stale sentence claiming Codex has no auto-loaded skills was deleted. The
+description got 64 characters shorter. It now scores **10/10 and 0/10**.
+
+The method matters more than the edit: **change the description, reinstall,
+re-score, and keep the change only if should-fire improves and should-not-fire
+stays at 0.** The runner tests the INSTALLED skill, so an edit that was not
+reinstalled measures nothing.
 
 ### Two duplicate paragraphs are kept on purpose
 

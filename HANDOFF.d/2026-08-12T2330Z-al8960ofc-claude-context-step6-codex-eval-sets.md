@@ -5,10 +5,10 @@
 - **Repo:** `u2giants/ai-devops`. Worked in the worktree
   `C:\repos\ai-devops-worktrees\router-tightened-step-6-2b48cf` on branch
   `claude/router-tightened-step-6-2b48cf`. The commit is on `origin/main`.
-- **Status:** step 6 is **substantially complete, committed, and pushed**
-  (`92d36ff` the opening task, `29ea53f` the merge). Duplicate paragraph groups
-  are 12 → 2. **One safety finding is open and unfixed: `codex-shared-db-change`
-  scores 8/10 (see §5 and §6).** Steps 7, 8, 9, 10 remain, and step 4 still owes
+- **Status:** step 6 is **complete, committed, and pushed** (`92d36ff` the
+  opening task, `29ea53f` the merge, and the shared-db description fix).
+  Duplicate paragraph groups are 12 → 2, and both eval sets score 10/10
+  should-fire and 0/10 should-not-fire. Steps 7, 8, 9, 10 remain, and step 4 owes
   its probes to step 8. The plan is
   [`plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
@@ -20,24 +20,22 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### Blocking — the next session cannot finish without an answer
 
-1. **Nothing is blocking.** Step 6's main task can start immediately. The first
-   thing that genuinely needs Albert is still step 8.
+1. **Nothing is blocking.** Step 7 can start immediately. The first thing that
+   genuinely needs Albert is still step 8.
 
 ### A wrong guess is recoverable, but the rework is wasteful
 
-2. **`codex-shared-db-change` under-fires, and fixing it means editing the
-   routing of the most safety-critical skill Albert has.** It scores 8/10, missing
-   its own verbatim trigger phrase. The obvious fix is to shorten and front-load
-   its ~1,000-character description, but that description is also what stops it
-   firing on unrelated work, and it currently has a perfect 0/10 false-positive
-   record worth protecting.
-   *Recommendation: fix it, but only against a re-score — change the description,
-   re-run the set, and keep the change only if should-fire improves AND
-   should-not-fire stays at 0. Budget about 40 Codex runs, roughly 20 minutes.*
-3. **The always-loaded globals have almost no headroom left: 10 bytes.** Any
-   further step-6 addition to a global warns immediately.
-   *Recommendation: treat 24,713 as frozen for step 6 and let step 10 set the
-   real number. Never raise it to silence a warning.*
+2. **The Claude twin `skills/claude/shared-db-change` has never been measured.**
+   Its Codex counterpart was found under-firing and fixed this session. The Claude
+   one has the same job and is named in the Claude global, but Claude routes
+   through the `Skill` tool, a different mechanism, so **the Codex result does not
+   transfer.**
+   *Recommendation: write the Claude eval set and score it with
+   `skill-trigger-eval.py` before assuming it is fine. Do not "fix" it blind — the
+   Codex fix was only defensible because it was measured before and after.*
+3. **Three of the four load-bearing skills still have no eval set.** See §6 step 1.
+   *Recommendation: write them before step 8, so the pilot has something to
+   compare against.*
 
 ### Not part of this work, and nobody is on it
 
@@ -108,12 +106,15 @@ would have no way to tell that it was the skill rather than the model.
 - **Measured result, reproducible:** `codex-qwen-code` scores **10/10 should-fire
   and 0/10 should-not-fire** against the real `codex` CLI (0.145.0) at `low`
   effort in a read-only sandbox.
-- **`codex-shared-db-change` scores 8/10 should-fire, 0/10 should-not-fire.** The
-  two misses are its own verbatim trigger phrase, "make db changes the proper
-  way", and Rule 0 schema inspection. **Re-tested with
-  `--project C:\repos\popdam3`, a real app repo on the shared database: both
-  still miss.** It is not a wrong-repo artifact. Unfixed on purpose — see §0
-  item 2.
+- **`codex-shared-db-change` scored 8/10, was fixed, and now scores 10/10
+  should-fire and 0/10 should-not-fire.** The two misses were its own verbatim
+  trigger phrase, "make db changes the proper way", and Rule 0 schema inspection.
+  They missed in this repo AND in the `popdam3` app repo, so it was never a
+  wrong-repo artifact. The fix was **description-only** — the name is
+  load-bearing, because both globals point at it. Trigger phrases were moved to
+  the front of a description that had buried them behind a slash-list of object
+  types, `"what columns exist"` was added, and a stale "Codex has no auto-loaded
+  skills" sentence was deleted. 64 characters shorter. Overlap stayed 0.
 
 **Also done, committed, and pushed to `main` as `29ea53f` (step 6's main task).**
 
@@ -225,25 +226,19 @@ the repo. That remains correct until step 8.
 
 These cover the whole remaining plan, steps 6 through 10, in order.
 
-1. **Close the `codex-shared-db-change` finding — the only step-6 work left, and
-   the most important thing on this list.** A Codex session in an app repo can
-   currently be told "make db changes the proper way" and not open the skill that
-   stops app repos authoring their own shared-database migrations. Method:
-   re-score first to confirm 8/10 still holds, edit the DESCRIPTION only (never
-   the name — both globals point at it), re-score, and keep the edit only if
-   should-fire improves and should-not-fire stays 0/10.
+1. **Score the four load-bearing skills the globals name.** Only
+   `codex-shared-db-change` has ever been measured, and it was found under-firing.
+   `synology-long-running-operations`, `shared-db-change` (the Claude twin), and
+   `handoff-writer` have no eval set at all. Write one set each, 10 positive and
+   10 negative, modelled on the two committed sets.
    ```bash
-   python tools/skill-trigger-eval/codex-trigger-eval.py \
-     --skill codex-shared-db-change \
-     --eval-set tools/skill-trigger-eval/codex-shared-db-change.eval.json \
-     --workers 4 --timeout 300
+   bash bin/ai-install-skills            # the runner tests the INSTALLED skill
+   python tools/skill-trigger-eval/codex-trigger-eval.py --skill <name>      --eval-set tools/skill-trigger-eval/<name>.eval.json --workers 4
    ```
-   Reinstall with `bash bin/ai-install-skills` between edits — **the runner tests
-   the INSTALLED skill, not the repo copy**, so an unreinstalled edit measures
-   nothing. Keep global-versus-skill-description overlap at 0.
-   *You'll know it worked when* should-fire is above 8/10, should-not-fire is
-   still 0/10, `--strict` exits 0, and the plan's step-6 drift item 6 can be
-   deleted rather than reworded.
+   Fix by editing the DESCRIPTION only, never the name, and keep an edit only if
+   should-fire improves and should-not-fire stays 0/10.
+   *You'll know it worked when* each load-bearing skill has a committed set and a
+   recorded score, and `--strict` still exits 0 with overlap at 0.
 2. **Optional, and only if a later step needs it: merge another client pair.**
    None is queued. The remaining pairs' bodies genuinely differ, and each would
    need its own eval set written and scored before and after. Do not merge on a
