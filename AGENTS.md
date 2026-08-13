@@ -47,6 +47,7 @@ Then load additional docs only when relevant:
 |---|---|---|
 | Quick repo orientation | `README.md`, `AGENTS.md` | Deep docs under `docs/` unless task requires them |
 | Reduce always-loaded AI context, decide where a rule or fact lives, or work the context-engineering consolidation | `AGENTS.md`, [`docs/context-engineering.md`](docs/context-engineering.md), `plan_context-engineering-consolidation.md` | Global and skill source files unless the task requires them |
+| Fix or continue dotfiles-sync reconciliation of local Grok/Kimi/GLM commands | `AGENTS.md`, [`plan_sync-machine-wrapper-reconciliation.md`](plan_sync-machine-wrapper-reconciliation.md) STATUS first, both sync skills, platform installer, related tests | Do not re-plan from chat or add another per-skill command checklist |
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
 | Add or change configuration, env vars, or model commands | `AGENTS.md`, `docs/configuration.md`, `docs/model-setup.md` (model commands) | Unrelated architecture docs |
 | Understand where machine config lives (skills, SSH, MCP, gcloud, memory, secrets) | `AGENTS.md`, `docs/config-inventory.md` | Unrelated architecture docs |
