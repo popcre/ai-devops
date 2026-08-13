@@ -1,0 +1,16 @@
+# Claude Code permissions that must exist on EVERY machine.
+#
+# One `permissions.allow` entry per line. Blank lines and `#` comments ignored.
+# `bin/ai-claude-permissions` merges these into the USER-level settings file
+# (~/.claude/settings.json), so they cover every project on the machine.
+#
+# This file is additive only: the script never removes an entry a machine
+# already has, and never touches `deny`, `ask`, or anything else in the file.
+# Delete a line here and it simply stops being enforced on the next sync;
+# machines that already have it keep it.
+#
+# Browser page-inspection tools. A session doing visual/UI verification needs
+# these to screenshot and read a rendered page; without them it stops on a
+# permission prompt that nobody is sitting there to answer. Added 2026-08-13.
+mcp__playwright__browser_evaluate
+mcp__claude-in-chrome__javascript_tool

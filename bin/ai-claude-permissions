@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# ai-claude-permissions — make sure the user-level Claude Code settings file
+# allows every tool the toolkit assumes is allowed.
+#
+# WHY THIS EXISTS
+# ---------------
+# Claude Code stops and asks before using a tool that is not on the allow list.
+# In an unattended or delegated session (a subagent doing visual verification,
+# a background task, a headless run) there is nobody there to answer, so the
+# work simply stalls — and the transcript reads like the tool is broken rather
+# than un-permitted. Albert hit this with browser screenshotting: one machine
+# had the permission, the others silently did not.
+#
+# The permissions live in ONE place, `config/claude-permissions.allow` in this
+# repo, and this script merges them into `~/.claude/settings.json`, which is the
+# USER-level file and therefore covers every project on the machine.
+#
+# Strictly additive and idempotent:
+#   - never removes an existing allow entry,
+#   - never touches deny / ask / hooks / env / anything else,
+#   - creates `permissions.allow` when the file has no permissions block,
+#   - creates the settings file itself when it does not exist,
+#   - backs the file up to settings.json.aidevops.bak before the first change.
+#
+# Usage:
+#   ai-claude-permissions              # apply (default)
+#   ai-claude-permissions --check      # report only; exit 1 if anything missing
+#   ai-claude-permissions --dry-run    # same as --check but phrased as a plan
+set -euo pipefail
+
+MODE="apply"
+case "${1:-}" in
+  --check)   MODE="check" ;;
+  --dry-run) MODE="check" ;;
+  -h|--help) sed -n '1,30p' "$0"; exit 0 ;;
+  "")        ;;
+  *) echo "ai-claude-permissions: unknown argument '$1'" >&2; exit 2 ;;
+esac
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ALLOW_FILE="${AI_DEVOPS_PERMISSIONS_FILE:-$REPO_ROOT/config/claude-permissions.allow}"
+
+if [[ ! -f "$ALLOW_FILE" ]]; then
+  echo "ai-claude-permissions: missing $ALLOW_FILE" >&2
+  exit 1
+fi
+
+# WINDOWS HOME-DRIVE TRAP (same rule as bin/ai-install-skills). On some Windows
+# boxes Git Bash's $HOME points at a roaming/network drive (Z:) that Claude Code
+# never reads. Claude Code always uses the Windows profile, so when USERPROFILE
+# is set (Windows only) base the path on it, not on $HOME.
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+else
+  BASE_HOME="$HOME"
+fi
+CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
+SETTINGS="$CLAUDE_HOME/settings.json"
+
+# Pick a JSON runtime. Editing JSON with sed/grep is how settings files get
+# corrupted, so refuse rather than improvise if none is available.
+#
+# `command -v python3` is NOT proof python exists: Windows ships an App Execution
+# Alias stub of that exact name which only prints "Python was not found" and
+# exits non-zero. So actually run each candidate before trusting it.
+RUNTIME=""
+for candidate in ${AI_DEVOPS_JSON_RUNTIME:-python3 python node}; do
+  if command -v "$candidate" >/dev/null 2>&1 \
+     && "$candidate" --version >/dev/null 2>&1; then
+    RUNTIME="$candidate"; break
+  fi
+done
+if [[ -z "$RUNTIME" ]]; then
+  echo "ai-claude-permissions: need python3, python, or node to edit JSON safely" >&2
+  exit 1
+fi
+
+mkdir -p "$CLAUDE_HOME"
+
+run_python() {
+  "$RUNTIME" - "$SETTINGS" "$ALLOW_FILE" "$MODE" <<'PY'
+import json, os, shutil, sys
+
+settings_path, allow_path, mode = sys.argv[1:4]
+
+wanted = []
+with open(allow_path, encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if line and not line.startswith("#"):
+            wanted.append(line)
+
+data = {}
+if os.path.exists(settings_path):
+    with open(settings_path, encoding="utf-8") as fh:
+        raw = fh.read().strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError as exc:
+            # Never rewrite a file we could not parse — that would destroy it.
+            print("ERROR unparseable JSON in %s: %s" % (settings_path, exc))
+            sys.exit(3)
+    if not isinstance(data, dict):
+        print("ERROR %s is not a JSON object" % settings_path)
+        sys.exit(3)
+
+perms = data.get("permissions")
+if not isinstance(perms, dict):
+    perms = {}
+allow = perms.get("allow")
+if not isinstance(allow, list):
+    allow = []
+
+missing = [entry for entry in wanted if entry not in allow]
+if not missing:
+    print("OK all %d required permission(s) already present" % len(wanted))
+    sys.exit(0)
+
+for entry in missing:
+    print("MISSING %s" % entry)
+
+if mode == "check":
+    sys.exit(1)
+
+if os.path.exists(settings_path):
+    shutil.copyfile(settings_path, settings_path + ".aidevops.bak")
+
+perms["allow"] = allow + missing
+data["permissions"] = perms
+with open(settings_path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
+print("ADDED %d permission(s) to %s" % (len(missing), settings_path))
+PY
+}
+
+run_node() {
+  node - "$SETTINGS" "$ALLOW_FILE" "$MODE" <<'JS'
+const fs = require('fs');
+const [settingsPath, allowPath, mode] = process.argv.slice(2);
+
+const wanted = fs.readFileSync(allowPath, 'utf8').split(/\r?\n/)
+  .map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+
+let data = {};
+if (fs.existsSync(settingsPath)) {
+  const raw = fs.readFileSync(settingsPath, 'utf8').trim();
+  if (raw) {
+    try { data = JSON.parse(raw); }
+    catch (e) { console.log(`ERROR unparseable JSON in ${settingsPath}: ${e.message}`); process.exit(3); }
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    console.log(`ERROR ${settingsPath} is not a JSON object`); process.exit(3);
+  }
+}
+
+let perms = data.permissions;
+if (perms === null || typeof perms !== 'object' || Array.isArray(perms)) perms = {};
+let allow = Array.isArray(perms.allow) ? perms.allow : [];
+
+const missing = wanted.filter(e => !allow.includes(e));
+if (missing.length === 0) {
+  console.log(`OK all ${wanted.length} required permission(s) already present`);
+  process.exit(0);
+}
+missing.forEach(e => console.log(`MISSING ${e}`));
+if (mode === 'check') process.exit(1);
+
+if (fs.existsSync(settingsPath)) fs.copyFileSync(settingsPath, settingsPath + '.aidevops.bak');
+perms.allow = allow.concat(missing);
+data.permissions = perms;
+fs.writeFileSync(settingsPath, JSON.stringify(data, null, 2) + '\n');
+console.log(`ADDED ${missing.length} permission(s) to ${settingsPath}`);
+JS
+}
+
+if [[ "$RUNTIME" == "node" ]]; then
+  run_node
+else
+  run_python
+fi

@@ -139,6 +139,16 @@ info "Pinning Git commit identity (and disabling Git's silent auto-guess)"
 "$REPO_ROOT/bin/ai-git-identity"
 
 # --------------------------------------------------------------------------
+# 4.7 Claude tool permissions. Claude Code stops and asks before a tool that is
+#     not on the allow list; in a delegated or unattended session nobody is
+#     there to answer, so the work stalls and looks like a broken tool. The
+#     required entries live in config/claude-permissions.allow and are merged
+#     into the USER-level ~/.claude/settings.json, covering every project.
+# --------------------------------------------------------------------------
+info "Ensuring required Claude tool permissions"
+"$REPO_ROOT/bin/ai-claude-permissions" || warn "Claude permission merge failed; see message above"
+
+# --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
 # --------------------------------------------------------------------------
 # Wires the vault-locked 1Password service-account token, the central mcp.env
