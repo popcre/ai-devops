@@ -12,8 +12,15 @@ is no cloud release, container, or CI/CD. Canonical guide:
   published.
 - **No** hosting platform, Coolify/Supabase app, or project ID.
 - The toolkit is git-cloned to `/worksp/ai-devops` and installed locally with
-  `install.sh`. Access to the host is via ordinary SSH; there is no deploy
+`install.sh`. Access to the host is via ordinary SSH; there is no deploy
   automation over SSH.
+
+Dotfiles sync uses commands-only repair tools for repo-owned Grok, Kimi,
+DeepSeek, and GLM launchers. The shared list is `config/machine-tools.tsv`.
+Use `bin/ai-machine-tools-doctor` to check it, then the matching narrow installer
+in `bin/`. These tools do not change secrets, MCP, SSH, packages, or services.
+The generic executable loop in `install.sh` remains the Ubuntu fresh-install
+owner and is intentionally unchanged.
 
 ## Install
 

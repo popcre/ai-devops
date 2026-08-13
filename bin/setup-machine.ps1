@@ -577,43 +577,15 @@ if (-not $codexRealBin) {
 }
 
 # --------------------------------------------------------------------------
-# 6c. Kimi Code CLI - optional local delegation target
+# 6c. Repo-owned local AI command launchers
 # --------------------------------------------------------------------------
-# Kimi delegation is distributed as a shared skill (`skills/shared/kimi-code-delegation`).
-# It is not an MCP server and has no repo-stored secret. Install both a PowerShell/cmd
-# shim and an extensionless Git Bash launcher for the repo-owned wrapper. A .cmd file
-# alone is not found by Bash when the skill invokes plain `ai-kimi`.
-Step "Kimi Code CLI (optional delegation target)"
-$delegateBinDir = Join-Path $env:USERPROFILE ".local\bin"
-New-Item -ItemType Directory -Force -Path $delegateBinDir | Out-Null
-$gitBashForKimi = @(
-  (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
-  (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
-) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$aiKimiSource = Join-Path $RepoPath "bin\ai-kimi"
-if ($gitBashForKimi -and (Test-Path -LiteralPath $aiKimiSource)) {
-  $homeBash = "/" + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-  $kimiBash = "/" + (($aiKimiSource -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-  @"
-#!/usr/bin/env bash
-# Managed by ai-devops setup-machine.ps1.
-export HOME="$homeBash"
-exec "$kimiBash" "`$@"
-"@ | Set-Content -NoNewline -Encoding ASCII -Path (Join-Path $delegateBinDir "ai-kimi")
-  @"
-@echo off
-rem Managed by ai-devops setup-machine.ps1.
-set "HOME=$env:USERPROFILE"
-"$gitBashForKimi" "$kimiBash" %*
-"@ | Set-Content -Encoding ASCII -Path (Join-Path $delegateBinDir "ai-kimi.cmd")
-  $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-  if (($userPath -split ';') -notcontains $delegateBinDir) {
-    [Environment]::SetEnvironmentVariable("PATH", ($delegateBinDir + ';' + $userPath), "User")
-  }
-  $env:Path = $delegateBinDir + ';' + $env:Path
-  Ok "ai-kimi wrapper installed for PowerShell and Git Bash"
+Step "Local AI command launchers"
+$machineToolsInstaller = Join-Path $RepoPath "bin\install-machine-tools.ps1"
+if (Test-Path -LiteralPath $machineToolsInstaller) {
+  & $machineToolsInstaller -RepoPath $RepoPath
+  Ok "catalog-driven AI command launchers installed"
 } else {
-  Warn "Git Bash or $aiKimiSource is missing; the ai-kimi wrapper could not be installed."
+  Warn "$machineToolsInstaller is missing; local AI commands were not installed."
 }
 if (Get-Command kimi -ErrorAction SilentlyContinue) {
   try {
@@ -627,45 +599,6 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
 } else {
   Warn "Kimi Code CLI not found; the kimi-code-delegation skill is installed, but local Kimi jobs will not run."
   Warn "  Install Kimi Code CLI and run `kimi login` once, then re-run this script."
-}
-
-# --------------------------------------------------------------------------
-# 6d. Grok CLI wrappers - ai-grok-review (read-only) and ai-grok-implement
-# --------------------------------------------------------------------------
-# Both are repo-owned Bash scripts. Without these shims they are only reachable
-# when C:\repos\ai-devops\bin happens to be on the Git Bash PATH, so a session
-# that could not find `ai-grok-implement` hand-composed a raw `grok --worktree`
-# command instead. That command shape is SILENTLY BROKEN in Grok headless mode
-# (the worktree is never created and Grok edits the primary checkout), and on
-# 2026-08-12 it burned ~$0.59 on three cancelled shared-db runs. Same two-shim
-# pattern as ai-kimi: an extensionless launcher for Git Bash plus a .cmd for
-# PowerShell.
-Step "Grok CLI wrappers (ai-grok-review, ai-grok-implement)"
-if ($gitBashForKimi) {
-  $homeBashG = "/" + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-  foreach ($grokWrapper in @("ai-grok-review", "ai-grok-implement")) {
-    $src = Join-Path $RepoPath "bin\$grokWrapper"
-    if (-not (Test-Path -LiteralPath $src)) {
-      Warn "$src is missing; $grokWrapper was not installed."
-      continue
-    }
-    $srcBash = "/" + (($src -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-    @"
-#!/usr/bin/env bash
-# Managed by ai-devops setup-machine.ps1.
-export HOME="$homeBashG"
-exec "$srcBash" "`$@"
-"@ | Set-Content -NoNewline -Encoding ASCII -Path (Join-Path $delegateBinDir $grokWrapper)
-    @"
-@echo off
-rem Managed by ai-devops setup-machine.ps1.
-set "HOME=$env:USERPROFILE"
-"$gitBashForKimi" "$srcBash" %*
-"@ | Set-Content -Encoding ASCII -Path (Join-Path $delegateBinDir "$grokWrapper.cmd")
-    Ok "$grokWrapper installed for PowerShell and Git Bash"
-  }
-} else {
-  Warn "Git Bash is missing; the Grok wrappers could not be installed."
 }
 
 # --------------------------------------------------------------------------

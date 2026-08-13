@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -u
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+catalog=""; platform=""; profile="${USERPROFILE:-}"; target_dir=""; target_override=0
+while (($#)); do
+  case "$1" in
+    --repo-root) repo_root="$2"; shift 2 ;;
+    --catalog) catalog="$2"; shift 2 ;;
+    --platform) platform="$2"; shift 2 ;;
+    --windows-profile) profile="$2"; shift 2 ;;
+    --target-dir) target_dir="$2"; target_override=1; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+catalog="${catalog:-$repo_root/config/machine-tools.tsv}"
+if [[ -z "$platform" ]]; then case "${OSTYPE:-}" in msys*|cygwin*) platform=windows;; *) platform=ubuntu;; esac; fi
+failed=0
+if [[ "$platform" == windows ]]; then
+  [[ -n "$profile" ]] || { echo "ERROR Windows profile is unavailable" >&2; exit 1; }
+  if command -v cygpath >/dev/null 2>&1; then profile="$(cygpath -u "$profile")"; fi
+  target_dir="${target_dir:-$profile/.local/bin}"
+  win_target="$(cygpath -w "$target_dir" 2>/dev/null || printf '%s' "$target_dir")"
+  persisted="$(powershell.exe -NoProfile -Command "[Environment]::GetEnvironmentVariable('PATH','User')" 2>/dev/null | tr -d '\r')"
+  case ";${persisted,,};" in *";${win_target,,};"*) echo "OK persistent User PATH contains $win_target";; *) echo "ERROR persistent User PATH misses $win_target" >&2; failed=1;; esac
+else
+  target_dir="${target_dir:-/usr/local/bin}"
+fi
+while IFS=$'\t' read -r name source form ubuntu provider owner; do
+  [[ -z "${name:-}" || "$name" == \#* ]] && continue
+  if [[ "$platform" == windows ]]; then
+    case "$form" in
+      bash+cmd)
+        [[ -f "$target_dir/$name" ]] || { echo "ERROR missing $name extensionless launcher" >&2; failed=1; }
+        [[ -f "$target_dir/$name.cmd" ]] || { echo "ERROR missing $name .cmd launcher" >&2; failed=1; } ;;
+      cmd-only-external)
+        [[ -f "$target_dir/$name.cmd" ]] || { echo "ERROR missing $name .cmd launcher; owner: $owner" >&2; failed=1; } ;;
+      *) echo "ERROR unsupported Windows form $form for $name" >&2; failed=1 ;;
+    esac
+  elif [[ "$ubuntu" == yes ]]; then
+    if ((target_override)); then
+      [[ -e "$target_dir/$name" ]] || { echo "ERROR missing or broken Ubuntu link: $name" >&2; failed=1; }
+    else
+      [[ -L "$target_dir/$name" && -e "$target_dir/$name" ]] || { echo "ERROR missing or broken Ubuntu link: $name" >&2; failed=1; }
+    fi
+  fi
+done < "$catalog"
+if [[ "$platform" == windows && ":${PATH,,}:" != *":${target_dir,,}:"* ]]; then echo "INFO current shell PATH is stale"; fi
+for provider in grok kimi; do
+  if command -v "$provider" >/dev/null 2>&1; then echo "INFO $provider provider available"; else echo "INFO $provider provider unavailable"; fi
+done
+((failed == 0)) && echo "OK local AI command launchers are current"
+exit "$failed"

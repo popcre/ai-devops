@@ -11,6 +11,18 @@ what manages it, and is it synced?"
 **Audience:** a developer or AI with zero prior context. Terms and paths are
 defined inline.
 
+## Repo-owned local AI commands
+
+`config/machine-tools.tsv` is the one list of skill-taught AI command launchers.
+`bin/ai-machine-tools-doctor` checks that list without calling a model or reading
+credentials. `bin/install-machine-tools.ps1` repairs the Windows Bash and cmd
+launchers in `%USERPROFILE%\.local\bin`; `bin/install-machine-tools.sh` repairs
+catalog links on Ubuntu. Windows `ai-glm.cmd` remains owned by
+`setup-opencode-glm.ps1`. Missing optional provider programs `grok` and `kimi`
+are reported as information, not as broken repo launchers. `ai-install-skills`
+also runs a fail-closed bootstrap check so a sync using an older loaded skill
+cannot quietly claim complete after pulling a newer command catalog.
+
 **One-line summary:** config is spread across **three overlapping sync systems
 plus several things synced by nothing**. `ai-devops` (this repo) is the intended
 long-term single hub; the migration plan is
