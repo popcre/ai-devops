@@ -47,7 +47,7 @@ printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "grok 0.2.118 (stub)"; exit 0 ;;
-  models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.5"; exit 0 ;;
+  models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.6"; exit 0 ;;
   export)    echo "# transcript stub"; exit 0 ;;
 esac
 case "$mode" in
@@ -72,19 +72,19 @@ cat > "$TMP/fixture.json" <<'EOF'
  "thought":"reasoning","sessionId":"019fd4e9-28d9-77c3-81f7-9fc9ca72fa7a",
  "stopReason":"end_turn","num_turns":3,"model":null,
  "usage":{"input_tokens":1440,"cache_read_input_tokens":21248,"total_tokens":22720},
- "modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.1234}
+ "modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0.1234}
 EOF
 cat > "$TMP/cancelled.json" <<'EOF'
 {"text":"I'll read the plan...","sessionId":"019fd4aa-7c5a-7ff2-b29b-258156f06ad3",
  "stopReason":"cancelled","num_turns":6,
- "usage":{"total_tokens":247740},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.25}
+ "usage":{"total_tokens":247740},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0.25}
 EOF
 cat > "$TMP/weird.json" <<'EOF'
 {"text":"x","sessionId":"s","stopReason":"banana","usage":{},"modelUsage":{},"total_cost_usd":0}
 EOF
 cat > "$TMP/endturn.json" <<'EOF'
 {"text":"## Verdict\nAPPROVE","sessionId":"s-endturn","stopReason":"EndTurn","num_turns":1,
- "usage":{"cache_read_input_tokens":10},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0.01}
+ "usage":{"cache_read_input_tokens":10},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0.01}
 EOF
 echo ok > "$TMP/mode"
 
@@ -128,7 +128,7 @@ echo "== max_turns_always_present / permissions_are_fixed =="
 run new t1 --prompt "review this" >/dev/null 2>&1
 ARGV="$(cat "$TMP/argv.txt")"
 check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
-check "new pins the model"                "grep -q -- '--model grok-4.5' '$TMP/argv.txt'"
+check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new denies Edit"                   "grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.txt'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
@@ -220,7 +220,7 @@ ERR="$(run ask t6 --prompt x 2>&1 >/dev/null)"
 check "usage line reports tokens"      "printf '%s' \"\$ERR\" | grep -q 'tokens:'"
 check "usage line reports cached"      "printf '%s' \"\$ERR\" | grep -q 'cached:'"
 check "usage line reports cost"        "printf '%s' \"\$ERR\" | grep -q 'cost:'"
-check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.5'"
+check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.6'"
 
 # 11 ------------------------------------------------------------------------
 echo "== verdict_delimiter_extraction =="
@@ -229,7 +229,7 @@ check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE
 check "narration is stripped"          "! printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
 cat > "$TMP/fixture2.json" <<'EOF'
 {"text":"no delimiter here","sessionId":"s2","stopReason":"end_turn","num_turns":1,
- "usage":{},"modelUsage":{"grok-4.5-build":{}},"total_cost_usd":0}
+ "usage":{},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0}
 EOF
 cp "$TMP/fixture.json" "$TMP/fixture.bak"; cp "$TMP/fixture2.json" "$TMP/fixture.json"
 ERR="$(run new t8 --prompt x 2>&1 >/dev/null)"
