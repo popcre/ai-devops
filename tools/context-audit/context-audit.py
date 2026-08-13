@@ -246,6 +246,22 @@ def link_issues(root: Path, markdown_paths: list[Path]) -> list[dict]:
     return issues
 
 
+def drift_state(source_bytes: bytes, installed_bytes: bytes) -> str:
+    """Say WHY two copies differ, so nobody hunts a content change that is not there.
+
+    Windows checkouts of this repo do not all agree on line endings: a few files
+    carry CRLF in the blob, so `core.autocrlf` leaves them mixed in one checkout
+    and converts them in another. The installer copies bytes, so whichever
+    checkout it ran from decides what is on disk, and the same machine then reads
+    as drifted or clean depending on which checkout you audit from. That is a
+    real difference and it is worth reporting, but it is not a content change and
+    must not be investigated as one.
+    """
+    if source_bytes.replace(b"\r\n", b"\n") == installed_bytes.replace(b"\r\n", b"\n"):
+        return "line-endings-only"
+    return "different"
+
+
 def installed_drift(root: Path, skill_records: list[dict], claude_home: Path | None, codex_home: Path | None) -> list[dict]:
     drift = []
     homes = {"claude": claude_home, "codex": codex_home}
@@ -261,9 +277,11 @@ def installed_drift(root: Path, skill_records: list[dict], claude_home: Path | N
             if not installed.exists():
                 drift.append({"kind": "skill", "client": client, "name": record["name"], "state": "missing"})
             else:
-                digest = hashlib.sha256(installed.read_bytes()).hexdigest()
-                if digest != source_hash:
-                    drift.append({"kind": "skill", "client": client, "name": record["name"], "state": "different"})
+                installed_bytes = installed.read_bytes()
+                if hashlib.sha256(installed_bytes).hexdigest() != source_hash:
+                    source_path = root / record["path"]
+                    state = drift_state(source_path.read_bytes(), installed_bytes) if source_path.exists() else "different"
+                    drift.append({"kind": "skill", "client": client, "name": record["name"], "state": state})
     globals_to_check = (
         ("claude", claude_home, "CLAUDE.md", root / "templates" / "system" / "CLAUDE-global.md"),
         ("codex", codex_home, "AGENTS.md", root / "templates" / "system" / "AGENTS-global-codex.md"),
@@ -274,8 +292,12 @@ def installed_drift(root: Path, skill_records: list[dict], claude_home: Path | N
         installed = home / filename
         if not installed.exists():
             drift.append({"kind": "global", "client": client, "name": filename, "state": "missing"})
-        elif hashlib.sha256(installed.read_bytes()).hexdigest() != hashlib.sha256(source.read_bytes()).hexdigest():
-            drift.append({"kind": "global", "client": client, "name": filename, "state": "different"})
+        else:
+            installed_bytes = installed.read_bytes()
+            source_bytes = source.read_bytes()
+            if hashlib.sha256(installed_bytes).hexdigest() != hashlib.sha256(source_bytes).hexdigest():
+                drift.append({"kind": "global", "client": client, "name": filename,
+                              "state": drift_state(source_bytes, installed_bytes)})
     return drift
 
 
@@ -577,7 +599,12 @@ def summary(report: dict) -> str:
         f"duplicate skill names: {len(report['duplicateSkillNames'])}",
         f"duplicate paragraphs: {len(report['duplicateParagraphs'])}",
         f"broken relative links: {len(report['brokenLinks'])}",
-        f"installed source drift: {len(report['installedDrift'])}",
+        f"installed source drift: {len(report['installedDrift'])}"
+        + (
+            f" ({sum(1 for d in report['installedDrift'] if d['state'] == 'line-endings-only')} line endings only)"
+            if any(d["state"] == "line-endings-only" for d in report["installedDrift"])
+            else ""
+        ),
         f"installer parity differences: {len(report['installerCapabilities']['differences'])}",
         f"missing safety markers: {len(report['safetyMarkerIssues'])}",
         f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
