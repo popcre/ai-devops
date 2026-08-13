@@ -9,17 +9,15 @@
 | 3. Add context-audit tooling and tests | ✅ done | 2026-08-12 | Warning budgets in `tools/context-audit/budgets.json` (warn only, never fail, even under `--strict`); per-category safety-marker reasons, cross-client parity with a divergence allowlist, and global-vs-skill-description overlap added to `tools/context-audit/context-audit.py` plus a `--strict` exit; `tools/skill-trigger-eval/codex-trigger-eval.py` added as the Codex runner (explicit low/medium effort, read-only sandbox, `--print-command` dry run); `tests/test-context-audit.ps1` extended to prove all six safety categories fail individually with a plain reason, parity and stale-allowlist failures, budget warnings that do not fail, and overlap detection; enforcement documented in `docs/context-engineering.md`, `docs/development.md`, and both tool READMEs; real sources pass `--strict` with zero mismatches, zero overlaps, zero budget warnings; all suites in `docs/development.md` plus `tests/test-windows-scripts.sh` pass |
 | 4. Slim the always-loaded global files | 🟡 source done, pilot probes owed | 2026-08-12 (revised in step 5) | Both globals trimmed: 33,311 → 25,764 bytes (22.7%); `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero global-vs-skill-description overlaps; `alwaysLoadedBytes` budget ratcheted to 25,764 (target 23,318 unchanged); every removed passage mapped to its canonical owner in the new "Where the removed global detail now lives" table in `docs/context-engineering.md`; all seven named Bash/PowerShell suites pass. Live Claude/Codex safety-and-routing probes are NOT run: they need the trimmed globals installed, which is step 8. |
 | 5. Turn `AGENTS.md` into a tighter router | ✅ done | 2026-08-12 | Startup-routed 50,729 → 35,972 bytes (29.1%), 632 bytes above the 35,340 target; `AGENTS.md` alone 48,451 → 33,694. Quirk and incident narratives moved verbatim to `docs/design-decisions.md` and `docs/critical-incidents.md`; the GLM/Grok/Kimi router rows now point at the STEP 0 headers and `glm-opencode.md` §5 that already hold the same constraints. `--strict` exits 0 with zero missing safety markers, zero parity mismatches, zero overlaps, zero broken links, zero budget warnings; both budgets ratcheted in all three places; all seven named suites pass |
-| 6. Remove cross-client skill duplication safely | 🟡 opening task done, consolidation open | 2026-08-12 | **Eval sets exist.** `tools/skill-trigger-eval/codex-qwen-code.eval.json` and `codex-shared-db-change.eval.json`, 10 positive + 10 negative each. `codex-qwen-code` scores **10/10 should-fire, 0/10 should-not-fire** against the real `codex` CLI at `low` effort in a read-only sandbox, reproducibly. Two detection bugs in `codex-trigger-eval.py` were found and fixed by that run (escaped path separators understated the score to 0/1; matching command OUTPUT rather than the command overstated it by 4 unearned false positives from this repo's own files). Every hit now records the matching command in an `evidence` field, locked by the new offline `tests/test-codex-trigger-eval.sh`. The stale "Codex has no skills system" sentence in `AGENTS-global-codex.md` is corrected. Always-loaded 24,703 bytes, still under budget; `--strict` exits 0; all seven named suites pass. **Consolidation done: duplicate paragraph groups 12 → 2.** The exact-body Qwen pair (identical `SKILL.md` apart from the name, identical `agents/openai.yaml`) is merged into `skills/shared/qwen-code`; task-triggered text fell 408,341 → 402,831 bytes and the merged skill **still scores 10/10 and 0/10** after installing to both clients, with the old Codex copy quarantined recoverably. The last 2 duplicates are kept deliberately (a credential-incident STOP banner and the handoff self-audit gate) with reasons in `docs/context-engineering.md`. No other pair was merged: their bodies genuinely differ. `docs/codex-skills-usage-guide.md` `--migrate-obsolete` line corrected. **`codex-shared-db-change` fixed and verified: 8/10 → 10/10 should-fire, still 0/10 should-not-fire.** It had been missing its own verbatim trigger phrase. Description-only change (the name is load-bearing), reinstalled and re-scored; overlap stays 0 |
-| 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | Four installed skill drifts found |
+| 6. Remove cross-client skill duplication safely | ✅ done | 2026-08-12 | **Eval sets exist.** `tools/skill-trigger-eval/qwen-code.eval.json` and `codex-shared-db-change.eval.json`, 10 positive + 10 negative each. `qwen-code` scores **10/10 should-fire, 0/10 should-not-fire** against the real `codex` CLI at `low` effort in a read-only sandbox, reproducibly. Two detection bugs in `codex-trigger-eval.py` were found and fixed by that run (escaped path separators understated the score to 0/1; matching command OUTPUT rather than the command overstated it by 4 unearned false positives from this repo's own files). Every hit now records the matching command in an `evidence` field, locked by the new offline `tests/test-codex-trigger-eval.sh`. The stale "Codex has no skills system" sentence in `AGENTS-global-codex.md` is corrected. Always-loaded 24,703 bytes, still under budget; `--strict` exits 0; all seven named suites pass. **Consolidation done: duplicate paragraph groups 12 → 2.** The exact-body Qwen pair (identical `SKILL.md` apart from the name, identical `agents/openai.yaml`) is merged into `skills/shared/qwen-code`; task-triggered text fell 408,341 → 402,831 bytes and the merged skill **still scores 10/10 and 0/10** after installing to both clients, with the old Codex copy quarantined recoverably. The last 2 duplicates are kept deliberately (a credential-incident STOP banner and the handoff self-audit gate) with reasons in `docs/context-engineering.md`. No other pair was merged: their bodies genuinely differ. `docs/codex-skills-usage-guide.md` `--migrate-obsolete` line corrected. **`codex-shared-db-change` fixed and verified: 8/10 → 10/10 should-fire, still 0/10 should-not-fire.** It had been missing its own verbatim trigger phrase. Description-only change (the name is load-bearing), reinstalled and re-scored; overlap stays 0 |
+| 7. Repair installation drift without clobbering local facts | ⬜ open | 2026-08-12 | **"Four installed skill drifts" is STALE** — `bin/ai-install-skills` was run on `al8960ofc` during step 6, so this machine reads `installed source drift: 0`. Re-measure before designing anything. A real obsolete-managed fixture now exists at `~/.codex/skills-quarantine/codex-qwen-code`. Neither global was installed |
 | 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** continue step 6 at its main task, consolidating
-cross-client skill duplication, beginning with the exact-body Qwen pair — its
-eval set now exists and scores 10/10, so it can be re-run before and after any
-merge. Steps 1-3 and 5 are done, step 4's source work is done, and step 6's
-opening task is done. Before each phase, re-read that phase and sections 1, 4, 8,
+**Fresh-session start:** begin with **step 7, repairing installation drift**.
+Steps 1-3, 5, and 6 are done; step 4's source work is done and owes two probes to
+step 8. Read the step-6 drift block first — it resets step 7's drift baseline. Before each phase, re-read that phase and sections 1, 4, 8,
 11, and 13 to catch drift.
 
 **Decisions Albert made on 2026-08-12 (binding, do not re-ask).**
@@ -42,7 +40,7 @@ opening task is done. Before each phase, re-read that phase and sections 1, 4, 8
    **Done on 2026-08-12**, and the stale Codex "no skills system" sentence is
    corrected in the same commit on that evidence. The rest of step 6 is unblocked.
 
-**Drift recorded by step 6 so far (its opening task; the phase is NOT finished).**
+**Drift recorded by step 6 (read before starting step 7).**
 
 1. **`codex-trigger-eval.py` changed shape.** `run_query` now returns
    `(opened, evidence)` rather than a bool, and every result row carries an
@@ -75,6 +73,29 @@ opening task is done. Before each phase, re-read that phase and sections 1, 4, 8
    (`qwen-code.eval.json`). The old installed copy is in
    `~/.codex/skills-quarantine/codex-qwen-code` on `al8960ofc`, recoverable, not
    deleted.
+8. **`bin/ai-install-skills` was RUN on `al8960ofc` twice this session**, to make
+   the merged and re-worded skills real before scoring them. **Step 7's drift
+   baseline on this machine is therefore reset:** installed skills now match
+   source, and the step-7 STATUS line's "four installed skill drifts found" is
+   **stale**. Re-measure before designing anything around it. Only SKILLS were
+   installed — `install_global` seeds a global solely when absent, and both
+   globals exist and differ, so **neither global was touched.** That is still
+   correct until step 8.
+9. **Step 7 now has a real obsolete-managed fixture to test against**, not a
+   synthetic one: `~/.codex/skills-quarantine/codex-qwen-code` on `al8960ofc`,
+   produced by the normal path. Do not delete it before step 7 uses it.
+10. **Step 10 baseline, measured from `C:
+eposi-devops` (CRLF-canonical):**
+   always-loaded **24,703** bytes, startup-routed **35,972**, task-triggered
+   **401,605** across 47 files, duplicate paragraph groups **2**, overlaps **0**.
+   The pre-merge task-triggered figure was only ever measured inside a worktree
+   (408,341), so **do not present the difference as an exact canonical delta.**
+11. **Trigger scores now exist and belong in step 10's before/after.**
+   `qwen-code` 10/10 and 0/10 (unchanged by its merge); `codex-shared-db-change`
+   8/10 → 10/10, 0/10 throughout. Three of the four load-bearing skills the
+   globals name still have **no** eval set: `synology-long-running-operations`,
+   `shared-db-change` (the Claude twin), and `handoff-writer`. Step 8's pilot has
+   nothing to compare those three against.
 
 **Drift recorded by step 5 (read before starting step 6).**
 
