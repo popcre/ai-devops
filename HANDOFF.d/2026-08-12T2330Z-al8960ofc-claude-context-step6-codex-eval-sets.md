@@ -36,11 +36,13 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### Not part of this work, and nobody is on it
 
-4. **`HANDOFF.d/` holds 6 open files, one OVER the 5-file warning line.** The
-   oldest, `2026-08-10T1138Z-albt16-codex-916-rollout.md`, is the powered-off
-   `916` machine rollout and is not this workstream's to close.
-   *Recommendation: Albert decides whether the `916` rollout is still wanted. If
-   it is not, that file can be deleted and the count drops to 5.*
+3. **Nothing. `HANDOFF.d/` is back to 5 open files, at the warning line, not over
+   it.** Albert closed the `916` question on 2026-08-12 by deleting
+   `2026-08-10T1138Z-albt16-codex-916-rollout.md`. **That rollout was never
+   finished** — `916-alien` was unreachable every time it was tested, most
+   recently 2026-08-12. If Albert ever powers that machine on and wants its setup
+   applied, the instructions are recoverable from git history; the file's last
+   commit is `4126fa7`'s parent chain. Do not re-create it speculatively.
 
 ### Already settled — do NOT re-ask
 
@@ -371,7 +373,7 @@ These cover the whole remaining plan, steps 7 through 10, in order.
   work in the primary checkout. Leave them alone. `.ai/` must never be committed.
 - No production, shared-cloud, Supabase, Coolify, NAS, or database mutation is
   part of this plan. No secret read should ever be needed.
-- **`HANDOFF.d/` holds 6 open files, over the 5-file warning line.** See §0 item 4.
+- **`HANDOFF.d/` holds 5 open files, at the warning line.** See §0.
 
 ## 8. Access and environment
 
