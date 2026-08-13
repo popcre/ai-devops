@@ -9,8 +9,7 @@ metadata:
 ---
 
 The remaining **config-consolidation Phase 3** work is specified in
-`plan_phase3-config-consolidation.md` at the root of the `u2giants/ai-devops`
-clone (`C:\repos\ai-devops` on Windows, `/worksp/ai-devops` on Linux; self-contained, 13
+`C:\repos\ai-devops\plan_phase3-config-consolidation.md` (self-contained, 13
 sections, has a STATUS table at the top). Phases 1 and 2 are complete
 (Phase 2 adopted on `t16` and `al8960ofc`; `916` and Ubuntu servers beyond `hetz`
 still need `git pull` + `bin/setup-machine.ps1` / `bin/setup-secrets.sh`).
