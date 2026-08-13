@@ -15,7 +15,9 @@
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** begin with **step 7, repairing installation drift**.
+**Fresh-session start:** first **score the three unmeasured load-bearing skills**
+(Albert's 2026-08-12 gate on step 8, decision 6 below), then **step 7, repairing
+installation drift**.
 Steps 1-3, 5, and 6 are done; step 4's source work is done and owes two probes to
 step 8. Read the step-6 drift block first — it resets step 7's drift baseline. Before each phase, re-read that phase and sections 1, 4, 8,
 11, and 13 to catch drift.
@@ -36,6 +38,17 @@ step 8. Read the step-6 drift block first — it resets step 7's drift baseline.
    not introduce PowerShell 7-only syntax into that child path and do not migrate
    `bin/setup-machine.ps1:187,192` to `pwsh`. Albert does not use 5.1 himself; the
    decision is that the migration is not worth a new machine requirement.
+6. **The three unmeasured load-bearing skills are tested BEFORE the step-8
+   pilot** (Albert, 2026-08-12). `synology-long-running-operations`,
+   `shared-db-change` (the Claude twin, which needs the CLAUDE runner
+   `skill-trigger-eval.py`), and `handoff-writer`. This is a new gate on step 8:
+   the pilot does not start until all three have a committed eval set and a
+   recorded score. Rationale: the fourth one, `codex-shared-db-change`, was
+   measured for the first time on 2026-08-12 and was **broken** — it missed its
+   own verbatim trigger phrase. Nothing else in the repo would ever have caught
+   it. Fix any failure by editing the DESCRIPTION only, never the name, and keep
+   an edit only if should-fire improves while should-not-fire stays at 0/10.
+
 5. **Writing the first Codex trigger eval sets is the opening task of step 6.**
    **Done on 2026-08-12**, and the stale Codex "no skills system" sentence is
    corrected in the same commit on that evidence. The rest of step 6 is unblocked.
@@ -898,7 +911,10 @@ Capture the native PowerShell installer's output and assert that the new
 reconciliation path actually executed; command success alone is insufficient.
 
 **Dependencies:** steps 1-7 committed and all named local Bash/PowerShell suites
-from `docs/development.md` passing. This repo has no GitHub Actions CI.
+from `docs/development.md` passing. This repo has no GitHub Actions CI. **Plus a gate
+added by Albert on 2026-08-12:** `synology-long-running-operations`,
+`shared-db-change`, and `handoff-writer` each have a committed eval set and a
+recorded trigger score before the pilot starts.
 
 **Verification gate:** all safety probes pass, real tasks complete correctly,
 no machine facts disappear, installed hashes/overlays match design, and measured

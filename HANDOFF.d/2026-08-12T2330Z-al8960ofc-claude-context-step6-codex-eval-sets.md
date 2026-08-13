@@ -27,16 +27,7 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### A wrong guess is recoverable, but the rework is wasteful
 
-2. **Three of the four skills Albert's global instructions name have never been
-   tested.** This session measured one of them, `codex-shared-db-change`, and
-   found it opening on only 8 of 10 prompts it should have — including its own
-   trigger phrase. It is fixed. The other three have no test at all:
-   `synology-long-running-operations`, `shared-db-change` (the Claude twin), and
-   `handoff-writer`.
-   *Recommendation: write and score a set for each before step 8, so the pilot has
-   a real before-and-after number instead of a guess. About an hour of model runs,
-   no risk, fully reversible.*
-3. **The Claude twin `skills/claude/shared-db-change` has the same buried wording
+2. **The Claude twin `skills/claude/shared-db-change` has the same buried wording
    the Codex one had, but Claude picks skills a different way**, so the Codex
    result does not transfer and the Claude one may be fine.
    *Recommendation: measure it with `skill-trigger-eval.py` before changing a
@@ -53,6 +44,10 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### Already settled — do NOT re-ask
 
+- **The three unmeasured load-bearing skills are tested BEFORE the step-8 pilot**
+  (Albert, 2026-08-12). `synology-long-running-operations`, `shared-db-change`,
+  and `handoff-writer`. This is now a gate on step 8, recorded in the plan as
+  decision 6 and in step 8's dependencies. It is decided — just do it.
 - **Codex has a skills system.** Measured on 2026-08-12, not assumed. The false
   sentence in the Codex global is corrected. Do not "restore" it.
 - **A Codex trigger counts only when the model RAN a command opening the skill.**
@@ -283,7 +278,8 @@ pwsh -File tests/test-memory-sync-scheduled-task.ps1
 
 These cover the whole remaining plan, steps 7 through 10, in order.
 
-1. **Score the three unmeasured load-bearing skills. Do this before step 8.**
+1. **Score the three unmeasured load-bearing skills. Albert made this a hard gate
+   on step 8 on 2026-08-12 — the pilot does not start until it is done.**
    `synology-long-running-operations`, `shared-db-change` (the Claude twin, which
    needs the Claude runner `skill-trigger-eval.py`, not the Codex one), and
    `handoff-writer`. Write one set each, 10 positive and 10 negative, modelled on
@@ -409,7 +405,8 @@ These cover the whole remaining plan, steps 7 through 10, in order.
   the `evidence` field. If evidence is empty, the number is not usable.
 - **Risk: an under-firing safety skill is invisible.** Only a written eval set
   found the 8/10. Three of the four load-bearing skills still have no set, so the
-  same defect could be sitting in any of them right now, undetected. §6 step 1.
+  same defect could be sitting in any of them right now, undetected. Albert closed
+  this on 2026-08-12 by making the three a gate on step 8. §6 step 1.
 - **Risk (highest, unchanged): a pointer is never followed.** The whole design
   assumes an agent opens `docs/design-decisions.md` or
   `templates/system/handoff-standard.md` when told to. Step 8's probes must test
