@@ -59,9 +59,11 @@ field — dropping a field is what creates collisions.
 
 Hard rules:
 
-- **You may edit only your OWN file.** Never open, edit, reformat, "tidy", merge,
-  or delete another session's `HANDOFF.d/` file. If another session's handoff
-  looks wrong or stale, say so in YOURS.
+- **You may edit only your OWN file.** Never open, edit, reformat, "tidy", or
+  merge another session's `HANDOFF.d/` file. If another session's handoff looks
+  wrong or stale, say so in YOURS. The one exception is retirement: when you
+  FINISH the next step of a workstream you may DELETE the previous step's file,
+  under the successor rule below. Retiring a finished file is not editing it.
 - **Never rewrite the root `HANDOFF.md`.** It is a short static pointer, written
   once, so that "read HANDOFF.md on start" still has one entry point:
 
@@ -113,12 +115,25 @@ migration is still pending.
 
 - When a workstream is **genuinely proven done** (verified, committed, pushed,
   deployed as applicable), **delete its `HANDOFF.d/` file** in the same commit that
-  finishes it. Git history preserves the text. Delete only work you can prove is
-  done — normally only your own.
+  finishes it. Git history preserves the text.
+- **The successor rule — this is what actually stops the pile-up.** A session
+  almost never gets to delete its own file: it writes the handoff *because* the
+  work continues past it. So **the session that finishes the NEXT step of a
+  workstream deletes the previous step's file.** Delete it only when all three
+  are true, and say so in the closing report:
+  1. the predecessor's status line says its work was committed and pushed, and
+     you verified those commits are on `main`;
+  2. every still-open obligation it names is carried forward — into the plan, or
+     into YOUR new file;
+  3. nothing in it is a decision or dead end that exists nowhere else.
+  If any of the three fails, keep it and say which one failed.
 - **Presence = OPEN.** Session start reads only the files that are there.
 - **If `HANDOFF.d/` holds more than 5 files, warn loudly** in the closing report:
   list them oldest-first with dates and ask which are actually finished. Silent
-  accumulation buries a fresh developer under dozens of nine-section essays.
+  accumulation buries a fresh developer under dozens of nine-section essays. In
+  `ai-devops` this is also checked mechanically — `context-audit.py` prints
+  `open handoffs: N` and warns past the threshold, so it never depends on anyone
+  remembering.
 
 ## Two modes
 
@@ -335,7 +350,8 @@ now**. If that is true, the answer is Yes — say it.
 - In a concurrently-edited checkout, stage only your own file and your own hunks;
   never `git add -A` another session's uncommitted work.
 - Your `HANDOFF.d/` file is deleted only when the work it describes is truly
-  complete. Never delete another session's.
+  complete — usually by the session that finishes the next step, under the
+  successor rule. Never delete one whose work you cannot prove landed.
 - Record infra/design decisions with dates so a later session can't contradict them.
 
 ---

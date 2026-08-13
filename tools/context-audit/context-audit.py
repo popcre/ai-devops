@@ -246,6 +246,26 @@ def link_issues(root: Path, markdown_paths: list[Path]) -> list[dict]:
     return issues
 
 
+OPEN_HANDOFF_THRESHOLD = 5
+
+
+def open_handoffs(root: Path) -> list[str]:
+    """Every file in HANDOFF.d/ is an OPEN workstream, by design.
+
+    Retention is supposed to be automatic — the session that finishes the next
+    step of a workstream deletes the previous step's file. In practice a session
+    can rarely prove its OWN work done, so nobody deleted anything and the folder
+    grew. Counting it here makes the threshold mechanical instead of a thing
+    someone has to remember at the end of a long session. It only ever warns:
+    a busy week legitimately has six, and an audit that fails over paperwork is
+    an audit people learn to ignore.
+    """
+    folder = root / "HANDOFF.d"
+    if not folder.is_dir():
+        return []
+    return sorted(posix(path, root) for path in folder.glob("*.md"))
+
+
 def drift_state(source_bytes: bytes, installed_bytes: bytes) -> str:
     """Say WHY two copies differ, so nobody hunts a content change that is not there.
 
@@ -569,6 +589,7 @@ def run(args: argparse.Namespace) -> dict:
             for digest, sources in sorted(duplicate_paragraphs.items()) if len(set(sources)) > 1
         ],
         "brokenLinks": link_issues(root, markdown_paths + [root / "plan_context-engineering-consolidation.md", root / "HANDOFF.md"]),
+        "openHandoffs": open_handoffs(root),
         "installedDrift": installed_drift(root, skill_records, args.claude_home, args.codex_home),
         "installerCapabilities": installer_capabilities(root),
         "safetyMarkers": safety,
@@ -610,7 +631,16 @@ def summary(report: dict) -> str:
         f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
         f"global vs skill-description overlaps: {len(report['globalSkillOverlap'])}",
         f"budget warnings: {report['budgets']['warnings']} (warnings only, never a failure)",
+        f"open handoffs: {len(report['openHandoffs'])} (threshold {OPEN_HANDOFF_THRESHOLD}, warning only)",
     ])
+    if len(report["openHandoffs"]) > OPEN_HANDOFF_THRESHOLD:
+        lines.append(
+            f"HANDOFF WARNING: HANDOFF.d/ holds {len(report['openHandoffs'])} open files, over the "
+            f"{OPEN_HANDOFF_THRESHOLD}-file threshold. Every file there means an OPEN workstream. "
+            "The session that finishes the next step of a workstream deletes the previous step's file "
+            "once its commits are on main and its open obligations are carried forward. "
+            "List them oldest-first and ask which are actually finished. This is a warning, not a failure."
+        )
     for issue in report["safetyMarkerIssues"]:
         lines.append(f"SAFETY: {issue['reason']}")
     for item in report["crossClientParity"]["rules"]:
