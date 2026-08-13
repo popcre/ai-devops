@@ -70,6 +70,8 @@ Run requests only inside the authenticated browser page. Browser-side `fetch` th
 
 For full metadata, use authenticated browser-side `GET /otmmapi/v6/assets` requests in batches of at most 100 asset IDs. A 200-ID full-metadata URL was observed returning an HTML error instead of JSON. Require HTTP 200, JSON content, the expected record count, and exact equality between requested and returned asset-ID sets before saving a batch. Persist compact required metadata rather than multi-gigabyte full response bodies when the output contract does not require every unused field.
 
+The full-metadata request's `selection_context.property_filters.content_type_filters` must contain the exact `content_type` for the requested assets. Group each request by content type. A mixed or wrong content-type filter can return HTTP 200 with only part of the requested ID set. Never accept that partial response; exact requested-versus-returned ID-set equality remains mandatory.
+
 The response provides:
 
 - paged `asset_list` records with 40-character lowercase hexadecimal text asset IDs;
@@ -126,6 +128,7 @@ The SPA can retain stale hidden result views. Bind UI reads to visible elements 
 - Result cards are virtualized or lazy-loaded. Reading the DOM before scrolling to the bottom returns only part of the page.
 - Numbered pagination is grouped. A later page number may not exist until `Next Page` advances the visible group.
 - A page click can finish before its cards refresh. Wait for the first asset ID to differ from the prior page.
+- A newly opened Property result can briefly render `0 items` while the real search is still loading. Wait for the settled result total and visible assets before recording zero or declaring the Property unavailable.
 - The single-page application can leave old hidden totals, cards, and controls in the DOM. A selector that takes the first match can silently read the previous Property.
 - Long browser calls can time out without saving in-memory work. Keep each call bounded and checkpoint to disk after every page or metadata batch.
 - A full-metadata request containing 200 asset IDs can return an HTML error page. Use at most 100 and validate response content before JSON parsing.
@@ -162,6 +165,10 @@ Maintain a private reconciliation summary with, for each licensed business title
 - every explicit caret pair validates and appears in the matching link output;
 - aggregate counts reconcile after deduplication;
 - no licensed row appears in public repositories, commit messages, or pull-request text.
+
+When preparing database-load files, `authorized-assets.json` defines the canonical asset order. Metadata batch numbers and records must follow that exact order in consecutive chunks of at most 100. Matching total counts do not prove batch identity; preserve and verify exact requested and returned ID-set hashes for every batch.
+
+A change in the licensed-title count, including an increase, is a rights-scope change. Before final database approval, record the owner's explicit approval on the new capture using the database's guarded override record. Do not reuse or edit an earlier completed capture, and do not treat a general scrape request as approval for unnamed rights changes.
 
 Keep raw source identities separate from canonical POP records. Reconciliation and promotion are later, idempotent database work. Never infer a missing relationship or manufacture an ID.
 
