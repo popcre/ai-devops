@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: c2fb38ad-dde0-459e-9563-443c4d2c38e1
-  modified: 2026-08-06T17:58:56.647Z
+  modified: 2026-07-27T21:24:18.821Z
 ---
 
 Applying `u2giants/shared-db` migrations to the shared backend
@@ -14,12 +14,6 @@ Applying `u2giants/shared-db` migrations to the shared backend
 - The **Supabase MCP is read-only** in this environment — `apply_migration`
   fails with "Cannot apply migration in read-only mode." Use `execute_sql` only
   for read-only validation. DDL goes through GitHub, not MCP.
-- **The Supabase MCP is connected to PRODUCTION `qsllyeztdwjgirsysgai`, not
-  preview** (confirmed 2026-08-06). This misleads: querying a preview-only
-  object such as `plm.taxonomy_parallel_observation` returns
-  `42P01 relation does not exist`, which reads as a broken schema but actually
-  means *wrong database*. Phase 6 objects exist ONLY on preview. There is no MCP
-  route to preview — use the workflow lanes or the Management API.
 - **The workflow is only safe when the backlog is empty.** It runs a plain
   `supabase db push`, which promotes EVERY pending file, not just yours. When
   others are pending (deliberately-held ColdLion work, etc.), use the bounded
