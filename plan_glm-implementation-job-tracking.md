@@ -93,7 +93,8 @@ Planning state:
 - Correct identity: `Albert Hazan <u2giants@users.noreply.github.com>`.
 - Unrelated untracked paths: `.ai/` and `docs/claude-remote-control-hardening-v2.md`.
   Preserve them and never stage them with this work.
-- The open handoff `HANDOFF.d/2026-08-10T1138Z-albt16-codex-916-rollout.md` is unrelated.
+- The `916` rollout handoff that used to sit in `HANDOFF.d/` was unrelated to this
+  plan, and Albert deleted it on 2026-08-12 with that rollout unfinished.
 
 What works and must remain:
 
