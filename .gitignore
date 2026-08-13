@@ -88,3 +88,10 @@ __pycache__/
 # "Filename too long", which aborted setup on 4837 and left a broken clone. Untracked
 # here so a fresh clone never writes these paths again.
 claude_chats/
+
+# === Delegate review output (never committed) ===
+# `ai-kimi` refuses to write a review file unless this path is git-ignored, so
+# without this line every Kimi review is lost with a warning. Same for the other
+# delegate wrappers that stage output here. Reviews worth keeping get copied
+# into docs/ by hand.
+.ai/reviews/

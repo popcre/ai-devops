@@ -6,10 +6,10 @@ notes; it does not repeat AGENTS.md.
 
 ## Context / ignore
 
-- `.claudeignore` controls what Claude Code ignores here. Keep it aligned with the
-  "What to ignore" section of `AGENTS.md`.
-- Do not load every `.md` file. Use the **Documentation map** in `AGENTS.md` to
-  pull only the docs a task needs.
+- `.claudeignore` controls what Claude Code ignores here. Keep it aligned with
+  the "What to ignore" section of `AGENTS.md`.
+- Do not load every `.md` file. Use the **Documentation map** in `AGENTS.md` for
+  only the docs a task needs.
 
 ## Repo-specific behaviors
 
@@ -27,9 +27,9 @@ notes; it does not repeat AGENTS.md.
   `skills/codex/` → Codex only, `skills/shared/` → **both**. So **every new skill
   is authored in `skills/shared/` unless it is genuinely client-specific** (uses
   a tool only one client has, or drives the other client — e.g. `codex-handoff`).
-  Do not put a general skill in `skills/claude/` and force Albert to ask for it in
-  Codex later. Default = shared, no exceptions unless you can name the
-  client-specific reason. A name may live in `shared/` OR a client tree, never
+  Putting a general skill in `skills/claude/` just forces Albert to ask for it in
+  Codex later. No exceptions unless you can name the client-specific reason.
+  A name may live in `shared/` OR a client tree, never
   both (the installer fails closed on the collision).
 
 ## Commits
@@ -37,7 +37,8 @@ notes; it does not repeat AGENTS.md.
 - Commit only when asked.
 - This repo pushes with a GitHub `@users.noreply.github.com` email (email-privacy
   protection blocks the private gmail address). Keep using the noreply email.
-- End commit messages with the `Co-Authored-By: Claude Opus 4.8` trailer.
+- End commit messages with a `Co-Authored-By: Claude <model>` trailer naming the
+  model that did the work — a record, not a remembered version.
 
 ## SSH / deployment
 
