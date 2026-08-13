@@ -206,4 +206,6 @@ complete), `ai-devops/plan_phase3-config-consolidation.md` (**the remaining Phas
 work — read this when Albert asks "what's left on the config consolidation?"**),
 `ai-devops/docs/mcp-1password-rate-limit-hardening.md` (why the launchers cache),
 `ai-devops/HANDOFF.md` (pointer) plus the OPEN files in `ai-devops/HANDOFF.d/`,
-`ai-devops/memory/README.md`.
+`ai-devops/memory/README.md`, and
+`ai-devops/plan_sync-machine-wrapper-reconciliation.md` (open plan; read STATUS
+first before changing local AI-command reconciliation).
