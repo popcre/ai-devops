@@ -30,6 +30,7 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine (never clobbers local edits) | `bin/ai-install-skills` |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
+| Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor` | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
@@ -43,6 +44,15 @@ clone + `./install.sh` on Ubuntu).
 ## Procedure
 1. `git pull --ff-only` in the repo. On failure (local changes/diverged), STOP
    and report — never force or reset.
+1b. **Reconcile local AI commands before installing skills.** Run
+   `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
+   Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   only `ai-glm` is missing, use the existing GLM installer in step 2b because
+   it owns that command and service. Stop if the final doctor is nonzero. Say
+   "Local AI commands already current" or name the launchers installed. On
+   Windows, add `%USERPROFILE%\.local\bin` to this process PATH and use `hash -r`
+   in Git Bash after repair. Never use the broad machine setup for this repair.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip.** Report each item
    present/missing:
    - `~/.config/ai-devops/op-service-account` (vault-locked 1Password SA token file).
@@ -105,7 +115,7 @@ clone + `./install.sh` on Ubuntu).
    each rule section present in the template but absent locally, append it
    verbatim (append-only — never rewrite or reorder the local file). Report what
    you appended. This mirrors step 4 of the Claude `sync-dotfiles` skill.
-4b. `bin/ai-claude-permissions` — merge the permissions in
+4c. `bin/ai-claude-permissions` — merge the permissions in
    `config/claude-permissions.allow` into the user-level `~/.claude/settings.json`,
    covering every project on the machine. Run it here too even though this is the
    Codex skill: the gap is per-MACHINE, not per-agent, and Albert expects one

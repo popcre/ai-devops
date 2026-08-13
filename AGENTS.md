@@ -205,7 +205,7 @@ names.
 | Toolkit home | `/worksp/ai-devops` | fixed convention | **Never** `/opt/ai-devops`. Referenced by all scripts/docs |
 | Machine config dir | `/etc/ai-devops/` | `install.sh`, `server.env` | Holds real `models.env` + `server.env` (not in repo) |
 | Log dir | `/var/log/ai-devops/` | `install.sh`, `server.env` | Created on install; currently unused by scripts |
-| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`, `ai-grok-implement`, `ai-kimi`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
+| Installed commands | `/usr/local/bin/ai-*` | `install.sh` symlinks; sync reconciliation catalog in `config/machine-tools.tsv` | `ai-devops`, `ai-workspace-status`, `ai-codex-review`, `ai-model-call`, `ai-run-task`, `ai-glm`, `ai-grok-review`, `ai-grok-implement`, `ai-kimi`, `ai-deepseek-agent`, `ai-machine-tools-doctor`, `ai-install-skills`, `ai-gcloud-dflow`, `ai-sync-memory` |
 | Workflow stages | `plan`, `plan-review`, `implement`, `diff-review`, `test`, `security`, `final` | `bin/ai-model-call`, `templates/prompts/` | Stage → prompt → model-command mapping |
 | Model command vars | `OPUS48_HIGH_REASONING_CMD`, `OPUS_REVIEW_CMD`, `GPT55_CMD`, `CODEX_CMD`, `TESTER_CMD` | `config/models.env.example` → `/etc/ai-devops/models.env` | Non-secret command strings |
 | Run/review artifacts | `.ai/runs/`, `.ai/reviews/` (inside onboarded app repos) | `ai-run-task`, `ai-codex-review` | Git-ignored; created in the target repo, not here |

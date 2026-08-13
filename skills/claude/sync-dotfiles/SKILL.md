@@ -32,6 +32,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
+| Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
@@ -48,6 +49,15 @@ clone + `./install.sh` (Ubuntu) first.
 1. **Pull the hub.** In the repo: `git pull --ff-only`. If it fails (local
    changes / diverged history), STOP and report — do not force, do not `git
    reset`. Tell the user to resolve or ask to inspect.
+1b. **Reconcile local AI commands before installing skills.** Run
+   `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
+   Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   only `ai-glm` is missing, use the existing GLM installer in step 2b because
+   it owns that command and service. Stop if the final doctor is nonzero. Say
+   "Local AI commands already current" or name what was installed. On Windows,
+   update this process PATH and run `hash -r` in Git Bash after repair. Never
+   use the broad machine setup for this repair.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip this.** Report each
    item as present or missing:
    - `~/.config/ai-devops/op-service-account` (the vault-locked 1Password

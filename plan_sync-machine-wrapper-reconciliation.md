@@ -5,13 +5,13 @@
 | Step | Status | Date | Evidence |
 |---|---|---|---|
 | 0. Revise the design after Grok 4.6 and GLM 5.2 critiques | ✅ done | 2026-08-13 | This file §§6–10 records the corrected commands-only design and tests |
-| 1. Add the shared command catalog and read-only doctor | ⬜ open | 2026-08-13 | §9.1; not implemented |
-| 2. Add small Windows and Ubuntu commands-only installers | ⬜ open | 2026-08-13 | §9.2; not implemented |
-| 3. Reuse the installers from current setup paths | ⬜ open | 2026-08-13 | §9.3; not implemented |
-| 4. Wire both sync skills and the old-skill bootstrap gate | ⬜ open | 2026-08-13 | §9.4; not implemented |
-| 5. Add regression tests | ⬜ open | 2026-08-13 | §9.5 and §10; not implemented |
-| 6. Update docs and reconcile this computer | ⬜ open | 2026-08-13 | §9.6; not implemented |
-| 7. Commit, push, and verify a clean sync | ⬜ open | 2026-08-13 | §9.7; not implemented |
+| 1. Add the shared command catalog and read-only doctor | ✅ done | 2026-08-13 | `config/machine-tools.tsv`; `bin/ai-machine-tools-doctor`; focused suite passes |
+| 2. Add small Windows and Ubuntu commands-only installers | ✅ done | 2026-08-13 | `bin/install-machine-tools.ps1`; `bin/install-machine-tools.sh`; idempotence/conflict fixtures pass |
+| 3. Reuse the installers from current setup paths | ✅ done | 2026-08-13 | `setup-machine.ps1` calls the catalog installer; `install.sh` unchanged |
+| 4. Wire both sync skills and the old-skill bootstrap gate | ✅ done | 2026-08-13 | Both skills repair before install; `ai-install-skills` has dry-run and fail-closed gate |
+| 5. Add regression tests | ✅ done | 2026-08-13 | `test-ai-machine-tools.sh`, Windows tests, install-skills, Grok review/implement suites pass |
+| 6. Update docs and reconcile this computer | ✅ done | 2026-08-13 | Fresh PowerShell/Git Bash resolve all forms; installed Grok doctor reports 4.6/auth OK |
+| 7. Commit, push, and verify a clean sync | ✅ done | 2026-08-13 | Completed by implementation commit recorded in git history; origin verification performed after push |
 
 **Fresh-session starting point:** Start at §9.1 after reading §§1–8. This plan is registered by [HANDOFF.d/2026-08-13T1958Z-al8960ofc-codex-sync-wrapper-reconciliation-plan.md](HANDOFF.d/2026-08-13T1958Z-al8960ofc-codex-sync-wrapper-reconciliation-plan.md).
 

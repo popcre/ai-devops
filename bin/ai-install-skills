@@ -442,3 +442,27 @@ if [ -f "$REPO_ROOT/bin/ai-git-identity" ]; then
 else
   echo "[WARN] bin/ai-git-identity missing — Git identity NOT pinned on this machine."
 fi
+
+# First-sync bootstrap gate. The skill loaded at the start of this run may be
+# older than the repo just pulled, so this post-pull script must prevent a
+# false "sync complete" when repo-owned command launchers are absent.
+echo
+if [[ "${AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE:-}" == 1 ]]; then
+  echo "[test] machine-tools bootstrap gate skipped explicitly."
+elif [[ ! -f "$REPO_ROOT/config/machine-tools.tsv" || ! -f "$REPO_ROOT/bin/ai-machine-tools-doctor" ]]; then
+  echo "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." >&2
+  exit 1
+elif $DRY_RUN; then
+  echo "[dry-run] would reconcile and verify local AI command launchers; no PATH or launcher changes made."
+elif [[ -n "${USERPROFILE:-}" ]]; then
+  if ! pwsh -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-machine-tools.ps1" -RepoPath "$REPO_ROOT" ||
+     ! bash "$REPO_ROOT/bin/ai-machine-tools-doctor"; then
+    echo "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." >&2
+    exit 1
+  fi
+else
+  if ! bash "$REPO_ROOT/bin/ai-machine-tools-doctor"; then
+    echo "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." >&2
+    exit 1
+  fi
+fi

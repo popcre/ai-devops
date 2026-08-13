@@ -30,7 +30,7 @@ run_installer() {
   local fixture="$1" claude_home="$2" codex_home="$3"
   shift 3
   mkdir -p "$codex_home"
-  CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
+  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
     bash "$fixture/bin/ai-install-skills" "$@"
 }
 
