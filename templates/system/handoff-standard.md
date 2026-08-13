@@ -31,9 +31,19 @@ resolution that quietly drops one session's work. This has already happened.
 
 - **Write-once.** Create it, fill it, done. You may keep editing **your own**
   file while your session is still running. You must **never** open, edit,
-  reformat, "tidy", merge, or delete **another** session's file. If you think
-  another session's handoff is wrong or stale, say so in YOUR file — do not touch
-  theirs.
+  reformat, "tidy", or merge **another** session's file. If you think another
+  session's handoff is wrong or stale, say so in YOUR file — do not rewrite theirs.
+
+- **Deleting is not editing.** The write-once rule protects the *text* from being
+  rewritten while another session may be mid-write. It was never meant to make a
+  finished file immortal — but that is what it did: only the authoring session
+  could delete, authoring sessions never come back, and `HANDOFF.d/` silently
+  grew until stale files were actively misdirecting readers. So: **any session
+  may delete another session's file once it has verified, itself, that every gate
+  in that file's "Done when" block passes.** Run the gates; do not take the
+  file's own word for it, and do not delete on age, on a closed chat, or on a
+  hunch. Git history keeps the text, so a wrong delete is recoverable — but say
+  in your commit message which file you deleted and which gates you ran.
 
 - **`HANDOFF.md` is a short STATIC pointer.** It is written once (see below) and
   is **never rewritten at closeout**. It exists only so the standing rule "read
@@ -112,8 +122,17 @@ file and note in it that migration is still pending.
 - When a workstream is **genuinely proven done** (verified, committed, pushed,
   deployed as applicable), **delete that workstream's `HANDOFF.d/` file** in the
   same commit that finishes it. Git history preserves the text forever, so
-  nothing is lost. Delete only files for work you can prove is done — normally
-  only your own.
+  nothing is lost. Delete only files for work you can prove is done — yours, or
+  anyone's whose "Done when" gates you have just run yourself.
+- **Every handoff must end with a `## Done when` block** — the gates that prove
+  the workstream is finished, written so a stranger can run them without asking
+  a question. Each line is a command or an observation plus its expected result;
+  no prose like "when the feature works". This block is what lets a later session
+  retire the file. A handoff without one cannot be retired by anyone but its
+  author, which is the failure this whole section exists to prevent.
+- **Stale-pointer check when you retire a file:** before deleting, grep the repo
+  for its filename. Other handoffs, plans, or docs may link to it. Fix the links
+  in files you own, and note any you cannot touch in YOUR file.
 - **A file's presence means OPEN.** Session start reads only the files that are
   present; it does not need any status field, index, or archive folder.
 - **Threshold warning:** if `HANDOFF.d/` holds **more than 5** files, say so
@@ -343,7 +362,10 @@ If that is true, the answer is Yes — say it.
   pointer, legacy migration, and retention.
 - Stage only your own file (and your own code hunks). In a concurrently-edited
   checkout, never `git add -A` another session's uncommitted work.
-- Your `HANDOFF.d/` file is deleted only when the work it describes is truly
-  complete. Never delete someone else's.
+- End the file with a `## Done when` block (see **Retention**). It is required —
+  without it, nobody but you can ever retire the file.
+- A `HANDOFF.d/` file is deleted only when the work it describes is truly
+  complete. That may be someone else's file, but only after YOU have run its
+  `## Done when` gates and they all pass.
 - Never add `.gitattributes merge=union` for handoffs — line-unioning Markdown
   produces a silently wrong document instead of a loud conflict.

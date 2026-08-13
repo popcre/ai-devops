@@ -26,31 +26,14 @@ None. Nothing is half-finished and nothing waits on an answer.
 
 ### NOT PART OF THIS WORK, AND NOBODY IS ON IT
 
-2. **`HANDOFF.d/` holds 8 files including this one — well over the standard's
-   threshold of 5.** This is the second consecutive session to raise it, which
-   is itself the finding. Oldest first:
+2. **RESOLVED 2026-08-13 — `HANDOFF.d/` is back under the threshold (4 files).**
+   It had reached 8. Albert approved the rule change and the cleanup, both of
+   which shipped; see §5. Four files were retired: the obsolete `ccweb` spec-kit
+   handoff, and the `step4`/`step5`/`step6` context-engineering step notes.
+   Remaining and genuinely open: the codex context-engineering audit, the GLM
+   plan's two owner loose ends, the step-7 installer handoff, and this file.
 
-   | File | Date |
-   |---|---|
-   | `2026-08-12T1135Z-al8960ofc-codex-context-engineering-audit.md` | 2026-08-12 |
-   | `2026-08-12T1959Z-al8960ofc-claude-glm-plan-closed-two-loose-ends.md` | 2026-08-12 |
-   | `2026-08-12T2010Z-al8960ofc-claude-context-step4-globals-slimmed.md` | 2026-08-12 |
-   | `2026-08-12T2101Z-al8960ofc-claude-context-step5-router-tightened.md` | 2026-08-12 |
-   | `2026-08-12T2330Z-al8960ofc-claude-context-step6-codex-eval-sets.md` | 2026-08-12 |
-   | `2026-08-13T0130Z-al8960ofc-claude-context-step7-installer-reconcile.md` | 2026-08-13 |
-   | `2026-08-13T1003Z-ccweb-claude-spec-kit-evaluation.md` | 2026-08-13 |
-   | *(this file)* | 2026-08-13 |
-
-   **The `ccweb` file is now obsolete** — its §6 tells the next session to execute
-   the plan this session dropped. I did not delete it: `handoff-standard.md:346`
-   permits only the authoring session to delete, and that session is gone. That
-   rule is the root cause of the pile-up; see §5.
-
-   *Recommendation: delete the `ccweb` file and the `step4`–`step6` files.*
-
-3. **A proposed fix for the pile-up was designed and NOT implemented.** See §5.
-   It changes `handoff-standard.md`, which every session follows, so it wants
-   Albert's yes first.
+3. **RESOLVED 2026-08-13 — the pile-up fix is implemented.** See §5.
 
 ### Already settled — do NOT re-ask
 
@@ -203,16 +186,19 @@ do not raise the budget.
   reads as an open workstream forever. The `ccweb` file proves it: its next-steps
   section now actively misdirects, and no living session is allowed to remove it.
 
-  **The proposed fix, designed this session and NOT implemented** (§0 item 3):
-  1. **Deleting is not editing.** Allow any session to delete another's file once
-     every gate in that file's own next-steps section verifiably passes. The
-     write-once rule protects the *text* from being rewritten; git history remains
-     the archive, so nothing is lost.
-  2. **Require a machine-checkable "Done when" block** in every handoff, so a
-     later session can *prove* completion rather than guess at it.
-  3. **Make the 5-file threshold a real check in `context-audit.py`.** Today it is
-     prose that nothing enforces — `grep -i handoff` over that script returns only
-     `:76` and `:571`, neither of which counts files.
+  **The fix — approved by Albert and SHIPPED 2026-08-13:**
+  1. **Deleting is not editing.** `handoff-standard.md` now lets any session
+     delete another's file once it has run that file's `## Done when` gates
+     itself. Rewriting another session's text is still forbidden.
+  2. **Every handoff must end with a `## Done when` block.** Without one, only
+     the author can ever retire the file — which is the failure itself.
+  3. **The 5-file threshold is a real check now**, in `context-audit.py`
+     (`open_handoffs()`): it lists files oldest-first and names any that lack a
+     `## Done when` block. Covered by `tests/test-context-audit.ps1`.
+  4. **Retiring a file requires a stale-pointer sweep** — grep the repo for its
+     name and repair the links you own. Both links this cleanup would have broken
+     were repaired (`plan_context-engineering-consolidation.md`,
+     `plan_spec-kit-idea-adoption.md`).
 - **Manifest bytes count only front matter**
   (`context-audit.py:512-516`, `"\n".join(f"{name}: {description}")`). Bodies are
   free. This is a real property, and the honest use of it is relocating trigger
@@ -345,3 +331,31 @@ finding with evidence. (3) Every relevant detail present: background §1–§2, 
 and dated decisions §9. (4) If Albert read only §0, would he see every decision
 needed from him, including out-of-scope ones? Yes — three items, one in-scope and
 two that no other section would have escalated.
+
+## Done when
+
+Run these from the repo root. If all pass, this workstream is finished and this
+file may be retired by any session, per `templates/system/handoff-standard.md`.
+
+- `git log --oneline origin/main..HEAD` lists the spec-kit commits and
+  `git status --short` is empty — everything is committed and pushed.
+- `grep -c 'THIS PLAN IS SUPERSEDED' plan_spec-kit-idea-adoption.md` returns 1 —
+  nobody can restart the dropped plan by accident.
+- `grep -c '^## 8. Revised recommendation' docs/github-spec-kit-evaluation.md`
+  returns 1 — the binding decision is recorded.
+- `grep -c '^### 9a' templates/system/implementation-plan-standard.md` returns 1
+  — the `tasks.md` contract exists.
+- `grep -c '^## Step 3a' skills/shared/close-old-session/SKILL.md` returns 1, and
+  its `description:` contains "did the delegate" — the convergence check exists
+  AND can be triggered.
+- `grep -c 'grok-4.6' bin/ai-grok-review` returns at least 1 — the wrapper is pinned.
+- `py tools/context-audit/context-audit.py` reports `brokenLinks` 0,
+  `installedSourceDrift` 0, and both skill manifests under budget.
+- `pwsh -NoProfile -File tests/test-context-audit.ps1` ends with
+  `PASS: context audit enforcement suite`.
+- The only `startupRoutedBytes` warning is the Windows CRLF artifact: confirm
+  with `tr -d '\r' < AGENTS.md | wc -c` plus the same for `CLAUDE.md`, summing
+  under 35,972.
+
+**Not gates, and not this workstream's job:** the unopened PR (§0 item 1), and
+the three other open `HANDOFF.d/` files.

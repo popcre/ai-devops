@@ -576,9 +576,48 @@ def run(args: argparse.Namespace) -> dict:
         "budgets": budget_section,
         "crossClientParity": parity,
         "globalSkillOverlap": global_skill_overlap(global_texts, manifests),
+        "openHandoffs": open_handoffs(root),
         "excludedPathClasses": sorted(EXCLUDED_PARTS) + ["secret file suffixes", "network roots"],
     }
     return report
+
+
+# HANDOFF.d/ threshold. `templates/system/handoff-standard.md` has said "more than
+# 5 files, say so loudly" since it was written, but nothing enforced it and two
+# consecutive sessions found the folder over the line with stale files still in
+# it. Prose that nothing checks is a suggestion. This makes it a measurement.
+HANDOFF_THRESHOLD = 5
+
+
+def open_handoffs(root: Path) -> dict:
+    """Count open workstream files in HANDOFF.d/. Presence means OPEN."""
+    handoff_dir = root / "HANDOFF.d"
+    if not handoff_dir.is_dir():
+        return {"count": 0, "threshold": HANDOFF_THRESHOLD, "status": "ok", "files": [], "reason": ""}
+    # Oldest first: the filenames lead with a UTC stamp, so name order is age order.
+    names = sorted(p.name for p in handoff_dir.glob("*.md"))
+    # A handoff that lacks a "## Done when" block can only be retired by its own
+    # author, so flag it — that is the condition that lets files accumulate.
+    unretirable = sorted(
+        p.name for p in handoff_dir.glob("*.md")
+        if "## Done when" not in p.read_text(encoding="utf-8", errors="replace")
+    )
+    over = len(names) > HANDOFF_THRESHOLD
+    reason = ""
+    if over:
+        reason = (
+            f"HANDOFF.d/ holds {len(names)} open workstream files, over the "
+            f"{HANDOFF_THRESHOLD}-file threshold. Oldest first: {', '.join(names)}. "
+            "Ask which are finished and retire them per handoff-standard.md."
+        )
+    return {
+        "count": len(names),
+        "threshold": HANDOFF_THRESHOLD,
+        "status": "warning" if over else "ok",
+        "files": names,
+        "missingDoneWhen": unretirable,
+        "reason": reason,
+    }
 
 
 def summary(report: dict) -> str:
@@ -610,7 +649,14 @@ def summary(report: dict) -> str:
         f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
         f"global vs skill-description overlaps: {len(report['globalSkillOverlap'])}",
         f"budget warnings: {report['budgets']['warnings']} (warnings only, never a failure)",
+        f"open handoffs: {report['openHandoffs']['count']} (threshold {report['openHandoffs']['threshold']})",
     ])
+    if report["openHandoffs"]["status"] == "warning":
+        lines.append(f"HANDOFF WARNING: {report['openHandoffs']['reason']}")
+    for name in report["openHandoffs"].get("missingDoneWhen", []):
+        lines.append(
+            f"HANDOFF: {name} has no '## Done when' block, so only its author can retire it."
+        )
     for issue in report["safetyMarkerIssues"]:
         lines.append(f"SAFETY: {issue['reason']}")
     for item in report["crossClientParity"]["rules"]:

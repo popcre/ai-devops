@@ -278,6 +278,43 @@ try {
     }
     Write-Host "PASS: exceeded budgets warn with a plain reason and never fail the run"
 
+    # ------------------------------------------------------ HANDOFF.d/ retention
+    # The 5-file threshold was prose in handoff-standard.md that nothing checked,
+    # and HANDOFF.d/ silently reached 8 with stale files still misdirecting
+    # readers. These cases keep it a measurement.
+    New-AuditFixture -Path $fixture
+    $handoffDir = Join-Path $fixture "HANDOFF.d"
+    New-Item -ItemType Directory -Path $handoffDir | Out-Null
+    1..5 | ForEach-Object {
+        Write-Utf8 (Join-Path $handoffDir "2026-08-0${_}T0000Z-host-agent-slug.md") "# H$_`n`n## Done when`n`n- ``true`` exits 0.`n"
+    }
+    $result = Invoke-Audit -Path $fixture
+    if ($result.report.openHandoffs.count -ne 5) {
+        throw "Expected 5 open handoffs, got $($result.report.openHandoffs.count)."
+    }
+    if ($result.report.openHandoffs.status -ne "ok") {
+        throw "Exactly at the threshold must not warn: 5 files is allowed, 'more than 5' is not."
+    }
+    if (@($result.report.openHandoffs.missingDoneWhen).Count -ne 0) {
+        throw "Handoffs that DO carry a '## Done when' block were flagged as missing one."
+    }
+
+    Write-Utf8 (Join-Path $handoffDir "2026-08-06T0000Z-host-agent-sixth.md") "# Sixth`n`nNo gates here.`n"
+    $result = Invoke-Audit -Path $fixture -Strict
+    if ($result.report.openHandoffs.status -ne "warning") {
+        throw "A sixth open handoff did not trip the threshold warning."
+    }
+    if ($result.report.openHandoffs.reason -notmatch "2026-08-01T0000Z") {
+        throw "The threshold warning does not list the files oldest-first, so nobody can tell which are stale."
+    }
+    if (@($result.report.openHandoffs.missingDoneWhen) -notcontains "2026-08-06T0000Z-host-agent-sixth.md") {
+        throw "A handoff with no '## Done when' block was not flagged as unretirable by anyone but its author."
+    }
+    if ($result.exit -ne 0) {
+        throw "A handoff-retention warning changed the exit status. It must warn only, even in strict mode."
+    }
+    Write-Host "PASS: HANDOFF.d/ warns above five files, lists them oldest-first, and flags missing 'Done when' gates"
+
     # -------------------------------- always-loaded global vs skill descriptions
     New-AuditFixture -Path $fixture -SkillDescription $overlapSentence `
         -ClaudeExtra $overlapSentence -CodexExtra $overlapSentence

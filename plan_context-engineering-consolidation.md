@@ -266,7 +266,9 @@ step's text) before you cut to a fresh session. Finishing a phase without that
 sweep is an incomplete phase.
 
 **Newest handoff:**
-[`HANDOFF.d/2026-08-12T2330Z-al8960ofc-claude-context-step6-codex-eval-sets.md`](HANDOFF.d/2026-08-12T2330Z-al8960ofc-claude-context-step6-codex-eval-sets.md)
+[`HANDOFF.d/2026-08-13T0130Z-al8960ofc-claude-context-step7-installer-reconcile.md`](HANDOFF.d/2026-08-13T0130Z-al8960ofc-claude-context-step7-installer-reconcile.md)
+(the step4–step6 handoffs were retired on 2026-08-13; their evidence is in the
+STATUS table above)
 (a link to a step-1 handoff was left broken here after that file was deleted on
 completion; when you delete your own handoff, fix every link that names it)
 

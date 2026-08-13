@@ -1,7 +1,9 @@
 # IMPLEMENTATION PLAN — port five Spec Kit ideas into the toolkit (2026-08-13)
 
 Companion handoff:
-[`HANDOFF.d/2026-08-13T1003Z-ccweb-claude-spec-kit-evaluation.md`](HANDOFF.d/2026-08-13T1003Z-ccweb-claude-spec-kit-evaluation.md).
+[`HANDOFF.d/2026-08-13T1941Z-al8960ofc-claude-spec-kit-verdict-reversed.md`](HANDOFF.d/2026-08-13T1941Z-al8960ofc-claude-spec-kit-verdict-reversed.md)
+(the original `ccweb` handoff was retired on 2026-08-13 — its next steps told the
+reader to execute this now-superseded plan).
 Decision record this plan implements:
 [`docs/github-spec-kit-evaluation.md`](docs/github-spec-kit-evaluation.md).
 
