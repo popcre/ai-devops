@@ -195,6 +195,17 @@ When asked whether the plan is comprehensive/detailed enough:
   open, dated) plus a line naming where a fresh session starts. On a brand-new plan
   every row is `⬜ open`; that is fine. It exists so the first thing any reader sees
   is what is still true.
+- **A row marked done cites an artifact, never a bare number.** The evidence cell must
+  name something a reader can open and re-derive the claim from: a file path under the
+  repo's verification/tests tree, a commit SHA, a CI run id, or the exact command to
+  re-run. A count, percentage, or row total with no artifact behind it is not evidence,
+  and neither is an issue or PR number on its own — those say where a discussion
+  happened, not what was proven. Real failure it prevents: in `u2giants/shared-db` a
+  cell claiming "86 object / 38 behavior assertions" was restated as fact in a plan, an
+  approval note, and a handoff before anyone checked. The source said 86 object and
+  **33** behaviour tests, and it was a pull-request description rather than a run. The
+  figure was wrong, relabelled in transit, and unsourced at every hop. No CI check can
+  catch that class; only citing the artifact can.
 - **A plan goes stale the moment someone executes part of it.** Whoever does the work
   owns updating it — the `session-docs-update` / `codex-docs-update` skills carry a
   **mandatory plan-file gate** for exactly this (de-stale the "current state" section,
