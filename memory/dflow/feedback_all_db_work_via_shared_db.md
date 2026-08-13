@@ -7,10 +7,7 @@ metadata:
   originSessionId: 5398de33-e7ff-49c8-a5a3-1529add38755
 ---
 
-**All shared-DB STRUCTURE work must go through `https://github.com/u2giants/shared-db`** (local clone `C:\repos\shared-db`).
-
-> **Scope correction, 2026-08-13 (owner ruling, `AGENTS.md` §0.0-B).** "All DB work" was too broad and misled sessions. shared-db governs the *shape* of the database — schema, tables, columns, views, functions/RPCs, triggers, RLS, indexes, migrations, cross-app contracts. It does **not** govern the *contents*: rows an application creates, edits or deletes in the normal course of its work belong to that application's own session, with no issue and no dispatch. One carve-out — bulk/ad-hoc loading of outside-sourced content into curated Master Data (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`) stays gated under §6.4. See [[shared-db-governs-structure-not-data]].
- The user corrected me after I fixed a bug by (a) running a direct `ALTER` on the shared sandbox DB via psycopg and (b) adding an inline migration to `designflow-backend/models/db.js`. Both are wrong as the canonical path — even the legacy `dflow` schema now goes through shared-db (a concurrent session added `20260710140000_dflow_product_user_assignment.sql` there).
+**All DB work must go through `https://github.com/u2giants/shared-db`** (local clone `C:\repos\shared-db`). The user corrected me after I fixed a bug by (a) running a direct `ALTER` on the shared sandbox DB via psycopg and (b) adding an inline migration to `designflow-backend/models/db.js`. Both are wrong as the canonical path — even the legacy `dflow` schema now goes through shared-db (a concurrent session added `20260710140000_dflow_product_user_assignment.sql` there).
 
 **Why:** the shared Supabase project `qsllyeztdwjgirsysgai` backs CRM/DAM/PIM/PM/PLM; ad-hoc DDL or app-repo-only migrations cause drift and can break other apps.
 
