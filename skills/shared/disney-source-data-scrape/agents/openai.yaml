@@ -1,0 +1,4 @@
+interface:
+  display_name: "Disney Source Data Scrape"
+  short_description: "Capture and load Disney OPA and DCP Vault data safely"
+  default_prompt: "Use $disney-source-data-scrape to safely capture, validate, resume, or load authorized Disney OPA or DCP Vault data."
