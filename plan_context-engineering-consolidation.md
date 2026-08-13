@@ -12,16 +12,72 @@
 | 6. Remove cross-client skill duplication safely | ✅ done | 2026-08-12 | **Eval sets exist.** `tools/skill-trigger-eval/qwen-code.eval.json` and `codex-shared-db-change.eval.json`, 10 positive + 10 negative each. `qwen-code` scores **10/10 should-fire, 0/10 should-not-fire** against the real `codex` CLI at `low` effort in a read-only sandbox, reproducibly. Two detection bugs in `codex-trigger-eval.py` were found and fixed by that run (escaped path separators understated the score to 0/1; matching command OUTPUT rather than the command overstated it by 4 unearned false positives from this repo's own files). Every hit now records the matching command in an `evidence` field, locked by the new offline `tests/test-codex-trigger-eval.sh`. The stale "Codex has no skills system" sentence in `AGENTS-global-codex.md` is corrected. Always-loaded 24,703 bytes, still under budget; `--strict` exits 0; all seven named suites pass. **Consolidation done: duplicate paragraph groups 12 → 2.** The exact-body Qwen pair (identical `SKILL.md` apart from the name, identical `agents/openai.yaml`) is merged into `skills/shared/qwen-code`; task-triggered text fell 408,341 → 402,831 bytes and the merged skill **still scores 10/10 and 0/10** after installing to both clients, with the old Codex copy quarantined recoverably. The last 2 duplicates are kept deliberately (a credential-incident STOP banner and the handoff self-audit gate) with reasons in `docs/context-engineering.md`. No other pair was merged: their bodies genuinely differ. `docs/codex-skills-usage-guide.md` `--migrate-obsolete` line corrected. **`codex-shared-db-change` fixed and verified: 8/10 → 10/10 should-fire, still 0/10 should-not-fire.** It had been missing its own verbatim trigger phrase. Description-only change (the name is load-bearing), reinstalled and re-scored; overlap stays 0 |
 | 7. Repair installation drift without clobbering local facts | ✅ done | 2026-08-13 | **Drift re-measured first: 3, not four** (1 skill + both globals) — the audit reports 0 unless `--claude-home`/`--codex-home` are passed, which is why earlier numbers disagreed. Both installers now reconcile preview-first: every skill is classified (absent, identical, update, local-edits, unmanaged) and printed before anything is written, and the same lines appear in a dry run and a real run. **The `rm -rf`-then-copy step is gone**, so a file added inside a managed skill is no longer silently deleted; only files the installer wrote and the repo has since dropped are removed. Anything replaced that held hand edits is copied to `<client>/skills-backup/<name>` first, and a global is never replaced without the explicit `--adopt-globals` / `-AdoptGlobals` boundary, which backs it up to `<client>/globals-backup/` and prints the restore command. The `.ai-devops-managed` marker now records a SHA-256 per installed file — that record is what distinguishes a hand edit from a source update. New `tests/test-installer-parity.sh` proves both installers write the same files and byte-identical markers, and that refreshing one's install with the other reports "up to date" rather than phantom edits; `tests/test-ai-install-skills.sh` 5 → 9 cases and `tests/test-install-ai-devops-windows.ps1` 5 → 8 cases cover the full fixture matrix plus idempotence. Audit parity gained `previewClassification`, `recoverableBackup`, `globalAdoptFlag`; parity differences stay 0. **Applied on `al8960ofc`: skill drift 1 → 0, second apply changed nothing, globals untouched as required until step 8.** PowerShell child path stayed 5.1-safe. All named suites pass |
 | 7a. Albert's gate: score the three unmeasured load-bearing skills | ✅ done | 2026-08-13 | Commit `45466a3`. Three committed 20-query sets, all measured at `--runs 3` on the Claude runner against a neutral scratch project: `handoff-writer` **8/10 fire, 0/10 false positive**, `shared-db-change` (Claude twin) **7/10, 0/10**, `synology-long-running-operations` **2/10, 0/10**. Precision is perfect on all three — no near-miss fired once, in any round. **Two description edits were written, measured and reverted**: `shared-db-change` rewritten to copy its 10/10 Codex twin's structure scored 7/10 → **6/10**, and `synology-long-running-operations` rewritten to lead with the shape of the work stayed at **2/10**. Per the standing rule no skill description changed. **Two runner traps found and fixed, and the first three-set run scrapped because of them**: `skill-trigger-eval.py` counted the skill name appearing in ANY tool call's input (a `Grep`/`Read` of a file naming the skill scored as a fire), and defaulted to the caller's cwd — run inside this repo, which names every skill in its docs and eval sets, `handoff-writer` appeared to fire on "commit and push everything". Only a `Skill` block's own delta counts now, and runs default to a fresh neutral scratch project seeded with a small ordinary codebase, because an empty directory is inert and manufactures misses. **`--runs 1` is not a measurement** — identical rounds disagreed on which queries fired, including prompts quoted verbatim in a skill's own description. `--strict` exits 0, overlaps 0, broken links 0, manifest bytes unchanged at 21,521. Full write-up in `docs/skill-trigger-eval.md` |
-| 8. Pilot on one Windows machine and representative repos | ⬜ open | 2026-08-12 | Pilot gates in section 9. **`synology-long-running-operations` at 2/10 is an open problem carried into this step**, with two untested causes recorded in `docs/skill-trigger-eval.md`: the eval project has no Synology MCP wired up, and rule 9a of the always-loaded global already covers the topic |
+| 8. Pilot on one Windows machine and representative repos | ✅ done | 2026-08-13 | **Trimmed globals installed on `al8960ofc` via `--adopt-globals`.** All nine named suites passed first. Both machine sections were saved before the install and re-appended after, and verified **byte-identical** to the saved copies; the installed bodies match the repo templates exactly under `tr -d '\r'` (mixed CRLF/LF is the known step-10 line-ending item). Exit code 0 was **not** accepted as proof — the new shared-db STRUCTURE-not-data text was grepped out of both installed files. `installed source drift` 8 → **2, and the JSON confirms both rows are the globals**, which now differ only by the machine sections and always will. The native PowerShell installer then reported every skill "up to date" against what the Bash installer wrote, and correctly refused both globals without `-AdoptGlobals` — the parity assertion this step owed. **Step-4, step-5 and step-6 probes all pass** against fresh `claude -p` sessions carrying the new global: shared-db routing, refusal of a prod `terraform apply`, Git-identity check before a first commit, the `HANDOFF.d` process, the NAS 25-second constraint, and correct recovery of a recorded design reason. **Two probes were mis-designed and re-run** (§ step-8 drift 1). **Pre-flight found the globals 2,233 bytes over budget from commit `df59ffa`, Albert's own shared-db ruling** — legitimate content, installed deliberately, but it moves step 10's numbers and adds 6 overlaps. **`synology-long-running-operations` re-scored after the pilot: 2/10 → 1/10, still 0/10 false positives** — hypothesis (b) refuted, see drift 3 |
 | 9. Roll out to all configured machines | ⬜ open | 2026-08-12 | Rollout gates in section 9 |
 | 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
 
-**Fresh-session start:** **step 8, the pilot** — the first step that needs
-Albert. Albert's 2026-08-12 gate (score the three unmeasured load-bearing
-skills, decision 6 below) is **closed as of 2026-08-13**; see row 7a.
-Steps 1-3 and 5-7 are done; step 4's source work is done and owes two probes to
-step 8. Read the step-7 drift block first. Before each phase, re-read that phase and sections 1, 4, 8,
-11, and 13 to catch drift.
+**Fresh-session start:** **step 9, the rollout** to `916-alien`, `albt16` and
+the Ubuntu AI users. Steps 1-8 are done: the pilot installed the trimmed globals
+on `al8960ofc` on 2026-08-13 and every safety and routing probe passed, so
+step 4's two deferred probes are discharged too. **Read the step-8 drift block
+first** — in particular finding 5 (drift settles at 2, not 0, on any machine
+with a machine section) and finding 6 (nothing re-appends that section for you).
+Before each phase, re-read that phase and sections 1, 4, 8, 11, and 13 to catch
+drift.
+
+**Drift recorded by step 8 (read before starting step 9).**
+
+1. **A behaviour probe must detect the ACT, not the ANSWER — the same trap the
+   trigger-eval runners hit, in a third place.** Two of the six first-pass probes
+   were scored wrong by the probe, not failed by the globals. The git-identity
+   probe told a folder that was not a git repo to commit, so the rule was never
+   reached; the pointer probe searched the ANSWER TEXT for `design-decisions`,
+   but an agent that opens a file has no reason to name it afterwards. Rewritten
+   to watch the `tool_use` blocks for the paths actually opened, and to ask
+   questions the pointed-to doc alone can answer, both pass. **Never score a
+   probe on what the model says when you can score it on what it did.**
+2. **The pointer design holds, but `AGENTS.md` is not opened as a router in
+   one-shot sessions.** Asked for a reason recorded ONLY in
+   `docs/design-decisions.md` (Fable: "being removed from the subscription
+   plan"), a fresh session found and quoted it exactly — by `Grep`, never by
+   following the router. Across four routing probes the router file was opened
+   zero times; correct answers came from search, from source code, from the
+   always-loaded global, and from this machine's memory files. **No probe
+   produced a wrong answer**, so step 5's move of narrative out of the router is
+   vindicated on outcome. But two of those routes are machine-local (memory) or
+   luck (self-evident code), so step 10 should re-test in an interactive session
+   before concluding the router is load-bearing at all.
+3. **Hypothesis (b) for `synology-long-running-operations` is REFUTED, and the
+   result is stronger than "no change": 2/10 → 1/10.** The new rule 9a is not
+   merely present, it now says outright "Load the shared
+   `synology-long-running-operations` skill before any NAS read that will exceed
+   25 seconds" — an explicit instruction to open the skill — and the score went
+   DOWN. Precision stayed perfect at 0/10. **An explicit load-this-skill
+   instruction in the always-loaded global does not make a skill fire; it
+   substitutes for it.** This is the 1Password precedent confirmed a second time:
+   where a global covers a topic, the model answers from the global. The SAFETY
+   constraint is intact — probe P6 shows a fresh session correctly citing the
+   25-second limit and the background method — what is unreachable is the
+   skill's procedure (managed SSH, PID/status, durable output, exit evidence).
+   Hypothesis (a), the missing Synology MCP, is still untested. Step 10 must
+   decide whether this skill's body belongs in the global or the skill.
+4. **Pre-flight measured the globals 2,233 bytes OVER budget, from `df59ffa`.**
+   Albert's shared-db STRUCTURE-not-data ruling grew both globals by design on
+   2026-08-13. Four budget warnings and 6 global-vs-skill-description overlaps
+   now stand where step 6 had driven overlaps to 0; all six are the shared-db
+   block echoed between the globals and the `shared-db-*` skill descriptions.
+   `--strict` still exits 0 — none of this fails. **Do not "fix" it by raising a
+   budget.** Step 10 sets real budgets and should decide whether that block
+   belongs in the globals at all, given finding 3 above.
+5. **The two drift rows will never reach 0 on a machine with a machine section**,
+   because `--adopt-globals` installs the repo template and the section is then
+   re-appended by hand. Step 9 should expect exactly 2 on every machine after a
+   successful install, not 0, and step 10's acceptance gate must say so.
+6. **Nothing re-appends the machine section, and the installer only prints a
+   NOTE.** It worked here only because it was done deliberately. Step 9 repeats
+   this on `916-alien`, `albt16` and the Ubuntu users, each with its own section.
+   Worth considering in step 10: have the installer detect and carry the section
+   itself, since the manual step is now proven to be the riskiest in the rollout.
 
 **Drift recorded by step 7 (read before starting step 8).**
 

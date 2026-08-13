@@ -151,3 +151,62 @@ scored differently on different queries between two identical rounds, including
 prompts quoted verbatim in the skill's own description. Use `--runs 3` for any
 decision; twenty queries at three runs takes about eight minutes at
 `--workers 6`.
+
+## A global that names the skill does not summon it (2026-08-13, step-8 pilot)
+
+`synology-long-running-operations` scored **2/10** before the step-8 pilot. Two
+causes were recorded as untested: (a) the neutral eval project has no Synology
+MCP wired up, so the model may see no NAS tooling to reach for; (b) rule 9a of
+the always-loaded Claude global already covers the topic, and the documented
+1Password precedent is that where a global covers a topic the model answers from
+the global and no skill wording overrides it.
+
+The pilot tested (b) by accident and refuted it hard. The trimmed global's rule
+9a is not merely present — it now says outright:
+
+> Load the shared `synology-long-running-operations` skill before any NAS read
+> that will exceed 25 seconds
+
+An explicit instruction, in always-loaded context, naming the skill. Re-scored
+immediately after installing it, at `--runs 3`, against the same committed eval
+set: **1/10 should-fire, 0/10 should-not-fire.** The score went *down*.
+
+Two things follow, and the second is the useful one:
+
+- **Precision is untouched.** Zero false positives across every configuration
+  this skill has ever been measured in. The failure mode is silence.
+- **An always-loaded rule does not route to a skill — it substitutes for it.**
+  This is the 1Password precedent confirmed a second time, now with the
+  strongest possible prompt. Naming a skill in a global is not a fix for a skill
+  that will not fire; if anything it removes the model's reason to open it.
+
+**The safety constraint is intact regardless**, and that distinction matters.
+A step-8 probe asked a fresh session to "find every file over 2 GB on the whole
+of volume1", and it correctly cited the 25-second limit and the background
+method — from the global. What stays out of reach is the skill's *procedure*:
+managed SSH, lowest practical priority, unique durable output, PID and status,
+separate stderr, completion and exit evidence.
+
+So the open question for step 10 is not "how do we word this description?" — two
+rewrites have now failed to move it at all. It is **where this content should
+live**: if the global already answers the question, the skill body is either
+redundant or it is the part that matters, and the global should point less and
+carry more (or the reverse). Decide that before touching the description again.
+
+Hypothesis (a), the missing MCP, is still untested and is now the only surviving
+explanation for the trigger score itself.
+
+## Probes have the same trap as evals: score the act, not the answer
+
+Step 8's first-pass safety probes searched the model's *answer text* for the name
+of the file it was supposed to open. An agent that reads `docs/design-decisions.md`
+has no obligation to name it afterwards, so a fully correct answer scored as a
+failure — the third instance of this same mistake, after both trigger-eval
+runners in steps 6 and 7a.
+
+A probe that watches `tool_use` blocks and records the paths actually opened
+reports the opposite and more interesting result: the router file was opened
+**zero times in four routing probes**, yet every answer was correct. The content
+was reached by `Grep`, by reading source, by the always-loaded global, and by
+this machine's memory files. Measure the mechanism, then be ready for the
+mechanism to tell you the design works for a reason you did not plan.
