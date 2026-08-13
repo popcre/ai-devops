@@ -46,15 +46,55 @@ Skill-only maintenance supports preview and a recoverable legacy migration:
 ```bash
 ai-install-skills --dry-run
 ai-install-skills --keep-orphans
+ai-install-skills --adopt-globals
 ```
 
-On Windows, `bin/install-ai-devops-windows.ps1 -SkillsDryRun` previews only skill
-operations and skips repository, tool, global-file, and login work. Both installers
+On Windows, `bin/install-ai-devops-windows.ps1 -SkillsDryRun` previews skill and
+global operations and skips repository, tool, and login work. Both installers
 retire skills automatically: any skill they previously installed (marked with a
 `.ai-devops-managed` file) that the repo no longer ships is moved into
 `<client>/skills-quarantine/`. Skills ai-devops did not install — vendor skills
 shipped with the client, or hand-authored local ones — carry no marker and are
 never touched. Pass `--keep-orphans` (Bash) to opt out.
+
+### Preview-first reconciliation
+
+Every install classifies each skill before touching it and prints one line per
+skill. The same lines appear in a dry run and in a real run, so the preview is
+the plan:
+
+| Line | State | What happens |
+|---|---|---|
+| `+ name` | absent | installed |
+| `= name` | identical | nothing is written |
+| `~ name` | update | only the changed files are copied |
+| `! name … LOCAL EDITS` | an installed file was edited by hand | copied to `<client>/skills-backup/<name>`, then updated |
+| `! name … never installed it` | a directory we do not own is in the way | copied to `<client>/skills-backup/<name>`, then adopted |
+| `- name retired` | the repo no longer ships it | moved to `<client>/skills-quarantine/<name>` |
+
+Two rules make this safe. **Files inside a managed skill that the repo does not
+ship are never deleted**, so a local extension survives every update; only files
+the installer itself wrote and the repo has since dropped are removed. And
+**anything replaced that held local edits is copied somewhere recoverable
+first** — nothing is ever deleted outright.
+
+The `.ai-devops-managed` marker records a SHA-256 for every file the installer
+wrote. That record is what tells a hand edit apart from an ordinary source
+update. Markers written before this existed carry no hashes; a skill under one
+that differs is treated as locally edited, so the first run after upgrading may
+report edits that are really just old installs. That is deliberate — it backs
+the copy up rather than assuming.
+
+**Globals are never replaced without being asked.** `~/.claude/CLAUDE.md` and
+`~/.codex/AGENTS.md` carry per-machine sections, so a differing global is
+reported and left alone. `--adopt-globals` (Bash) or `-AdoptGlobals`
+(PowerShell) is the explicit managed boundary: it copies the installed file to
+`<client>/globals-backup/` and prints the one-line restore command before
+replacing it.
+
+Both installers implement the same engine, and `tests/test-installer-parity.sh`
+proves it: same file set, byte-identical markers, and a refresh with one after
+an install by the other reports "up to date" rather than inventing local edits.
 
 ## Update
 

@@ -159,6 +159,18 @@ machine behaves oddly, still diff `ls ~/.claude/skills` against `ls
 skills/claude/`. Repo-owned cross-client skills live under `skills/shared/` and
 install into both Claude and Codex.
 
+EXTENDED 2026-08-13 — the update itself no longer destroys local work:
+Until this date the copy step was `rm -rf <installed skill>` followed by a fresh
+copy, so **any file added inside a managed skill directory was deleted without a
+word** on the next sync. Both installers now classify before writing (absent,
+identical, update, local-edits, unmanaged), copy only the files that actually
+changed, never delete a file the repo does not ship, and copy anything they are
+about to overwrite that held hand edits into `<client>/skills-backup/<name>`.
+The marker carries a SHA-256 per installed file, which is the only way to tell a
+hand edit from an ordinary source update; markers written before this carry no
+hashes, so a differing skill under a legacy marker is assumed edited and backed
+up rather than silently replaced. Full behavior table: `docs/deployment.md`.
+
 ## `codex exec resume` takes different flags from `codex exec`
 
 Looks like:

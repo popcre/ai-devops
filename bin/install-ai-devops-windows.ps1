@@ -24,6 +24,10 @@ param(
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
     [string]$CodexHome = (Join-Path $HOME ".codex"),
     [switch]$SkillsDryRun,
+    # Replace an installed global that differs from the repo copy. Without this
+    # switch a differing global is reported and left alone. The old file is
+    # copied to <client>\globals-backup\ first.
+    [switch]$AdoptGlobals,
     # Deprecated: retiring skills is now automatic and needs no flag.
     # Accepted so older docs and scripts keep working.
     [switch]$MigrateObsolete
@@ -96,11 +100,142 @@ function Ensure-Git {
     }
 }
 
+$script:ManagedMarker = ".ai-devops-managed"
+
+# --- reconciliation primitives ----------------------------------------------
+# Byte-for-byte the same contract as bin/ai-install-skills: same marker format,
+# same five states, same backup locations. The two installers must produce the
+# same managed outcome on the same inputs, so anything changed here changes
+# there too.
+
+function Get-TreeHashes {
+    param([string]$Dir)
+
+    $map = @{}
+    if (-not (Test-Path -LiteralPath $Dir)) { return $map }
+    $base = (Resolve-Path -LiteralPath $Dir).Path.TrimEnd('\') + '\'
+    Get-ChildItem -LiteralPath $Dir -Recurse -Force -File |
+        Where-Object { $_.Name -ne $script:ManagedMarker } |
+        ForEach-Object {
+            $rel = $_.FullName.Substring($base.Length).Replace('\', '/')
+            $map[$rel] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+        }
+    return $map
+}
+
+function Read-SkillMarker {
+    param([string]$Path)
+
+    $records = @{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $records }
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
+        $parts = $line.Trim() -split '\s+', 2
+        if ($parts.Count -eq 2) { $records[$parts[1].Trim()] = $parts[0].ToLower() }
+    }
+    return $records
+}
+
+function Write-SkillMarker {
+    param([string]$Dest, [hashtable]$SourceHashes)
+
+    if ($SkillsDryRun) { return }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# ai-devops managed skill. Rewritten on every install; do not edit.")
+    $lines.Add("# <sha256>  <path relative to this skill directory>")
+    # Ordinal sort, to match the Bash installer's LC_ALL=C sort byte for byte.
+    # PowerShell's default Sort-Object is culture-aware and case-insensitive,
+    # which puts "agents/openai.yaml" before "SKILL.md" while `sort` does not.
+    $ordered = [string[]]@($SourceHashes.Keys)
+    [Array]::Sort($ordered, [StringComparer]::Ordinal)
+    foreach ($rel in $ordered) {
+        $lines.Add("$($SourceHashes[$rel])  $rel")
+    }
+    # LF, so the Bash installer reads the same file without stray CR.
+    [System.IO.File]::WriteAllText((Join-Path $Dest $script:ManagedMarker),
+        ($lines -join "`n") + "`n")
+}
+
+# Returns @{ State = ...; Changed = @(...); SourceHashes = @{} }.
+# States: absent | identical | update | local-edits | unmanaged.
+function Get-SkillState {
+    param([string]$Source, [string]$Dest)
+
+    $srcHashes = Get-TreeHashes $Source
+    $result = @{ State = "absent"; Changed = @(); SourceHashes = $srcHashes }
+    if (-not (Test-Path -LiteralPath $Dest)) { return $result }
+    if (-not (Test-Path -LiteralPath (Join-Path $Dest $script:ManagedMarker))) {
+        $result.State = "unmanaged"
+        return $result
+    }
+
+    $dstHashes = Get-TreeHashes $Dest
+    $records = Read-SkillMarker (Join-Path $Dest $script:ManagedMarker)
+    $edited = $false
+    foreach ($rel in $records.Keys) {
+        if ($dstHashes[$rel] -ne $records[$rel]) { $edited = $true }
+    }
+
+    $changed = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in $srcHashes.Keys) {
+        if ($dstHashes[$rel] -ne $srcHashes[$rel]) { $changed.Add($rel) }
+    }
+    foreach ($rel in $records.Keys) {
+        if ($srcHashes.ContainsKey($rel)) { continue }
+        if ($dstHashes.ContainsKey($rel)) { $changed.Add("-$rel") }
+    }
+
+    $result.Changed = @($changed)
+    if ($changed.Count -eq 0) {
+        $result.State = "identical"
+    } elseif ($edited -or $records.Count -eq 0) {
+        # A legacy marker carries no record, so nothing can prove the difference
+        # came from the repo rather than from a person. Assume the person.
+        $result.State = "local-edits"
+    } else {
+        $result.State = "update"
+    }
+    return $result
+}
+
+function Backup-InstalledPath {
+    param([string]$Path, [string]$BackupRoot, [string]$Name)
+
+    $backup = Join-Path $BackupRoot $Name
+    Write-Note "    backup: $Path -> $backup"
+    if ($SkillsDryRun) { return }
+    New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+    if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+    Copy-Item -LiteralPath $Path -Destination $backup -Recurse
+}
+
+# Copy the changed source files over an installed skill WITHOUT touching files
+# the repo does not ship, so a local extension survives every update.
+function Sync-SkillFiles {
+    param([string]$Source, [string]$Dest, [string[]]$Changed)
+
+    if ($SkillsDryRun) { return }
+    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+    foreach ($entry in $Changed) {
+        if ([string]::IsNullOrEmpty($entry)) { continue }
+        if ($entry.StartsWith("-")) {
+            # Only files WE installed that the repo has since dropped.
+            $target = Join-Path $Dest ($entry.Substring(1).Replace('/', '\'))
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+        } else {
+            $target = Join-Path $Dest ($entry.Replace('/', '\'))
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Source ($entry.Replace('/', '\'))) -Destination $target -Force
+        }
+    }
+}
+
 function Install-SkillFolder {
     param(
         [string]$SourceRoot,
         [string]$DestRoot,
-        [string]$Label
+        [string]$Label,
+        [string]$ClientHome
     )
 
     if (-not (Test-Path -LiteralPath $SourceRoot)) {
@@ -116,19 +251,51 @@ function Install-SkillFolder {
             return
         }
 
-        $dest = Join-Path $DestRoot $_.Name
-        if ($SkillsDryRun) {
-            Write-Note "[skills-dry-run] replace $dest from $($_.FullName)"
-        } else {
-            if (Test-Path -LiteralPath $dest) {
-                Remove-Item -LiteralPath $dest -Recurse -Force
+        # Capture these BEFORE the switch: inside a switch block $_ is the
+        # switch's own value, not the pipeline item, so $_.Name would be empty.
+        $skillName = $_.Name
+        $skillPath = $_.FullName
+        $dest = Join-Path $DestRoot $skillName
+        $info = Get-SkillState -Source $skillPath -Dest $dest
+        $changed = $info.Changed
+        $prefix = ""
+        if ($SkillsDryRun) { $prefix = "[skills-dry-run] " }
+
+        switch ($info.State) {
+            "identical" {
+                Write-Note "$prefix= $skillName ($Label) up to date"
+                # One-time upgrade of a legacy marker so the NEXT run can tell a
+                # local edit apart. Writes only the marker, and only once.
+                if ((Read-SkillMarker (Join-Path $dest $script:ManagedMarker)).Count -eq 0) {
+                    Write-SkillMarker -Dest $dest -SourceHashes $info.SourceHashes
+                }
+                $script:InstalledSkillCount += 1
+                $count += 1
+                return
             }
-            Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse
-            # Stamp as ai-devops-managed so a later run may retire it. Vendor
-            # skills sharing this root never get the marker and are never moved.
-            New-Item -ItemType File -Force -Path (Join-Path $dest ".ai-devops-managed") | Out-Null
+            "absent" {
+                Write-Note "$prefix+ $skillName ($Label) install"
+                $changed = @($info.SourceHashes.Keys)
+            }
+            "update" {
+                Write-Note "$prefix~ $skillName ($Label) update, $($changed.Count) file(s): $($changed -join ' ')"
+            }
+            "local-edits" {
+                Write-Warning "! $skillName ($Label) LOCAL EDITS - backing up, then updating: $($changed -join ' ')"
+                Backup-InstalledPath -Path $dest -BackupRoot (Join-Path $ClientHome "skills-backup") -Name $skillName
+            }
+            "unmanaged" {
+                Write-Warning "! $skillName ($Label) exists but ai-devops never installed it - backing up, then adopting"
+                Backup-InstalledPath -Path $dest -BackupRoot (Join-Path $ClientHome "skills-backup") -Name $skillName
+                if (-not $SkillsDryRun) { Remove-Item -LiteralPath $dest -Recurse -Force }
+                $changed = @($info.SourceHashes.Keys)
+            }
         }
-        Write-Note "+ $($_.Name)"
+
+        Sync-SkillFiles -Source $skillPath -Dest $dest -Changed $changed
+        # Stamp as ai-devops-managed so a later run may retire it. Vendor skills
+        # sharing this root never get the marker and are never moved.
+        Write-SkillMarker -Dest $dest -SourceHashes $info.SourceHashes
         $script:InstalledSkillCount += 1
         $count += 1
     }
@@ -211,18 +378,34 @@ function Install-GlobalFile {
 
     Ensure-Directory (Split-Path -Parent $Dest)
     if (-not (Test-Path -LiteralPath $Dest)) {
-        Copy-Item -LiteralPath $Source -Destination $Dest
-        Write-Note "Installed $Label -> $Dest"
+        if ($SkillsDryRun) {
+            Write-Note "[skills-dry-run] install $Label -> $Dest"
+        } else {
+            Copy-Item -LiteralPath $Source -Destination $Dest
+            Write-Note "Installed $Label -> $Dest"
+        }
         return
     }
 
     $srcHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
     $dstHash = (Get-FileHash -LiteralPath $Dest -Algorithm SHA256).Hash
+    $backupRoot = Join-Path (Split-Path -Parent $Dest) "globals-backup"
+    $leaf = Split-Path -Leaf $Dest
     if ($srcHash -eq $dstHash) {
         Write-Note "$Label already up to date."
+    } elseif ($AdoptGlobals) {
+        # A global is the one file that carries per-machine additions, so
+        # replacing it needs an explicit managed boundary: -AdoptGlobals.
+        Write-Note "$Dest differs - -AdoptGlobals given, replacing it."
+        Backup-InstalledPath -Path $Dest -BackupRoot $backupRoot -Name $leaf
+        if (-not $SkillsDryRun) {
+            Copy-Item -LiteralPath $Source -Destination $Dest -Force
+        }
+        Write-Note "    restore with: Copy-Item `"$backupRoot\$leaf`" `"$Dest`""
     } else {
         Write-Note "$Dest exists and differs; not overwriting local edits."
         Write-Note "Compare with: code --diff `"$Dest`" `"$Source`""
+        Write-Note "Replace it deliberately with: -AdoptGlobals"
     }
 }
 
@@ -260,12 +443,14 @@ $script:InstalledSkillCount = 0
 $claudeCount = Install-SkillFolder `
     -SourceRoot (Join-Path $RepoPath "skills\claude") `
     -DestRoot (Join-Path $ClaudeHome "skills") `
-    -Label "Claude"
+    -Label "Claude" `
+    -ClientHome $ClaudeHome
 Write-Note "$claudeCount Claude skills installed."
 $sharedClaudeCount = Install-SkillFolder `
     -SourceRoot (Join-Path $RepoPath "skills\shared") `
     -DestRoot (Join-Path $ClaudeHome "skills") `
-    -Label "shared"
+    -Label "shared" `
+    -ClientHome $ClaudeHome
 Write-Note "$sharedClaudeCount shared skills installed for Claude."
 Invoke-OrphanSkillPruning -ClientHome $ClaudeHome -Label "Claude" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\claude"), (Join-Path $RepoPath "skills\shared"))
@@ -274,21 +459,17 @@ Write-Step "Installing Codex skills"
 $codexCount = Install-SkillFolder `
     -SourceRoot (Join-Path $RepoPath "skills\codex") `
     -DestRoot (Join-Path $CodexHome "skills") `
-    -Label "Codex"
+    -Label "Codex" `
+    -ClientHome $CodexHome
 Write-Note "$codexCount Codex skills installed."
 $sharedCodexCount = Install-SkillFolder `
     -SourceRoot (Join-Path $RepoPath "skills\shared") `
     -DestRoot (Join-Path $CodexHome "skills") `
-    -Label "shared"
+    -Label "shared" `
+    -ClientHome $CodexHome
 Write-Note "$sharedCodexCount shared skills installed for Codex."
 Invoke-OrphanSkillPruning -ClientHome $CodexHome -Label "Codex" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\codex"), (Join-Path $RepoPath "skills\shared"))
-
-if ($SkillsDryRun) {
-    Write-Step "Skills dry-run complete"
-    Write-Host "No files were changed."
-    exit 0
-}
 
 Write-Step "Installing global instruction files"
 Install-GlobalFile `
@@ -299,6 +480,14 @@ Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\AGENTS-global-codex.md") `
     -Dest (Join-Path $CodexHome "AGENTS.md") `
     -Label "Codex global instructions"
+
+# A dry run is a preview of everything, globals included, and stops before the
+# environment checks that would otherwise look like part of the plan.
+if ($SkillsDryRun) {
+    Write-Step "Skills dry-run complete"
+    Write-Host "No files were changed."
+    exit 0
+}
 
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {

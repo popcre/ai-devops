@@ -263,7 +263,7 @@ change, simplify, or "fix" any of them.**
 | No Fable model slot | Fable is deliberately absent. Planning and final review use Opus 4.8 at high reasoning. |
 | `codex-cli` MCP uses Codex's own `mcp-server`, not a richer third-party wrapper | Deliberate: no supply chain, no `npx` in the hot path, and a wrapper re-resolves `codex` from PATH, which reintroduces the Windows junction bug. |
 | `ai-devops doctor` spends a real model call on Codex | It runs a real sandboxed write. `--version` cannot see the failure mode that cost a full session on 2026-07-16. Do not downgrade it. |
-| `ai-install-skills` never deleted stale skills | Fixed 2026-08-03: installers stamp `.ai-devops-managed` and quarantine managed skills the repo no longer ships. Unmarked directories are never touched, and that marker must stay. |
+| `ai-install-skills` pruned nothing, and updating wiped local files | Both fixed: `.ai-devops-managed` quarantine (unmarked dirs untouched), then preview-first sync that keeps unowned files, backs up edits. `docs/deployment.md` |
 | `codex exec resume` rejects flags that `exec` accepts | Upstream behavior. `resume` refuses `-s/--sandbox`, `-C/--cd`, `--color`; a mistyped `-c` key silently falls back to the config default, so always confirm the run header. |
 | Review stages never fix what they find | Reviews are read-only by design; they write a report under `.ai/reviews/` and nothing else. |
 | The MCP secret launcher caches secrets | Required. A per-launch `op run` locked the shared 1Password account. Never re-add `--`, never drop `Position = 0`, never re-resolve per launch. |
