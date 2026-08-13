@@ -34,7 +34,7 @@ cat > "$STUB/grok" <<'STUBEOF'
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 case "${1:-}" in
   --version) echo "grok 0.2.112 (stub)"; exit 0 ;;
-  models)    echo "grok-4.5"; exit 0 ;;
+  models)    echo "grok-4.6"; exit 0 ;;
   worktree)  # `list` must never show anything: headless runs are untracked.
              case "${2:-}" in list) echo "No worktrees found." ;; rm) exit 1 ;; esac; exit 0 ;;
 esac
@@ -47,10 +47,10 @@ case "$cwd" in /*) echo "Error: Failed to set working directory to \"$cwd\": (os
 posix="$(cygpath -u "$cwd" 2>/dev/null || printf '%s' "$cwd")"
 case "$mode" in
   ok)        printf 'grok was here\n' > "$posix/made-by-grok.txt"
-             echo '{"text":"done","stopReason":"EndTurn","sessionId":"s1","num_turns":3,"usage":{"total_tokens":100,"cache_read_input_tokens":10},"total_cost_usd":0.01,"modelUsage":{"grok-4.5-build":{}}}' ;;
+             echo '{"text":"done","stopReason":"EndTurn","sessionId":"s1","num_turns":3,"usage":{"total_tokens":100,"cache_read_input_tokens":10},"total_cost_usd":0.01,"modelUsage":{"grok-4.6-build":{}}}' ;;
   cancelled) printf 'partial\n' > "$posix/partial.txt"
-             echo '{"text":"","stopReason":"Cancelled","sessionId":"s2","num_turns":2,"usage":{"total_tokens":50},"total_cost_usd":0.02,"modelUsage":{"grok-4.5-build":{}}}' ;;
-  nodiff)    echo '{"text":"nothing to do","stopReason":"EndTurn","sessionId":"s3","num_turns":1,"usage":{"total_tokens":10},"total_cost_usd":0.001,"modelUsage":{"grok-4.5-build":{}}}' ;;
+             echo '{"text":"","stopReason":"Cancelled","sessionId":"s2","num_turns":2,"usage":{"total_tokens":50},"total_cost_usd":0.02,"modelUsage":{"grok-4.6-build":{}}}' ;;
+  nodiff)    echo '{"text":"nothing to do","stopReason":"EndTurn","sessionId":"s3","num_turns":1,"usage":{"total_tokens":10},"total_cost_usd":0.001,"modelUsage":{"grok-4.6-build":{}}}' ;;
   empty)     : ;;
 esac
 exit 0

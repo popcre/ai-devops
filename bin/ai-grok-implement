@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ai-grok-implement — bounded Grok 4.5 implementation runs in a REAL isolated
+# ai-grok-implement — bounded Grok 4.6 implementation runs in a REAL isolated
 # git worktree.
 #
 # Companion to `ai-grok-review` (read-only). This script is the ONLY supported
@@ -61,7 +61,7 @@ STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
 IMPL_DIR="$STATE_DIR/implement"
 CALLER="${AI_GROK_CALLER:-claude}"
 
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.6}"
 DEFAULT_MAX_TURNS="${AI_GROK_IMPL_MAX_TURNS:-20}"
 
 die()  { printf 'ai-grok-implement: error: %s\n' "$*" >&2; exit 1; }
