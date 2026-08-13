@@ -78,8 +78,21 @@ history, generated types, safe sample data — and compare it to your app's data
 shape, you have nothing to hand over and nothing to request. Reading the shared
 schema is allowed from every application repo, always, with no issue and no
 dispatch. Say what you learned and carry on. A handover is only owed once you
-mutated something (DDL, DML, `apply_migration`, a migration file, a branch, a
+mutated something (DDL, `apply_migration`, a migration file, a branch, a
 preview or production push).
+
+**Ordinary application data writes are not a handover trigger either** (owner ruling
+2026-08-13, `AGENTS.md` §0.0-B). An application session that inserted, updated, or
+deleted its own rows — a feature, a bug fix, its own ingest tables, a backfill of data
+the app produced, preview fixtures, job/queue/audit rows — owns those writes and owes
+this repo nothing for them. Two things still do trigger a handover:
+
+- **any bulk or ad-hoc load of outside-sourced content into curated Master Data**
+  (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`,
+  `*_ext`) — the §6.4 carve-out, unchanged; and
+- **any data you wrote to preview `<removed-protected-project-ref>` while running as, or dispatched
+  by, the orchestrator** — point 3 below. Preview is a shared rehearsal environment, so
+  the disclosure is about not poisoning the next rehearsal, not about permission.
 
 Your block must cover, at minimum:
 

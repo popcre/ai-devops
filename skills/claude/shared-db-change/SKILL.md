@@ -1,6 +1,6 @@
 ---
 name: shared-db-change
-description: Discipline for any CHANGE to the shared supabase.com backend. Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says "make db changes the proper way", "mirror it to shared-db", or "re-author it properly in shared-db". Also states Rule 0 — read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch — so load it too when the ask is "does the shared database fit our data", "compare our data shape to the schema", "review the schema", or "what columns exist".
+description: Discipline for any STRUCTURAL change to the shared supabase.com backend — schema, tables, columns, views, functions/RPCs, triggers, RLS, indexes, migrations, cross-app data contracts. It does NOT gate DATA: an application session owns the rows it writes, updates, or deletes in the normal course of its work, with no issue and no dispatch (owner ruling 2026-08-13, shared-db `AGENTS.md` §0.0-B); the ONE exception is bulk/ad-hoc loading of outside-sourced content into curated Master Data (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`). Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says "make db changes the proper way", "mirror it to shared-db", or "re-author it properly in shared-db". Also states Rule 0 — read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch — so load it too when the ask is "does the shared database fit our data", "compare our data shape to the schema", "review the schema", or "what columns exist".
 ---
 
 # shared-db-change
@@ -15,9 +15,10 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > GitHub issue and stops —
 > `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
 > This skill tells you how to author a correct change once you have been
-> dispatched; it is not permission to start one. **This STOP is about changing,
-> not looking** — read-only inspection of the schema is always allowed from
-> anywhere (Rule 0 below).
+> dispatched; it is not permission to start one. **This STOP is about changing
+> STRUCTURE.** It is not about looking — read-only inspection of the schema is
+> always allowed from anywhere (Rule 0 below). And it is not about your own
+> application's data — see Rule 0.5.
 >
 > **Working IN the shared-db repo, or running more than one workstream?** Load the
 > **`shared-db-orchestrator`** skill as well. This skill covers how to author a
@@ -65,9 +66,10 @@ caution.
 
 Three conditions on a read-only review:
 
-1. **Read only.** No `ALTER`/`CREATE`/`DROP`, no `INSERT`/`UPDATE`/`DELETE`, no
-   `apply_migration`, no migration file, no branch — in preview or production. The
-   moment you mutate anything, it stops being a review and the rules below apply.
+1. **Read only.** No `ALTER`/`CREATE`/`DROP`, no `apply_migration`, no migration
+   file, no branch — in preview or production. The moment you mutate the schema,
+   it stops being a review and the rules below apply. (Writing your own app's rows
+   is not gated at all, but it is also not a "review" — see Rule 0.5.)
 2. **Know what you are pointed at** before every call — `get_project_url` for the
    MCP, `cat supabase/.temp/project-ref` for the CLI — and quote it in your report.
    Use the approved read-only AI identity wherever one is required.
@@ -77,9 +79,44 @@ Three conditions on a read-only review:
    or pull requests.
 
 Everything below — the issue, the orchestrator, the branch/PR/preview process —
-starts the moment the answer is "and now change it".
+starts the moment the answer is "and now change the SHAPE of it".
 
-## Hard rules (these govern CHANGES)
+## Rule 0.5 — DATA is not gated. Rows belong to the application session.
+
+> **Owner ruling, Albert Hazan, 2026-08-13** — "shared-db orchestrator is for creating,
+> changing, or deleting the STRUCTURE or schema or design of the database, not for
+> creating, changing, or deleting the data inside the database. That should be done by
+> the sessions working on the actual application."
+
+Recorded as `AGENTS.md` §0.0-B in `u2giants/shared-db`, which is the controlling text.
+This skill governs the **shape** of the shared database, not its **contents**.
+
+**No issue, no dispatch, no handover, no branch, no migration** for:
+
+- a feature or bug fix writing, updating, or deleting its own application rows
+- a scraper, importer, or sync job writing into the ingest/staging tables it owns
+- backfilling, correcting, or cleaning up application data the app itself produced
+- test, demo, or fixture data in preview
+- operational data: job runs, queue rows, cache entries, audit and log rows
+
+Older wording here listed "a seed or data fix" next to tables and columns, so sessions
+reasonably read any `INSERT` as orchestrator work. It never was.
+
+**The one carve-out — curated Master Data.** Bulk or ad-hoc loading of **outside-sourced**
+content (spreadsheet, CSV, export, pasted rows, screenshot, chat message, API pull) into
+`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory` or
+their `*_ext` tables is still orchestrator work under `AGENTS.md` §6.4 and its 2026-08-03
+correction, matched-row abstention included. That gate was bought with an incident. The
+trigger is **provenance and target**, not volume or verb.
+
+**Still binding on every data write you do own:** `AGENTS.md` §4.2 — prove which database
+you are pointed at immediately before every `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`, preview
+and production alike, and quote the proof in your report.
+
+**The test:** *shape or contents?* Shape → everything below. Contents → your own session,
+unless the target is curated Master Data.
+
+## Hard rules (these govern STRUCTURAL CHANGES)
 
 1. ~~**DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.~~
    **SUPERSEDED — see the box above.** Never `execute_sql` for DDL still holds; "via MCP

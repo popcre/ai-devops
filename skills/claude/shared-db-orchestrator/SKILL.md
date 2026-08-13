@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST a database CHANGE instead of starting it. NOTE — this skill gates CHANGES ONLY; read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types, safe samples) is ALLOWED from every application repo with no issue and no dispatch, so do NOT load this skill merely to look at the schema. Load it for THREE situations, before doing anything else. (0) ANYONE who needs a shared-database CHANGE made — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST a database CHANGE instead of starting it. NOTE — this skill gates STRUCTURE CHANGES ONLY. (a) Read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types, safe samples) is ALLOWED from every application repo with no issue and no dispatch, so do NOT load this skill merely to look at the schema. (b) DATA is NOT gated either (owner ruling 2026-08-13, `AGENTS.md` §0.0-B): an application session owns the rows it creates, edits, or deletes in the normal course of its work — feature/bugfix row writes, its own scraper or ingest tables, backfills and cleanups of data the app produced, preview test/fixture data, job/queue/audit rows — with NO issue and NO dispatch, so do NOT load this skill for "insert these rows", "update this record", "fix this data", or "backfill this column's values". The ONE data exception that DOES load this skill is bulk or ad-hoc loading of outside-sourced content (spreadsheet, CSV, export, pasted rows, API pull) into curated Master Data — `core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory` and their `*_ext` tables. Load it for THREE situations, before doing anything else. (0) ANYONE who needs a shared-database CHANGE made — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / structural seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
 ---
 
 # shared-db-orchestrator
@@ -30,7 +30,7 @@ description: Open and run a session as ONE orchestrator that does no work itself
 >
 > | Skill | When |
 > |---|---|
-> | **`shared-db-orchestrator`** (this one) | **OPENING and running** a session. You are in charge and you dispatch; you do no work yourself. Also the skill for anyone who needs a database **change** and must request it (reading needs no request).  |
+> | **`shared-db-orchestrator`** (this one) | **OPENING and running** a session. You are in charge and you dispatch; you do no work yourself. Also the skill for anyone who needs a **structural** database change and must request it (reading needs no request, and neither do ordinary application data writes — see §0.0-B).  |
 > | `shared-db-change` | **AUTHORING** a schema change — the migration discipline itself |
 > | `shared-db-handover` | **ENDING or STOPPING** a session |
 
@@ -72,12 +72,53 @@ database must be able to judge whether the database fits its data, and that is
 impossible without seeing the schema. **Do not file an issue to read.** Do not tell
 a user that looking at the schema is queued for the orchestrator.
 
-The line is mutation. The moment a session runs `ALTER`/`CREATE`/`DROP`, any
-`INSERT`/`UPDATE`/`DELETE`, `apply_migration`, or opens a migration file or
-branch — in preview or in production — it has left read-only territory and
-everything below applies. (A read-only session still proves its connection target
-before every call and still keeps licensed rows inside their approved private
-repo.)
+The line is **structural** mutation. The moment a session runs `ALTER`/`CREATE`/`DROP`,
+`apply_migration`, or opens a migration file or branch — in preview or in
+production — it has left read-only territory and everything below applies. (A
+read-only session still proves its connection target before every call and still
+keeps licensed rows inside their approved private repo.)
+
+## SECOND: data is not "database work" either. Rows belong to the application session.
+
+> **Owner ruling, Albert Hazan, 2026-08-13** — "shared-db orchestrator is for creating,
+> changing, or deleting the STRUCTURE or schema or design of the database, not for creating,
+> changing, or deleting the data inside the database. That should be done by the sessions
+> working on the actual application."
+
+Recorded as `AGENTS.md` §0.0-B in `u2giants/shared-db`, which is the controlling text.
+**This skill gates the shape of the database, not its contents.**
+
+**NOT gated. No issue, no dispatch, no handover, no branch, no migration:**
+
+- a feature or bug fix writing, updating, or deleting its own application rows
+- a scraper, importer, or sync job writing into the ingest/staging tables it owns
+- backfilling, correcting, or cleaning up application data the app itself produced
+- test, demo, or fixture data in preview
+- operational data: job runs, queue rows, cache entries, audit and log rows
+
+Filing an issue for one of these is a mistake in the other direction — it clogs the queue
+and blocks the app for no safety gain. This was previously ambiguous: the older wording
+listed "a seed or data fix" beside tables and columns, and sessions reasonably read any
+`INSERT` as orchestrator work. It never was.
+
+**THE ONE CARVE-OUT — curated Master Data stays gated.** Bulk or ad-hoc loading of
+**outside-sourced** content (a spreadsheet, CSV, export, pasted block of rows, screenshot,
+chat message, or API pull) into `core.licensor`, `core.property`, `core.character`,
+`core.customer`, `core.factory` or their `*_ext` tables is still orchestrator work, under
+`AGENTS.md` §6.4 and its 2026-08-03 correction. Nothing there is relaxed, including the
+matched-row abstention rule: on a matched row an ad-hoc session writes **nothing**, because
+this database records no per-field curation and you therefore cannot tell curated from
+untouched. That gate was bought with an incident — a dump silently superseding hand-curated
+rulings. The trigger is **provenance and target**, never volume or verb.
+
+**Unchanged for every data write you do own:** `AGENTS.md` §4.2 still binds. Prove which
+database you are pointed at immediately before every `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`,
+in preview and production alike, and quote the proof in your report. Owning your rows is not
+permission to be unsure where they land.
+
+**The test, in one line:** *am I changing the shape of the database, or the contents of it?*
+Shape → request it here. Contents → do it in your own session, unless the target is curated
+Master Data.
 
 ## If you need a database CHANGE: REQUEST it, do not start it
 
@@ -86,8 +127,15 @@ applies to every session and every person who is **not** the current orchestrato
 
 **Anyone who needs any of the following must file a request rather than act:**
 a schema change, a migration, an RLS policy, a view, an RPC or function, a
-trigger, an index, a seed or data fix, a promotion to production, or any change
-to a data contract shared between Poppim, PopCRM, PopDAM or DesignFlow PLM.
+trigger, an index, a structural seed that ships as a migration, a promotion to
+production, or any change to a data contract shared between Poppim, PopCRM,
+PopDAM or DesignFlow PLM. **Plus the one data carve-out:** a bulk or ad-hoc load
+of outside-sourced content into curated Master Data (`core.licensor`,
+`core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`).
+
+**Ordinary application row writes are NOT on this list** — see "SECOND: data is
+not database work either" above. Do not file a request to change your own app's
+data; do it in your own session, with the §4.2 connection-target proof.
 
 **Where it goes: a GitHub issue on `u2giants/shared-db`.** Not a file, not a PR,
 not a chip.
@@ -121,7 +169,9 @@ felt like bureaucracy: a one-line `CREATE OR REPLACE`, a column add, a quick
 version bump. Small changes are the dangerous ones precisely because they are the
 ones people feel entitled to make directly, and this database is shared by four
 applications that will not find out until a user does. Size is not the test —
-whether it touches the shared database is the test.
+**whether it changes the STRUCTURE of the shared database is the test** (plus the
+curated-Master-Data carve-out). A small *structural* change still needs a request;
+a large *data* change in your own app's tables does not.
 
 **If you are an AI session and a user asks you to CHANGE the database:** do not
 start it, do not open a migration file, and do not create a

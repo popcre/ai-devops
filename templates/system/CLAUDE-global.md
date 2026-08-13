@@ -155,7 +155,7 @@ before touching any prod trigger or Terraform state.
     and commits already on a shared branch stay as they are. One `git` binary
     serves every agent, so this is per-MACHINE, never per-agent.
 
-> ## Shared database: reading is open, changing is not
+> ## Shared database: reading is open, DATA is the app's, STRUCTURE goes through shared-db
 >
 > The shared supabase backend (`<removed-protected-project-ref>`) serves many applications,
 > so this split is global — not Paramount-only, not scraper-only.
@@ -167,12 +167,30 @@ before touching any prod trigger or Terraform state.
 > against app code, scraper output, business rules, or a proposed feature and
 > reporting the gaps is normal work. Do not refuse it as "database work".
 >
-> **Every CHANGE is authored in `u2giants/shared-db` FIRST** (branch + PR,
-> preview-first, you merge it) BEFORE app code — schema, tables/columns, views,
-> functions/RPCs, triggers, RLS, indexes, seeds, migrations, data contracts.
-> From an app repo, NEVER write its own shared-DB migration, run
-> `ALTER`/`CREATE`/`DROP` directly, mutate shared data during a review, or
-> bypass that process. App-repo docs teaching inline migrations are stale.
+> **Every STRUCTURE change is authored in `u2giants/shared-db` FIRST** (branch +
+> PR, preview-first, you merge it) BEFORE app code — schema, tables/columns,
+> views, functions/RPCs, triggers, RLS, indexes, structural seeds, migrations,
+> cross-app data contracts. From an app repo, NEVER write its own shared-DB
+> migration, run `ALTER`/`CREATE`/`DROP` directly, or bypass that process.
+> App-repo docs teaching inline migrations are stale.
+>
+> **DATA is NOT shared-db's job** (owner ruling 2026-08-13, `AGENTS.md` §0.0-B).
+> shared-db and its orchestrator govern the *shape* of the database, not its
+> *contents*. The rows an application creates, edits, or deletes in the normal
+> course of its work belong to the session working on that application — no
+> issue, no dispatch, no migration. That covers feature and bug-fix row writes,
+> its own scraper/ingest tables, backfills and cleanups of data the app
+> produced, preview fixtures, and job/queue/audit rows. Do not queue these.
+>
+> **One data carve-out:** bulk or ad-hoc loading of OUTSIDE-SOURCED content
+> (spreadsheet, CSV, export, pasted rows, API pull) into curated Master Data —
+> `core.licensor`, `core.property`, `core.character`, `core.customer`,
+> `core.factory` and their `*_ext` tables — stays orchestrator work under §6.4.
+> A dump there can silently supersede hand-curated rulings.
+>
+> **Unchanged:** before every `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`, preview or
+> production, prove which database you are pointed at and quote the proof (§4.2).
+> Owning your rows is not permission to be unsure where they land.
 >
 > Licensed licensor rows never leave their approved private repo. Load the
 > `shared-db-change` skill before making any change; it carries the full
