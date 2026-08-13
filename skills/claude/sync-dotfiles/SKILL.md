@@ -29,6 +29,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine (seeded only if absent; never clobbers local edits) | `bin/ai-install-skills` |
 | New standing rules added to those templates | repo → machine, **by hand, step 4** — no script does this | you, appending the missing section |
+| Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -128,6 +129,24 @@ clone + `./install.sh` (Ubuntu) first.
    the local file, which carries this machine's own atlas section and hand
    edits). Report what you appended. Leave machine-specific local content alone;
    you are only adding missing rules, never reconciling wording.
+5b. **Ensure the required Claude tool permissions:** `bin/ai-claude-permissions`.
+   Merges every entry in `config/claude-permissions.allow` into the USER-level
+   `~/.claude/settings.json`, so it covers every project on the machine. It is
+   idempotent, strictly additive (never removes an entry, never touches `deny`
+   or anything else), and backs the file up to `settings.json.aidevops.bak`
+   before its first change. Prints `OK all N required permission(s) already
+   present` when there is nothing to do — say that verdict out loud, the same
+   way step 2 distinguishes *checked and fine* from *not checked*.
+   This is not cosmetic: Claude Code STOPS and asks before using a tool that is
+   not allowed, and in a delegated/unattended session (a subagent doing visual
+   verification, a background task) nobody is there to answer — the work stalls
+   and the transcript reads like the tool is broken rather than un-permitted.
+   That is exactly how browser screenshotting worked on one machine and silently
+   did not on the others (2026-08-13). If it exits 3 (`ERROR unparseable JSON`),
+   the local settings file is already broken — do NOT rewrite it; report it and
+   let Albert decide. To add a permission for every machine, add the line to
+   `config/claude-permissions.allow` in the repo and commit; never hand-edit one
+   machine's settings file.
 6. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
    Skips cleanly if gcloud isn't installed.
 6b. **Pin the Git commit identity:** `bin/ai-git-identity`. Idempotent; prints
