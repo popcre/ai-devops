@@ -91,3 +91,63 @@ Precision is the strong suit; sensitivity is adequate. No description change was
 justified, so none was made. Re-run this before and after any edit to that
 description — a rewrite that reads better but fires less is a regression, and
 without the numbers you'd never know.
+
+## The three load-bearing skills (2026-08-13) — Albert's gate on step 8
+
+Scored on the Claude runner at `--runs 3`, against a neutral scratch project.
+
+| Skill | Should fire | Should NOT fire | Verdict |
+|---|---|---|---|
+| `handoff-writer` | **8/10** | **0/10** | unchanged, no edit justified |
+| `shared-db-change` (Claude twin) | **7/10** | **0/10** | unchanged; edit tried and reverted |
+| `synology-long-running-operations` | **2/10** | **0/10** | unchanged; edit tried and reverted |
+
+Precision is perfect across all three: no near-miss fired once, in any round.
+
+**Two edits were written, measured, and thrown away.** The `shared-db-change`
+description was rewritten to lead with the read-only schema-question case,
+copying the structure of the 10/10 `codex-shared-db-change` twin; it scored
+**7/10 → 6/10**. The `synology-long-running-operations` description was rewritten
+to lead with the *shape* of the work (whole volume, share, or large subtree) and
+name every case it had missed; it scored **2/10 → 2/10**. Both were reverted, per
+the standing rule that an edit is kept only when should-fire improves and
+should-not-fire stays 0/10. **Porting the wording of a high-scoring twin does not
+port its score** — this is the second time (after the 1Password rewrite) that a
+description that reads better measured worse or identical.
+
+`synology-long-running-operations` at 2/10 is the real open problem. It fires on
+prompts that name a timeout or ask for an "inventory", and stays silent on
+ordinary phrasings of the same expensive read — hashing a tree, comparing the two
+NAS boxes, months of logs, a CSV of every file. Wording alone did not move it.
+Two untested hypotheses for whoever picks this up: the eval runs in a project
+with no Synology MCP configured, so the model may see no NAS tooling to reach
+for; and the always-loaded global already carries rule 9a about this exact
+topic, which is the same "Claude believes it already knows enough" effect
+documented above for 1Password. Test the MCP hypothesis before rewriting again.
+
+### Two runner traps found on this run, both fixed
+
+Both **inflated** scores, and the first three-set run was scrapped because of them.
+
+1. **Any tool's input counted as a trigger.** The streaming-delta path matched the
+   skill name anywhere in a tool call's input, so a `Grep` or `Read` of a file
+   whose path merely contained the name scored as a fire. Deltas are now
+   attributed to their block via `content_block_start`, and only a `Skill`
+   block's delta counts.
+2. **The default project was the caller's cwd.** Run from inside this repo —
+   which names every skill in its docs, its globals, and its eval sets — ordinary
+   reading produced false positives on prompts that must NOT fire.
+   `handoff-writer` appeared to fire on "commit and push everything". The default
+   is now a fresh neutral scratch project.
+
+**An empty directory is not the fix.** It is inert: prompts asking the model to
+act on the work at hand have nothing to act on, so it asks a question instead of
+selecting a skill, and the run scores a miss it did not earn. The runner now
+seeds a small ordinary project (a README, two source files, a notes file, an
+empty `HANDOFF.d/`) that names none of our skills, repos, or machines.
+
+**One run per query is not a measurement.** At `--runs 1` the same three sets
+scored differently on different queries between two identical rounds, including
+prompts quoted verbatim in the skill's own description. Use `--runs 3` for any
+decision; twenty queries at three runs takes about eight minutes at
+`--workers 6`.

@@ -1,0 +1,23 @@
+[
+  {"query": "we need a new column on the products table for the licensor style guide id. add it", "should_trigger": true},
+  {"query": "make the db changes the proper way for the new rfq status field", "should_trigger": true},
+  {"query": "popdam needs an rpc that returns assets by character id. write it", "should_trigger": true},
+  {"query": "the rls policy on the characters table blocks the crm app. fix the policy", "should_trigger": true},
+  {"query": "does the shared database actually fit the paramount scrape output? compare our data shape to the schema and tell me the gaps", "should_trigger": true},
+  {"query": "what columns exist on the properties table in the shared supabase project?", "should_trigger": true},
+  {"query": "i added a migration in poppim-web that alters the shared table at startup. is that ok?", "should_trigger": true},
+  {"query": "review the schema for the shared pop database and tell me if the character to property relationship is many to many", "should_trigger": true},
+  {"query": "re-author that index change properly in shared-db instead of running it directly", "should_trigger": true},
+  {"query": "we want a view that joins assets, characters, and style guides for the dam. create it in the shared backend", "should_trigger": true},
+
+  {"query": "wrap up this session", "should_trigger": false},
+  {"query": "the dflow cloud sql connection string changed, update the backend env in coolify", "should_trigger": false},
+  {"query": "put the supabase service role key in 1password", "should_trigger": false},
+  {"query": "read the entire codebase and tell me if you find any bugs or poorly written code", "should_trigger": false},
+  {"query": "the popdam frontend crashes when an asset has no thumbnail. fix the component", "should_trigger": false},
+  {"query": "add a local sqlite cache to the scraper so it doesnt refetch pages", "should_trigger": false},
+  {"query": "update the .md files for what we did today", "should_trigger": false},
+  {"query": "scrape the paramount portal and give me the character list as csv", "should_trigger": false},
+  {"query": "set up ci/cd for popcrm-web through ghcr and coolify", "should_trigger": false},
+  {"query": "stop work on shared-db and hand your work over to the orchestrator", "should_trigger": false}
+]

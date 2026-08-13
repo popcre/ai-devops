@@ -1,0 +1,23 @@
+[
+  {"query": "i need a full inventory of every file on volume1 on edgesynology1 with sizes and mtimes. last time the nas mcp just timed out", "should_trigger": true},
+  {"query": "hash every file under /volume1/photo on the nas so we can compare it against the replica. thats about 400k files", "should_trigger": true},
+  {"query": "the run_command call keeps dying at 25 seconds when i try to find the big files on the nas. get me the answer anyway without breaking the timeout", "should_trigger": true},
+  {"query": "walk the whole /volume1/media tree on edgesynology2 and tell me which folders are eating the most space. read only, but its going to take a while", "should_trigger": true},
+  {"query": "grep six months of synology drive logs on both nases for connection errors and give me counts per day", "should_trigger": true},
+  {"query": "i want a background job on the nas that lists every file over 1gb across all shares and writes it somewhere i can read later", "should_trigger": true},
+  {"query": "audit permissions on every folder under /volume1/mgmt on edgesynology1. its a huge tree so plan for it to run long", "should_trigger": true},
+  {"query": "compare file counts between edgesynology1 and edgesynology2 for all shared folders. dont overload the nas while you do it", "should_trigger": true},
+  {"query": "that find scan you ran got cut off halfway. rerun it so it actually finishes this time and prove it completed", "should_trigger": true},
+  {"query": "build me a csv of every video file on the nas with path, size, and modified date. whole volume, not a sample", "should_trigger": true},
+
+  {"query": "how much free space is left on edgesynology1?", "should_trigger": false},
+  {"query": "sharesync has been stuck syncing the same file for two hours on the mgmt share. whats wrong", "should_trigger": false},
+  {"query": "restart the nas-api service on edgesynology2", "should_trigger": false},
+  {"query": "a file i saved on edgesynology1 never showed up on the replica. can you figure out why", "should_trigger": false},
+  {"query": "show me the last 50 lines of the drive server log on the nas", "should_trigger": false},
+  {"query": "delete the old backup folder on volume1 to free up room", "should_trigger": false},
+  {"query": "whats the ip and ssh alias for edgesynology1 again?", "should_trigger": false},
+  {"query": "wrap up this session and write the handoff", "should_trigger": false},
+  {"query": "the synology monitor mcp wont connect from this machine, check the config", "should_trigger": false},
+  {"query": "run a quick df on the nas and tell me if volume2 is above 80 percent", "should_trigger": false}
+]
