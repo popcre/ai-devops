@@ -1,0 +1,24 @@
+# Memory index
+
+- [Wrap-up routing](wrap-up-routing.md) — "dflow wrap up" → run the **wrap-up** skill (docs FIRST), never dflow-ship alone
+- [User: Albert](user-albert.md) — non-programmer owner of dflow PLM; explain in plain language
+- [Git commit identity](git-commit-identity.md) — user.* unset; commit via `-c user.name/email`, use the **noreply** email (gmail/popcre → GH007)
+- [AG Grid v36 theming](aggrid-v36-legacy-theming.md) — MIGRATED to Theming API (themeAlpine/APP_GRID_THEME); legacy CSS removed; keep .ag-theme-alpine class as styling hook
+- [AG Grid version drift](aggrid-version-drift-local-install.md) — local node_modules was 35.2.1 vs repo 36.0.0; always `yarn install` before trusting local tsc/jest
+- [dflow delivery workflow](dflow-delivery-workflow.md) — 6 popcre repos, sandbox-albert branch, PR to develop
+- [dflow frontend deploy pipeline](dflow-frontend-deploy-pipeline.md) — sandbox-albert deploy = Cloud Build in project lithe-breaker-323913, region us-east4, service popcre-albert-frontend-sandbox (alsand); `yarn start:preview` for local UI
+- [shared-db canonical repo](shared-db-canonical-repo.md) — u2giants/shared-db at C:\repos\shared-db; branch→PR→**main** (not develop); app-owned columns stay as db.js startup migration + a docs note there
+- [Codex concurrency incident](codex-concurrency-incident.md) — Codex (approval:never) broke the backend tree during a concurrent sync; don't run two agents on the same repos
+- [Codex Windows sandbox helper](codex-windows-sandbox-helper.md) — `-s workspace-write` fails on the Programs\ codex.exe (no resources); use the AppData\Local\OpenAI copy
+- [Sandbox test images](sandbox-test-images.md) — bulk-loaded 4 recycled images onto all 19,202 items; rollback via uuid prefix `e1e10000-`
+- [Compact mat-field label overflow](dflow-compact-matfield-label-overflow.md) — toolbar outline labels overflow field top on some machines (font-metric dep); pin line-height + float transform
+- [Error-handling standard](error-handling-standard.md) — no silent failures AND no cryptic/generic errors; every failure must name the record + exact problem so a dev can pinpoint it
+- [dflow fixes register](dflow-fixes-register.md) — fixes.md (in designflow-frontend) re-verified 2026-07-20: 39 closed/106 open/14 new; JWT bypass is FIXED; watch regression-by-activation
+- [dflow vendor identity model](dflow-vendor-identity-model.md) — TWO unreconciled vendor-scope mechanisms (factory_id vs externalVendor.vendorCode-by-email); root cause of the Group A tracking auth holes
+- [dflow schema: dflow vs plm](dflow-schema-dflow-vs-plm.md) — app runs on `SCHEMA=dflow`; segregation moves tables to `plm` and breaks the app (`relation "dflow.X" does not exist`); fix in shared-db
+- [dflow DB → Supabase](dflow-db-supabase-migration.md) — migration DONE for the sandbox (verified 2026-07-27); do not say dflow runs on Cloud SQL
+- [HTS RAG pilot](hts-rag-pilot.md) — HTS_RAG.md is plan-only (no code); pilot = 9-model bake-off + ruling verifier; cross.js now has fetchRuling()
+- [dflow UI verify via preview](dflow-ui-verify-preview.md) — start:preview + `umeka@popcre.com` (vibe_coding) to see UI render; dev-server renders AG-Grid cell renderers BLANK (prod is fine)
+- [dflow sandbox = PRODUCTION Supabase](dflow-sandbox-is-production-supabase.md) — alsand writes to `qsllyeztdwjgirsysgai`, schema-separated only; test data is permanent and only Albert can delete it
+- [shared-db production apply lane](shared-db-production-apply-lane.md) — merged ≠ applied; workflow dispatch + Albert's approval, and atomic batches (B9) forbid applying one migration alone
+- [AG Grid group id → context.col_id](aggrid-group-id-survives-as-context-colid.md) — on Standardized, `field` is cleared and `groupId` is auto-numbered; match saved group ids on `context.col_id`
