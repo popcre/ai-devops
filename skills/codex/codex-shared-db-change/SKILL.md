@@ -1,6 +1,6 @@
 ---
 name: codex-shared-db-change
-description: Read this BEFORE any change to the shared supabase.com backend from an app repo, and before answering any question about its schema. Fires on "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", "all db work goes through shared-db", "review the schema", "what columns exist", "does the shared database fit our data", "compare our data shape to the schema". Covers every schema, table, column, view, RPC, trigger, RLS policy, index, seed, migration, and cross-app data-contract change in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam) — every one of which is authored in `u2giants/shared-db`, never in the app repo. Also states Rule 0: read-only inspection of the shared schema is ALLOWED from every app repo, with no issue and no dispatch.
+description: Read this BEFORE any change to the shared supabase.com backend from an app repo, and before answering any question about its schema. Fires on "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", "all db work goes through shared-db", "review the schema", "what columns exist", "does the shared database fit our data", "compare our data shape to the schema". Covers every STRUCTURAL change in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam) — schema, table, column, view, RPC, trigger, RLS policy, index, structural seed, migration, cross-app data contract — every one of which is authored in `u2giants/shared-db`, never in the app repo. Also states Rule 0: read-only inspection of the shared schema is ALLOWED from every app repo, with no issue and no dispatch. And Rule 0.5: DATA is NOT gated — an application session owns the rows it writes, updates, or deletes in the normal course of its work, with no issue and no dispatch (owner ruling 2026-08-13, `AGENTS.md` §0.0-B); the ONE exception is bulk/ad-hoc loading of outside-sourced content into curated Master Data (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`).
 ---
 
 # codex-shared-db-change
@@ -8,7 +8,24 @@ description: Read this BEFORE any change to the shared supabase.com backend from
 `u2giants/shared-db` is the **canonical** repo for the shared supabase.com backend
 (production project `qsllyeztdwjgirsysgai`) used by CRM, DAM, PM/PIM, and PLM
 (designflow). Every app reads/writes the same tables, so a schema change made in
-one app repo can silently break another. All durable DB truth lives in shared-db.
+one app repo can silently break another. All durable DB **structure** lives in shared-db.
+
+> **Structure, not data (owner ruling, Albert Hazan, 2026-08-13; `AGENTS.md` §0.0-B).**
+> This skill and the shared-db orchestrator govern the *shape* of the database — schema,
+> tables, columns, views, functions/RPCs, triggers, RLS, indexes, migrations, cross-app
+> contracts. The rows an application creates, edits, or deletes in the normal course of its
+> work belong to the session working on that application: **no issue, no dispatch, no
+> migration.** That includes its own ingest/staging tables, backfills and cleanups of data
+> the app produced, preview fixtures, and job/queue/audit rows.
+>
+> **One carve-out:** bulk or ad-hoc loading of outside-sourced content (spreadsheet, CSV,
+> export, pasted rows, API pull) into curated Master Data — `core.licensor`,
+> `core.property`, `core.character`, `core.customer`, `core.factory` and their `*_ext`
+> tables — is still orchestrator work under `AGENTS.md` §6.4, matched-row abstention
+> included. The trigger is provenance and target, not volume or verb.
+>
+> **Unchanged:** §4.2 still requires proving the connection target immediately before every
+> data write, preview and production alike.
 
 > ## ⚠️ Read this before anything below. Corrected 2026-08-09 (issue #574).
 >
