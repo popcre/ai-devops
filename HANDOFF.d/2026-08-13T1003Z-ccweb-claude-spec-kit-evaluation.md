@@ -218,19 +218,57 @@ the step-3 path rewrites will cost `AGENTS.md` a further ~100 bytes of the 136 l
 
 1. Put the whole of §0 to Albert in one message. *You'll know it worked when he
    has answered items 1–7, especially whether to run the Grok review first.*
-2. Execute `plan_spec-kit-idea-adoption.md` starting at **step 1**, phase by
+2. **Run the outstanding Grok second opinion** (§0 item 2). Prefer `hetz` — the
+   `STEP 0 VERIFICATION` block in `bin/ai-grok-review` was captured there. Confirm
+   the model id first; the wrapper defaults to `grok-4.5` and fixes the model at
+   session creation, so `AI_GROK_MODEL` must be on the `new` call, not a later
+   `ask`:
+
+   ```bash
+   grok models    # confirm the real 4.6 id — the header says never hard-code a remembered one
+
+   AI_GROK_MODEL=grok-4.6 ai-grok-review new spec-kit-eval <<'EOF'
+   Read these three files in this repo and give a second opinion:
+     docs/github-spec-kit-evaluation.md
+     plan_spec-kit-idea-adoption.md
+     AGENTS.md (documentation map + intentional quirks)
+
+   Attack the conclusion, don't summarize it. Specifically:
+   1. Is "don't adopt github/spec-kit, port five ideas" right, or is it
+      status-quo bias dressed up as analysis?
+   2. The plan refuses to add a new skill because claudeSkillManifestBytes is at
+      21521/21521 and budgets.json forbids raising a budget. Is extending
+      fresh-session's body the right call, or is that gaming a budget rather
+      than respecting it?
+   3. Phase order is migrate-first (D3) and two plans are excluded from
+      migration because open HANDOFF.d/ files link to them (D2). Find the flaw.
+   4. What did this evaluation miss entirely?
+
+   Be concrete and cite file:line. Say plainly if you'd reach a different verdict.
+   EOF
+   ```
+
+   *You'll know it worked when the JSON reports a terminal `stopReason`
+   (`end_turn` / `EndTurn`) — never judge completion by exit status; that rule is
+   in the script header and cost ~$1.28 in wasted runs on 2026-08-05.*
+   **Sanity-check the reply:** its central claim is a measurement, and Grok has
+   Read + Grep. If it disputes `21521/21521` rather than the reasoning, check
+   whether it actually ran `tools/context-audit/context-audit.py` or just
+   eyeballed the file. Record the verdict in `docs/github-spec-kit-evaluation.md`
+   §7, which currently says the second opinion is still owed.
+3. Execute `plan_spec-kit-idea-adoption.md` starting at **step 1**, phase by
    phase. Do not start phase 2 before phase 1's gates pass. *You'll know phase 1
    worked when `git status --short` shows 11 `R` lines, `ls -1 plan_*.md` lists
    exactly three files, and the step-3 grep returns only the four permitted plan
    names.*
-3. Commit phase 1 on its own so the renames are reviewable in isolation. *You'll
+4. Commit phase 1 on its own so the renames are reviewable in isolation. *You'll
    know it worked when `git log --stat` shows the renames as one commit.*
-4. Re-run `python3 tools/context-audit/context-audit.py` after every phase.
+5. Re-run `python3 tools/context-audit/context-audit.py` after every phase.
    *You'll know it worked when `brokenLinks` is empty, both manifest counts are
    unchanged (21,521 / 13,943), and no budget entry is in warning.*
-5. Update this plan's STATUS table in the same session that executes any step —
+6. Update this plan's STATUS table in the same session that executes any step —
    a partially-executed plan lies to the next reader.
-6. When all 13 steps are done and verified, write your own `HANDOFF.d/` file,
+7. When all 13 steps are done and verified, write your own `HANDOFF.d/` file,
    delete **this** file in the same commit, and only then migrate
    `plan_spec-kit-idea-adoption.md` into `specs/`.
 
