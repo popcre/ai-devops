@@ -93,6 +93,19 @@ thin plan costs a whole session of rediscovery and a wrong build.
     branch/env/URL, test logins by 1Password location (vault + item title,
     **never values**), and how to run/serve the thing locally.
 
+**9a. `tasks.md` — REQUIRED when the plan is multi-phase or any part of it will
+be delegated** (Codex, Grok, GLM, Kimi, or a fresh session). Not for a small
+single-session plan; never retrofitted to a closed plan. Full contract:
+`templates/system/implementation-plan-standard.md` §9a. In short — a sibling
+`tasks.md` with one row per task: stable `id` (`T001`…, never renumbered or
+reused), a one-sitting `task`, the exact `files` it may touch, `depends`,
+`verify` (the command and what success looks like), and `status`.
+
+The two rules that give it its value: **a delegate reports completion by task id,
+never by prose**, and **you never mark a task done on a delegate's word — you run
+its `verify` yourself.** If the plan also has a STATUS table, §13 must say which
+tracker wins when they disagree, or the two will drift.
+
 ### Part 4 — Landing it
 
 13. **Definition of done + risks and open questions** — the checklist that makes

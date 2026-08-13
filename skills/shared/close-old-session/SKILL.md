@@ -11,7 +11,12 @@ description: >-
   ONE job it adds: verify against ground truth (git + current .md files + code)
   that each pending item wasn't already done or superseded by intervening
   sessions BEFORE acting — then delegate the actual doc/ship work to
-  session-docs-update, wrap-up, or dflow-ship.
+  session-docs-update, wrap-up, or dflow-ship. ALSO owns the convergence check
+  on delegated work — use when the user asks "what is still left?", "did the
+  delegate/Codex/Grok/GLM/Kimi actually finish?", "is this plan done?", "check
+  what it claimed against the repo", or "converge this plan": never trust a
+  reported completion, re-run each task's own verification against the repo and
+  report done / still open / contradicted per task id.
 ---
 
 # close-old-session
@@ -78,6 +83,33 @@ For every item from Step 1, decide which it is and say so plainly:
   differently. Do not silently pick one. Surface both to Albert with a
   recommendation (per the no-silent-failures / never-clobber-concurrent-work
   rules).
+
+## Step 3a — The convergence check (delegated work)
+
+Same discipline, different suspect list. When the pending work was handed to a
+delegate model (Codex, Grok, GLM, Kimi) or to another session, **its report is a
+claim, not a fact** — treat every claimed-done item exactly like a Step 1 suspect.
+
+Run this whenever asked "what is still left?", "did it actually finish?", "is
+this plan done?", or "converge this plan".
+
+1. **Get the task list, not the prose.** If the plan has a `tasks.md`
+   (`templates/system/implementation-plan-standard.md` §9a), that is the unit of
+   work. If it does not, use the plan's numbered steps. A delegate's summary
+   paragraph is never the list.
+2. **Re-run each task's own `verify` yourself.** The command in the `verify`
+   cell, against the current repo. Not a re-read of the delegate's output.
+3. **Check the blast radius.** Did it touch files outside the task's `files`
+   column? Out-of-scope edits are a finding, even when the task itself passed.
+4. **Report per task id**, using the Step 3 buckets: done, still open, or
+   **contradicted** (claimed done, verification fails). Contradicted is the
+   whole point of the check — say it loudly and never quietly re-run the task.
+5. **Append, never overwrite.** Update the `status` column from what *you*
+   verified. Do not rewrite the delegate's narrative, and do not mark anything
+   done on its word.
+
+This check **reports only**. It does not fix what it finds — that is the same
+rule the read-only review stages follow.
 
 ## Step 4 — Hand the surviving work to the close-out chain
 

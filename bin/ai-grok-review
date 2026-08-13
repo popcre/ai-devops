@@ -63,7 +63,10 @@ CALLER="${AI_GROK_CALLER:-claude}"
 # provider cache; broadening it turns a read-only review into something else.
 # --disable-web-search closes a real scope leak: under --allow Read alone, Grok
 # has been observed using web_fetch during a purely local repository review.
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+# grok-4.6 confirmed as the provider default on 2026-08-13 via `grok models`
+# (grok 1.0.3, 1a29d5bc12). Do not hard-code a remembered id — re-run `grok
+# models` before changing this line.
+GROK_MODEL="${AI_GROK_MODEL:-grok-4.6}"
 GROK_PERMS=(--permission-mode default --allow Read --allow Grep
             --deny Edit --deny Bash --disable-web-search --no-memory)
 

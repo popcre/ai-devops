@@ -55,6 +55,36 @@ Per step: target files (file:line/function), intended behavior when done,
 dependencies, and a verification gate — "you'll know it worked when ___."
 Group into phases for large work; mark the context cut points.
 
+### 9a. The `tasks.md` contract — REQUIRED when work will be delegated
+Applies to a **new** plan that is multi-phase, or that any part of will be handed
+to a delegate model (Codex, Grok, GLM, Kimi) or a fresh session. Not required for
+a small single-session plan, and never retrofitted to a closed plan.
+
+Handing a delegate a 20–80 KB plan gives it no unit of work smaller than the
+whole document, and no mechanical way to answer "what is still undone?". A
+`tasks.md` alongside the plan fixes both. One row per task:
+
+| Field | Rule |
+|---|---|
+| `id` | `T001`, `T002`, … Stable forever. Never renumbered, never reused after deletion. |
+| `task` | One action, doable in one sitting. If it needs two verification gates, it is two tasks. |
+| `files` | The exact paths it may touch. A delegate that edits outside this list has gone out of scope. |
+| `depends` | Task ids that must be done first, or `—`. |
+| `verify` | The command or observation proving it, and what "worked" looks like. |
+| `status` | `⬜ open` / `🟨 in progress` / `✅ done` / `⛔ blocked` |
+
+Rules that make it worth having:
+
+- **A delegate reports completion by task id, never by prose.** "Done" without an
+  id is not an answer.
+- **Never mark a task done on a delegate's word.** Run its `verify` yourself. The
+  status column records what was verified, not what was claimed.
+- **One tracker, not two.** If the plan also carries a STATUS table of steps, that
+  table tracks *steps* and `tasks.md` tracks *tasks*, and §13 must say which one
+  wins when they disagree. Two trackers that both claim authority will drift.
+- The verification gate in the step (§9) and the `verify` cell are the same gate,
+  written once and referenced, not copied and allowed to diverge.
+
 ## 10. Tests required
 Specific unit tests to add; the existing suite/command that must stay green.
 

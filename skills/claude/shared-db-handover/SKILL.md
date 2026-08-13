@@ -1,9 +1,34 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the orchestrator. TWO paths. (A) You are NOT the orchestrator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the orchestrator", "hand your work to the orchestrator", "hand your work to the orchestrator", "hand this off to the orchestrator", "hand your work to the coordinator", "hand this off to the coordinator", "you are not the coordinator", "there is already a coordinator" (COORDINATOR is the older word for the ORCHESTRATOR role, still used in older issues and in git history, and must trigger this skill too), "you are not the orchestrator", "another session is coordinating this", "there is already a orchestrator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the orchestrator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A orchestrator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a orchestrator session is opened and run.
+description: Wrap up, close out, hand over, or STOP a session that touched `u2giants/shared-db` or the shared Supabase database — schema/migration/RLS/view/RPC/trigger/seed work, a preview or production promotion, a cross-app data contract, or any dispatched sub-agents or worktrees. Covers both paths - if you are NOT the orchestrator ("stop and hand over", "transfer this to the orchestrator/coordinator", "you are not the orchestrator"), stop and open a `db-work` issue; if you ARE the orchestrator ("wrap up", "close this out", "end of session", "write the handoff", "out of context"), write the two-halves handoff. Prefer this over `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Opened and run via `shared-db-orchestrator`.
 ---
 
 # shared-db-handover
+
+## Trigger phrases (moved here from `description:` on 2026-08-13)
+
+The manifest counts only `name` + `description`, so long trigger lists are
+expensive there and free here. Nothing below was dropped — it was relocated.
+
+**Path A — you are NOT the orchestrator:** "stop work and hand over", "stop what
+you are doing on shared-db", "transfer your work to the orchestrator", "hand your
+work to the orchestrator", "hand this off to the orchestrator", "hand your work to
+the coordinator", "hand this off to the coordinator", "you are not the
+coordinator", "there is already a coordinator", "you are not the orchestrator",
+"another session is coordinating this", "there is already an orchestrator", "write
+your handover into COORDINATOR_INTAKE", "fill in the intake template".
+COORDINATOR is the older word for the ORCHESTRATOR role, still used in older
+issues and in git history, and must trigger this skill too. `COORDINATOR_INTAKE.md`
+was retired on 2026-08-07 — the handover is a GitHub issue on `u2giants/shared-db`.
+
+**Path B — you ARE the orchestrator:** "hand this over", "hand this session over",
+"hand it to a new session", "wrap up", "wrap up this session", "close this out",
+"close out the session", "end of session", "we're done here", "write the handoff",
+"write the handoff for what the subagents did", "I'm out of context", "context
+window is full", "fresh session", "give the next session a prompt".
+
+A orchestrator handoff has TWO halves — coordination state AND a separate block
+per sub-agent. One missing the second half is incomplete no matter how long it is.
 
 ## FIRST: are you the orchestrator? Answer this before anything else
 

@@ -1,6 +1,6 @@
 ---
 name: qwen-code
-description: Invoke the locally installed Qwen Code CLI as an independent reviewer, second-opinion reasoning engine, codebase analyst, or delegated implementation agent. Use when the user says "ask Qwen", "use Qwen Code", "run this by Qwen", "have Qwen review this", "get a Qwen second opinion", or explicitly requests qwen3.8-max / Qwen 3.8. Use the real installed `qwen` CLI non-interactively, validate its current flags, capture its result and errors, and keep review work read-only.
+description: Invoke the locally installed Qwen Code CLI as an independent reviewer, second-opinion reasoning engine, codebase analyst, or delegated implementation agent. Use when the user says "ask Qwen", "use Qwen Code", "run this by Qwen", "have Qwen review this", "get a Qwen second opinion", or explicitly requests qwen3.8-max / Qwen 3.8. Drive the real `qwen` CLI non-interactively, validate its flags, capture result and errors, keep reviews read-only.
 ---
 
 # Qwen Code

@@ -160,6 +160,11 @@ cheaper than a wrong plan surviving to stage 03.
 
 ## 5. Recommendation
 
+> **SUPERSEDED 2026-08-13 by two independent reviews — see §8.** The paragraph
+> below is the original single-model recommendation, kept for the record. The
+> binding recommendation is now §8: do **not** execute the four-phase plan; make
+> two changes instead.
+
 Port the five ideas per
 [`plan_spec-kit-idea-adoption.md`](../plan_spec-kit-idea-adoption.md). Do not
 install `specify-cli` into the toolkit or into `/worksp/ai-devops`.
@@ -191,8 +196,54 @@ Reopen this decision if any of these become true:
   `skills/shared/implementation-plan-writer/SKILL.md`,
   `skills/shared/fresh-session/SKILL.md`, `bin/ai-grok-review`,
   `tools/context-audit/` (run for the budget figures quoted in §3).
-- **Not yet done:** an independent second-opinion review by another model. It was
-  requested on 2026-08-13 but Grok is not reachable from a Claude-on-the-web
-  container (no `grok` binary, no `ai-grok-review`, no xAI credentials, no
-  `/worksp`). Run `ai-grok-review new spec-kit-eval` on `hetz` or `t16` to get
-  it. The verdict above is one model's judgement until then.
+- **Second opinions — DONE 2026-08-13** on `al8960ofc`, after this evaluation was
+  first written on a Claude-on-the-web container where no delegate CLI existed.
+  - Grok 4.6 (`ai-grok-review new spec-kit-eval`) — full text:
+    [`grok-4.6-spec-kit-second-opinion.md`](grok-4.6-spec-kit-second-opinion.md).
+  - Kimi K3 (`ai-kimi new spec-kit-tiebreak`), given both positions and asked to
+    rule point by point — full text:
+    [`kimi-k3-spec-kit-tiebreak.md`](kimi-k3-spec-kit-tiebreak.md).
+
+## 8. Revised recommendation (2026-08-13, after second opinions)
+
+Both reviewers independently reached the same verdict, against the original
+plan. Their load-bearing claims were spot-checked against the files and hold.
+
+**Do not execute the four-phase plan.** Make two changes instead:
+
+1. **Add a `tasks.md` contract** to
+   `templates/system/implementation-plan-standard.md`, for **new** delegated or
+   multi-phase plans only. This is the surviving core of plan step 6, and both
+   reviewers endorse it.
+2. **Put the convergence check in `close-old-session`**, not in the body of
+   `fresh-session`. Give it a real `description:` so it can actually trigger, and
+   fund those bytes with the manifest trim `budgets.json:14` already targets
+   (Claude down to 15,065). Never by raising a budget.
+
+**Dropped, with reasons:**
+
+- **Phase 1 (moving 11 plans into `specs/`) — deferred, not cancelled.** Its
+  stated ordering rationale is false: phases 2–4 never rewrite the moved files,
+  so moving them first saves no later work. It would also spend the last
+  `startupRoutedBytes` headroom in `AGENTS.md` while
+  `plan_context-engineering-consolidation.md` (steps 8–10 still open) is actively
+  shrinking that same file, and it misses the ownership map at
+  `docs/context-engineering.md:105`. Revisit once that plan closes and the stale
+  `HANDOFF.d/` files are cleared — at which point the exclusion set that
+  complicated the move largely disappears.
+- **Converge inside `fresh-session`'s body — rejected as budget-gaming.** Skills
+  are selected on `name` + `description`; the body loads only after selection
+  (`docs/context-engineering.md:102`). `fresh-session`'s description fires on
+  "fresh session?" and "new context window?", never on "did the delegate finish?".
+  This repo has already been bitten by exactly that
+  (`docs/context-engineering.md:312-326`).
+- **The spec/plan split and the stage-00 clarify gate — not now.** Nobody has
+  run `specify init` in a throwaway repo yet, which §5 itself recommended as the
+  prerequisite. And `bin/ai-model-call:63-71` has no `clarify` stage, so the new
+  prompt file would be one no runner can invoke.
+- **The task-ID rationale in §4.1 does not survive its own citations.**
+  `plan_kimi-incomplete-implementation-recovery.md` and
+  `plan_glm-incomplete-implementation-recovery.md` describe runs that correctly
+  **fail closed** and export a marked-incomplete patch — not delegates reporting
+  success on partial work. Both are closed. Task IDs may still be worth having,
+  but the incident class used to justify them is undocumented in this repo.

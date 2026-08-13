@@ -1,6 +1,6 @@
 ---
 name: codex-shared-db-change
-description: Read this BEFORE any change to the shared supabase.com backend from an app repo, and before answering any question about its schema. Fires on "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", "all db work goes through shared-db", "review the schema", "what columns exist", "does the shared database fit our data", "compare our data shape to the schema". Covers every schema, table, column, view, RPC, trigger, RLS policy, index, seed, migration, and cross-app data-contract change in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam) — every one of which is authored in `u2giants/shared-db`, never in the app repo. Also states Rule 0: read-only inspection of the shared schema is ALLOWED from every app repo, with no issue and no dispatch.
+description: Read BEFORE any change to the shared supabase.com backend from an app repo, and before answering any question about its schema. Fires on "make db changes the proper way", "mirror it to shared-db", "all db work goes through shared-db", "review the schema", "what columns exist", "does the shared database fit our data". Covers every schema, table, column, view, RPC, trigger, RLS policy, index, seed, migration, and cross-app data-contract change in ANY app repo (dflow, popcrm-web, poppim-web, popdam) — all authored in `u2giants/shared-db`, never in the app repo. Also states Rule 0: read-only schema inspection is ALLOWED from every app repo, with no issue and no dispatch.
 ---
 
 # codex-shared-db-change

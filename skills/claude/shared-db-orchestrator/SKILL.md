@@ -1,9 +1,38 @@
 ---
 name: shared-db-orchestrator
-description: Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees — and, for everyone who is NOT the orchestrator, how to REQUEST a database CHANGE instead of starting it. NOTE — this skill gates CHANGES ONLY; read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types, safe samples) is ALLOWED from every application repo with no issue and no dispatch, so do NOT load this skill merely to look at the schema. Load it for THREE situations, before doing anything else. (0) ANYONE who needs a shared-database CHANGE made — "I need a database change", "can you add a column", "we need a new table / view / RPC / index", "how do I request database work", "submit a request to the orchestrator", "who do I ask for a schema change", "it's only a small change" — the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session — "run this with subagents", "spin up agents", "use subagents", "run these in parallel", "coordinate", "orchestrate", "coordinate multiple sessions", "several workstreams", "who is working on what", "what is each agent doing". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named — "add a migration", "write a migration", "make a schema change", "change the database", "update the shared database", "add a column", "change RLS", "add a view / RPC / trigger / seed", "promote to production", "work in shared-db", "start a new shared-db session", "start a shared-db orchestrator session", "start a orchestrator session", "start an orchestrator session", "be the orchestrator", "start a coordinator session", "be the coordinator", "hand over to the coordinator", "I want to run a orchestrator session", "open a orchestrator session", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; "COORDINATOR" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work — the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.
+description: Gates every CHANGE to the shared Supabase database or `u2giants/shared-db` — migrations, schema, columns, RLS, views, RPCs, triggers, seeds, production promotion, cross-app data contracts — and every request to run work with multiple agents or sessions ("use subagents", "run these in parallel", "orchestrate", "coordinate sessions"). Load it BEFORE doing anything else in three cases - you need a database change made (the answer is a `db-work` GitHub issue, never work started on the spot); you are asked to open or run an orchestrator (older word - coordinator) session; or you are about to spawn sub-agents or task chips for database work. Read-only schema inspection is ALLOWED everywhere with no issue and no dispatch, so do NOT load this to merely look at the schema. To END or hand over such a session use `shared-db-handover`. In doubt, it needs coordination; load this.
 ---
 
 # shared-db-orchestrator
+
+## Trigger phrases (moved here from `description:` on 2026-08-13)
+
+The manifest counts only `name` + `description`, so long trigger lists are
+expensive there and free here. Nothing below was dropped — it was relocated.
+
+**(0) Anyone who needs a shared-database CHANGE made:** "I need a database
+change", "can you add a column", "we need a new table / view / RPC / index", "how
+do I request database work", "submit a request to the orchestrator", "who do I ask
+for a schema change", "it's only a small change". The answer is always a GitHub
+issue on `u2giants/shared-db` with the `db-work` label — never work started on
+the spot.
+
+**(1) Any request to run work with more than one agent or session:** "run this
+with subagents", "spin up agents", "use subagents", "run these in parallel",
+"coordinate", "orchestrate", "coordinate multiple sessions", "several
+workstreams", "who is working on what", "what is each agent doing".
+
+**(2) Any work on the shared database or repo, even when neither is named:** "add
+a migration", "write a migration", "make a schema change", "change the database",
+"update the shared database", "add a column", "change RLS", "add a view / RPC /
+trigger / seed", "promote to production", "work in shared-db", "start a new
+shared-db session", "start a shared-db orchestrator session", "start an
+orchestrator session", "be the orchestrator", "start a coordinator session", "be
+the coordinator", "hand over to the coordinator", "open an orchestrator session",
+or any cross-app data-contract change.
+
+Also load this before creating background task chips for database work — the chip
+pattern is what broke this repo.
 
 > ## The role is called ORCHESTRATOR. "Coordinator" is the OLD word for the same thing.
 >

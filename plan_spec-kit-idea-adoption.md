@@ -7,26 +7,38 @@ Decision record this plan implements:
 
 ## STATUS — read this first
 
-Nothing below has been executed. Only the two documents named above exist.
+> ## ⛔ THIS PLAN IS SUPERSEDED (2026-08-13). DO NOT EXECUTE IT.
+>
+> Two independent reviews — Grok 4.6
+> ([`docs/grok-4.6-spec-kit-second-opinion.md`](docs/grok-4.6-spec-kit-second-opinion.md))
+> and Kimi K3 as tie-breaker
+> ([`docs/kimi-k3-spec-kit-tiebreak.md`](docs/kimi-k3-spec-kit-tiebreak.md)) —
+> independently rejected this plan's shape. Their load-bearing claims were
+> spot-checked against the files and hold. The binding decision is
+> **[`docs/github-spec-kit-evaluation.md`](docs/github-spec-kit-evaluation.md) §8**.
+>
+> Two steps survive, in reduced form; the rest are dropped or deferred. The text
+> below is kept **as a record of the reasoning**, not as instructions. Do not
+> restart at step 1.
 
 | # | Step | Phase | Status |
 |---|---|---|---|
-| 1 | Derive the migration set from `HANDOFF.d/` | 1 | ⬜ open |
-| 2 | `git mv` 11 plans to `specs/NNN-<slug>/plan.md` | 1 | ⬜ open |
-| 3 | Rewrite references to the migrated plans | 1 | ⬜ open |
-| 4 | Verify migration (audit + grep gates) | 1 | ⬜ open |
-| 5 | Split the standard into `spec.md` + `plan.md` | 2 | ⬜ open |
-| 6 | Add the `tasks.md` contract with task IDs | 2 | ⬜ open |
-| 7 | Mirror steps 5–6 into `implementation-plan-writer` | 2 | ⬜ open |
-| 8 | Teach stage 02 to review the spec separately | 2 | ⬜ open |
-| 9 | Add `templates/prompts/00-clarify.md` | 3 | ⬜ open |
-| 10 | Wire the clarify gate into the pipeline skill | 3 | ⬜ open |
-| 11 | Add the converge check to `fresh-session` | 4 | ⬜ open |
-| 12 | Add the converge gate to the delegate handoff contract | 4 | ⬜ open |
-| 13 | Final verification + docs/handoff update | 4 | ⬜ open |
+| 1 | Derive the migration set from `HANDOFF.d/` | 1 | 🟥 deferred — see §8 of the decision record |
+| 2 | `git mv` 11 plans to `specs/NNN-<slug>/plan.md` | 1 | 🟥 deferred — blocked on `plan_context-engineering-consolidation.md` steps 8–10 |
+| 3 | Rewrite references to the migrated plans | 1 | 🟥 deferred with step 2 |
+| 4 | Verify migration (audit + grep gates) | 1 | 🟥 deferred with step 2 |
+| 5 | Split the standard into `spec.md` + `plan.md` | 2 | ⬛ dropped — prerequisite `specify init` research never done |
+| 6 | Add the `tasks.md` contract with task IDs | 2 | ✅ done 2026-08-13 — reduced to new delegated/multi-phase plans only |
+| 7 | Mirror steps 5–6 into `implementation-plan-writer` | 2 | ✅ done 2026-08-13 — `tasks.md` half only |
+| 8 | Teach stage 02 to review the spec separately | 2 | ⬛ dropped with step 5 |
+| 9 | Add `templates/prompts/00-clarify.md` | 3 | ⬛ dropped — `bin/ai-model-call:63-71` has no `clarify` stage, so no runner could invoke it |
+| 10 | Wire the clarify gate into the pipeline skill | 3 | ⬛ dropped with step 9 |
+| 11 | Add the converge check to `fresh-session` | 4 | ⬛ dropped — body-only edit behind a description that cannot trigger it |
+| 12 | Add the converge gate to the delegate handoff contract | 4 | ⬛ dropped with step 11 |
+| 13 | Final verification + docs/handoff update | 4 | ✅ done 2026-08-13 |
+| 14 | Converge check in `close-old-session`, with a real description | — | ✅ done 2026-08-13 — replaces steps 11–12 |
 
-**A fresh session starts at step 1.** Phases are ordered deliberately — see §8
-LOCKED decision D3. Do not start phase 2 before phase 1 is verified.
+**Do not start a fresh session at step 1.** Read the decision record §8 instead.
 
 ---
 
