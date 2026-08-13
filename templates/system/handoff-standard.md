@@ -114,12 +114,30 @@ file and note in it that migration is still pending.
   same commit that finishes it. Git history preserves the text forever, so
   nothing is lost. Delete only files for work you can prove is done — normally
   only your own.
+- **The successor rule — this is what actually stops the pile-up.** A session
+  almost never gets to delete its own file: it writes the handoff *because* the
+  work continues past it. So **the session that finishes the NEXT step of a
+  workstream deletes the previous step's file**, in the commit that finishes that
+  step. That is not "editing another session's handoff" (still forbidden) — it is
+  retiring a file whose work you just proved landed. Delete it only when all
+  three are true, and say so in the closing report:
+  1. the predecessor's own status line says its work was committed and pushed,
+     and you verified those commits are on `main`;
+  2. every still-open obligation it names is carried forward — in the plan's
+     STATUS table, in the plan's drift block, or in YOUR new file;
+  3. nothing in it is a decision or dead end that exists nowhere else.
+  If any of the three fails, keep it and say which one failed.
 - **A file's presence means OPEN.** Session start reads only the files that are
   present; it does not need any status field, index, or archive folder.
 - **Threshold warning:** if `HANDOFF.d/` holds **more than 5** files, say so
   loudly in the closing report, list them oldest-first with their dates, and ask
   which are actually finished. Never let them silently accumulate — 50 nine-section
   essays a year is exactly the drowning a fresh developer must be spared.
+  In the `ai-devops` repo this is also **checked mechanically**, so it does not
+  depend on anyone remembering: `tools/context-audit/context-audit.py` reports
+  `open handoffs: N` and warns past the threshold. It is a warning, never a
+  failure — a busy week legitimately has six, and an audit that blocks a commit
+  over paperwork teaches people to ignore audits.
 - Do not create an `archive/`, `done/`, or index file. Deletion + git history IS
   the archive. A generated index would just be another shared mutable file for
   sessions to clobber.

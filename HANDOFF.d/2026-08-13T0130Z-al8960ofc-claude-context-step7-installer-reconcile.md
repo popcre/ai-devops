@@ -39,11 +39,16 @@ Put this whole list to Albert in ONE message before starting work.
    `.gitattributes` that normalizes text files. Normalizing now would rewrite
    the working copy of nearly every file days before a pilot, and every installed
    hash with it. Do NOT "fix" it mid-pilot.*
-3. **`HANDOFF.d/` now holds 6 open files — over the 5-file warning line.**
-   The step-4, step-5, and step-6 handoffs describe work that is committed,
-   pushed, and superseded by this file and by the plan's STATUS table.
-   *Recommendation: Albert deletes those three. A session must not delete another
-   session's handoff, so this one did not.*
+3. **CLOSED 2026-08-13 — Albert approved deleting the step-4, step-5, and step-6
+   handoffs**, and they are gone in the same commit that added the successor
+   rule. `HANDOFF.d/` is back to 3 files. Nothing was lost: their commits are on
+   `main`, every open obligation they named is carried in the plan's STATUS
+   table, the plan's drift blocks, or §6 of this file, and git history keeps the
+   text. **The rule changed so this does not rebuild:** the session that finishes
+   the NEXT step of a workstream now deletes the previous step's file (three
+   conditions, in `templates/system/handoff-standard.md`), and
+   `context-audit.py` prints `open handoffs: N` and warns past 5 so it never
+   depends on anyone remembering.
 
 ### Not part of this work, and nobody is on it
 

@@ -278,6 +278,37 @@ try {
     }
     Write-Host "PASS: exceeded budgets warn with a plain reason and never fail the run"
 
+    # ------------------------------------------------------- open handoff count
+    # Every file in HANDOFF.d/ means an OPEN workstream. Retention used to depend
+    # on someone remembering at the end of a long session, and it silently grew
+    # past the threshold. Counting it here makes it mechanical - and a warning,
+    # never a failure, because an audit that blocks a commit over paperwork is an
+    # audit people learn to ignore.
+    New-AuditFixture -Path $fixture
+    $handoffDir = Join-Path $fixture "HANDOFF.d"
+    $handoffSummary = Join-Path $root "handoff-summary.txt"
+    New-Item -ItemType Directory -Force -Path $handoffDir | Out-Null
+    $result = Invoke-Audit -Path $fixture -Strict
+    if (@($result.report.openHandoffs).Count -ne 0) { throw "An empty HANDOFF.d was not reported as zero open handoffs." }
+    foreach ($n in 1..5) { Write-Utf8 (Join-Path $handoffDir "2026-01-0${n}Z-m-a-s.md") "# handoff $n" }
+    $result = Invoke-Audit -Path $fixture -Strict
+    if (@($result.report.openHandoffs).Count -ne 5) { throw "Five handoffs were not all counted." }
+    & python $tool --root $fixture --summary $handoffSummary --generated-at "fixture-time" | Out-Null
+    if ((Get-Content -LiteralPath $handoffSummary -Raw) -match "HANDOFF WARNING") {
+        throw "Exactly five handoffs warned; the threshold is MORE than five."
+    }
+    Write-Utf8 (Join-Path $handoffDir "2026-01-06Z-m-a-s.md") "# handoff 6"
+    $result = Invoke-Audit -Path $fixture -Strict
+    if (@($result.report.openHandoffs).Count -ne 6) { throw "Six handoffs were not all counted." }
+    & python $tool --root $fixture --summary $handoffSummary --generated-at "fixture-time" | Out-Null
+    $handoffText = Get-Content -LiteralPath $handoffSummary -Raw
+    if ($handoffText -notmatch "HANDOFF WARNING") { throw "Six open handoffs did not warn." }
+    if ($handoffText -notmatch "warning, not a failure") {
+        throw "The handoff warning does not say plainly that it is a warning."
+    }
+    if ($result.exit -ne 0) { throw "Too many open handoffs changed the exit status. It must warn only, even in strict mode." }
+    Write-Host "PASS: open handoffs are counted, warn past five, and never fail the run"
+
     # -------------------------------- always-loaded global vs skill descriptions
     New-AuditFixture -Path $fixture -SkillDescription $overlapSentence `
         -ClaudeExtra $overlapSentence -CodexExtra $overlapSentence
