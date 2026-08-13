@@ -180,6 +180,14 @@ through `~/.config/ai-devops/mcp-launch.cmd`. Confirmed token-free on t16
 not yet run `setup-machine.ps1`. The Dropbox MCP script is superseded, not the
 source of this file any more.
 
+It also carries `permissions.allow`, the list of tools Claude Code may use
+without stopping to ask. The entries the toolkit requires live in
+`config/claude-permissions.allow` and are merged in by `bin/ai-claude-permissions`
+(run by `install.sh` and by every `sync my dotfiles`). That script is additive
+only — it never removes an entry and never touches the rest of the file, so
+per-machine hand additions survive. Everything else in the file stays
+machine-local; only the required-permissions list is synced.
+
 ### 5. `~/.codex/config.toml`
 Codex CLI settings: `model = "gpt-5.5"`, `model_reasoning_effort = "medium"`,
 `[windows] sandbox = "elevated"`, `[desktop]` UI prefs, enabled plugins

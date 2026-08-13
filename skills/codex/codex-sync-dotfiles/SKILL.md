@@ -105,6 +105,20 @@ clone + `./install.sh` on Ubuntu).
    each rule section present in the template but absent locally, append it
    verbatim (append-only — never rewrite or reorder the local file). Report what
    you appended. This mirrors step 4 of the Claude `sync-dotfiles` skill.
+4b. `bin/ai-claude-permissions` — merge the permissions in
+   `config/claude-permissions.allow` into the user-level `~/.claude/settings.json`,
+   covering every project on the machine. Run it here too even though this is the
+   Codex skill: the gap is per-MACHINE, not per-agent, and Albert expects one
+   "sync my dotfiles" to leave the machine complete whichever client he said it
+   in. Idempotent and strictly additive — it never removes an entry and never
+   touches `deny`. Prints `OK all N required permission(s) already present` when
+   there is nothing to do; say that verdict out loud. Exit 3 means the local
+   settings file is already unparseable JSON — it is left untouched; report it,
+   do not rewrite it. Why it matters: Claude Code STOPS and asks before using a
+   tool that is not allowed, so in a delegated or unattended session the work
+   stalls and reads like a broken tool. To add a permission everywhere, add the
+   line to `config/claude-permissions.allow` in the repo — never hand-edit one
+   machine's settings file.
 5. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
    absent).
 5b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints
