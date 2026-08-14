@@ -44,7 +44,11 @@ node scripts/manage-migration-author-lanes.mjs --claim \
   --objects "<every exact object written, comma-separated>"
 ```
 
-The command must refuse unreadable claims, overlapping objects, unavailable GitHub state, failed version reservation, or a fourth author. Never choose a version manually and never hand-edit the fenced claim blocks.
+The command acquires GitHub-backed exact-object locks and one of three fixed
+author slots across computers. It must include open pull requests and refuse
+unreadable claims, overlapping objects, unavailable GitHub state, failed version
+reservation, or a fourth author. Older claims count. Never choose a version
+manually and never hand-edit fenced claim blocks.
 
 Audit and cleanup:
 
@@ -53,19 +57,23 @@ node scripts/manage-migration-author-lanes.mjs --audit
 node scripts/manage-migration-author-lanes.mjs --cleanup-stale
 ```
 
-Close a claim immediately when its PR merges or work is abandoned. Expired leases must be closed so the board stays clean. The reserved version remains permanently unavailable because it may already exist in preview's ledger.
+Release a claim explicitly when its PR merges or work is safely abandoned.
+Expiry never removes collision protection. Cleanup must prove ownership and
+finished branch/worktree/PR state before removing temporary refs. The reserved
+version remains permanently unavailable because it may already exist in preview.
 
 ## Before preview and merge
 
 For each PR separately:
 
-1. Grant the single preview lane.
+1. Acquire the exclusive GitHub-backed preview lock for the exact PR head.
 2. Fetch `origin/main` and update the branch from the newly merged main tip.
 3. Re-run version, object-collision, SQL and contract checks.
 4. Apply and prove the migration on preview.
 5. Obtain an independent review. Merge only with no unresolved Critical or High finding.
-6. Grant the single merge lane and merge one PR.
-7. Close its claim, then repeat from the new main tip for the next PR.
+6. Release preview, acquire the exclusive merge lock, revalidate the head/base,
+   and merge one PR through the guarded path.
+7. Release merge and the author claim, then repeat from the new main tip.
 
 Never resolve full-body `CREATE OR REPLACE` conflicts mechanically. Re-derive the later change from the newly merged body.
 
