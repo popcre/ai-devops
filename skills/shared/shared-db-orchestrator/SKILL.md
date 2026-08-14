@@ -34,6 +34,9 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
 - Keep preview application, PR merges and production promotion strictly one at a time.
 - Do not count read-only analysis, application code, tests or planning against the three author lanes.
+- Maintain three dynamic queues grouped by exact object overlap. Recompute them after every merge.
+- Refill every free lane in the same turn. Never wait for Albert to request status or say start.
+- Skip blocked, owner-decision, data-only and non-structural issues.
 
 Acquire a lane from the shared-db checkout:
 
@@ -54,8 +57,15 @@ Audit and cleanup:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --audit
+node scripts/manage-migration-author-lanes.mjs --queue-audit
 node scripts/manage-migration-author-lanes.mjs --cleanup-stale
 ```
+
+`--queue-audit` must classify every open `db-work` issue. Dispatch every
+`REFILL REQUIRED NOW` result immediately. An empty lane is acceptable only when
+the complete audit proves no eligible work exists. See
+[references/operating-manual.md](references/operating-manual.md) for the issue
+block and refill rules.
 
 Release a claim explicitly when its PR merges or work is safely abandoned.
 Expiry never removes collision protection. Cleanup must prove ownership and

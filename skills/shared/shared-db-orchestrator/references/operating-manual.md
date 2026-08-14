@@ -7,6 +7,7 @@
 3. Preview and merge locks
 4. Release and recovery
 5. Review and production
+6. Dynamic queues and automatic refill
 
 ## Startup recovery
 
@@ -46,6 +47,39 @@ objects or author slot.
 
 Do not create migration files before acquisition succeeds. Do not choose a
 version manually. Do not edit fenced claim blocks.
+
+## Dynamic queues and automatic refill
+
+Every open `db-work` issue must carry this machine-readable block:
+
+````text
+```db-work-scope
+state: eligible
+priority: 100
+depends_on:
+objects:
+  - table schema.name
+````
+```
+
+Allowed states are `eligible`, `blocked`, `owner-decision`, `data-only`, and
+`non-structural`. Use exact normalized objects, including every whole-body
+function or trigger the implementation replaces. Higher priority runs first.
+Open dependencies make otherwise eligible work wait.
+
+Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
+after every merge, and immediately after every claim release. Exact-overlap
+components form serial queues; unrelated components fill the three lanes.
+Dispatch every `REFILL REQUIRED NOW` issue in the same turn. Do not ask Albert
+to approve dispatch. Ask only for a genuine owner decision or exact production
+approval.
+
+An empty lane is justified only by a complete audit with no eligible candidate.
+Unclassified or malformed issues make that proof impossible and the command
+fails. Blocked, owner-decision, data-only and non-structural issues are reported
+but never consume a lane. Preview and merge remain globally serialized. An
+author waiting for those stages keeps doing safe local work or prepares the next
+issue without creating an overlapping migration.
 
 ## Preview and merge locks
 
