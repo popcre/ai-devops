@@ -103,7 +103,15 @@ bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
 bash tests/test-codex-trigger-eval.sh
 bash tests/test-installer-parity.sh
+bash tests/test-ai-adopt-globals.sh
 ```
+
+`tests/test-ai-adopt-globals.sh` covers `bin/ai-adopt-globals`, the wrapper that
+replaces a machine's always-loaded globals **without losing its machine
+section**. It proves the section is detected, saved and restored
+byte-identically, that a machine with no section is handled without one being
+invented, that `--dry-run` writes nothing, and that a timestamped copy of the
+original is always recoverable.
 
 `tests/test-installer-parity.sh` runs BOTH installers against one fixture and
 compares the result: same files, byte-identical `.ai-devops-managed` markers, and
