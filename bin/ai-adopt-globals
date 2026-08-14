@@ -92,6 +92,15 @@ trim_tail() {
 
 # Print the 1-based line number where this file's machine section starts, or
 # nothing at all if there is no machine section.
+#
+# Real headings in use across the machines, all of which must match:
+#   ## al8960ofc — Windows 11 dev machine (machine-specific; not from the hub template)
+#   # Machine facts — al8960ofc (Windows 11 dev box)
+#   # Machine atlas — this machine (t16 / `albt16`)
+#   # Machine atlas - 916 ("916-alien") and t16 and 4837 - Windows 11 dev machines
+#   # Local standing addition retained from previous AGENTS.md
+# Note the last two: neither contains this machine's own hostname, so hostname
+# matching alone silently reports "no machine section" on a file that has one.
 find_section_start() {
   local file=$1
   awk -v host="$SHORT_HOST" '
@@ -99,9 +108,56 @@ find_section_start() {
       line = tolower($0)
       if ((host != "" && index(line, host) > 0) ||
           index(line, "machine-specific") > 0 ||
-          index(line, "machine facts") > 0) { print NR; exit }
+          index(line, "machine facts") > 0 ||
+          index(line, "machine atlas") > 0 ||
+          index(line, "local standing addition") > 0) { print NR; exit }
     }
   ' "$file"
+}
+
+# A machine section is not always pure machine facts. On some machines the tail
+# of the installed global is INTERLEAVED: machine atlas, then a local standing
+# addition, then several blocks that were pasted in by earlier template syncs
+# and whose content the new repo template now carries inline. Re-appending those
+# verbatim would duplicate several kilobytes inside a file that is loaded on
+# every single session — the exact bloat this workstream exists to remove.
+#
+# So each heading block in the saved section is classified:
+#   DROPPED  - the heading says "added from ai-devops template sync", or it
+#              matches a heading in the repo template. Its sub-sections go with
+#              it, so a dropped "# Response Style" takes its "## Rules" too.
+#   KEPT     - everything else, which is treated as genuinely machine-local.
+# Every decision is printed, and the FULL untouched section is always in the
+# backup directory, so a wrong drop is recoverable and visible, never silent.
+filter_section() {
+  local section=$1 template=$2 report=$3
+  grep -E '^#{1,6} ' "$template" > "$WORK/template-headings.txt" || true
+  awk -v reportfile="$report" '
+    function norm(s) {
+      sub(/^#+[[:space:]]*/, "", s)
+      gsub(/[`*_]/, "", s)
+      sub(/[[:space:]]*\([^)]*\)[[:space:]]*$/, "", s)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      return tolower(s)
+    }
+    NR == FNR { tmpl[norm($0)] = 1; next }
+    /^#{1,6} / {
+      match($0, /^#+/); level = RLENGTH
+      if (dropping && level > drop_level) { next }
+      dropping = 0
+      lower = tolower($0)
+      reason = ""
+      if (index(lower, "added from ai-devops template sync") > 0) reason = "declares itself a template sync"
+      else if (norm($0) in tmpl)                                  reason = "the hub template now owns this heading"
+      if (reason != "") {
+        dropping = 1; drop_level = level
+        print "  DROPPED (" reason "): " $0 > reportfile
+        next
+      }
+      print "  KEPT:    " $0 > reportfile
+    }
+    { if (!dropping) print }
+  ' "$WORK/template-headings.txt" "$section"
 }
 
 # Files that will be replaced, as "label|installed path|repo template".
@@ -138,10 +194,19 @@ for entry in "${TARGETS[@]}"; do
     say
     HAVE_SECTION+=("$label|")
   else
-    sed -n "${start},\$p" "$installed" > "$WORK/$label.section"
+    sed -n "${start},\$p" "$installed" > "$WORK/$label.section.full"
+    filter_section "$WORK/$label.section.full" "$template" "$WORK/$label.report" \
+      | trim_tail > "$WORK/$label.section"
     say "$label: machine section starts at line $start of $installed"
-    say "        first line: $(head -n 1 "$WORK/$label.section")"
-    say "        $(wc -l < "$WORK/$label.section") lines, $(wc -c < "$WORK/$label.section") bytes — saved and will be re-appended."
+    say "        first line: $(head -n 1 "$WORK/$label.section.full")"
+    say "        found $(wc -l < "$WORK/$label.section.full") lines, $(wc -c < "$WORK/$label.section.full") bytes"
+    sed 's/^/      /' "$WORK/$label.report"
+    if grep -q '^  DROPPED' "$WORK/$label.report"; then
+      say "        ^ those blocks are NOT re-appended: the repo template already"
+      say "          carries that text, and duplicating it costs bytes on every"
+      say "          session. The untouched original is kept in the backup below."
+    fi
+    say "        re-appending $(wc -l < "$WORK/$label.section") lines, $(wc -c < "$WORK/$label.section") bytes."
     say
     HAVE_SECTION+=("$label|$WORK/$label.section")
   fi

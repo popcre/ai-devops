@@ -35,20 +35,22 @@ make_fixture() {
 run_adopt() {
   local fixture=$1 claude_home=$2 codex_home=$3; shift 3
   mkdir -p "$claude_home" "$codex_home"
-  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOSTNAME_OVERRIDE=testbox \
+  AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$BASE_BACKUP_HOME" USERPROFILE= \
   CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
     bash "$fixture/bin/ai-adopt-globals" "$@" 2>&1
 }
 
 # The script derives the machine name from `hostname`. Put a stub first on PATH
 # so the fixture headings are recognisable on any real machine.
+BASE_BACKUP_HOME="$TMP_ROOT/fakehome"
+mkdir -p "$BASE_BACKUP_HOME"
 STUB_BIN="$TMP_ROOT/stub-bin"
 mkdir -p "$STUB_BIN"
 printf '%s\n' '#!/usr/bin/env bash' 'echo testbox' > "$STUB_BIN/hostname"
 chmod +x "$STUB_BIN/hostname"
 export PATH="$STUB_BIN:$PATH"
 
-echo "1/5 machine section is detected, saved and restored byte-identically"
+echo "1/7 machine section is detected, saved and restored byte-identically"
 fixture="$TMP_ROOT/keep/repo"; claude="$TMP_ROOT/keep/claude"; codex="$TMP_ROOT/keep/codex"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
@@ -62,11 +64,11 @@ grep -Fq 'Codex-side machine fact.' "$codex/AGENTS.md" \
   || fail "Codex machine section lost"
 grep -Fq 'Body line two.' "$claude/CLAUDE.md" || fail "repo body not installed"
 
-echo "2/5 installed body equals the repo template exactly"
+echo "2/7 installed body equals the repo template exactly"
 grep -Fq 'installed body matches the repo template exactly' <<<"$output" \
   || fail "body verification did not run or did not pass: $output"
 
-echo "3/5 a machine with no machine section is handled without inventing one"
+echo "3/7 a machine with no machine section is handled without inventing one"
 fixture="$TMP_ROOT/none/repo"; claude="$TMP_ROOT/none/claude"; codex="$TMP_ROOT/none/codex"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex"
 printf '%s\nAn old locally-edited line.\n' "$TEMPLATE_CLAUDE" > "$claude/CLAUDE.md"
@@ -79,7 +81,7 @@ grep -Fq 'nothing to re-append' <<<"$output" || fail "did not say it appended no
 diff "$claude/CLAUDE.md" "$fixture/templates/system/CLAUDE-global.md" >/dev/null \
   || fail "installed global is not exactly the template when there is no section"
 
-echo "4/5 --dry-run changes nothing"
+echo "4/7 --dry-run changes nothing"
 fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
@@ -89,7 +91,7 @@ grep -Fq 'Nothing was changed.' <<<"$output" || fail "dry-run did not say so: $o
 [[ "$(cat "$claude/CLAUDE.md")" == "$before" ]] || fail "dry-run modified the global"
 [[ ! -d "$claude/skills" ]] || fail "dry-run installed skills"
 
-echo "5/5 originals are always recoverable"
+echo "5/7 originals are always recoverable"
 fixture="$TMP_ROOT/backup/repo"; claude="$TMP_ROOT/backup/claude"; codex="$TMP_ROOT/backup/codex"
 home="$TMP_ROOT/backup/home"
 make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$home"
@@ -101,5 +103,48 @@ AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$home" USERPROFILE= \
 found="$(find "$home/.ai-globals-backup" -name 'Claude-BEFORE.md' | head -n 1)"
 [[ -n "$found" ]] || fail "no timestamped backup of the original Claude global"
 grep -Fq 'A fact that exists nowhere else.' "$found" || fail "backup does not hold the original"
+
+echo "6/7 an interleaved tail keeps machine facts and drops re-synced template blocks"
+# This is albt16's real shape: machine atlas, a local standing addition, then
+# several blocks pasted in by earlier template syncs whose text the repo
+# template now carries. Note the atlas heading names OTHER machines, so hostname
+# matching alone would report "no machine section" on a file that has one.
+fixture="$TMP_ROOT/interleaved/repo"; claude="$TMP_ROOT/interleaved/claude"; codex="$TMP_ROOT/interleaved/codex"
+make_fixture "$fixture"; mkdir -p "$claude" "$codex"
+printf '%s\n' '# Codex global rules' '' 'Codex body.' '' \
+  '# Machine atlas - 916 ("916-alien") and t16 and 4837 - Windows 11 dev machines' '' \
+  '- dflow working copies live on D: here.' '' \
+  '# Local standing addition retained from previous AGENTS.md' '' \
+  '## Host changes route through Ansible' '' \
+  '- Never hand-edit the box.' '' \
+  '## Production infrastructure safety (absolute rule - added from ai-devops template sync)' '' \
+  '- Duplicated safety text the template already carries.' '' \
+  '# Response Style' '' \
+  '## Rules' '' \
+  '- A sub-section of a block the template owns.' \
+  > "$codex/AGENTS.md"
+printf '%s\n' '# Codex global rules' '' 'Codex body.' '' '# Response Style' '' 'Talk plainly.' \
+  > "$fixture/templates/system/AGENTS-global-codex.md"
+interleaved_home="$TMP_ROOT/interleaved/home"; mkdir -p "$interleaved_home"
+output="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$interleaved_home" USERPROFILE= \
+  CLAUDE_HOME="$claude" CODEX_HOME="$codex" \
+  bash "$fixture/bin/ai-adopt-globals" 2>&1)" || fail "adopt exited non-zero: $output"
+grep -Fq 'KEPT:    # Machine atlas' <<<"$output" || fail "machine atlas not kept: $output"
+grep -Fq 'KEPT:    # Local standing addition' <<<"$output" || fail "local addition not kept: $output"
+grep -Fq 'KEPT:    ## Host changes route through Ansible' <<<"$output" || fail "local sub-section not kept"
+grep -Fq 'DROPPED (declares itself a template sync): ## Production infrastructure safety' <<<"$output" \
+  || fail "self-declared template sync not dropped: $output"
+grep -Fq 'DROPPED (the hub template now owns this heading): # Response Style' <<<"$output" \
+  || fail "template-owned heading not dropped: $output"
+grep -Fq 'dflow working copies live on D: here.' "$codex/AGENTS.md" || fail "machine fact lost"
+grep -Fq 'Never hand-edit the box.' "$codex/AGENTS.md" || fail "local standing addition lost"
+grep -Fq 'Duplicated safety text' "$codex/AGENTS.md" && fail "re-synced template block was re-appended"
+grep -Fq 'A sub-section of a block the template owns.' "$codex/AGENTS.md" \
+  && fail "sub-section of a dropped heading was re-appended"
+
+echo "7/7 a dropped block is still recoverable in the backup"
+found="$(find "$interleaved_home/.ai-globals-backup" -name 'Codex-BEFORE.md' | head -n 1)"
+[[ -n "$found" ]] || fail "no backup of the original Codex global"
+grep -Fq 'Duplicated safety text' "$found" || fail "backup does not hold the dropped block"
 
 echo "ALL TESTS PASSED"
