@@ -152,7 +152,47 @@ prompts quoted verbatim in the skill's own description. Use `--runs 3` for any
 decision; twenty queries at three runs takes about eight minutes at
 `--workers 6`.
 
-## A global that names the skill does not summon it (2026-08-13, step-8 pilot)
+## RETRACTED by measurement (2026-08-14, step 10) — read this before the section below
+
+**The step-8 conclusion in the next section is wrong, and this is the evidence.**
+The same skill, the same committed eval set, the same `--runs 3`, the same
+always-loaded rule 9a naming the skill outright, measured on the same day:
+
+| Where | Should-fire | Should-NOT-fire |
+|---|---:|---:|
+| `hetz` (Ubuntu VPS, user `ai`) | **10/10** | 0/10 |
+| `al8960ofc` (Windows 11) | **5/10** | 0/10 |
+| `al8960ofc`, one day earlier (step 8) | 1/10 | 0/10 |
+| `al8960ofc`, two days earlier (step 7a) | 2/10 | 0/10 |
+
+Two things follow, and both matter more than the retracted claim:
+
+- **A global that names a skill does not suppress it.** On `hetz` the global says
+  "Load the shared `synology-long-running-operations` skill …" and the skill
+  fires on **every** should-fire prompt. The step-8 reading — that an
+  always-loaded rule substitutes for the skill — is not supported. Do not carry
+  it forward, and do not use it as a reason to move skill procedure into a
+  global.
+- **Run-to-run variance across days is larger than any description edit yet
+  measured.** Windows went 2 → 1 → 5 out of 10 with **no change to the skill
+  text at all**. Step 7a had already found that `--runs 1` is not a measurement;
+  this shows `--runs 3` on a single day is not a stable fact either. **A four-
+  point swing with nothing changed means the two "failed" description rewrites of
+  step 7a were never actually shown to fail.** Treat any single score as an
+  observation, never as a verdict, and never revert a description on one run.
+
+What is genuinely stable across every measurement this skill has ever had:
+**precision. Zero false positives, in every configuration, on both platforms.**
+
+The remaining real question is the **platform gap**, 10/10 on Linux versus 5/10
+on Windows with identical text. Hypothesis (a) from the section below — the
+neutral eval project has no Synology MCP wired up — is still the only surviving
+explanation, and it is now testable as a difference between two machines rather
+than as a guess. Nobody is on it; it is not a safety problem, because the
+25-second limit is carried by the global and the step-8 and step-9 probes both
+confirmed a session states it correctly.
+
+## A global that names the skill does not summon it (2026-08-13, step-8 pilot) — RETRACTED, see above
 
 `synology-long-running-operations` scored **2/10** before the step-8 pilot. Two
 causes were recorded as untested: (a) the neutral eval project has no Synology

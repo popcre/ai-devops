@@ -493,12 +493,21 @@ that evidence is reproducible.
   about 2.5 KB paid on every session on every machine. Keeping it is the safe
   default because of the finding below; moving it into a skill would be the next
   real cut and needs a measurement, not an opinion.
-- **Whether naming a skill inside an always-loaded rule suppresses it.** Step 8
-  measured `synology-long-running-operations` at 2/10 → 1/10 on Windows after the
-  global started naming it. But on `hetz` the same probe **did** open the skill.
-  So the effect may be platform-specific rather than a law. The safety limit
-  itself is intact either way — the global carries it — so this is a reachability
-  question, not a safety one.
+- ~~**Whether naming a skill inside an always-loaded rule suppresses it.**~~
+  **SETTLED, and the step-8 answer was wrong.** Measured on 2026-08-14 with the
+  same skill, same eval set, same global naming the skill: **`hetz` 10/10
+  should-fire, `al8960ofc` 5/10, both 0/10 false positives.** A global naming a
+  skill does not suppress it. The open part is now the **platform gap** — 10/10
+  on Linux versus 5/10 on Windows with identical text — and the surviving
+  explanation is that the neutral eval project has no Synology MCP wired up.
+  Safety is unaffected: the 25-second limit lives in the global and probes
+  confirm sessions state it correctly on both platforms. Full write-up in
+  [`skill-trigger-eval.md`](skill-trigger-eval.md).
+- **How many runs make a score a fact.** Windows measured 2/10, then 1/10, then
+  5/10 for the same skill with **no text change**, across three days. That swing
+  is bigger than any description edit ever measured, which means the two
+  "failed" rewrites of step 7a were never actually shown to fail. Until this is
+  settled, treat a score as an observation, not a verdict.
 - **What a passing trigger score is.** Seven measured skills, still no agreed bar.
 - **Whether `AGENTS.md` is load-bearing as a router.** Across five routing probes
   on two machines it was opened **zero times**, and every answer was still
