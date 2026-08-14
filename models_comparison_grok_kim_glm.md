@@ -791,7 +791,7 @@ Both predate the three models' work (`1f4de05` and `a7c8d76`), so **neither is a
 
 - Reviewer: Kimi K3 requested through `AI_KIMI_CALLER=codex ai-kimi`; wrapper pin
   proves the requested configuration. Headless returned-model evidence is unavailable.
-- Exact head: `0885b93b3a86fa419310250a5b6de2683dbc75c0`.
+- Exact final head: `99223f8fd548d6cefa69c696556ed8337b91fea0`.
 - Verdict: APPROVE after a current-file re-read.
 - Confirmed: #964 behavior remains preserved; `data_type` remains per value; the
   normalized parent is written before the foreign key; NULL-aware disagreement,
@@ -802,11 +802,29 @@ Both predate the three models' work (`1f4de05` and `a7c8d76`), so **neither is a
   accurate but non-blocking.
 - Policy/tool adherence: read-only wrapper used; no shell, edit, database call,
   secret, or licensed row was exposed.
-- Continuity: one named session, one turn, no rebuttal required. Latency was about
-  74 seconds.
+- Continuity: one named session and two turns. The second turn re-read the exact
+  head after an unrelated documentation-only main update and confirmed no
+  collision. No rebuttal was required. Initial-turn latency was about 74 seconds.
 - Tokens, cache, cost, context size, and returned model: unavailable from Kimi
   headless output and intentionally not estimated.
 - Final outcome at recording time: preview rehearsal passed; guarded merge pending.
+
+### shared-db #961 / PR #1019
+
+- Reviewer: Grok 4.6, proven by the `ai-grok-review` wrapper output.
+- Verdict: APPROVE with no material findings after a tightly constrained retry.
+- Confirmed: repeat safety, exact `dflow`/`plm` parity, all six statuses including
+  3D Approved, ordering, access, duplicable behavior, and test adequacy.
+- Defects caught: 0. False positives: 0. Policy/tool adherence: read-only wrapper;
+  no database write or licensed data exposure reported.
+- Continuity and efficiency: the first broad review cancelled at the 20-turn
+  bound without a verdict. It used 3,290,986 tokens (236,497 uncached and
+  3,033,472 cached) and cost $0.35969144. A fresh, exact-file retry completed in
+  2 turns with 156,327 tokens (81,292 uncached and 68,736 cached) and cost
+  $0.03990682. Total reported cost: $0.39959826.
+- Operational lesson: bounded exact-file briefs materially improve completion;
+  broad repository inspection can exhaust Grok's turn limit without a verdict.
+- Final outcome at recording time: exact-head checks green; preview/merge pending.
 
 ## Routing advice specific to contract/schema work
 
