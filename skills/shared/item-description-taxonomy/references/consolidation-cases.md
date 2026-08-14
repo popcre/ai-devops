@@ -48,6 +48,20 @@ product constructions:
 Do not merge solely because phrases are similar. Preserve distinctions supported
 by the physical description and consistent catalog behavior.
 
+## Same post-change MG family with incidental material wording
+
+These are one item type when items created on or after May 14, 2025 consistently
+share `M|W1|B1`:
+
+- `Molded Wall Clock`
+- `Polypropylene Molded Wall Clock`
+
+Canonicalize to `Molded Wall Clock`. Store `Polypropylene` as material wording,
+not as a separate product family. Apply the same test to other material,
+packaging, size, and included-contents modifiers. Do not apply this mechanically
+when the modifier indicates a genuinely different construction or the trusted
+post-change MG01-MG03 values disagree.
+
 ## Review principle
 
 Neither longest-string wins nor shortest-string wins. Choose the phrase that a
