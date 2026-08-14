@@ -94,10 +94,13 @@ For each PR separately:
 Never resolve full-body `CREATE OR REPLACE` conflicts mechanically. Re-derive the later change from the newly merged body.
 
 Production remains a separate single lane. After review, green checks, preview,
-and guarded merge, run `--production-risk-gate <evidence.json>`. Automatically
-promote only when all five business risks are proven absent; otherwise ask
-Albert one plain business-risk question. See the operating manual. Freeze merges
-for the bounded promotion and verify the exact production result.
+and guarded merge, use the production workflow's governed business-risk gate.
+It reads the exact merged PR/checks, immutable review artifact, pinned preview
+apply proof, current-main SQL, and activation record. Never supply risk booleans
+or prose as evidence. Automatically promote only when all five business risks
+are proven absent; otherwise ask Albert one plain business-risk question. See
+the operating manual. Freeze merges for the bounded promotion and verify the
+exact production result.
 
 ## Owner decisions
 
