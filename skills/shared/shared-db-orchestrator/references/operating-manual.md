@@ -8,6 +8,7 @@
 4. Release and recovery
 5. Review and production
 6. Dynamic queues and automatic refill
+7. External review rotation
 
 ## Startup recovery
 
@@ -94,6 +95,41 @@ file and parsed object to the branch-bound author lock and permanent version.
 
 Never mechanically merge competing full-body `CREATE OR REPLACE` changes.
 Re-derive the later body from the newly merged main.
+
+## External review rotation
+
+After an issue reaches its exact final head, run:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
+  --issue <issue> --pr <pr> --head-sha <exact-head>
+```
+
+The GitHub-backed cursor rotates Grok 4.6, GLM 5.2, Kimi K3, Qwen 3.8 Max, then
+repeats across machines and restarts. Retrying the same issue/PR/head returns the
+same assignment. Use only the returned persistent wrapper: `ai-grok-review`,
+`ai-glm`, `ai-kimi`, or `ai-qwen`. Never override its model or reasoning pin;
+record Qwen High as requested if applicable, while using the wrapper's qualified
+fixed configuration.
+
+Require the reviewer to re-read the current exact head and return `APPROVE` or
+`REVISE` with evidence. Independently verify every claim. Reuse the same named
+session for rebuttals and relay them with `templates/delegation/debate-turn.md`.
+Stop at evidence-backed agreement or after the initial review plus three
+rebuttals. If a material disagreement remains, stop merge and ask Albert one
+concise decision. Never expose secrets or licensed rows.
+
+After every review, append objective evidence to
+`C:\repos\ai-devops\models_comparison_grok_kim_glm.md` through an ai-devops PR:
+issue/PR, model/version requested and proven, verdict, confirmed and disproved
+findings, defects caught, false positives, policy/tool adherence, continuity,
+latency, turns, tokens/cache/cost only when reported, and final outcome. Kimi's
+headless token/cache/cost/returned-model figures are unavailable and must remain
+marked unavailable.
+
+Approval may trigger preview, merge, and preparation of the exact production
+approval package. It never authorizes production. Albert must approve the exact
+migration and target project.
 
 ## Release and recovery
 

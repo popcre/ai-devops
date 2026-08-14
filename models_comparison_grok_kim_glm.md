@@ -785,6 +785,29 @@ Both predate the three models' work (`1f4de05` and `a7c8d76`), so **neither is a
 
 **Not yet settled:** who is the best reviewer, and who is "best overall" — both flipped between engagements. Treat those as task-dependent rather than fixed, and re-evaluate after more rotations.
 
+## 2026-08-14 review rotation evidence
+
+### shared-db #965 / PR #1006
+
+- Reviewer: Kimi K3 requested through `AI_KIMI_CALLER=codex ai-kimi`; wrapper pin
+  proves the requested configuration. Headless returned-model evidence is unavailable.
+- Exact head: `0885b93b3a86fa419310250a5b6de2683dbc75c0`.
+- Verdict: APPROVE after a current-file re-read.
+- Confirmed: #964 behavior remains preserved; `data_type` remains per value; the
+  normalized parent is written before the foreign key; NULL-aware disagreement,
+  freeze, privilege, loader/database, and no-API-view contracts are present.
+- Disproved: no unresolved Critical, High, or Medium defect remained after the
+  earlier STATUS-table correction.
+- Defects caught: 0. False positives: 0. Two Low documentation observations were
+  accurate but non-blocking.
+- Policy/tool adherence: read-only wrapper used; no shell, edit, database call,
+  secret, or licensed row was exposed.
+- Continuity: one named session, one turn, no rebuttal required. Latency was about
+  74 seconds.
+- Tokens, cache, cost, context size, and returned model: unavailable from Kimi
+  headless output and intentionally not estimated.
+- Final outcome at recording time: preview rehearsal passed; guarded merge pending.
+
 ## Routing advice specific to contract/schema work
 
 Report A's routing guidance holds. Add this for work like Report B's — adopting an already-live database contract in application code:
