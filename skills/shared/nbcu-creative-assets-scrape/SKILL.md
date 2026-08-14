@@ -138,6 +138,26 @@ Never silently discard a detail record. Maintain one `dropped.csv` with `href,st
 
 For a recovery of known missing details, use `asset-index.csv` as the authoritative href list and preserve the exact detail form already stored there (`details.html`, `details/image.html`, `details/video.html`, or `details/document.html`). Preserve percent encoding such as `%20`; do not decode and rebuild URLs.
 
+## Shared-database landing contract
+
+Treat `plm.nbcu_property_character` as a link table, not an entity table. A loader writes:
+
+- `property_key` and `character_key`
+- `evidence_type` and `evidence_value`
+- the capture and source-provenance columns required by the current schema
+
+Do not write `property_label` or `character_label` on the link row. Those columns duplicate
+`plm.nbcu_property.property_label` and `plm.nbcu_character.character_label`. Migration
+`20260814050000_nbcu_link_labels_deprecated.sql` made both link-label columns nullable on
+2026-08-14 so loaders can stop writing them; they remain temporarily only for compatibility
+and will be dropped after every writer confirms the new contract. Read labels by joining the
+two entity tables. Never use a display label as identity.
+
+When reviewing or changing an NBCU loader, fail verification if its insert, update, merge, or
+upsert path still names either deprecated link-label column. Do not request their database
+removal until the live loader has stopped writing both columns and its next capture has been
+verified.
+
 Do not load a database, and do not change one. Database design changes and promotion are separate `shared-db` work: open a GitHub issue — `gh issue create --repo u2giants/shared-db --label db-work --title "<the outcome you need>" --body-file <file>` — and stop.
 
 **Reading the shared database is allowed and needs no issue.** You may inspect the live shared Supabase structure in full (schemas, tables, columns, keys and relationships, indexes, constraints, views, functions/RPCs, triggers, RLS policies, migration history, generated types, metadata, safe sample data) and compare it against the NBCU source shape to report gaps. That is a review, not a load. The confidentiality rules above are unchanged while you do it: licensed NBCU rows, rights lists and examples stay under `nbcu/` in the private `u2giants/licensor-source-data` repo and never appear in a public repo, a GitHub issue, logs, prompts sent to outside services, commit messages or PR text — describe the shape, never paste the data.
