@@ -127,17 +127,28 @@ latency, turns, tokens/cache/cost only when reported, and final outcome. Kimi's
 headless token/cache/cost/returned-model figures are unavailable and must remain
 marked unavailable.
 
-After approval, green checks, preview proof, and guarded merge, write objective
-risk evidence and run `--production-risk-gate <evidence.json>`. Automatic
-production promotion is allowed only when it proves all five: no permanent data
-loss/rewrite, no expected downtime, no material access change, tested credible
-recovery, and no unresolved material objection. Otherwise ask Albert one plain
-business-risk question. Never ask him to approve migration numbers, project
-identifiers, SQL, or other technical details.
+After approval, green checks, preview proof, and guarded merge, dispatch the
+production workflow with the exact source PR, review run and digest, preview
+apply run and digest, current-main SHA, and ordered allowlist. The workflow runs
+`scripts/production_business_risk_gate.py` before and after its approval wait.
+It independently reads the merged PR and required checks, verifies both pinned
+artifacts, proves the preview ledger change, and conservatively inspects the
+current-main SQL. Caller-written booleans and explanatory prose are never
+evidence. Automatic production promotion is allowed only when the governed
+records prove all five: no permanent data loss/rewrite, no expected downtime,
+no material access change, tested credible recovery, and no unresolved material
+objection. Ambiguous SQL stops. Ask Albert one plain business-risk question and
+never ask him to approve migration numbers, project identifiers, SQL, or other
+technical details.
 
-Transition rule: this policy cannot authorize its own rollout. The older exact
-approval rule remains binding until #1015 is independently reviewed, merged in
-shared-db and ai-devops, installed, and forward-tested.
+Transition rule: this policy cannot authorize its own rollout.
+`config/production-risk-policy-activation.json` starts inactive, so the older
+exact approval and production-environment review remain binding. Activation is
+a later governed change and must name the merged shared-db #1021 and ai-devops
+#24 commits, record matching canonical and installed skill hashes, and pin the
+forward-test proof hash. The gate re-reads both PRs and all hashes before it can
+use the automatic path. A boolean such as `active: true`, an explanation, or a
+caller assertion without the complete exact schema fails closed.
 
 ## Release and recovery
 
