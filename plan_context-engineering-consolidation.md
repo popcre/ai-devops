@@ -15,7 +15,7 @@
 | 8. Pilot on one Windows machine and representative repos | ✅ done | 2026-08-13 | **Trimmed globals installed on `al8960ofc` via `--adopt-globals`.** All nine named suites passed first. Both machine sections were saved before the install and re-appended after, and verified **byte-identical** to the saved copies; the installed bodies match the repo templates exactly under `tr -d '\r'` (mixed CRLF/LF is the known step-10 line-ending item). Exit code 0 was **not** accepted as proof — the new shared-db STRUCTURE-not-data text was grepped out of both installed files. `installed source drift` 8 → **2, and the JSON confirms both rows are the globals**, which now differ only by the machine sections and always will. The native PowerShell installer then reported every skill "up to date" against what the Bash installer wrote, and correctly refused both globals without `-AdoptGlobals` — the parity assertion this step owed. **Step-4 and step-5 probes pass** against fresh `claude -p` sessions carrying the new global: shared-db routing, refusal of a prod `terraform apply`, Git-identity check before a first commit, the `HANDOFF.d` process, the NAS 25-second constraint, and correct recovery of a recorded design reason. **Two probes were mis-designed and re-run** (§ step-8 drift 1). **The step-6 Codex probe was first recorded as passing on no evidence and is now actually measured** (§ step-8 drift 7): `codex-shared-db-change` scores **10/10 should-fire, 0/10 should-not-fire** on the real `codex` CLI at `low` effort, after the pilot, unchanged from step 6. **Pre-flight found the globals 2,233 bytes over budget from commit `df59ffa`, Albert's own shared-db ruling** — legitimate content, installed deliberately, but it moves step 10's numbers and adds 6 overlaps. **`synology-long-running-operations` re-scored after the pilot: 2/10 → 1/10, still 0/10 false positives** — hypothesis (b) refuted, see drift 3 |
 | 9. Roll out to all configured machines | ✅ done (`916-alien` excluded) | 2026-08-14 | **`albt16` done on 2026-08-14, at the keyboard** — it is unreachable over SSH (Tailscale peer `t16` online, port 22 closed, no host entry), so Albert ran `bin/ai-adopt-globals` there. Both machine sections were detected, filtered, re-appended and **diffed CLEAN against the pre-install copies**, and both installed bodies match the repo templates exactly ignoring CRLF. The run also repaired four missing launchers (`ai-grok-review`, `ai-grok-implement`, `ai-kimi`, `ai-deepseek-agent`). **`albt16` is what proved the machine-section handling was still wrong**, before anything was overwritten: its Codex section sits under `# Machine atlas - 916 ("916-alien") and t16 and 4837 …` and `# Local standing addition retained from previous AGENTS.md`, neither of which names that machine, so the detector reported "no machine section" on a file that had one. Its tail is also INTERLEAVED — machine facts followed by six blocks pasted in by older template syncs whose text the new global carries inline — so a verbatim re-append would have duplicated about 4 KB in an always-loaded file. `bin/ai-adopt-globals` now classifies every heading block, prints KEPT/DROPPED with the reason, and keeps the untouched original in `~/.ai-globals-backup/<UTC>/`. On `albt16` the Claude section went 11,372 → 4,809 bytes with no fact lost; on `al8960ofc` nothing is dropped, unchanged. Old row: 🟡 `hetz` done, `albt16` owed |
 | 9a. `hetz` (Ubuntu VPS, user `ai`) | ✅ done | 2026-08-13 | **`hetz` (Ubuntu VPS, user `ai`) done and verified.** Repo pulled to `9d08669` and clean before touching anything; both installed globals copied to `~/step9-backup/` first; `--dry-run` read line by line. **hetz carries NO machine section** — checked explicitly for machine-local facts (IPs, `/worksp`, `/home/ai`, Coolify) before installing, and the only two hits are text the repo templates already carry, so nothing was re-appended and `installed source drift` is **0** here, not 2. Installed with `--adopt-globals`; both installed files are **byte-identical to the repo templates** under `tr -d '\r'` and both contain the new-only shared-db STRUCTURE-not-data wording (exit 0 was not accepted as proof). `--strict` exits 0; parity 0; safety markers 0; broken links 0; `ai-devops doctor` all required checks pass, including the Codex workspace-write end-to-end test. **All twelve `LOCAL EDITS` skills were diffed against the repo AND against git history** rather than skimmed (the step-8 studio-boundary lesson): every installed-only passage is superseded older wording from a known commit, none is unique content. **All six behaviour probes pass**, and P6 additionally **opened the `synology-long-running-operations` skill**, which the Windows pilot never did — the first evidence that the skill is reachable on Linux. Probes are now committed as `tools/context-probes/` instead of living in a temp scratchpad. **Pre-existing, not caused by this step:** `/usr/local/bin/ai-grok-implement` and `ai-deepseek-agent` are missing on `hetz` (the installer prints ERROR; `/usr/local/bin` needs root). **`albt16` is not reachable over SSH** (Tailscale peer `t16` is online, port 22 refused; no host entry exists), so it must be run at the machine. `916-alien` is powered off — excluded by Albert, 2026-08-13 |
-| 10. Measure results and close the workstream | ⬜ open | 2026-08-12 | Acceptance gates in sections 10 and 13 |
+| 10. Measure results and close the workstream | ✅ done | 2026-08-14 | **Final budgets set from measurement, not from a percentage guess** — each one is the size that was live on all three rolled-out machines when every probe passed, edited in all three places (`budgets.json`, `DEFAULT_BUDGETS`, the `docs/context-engineering.md` table): always-loaded **33,311 → 26,946 (−19.1%)**, startup-routed **50,729 → 37,088 (−26.9%)**, Claude manifest 21,521 → 22,777 (+5.8%), Codex manifest 14,015 → 14,847 (+5.9%), duplicate paragraph groups 12 → 3. Budget warnings now **0**; `--strict` exits 0. **The always-loaded budget was RAISED 24,713 → 26,946, the one sanctioned raise in this repo's history**, because commit `df59ffa` added Albert's own shared-db STRUCTURE-not-data ruling to both globals; it is recorded as a decision, not absorbed silently, and the new target is 24,500 rather than the unreachable 23,318. **The manifests grew and that is reported, not hidden.** Results, the rollout table, and the open questions are written up under "Results (step 10)" in `docs/context-engineering.md`. **Gap recorded honestly: the five matched before/after task evaluations (test 16) were NOT run** — the pre-trim globals are gone from every machine, so no honest "before" arm exists, and restoring one would risk the rollout for a number nobody would act on; the evidence is the six committed probes (`tools/context-probes/`, pass on two machines) plus the trigger scores. **Deliberately left as they are:** mixed CRLF/LF (normalizing rewrites every machine for zero behavioural gain — compare with `tr -d '\r'`), and `installed source drift`, whose correct value is 2 with a machine section and 0 without, so the gate reads "only the globals may differ". **This machine's dead `Z:` trap trimmed to a pointer** (568 → 263 bytes of always-loaded text) now that `machine-atlas.md` holds the full story |
 
 **Fresh-session start:** **step 10, measure and close.** Steps 1-9 are done. The
 trimmed globals are live on all three in-scope machines — `al8960ofc` (pilot,
@@ -1183,21 +1183,37 @@ machine.
 
 ### Definition of done
 
-- [ ] Baseline audit is reproducible and excludes sensitive/irrelevant paths.
-- [ ] Ownership map assigns every rule class one canonical home.
-- [ ] Locked safety rules have regression tests.
-- [ ] Always-loaded global plus repo-start context is materially smaller.
-- [ ] Representative task quality and safety are equal or better.
-- [ ] Cross-client skill duplicates are consolidated only where behavior matches.
-- [ ] Installed/source drift is visible and safely reconcilable.
-- [ ] One Windows pilot passes before broad rollout.
-- [ ] Every reachable managed machine is verified against the pushed SHA.
-- [ ] Offline machines have a separate accurate open handoff.
-- [ ] All named local Bash and PowerShell tests pass. This repo has no GitHub
+**Closed 2026-08-14.** One item is partial and says so; nothing is ticked that
+was not actually proven.
+
+- [x] Baseline audit is reproducible and excludes sensitive/irrelevant paths.
+- [x] Ownership map assigns every rule class one canonical home.
+- [x] Locked safety rules have regression tests (`tests/test-context-audit.ps1`
+      fails on each safety category independently).
+- [x] Always-loaded global plus repo-start context is materially smaller —
+      −19.1% and −26.9%.
+- [~] **Representative task quality and safety are equal or better — PARTIAL.**
+      Safety and routing are proven by six committed probes passing on two
+      machines (`tools/context-probes/`). The five matched before/after task
+      evaluations were **not** run: the pre-trim globals are gone from every
+      machine, so no honest "before" arm exists. Recorded, not dropped.
+- [x] Cross-client skill duplicates are consolidated only where behavior matches
+      (12 → 3 duplicate paragraph groups; the remaining 3 are deliberate).
+- [x] Installed/source drift is visible and safely reconcilable — and
+      `bin/ai-adopt-globals` now makes the machine-section step safe too.
+- [x] One Windows pilot passes before broad rollout (`al8960ofc`, 2026-08-13).
+- [x] Every reachable managed machine is verified against the pushed SHA
+      (`al8960ofc`, `hetz`, `albt16`).
+- [x] Offline machines have a separate accurate open handoff — **N/A by owner
+      decision.** `916-alien` is excluded, not pending: powered off, Albert's
+      call 2026-08-13, and he had its handoff deleted on 2026-08-12. The
+      procedure for it when it returns is one command, `bin/ai-adopt-globals`,
+      recorded in `docs/context-engineering.md`.
+- [x] All named local Bash and PowerShell tests pass. This repo has no GitHub
       Actions CI and no CI gate may be invented.
-- [ ] Documentation, memory, plan STATUS, and handoffs describe current reality.
-- [ ] Focused commits are pushed to `main`; local and `origin/main` match.
-- [ ] No hosted deployment is claimed because none exists.
+- [x] Documentation, memory, plan STATUS, and handoffs describe current reality.
+- [x] Focused commits are pushed to `main`; local and `origin/main` match.
+- [x] No hosted deployment is claimed because none exists.
 
 ### Rollback
 

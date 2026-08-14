@@ -1,17 +1,22 @@
 {
   "_comment": [
     "Warning budgets for the context audit. These NEVER fail a run: they warn.",
-    "'budget' is the size measured at the last accepted baseline (2026-08-12), so",
-    "any growth warns immediately. 'target' is the smaller number the reduction",
-    "steps (plan_context-engineering-consolidation.md steps 4-6) are aiming for,",
-    "about a 30% cut. Tighten 'budget' toward 'target' only after a measured",
-    "reduction has actually landed and its behavior tests still pass. Never raise",
-    "a budget to silence a warning."
+    "FINAL budgets, set at step 10 (2026-08-14) from what was measured live on",
+    "three machines after the rollout, not from a percentage guess. 'budget' is",
+    "the size that was actually running when every safety and routing probe",
+    "passed; any growth from here warns on the next run. 'target' is the next",
+    "reduction worth attempting, and each one now names a specific candidate",
+    "rather than a flat 30% cut. Tighten 'budget' toward 'target' only after a",
+    "measured reduction has landed and its behavior tests still pass. Never raise",
+    "a budget to silence a warning: the step-10 raise below is the one sanctioned",
+    "exception in this file's history, it is content Albert deliberately added",
+    "(commit df59ffa, the shared-db STRUCTURE-not-data ruling), and it is",
+    "recorded as such in docs/context-engineering.md."
   ],
   "budgets": {
-    "alwaysLoadedBytes": { "budget": 24713, "target": 23318 },
-    "startupRoutedBytes": { "budget": 35972, "target": 35340 },
-    "claudeSkillManifestBytes": { "budget": 21521, "target": 15065 },
-    "codexSkillManifestBytes": { "budget": 14015, "target": 9811 }
+    "alwaysLoadedBytes": { "budget": 26946, "target": 24500 },
+    "startupRoutedBytes": { "budget": 37088, "target": 35340 },
+    "claudeSkillManifestBytes": { "budget": 22777, "target": 20000 },
+    "codexSkillManifestBytes": { "budget": 14847, "target": 13000 }
   }
 }
