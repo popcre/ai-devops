@@ -40,11 +40,11 @@ product concept plus its observed variants.
    packaging instructions, manufacturing specifications, and incidental contents
    from the canonical item type unless they define the sold product itself.
 7. When the business gives a reliable category-change date, treat the combined
-   MG01-MG03 on and after that date as the classification key. MG01 and MG02 can
-   define the physical product family while MG03 distinguishes treatment,
-   embellishment, construction, or another lower-level attribute. The same broad
-   product wording may legitimately occur under several sibling MG03 keys. Do
-   not call that a conflict. Do not use earlier MG codes to define the new rules.
+   MG01-MG03 on and after that date as the classification key. The three values
+   together roughly describe the product. Do not assume MG01+MG02 alone is the
+   product and MG03 is detachable; its meaning depends on the hierarchy. The same
+   broad wording may legitimately occur under several full keys. Do not call that
+   a conflict. Do not use earlier MG codes to define the new rules.
 8. Never call an automated phrase list final. A model must review every proposed
    family semantically and consolidate it before user review.
 9. Abstain when the physical product is genuinely ambiguous. Explain exactly what
@@ -64,14 +64,17 @@ product concept plus its observed variants.
 - For rows on or after that date, create the primary key
   `MG01|MG02|MG03`. Treat blank or incomplete keys as unresolved.
 - Read the merchandise-group definition workbook before interpreting the key.
-- Build the physical-product dictionary at the level defined by MG01 and MG02,
-  then learn the MG03 treatment or embellishment wording from sibling keys.
-- Keep each row's full MG key, but allow one physical product family to span
-  sibling MG03 keys when the hierarchy defines MG03 as an attribute.
+- Learn product-description wording for each complete MG01+MG02+MG03 key, while
+  comparing related keys to understand shared broad terms and distinguishing
+  details.
+- Keep each row's full three-part key. A broad product term may span keys, but
+  that does not make the keys interchangeable.
 - Treat identical broad wording across sibling MG03 keys as expected ambiguity,
   not evidence that a key is wrong.
 - Use pre-change descriptions only as candidates to match into a trusted keyed
   group. Do not let their old MG values influence the new grouping.
+- If an old description supports MG01 and MG02 but not MG03, leave MG03
+  unresolved until other evidence identifies it. Never assume a default MG03.
 
 ### 3. Learn the company's language holistically
 
@@ -109,12 +112,12 @@ Create one family record containing:
 - MG01-MG03 distribution;
 - any reason a similar phrase must remain separate.
 
-Within one post-change product family, actively test whether extra material,
+Within related post-change product descriptions, actively test whether extra material,
 packaging, size, construction, quantity, `DIY`, `PBN`, `2pc`/`2pk`, or contents
 wording is merely an attribute. Fold equivalent phrases into the simplest
-complete merchant-facing name. Preserve the MG03 treatment separately. Do not
-create a different physical product family merely because MG03 differs or one
-description is longer. Never merge the actual row-level MG assignments.
+complete merchant-facing name where appropriate, but preserve the full
+MG01+MG02+MG03 meaning. Do not create a different wording merely because one
+description is longer. Never merge or infer the actual row-level MG assignments.
 
 Read [references/consolidation-cases.md](references/consolidation-cases.md) before
 approving a phrase dictionary.
@@ -129,8 +132,9 @@ Before export, test every family:
 - Did artwork, license, property, size, packaging, or factory wording leak in?
 - Are two phrases separate only because a script extracted different lengths?
 - Would a buyer or merchant actually treat them as different products?
-- Does the proposed physical family follow the MG01/MG02 hierarchy?
-- Is the MG03-specific treatment or embellishment preserved separately?
+- Does the proposed interpretation follow the full MG01+MG02+MG03 hierarchy?
+- Is every part of the three-part product meaning supported by the description
+  or other reliable evidence?
 
 Merge or correct every failure before showing the result.
 
@@ -138,9 +142,9 @@ Merge or correct every failure before showing the result.
 
 Provide two review surfaces:
 
-1. **Product families with MG variants:** MG01, MG02, physical product phrase,
-   every associated MG03 definition and description variant, count, examples,
-   confidence, and reviewer decision. Preserve each row's full MG key.
+1. **MG-keyed product descriptions:** MG01, MG02, MG03, combined key, interpreted
+   product description, broad wording shared with other keys, distinguishing
+   wording, count, examples, confidence, and reviewer decision.
 2. **Row-level parsing:** original description and the five extracted chunks,
    linked to the proposed canonical family.
 
@@ -151,8 +155,8 @@ Flag ambiguity and MG disagreement. Do not hide it behind a numeric score.
 Do not report completion until:
 
 - the mandatory consolidation cases pass;
-- every physical family follows the definition workbook's MG01/MG02 hierarchy;
-- every MG03 treatment remains traceable to its full row-level MG key;
+- every interpretation follows the definition workbook's full MG01-MG03 hierarchy;
+- no old item receives MG03 without description evidence or other reliable evidence;
 - prefix-chain duplicates have been semantically reviewed;
 - spelling and abbreviation variants are grouped;
 - a sample from every major MG01 family has been checked;
