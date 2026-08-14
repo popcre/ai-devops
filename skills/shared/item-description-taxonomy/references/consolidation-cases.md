@@ -23,7 +23,8 @@ The longer strings describe included contents. Choose one complete commercial
 product concept, such as `2-Piece Paint-Your-Own Canvas Set`, after checking the
 full descriptions. Do not make each longer fragment a new type.
 
-When all occur under post-change key `A|A2|D2`, also consolidate:
+When all occur under the post-change stretched-canvas family with MG03 `DIY`,
+also consolidate:
 
 - `DIY 2-Piece Canvas Set`
 - `DIY 2Pk Canvas`
@@ -33,8 +34,36 @@ When all occur under post-change key `A|A2|D2`, also consolidate:
 - `DIY Pbn Canvas`
 - `DIY Pbn Canvas Panel 2-Piece Set`
 
-Treat `DIY`, `PBN`, `2-piece`/`2pk`, `panel`, paint pots, and brushes as observed
-description details inside that MG key, not separate keyed product families.
+Treat `PBN`, `2-piece`/`2pk`, `panel`, paint pots, and brushes as observed
+description details, not separate physical product families. Preserve `DIY` as
+the MG03 treatment.
+
+## Stretched canvas hierarchy
+
+In `MerchGroup_Rework.xlsx`, MG01 `A` plus MG02 `A` plus MG03 together roughly
+describe the canvas product. The first two levels establish `Stretched/Box >
+Canvas`, and the third contributes treatment or embellishment:
+
+- `0` none stated
+- `1` foil
+- `2` shaped
+- `8` other embellishment
+- `9` other
+- `B` embroidery
+- `D` DIY
+- `E` LED
+- `G` staggered
+- `H` high-gloss
+- `Q` glitter, sequins, or rhinestones
+- `P` handpaint
+- `Y` physical attachment
+- `W` gel or other coating
+
+Therefore `Canvas`, `Printed Canvas`, or another broad canvas phrase appearing
+under several of these MG03 keys is not inherently a conflict. The description
+may omit the detail that distinguishes the full keys. Use treatment words when
+present. For an old item without enough evidence, infer the supported MG01/MG02
+portion and leave MG03 unresolved. Never assume MG03 `0` as a default.
 
 ## Spelling and word-omission variants
 
@@ -75,17 +104,19 @@ packaging, size, and included-contents modifiers. Do not apply this mechanically
 when the modifier indicates a genuinely different construction or the trusted
 post-change MG01-MG03 values disagree.
 
-This merge applies only to the `M|W1|B1` rows. A molded-wall-clock description
-under `M|W1|P1` is a separate keyed group because different post-change MG keys
-can never be combined.
+Keep every wall-clock row's MG03 treatment assignment. A common physical product
+phrase may span sibling MG03 values when the definition workbook makes MG03 an
+attribute rather than a different physical product.
 
-## Hard MG-key boundary
+## MG hierarchy rule
 
-For rows created on or after May 14, 2025, `MG01|MG02|MG03` is the primary key.
-One description group may have many wording variants, but exactly one key. If the
-same canonical phrase occurs under two keys, output two separate groups and flag
-the duplication for business review. Never solve the disagreement by combining
-the keys.
+For rows created on or after May 14, 2025, preserve `MG01|MG02|MG03` as the
+row-level classification key. Interpret each level using the definition workbook.
+The three values together roughly describe the product. Broad wording can span
+several keys because it expresses only part of that meaning. Identical broad
+wording across keys is expected and should be reviewed for missing distinguishing
+detail, not presented as a categorization conflict. For old items, leave MG03
+unresolved whenever reliable evidence does not identify it.
 
 ## Review principle
 
