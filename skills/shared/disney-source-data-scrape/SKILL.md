@@ -66,6 +66,18 @@ OPA loads the complete Property-to-Character tree into the product-create page. 
 
 DCP Vault is a paged Adobe Experience Manager asset library. The current private extract is an aggregated path checkpoint, not a completed catalogue.
 
+### Studio boundary
+
+DCP Vault being one website does not make its content one database source. Keep
+**Disney, Lucasfilm, Marvel, and 20th Century** in separate capture outputs,
+separate table families, separate crawl histories, and separate guarded loaders.
+A portal tile or discriminator inside shared tables is not enough separation.
+Never send one studio's rows through another studio's loader. If a studio-specific
+landing family is not live, checkpoint locally and stop before the database write.
+
+Do not assume Avatar's destination from portal placement. Record it as an open
+ownership decision until the private contract names its target.
+
 ### Plan before fetching
 
 1. Ask the user to sign in to `https://dcpvault.disney.com` and complete MFA in Chrome.
@@ -121,6 +133,11 @@ Never load Disney scrape rows into `core.*`. Use the dedicated source-landing ta
 - DCP evidence: `plm.dcp_asset_crawl` and `plm.dcp_asset_tile_observation`
 - Load proof: `plm.dcp_chunk_ledger` and `plm.dcp_load_exception`
 - Phase-two metadata, when collected: the existing `plm.dcp_*metadata*` landing tables and guarded metadata functions
+
+The `plm.dcp_*` names above describe the existing Disney landing path. They are
+not permission to load Lucasfilm, Marvel, or 20th Century rows there. Read the
+current private plan and newest handoff for the live studio-specific table and
+function names; never invent those names from this public skill.
 
 Before every data write:
 
