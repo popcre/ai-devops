@@ -34,7 +34,8 @@ notes; it does not repeat AGENTS.md.
 
 ## Commits
 
-- Commit only when asked.
+- Always commit. Do not wait to be asked — every change you finish gets
+  committed (and pushed) as part of the work.
 - This repo pushes with a GitHub `@users.noreply.github.com` email (email-privacy
   protection blocks the private gmail address). Keep using the noreply email.
 - End commit messages with the `Co-Authored-By: Claude Opus 4.8` trailer.
