@@ -93,7 +93,11 @@ For each PR separately:
 
 Never resolve full-body `CREATE OR REPLACE` conflicts mechanically. Re-derive the later change from the newly merged body.
 
-Production promotion remains a separate, owner-approved, single lane. Freeze merges for the bounded promotion and verify the exact production result.
+Production remains a separate single lane. After review, green checks, preview,
+and guarded merge, run `--production-risk-gate <evidence.json>`. Automatically
+promote only when all five business risks are proven absent; otherwise ask
+Albert one plain business-risk question. See the operating manual. Freeze merges
+for the bounded promotion and verify the exact production result.
 
 ## Owner decisions
 

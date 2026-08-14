@@ -72,8 +72,8 @@ Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
 components form serial queues; unrelated components fill the three lanes.
 Dispatch every `REFILL REQUIRED NOW` issue in the same turn. Do not ask Albert
-to approve dispatch. Ask only for a genuine owner decision or exact production
-approval.
+to approve dispatch. Ask only for a genuine owner decision or material business
+risk.
 
 An empty lane is justified only by a complete audit with no eligible candidate.
 Unclassified or malformed issues make that proof impossible and the command
@@ -127,9 +127,17 @@ latency, turns, tokens/cache/cost only when reported, and final outcome. Kimi's
 headless token/cache/cost/returned-model figures are unavailable and must remain
 marked unavailable.
 
-Approval may trigger preview, merge, and preparation of the exact production
-approval package. It never authorizes production. Albert must approve the exact
-migration and target project.
+After approval, green checks, preview proof, and guarded merge, write objective
+risk evidence and run `--production-risk-gate <evidence.json>`. Automatic
+production promotion is allowed only when it proves all five: no permanent data
+loss/rewrite, no expected downtime, no material access change, tested credible
+recovery, and no unresolved material objection. Otherwise ask Albert one plain
+business-risk question. Never ask him to approve migration numbers, project
+identifiers, SQL, or other technical details.
+
+Transition rule: this policy cannot authorize its own rollout. The older exact
+approval rule remains binding until #1015 is independently reviewed, merged in
+shared-db and ai-devops, installed, and forward-tested.
 
 ## Release and recovery
 
@@ -151,7 +159,7 @@ Require independent review with no unresolved Critical or High finding. Merge
 one pull request at a time, close its claim, update the next branch from newly
 merged main and repeat.
 
-Production is separate, owner-approved and serialized. Freeze merges for the
-bounded promotion, verify the exact target before any write, and verify the exact
-production result. Read [incident-ledger.md](incident-ledger.md) when a safety
-rule appears unnecessary.
+Production is separate and serialized. Apply the business-risk gate above,
+freeze merges for the bounded promotion, verify the exact target before any
+write, and verify the exact production result. Read
+[incident-ledger.md](incident-ledger.md) when a safety rule appears unnecessary.
