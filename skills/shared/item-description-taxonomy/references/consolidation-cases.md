@@ -23,6 +23,19 @@ The longer strings describe included contents. Choose one complete commercial
 product concept, such as `2-Piece Paint-Your-Own Canvas Set`, after checking the
 full descriptions. Do not make each longer fragment a new type.
 
+When all occur under post-change key `A|A2|D2`, also consolidate:
+
+- `DIY 2-Piece Canvas Set`
+- `DIY 2Pk Canvas`
+- `DIY 2Pk Canvas Set`
+- `DIY Canvas`
+- `DIY Canvas Set`
+- `DIY Pbn Canvas`
+- `DIY Pbn Canvas Panel 2-Piece Set`
+
+Treat `DIY`, `PBN`, `2-piece`/`2pk`, `panel`, paint pots, and brushes as observed
+description details inside that MG key, not separate keyed product families.
+
 ## Spelling and word-omission variants
 
 These are one item type:
@@ -61,6 +74,18 @@ not as a separate product family. Apply the same test to other material,
 packaging, size, and included-contents modifiers. Do not apply this mechanically
 when the modifier indicates a genuinely different construction or the trusted
 post-change MG01-MG03 values disagree.
+
+This merge applies only to the `M|W1|B1` rows. A molded-wall-clock description
+under `M|W1|P1` is a separate keyed group because different post-change MG keys
+can never be combined.
+
+## Hard MG-key boundary
+
+For rows created on or after May 14, 2025, `MG01|MG02|MG03` is the primary key.
+One description group may have many wording variants, but exactly one key. If the
+same canonical phrase occurs under two keys, output two separate groups and flag
+the duplication for business review. Never solve the disagreement by combining
+the keys.
 
 ## Review principle
 

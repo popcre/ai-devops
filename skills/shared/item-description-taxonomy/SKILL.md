@@ -39,11 +39,12 @@ product concept plus its observed variants.
 6. Exclude size, licensor, property, artwork, color, slogan, character pose,
    packaging instructions, manufacturing specifications, and incidental contents
    from the canonical item type unless they define the sold product itself.
-7. Do not trust existing MG codes as ground truth. Use them as supporting evidence
-   and surface disagreement; historical codes may be the problem under review.
-   When the business gives a reliable date boundary, treat MG01-MG03 on and after
-   that date as the stronger classification hint and do not use earlier MG codes
-   to define the new taxonomy.
+7. When the business gives a reliable category-change date, treat the combined
+   MG01-MG03 on and after that date as the primary key and a hard grouping
+   boundary. Never combine post-change items with different MG01-MG03 values.
+   Do not use earlier MG codes to define the new taxonomy. A repeated product
+   phrase under two post-change MG keys must remain two keyed groups until the
+   business corrects the source classification.
 8. Never call an automated phrase list final. A model must review every proposed
    family semantically and consolidate it before user review.
 9. Abstain when the physical product is genuinely ambiguous. Explain exactly what
@@ -57,7 +58,17 @@ product concept plus its observed variants.
 - Work in a confidential location when descriptions contain licensed content.
 - Never place licensed rows in a public repository.
 
-### 2. Learn the company's language holistically
+### 2. Establish the trusted MG groups
+
+- Split rows at the business-provided change date.
+- For rows on or after that date, create the primary key
+  `MG01|MG02|MG03`. Treat blank or incomplete keys as unresolved.
+- Build the new description dictionary independently inside each complete key.
+- Never let semantic similarity, spelling, or materials merge rows across keys.
+- Use pre-change descriptions only as candidates to match into a trusted keyed
+  group. Do not let their old MG values influence the new grouping.
+
+### 3. Learn the company's language holistically
 
 - Normalize case, punctuation, encoding damage, spelling variants, and common
   abbreviations for comparison without overwriting the original.
@@ -67,7 +78,7 @@ product concept plus its observed variants.
 - Find both repeated wording and one-off variants that clearly belong to a common
   family.
 
-### 3. Propose semantic item types per row
+### 4. Propose semantic item types per row
 
 Interpret the description as a whole. Identify the noun phrase that answers
 "what physical item is this?" Do not extract a text fragment merely because it
@@ -81,7 +92,7 @@ Examples:
   -> item type `Printed Glass Shadowbox`; size `12x12"`; licensor `Disney`;
   property `Stitch`; artwork `wink Oh Yeah Whatever blue`.
 
-### 4. Consolidate into canonical families
+### 5. Consolidate within each MG primary key
 
 For each proposed type, compare all near phrases by meaning, not character match.
 Create one family record containing:
@@ -93,16 +104,17 @@ Create one family record containing:
 - MG01-MG03 distribution;
 - any reason a similar phrase must remain separate.
 
-When post-boundary items share the same MG01-MG03, actively test whether extra
-material, packaging, size, construction, or contents wording is merely an
-attribute. If the sold product is the same, fold those phrases into the simplest
-complete merchant-facing product name. MG agreement is a strong hint, not enough
-by itself to merge physically different products.
+Within one post-change MG01-MG03 key, actively test whether extra material,
+packaging, size, construction, quantity, `DIY`, `PBN`, `2pc`/`2pk`, or contents
+wording is merely an attribute. Fold equivalent phrases into the simplest
+complete merchant-facing name. Do not create a separate family merely because
+one description is longer. Different MG01-MG03 keys can never share a group,
+even when their descriptions appear identical.
 
 Read [references/consolidation-cases.md](references/consolidation-cases.md) before
 approving a phrase dictionary.
 
-### 5. Run the common-sense gate
+### 6. Run the common-sense gate
 
 Before export, test every family:
 
@@ -112,15 +124,17 @@ Before export, test every family:
 - Did artwork, license, property, size, packaging, or factory wording leak in?
 - Are two phrases separate only because a script extracted different lengths?
 - Would a buyer or merchant actually treat them as different products?
+- Does every post-change row in this group have exactly the same MG01-MG03 key?
 
 Merge or correct every failure before showing the result.
 
-### 6. Export for review
+### 7. Export for review
 
 Provide two review surfaces:
 
-1. **Canonical families:** canonical phrase, variants, count, examples, MG
-   distribution, confidence, and reviewer decision.
+1. **MG-keyed description groups:** MG01, MG02, MG03, combined primary key,
+   canonical phrase, all observed description variants, count, examples,
+   confidence, and reviewer decision. Each row has exactly one MG primary key.
 2. **Row-level parsing:** original description and the five extracted chunks,
    linked to the proposed canonical family.
 
@@ -131,6 +145,7 @@ Flag ambiguity and MG disagreement. Do not hide it behind a numeric score.
 Do not report completion until:
 
 - the mandatory consolidation cases pass;
+- no post-change group contains more than one MG01-MG03 primary key;
 - prefix-chain duplicates have been semantically reviewed;
 - spelling and abbreviation variants are grouped;
 - a sample from every major MG01 family has been checked;
