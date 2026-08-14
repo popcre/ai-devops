@@ -1,1 +1,3 @@
 - [No hardcoded model names in adapters](no-hardcoded-model-names-in-adapters.md) — model facts live in the catalog/capability layer, never branched on model-id strings in provider adapters; "proper fix, never a band-aid"
+- [Delegated sandboxes get no credentials](delegated-sandboxes-get-no-credentials.md) — ai-glm implement clones don't inherit env, so the owner session must run any credentialed gate itself
+- [Mirror shared standards into the repo router](mirror-shared-standards-into-repo-router.md) — a rule that lives only in an ai-devops template or a skill is not in force until AGENTS.md restates it
