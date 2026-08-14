@@ -290,24 +290,49 @@ try {
     New-Item -ItemType Directory -Force -Path $handoffDir | Out-Null
     $result = Invoke-Audit -Path $fixture -Strict
     if (@($result.report.openHandoffs).Count -ne 0) { throw "An empty HANDOFF.d was not reported as zero open handoffs." }
+    # The 5-file cap was retired on 2026-08-14 (#658, commit 85887cf): a count is
+    # not a finding, because a file's own session is what retires it. What the
+    # audit warns about now is a handoff carrying NO contract block, since
+    # without one nothing can ever tell whether that workstream is finished -
+    # the failure that left 27 finished files behind in u2giants/shared-db.
     foreach ($n in 1..5) { Write-Utf8 (Join-Path $handoffDir "2026-01-0${n}Z-m-a-s.md") "# handoff $n" }
     $result = Invoke-Audit -Path $fixture -Strict
     if (@($result.report.openHandoffs).Count -ne 5) { throw "Five handoffs were not all counted." }
     & python $tool --root $fixture --summary $handoffSummary --generated-at "fixture-time" | Out-Null
-    if ((Get-Content -LiteralPath $handoffSummary -Raw) -match "HANDOFF WARNING") {
-        throw "Exactly five handoffs warned; the threshold is MORE than five."
-    }
-    Write-Utf8 (Join-Path $handoffDir "2026-01-06Z-m-a-s.md") "# handoff 6"
-    $result = Invoke-Audit -Path $fixture -Strict
-    if (@($result.report.openHandoffs).Count -ne 6) { throw "Six handoffs were not all counted." }
-    & python $tool --root $fixture --summary $handoffSummary --generated-at "fixture-time" | Out-Null
     $handoffText = Get-Content -LiteralPath $handoffSummary -Raw
-    if ($handoffText -notmatch "HANDOFF WARNING") { throw "Six open handoffs did not warn." }
+    if ($handoffText -notmatch "HANDOFF WARNING") {
+        throw "Handoffs with no contract block did not warn."
+    }
     if ($handoffText -notmatch "warning, not a failure") {
         throw "The handoff warning does not say plainly that it is a warning."
     }
-    if ($result.exit -ne 0) { throw "Too many open handoffs changed the exit status. It must warn only, even in strict mode." }
-    Write-Host "PASS: open handoffs are counted, warn past five, and never fail the run"
+    if ($result.exit -ne 0) { throw "An uncontracted handoff changed the exit status. It must warn only, even in strict mode." }
+
+    # A file that carries the contract block is not a finding, however many
+    # there are. Six contracted files must be counted and must NOT warn.
+    Remove-Item -LiteralPath $handoffDir -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $handoffDir | Out-Null
+    foreach ($n in 1..6) {
+        Write-Utf8 (Join-Path $handoffDir "2026-02-0${n}Z-m-a-s.md") @"
+---
+issue: 92$n
+status: OPEN
+owner: claude/fixture-$n
+---
+# handoff $n
+"@
+    }
+    $result = Invoke-Audit -Path $fixture -Strict
+    if (@($result.report.openHandoffs).Count -ne 6) { throw "Six contracted handoffs were not all counted." }
+    if (@($result.report.openHandoffs | Where-Object { -not $_.hasContract }).Count -ne 0) {
+        throw "A handoff carrying issue/status/owner frontmatter was not recognised as contracted."
+    }
+    & python $tool --root $fixture --summary $handoffSummary --generated-at "fixture-time" | Out-Null
+    if ((Get-Content -LiteralPath $handoffSummary -Raw) -match "HANDOFF WARNING") {
+        throw "Contracted handoffs warned. The count alone is not a finding (#658)."
+    }
+    if ($result.exit -ne 0) { throw "Counting handoffs changed the exit status. It must warn only, even in strict mode." }
+    Write-Host "PASS: open handoffs are counted, an uncontracted one warns, a contracted one does not, and neither ever fails the run"
 
     # -------------------------------- always-loaded global vs skill descriptions
     New-AuditFixture -Path $fixture -SkillDescription $overlapSentence `

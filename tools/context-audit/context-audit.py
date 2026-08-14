@@ -88,11 +88,15 @@ PARITY_DIVERGENCE_ALLOWLIST = {
     "Codex edition framing": ("codex", r"Codex edition"),
 }
 
+# Final budgets, set at step 10 (2026-08-14) from the sizes that were live on
+# all three rolled-out machines when every safety and routing probe passed.
+# Keep in sync with tools/context-audit/budgets.json and the table in
+# docs/context-engineering.md — a budget number lives in exactly three places.
 DEFAULT_BUDGETS = {
-    "alwaysLoadedBytes": {"budget": 24713, "target": 23318},
-    "startupRoutedBytes": {"budget": 35972, "target": 35340},
-    "claudeSkillManifestBytes": {"budget": 21521, "target": 15065},
-    "codexSkillManifestBytes": {"budget": 14015, "target": 9811},
+    "alwaysLoadedBytes": {"budget": 26946, "target": 24500},
+    "startupRoutedBytes": {"budget": 37088, "target": 35340},
+    "claudeSkillManifestBytes": {"budget": 22777, "target": 20000},
+    "codexSkillManifestBytes": {"budget": 14847, "target": 13000},
 }
 
 BUDGET_LABELS = {
