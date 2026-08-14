@@ -7,4 +7,3 @@
 - [4837 home-drive Z: trap](4837-home-drive-z-trap.md) — 4837 interactive Git Bash $HOME=Z: (roaming profile) sent $HOME-based installs to a network drive apps never read; fixed by pinning HOME=C: + ai-install-skills using %USERPROFILE%.
 - [remote-shell CWD trap](remote-shell-cwd-trap.md) — remote `bash -lc` over SSH starts in $HOME not the repo; use `git -C`/absolute paths, not relative. Includes the `4837` ssh alias (100.123.87.44, key 916-alien).
 - [GLM on OpenCode: hard-won constraints](glm-opencode-constraints.md) — `ai-glm` replaced `ai-glm-agent`; read docs/glm-opencode.md §5 before touching GLM or Windows setup. Only the agent `tools:` map enforces anything; `.ps1` files must be pure ASCII.
-- [Globals machine-section trap](globals-machine-section-trap.md) — replacing an installed global wipes that machine's own facts; use `bin/ai-adopt-globals`, and drift 2 means success, not failure.
