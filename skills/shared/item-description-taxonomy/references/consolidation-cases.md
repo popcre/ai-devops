@@ -40,8 +40,9 @@ the MG03 treatment.
 
 ## Stretched canvas hierarchy
 
-In `MerchGroup_Rework.xlsx`, MG01 `A` plus MG02 `A` defines the physical family
-`Stretched/Box > Canvas`. MG03 then distinguishes treatment or embellishment:
+In `MerchGroup_Rework.xlsx`, MG01 `A` plus MG02 `A` plus MG03 together roughly
+describe the canvas product. The first two levels establish `Stretched/Box >
+Canvas`, and the third contributes treatment or embellishment:
 
 - `0` none stated
 - `1` foil
@@ -60,8 +61,9 @@ In `MerchGroup_Rework.xlsx`, MG01 `A` plus MG02 `A` defines the physical family
 
 Therefore `Canvas`, `Printed Canvas`, or another broad canvas phrase appearing
 under several of these MG03 keys is not inherently a conflict. The description
-may omit the treatment even though the key records it. Use treatment words when
-present; otherwise preserve ambiguity instead of declaring the key wrong.
+may omit the detail that distinguishes the full keys. Use treatment words when
+present. For an old item without enough evidence, infer the supported MG01/MG02
+portion and leave MG03 unresolved. Never assume MG03 `0` as a default.
 
 ## Spelling and word-omission variants
 
@@ -110,9 +112,11 @@ attribute rather than a different physical product.
 
 For rows created on or after May 14, 2025, preserve `MG01|MG02|MG03` as the
 row-level classification key. Interpret each level using the definition workbook.
-The physical family can span sibling MG03 keys when MG03 represents treatment or
-embellishment. Identical broad wording across those keys is expected and should
-be reviewed for missing detail only, not presented as a categorization conflict.
+The three values together roughly describe the product. Broad wording can span
+several keys because it expresses only part of that meaning. Identical broad
+wording across keys is expected and should be reviewed for missing distinguishing
+detail, not presented as a categorization conflict. For old items, leave MG03
+unresolved whenever reliable evidence does not identify it.
 
 ## Review principle
 
