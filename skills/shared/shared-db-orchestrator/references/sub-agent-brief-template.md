@@ -53,11 +53,11 @@ moved a dozen times in one day recently. Before you act:
 ```bash
 git fetch origin
 git rev-parse origin/main
-ls supabase/migrations | cut -c1-14 | sort | tail -1   # current max version
+node scripts/manage-migration-author-lanes.mjs --audit # authoritative reservations and lanes
 gh pr list
 ```
 
-At time of writing: `main` = `<sha>`, max migration version = `<version>`,
+At time of writing: `main` = `<sha>`, reserved migration version = `<version>`,
 open PRs = `<list>`.
 
 ## 6. Hard limits (non-negotiable)
@@ -80,6 +80,10 @@ open PRs = `<list>`.
 - **Before preview and merge**, fetch `origin/main`, update this branch from the
   newly merged main tip, and rerun migration-version, object-collision, SQL and
   contract checks. Author-lane permission is not preview or merge permission.
+- **Do not use preview or merge without the exclusive GitHub-backed stage lock**
+  bound to this pull request's exact head commit. Release it explicitly after use.
+- **Expiry does not release your claim.** Renew or explicitly release it after
+  the orchestrator proves your branch, worktree and pull request are finished.
 - **Never edit an applied migration.** Fix forward with a new version. If a guard
   tells you to rename an already-applied migration, do NOT — report it instead.
 - **Do not create background task chips (`spawn_task`).** Follow-ups go in your
