@@ -41,6 +41,9 @@ product concept plus its observed variants.
    from the canonical item type unless they define the sold product itself.
 7. Do not trust existing MG codes as ground truth. Use them as supporting evidence
    and surface disagreement; historical codes may be the problem under review.
+   When the business gives a reliable date boundary, treat MG01-MG03 on and after
+   that date as the stronger classification hint and do not use earlier MG codes
+   to define the new taxonomy.
 8. Never call an automated phrase list final. A model must review every proposed
    family semantically and consolidate it before user review.
 9. Abstain when the physical product is genuinely ambiguous. Explain exactly what
@@ -89,6 +92,12 @@ Create one family record containing:
 - representative descriptions;
 - MG01-MG03 distribution;
 - any reason a similar phrase must remain separate.
+
+When post-boundary items share the same MG01-MG03, actively test whether extra
+material, packaging, size, construction, or contents wording is merely an
+attribute. If the sold product is the same, fold those phrases into the simplest
+complete merchant-facing product name. MG agreement is a strong hint, not enough
+by itself to merge physically different products.
 
 Read [references/consolidation-cases.md](references/consolidation-cases.md) before
 approving a phrase dictionary.
