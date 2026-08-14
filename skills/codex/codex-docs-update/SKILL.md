@@ -104,8 +104,7 @@ Hard rules:
   one open workstream, then write the static pointer, then write your own file. If
   the marker is present, leave the file alone.
 - **Retention:** delete YOUR file once its work is proven done; git history keeps
-  the text. Presence = OPEN. If `HANDOFF.d/` holds **more than 5** files, warn
-  loudly in the final report, oldest-first with dates, and ask which are finished.
+  the text. Presence = OPEN. Never treat the file COUNT as a problem and never cap it — 20 concurrent workstreams means 20 files and that is correct (owner ruling 2026-08-13). Warn about STALE files instead: ones whose issue is already closed. List those by name with the owner from their contract block; the target is zero.
 - **Never add `.gitattributes merge=union`** for handoffs — line-unioning Markdown
   silently produces a wrong document instead of a loud conflict.
 
@@ -149,5 +148,5 @@ When a plan file exists, state its updated STATUS line: which steps are now done
 where the next session starts, and what is blocked on whom - or say explicitly that
 no plan file was touched.
 When you wrote a `HANDOFF.d/` file, also state that the mandatory completeness
-gate passed, name the file, and report how many open files `HANDOFF.d/` now holds
-(warning loudly if more than 5).
+gate passed, name the file, and report the STALE files in `HANDOFF.d/` — those
+whose issue is already closed — by name, or "none". The count is never a warning.

@@ -39,5 +39,6 @@ Before reporting done:
 4. Confirm no secrets were added.
 5. Confirm your own `HANDOFF.d/` file is present only if unfinished work remains,
    that the root `HANDOFF.md` was not rewritten, that no other session's
-   `HANDOFF.d/` file was touched, and that `HANDOFF.d/` holds no more than 5 open
-   files (otherwise warn loudly, oldest-first with dates).
+   `HANDOFF.d/` file was touched, and that no `HANDOFF.d/` file points at an
+   already-closed issue (warn loudly about those by name; the file COUNT is never a
+   finding — owner ruling 2026-08-13).

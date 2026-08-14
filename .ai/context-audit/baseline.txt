@@ -1,0 +1,14 @@
+Context audit summary
+Root: C:\repos\ai-devops
+
+always-loaded: 2 files, 33311 bytes, about 8329 tokens
+startup-routed: 2 files, 49401 bytes, about 12351 tokens
+task-triggered: 48 files, 405271 bytes, about 101333 tokens
+claude skill manifest: 35 skills, 18448 bytes, about 4612 tokens
+codex skill manifest: 30 skills, 10593 bytes, about 2649 tokens
+duplicate skill names: 0
+duplicate paragraphs: 12
+broken relative links: 0
+installed skill drift: 6
+installer parity differences: 0
+missing safety markers: 0

@@ -103,9 +103,7 @@ Hard rules:
   open workstream, then write the static pointer, then write your own file. If it
   already has the marker, leave it alone.
 - **Retention:** delete YOUR `HANDOFF.d/` file once its work is proven done — git
-  history keeps the text. Presence = OPEN. If `HANDOFF.d/` holds **more than 5**
-  files, warn loudly in the final report, list them oldest-first with dates, and
-  ask which are finished.
+  history keeps the text. Presence = OPEN. Never treat the file COUNT as a problem and never cap it — 20 concurrent workstreams means 20 files and that is correct (owner ruling 2026-08-13). Warn about STALE files instead: ones whose issue is already closed. List those by name with the owner from their contract block; the target is zero.
 
 Whenever this skill creates or updates your `HANDOFF.d/` file, do not report the
 documentation update complete until this gate passes:
@@ -161,8 +159,8 @@ completeness gate above does not pass without it.
 
 End with the report format from DOC-SPEC.md: a Documentation Updates table,
 Handoff status (which `HANDOFF.d/` file you wrote + reason, or none because the
-work is complete; any file you deleted as done; a loud warning if `HANDOFF.d/` now
-holds more than 5 open files), and Verification summary.
+work is complete; any file you deleted as done; the STALE files in `HANDOFF.d/` — those whose
+issue is already closed — by name, or "none"; never the count), and Verification summary.
 When you wrote a `HANDOFF.d/` file, state that the mandatory completeness gate passed.
 When a plan file exists, state its updated STATUS line — which steps are now done,
 where the next session starts, and what is blocked on whom — or say explicitly that

@@ -57,6 +57,36 @@ Example: `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`
 Never write a literal placeholder (`unknown`, `machine`, `agent`) and never drop a
 field — dropping a field is what creates collisions.
 
+### The contract block (REQUIRED where the repo enforces it; good practice everywhere)
+
+**Open every `HANDOFF.d/` file with the issue that would prove it finished:**
+
+```
+---
+issue: 925                            # bare number, the issue that proves this done
+status: OPEN                          # OPEN or BLOCKED — never DONE
+owner: codex/wb-scrape-schema-925     # the branch or session that owns this file
+---
+```
+
+**Why it is worth four lines.** Without it, "is this workstream finished?" can only
+be answered by reading the whole nine-section essay against live GitHub. Nobody
+does that, so nothing is ever retired. In `u2giants/shared-db` that produced **30
+files, 27 of them finished** (issue #658, cleaned 2026-08-13). With the block, the
+question is one `gh issue view`.
+
+**A finished file is DELETED, never marked done.** There is no `status: DONE`. A
+file that stays behind announcing it is complete is the same archaeology problem as
+one that says nothing.
+
+**If your work has no issue, open one.** A workstream worth a handoff is worth an
+issue; without one, nothing can ever tell that the handoff is finished.
+
+**Enforced in `u2giants/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
+issue #658). It fails a pull request only for a handoff file **that pull request
+touches**, never for anybody else's, and it asks you to retire your file in the same
+pull request that closes its issue.
+
 Hard rules:
 
 - **You may edit only your OWN file.** Never open, edit, reformat, "tidy", or
@@ -128,12 +158,21 @@ migration is still pending.
   3. nothing in it is a decision or dead end that exists nowhere else.
   If any of the three fails, keep it and say which one failed.
 - **Presence = OPEN.** Session start reads only the files that are there.
-- **If `HANDOFF.d/` holds more than 5 files, warn loudly** in the closing report:
-  list them oldest-first with dates and ask which are actually finished. Silent
-  accumulation buries a fresh developer under dozens of nine-section essays. In
-  `ai-devops` this is also checked mechanically — `context-audit.py` prints
-  `open handoffs: N` and warns past the threshold, so it never depends on anyone
-  remembering.
+- ⛔ **There is NO limit on how many files `HANDOFF.d/` may hold, and never add
+  one.** Owner ruling, Albert Hazan, 2026-08-13, on a proposal to fail a pull
+  request above five files:
+
+  > "when the 6th file gets there legitimately, if there are five files already
+  > there and some are stale, the legitimate file will get rejected. The sessions
+  > that do the work must take care of their own housekeeping. they are better
+  > informed than anyone as to whether something is finished or not."
+
+  Twenty concurrent workstreams legitimately means twenty files. A count cap bills
+  whoever shows up next for a mess somebody else left. **Count STALE files instead
+  — files whose issue is already closed — and the target for those is ZERO.**
+  Report those in the closing report, named, with their owner from the contract
+  block. Any earlier "more than 5 is a warning" wording in this or any other skill
+  is **superseded**.
 
 ## Two modes
 
