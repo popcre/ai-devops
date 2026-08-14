@@ -101,6 +101,7 @@ Installer behavior has lightweight, dependency-free tests:
 ```bash
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
+bash tests/test-ai-qwen.sh
 bash tests/test-codex-trigger-eval.sh
 bash tests/test-installer-parity.sh
 bash tests/test-ai-adopt-globals.sh
