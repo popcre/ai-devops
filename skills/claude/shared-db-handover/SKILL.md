@@ -242,6 +242,41 @@ Three passes, and then a fourth that is just honesty:
    For each agent you are calling finished: confirm the PR is merged
    (`gh pr view`), confirm the commits are in `origin/main`, and only then retire
    the worktree.
+
+   ⚠️ **`git branch --merged` CANNOT see a squash-merged branch.** `main` is
+   squash-merged, which rewrites the commit. Measured 2026-08-13: **74 of 130
+   branches looked unmerged to git while their pull request was merged.** Every
+   cleanup keyed on git ancestry therefore reports live work and cleans nothing —
+   which is exactly why 29 worktrees and 130 branches accumulated. **Ask GitHub
+   whether the PULL REQUEST merged.** `scripts/reap-merged-worktrees.mjs` in
+   `shared-db` does this: dry run by default, `--apply` to act, and it refuses
+   while any `orchestrator-marker` issue is open because a clean worktree on a
+   merged branch is indistinguishable from one a live sub-agent just pushed from.
+
+   Remote branches now delete themselves — `delete-branch-on-merge` was turned on
+   for `u2giants/shared-db` on 2026-08-13.
+
+2a. **Retire the `HANDOFF.d/` file of every workstream you finished, in the same
+   pull request that closes its issue.** You are the session that did the work and
+   the only one who can tell it is really done; a later session can only guess, and
+   that guessing is what left 27 finished files in the directory (issue #658).
+   Every handoff file opens with a contract block naming its issue:
+
+   ```
+   ---
+   issue: 925
+   status: OPEN            # OPEN or BLOCKED — never DONE
+   owner: <branch/session>
+   ---
+   ```
+
+   The `Handoff Contract Guard` enforces this on every pull request. It fails only
+   for handoff files **your** pull request touches, never for anybody else's.
+
+   ⛔ **Never report the file COUNT as a problem and never add a cap.** Twenty
+   concurrent workstreams means twenty files and that is correct (owner ruling,
+   2026-08-13). Report **stale** files — those whose issue is already closed —
+   by name, with the owner from their contract block.
 2b. **Open or refresh a `db-work` issue for every outstanding item** — the
    section above. This is not optional tidying: a handover that leaves outstanding
    work unqueued is **incomplete**, in exactly the same way as one missing the

@@ -40,8 +40,7 @@ ask whether the handoff is good enough, or separately ask for git/deploy status.
    - **Never open, edit, tidy, or delete another session's `HANDOFF.d/` file.**
    - **Retention:** delete YOUR file when the work it describes is proven done —
      git history preserves the text. Presence of a file means the workstream is
-     OPEN. If `HANDOFF.d/` holds **more than 5** files, warn loudly in the closing
-     report, list them oldest-first with dates, and ask which are finished.
+     OPEN. Never treat the file COUNT as a problem and never cap it — 20 concurrent workstreams means 20 files and that is correct (owner ruling 2026-08-13). Warn about STALE files instead: ones whose issue is already closed. List those by name with the owner from their contract block; the target is zero.
    - **Never add `.gitattributes merge=union`** for handoffs; line-unioning
      Markdown yields a silently wrong document instead of a loud conflict.
 3. **Secret hygiene.** Search this session and diffs for new credentials,

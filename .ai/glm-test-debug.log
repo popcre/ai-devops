@@ -1,0 +1,192 @@
+== static checks ==
+  ok   ai-glm is executable
+  ok   ai-glm parses
+  ok   setup-opencode-glm.sh parses
+  ok   retired launcher is gone
+  ok   retired launcher not on PATH
+== pinned config ==
+  ok   version file exists
+  ok   version is a bare semver
+  ok   opencode.json is valid json
+  ok   model is pinned to glm-5.2
+  ok   autoupdate disabled
+  ok   sharing disabled
+== agent safety (the only working read-only enforcement) ==
+  ok   glm-review exists
+  ok   glm-review has webfetch: false
+  ok   glm-review pins the model
+  ok   glm-implement exists
+  ok   glm-implement has webfetch: false
+  ok   glm-implement pins the model
+  ok   glm-review has write: false
+  ok   glm-review has edit: false
+  ok   glm-review has NO bash tool
+  ok   glm-review explicitly allows todowrite
+  ok   glm-implement can write
+  ok   glm-implement HAS a bash tool
+  ok   glm-implement explicitly allows todowrite
+  ok   sandbox is a clone, not a worktree
+  ok   sandbox removes its git remote
+== systemd unit ==
+  ok   unit exists
+  ok   unit is a user service (uses %h)
+  ok   unit has no secret material
+  ok   unit rate-limits restarts
+  ok   unit sets NoNewPrivileges
+  ok   unit does not bind publicly
+== cli contract ==
+  ok   no command exits 0
+  ok   unknown command rejected
+  ok   help works
+  ok   --model is rejected
+  ok   --model error explains why
+  ok   --agent is rejected
+  ok   --agent error explains why
+  ok   --system is rejected
+  ok   --system error explains why
+  ok   --tools is rejected
+  ok   --tools error explains why
+  ok   --provider is rejected
+  ok   --provider error explains why
+  ok   --directory is rejected
+  ok   --directory error explains why
+  ok   --temperature is rejected
+  ok   --temperature error explains why
+  ok   --reasoning is rejected
+  ok   --reasoning error explains why
+  ok   doctor symlink check skipped (host created a copy)
+== repository + session identity ==
+warning: in the working copy of 'f.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'f.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   distinct repos get distinct ids
+  ok   repo id is stable
+  ok   new locks before server session creation
+  ok   failed metadata write deletes created server session
+== error paths without a server ==
+  ok   new fails when server is down
+  ok   server-down message is actionable
+  ok   ask on unknown session fails
+  ok   invalid session name rejected
+  ok   non-git directory rejected
+  ok   empty prompt rejected
+  ok   missing prompt file rejected
+  ok   list works with no sessions
+== caller separation ==
+  ok   claude and codex sessions coexist
+== worktree hygiene ==
+  ok   no scratch worktrees leaked
+  ok   repoA has only its own worktree
+== secret hygiene ==
+  ok   ai-glm never echoes a key
+  ok   launcher unsets ZAI_API_KEY
+  ok   launcher guards empty key
+  ok   launcher has re-exec guard
+  ok   mcp.env.example keeps ZAI_API_KEY
+  ok   dead ZAI_ANTHROPIC_BASE_URL gone
+  ok   dead ZAI_GLM_MODEL gone
+== skill ==
+  ok   skill exists
+  ok   skill tells callers to use ai-glm
+  ok   skill forbids calling opencode
+  ok   skill says continue, not recreate
+  ok   skill has no stale launcher ref
+  ok   skill keeps todowrite wildcard narrow
+  ok   skill names permission failure evidence
+== doctor must report, not abort ==
+  ok   doctor reports every check on a bare machine
+  ok   doctor exits nonzero on a bare machine
+  ok   doctor prints no stray error lines
+  ok   doctor knows Windows from Linux
+  ok   server control works on Windows
+== platform-correct doctor checks ==
+  ok   password check is platform-aware
+  ok   secret check targets real files
+  ok   no vacuous systemd-only secret check
+  ok   doctor sweeps the glm-claude vestige
+  ok   ubuntu setup sweeps it too
+  ok   windows setup sweeps it too
+== a down server must explain itself ==
+  ok   health failure names a next command
+  ok   health failure names the setup script
+  ok   health failure shows recent log lines
+== completion rule ==
+  ok   requires finish==stop
+  ok   requires two idle polls
+  ok   detects the 400 permission wedge
+  ok   names the stuck tool on timeout
+  ok   default timeout remains 1800s
+  ok   new passes review directory
+  ok   ask passes review directory
+  ok   implement passes sandbox directory
+== permission classifier ==
+  ok   empty data envelope is valid
+  ok   unmeasured bare array fails closed
+  ok   in-directory read is approved
+  ok   in-directory list is approved
+  ok   in-directory glob is approved
+  ok   in-directory grep is approved
+  ok   measured todowrite shape is approved
+  ok   todowrite wildcard is action-local
+  ok   todowrite rejects a path resource
+  ok   todowrite rejects missing save shape
+  ok   todowrite rejects broader save shape
+  ok   implementation root is classified
+  ok   outside-directory resource fails
+  ok   mixed resource set fails closed
+  ok   external-directory action fails
+  ok   unknown action fails
+  ok   missing id fails
+  ok   missing resources fails
+  ok   malformed JSON fails
+  ok   unsupported envelope fails
+  ok   InvalidRequestError fails
+  ok   other HTTP failure fails
+  ok   unknown mode fails
+  ok   diagnostic redacts sensitive fields
+  ok   diagnostic is capped after redaction
+  ok   diagnostic marks truncation
+  ok   failed approval fails closed
+  ok   uncleared approval fails by third poll
+  ok   running outside read is deterministic
+  ok   running inside read remains legitimate
+  ok   unmeasured running input is not guessed
+== implementation job records ==
+  ok   implement_record_exists_before_clone_creation
+  ok   implement_list_and_show_are_type_and_state_aware
+  ok   concurrent_same_name_implement_creates_one_job_and_session
+  FAIL implement_record_is_private_and_contains_no_prompt_or_secret
+  ok   implement_ask_is_rejected_as_one_shot
+  ok   delete_refuses_active_implementation_job
+  ok   starting-job abort is recorded before a server session exists
+  ok   starting-job abort has no clone to delete
+  ok   pre-resource abort records terminal state
+  ok   abort_targets_exact_active_implementation_session
+  ok   abort_never_deletes_live_clone_from_control_process
+  FAIL abort owner records terminal state and cleans exact resources
+  FAIL interrupt_records_terminal_state_and_cleans
+  ok   implement_record_adds_clone_and_session_atomically
+  ok   normal_and_no_change_completion_clean_resources
+  FAIL provider_and_permission_failures_record_failure_and_clean
+  ok   unsupported permission fails on first exposed poll
+  FAIL permission failure records truthful terminal evidence
+  ok   permission failure cleanup preserves evidence without partial patch
+  ok   failed job cannot be deleted before cleanup finishes
+  FAIL metadata_failure_cleans_new_server_session
+  FAIL patch_failure_preserves_recovery_evidence
+  ok   dead_owner_reconciliation_requires_all_safety_checks
+  ok   dead permission-failure owner completes cleanup without losing cause
+  ok   live_owner_and_forged_or_outside_paths_are_never_swept
+  ok   different_implementation_names_run_independently
+  ok   abort_completion_race_records_observed_truth
+  ok   ambiguous_server_state_is_reported_not_deleted
+  ok   terminal_record_can_be_cleared_for_safe_name_reuse
+== shared-server attach ==
+  ok   ai-glm loads when getent fails/absent
+  ok   ai-glm parses cleanly
+  ok   own password wins over the shared one
+  ok   fallback never copies the password
+  ok   fallback is limited to a named user
+  ok   never attaches to its own account
+
+162 passed, 7 failed
+kept test temp: /tmp/tmp.7jI8jkIm08

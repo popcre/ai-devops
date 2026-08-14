@@ -366,8 +366,9 @@ session context that would otherwise be lost
 RETENTION:
 IF the work described in YOUR HANDOFF.d/ file is proven complete:
 MUST delete that file in the same commit that finishes the work (git history preserves the text). Presence of a file means the workstream is OPEN.
-IF HANDOFF.d/ holds more than 5 files:
-MUST warn loudly in the final report, listing them oldest-first with dates, and ask which are actually finished.
+IF any HANDOFF.d/ file points at an issue that is already CLOSED:
+MUST warn loudly in the final report, naming each stale file and the owner recorded in its contract block, and ask which are actually finished.
+MUST NOT treat the NUMBER of files as a problem and MUST NOT introduce a cap. Twenty concurrent workstreams legitimately means twenty files (owner ruling, Albert Hazan, 2026-08-13). A count cap fails the next legitimate file for a mess somebody else left.
 
 REQUIRED AI WORKFLOW
 Follow this sequence:
@@ -397,7 +398,7 @@ CLAUDE.md does not duplicate AGENTS.md.
 Ignore files match documented ignore guidance where appropriate.
 Env vars are listed without secret values.
 Deployment docs describe actual deployment, not guesses.
-A HANDOFF.d/ file of yours exists if and only if your work is unfinished, blocked, or in progress; HANDOFF.md is the static pointer and was not rewritten; no other session's HANDOFF.d/ file was touched; HANDOFF.d/ holds no more than 5 open files (or the excess is called out with dates).
+A HANDOFF.d/ file of yours exists if and only if your work is unfinished, blocked, or in progress; HANDOFF.md is the static pointer and was not rewritten; no other session's HANDOFF.d/ file was touched; no HANDOFF.d/ file points at a closed issue (or each stale one is called out by name with its owner). The file COUNT is never a finding.
 No secrets were written.
 Stale docs were removed, corrected, or clearly marked.
 
@@ -420,7 +421,7 @@ After committing and pushing, final response MUST include:
 - New file written: `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` / none
 - Reason: ...
 - Files deleted as proven done: ...
-- Open files now in `HANDOFF.d/`: N (warn loudly if more than 5, oldest-first with dates)
+- Open files now in `HANDOFF.d/`: N (a count, not a warning). Stale files — issue already closed: list by name + owner, or "none"
 
 ## Verification
 

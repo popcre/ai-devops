@@ -74,7 +74,9 @@ doesn't apply, say so in the report.
 - Docs updated: [files, or "nothing durable changed"]
 - Secrets: [stored/none found]
 - Handoff: [new HANDOFF.d/<file> written + why / none because work is complete;
-  files deleted as done; WARNING if HANDOFF.d/ now holds more than 5 open files]
+  files deleted as done. Report STALE files — ones whose issue is already closed —
+  by name with their owner. Never report the file COUNT as a problem: 20 concurrent
+  workstreams means 20 files and that is correct (owner ruling 2026-08-13)]
 - Shipped: [commit SHAs, PR URLs, deploy verified yes/no]
 - Loose ends: [anything Albert should know, or "none"]
 ```

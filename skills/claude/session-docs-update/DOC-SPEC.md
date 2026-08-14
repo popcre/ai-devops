@@ -120,7 +120,7 @@ Risks / watchouts:
 - New claims match the repository or verified session findings.
 - No secrets were added.
 - A new `HANDOFF.d/` file exists only if continuation context is needed, and it is yours alone (no other session's file was touched).
-- `HANDOFF.d/` holds no more than 5 open files; if it does, the excess is called out loudly with dates so the owner can say which are finished.
+- No `HANDOFF.d/` file points at an already-closed issue; each stale one is called out loudly by name with its owner so Albert can say which are finished. The file COUNT is never a finding (owner ruling 2026-08-13).
 - Any new quirk or warning explains why it exists and what would break if ignored.
 
 ## Final Report
@@ -137,7 +137,7 @@ Reply with:
 - New file written: `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` / none
 - Reason: ...
 - Files deleted as proven done: ...
-- Open files now in `HANDOFF.d/`: N (WARN loudly if more than 5, oldest-first with dates)
+- Open files now in `HANDOFF.d/`: N (a count, not a warning). Stale files — issue already closed: by name + owner, or "none"
 
 ## Verification
 - Docs verified against session findings: yes/no

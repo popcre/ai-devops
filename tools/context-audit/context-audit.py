@@ -246,24 +246,33 @@ def link_issues(root: Path, markdown_paths: list[Path]) -> list[dict]:
     return issues
 
 
-OPEN_HANDOFF_THRESHOLD = 5
+# Deliberately no OPEN_HANDOFF_THRESHOLD. A count cap on HANDOFF.d/ was ruled out
+# by the owner on 2026-08-13 (see open_handoffs below). Do not reintroduce one.
 
 
-def open_handoffs(root: Path) -> list[str]:
+def open_handoffs(root: Path) -> list[dict]:
     """Every file in HANDOFF.d/ is an OPEN workstream, by design.
 
-    Retention is supposed to be automatic — the session that finishes the next
-    step of a workstream deletes the previous step's file. In practice a session
-    can rarely prove its OWN work done, so nobody deleted anything and the folder
-    grew. Counting it here makes the threshold mechanical instead of a thing
-    someone has to remember at the end of a long session. It only ever warns:
-    a busy week legitimately has six, and an audit that fails over paperwork is
-    an audit people learn to ignore.
+    ⛔ The COUNT is reported, never judged. A count threshold was tried and
+    RULED OUT by the owner on 2026-08-13: it fails the next legitimate file for
+    a mess somebody else left, and twenty concurrent workstreams legitimately
+    means twenty files.
+
+    What is worth flagging is a file nothing can ever retire — one with no
+    contract block naming the issue that would prove it done. That is checkable
+    offline, which this audit must be. Whether the named issue is actually
+    CLOSED is checked where GitHub is reachable: the Handoff Contract Guard on
+    every pull request, and the weekly stale report (u2giants/shared-db, #658).
     """
     folder = root / "HANDOFF.d"
     if not folder.is_dir():
         return []
-    return sorted(posix(path, root) for path in folder.glob("*.md"))
+    out = []
+    for path in sorted(folder.glob("*.md")):
+        head = path.read_text(encoding="utf-8", errors="replace")[:400]
+        has_contract = head.startswith("---") and "issue:" in head and "owner:" in head
+        out.append({"path": posix(path, root), "hasContract": has_contract})
+    return out
 
 
 def drift_state(source_bytes: bytes, installed_bytes: bytes) -> str:
@@ -631,15 +640,16 @@ def summary(report: dict) -> str:
         f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
         f"global vs skill-description overlaps: {len(report['globalSkillOverlap'])}",
         f"budget warnings: {report['budgets']['warnings']} (warnings only, never a failure)",
-        f"open handoffs: {len(report['openHandoffs'])} (threshold {OPEN_HANDOFF_THRESHOLD}, warning only)",
+        f"open handoffs: {len(report['openHandoffs'])} (a count, never a finding — see #658)",
     ])
-    if len(report["openHandoffs"]) > OPEN_HANDOFF_THRESHOLD:
+    uncontracted = [h for h in report["openHandoffs"] if not h.get("hasContract", False)]
+    if uncontracted:
         lines.append(
-            f"HANDOFF WARNING: HANDOFF.d/ holds {len(report['openHandoffs'])} open files, over the "
-            f"{OPEN_HANDOFF_THRESHOLD}-file threshold. Every file there means an OPEN workstream. "
-            "The session that finishes the next step of a workstream deletes the previous step's file "
-            "once its commits are on main and its open obligations are carried forward. "
-            "List them oldest-first and ask which are actually finished. This is a warning, not a failure."
+            f"HANDOFF WARNING: {len(uncontracted)} file(s) in HANDOFF.d/ carry no contract block, so "
+            "nothing can ever tell whether their work is finished — the failure that left 27 finished "
+            "files in u2giants/shared-db (#658). Add `issue:`, `status:` and `owner:` frontmatter, or "
+            "retire the file. This is a warning, not a failure. "
+            f"Files: {', '.join(h['path'] for h in uncontracted)}"
         )
     for issue in report["safetyMarkerIssues"]:
         lines.append(f"SAFETY: {issue['reason']}")

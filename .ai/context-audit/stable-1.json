@@ -1,0 +1,746 @@
+{
+  "brokenLinks": [],
+  "duplicateParagraphs": [
+    {
+      "sha256": "12fc1fd85019994d2440cb8f268d9b522be3ed24c01a75ca11abe6e91952f9c3",
+      "sources": [
+        "skills/claude/claude-transcript-backup/SKILL.md",
+        "skills/codex/codex-transcript-miner/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "1ab7f3c1a09988ae947d737b35d789c1d35972d0d7ca4263fc56854e43d0c855",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "4e874847182eaf4972211f60b74e23faedacfb0bd624d87339d05b1220c3676c",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "4fcf3b9524dbe404cc32089629a3eaaffac826ef44a82568ce10f4a53f13a38c",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "538a7bf0b89c92b5415bc57e3ddd8a31046b4ef24366478cd703f72981512649",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "62c065c9d48d892142d4b059e08dbf9a4a4b0935a51f4b913e187a65a01606ce",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "6412c9ffad3d48c4fb2055957a00651068a79fe54d44caf8e28a646aa9745fbf",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "80ca162be1e5d65186c0f1773af26c029e801cd186b1c4463373c552a62d7686",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "8105a608c40ba56f241ae27f66cb028ae83f49e5e05b082c1424ce5f871b3688",
+      "sources": [
+        "skills/claude/session-docs-update/SKILL.md",
+        "skills/codex/codex-docs-update/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "d8fdfe4d83cd2b23de2669e8a2ec34982305a3f026403f6fa74a3072853a88ea",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "ea4d7d974588779e8be7488662f1a3b319e1464dbd7c91d36d20fc50c306144e",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    },
+    {
+      "sha256": "fbf3ba3a1ab434feb10879a493a413d1880c88eec35df845d2618ec545f59cf3",
+      "sources": [
+        "skills/claude/qwen-code/SKILL.md",
+        "skills/codex/codex-qwen-code/SKILL.md"
+      ]
+    }
+  ],
+  "duplicateSkillNames": [],
+  "excludedPathClasses": [
+    ".ai",
+    ".cache",
+    ".git",
+    "claude_chats",
+    "codex_chats",
+    "coverage",
+    "dist",
+    "node_modules",
+    "transcripts",
+    "worktrees",
+    "secret file suffixes",
+    "network roots"
+  ],
+  "files": [
+    {
+      "bytes": 47123,
+      "classification": "startup-routed",
+      "estimatedTokens": 11781,
+      "lines": 706,
+      "path": "AGENTS.md",
+      "sha256": "b21df17f3c07ba1eea7a71ce08dd34a71a86d72b6db6d6bc63fc536463a10fa6"
+    },
+    {
+      "bytes": 2278,
+      "classification": "startup-routed",
+      "estimatedTokens": 570,
+      "lines": 46,
+      "path": "CLAUDE.md",
+      "sha256": "d87b8d782f4d1c7d766582b3edef68631615a85d27820154d6e113ce2084d6d5"
+    },
+    {
+      "bytes": 16258,
+      "classification": "always-loaded",
+      "estimatedTokens": 4065,
+      "lines": 281,
+      "path": "templates/system/AGENTS-global-codex.md",
+      "sha256": "a7ea4de88f6b575cfa889f87726d5505a633a1dbb905b6d91b3c9b5d2041eda9"
+    },
+    {
+      "bytes": 17053,
+      "classification": "always-loaded",
+      "estimatedTokens": 4264,
+      "lines": 288,
+      "path": "templates/system/CLAUDE-global.md",
+      "sha256": "2757f3f07332bc8cf35ae3d990db86aaebc0fb6a67938aacf43296d769e8d782"
+    }
+  ],
+  "generatedAt": "stable",
+  "installedDrift": [
+    {
+      "client": "claude",
+      "kind": "skill",
+      "name": "shared-db-handover",
+      "state": "different"
+    },
+    {
+      "client": "claude",
+      "kind": "skill",
+      "name": "shared-db-orchestrator",
+      "state": "different"
+    },
+    {
+      "client": "claude",
+      "kind": "skill",
+      "name": "kimi-code-delegation",
+      "state": "different"
+    },
+    {
+      "client": "codex",
+      "kind": "skill",
+      "name": "kimi-code-delegation",
+      "state": "different"
+    },
+    {
+      "client": "claude",
+      "kind": "global",
+      "name": "CLAUDE.md",
+      "state": "different"
+    },
+    {
+      "client": "codex",
+      "kind": "global",
+      "name": "AGENTS.md",
+      "state": "different"
+    }
+  ],
+  "installerCapabilities": {
+    "bash": {
+      "collisionGuard": true,
+      "dryRun": true,
+      "globalNonClobber": true,
+      "managedMarker": true,
+      "orphanQuarantine": true
+    },
+    "differences": [],
+    "powershell": {
+      "collisionGuard": true,
+      "dryRun": true,
+      "globalNonClobber": true,
+      "managedMarker": true,
+      "orphanQuarantine": true
+    }
+  },
+  "root": "C:\\repos\\ai-devops",
+  "safetyMarkers": {
+    "GPT-5.6 effort": true,
+    "Git identity": true,
+    "destructive actions": true,
+    "production mutation": true,
+    "secret handling": true,
+    "shared database routing": true
+  },
+  "schemaVersion": 1,
+  "skillManifest": {
+    "claude": {
+      "bytes": 18448,
+      "estimatedTokens": 4612,
+      "skills": 35
+    },
+    "codex": {
+      "bytes": 10593,
+      "estimatedTokens": 2649,
+      "skills": 30
+    }
+  },
+  "skills": [
+    {
+      "bytes": 2984,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 746,
+      "lines": 67,
+      "name": "ai-development-pipeline",
+      "path": "skills/claude/ai-development-pipeline/SKILL.md",
+      "sha256": "cf2ec65fcb03d7077d98cbc348e3a43c52e88a067aa2e0aa2fc91307cbb5b7e6",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 2299,
+      "classification": "task-triggered",
+      "description": "Audit a repo's CI/CD against Albert's operating rules (GitHub = code truth, GHCR = artifacts, Coolify = runtime config, no SSH deploys, single-branch main). Use when the user pastes the \"CI/CD/DevOps Operating Rules\", asks \"does this conform to our ci/cd pipeline rules\", or requests CI/Coolify hardening.",
+      "estimatedTokens": 575,
+      "lines": 40,
+      "name": "cicd-rules-audit",
+      "path": "skills/claude/cicd-rules-audit/SKILL.md",
+      "sha256": "16190cce0b27fb2f52a858cc66122701b7318a242fa0af23e97df874c28601ce",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 2762,
+      "classification": "task-triggered",
+      "description": "",
+      "estimatedTokens": 691,
+      "lines": 49,
+      "name": "claude-transcript-backup",
+      "path": "skills/claude/claude-transcript-backup/SKILL.md",
+      "sha256": "4ea3f34c79a88aa6b4a06bbfca23c3b1dded28eeda950ec96ffc5a0f1586c544",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 8598,
+      "classification": "task-triggered",
+      "description": "Hand a substantial implementation, ops, or verification task off to Codex (GPT-5.x) and drive it to completion, then verify its work. Use whenever the user says \"use codex\", \"have codex do X\", \"hand this off to codex\", \"use the codex-cli MCP\", \"delegate this to gpt-5\", or wants a second engine to build/run/prove something autonomously \u2014 especially long tasks worth running in the background. For Codex's opinion on reasoning rather than work to execute, use codex-second-opinion instead.",
+      "estimatedTokens": 2150,
+      "lines": 142,
+      "name": "codex-handoff",
+      "path": "skills/claude/codex-handoff/SKILL.md",
+      "sha256": "2031a51be3dd2e1536eec0ea47c0332a9146a71f7fca175fe222f5e66c1c01f9",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 11176,
+      "classification": "task-triggered",
+      "description": "Get Codex (GPT-5.x) to independently review a plan, diagnosis, design, or diff, report what it says, state whether Claude agrees \u2014 and when Claude disagrees, argue the point back to Codex and report whether either side moved. Use when the user says \"run this by codex\", \"what does codex think\", \"get a second opinion\", \"see if codex agrees\", \"ask codex and tell me if you agree\", or \"if you disagree, push back and see if it changes its mind\". For handing Codex work to *execute*, use codex-handoff instead; for a canned read-only review of the current git diff, ai-codex-review is the lighter tool.",
+      "estimatedTokens": 2794,
+      "lines": 206,
+      "name": "codex-second-opinion",
+      "path": "skills/claude/codex-second-opinion/SKILL.md",
+      "sha256": "41ef9d462e3b58c50b77415400f403290c68e8c44a2e79d24401a47204d7e27a",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 2810,
+      "classification": "task-triggered",
+      "description": "Ship and verify a deploy for the hetz/Coolify/GHCR apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw). Use when the user says \"push and commit\", \"is everything pushed and committed?\", \"the live site is still running the old commit\", \"site looks exactly like it did before\", or \"there are no new actions on github.com\" WHEN WORKING IN ONE OF THOSE hetz app repos (deploy path: GitHub \u2192 Actions \u2192 GHCR \u2192 Coolify, single-branch main). For the dflow repos (popcre/designflow-*, branch sandbox-albert) use `dflow-ship` instead \u2014 same phrases, different pipeline (Cloud Build + PR to develop).",
+      "estimatedTokens": 703,
+      "lines": 49,
+      "name": "deploy-and-verify",
+      "path": "skills/claude/deploy-and-verify/SKILL.md",
+      "sha256": "f6ac6a63a6fd104397a300441e20ff0ae369748e130c8b58ea6e96fc189f918a",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 3059,
+      "classification": "task-triggered",
+      "description": "DesignFlow PLM session opener. Use at the start of any dflow session, or when the user says \"pull develop into sandbox-albert\" or any branch-sync variant. Syncs all six designflow repos and loads the standing dflow rules Albert used to paste manually every session.",
+      "estimatedTokens": 765,
+      "lines": 56,
+      "name": "dflow-session-start",
+      "path": "skills/claude/dflow-session-start/SKILL.md",
+      "sha256": "ac34b1c0ce80f1c7811e803f6513386032e02f1f392d11715a848b8475b19d21",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 3581,
+      "classification": "task-triggered",
+      "description": "DesignFlow PLM (dflow) ship step \u2014 test, commit, push, PR to develop, verify the sandbox Cloud Build deploy. Use for a pure ship request (\"push and commit\", \"commit and push\", \"update the PR for my branch sandbox-albert with develop\", \"is everything pushed and committed?\") WHEN WORKING IN A DFLOW REPO (the six popcre designflow-* repos on branch sandbox-albert / albert-2sandbox). For the hetz/Coolify apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw) use `deploy-and-verify` instead. This is NOT the session closer \u2014 it does not update docs, sweep secrets, or write a handoff; for \"wrap up\"/\"close out\"/\"end of session\" use `wrap-up`, which runs docs FIRST and then calls this skill.",
+      "estimatedTokens": 896,
+      "lines": 57,
+      "name": "dflow-ship",
+      "path": "skills/claude/dflow-ship/SKILL.md",
+      "sha256": "28bd40295d8a4de516888e231d29bd4b2e574927eec0d0e779220475c2e8a612",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 12568,
+      "classification": "task-triggered",
+      "description": "Extract Disney's authoritative property and character list from the OPA licensee portal (opa.disney.com) into a CSV. Use when the user says \"scrape OPA\", \"get the Disney character list\", \"pull the OPA properties\", \"refresh the OPA extract\", \"get Disney's character names\", or needs canonical Disney property/character names or IDs for the characters and style-guides work. Also covers the general pattern of reading data out of an MFA-protected portal through the user's own logged-in browser without ever handling their credentials.",
+      "estimatedTokens": 3142,
+      "lines": 240,
+      "name": "disney_opa_character_scrape",
+      "path": "skills/claude/disney_opa_character_scrape/SKILL.md",
+      "sha256": "00d0d951f6a95cb942bdf971a240edd33ed6d79171c162a53fbb6a7496b8d4d8",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 9362,
+      "classification": "task-triggered",
+      "description": "One-time briefing and setup ritual for a brand-new software project. Use when starting a new project, spinning up a new application/repo from scratch, or when the user says \"new project\", \"new application\", \"set up a brand new app\", \"starting a new project\", or pastes the \"POP Creations \u2014 New Project Standard\" prompt. Covers access-first credential requests, container naming, docs/CI-CD standards, DB choice, and the initial file-count-and-cleanup pass. For an existing repo that just needs Coolify/GHCR CI/CD hardened, use cicd-rules-audit instead; for rebuilding docs on an existing repo, use repo-docs-overhaul instead.",
+      "estimatedTokens": 2341,
+      "lines": 175,
+      "name": "new-app-setup",
+      "path": "skills/claude/new-app-setup/SKILL.md",
+      "sha256": "ea8400eba7b4dc84510d5341b2d44f0b0dbc827aef7cca0c57045dd3e9f12b9f",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 5504,
+      "classification": "task-triggered",
+      "description": "Invoke the locally installed Qwen Code CLI as an independent reviewer, second-opinion reasoning engine, codebase analyst, or delegated implementation agent. Use when the user says \"ask Qwen\", \"use Qwen Code\", \"run this by Qwen\", \"have Qwen review this\", \"get a Qwen second opinion\", or explicitly requests qwen3.8-max / Qwen 3.8. Use the real installed `qwen` CLI non-interactively, validate its current flags, capture its result and errors, and keep review work read-only.",
+      "estimatedTokens": 1376,
+      "lines": 81,
+      "name": "qwen-code",
+      "path": "skills/claude/qwen-code/SKILL.md",
+      "sha256": "b1e4d343a32034cef7f8399197597063b1c5f2bb2ec3173669e49d659f6eb9af",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 3270,
+      "classification": "task-triggered",
+      "description": "Full documentation-system rebuild for a repo \u2014 the \"AI TASK SPEC Repository Documentation Maintenance\" spec. Use for NEW applications, after BIG changes, or when the user says \"do a full documentation overhaul\", \"make AGENTS.md the canonical operating guide\", or pastes the AI TASK SPEC. For routine end-of-session updates use session-docs-update instead.",
+      "estimatedTokens": 818,
+      "lines": 55,
+      "name": "repo-docs-overhaul",
+      "path": "skills/claude/repo-docs-overhaul/SKILL.md",
+      "sha256": "66b940422c19c4fc3ddb64fd69b0f8ad6ea5e40172d472d425e4a6a5fa988ce6",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 10508,
+      "classification": "task-triggered",
+      "description": "End-of-session documentation ritual. Use when the user says \"update the .md files\", pastes the \"AI Session Documentation Update Prompt\", or at the end of any session that changed code, deployment behavior, data flow, configuration, or project knowledge. Replaces the 2-page prompt Albert pasted manually 30+ times across machines.",
+      "estimatedTokens": 2627,
+      "lines": 169,
+      "name": "session-docs-update",
+      "path": "skills/claude/session-docs-update/SKILL.md",
+      "sha256": "b39abb03fcf6c729b5bdb4377b59662d80abd78edebba75f68e433795e155d95",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 8685,
+      "classification": "task-triggered",
+      "description": "Discipline for any CHANGE to the shared supabase.com backend. Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says \"make db changes the proper way\", \"mirror it to shared-db\", or \"re-author it properly in shared-db\". Also states Rule 0 \u2014 read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch \u2014 so load it too when the ask is \"does the shared database fit our data\", \"compare our data shape to the schema\", \"review the schema\", or \"what columns exist\".",
+      "estimatedTokens": 2172,
+      "lines": 130,
+      "name": "shared-db-change",
+      "path": "skills/claude/shared-db-change/SKILL.md",
+      "sha256": "8fb70798b689744977cbea54ce428e173468bad7fad7ed0ca64ad4fb0802c9b8",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 28100,
+      "classification": "task-triggered",
+      "description": "Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database \u2014 whether or not that session is the orchestrator. TWO paths. (A) You are NOT the orchestrator \u2014 trigger on \"stop work and hand over\", \"stop what you are doing on shared-db\", \"transfer your work to the orchestrator\", \"hand your work to the orchestrator\", \"hand your work to the orchestrator\", \"hand this off to the orchestrator\", \"hand your work to the coordinator\", \"hand this off to the coordinator\", \"you are not the coordinator\", \"there is already a coordinator\" (COORDINATOR is the older word for the ORCHESTRATOR role, still used in older issues and in git history, and must trigger this skill too), \"you are not the orchestrator\", \"another session is coordinating this\", \"there is already a orchestrator\", \"write your handover into COORDINATOR_INTAKE\", or \"fill in the intake template\" \u2014 then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the orchestrator \u2014 trigger on \"hand this over\", \"hand this session over\", \"hand it to a new session\", \"wrap up\", \"wrap up this session\", \"close this out\", \"close out the session\", \"end of session\", \"we're done here\", \"write the handoff\", \"write the handoff for what the subagents did\", \"I'm out of context\", \"context window is full\", \"fresh session\", or \"give the next session a prompt\" \u2014 then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A orchestrator handoff has TWO halves \u2014 coordination state AND a separate block per sub-agent \u2014 and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a orchestrator session is opened and run.",
+      "estimatedTokens": 7025,
+      "lines": 449,
+      "name": "shared-db-handover",
+      "path": "skills/claude/shared-db-handover/SKILL.md",
+      "sha256": "af6044499fb7b3bd03146c6d56e3e6e20a3c8ec6cdc6ee34188574f112af1ea5",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 42588,
+      "classification": "task-triggered",
+      "description": "Open and run a session as ONE orchestrator that does no work itself and dispatches every task to isolated sub-agents in their own git worktrees \u2014 and, for everyone who is NOT the orchestrator, how to REQUEST a database CHANGE instead of starting it. NOTE \u2014 this skill gates CHANGES ONLY; read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types, safe samples) is ALLOWED from every application repo with no issue and no dispatch, so do NOT load this skill merely to look at the schema. Load it for THREE situations, before doing anything else. (0) ANYONE who needs a shared-database CHANGE made \u2014 \"I need a database change\", \"can you add a column\", \"we need a new table / view / RPC / index\", \"how do I request database work\", \"submit a request to the orchestrator\", \"who do I ask for a schema change\", \"it's only a small change\" \u2014 the answer is a GitHub issue filed on `u2giants/shared-db` with the `db-work` label, never work started on the spot. (1) ANY request to run work with more than one agent or session \u2014 \"run this with subagents\", \"spin up agents\", \"use subagents\", \"run these in parallel\", \"coordinate\", \"orchestrate\", \"coordinate multiple sessions\", \"several workstreams\", \"who is working on what\", \"what is each agent doing\". (2) ANY work on the shared Supabase database or the `u2giants/shared-db` repo, even when neither is named \u2014 \"add a migration\", \"write a migration\", \"make a schema change\", \"change the database\", \"update the shared database\", \"add a column\", \"change RLS\", \"add a view / RPC / trigger / seed\", \"promote to production\", \"work in shared-db\", \"start a new shared-db session\", \"start a shared-db orchestrator session\", \"start a orchestrator session\", \"start an orchestrator session\", \"be the orchestrator\", \"start a coordinator session\", \"be the coordinator\", \"hand over to the coordinator\", \"I want to run a orchestrator session\", \"open a orchestrator session\", or any cross-app data-contract change. NOTE: the role is called ORCHESTRATOR as of 2026-08-07; \"COORDINATOR\" is the older word for exactly the same role and still appears in older issues, in `HANDOFF.d/` records and in git history. BOTH words must load this skill. Also load it before creating background task chips for database work \u2014 the chip pattern is what broke this repo. To END, wrap up, or hand over such a session, use `shared-db-handover` instead. If in doubt whether the work needs coordination, it does; load this skill.",
+      "estimatedTokens": 10647,
+      "lines": 685,
+      "name": "shared-db-orchestrator",
+      "path": "skills/claude/shared-db-orchestrator/SKILL.md",
+      "sha256": "075fef7ed7cce2e81609ab657f3458435aa9b25b89dd664004f58a6a3831753e",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 13328,
+      "classification": "task-triggered",
+      "description": "Sync this machine's AI config with the ai-devops hub. Use when the user says \"sync my dotfiles\", \"sync my config\", \"pull the latest skills/instructions\", or \"push my dotfiles\". Pulls latest skills + global instructions + memory from ai-devops and installs them, sets the dflow gcloud defaults, and pushes local memory changes back. No chezmoi \u2014 ai-devops is the single hub.",
+      "estimatedTokens": 3332,
+      "lines": 190,
+      "name": "sync-dotfiles",
+      "path": "skills/claude/sync-dotfiles/SKILL.md",
+      "sha256": "550854399a1417b0524d0f27b8d92f0e0a77d79ef3a160843024b738440349c6",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 4967,
+      "classification": "task-triggered",
+      "description": "One-phrase end-of-session closer. Use when the user says \"wrap up\", \"wrap it up\", \"dflow wrap up\", \"wrap up dflow\", \"close out this session\", \"we're done here\", or \"end of session\" \u2014 ANY \"wrap up\" variant, including project-prefixed ones like \"dflow wrap up\", routes HERE, not to a ship-only skill. Chains the four closing rituals: docs update FIRST, then secrets sweep, handoff-safe state, and push verification \u2014 then gives a single plain-English closing report. This skill OWNS \"wrap up\"; it delegates the ship step to the project ship skill (dflow \u2192 dflow-ship) but never the other way around.",
+      "estimatedTokens": 1242,
+      "lines": 83,
+      "name": "wrap-up",
+      "path": "skills/claude/wrap-up/SKILL.md",
+      "sha256": "bc19fd61bf60fa254f3779b73c2f13494e8bbf259e05aa8fbddfe082e8573e7e",
+      "sourceClient": "claude"
+    },
+    {
+      "bytes": 1802,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 451,
+      "lines": 54,
+      "name": "ai-reviewer",
+      "path": "skills/codex/ai-reviewer/SKILL.md",
+      "sha256": "d769a6f39dbc2dcebe3f060a4ff0119fb7e64e290dcf4a00d88f6ab511e83747",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2094,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 524,
+      "lines": 51,
+      "name": "codex-cicd-pipeline",
+      "path": "skills/codex/codex-cicd-pipeline/SKILL.md",
+      "sha256": "cc09d9f828f2f771442454a5a35d79cfea3beded8b99d88494f8ab11fc7ff14f",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2532,
+      "classification": "task-triggered",
+      "description": "Reduce Codex token use by loading only relevant repo docs, compressing repeated prompts, and turning long pasted instructions into reusable references. Use when the user asks to reduce token usage, start from a handoff, read docs efficiently, avoid re-pasting instructions, or get lower-cost GPT-5.4/5.5 behavior close to a larger model.",
+      "estimatedTokens": 633,
+      "lines": 63,
+      "name": "codex-context-optimizer",
+      "path": "skills/codex/codex-context-optimizer/SKILL.md",
+      "sha256": "1f62801a97296c9a0c5b02871edc0a773d4f9379c94469e650fda57f1de997e6",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2582,
+      "classification": "task-triggered",
+      "description": "DesignFlow PLM Codex workflow for session start, implementation, and session end. Use for dflow/designflow work, sandbox-albert or albert-2sandbox branch sync, AG-Grid coding rules, Uma PR handoff, or when the user references uma_designflow_prompt.docx.",
+      "estimatedTokens": 646,
+      "lines": 67,
+      "name": "codex-dflow-plm",
+      "path": "skills/codex/codex-dflow-plm/SKILL.md",
+      "sha256": "08be3d6690b07b55e892a5b53f30e06a16db2617e0cbdc096604cec1d7df6b45",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 8743,
+      "classification": "task-triggered",
+      "description": "Update only the markdown files that need durable knowledge from an existing project, task, or session. Use when the user says \"update the .md files\", \"update only the markdown files\", \"document this\", or wants docs updated without secrets sweep, handoff closeout, commit, push, deploy, or any other end-of-session ritual.",
+      "estimatedTokens": 2186,
+      "lines": 153,
+      "name": "codex-docs-update",
+      "path": "skills/codex/codex-docs-update/SKILL.md",
+      "sha256": "4d1e202fd2df5242a3cd37e1103c771abc4dfa780f2de206783e5e5886e9ee63",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2188,
+      "classification": "task-triggered",
+      "description": "Sync, commit, push, PR, and verify GitHub/deploy state from Codex. Use when the user says \"push and commit\", \"commit and push\", \"sync this repo with github.com\", \"pull the latest repo from github.com\", \"is everything pushed and committed?\", or asks why the live site still has an old commit.",
+      "estimatedTokens": 547,
+      "lines": 44,
+      "name": "codex-github-ship",
+      "path": "skills/codex/codex-github-ship/SKILL.md",
+      "sha256": "fe1963fc192a41591cd285a1adc6e7f2118e93533d7e63c00afa69159bf972a5",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2840,
+      "classification": "task-triggered",
+      "description": "Set up a brand-new POP Creations application repo, documentation, CI/CD, and optional Hetzner/Coolify deployment path. Use when starting a new application, creating a new repo, applying the \"new application one big prompt\", or deciding how a new app should be deployed to hetz/Hetzner/VPS.",
+      "estimatedTokens": 710,
+      "lines": 71,
+      "name": "codex-new-application",
+      "path": "skills/codex/codex-new-application/SKILL.md",
+      "sha256": "9d57226a74416368c247e71963a731a636b66004bb66ab7bf770de60e780bcfa",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 5510,
+      "classification": "task-triggered",
+      "description": "Invoke the locally installed Qwen Code CLI as an independent reviewer, second-opinion reasoning engine, codebase analyst, or delegated implementation agent. Use when the user says \"ask Qwen\", \"use Qwen Code\", \"run this by Qwen\", \"have Qwen review this\", \"get a Qwen second opinion\", or explicitly requests qwen3.8-max / Qwen 3.8. Use the real installed `qwen` CLI non-interactively, validate its current flags, capture its result and errors, and keep review work read-only.",
+      "estimatedTokens": 1378,
+      "lines": 81,
+      "name": "codex-qwen-code",
+      "path": "skills/codex/codex-qwen-code/SKILL.md",
+      "sha256": "fc47d3e03b9047d683e80d7b7eefc6690eeb161dd9829c522dca9348957a575d",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2276,
+      "classification": "task-triggered",
+      "description": "Create or rebuild the full markdown documentation set for a new repo/application or after a big application change using Albert's AI TASK SPEC. Use when the user asks to create AGENTS.md/docs exactly the standard way, pastes update_.md.docx, says \"full documentation overhaul\", or wants AGENTS.md to become the canonical operating guide and documentation router.",
+      "estimatedTokens": 569,
+      "lines": 43,
+      "name": "codex-repo-docs-overhaul",
+      "path": "skills/codex/codex-repo-docs-overhaul/SKILL.md",
+      "sha256": "bfb013a81f4ab3b2db70c5fbc2e25b1df9704273dd470676332d76c9f4154998",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 3839,
+      "classification": "task-triggered",
+      "description": "One-phrase Codex end-of-session closer. Use when the user says \"wrap up\", \"update the .md files\", \"close out this session\", \"is everything pushed and committed?\", or asks for docs, handoff, secrets, git, and deploy state to be made safe before ending.",
+      "estimatedTokens": 960,
+      "lines": 76,
+      "name": "codex-session-closeout",
+      "path": "skills/codex/codex-session-closeout/SKILL.md",
+      "sha256": "83a570196b48c1a208332914d10686a6c387452e202fe727142dab779c50c58f",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 8827,
+      "classification": "task-triggered",
+      "description": "Discipline for ANY change to the shared supabase.com backend from an app repo. Use before making db/schema/column/table/view/RPC/trigger/RLS/seed/migration or cross-app data-contract changes in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam), or when the user says \"make db changes the proper way\", \"mirror it to shared-db\", \"re-author it properly in shared-db\", or \"all db work goes through shared-db\". Also states Rule 0 \u2014 read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch \u2014 so read it too for \"does the shared database fit our data\", \"compare our data shape to the schema\", \"review the schema\". Codex has no auto-loaded skills, so read this whenever a task touches the database.",
+      "estimatedTokens": 2207,
+      "lines": 137,
+      "name": "codex-shared-db-change",
+      "path": "skills/codex/codex-shared-db-change/SKILL.md",
+      "sha256": "a7be63d932dd48f542b3c42f5bcf99d9ae49c15100b99a00ebfc82009fbad39c",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 10654,
+      "classification": "task-triggered",
+      "description": "Sync this machine's AI config with the ai-devops hub (Codex edition). Use when the user says \"sync my dotfiles\", \"sync my config\", \"pull the latest skills/instructions\", or \"push my dotfiles\". Pulls latest skills + global instructions + memory from ai-devops and installs them, sets the dflow gcloud defaults, and pushes local memory back. ai-devops is the single hub \u2014 no chezmoi.",
+      "estimatedTokens": 2664,
+      "lines": 154,
+      "name": "codex-sync-dotfiles",
+      "path": "skills/codex/codex-sync-dotfiles/SKILL.md",
+      "sha256": "8ea0338bd8dddfa2240d999e9d0a07089af7258bc6ff9041d47b12d30b79a493",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 2297,
+      "classification": "task-triggered",
+      "description": "",
+      "estimatedTokens": 575,
+      "lines": 60,
+      "name": "codex-transcript-miner",
+      "path": "skills/codex/codex-transcript-miner/SKILL.md",
+      "sha256": "e032cdb1091ae12080ab6376365f71e3d4e206128f1da05ae9ec4c59ce5fc45d",
+      "sourceClient": "codex"
+    },
+    {
+      "bytes": 10167,
+      "classification": "task-triggered",
+      "description": "Delegate a repository analysis, code review, debate, second opinion, or scoped implementation to Z.ai GLM through the persistent `ai-glm` session harness. Use when the user says \"ask GLM,\" \"run this by GLM,\" \"get GLM's opinion,\" requests GLM-5.2, wants an independent GLM review, or explicitly delegates repository work to GLM.",
+      "estimatedTokens": 2542,
+      "lines": 181,
+      "name": "ask-glm",
+      "path": "skills/shared/ask-glm/SKILL.md",
+      "sha256": "5b6674bb4d4c5c54445fe774fc44b778b386fabca230dd1f673cd6f7d326b7c3",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 10887,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 2722,
+      "lines": 235,
+      "name": "cleanup-worktree",
+      "path": "skills/shared/cleanup-worktree/SKILL.md",
+      "sha256": "dcf97206bf0733f37285ca4f374f14bcc2bdeadc6a9f73ea9f02f1c34793ca54",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 6541,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 1636,
+      "lines": 117,
+      "name": "close-old-session",
+      "path": "skills/shared/close-old-session/SKILL.md",
+      "sha256": "07e9da35cf62f091ae1977c497096cb269946807b32904b05e9f386ade99f4d4",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 7865,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 1967,
+      "lines": 159,
+      "name": "deepseek-second-opinion",
+      "path": "skills/shared/deepseek-second-opinion/SKILL.md",
+      "sha256": "3ea3da22230ee9467cb52089d730367086bcb6a6ccd7417d2db0f4cc9dd2a4cd",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 2711,
+      "classification": "task-triggered",
+      "description": "Implement a Claude Design handoff zip in the real app. Use when the user attaches a design zip (\"dflow RFQ design update.zip\", \"poppim.zip\") and says \"read the README in this zip in full\", \"recreate these screens in our app\", or \"implement the design\". Used for dflow (Angular/AG-Grid) and the React apps (poppim-web, popcrm-web, popdam, hiclaw). Shared by Claude and Codex.",
+      "estimatedTokens": 678,
+      "lines": 45,
+      "name": "design-handoff-implement",
+      "path": "skills/shared/design-handoff-implement/SKILL.md",
+      "sha256": "0823d3a9cfe9314d52a233dbf286c84d4f9b5bfb3121527319db83d1f9d2e597",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 4825,
+      "classification": "task-triggered",
+      "description": ">-",
+      "estimatedTokens": 1207,
+      "lines": 97,
+      "name": "fresh-session",
+      "path": "skills/shared/fresh-session/SKILL.md",
+      "sha256": "ba698b58c3bf0fcf2bd3419c5e670ae54fe08f2108060eb21bf0df8c3ef598c6",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 8876,
+      "classification": "task-triggered",
+      "description": "Use xAI's Grok CLI (`grok`, branded Grok Build) as an independent coding agent via the `ai-grok-review` wrapper \u2014 read-only reviews, repository analysis, second opinions, session continuation, and the explicit implementation path. Use when the user says \"use Grok\", \"ask Grok\", \"run this by Grok\", \"Grok CLI\", \"Grok Build\", requests a Grok second opinion, asks where Grok is installed, or explicitly delegates coding work to Grok.",
+      "estimatedTokens": 2219,
+      "lines": 158,
+      "name": "grok-cli",
+      "path": "skills/shared/grok-cli/SKILL.md",
+      "sha256": "80a05405bad4aea72841ad1f8d810e3423252cbf4a4a0b283f4d174655818d89",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 20810,
+      "classification": "task-triggered",
+      "description": "Write a fresh-developer-grade handoff as one write-once file under HANDOFF.d/, or judge whether an existing handoff is comprehensive enough. Use when the user says \"put that plan in handoff.md\", \"write a handoff\", \"give me a detailed prompt for the new chat\", or asks whether the handoff is thorough, detailed, or comprehensive enough for a fresh developer to pick up and not skip a beat. The handoff must pass the concrete self-audit before it is shown. Do not trigger on a bare \"wrap up\"; the active client's closeout skill owns that phrase. Shared by Claude and Codex.",
+      "estimatedTokens": 5203,
+      "lines": 345,
+      "name": "handoff-writer",
+      "path": "skills/shared/handoff-writer/SKILL.md",
+      "sha256": "1b4b8a86014cb8b599e4f2232a2048de349cc6df9cf97437f9df2e092efc06e2",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 13070,
+      "classification": "task-triggered",
+      "description": "Write (or judge) an implementation plan that a BRAND-NEW AI session with zero context can execute perfectly. Use when the user says 'write an implementation plan', 'write the plan for this feature/fix', 'plan how we will build X', 'put the plan in PLAN.md / IMPLEMENTATION-PLAN.md', 'give another session a plan to implement this', or asks whether an existing plan is detailed/comprehensive enough for a fresh implementing session. The plan is a handoff plus a build spec: it must carry the ultimate goal, all background, every constraint and nuance, and per-step verification. This skill is self-contained and must pass the self-audit gate BELOW before the plan is shown.",
+      "estimatedTokens": 3268,
+      "lines": 217,
+      "name": "implementation-plan-writer",
+      "path": "skills/shared/implementation-plan-writer/SKILL.md",
+      "sha256": "c0b9903728c59bcdbcbbdd1d609a71a15b020b8d0b3816124a4548ae6bd967fd",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 11827,
+      "classification": "task-triggered",
+      "description": "Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrapper \u2014 read-only reviews, repository analysis, session continuation, and explicit isolated implementation. Use when an AI session should drive Kimi headlessly, split planning from execution, resume a prior Kimi session, or verify Kimi-authored changes without relying on the interactive TUI.",
+      "estimatedTokens": 2957,
+      "lines": 202,
+      "name": "kimi-code-delegation",
+      "path": "skills/shared/kimi-code-delegation/SKILL.md",
+      "sha256": "bfa1c124d1060a6b250b07ec18847ebfbd4493a05d9063a4f60f80c3943286e0",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 13837,
+      "classification": "task-triggered",
+      "description": "Safely capture NBCU Creative Asset Factory metadata for authorized Properties, IP Families, Characters, style guides, assets, file names, source IDs, and explicit relationships. Use when asked to scrape, refresh, inspect, validate, reconcile, or map NBCU, Universal, DreamWorks, Illumination, or NBCUniversal licensed source data from creativeassets.nbcuni.com, including Product Submissions and asset-search work.",
+      "estimatedTokens": 3460,
+      "lines": 147,
+      "name": "nbcu-creative-assets-scrape",
+      "path": "skills/shared/nbcu-creative-assets-scrape/SKILL.md",
+      "sha256": "892b71839a2d6702fcd54922fd239a7eb2f0ca935e29d3464c5b758fb3e8f145",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 18461,
+      "classification": "task-triggered",
+      "description": "Safely inspect, reconcile, or capture licensed Paramount Creative Library metadata for Properties, Franchises, Collections/style guides, Characters, assets, and their source IDs and relationships. Use when asked to scrape, refresh, research, validate, map, or load Paramount portal data from stillsarchive.paramount.com, or when database design depends on Paramount's field names, numeric character/property IDs, asset IDs, pagination, or many-to-many links.",
+      "estimatedTokens": 4616,
+      "lines": 170,
+      "name": "paramount-creative-library-scrape",
+      "path": "skills/shared/paramount-creative-library-scrape/SKILL.md",
+      "sha256": "fcdd5a23a93b1d17de3e95738e33530c1f3377ae842b5084002a8cb24697b69c",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 2139,
+      "classification": "task-triggered",
+      "description": "Whole-codebase quality audit across one or many repos. Use when the user says \"read the entire codebase and tell me if you find any bugs, inefficient code, or poorly written code\", asks to audit the codebase, or requests an AI-implementation audit (context/prompt-caching correctness). Uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex.",
+      "estimatedTokens": 535,
+      "lines": 34,
+      "name": "repo-bug-audit",
+      "path": "skills/shared/repo-bug-audit/SKILL.md",
+      "sha256": "5ec302b8a1b4aa7da91085d6c9f9e56d3062dfaa091aad10e70dca9c5437619e",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 13372,
+      "classification": "task-triggered",
+      "description": "Store anything in the vibe_coding 1Password vault with a descriptive title, searchable tags, and notes detailed enough for a future AI session that has never seen the entry to find it, know what it is for, and use it without asking a single question. Use for EVERY create or update in the 1Password MCP (`note_create`, `password_create`, `item_edit`) \u2014 whether it is a secret (credential, token, API key, password, connection string, SSH key, login) or a plain non-secret information/config/reference note. Use whenever the user says \"secrets sweep\", \"any secrets not in 1password?\", \"put this in 1Password\", \"save this key\", \"store these credentials\", \"add this note to the vault\", \"update that entry\"; whenever a credential appears mid-session that isn't stored yet; whenever you're about to write a secret into a .env, doc, or scratch file instead; and as the secrets step of wrap-up and session-docs-update.",
+      "estimatedTokens": 3343,
+      "lines": 245,
+      "name": "secrets-to-1password",
+      "path": "skills/shared/secrets-to-1password/SKILL.md",
+      "sha256": "88078d0f0a722bc84313d96bd6baf3be3c81cb05f7fe936a2907a237229b27ea",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 4663,
+      "classification": "task-triggered",
+      "description": "Run non-destructive Synology NAS operations that are expected to exceed the Synology Monitor MCP run_command 25-second budget without weakening its safety timeout. Use for whole-volume or large-subtree find scans, inventories, hashing, audits, large log processing, or any safe NAS read that timed out or predictably will time out; use managed SSH only when no native NAS background-job capability exists.",
+      "estimatedTokens": 1166,
+      "lines": 88,
+      "name": "synology-long-running-operations",
+      "path": "skills/shared/synology-long-running-operations/SKILL.md",
+      "sha256": "577b93be3eb6f3426e79d4aa3d21d01bf4a77cdf98f39fe0267f76e509779b4d",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 4296,
+      "classification": "task-triggered",
+      "description": "Diagnose and repair Synology Drive ShareSync stalls, repeated single-file syncing, destination-side basis-file corruption, connection-26 flaps, and hidden queue jams across source and destination NASes. Use when a share looks stuck, a file is missing on a replica, ShareSync shows syncing one file for a long time, or the user wants proof of root cause and a targeted fix.",
+      "estimatedTokens": 1074,
+      "lines": 58,
+      "name": "synology-sharesync-triage",
+      "path": "skills/shared/synology-sharesync-triage/SKILL.md",
+      "sha256": "3019e07f5aa6d666117e5def84a03bfe41c2e3ba7eef2bd52bb74a42abf0a424",
+      "sourceClient": "shared"
+    },
+    {
+      "bytes": 18591,
+      "classification": "task-triggered",
+      "description": "Safely capture Warner Bros. STARLABS portal source data, especially the direct Franchise/Property-to-Character lists on the Product submission page and style-guide/file metadata from Art Assets. Use when asked to scrape, refresh, inspect, validate, or load Warner STARLABS properties, characters, style guides, or licensed asset records, or when investigating the portal fields and IDs that feed shared-db.",
+      "estimatedTokens": 4648,
+      "lines": 135,
+      "name": "wb-starlabs-scrape",
+      "path": "skills/shared/wb-starlabs-scrape/SKILL.md",
+      "sha256": "843c2e3e2f8ec3513e284813b76dd51b4f1be246e05733b28f3f441839866935",
+      "sourceClient": "shared"
+    }
+  ]
+}

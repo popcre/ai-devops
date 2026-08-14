@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Answer exactly DEEPSEEK_PHASE1_OK."
+  },
+  {
+    "role": "assistant",
+    "content": "DEEPSEEK_PHASE1_OK"
+  }
+]
