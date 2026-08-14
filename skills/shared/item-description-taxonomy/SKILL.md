@@ -40,11 +40,11 @@ product concept plus its observed variants.
    packaging instructions, manufacturing specifications, and incidental contents
    from the canonical item type unless they define the sold product itself.
 7. When the business gives a reliable category-change date, treat the combined
-   MG01-MG03 on and after that date as the primary key and a hard grouping
-   boundary. Never combine post-change items with different MG01-MG03 values.
-   Do not use earlier MG codes to define the new taxonomy. A repeated product
-   phrase under two post-change MG keys must remain two keyed groups until the
-   business corrects the source classification.
+   MG01-MG03 on and after that date as the classification key. MG01 and MG02 can
+   define the physical product family while MG03 distinguishes treatment,
+   embellishment, construction, or another lower-level attribute. The same broad
+   product wording may legitimately occur under several sibling MG03 keys. Do
+   not call that a conflict. Do not use earlier MG codes to define the new rules.
 8. Never call an automated phrase list final. A model must review every proposed
    family semantically and consolidate it before user review.
 9. Abstain when the physical product is genuinely ambiguous. Explain exactly what
@@ -63,8 +63,13 @@ product concept plus its observed variants.
 - Split rows at the business-provided change date.
 - For rows on or after that date, create the primary key
   `MG01|MG02|MG03`. Treat blank or incomplete keys as unresolved.
-- Build the new description dictionary independently inside each complete key.
-- Never let semantic similarity, spelling, or materials merge rows across keys.
+- Read the merchandise-group definition workbook before interpreting the key.
+- Build the physical-product dictionary at the level defined by MG01 and MG02,
+  then learn the MG03 treatment or embellishment wording from sibling keys.
+- Keep each row's full MG key, but allow one physical product family to span
+  sibling MG03 keys when the hierarchy defines MG03 as an attribute.
+- Treat identical broad wording across sibling MG03 keys as expected ambiguity,
+  not evidence that a key is wrong.
 - Use pre-change descriptions only as candidates to match into a trusted keyed
   group. Do not let their old MG values influence the new grouping.
 
@@ -92,7 +97,7 @@ Examples:
   -> item type `Printed Glass Shadowbox`; size `12x12"`; licensor `Disney`;
   property `Stitch`; artwork `wink Oh Yeah Whatever blue`.
 
-### 5. Consolidate within each MG primary key
+### 5. Consolidate product families and preserve MG attributes
 
 For each proposed type, compare all near phrases by meaning, not character match.
 Create one family record containing:
@@ -104,12 +109,12 @@ Create one family record containing:
 - MG01-MG03 distribution;
 - any reason a similar phrase must remain separate.
 
-Within one post-change MG01-MG03 key, actively test whether extra material,
+Within one post-change product family, actively test whether extra material,
 packaging, size, construction, quantity, `DIY`, `PBN`, `2pc`/`2pk`, or contents
 wording is merely an attribute. Fold equivalent phrases into the simplest
-complete merchant-facing name. Do not create a separate family merely because
-one description is longer. Different MG01-MG03 keys can never share a group,
-even when their descriptions appear identical.
+complete merchant-facing name. Preserve the MG03 treatment separately. Do not
+create a different physical product family merely because MG03 differs or one
+description is longer. Never merge the actual row-level MG assignments.
 
 Read [references/consolidation-cases.md](references/consolidation-cases.md) before
 approving a phrase dictionary.
@@ -124,7 +129,8 @@ Before export, test every family:
 - Did artwork, license, property, size, packaging, or factory wording leak in?
 - Are two phrases separate only because a script extracted different lengths?
 - Would a buyer or merchant actually treat them as different products?
-- Does every post-change row in this group have exactly the same MG01-MG03 key?
+- Does the proposed physical family follow the MG01/MG02 hierarchy?
+- Is the MG03-specific treatment or embellishment preserved separately?
 
 Merge or correct every failure before showing the result.
 
@@ -132,9 +138,9 @@ Merge or correct every failure before showing the result.
 
 Provide two review surfaces:
 
-1. **MG-keyed description groups:** MG01, MG02, MG03, combined primary key,
-   canonical phrase, all observed description variants, count, examples,
-   confidence, and reviewer decision. Each row has exactly one MG primary key.
+1. **Product families with MG variants:** MG01, MG02, physical product phrase,
+   every associated MG03 definition and description variant, count, examples,
+   confidence, and reviewer decision. Preserve each row's full MG key.
 2. **Row-level parsing:** original description and the five extracted chunks,
    linked to the proposed canonical family.
 
@@ -145,7 +151,8 @@ Flag ambiguity and MG disagreement. Do not hide it behind a numeric score.
 Do not report completion until:
 
 - the mandatory consolidation cases pass;
-- no post-change group contains more than one MG01-MG03 primary key;
+- every physical family follows the definition workbook's MG01/MG02 hierarchy;
+- every MG03 treatment remains traceable to its full row-level MG key;
 - prefix-chain duplicates have been semantically reviewed;
 - spelling and abbreviation variants are grouped;
 - a sample from every major MG01 family has been checked;
