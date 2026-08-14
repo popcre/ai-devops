@@ -140,7 +140,9 @@ nothing anywhere would show it until the damage was done.
 - **Recoverable copies exist and must not be deleted:**
   `~/.claude/globals-backup/CLAUDE.md`, `~/.codex/globals-backup/AGENTS.md`,
   `~/.codex/skills-backup/codex-shared-db-change`,
-  `~/.codex/skills-quarantine/codex-qwen-code`.
+  `~/.codex/skills-quarantine/codex-qwen-code`,
+  `~/.codex/skills-backup/disney-source-data-scrape` (the pre-ruling Studio
+  boundary text — see §9).
 - Restore either global with:
   ```bash
   cp "$USERPROFILE/.claude/globals-backup/CLAUDE.md" "$USERPROFILE/.claude/CLAUDE.md"
@@ -181,6 +183,14 @@ evidence at all and corrected afterwards — see §4.
 Probe scripts and full answers are in this session's scratchpad, which is
 temporary. **They are not committed and will not survive.** If step 10 wants to
 re-run them, re-derive from this file — the prompts are in the table above.
+
+### After the client restart
+
+Albert fully restarted Claude and Codex on 2026-08-13. A post-restart re-check
+confirmed both globals intact, both machine sections present, sizes unchanged.
+That re-check is what surfaced the mis-stated Codex probe (§4) and the
+unversioned skill edit (§9) — **do the same re-check after every machine in
+step 9; the restart is not the end of the work.**
 
 ### Verified green on 2026-08-13, before the install
 
@@ -371,16 +381,30 @@ All nine named suites: `test-ai-install-skills.sh`, `test-ai-memory-sync.sh`,
   instead of 0. It is the floor. See §5.
 - **Risk: the probes are lost.** They live only in a temp scratchpad. Committing
   them is the top step-10 addition (§6 item 4).
-- **Risk: a hand edit inside an installed skill exists nowhere in git.**
-  `~/.codex/skills/disney-source-data-scrape/SKILL.md` on this machine carries a
+- **RESOLVED, but read this before step 9 — a hand edit was found inside an
+  installed skill that existed nowhere in git.**
+  `~/.codex/skills/disney-source-data-scrape/SKILL.md` on this machine carried a
   "Studio boundary" section — keep Disney, Lucasfilm, Marvel and 20th Century in
-  separate outputs, tables, crawl histories and loaders — that is absent from the
-  repo, every worktree, all of git history, and the Claude copy of the same
-  shared skill. It postdates the pilot, so it is another session's in-flight work
-  and was left untouched. Step 7's redesign makes it survivable (classified as
-  local-edits and copied to `skills-backup`, never deleted). **Step 9 must read
-  every `LOCAL EDITS` line in the preview**, not skim past it — at least one of
-  them is real content that exists in exactly one place.
+  separate capture outputs, table families and crawl histories — that was absent
+  from the repo, every worktree, all of git history, and the Claude copy of the
+  same shared skill. **Claude sessions therefore had no studio rule at all.**
+  Albert confirmed the rule on 2026-08-13, it was copied verbatim into
+  `skills/shared/disney-source-data-scrape` (commit `e2a6590`) and diffed back to
+  prove nothing was lost or invented. **Albert then overruled one clause**
+  (commit `cdeb357`): separate outputs yes, separate loader NO — one guarded
+  loader serves every studio, takes the studio as an explicit required input,
+  writes only into that studio's table family, and fails loudly rather than
+  defaulting. That matches what is actually built (one
+  `load-collected-to-supabase.mjs`, not four). Installed to both clients; the
+  pre-edit file is recoverable at
+  `~/.codex/skills-backup/disney-source-data-scrape/`.
+  **Two things are still open.** (1) Whoever wrote the original text has not been
+  told the four-loaders design was overruled — the author could not be
+  identified, no Codex session is reachable from a Claude session, and a
+  transcript search for "Studio boundary" found nothing. (2) **This is a class,
+  not an incident.** Step 9 will meet the same kind of edit on other machines:
+  read every `LOCAL EDITS` line in the preview rather than skimming past it,
+  because at least one of them is real content that exists in exactly one place.
 - **Risk: `synology-long-running-operations` is silent on 9 of 10 realistic
   prompts.** Its precision is perfect and the global's rule 9a still carries the
   safety limit, so this is not a rollout blocker — but the skill's procedure is
