@@ -45,7 +45,7 @@ while IFS=$'\t' read -r name source form ubuntu provider owner; do
   fi
 done < "$catalog"
 if [[ "$platform" == windows && ":${PATH,,}:" != *":${target_dir,,}:"* ]]; then echo "INFO current shell PATH is stale"; fi
-for provider in grok kimi; do
+for provider in grok kimi qwen; do
   if command -v "$provider" >/dev/null 2>&1; then echo "INFO $provider provider available"; else echo "INFO $provider provider unavailable"; fi
 done
 ((failed == 0)) && echo "OK local AI command launchers are current"

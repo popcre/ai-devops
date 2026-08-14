@@ -1,0 +1,1057 @@
+#!/usr/bin/env bash
+# ai-qwen — Qwen Code delegation in persistent, named sessions.
+#
+# This is the ONLY supported way for Claude or Codex to drive Qwen headlessly.
+# Never call `qwen -p` directly: this script owns the model pin, the read-only
+# enforcement, the completion rule, the session bookkeeping, and the worktree
+# isolation for write runs.
+#
+#   ai-qwen new <name>       [--prompt T | --prompt-file F | stdin]   read-only review
+#   ai-qwen ask <name>       [--prompt T | --prompt-file F | stdin]   continue its saved mode
+#   ai-qwen implement <name> [--prompt T | --prompt-file F | stdin]   create/continue write run
+#   ai-qwen reset-context <name> [--prompt T | --prompt-file F]       visible recovery
+#   ai-qwen list | show <name> | transcript <name> | delete <name>
+#   ai-qwen doctor [--live]
+#
+# Review sessions are structurally read-only: safe mode disables local hooks,
+# extensions, skills, and MCP servers; plan mode plus excluded shell/write/edit
+# tools removes every built-in mutation route. Implementation runs require
+# Qwen's sandbox and a wrapper-owned disposable Git worktree.
+#
+# ---------------------------------------------------------------------------
+# STEP 0 VERIFICATION — qualified 2026-08-14 against Qwen Code 0.21.11.
+# Re-run and update this block on every version bump.
+#
+#   Exact resume is `--resume SESSION_ID`; `--continue` means newest for the
+#     project and is never used. Sessions are directory-bound, so persistent
+#     implementation reconstructs the same stable worktree path each turn.
+#   `stream-json` is NDJSON. Completion is ONLY a terminal `type:"result"`,
+#     `subtype:"success"`, `is_error:false` record. It carries session_id,
+#     num_turns, result, usage, permission_denials, and timing.
+#   Headless budgets exist and are always set: max session turns, wall time,
+#     tool calls, and subagent depth. Exit 55 means a budget ended the run.
+#   Reviews use `--safe-mode --approval-mode plan --exclude-tools
+#     shell,write,edit` and a post-run tree-state check. Implementation uses
+#     `--safe-mode --sandbox --approval-mode yolo` only inside the wrapper-owned
+#     disposable worktree. Qwen itself warns that yolo without sandbox executes
+#     at process privilege; therefore implement mode refuses to omit sandbox.
+#   Qwen's own `--worktree` is not used. The wrapper owns base selection,
+#     locking, cumulative binary patches, interrupted-work recovery, and cleanup.
+#   Installed help and source confirmed all flags above in 0.21.11. A real model
+#     proof still requires an authenticated writable QWEN_HOME; `doctor --live`
+#     is the required post-install qualification gate.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+VERSION="0.1.0"
+
+STATE_DIR="${AI_QWEN_STATE_DIR:-$HOME/.local/state/ai-devops/qwen}"
+CALLER="${AI_QWEN_CALLER:-claude}"
+QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max-preview}"
+MAX_TURNS="${AI_QWEN_MAX_TURNS:-30}"
+MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
+MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
+
+WAIT_TIMEOUT="${AI_QWEN_WAIT_TIMEOUT:-900}"
+POLL_INTERVAL="${AI_QWEN_POLL_INTERVAL:-5}"
+
+die()  { printf 'ai-qwen: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-qwen: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+# ---------------------------------------------------------------------------
+# Binary resolution covers the official standalone locations and npm installs.
+# ---------------------------------------------------------------------------
+resolve_qwen() {
+  if [ -n "${AI_QWEN_BIN:-}" ]; then
+    [ -x "$AI_QWEN_BIN" ] || die "AI_QWEN_BIN=$AI_QWEN_BIN is not executable."
+    printf '%s' "$AI_QWEN_BIN"; return 0
+  fi
+  local c
+  for c in "$(command -v qwen 2>/dev/null || true)" \
+           "${LOCALAPPDATA:-}/qwen-code/bin/qwen.exe" \
+           "${LOCALAPPDATA:-}/qwen-code/bin/qwen.cmd" \
+           "$HOME/.local/bin/qwen" \
+           /home/ai/.local/bin/qwen \
+           /usr/local/bin/qwen; do
+    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  die "qwen binary not found. Set AI_QWEN_BIN, or install Qwen Code. Looked on PATH, the official standalone locations, and /usr/local/bin."
+}
+
+qwen_procs() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -x qwen 2>/dev/null || true
+  else
+    ps -W 2>/dev/null | grep -i '[q]wen' || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Session identity: repo + caller + name, so Claude and Codex never collide.
+# ---------------------------------------------------------------------------
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null \
+    || die "ai-qwen must be run inside a git repository."
+}
+legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
+repo_id() {
+  local root="$1" remote
+  root="$(cd "$root" && pwd -P)"
+  remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
+  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
+}
+repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
+valid_name() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
+
+meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
+lock_path()     { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+repolock_path() { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+workspace_path(){ printf '%s/worktrees/qwen.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+
+# Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
+lock_acquire() {
+  local dir="$1" label="$2" owner
+  mkdir -p "$(dirname "$dir")"
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+  fi
+  owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then return 1; fi
+  warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
+  rm -rf "$dir"; mkdir "$dir" 2>/dev/null || return 1
+  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+}
+lock_release() { rm -rf "$1" 2>/dev/null || true; }
+lock_info() {
+  local dir="$1" label pid started now
+  label="$(cat "$dir/label" 2>/dev/null || echo unknown)"
+  pid="$(cat "$dir/pid" 2>/dev/null || echo '?')"
+  if started="$(date -r "$dir" +%s 2>/dev/null)"; then
+    now="$(date +%s)"; printf '%s (pid %s, running %ss)' "$label" "$pid" "$((now - started))"
+  else printf '%s (pid %s)' "$label" "$pid"; fi
+}
+
+write_meta() {
+  local f="$1" tmp; mkdir -p "$(dirname "$f")"
+  tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
+  printf '%s\n' "$2" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true; mv -f "$tmp" "$f"
+}
+find_meta_optional() {
+  local f old repo remote cand found=""; f="$(impl_meta_path "$1" "$2")"
+  [ -f "$f" ] || f="$(meta_path "$1" "$2")"
+  if [ ! -f "$f" ]; then
+    repo="$(repo_root)"; old="$(meta_path "$(legacy_repo_id "$repo")" "$2")"
+    if [ -f "$old" ]; then mkdir -p "$(dirname "$f")"; mv "$old" "$f"; fi
+  fi
+  if [ ! -f "$f" ]; then
+    remote="$(repo_remote "$repo")"
+    [ -n "$remote" ] || return 1
+    while IFS= read -r cand; do
+      [ "$(jq -r '.name // ""' "$cand")" = "$2" ] || continue
+      [ "$(jq -r '.caller // ""' "$cand")" = "$CALLER" ] || continue
+      [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
+      [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
+      found="$cand"
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" \) 2>/dev/null)
+    if [ -n "$found" ]; then
+      case "$found" in
+        */"$CALLER--$2.d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
+        *) mkdir -p "$(dirname "$f")"; mv "$found" "$f" ;;
+      esac
+    fi
+  fi
+  [ -f "$f" ] || return 1
+  printf '%s' "$f"
+}
+find_meta() {
+  local f
+  f="$(find_meta_optional "$1" "$2")" || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-qwen list"
+  printf '%s' "$f"
+}
+rid_from_meta() { basename "$(dirname "$(dirname "$1")")"; }
+
+# ---------------------------------------------------------------------------
+# The completion rule.
+#
+# Qwen's stream-json is NDJSON. Completion is proven by its explicit terminal
+# success record, never by process exit status alone.
+# ---------------------------------------------------------------------------
+has_result() { # has_result FILE
+  [ -s "$1" ] || return 1
+  tail -5 "$1" | jq -e 'select(.type=="result" and .subtype=="success" and .is_error==false and (.session_id|type=="string"))' >/dev/null 2>&1
+}
+session_id_from() { tail -5 "$1" | jq -r 'select(.type=="result")|.session_id // empty' 2>/dev/null | tail -1; }
+model_from() { jq -r 'select(.type=="assistant")|.message.model // empty' "$1" 2>/dev/null | tail -1; }
+
+AWAIT_RESULT_REASON=""
+await_result() { # await_result FILE LABEL
+  local f="$1" label="$2" waited=0 empty=0 saw=0
+  AWAIT_RESULT_REASON=""
+  while [ "$waited" -lt "$WAIT_TIMEOUT" ]; do
+    has_result "$f" && return 0
+    # Fast-fail ONLY if a qwen process was positively seen and then vanished.
+    # If detection never matched, we do not trust it and wait the full timeout —
+    # a detection miss must never abort a healthy slow run.
+    if [ -n "$(qwen_procs)" ]; then saw=1; empty=0
+    elif [ "$saw" = 1 ]; then
+      empty=$((empty + 1))
+      if [ "$empty" -ge 2 ]; then
+        note ""
+        note "ai-qwen: Qwen is no longer running but never emitted a terminal success result."
+        note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
+        note "  elapsed  : ${waited}s"
+        note "  diagnose : ai-qwen doctor"
+        AWAIT_RESULT_REASON="process-ended"
+        return 1
+      fi
+    fi
+    sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))
+    [ $((waited % 60)) -eq 0 ] && note "  … $label still running (${waited}s)"
+  done
+  note ""
+  note "ai-qwen: no terminal success result after ${WAIT_TIMEOUT}s — the run did not complete."
+  note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
+  note "  diagnose : ai-qwen doctor"
+  note "  Raise the ceiling with AI_QWEN_WAIT_TIMEOUT=<seconds> for a genuinely long run."
+  AWAIT_RESULT_REASON="timeout"
+  return 1
+}
+
+sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+
+valid_impl_record() { # valid_impl_record RID NAME META
+  local rid="$1" name="$2" meta="$3" dir manifest patch base
+  dir="$(impl_dir "$rid" "$name")"; manifest="$dir/owner.json"; patch="$(jq -r '.canonical_patch // ""' "$meta" 2>/dev/null)"
+  same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] && [ -f "$patch" ] || return 1
+  same_path "$(dirname "$patch")" "$dir" || return 1
+  base="$(basename "$patch")"; [ "$base" = cumulative.patch ] || printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' || return 1
+  jq -e --arg remote "$(repo_remote "$(repo_root)")" \
+    --arg caller "$CALLER" --arg name "$name" --arg patch "$patch" --arg meta "$meta" \
+    '.version==2 and .mode=="implement" and .repo_remote==$remote and
+     .caller==$caller and .name==$name and (.base_sha|type=="string") and (.base_sha|length==40) and
+     (.patch_sha256|type=="string") and (.generation|type=="number") and
+     (.continuity_state|type=="string")' "$meta" >/dev/null 2>&1 || return 1
+  jq -e --arg dir "$dir" --arg meta "$meta" \
+    '.version==1 and .owner_dir==$dir and .metadata==$meta' \
+    "$manifest" >/dev/null 2>&1 || return 1
+  [ "$(sha256_file "$patch")" = "$(jq -r .patch_sha256 "$meta")" ]
+}
+
+write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
+  local rid="$1" name="$2" repo="$3" base="$4" sid="$5" wt="$6" terminal="$7" continuity="$8" old="${9:-}"
+  local dir meta patch manifest tmp_patch hash now turns generation created old_patch
+  dir="$(impl_dir "$rid" "$name")"; meta="$dir/metadata.json"; manifest="$dir/owner.json"
+  mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
+  tmp_patch="$(mktemp "$dir/.cumulative.XXXXXX")" || return 1
+  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$tmp_patch" || { rm -f "$tmp_patch"; return 1; }
+  hash="$(sha256_file "$tmp_patch")"; now="$(date -u +%FT%TZ)"
+  if [ -n "$old" ] && [ -f "$old" ]; then
+    turns=$(( $(jq -r '.turns // 0' "$old") + 1 )); generation=$(( $(jq -r '.generation // 0' "$old") + 1 )); created="$(jq -r .created "$old")"
+  else turns=1; generation=1; created="$now"; fi
+  patch="$dir/cumulative-$generation-$hash.patch"
+  if [ -f "$patch" ]; then [ "$(sha256_file "$patch")" = "$hash" ] || return 1; rm -f "$tmp_patch"
+  else mv -f "$tmp_patch" "$patch" || return 1; fi
+  chmod 0600 "$patch" 2>/dev/null || true
+  [ "${AI_QWEN_TEST_FAIL_STATE:-}" != after-patch ] || return 1
+  write_meta "$manifest" "$(jq -n --arg dir "$dir" --arg meta "$meta" \
+    '{version:1,owner_dir:$dir,metadata:$meta,patch_pattern:"cumulative-<generation>-<sha256>.patch"}')" || return 1
+  old_patch=""; [ -n "$old" ] && [ -f "$old" ] && old_patch="$(jq -r '.canonical_patch // ""' "$old")"
+  write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
+    --arg name "$name" --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg base "$base" \
+    --arg patch "$patch" --arg hash "$hash" --arg created "$created" --arg updated "$now" \
+    --arg terminal "$terminal" --arg continuity "$continuity" --argjson turns "$turns" --argjson generation "$generation" \
+    '{version:2,qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"implement",
+      model:$model,base_sha:$base,canonical_patch:$patch,patch_sha256:$hash,generation:$generation,turns:$turns,
+      created:$created,updated:$updated,last_terminal_state:$terminal,incomplete_state:($terminal!="completed"),
+      continuity_state:$continuity,lifecycle_status:(if $continuity=="exact" then "ready" else "recovery-required" end),
+      ephemeral_state_notice:"Ignored dependencies, build output, downloads, caches, and secrets are not preserved. Generation is wrapper bookkeeping, not a Qwen turn counter."}')"
+  [ -z "$old_patch" ] || [ "$old_patch" = "$patch" ] || rm -f "$old_patch" 2>/dev/null || true
+}
+
+reconcile_impl_patches() { # META RESET_ALLOWED
+  local meta="$1" reset="${2:-0}" dir canonical generation f base fgen
+  dir="$(dirname "$meta")"; canonical="$(jq -r .canonical_patch "$meta")"; generation="$(jq -r .generation "$meta")"
+  for f in "$dir"/cumulative-*.patch; do
+    [ -f "$f" ] || continue
+    same_path "$f" "$canonical" && continue
+    base="$(basename "$f")"
+    fgen="$(printf '%s' "$base" | sed -nE 's/^cumulative-([0-9]+)-[0-9a-f]{64}\.patch$/\1/p')"
+    [ -n "$fgen" ] || return 1
+    if [ "$fgen" -gt "$generation" ]; then
+      if [ "$reset" = 1 ]; then rm -f "$f" || return 1
+      else
+        mark_impl_recovery_required "$meta" uncommitted-state-detected || return 1
+        return 2
+      fi
+    else rm -f "$f" || return 1; fi
+  done
+  return 0
+}
+
+mark_impl_recovery_required() { # META TERMINAL
+  local meta="$1" terminal="$2" json
+  [ -n "$meta" ] && [ -f "$meta" ] || return 1
+  json="$(jq --arg u "$(date -u +%FT%TZ)" --arg t "$terminal" \
+    '.updated=$u | .last_terminal_state=$t | .incomplete_state=true |
+     .continuity_state="recovery-required" | .lifecycle_status="recovery-required"' "$meta")" || return 1
+  write_meta "$meta" "$json"
+}
+
+# ---------------------------------------------------------------------------
+# Turn execution
+# ---------------------------------------------------------------------------
+RUN_TURN_RC=unavailable
+RUN_TURN_PID=""
+run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
+  local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
+  local qwen; qwen="$(resolve_qwen)"
+  local args=(--model "$QWEN_MODEL" --output-format stream-json --safe-mode
+    --max-session-turns "$MAX_TURNS" --max-wall-time "$MAX_WALL_TIME"
+    --max-tool-calls "$MAX_TOOL_CALLS" --max-subagent-depth 1)
+  [ -z "$sid" ] || args+=(--resume "$sid")
+  if [ "$mode" = review ]; then
+    args+=(--approval-mode plan --exclude-tools shell,write,edit)
+  elif [ "$mode" = implement ]; then
+    args+=(--sandbox --approval-mode yolo)
+  fi
+  # Current Qwen supports stdin, keeping the brief out of the process list.
+
+  : > "$out"
+  set +e
+  ( cd "$repo" && exec "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  RUN_TURN_PID=$!
+  wait "$RUN_TURN_PID"
+  RUN_TURN_RC=$?
+  RUN_TURN_PID=""
+  set -e
+  return 0
+}
+
+child_pids() { # child_pids PARENT
+  if ps -W >/dev/null 2>&1; then
+    ps -W 2>/dev/null | awk -v p="$1" 'NR>1 && $2==p {print $1}'
+  else
+    ps -eo pid=,ppid= 2>/dev/null | awk -v p="$1" '$2==p {print $1}'
+  fi
+}
+
+signal_run_tree() { # signal_run_tree SIGNAL PID
+  local signal="$1" pid="$2" child
+  for child in $(child_pids "$pid"); do signal_run_tree "$signal" "$child"; done
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+stop_run_turn() {
+  if [ -n "$RUN_TURN_PID" ]; then
+    local pid="$RUN_TURN_PID" i
+    signal_run_tree TERM "$pid"
+    for i in 1 2 3 4 5; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -0 "$pid" 2>/dev/null && signal_run_tree KILL "$pid"
+    set +e; wait "$pid" 2>/dev/null; set -e
+    RUN_TURN_PID=""
+  fi
+}
+
+cancel_plain_turn() { stop_run_turn; exit 130; }
+
+extract_answer() { # extract_answer FILE
+  local text
+  text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed '/^$/d')"
+  if printf '%s' "$text" | grep -qF '## Verdict'; then
+    printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
+  else
+    printf '%s\n' "$text"
+  fi
+}
+
+PROMPT_FOOTER="
+
+---
+Formatting requirement: structure your reply so the final answer is last, under a
+literal '## Verdict' heading. Put any narration above it."
+
+build_prompt_file() {
+  local dest="$1"
+  if [ -n "${OPT_PROMPT_FILE:-}" ]; then
+    [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
+    cat "$OPT_PROMPT_FILE" > "$dest"
+  elif [ -n "${OPT_PROMPT:-}" ]; then printf '%s\n' "$OPT_PROMPT" > "$dest"
+  elif [ ! -t 0 ]; then cat > "$dest"
+  else die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
+  fi
+  [ -s "$dest" ] || die "the prompt is empty."
+  printf '%s' "$PROMPT_FOOTER" >> "$dest"
+}
+
+# Defence in depth: excluded tools are the guarantee. Hash the complete tracked
+# diff and every untracked file so a review cannot hide a content change inside
+# a path that was already dirty before it started.
+tree_state() {
+  local repo="$1"
+  {
+    git -C "$repo" diff --binary HEAD 2>/dev/null
+    git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null \
+      | while IFS= read -r -d '' f; do
+          printf 'UNTRACKED %s\n' "$f"
+          sha256sum "$repo/$f" 2>/dev/null || return 1
+        done
+  } | sha256sum | awk '{print $1}'
+}
+
+reviews_dir() {
+  git -C "$1" check-ignore -q .ai/reviews 2>/dev/null && printf '%s/.ai/reviews' "$1" || printf ''
+}
+write_review_file() {
+  local repo="$1" name="$2" f="$3" dir ts out
+  dir="$(reviews_dir "$repo")"
+  if [ -z "$dir" ]; then
+    warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
+    return 0
+  fi
+  mkdir -p "$dir"; ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  out="$dir/qwen-${name}-${ts}.md"
+  {
+    echo "# Qwen review — $name"; echo
+    echo "- Repo: \`$repo\`"
+    echo "- Branch: \`$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')\`"
+    echo "- Session: \`$(session_id_from "$f")\`"
+    echo "- Model requested: \`$QWEN_MODEL\`; returned: \`$(model_from "$f")\`"
+    echo "- Turns: \`$(jq -r 'select(.type=="result")|.num_turns // "unavailable"' "$f" | tail -1)\`"
+    echo "- Usage: \`$(jq -c 'select(.type=="result")|.usage // {}' "$f" | tail -1)\`"
+    echo; echo "---"; echo
+    jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$f" 2>/dev/null
+  } > "$out"
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
+usage() {
+  cat <<EOF
+ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
+
+  ai-qwen new <name>       [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen ask <name>       [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen list | show <name> | transcript <name> | delete <name>
+  ai-qwen doctor [--live]
+
+'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
+read-only for reviews, but an implementation continuation (write run) for an
+implementation session. 'implement' creates or continues an isolated write
+session. Each write turn uses a new disposable worktree reconstructed from the
+immutable base and cumulative patch. Ignored build and dependency state does
+not persist. No patch is applied to the live repository automatically. Model is
+pinned ($QWEN_MODEL). Every run is bounded by turns, tool calls, and wall time.
+
+Environment:
+  AI_QWEN_CALLER       'claude' (default) or 'codex' — keeps sessions separate
+  AI_QWEN_BIN          explicit path to the qwen binary
+  AI_QWEN_MODEL        model pin ($QWEN_MODEL)
+  AI_QWEN_MAX_TURNS    maximum session turns ($MAX_TURNS)
+  AI_QWEN_MAX_TOOL_CALLS maximum tool calls ($MAX_TOOL_CALLS)
+  AI_QWEN_MAX_WALL_TIME wall-clock limit ($MAX_WALL_TIME)
+  AI_QWEN_WAIT_TIMEOUT seconds to wait for completion ($WAIT_TIMEOUT)
+  AI_QWEN_STATE_DIR    session state ($STATE_DIR)
+EOF
+}
+
+doctor_worktrees() {
+  local root owner repo wt pid state expected
+  root="$STATE_DIR/worktrees"; [ -d "$root" ] || return 0
+  while IFS= read -r owner; do
+    repo="$(jq -r '.repo // ""' "$owner" 2>/dev/null)"
+    wt="$(jq -r '.worktree // ""' "$owner" 2>/dev/null)"
+    pid="$(jq -r '.pid // ""' "$owner" 2>/dev/null)"
+    state="$(jq -r '.state // ""' "$owner" 2>/dev/null)"
+    expected="${wt%/wt}/owner.json"
+    if [ "$owner" != "$expected" ] || [ "${wt#"$root"/}" = "$wt" ] || [ ! -d "$repo/.git" ]; then
+      warn "ambiguous Qwen worktree owner record left untouched: $owner"; continue
+    fi
+    if [ "$state" = preserved-recovery ]; then
+      warn "preserved Qwen recovery worktree left untouched: $wt"; continue
+    fi
+    [ "$state" = active ] || { warn "unknown Qwen worktree state left untouched: $owner"; continue; }
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && continue
+    git -C "$repo" worktree list --porcelain 2>/dev/null | grep -Fxq "worktree $wt" \
+      || { warn "unregistered Qwen worktree record left untouched: $owner"; continue; }
+    warn "removing stale wrapper-owned Qwen worktree: $wt"
+    cleanup_wt "$repo" "$wt" "$owner"
+  done < <(find "$root" -type f -name owner.json 2>/dev/null)
+}
+
+cmd_doctor() {
+  local live=0 qwen rc=0
+  [ "${1:-}" = "--live" ] && live=1
+  need jq; qwen="$(resolve_qwen)"
+  echo "qwen binary   : $qwen"
+  echo "qwen version  : $("$qwen" --version 2>&1 | head -1)"
+  echo "caller        : $CALLER"
+  echo "state dir     : $STATE_DIR"
+  echo "model pin     : $QWEN_MODEL"
+  echo "read-only     : safe mode + plan mode + shell/write/edit excluded"
+  echo "implement     : Qwen sandbox + disposable Git worktree"
+  echo "budgets       : turns=$MAX_TURNS tools=$MAX_TOOL_CALLS wall=$MAX_WALL_TIME"
+  echo
+  if "$qwen" sessions list --json --limit 1 >/dev/null 2>&1; then
+    echo "session store : OK"
+  else
+    echo "session store : FAILED"; rc=1
+  fi
+  if [ "$live" = 1 ]; then
+    local tmp; tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
+    echo -n "live probe    : "
+    run_turn "$(pwd)" "$tmp" "$tmp.p" review >/dev/null || true
+    if has_result "$tmp"; then echo "OK"; else echo "FAILED — no terminal success result (authentication, model, or sandbox may need attention)"; rc=1; fi
+    rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
+  fi
+  doctor_worktrees
+  return $rc
+}
+
+# One implementation lifecycle owns artifact export, worktree cleanup, temporary
+# files, and the repository lock. Signal handlers only record cancellation and
+# exit; this finalizer does every state-changing cleanup action exactly once.
+LIFECYCLE_ACTIVE=0
+LIFECYCLE_MODE=""
+LIFECYCLE_STATE="failed"
+LIFECYCLE_NAME=""
+LIFECYCLE_REPO=""
+LIFECYCLE_WT=""
+LIFECYCLE_OWNER=""
+LIFECYCLE_BASE=""
+LIFECYCLE_PF=""
+LIFECYCLE_OUT=""
+LIFECYCLE_LOCK=""
+LIFECYCLE_SESSION_LOCK=""
+LIFECYCLE_COMMAND_RC="unavailable"
+LIFECYCLE_ARTIFACT_DURABLE=0
+LIFECYCLE_PRESERVE=0
+LIFECYCLE_RID=""
+LIFECYCLE_META=""
+LIFECYCLE_SID=""
+LIFECYCLE_PRIOR_TREE=""
+
+classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
+  local out="$1" err="$2" reason="$3"
+  [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
+  if { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
+    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
+    printf 'usage-limit'
+  elif [ "$LIFECYCLE_COMMAND_RC" != unavailable ] && [ "$LIFECYCLE_COMMAND_RC" -ne 0 ] 2>/dev/null; then
+    printf 'failed'
+  elif [ "$reason" = timeout ]; then
+    printf 'timed-out'
+  else
+    printf 'failed'
+  fi
+}
+
+valid_owner_record() { # valid_owner_record REPO WORKTREE OWNER [STATE]
+  local repo="$1" wt="$2" owner="$3" wanted="${4:-}" root expected recorded_repo recorded_wt state
+  [ -n "$repo" ] && [ -n "$wt" ] && [ -n "$owner" ] && [ -f "$owner" ] || return 1
+  root="${STATE_DIR%/}/worktrees"
+  case "$wt" in "$root"/qwen.*/wt) ;; *) return 1 ;; esac
+  expected="${wt%/wt}/owner.json"
+  [ "$owner" = "$expected" ] || return 1
+  recorded_repo="$(jq -r '.repo // ""' "$owner" 2>/dev/null)"
+  recorded_wt="$(jq -r '.worktree // ""' "$owner" 2>/dev/null)"
+  state="$(jq -r '.state // ""' "$owner" 2>/dev/null)"
+  [ "$recorded_repo" = "$repo" ] && same_path "$recorded_wt" "$wt" || return 1
+  [ -z "$wanted" ] || [ "$state" = "$wanted" ]
+}
+
+same_path() { # same_path A B - accounts for Git Bash /tmp to Windows argv conversion
+  local a="$1" b="$2"
+  if command -v cygpath >/dev/null 2>&1; then
+    a="$(cygpath -aw "$a" 2>/dev/null | tr '\\' '/' || printf '%s' "$a")"
+    b="$(cygpath -aw "$b" 2>/dev/null | tr '\\' '/' || printf '%s' "$b")"
+  fi
+  [ "$a" = "$b" ]
+}
+
+mark_preserved() { # mark_preserved OWNER
+  local owner="$1" json
+  json="$(jq '.state="preserved-recovery"' "$owner" 2>/dev/null)" || return 1
+  write_meta "$owner" "$json" || return 1
+  [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ]
+}
+
+safe_report_detail() { # safe_report_detail TERMINAL_STATE
+  case "$1" in
+    usage-limit) printf 'Qwen reported a usage or billing limit.' ;;
+    timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
+    cancelled)   printf 'The wrapper received an interrupt or termination request.' ;;
+    *)           printf 'Qwen did not emit the required terminal completion record.' ;;
+  esac
+}
+
+artifact_dir() { # artifact_dir REPO
+  local dir
+  [ "${AI_QWEN_TEST_FAIL_EXPORT:-}" = destination ] && return 1
+  dir="$(reviews_dir "$1")"
+  if [ -z "$dir" ]; then
+    dir="$STATE_DIR/recovery-patches"
+    mkdir -p "$dir" 2>/dev/null || return 1
+  fi
+  mkdir -p "$dir" 2>/dev/null || return 1
+  chmod 0700 "$dir" 2>/dev/null || true
+  printf '%s' "$dir"
+}
+
+emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PRIOR_TREE]
+  local repo="$1" name="$2" wt="$3" base="$4" owner="$5" kind="$6" state="$7" rc="$8" out="$9"
+  local prior="${10:-$base}" dir ts suffix patch report turn_patch="" patch_tmp turn_tmp="" report_tmp sid summary detail
+  valid_owner_record "$repo" "$wt" "$owner" active || {
+    warn "refusing artifact export from an ambiguous Qwen worktree owner record: $owner"
+    return 1
+  }
+  dir="$(artifact_dir "$repo")" || return 1
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  [ "$kind" = incomplete ] && suffix=.incomplete || suffix=""
+  patch="$dir/qwen-${name}-${ts}${suffix}.patch"
+  report="$dir/qwen-${name}-${ts}.incomplete.md"
+  patch_tmp="$(mktemp "$dir/.qwen-patch.XXXXXX")" || return 1
+  chmod 0600 "$patch_tmp" 2>/dev/null || true
+  ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$patch_tmp" 2>/dev/null \
+    || { rm -f "$patch_tmp"; return 1; }
+  if [ ! -s "$patch_tmp" ]; then
+    rm -f "$patch_tmp"
+    [ "$kind" = incomplete ] && note "ai-qwen: failed before changes (terminal state: $state); no empty patch was created." \
+      || warn "the implement run produced no changes."
+    return 2
+  fi
+  if [ "$kind" = incomplete ]; then
+    if [ "$prior" != "$base" ]; then
+      turn_patch="$dir/qwen-${name}-${ts}.turn.incomplete.patch"
+      turn_tmp="$(mktemp "$dir/.qwen-turn-patch.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
+      ( cd "$wt" && git diff --binary "$prior" ) > "$turn_tmp" 2>/dev/null || { rm -f "$patch_tmp" "$turn_tmp"; return 1; }
+      [ -s "$turn_tmp" ] || { rm -f "$turn_tmp"; turn_patch=""; }
+    fi
+    report_tmp="$(mktemp "$dir/.qwen-report.XXXXXX")" || { rm -f "$patch_tmp" "${turn_tmp:-}"; return 1; }
+    chmod 0600 "$report_tmp" 2>/dev/null || true
+    sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
+    summary="$(cd "$wt" && git diff --stat "$prior" 2>/dev/null | head -40 | cut -c1-240)"
+    detail="$(safe_report_detail "$state")"
+    {
+      echo "# INCOMPLETE Qwen implementation - $name"; echo
+      echo "This work is INCOMPLETE. It is not proof that the task is correct, tested, or safe."; echo
+      echo "- Job: \`$name\`"
+      echo "- Repository: \`$repo\`"
+      echo "- Base SHA: \`$base\`"
+      echo "- Model requested: \`$QWEN_MODEL\`; returned: \`$(model_from "$out")\`"
+      echo "- Terminal state: \`$state\`"
+      echo "- Command exit status: \`$rc\`"
+      echo "- Qwen session ID: \`$sid\`"
+      echo "- Usage: \`$(jq -c 'select(.type=="result")|.usage // {}' "$out" 2>/dev/null | tail -1)\`"
+      echo "- Tests: not confirmed complete"
+      echo "- Patch: \`$patch\`"
+      [ -z "$turn_patch" ] || echo "- This turn only: \`$turn_patch\`"
+      echo "- Safe detail: $detail"; echo
+      echo "## Changed-file summary"; echo; echo '```text'
+      printf '%s\n' "${summary:-Git recorded changes, but no bounded stat text was available.}"
+      echo '```'; echo
+      echo "## Recovery"; echo
+      echo "1. Inspect cumulative work: \`git apply --stat '$patch'\`"
+      [ -z "$turn_patch" ] || echo "2. Inspect only this failed turn: \`git apply --stat '$turn_patch'\`"
+      echo "3. Verify the cumulative patch against the captured base: \`git apply --check '$patch'\`"
+      echo "4. Never apply an incomplete patch without reviewing every change and running the required tests."
+    } > "$report_tmp" || { rm -f "$patch_tmp" "${turn_tmp:-}" "$report_tmp"; return 1; }
+  fi
+  if [ "${AI_QWEN_TEST_FAIL_EXPORT:-}" = move ]; then
+    rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"
+    return 1
+  fi
+  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"; return 1; }
+  if [ "$kind" = incomplete ]; then
+    [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
+    mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
+    note "ai-qwen: $state with partial changes; command remains unsuccessful."
+    note "INCOMPLETE patch written: $patch"
+    note "INCOMPLETE report written: $report"
+    [ -z "$turn_patch" ] || note "THIS-TURN patch written: $turn_patch"
+    note "  inspect: git apply --stat '$patch'"
+    note "  verify:  git apply --check '$patch'"
+  else
+    note "patch written: $patch"
+    note "  review it, then:  git apply --check '$patch' && git apply '$patch'"
+  fi
+  return 0
+}
+
+lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
+  local original="${1:-1}" artifact_rc=0 state_rc=0 final continuity
+  final="$original"
+  [ "$LIFECYCLE_ACTIVE" = 1 ] || return "$original"
+  LIFECYCLE_ACTIVE=0
+  if [ "$LIFECYCLE_MODE" = implement ] && [ -n "$LIFECYCLE_WT" ]; then
+    if [ "$LIFECYCLE_STATE" = completed ]; then
+      emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" complete completed "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" || artifact_rc=$?
+    else
+      emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" \
+        "${LIFECYCLE_PRIOR_TREE:-$LIFECYCLE_BASE}" || artifact_rc=$?
+    fi
+    if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
+      continuity=exact
+      [ "$LIFECYCLE_STATE" = completed ] || continuity=recovery-required
+      [ -n "$LIFECYCLE_SID" ] || LIFECYCLE_SID="$(session_id_from "$LIFECYCLE_OUT")"
+      [ -n "$LIFECYCLE_SID" ] || continuity=recovery-required
+      write_impl_state "$LIFECYCLE_RID" "$LIFECYCLE_NAME" "$LIFECYCLE_REPO" \
+        "$LIFECYCLE_BASE" "${LIFECYCLE_SID:-unavailable}" "$LIFECYCLE_WT" \
+        "$LIFECYCLE_STATE" "$continuity" "$LIFECYCLE_META" || state_rc=1
+      if [ "$state_rc" = 1 ]; then
+        final=1
+        if mark_impl_recovery_required "$LIFECYCLE_META" state-save-failed; then
+          warn "canonical Qwen state could not be saved. The prior proven code was kept and exact-session resume is blocked."
+        else
+          LIFECYCLE_PRESERVE=1; mark_preserved "$LIFECYCLE_OWNER" || true
+          warn "canonical Qwen state and recovery metadata could not be saved. Recovery worktree: $LIFECYCLE_WT"
+        fi
+      fi
+    fi
+    if [ "$artifact_rc" = 1 ]; then
+      LIFECYCLE_PRESERVE=1; final=1
+      mark_preserved "$LIFECYCLE_OWNER" || true
+      warn "could not safely export Qwen's work. The exact recovery worktree remains at: $LIFECYCLE_WT"
+      warn "after recovery, remove it with: git -C '$LIFECYCLE_REPO' worktree remove '$LIFECYCLE_WT'"
+    elif [ "$artifact_rc" = 0 ] && [ "$state_rc" = 0 ]; then
+      LIFECYCLE_ARTIFACT_DURABLE=1
+    fi
+    [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
+  fi
+  rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
+  [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
+  return "$final"
+}
+
+lifecycle_exit_trap() {
+  local original=$? final
+  trap - EXIT INT TERM
+  set +e
+  lifecycle_finalize "$original"; final=$?
+  exit "$final"
+}
+
+lifecycle_cancel() {
+  LIFECYCLE_STATE=cancelled
+  LIFECYCLE_COMMAND_RC=130
+  stop_run_turn
+  exit 130
+}
+
+start_session() { # start_session NAME MODE
+  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner=""
+  valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  meta="$(meta_path "$rid" "$name")"
+  [ "$mode" = implement ] && meta="$(impl_meta_path "$rid" "$name")"
+  [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-qwen ask $name"
+
+  rid_lock="$(repolock_path "$rid")"
+  lock_acquire "$rid_lock" "$mode:$name" || die "another Qwen run is already active in this repository: $(lock_info "$rid_lock").
+  Do not start a second one; wait for it, or continue it with 'ask'."
+  LIFECYCLE_LOCK="$rid_lock"
+  trap lifecycle_exit_trap EXIT
+  trap lifecycle_cancel INT TERM
+  LIFECYCLE_ACTIVE=1; LIFECYCLE_MODE="$mode"; LIFECYCLE_STATE=failed
+  LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"; LIFECYCLE_WT=""
+  LIFECYCLE_OWNER=""; LIFECYCLE_BASE=""; LIFECYCLE_PF=""; LIFECYCLE_OUT=""
+  LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
+  LIFECYCLE_RID="$rid"; LIFECYCLE_META=""; LIFECYCLE_SID=""
+  LIFECYCLE_PRIOR_TREE=""
+
+  local workdir="$repo"
+  if [ "$mode" = implement ]; then
+    base="$(git -C "$repo" rev-parse HEAD)"
+    wt="$(workspace_path "$rid" "$name")"
+    [ ! -e "${wt%/wt}" ] || die "the stable disposable Qwen workspace path is still occupied: ${wt%/wt}"
+    mkdir -p "${wt%/wt}"
+    git -c core.longpaths=true -C "$repo" worktree add -q --detach "$wt" >/dev/null 2>&1 \
+      || die "could not create an isolated worktree for the implement run."
+    git -C "$wt" config core.longpaths true
+    owner="${wt%/wt}/owner.json"
+    LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
+    write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
+      '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
+    workdir="$wt"
+    note "implement run isolated in a throwaway worktree: $wt"
+  fi
+
+  pf="$(mktemp)"; LIFECYCLE_PF="$pf"
+  out="$(mktemp)"; LIFECYCLE_OUT="$out"
+  build_prompt_file "$pf"
+  before="$(tree_state "$repo")"
+
+  note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
+  run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
+  LIFECYCLE_COMMAND_RC="$rc"
+  if ! await_result "$out" "$mode '$name'"; then
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
+    note "  qwen exit status was $rc — which proves nothing on its own."
+    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    exit 1
+  fi
+
+  sid="$(session_id_from "$out")"
+  [ -n "$sid" ] || die "Qwen returned no session id."
+  LIFECYCLE_STATE=completed
+  LIFECYCLE_SID="$sid"
+
+  after="$(tree_state "$repo")"
+  if [ "$mode" = review ] && [ "$before" != "$after" ]; then
+    die "a READ-ONLY Qwen review changed the working tree. The agent profile's tool
+  restriction is not holding — do not trust further reviews until this is understood.
+  Inspect: git -C $repo status"
+  fi
+
+  if [ "$mode" = review ]; then
+    write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
+    --arg caller "$CALLER" --arg mode "$mode" --arg model "$QWEN_MODEL" \
+    --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
+    '{qwen_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
+      model:$model, created:$created, updated:$created, turns:$turns}')"
+  fi
+
+  finish_turn "$repo" "$name" "$out"
+  lifecycle_finalize 0
+}
+
+cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
+  local repo="${1:-}" wt="${2:-}" owner="${3:-}"
+  [ -n "$wt" ] || return 0
+  valid_owner_record "$repo" "$wt" "$owner" || {
+    warn "ambiguous Qwen worktree owner record left untouched: ${owner:-unavailable}"
+    return 1
+  }
+  [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
+  git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  git -C "$repo" worktree prune >/dev/null 2>&1 || true
+  if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
+    warn "the throwaway worktree $wt is STILL registered — remove it before continuing."
+    return 1
+  fi
+  # `git worktree remove --force` can leave ignored build/dependency files behind.
+  # The owner record and validated wrapper-only path make this narrow cleanup safe.
+  rm -rf "$wt" 2>/dev/null || true
+  rm -f "$owner" 2>/dev/null || true
+  rmdir "${wt%/wt}" 2>/dev/null || true
+}
+
+cmd_ask() {
+  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  meta="$(find_meta "$rid" "$name")"
+  sid="$(jq -r .qwen_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
+  if [ "$mode" = implement ]; then rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return; fi
+
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
+  lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  if ! lock_acquire "$rid_lock" "ask:$name"; then
+    lock_release "$sess_lock"; die "another Qwen run is active in this repository: $(lock_info "$rid_lock")"
+  fi
+  # shellcheck disable=SC2064
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
+  trap cancel_plain_turn INT TERM
+
+  pf="$(mktemp)"; out="$(mktemp)"; build_prompt_file "$pf"
+  before="$(tree_state "$repo")"
+  note "Qwen '$name' continuing session $sid…"
+  run_turn "$repo" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  if ! await_result "$out" "'$name'"; then
+    note "  qwen exit status was $rc — which proves nothing on its own."
+    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    rm -f "$pf" "$out" "$out.err"; exit 1
+  fi
+  after="$(tree_state "$repo")"
+  if [ "$mode" = review ] && [ "$before" != "$after" ]; then
+    die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
+  fi
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.updated=$u | .turns=(.turns+1)' "$meta")"
+  finish_turn "$repo" "$name" "$out"
+  rm -f "$pf" "$out" "$out.err"
+}
+
+continue_implementation() { # NAME RID META [RESET]
+  local name="$1" rid="$2" meta="$3" reset="${4:-0}" repo sid base patch expected actual sess_lock rid_lock wt owner pf out rc rrc=0
+  [ "$(jq -r '.version // 1' "$meta")" = 2 ] || die "session '$name' is a legacy one-shot implementation and cannot be guessed or resumed.
+  Archive it with 'ai-qwen transcript $name', delete it with 'ai-qwen delete $name', then start persistent work with 'ai-qwen implement <new-name>'."
+  valid_impl_record "$rid" "$name" "$meta" || die "persistent implementation state for '$name' failed ownership, identity, or patch validation. No Qwen turn was started."
+  reconcile_impl_patches "$meta" "$reset" || rrc=$?
+  [ "$rrc" != 2 ] || die "session '$name' has an uncommitted newer state artifact from an interrupted save. Exact-session resume is blocked. Run: ai-qwen reset-context $name --prompt 'Restate the task and continue from the prior proven code.'"
+  [ "$rrc" = 0 ] || die "persistent implementation patch reconciliation failed; no Qwen turn was started."
+  if [ "$reset" != 1 ]; then
+    [ "$(jq -r .continuity_state "$meta")" = exact ] || die "session '$name' requires recovery because conversation and canonical code may differ. Exact-session resume is blocked. Run: ai-qwen reset-context $name --prompt 'Restate the task and continue from the reconstructed code.'"
+  fi
+  repo="$(repo_root)"; sid="$(jq -r .qwen_session_id "$meta")"; base="$(jq -r .base_sha "$meta")"; patch="$(jq -r .canonical_patch "$meta")"
+  git -C "$repo" cat-file -e "$base^{commit}" 2>/dev/null || die "recorded immutable base $base is unavailable."
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
+  lock_acquire "$sess_lock" "implement-continuation:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  if ! lock_acquire "$rid_lock" "implement-continuation:$name"; then lock_release "$sess_lock"; die "another Qwen run is active: $(lock_info "$rid_lock")"; fi
+  LIFECYCLE_SESSION_LOCK="$sess_lock"; LIFECYCLE_LOCK="$rid_lock"
+  trap lifecycle_exit_trap EXIT; trap lifecycle_cancel INT TERM
+  LIFECYCLE_ACTIVE=1; LIFECYCLE_MODE=implement; LIFECYCLE_STATE=failed; LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"
+  LIFECYCLE_BASE="$base"; LIFECYCLE_RID="$rid"; LIFECYCLE_META="$meta"; LIFECYCLE_SID="$sid"
+  LIFECYCLE_COMMAND_RC=unavailable; LIFECYCLE_ARTIFACT_DURABLE=0; LIFECYCLE_PRESERVE=0
+  wt="$(workspace_path "$rid" "$name")"
+  [ ! -e "${wt%/wt}" ] || die "the stable disposable Qwen workspace path is still occupied: ${wt%/wt}"
+  mkdir -p "${wt%/wt}"
+  git -c core.longpaths=true -C "$repo" worktree add -q --detach "$wt" "$base" >/dev/null 2>&1 || die "could not reconstruct the disposable implementation workspace."
+  git -C "$wt" config core.longpaths true
+  owner="${wt%/wt}/owner.json"; LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"
+  write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:"active"}')"
+  git -C "$wt" apply --check "$patch" >/dev/null 2>&1 && git -C "$wt" apply "$patch" >/dev/null 2>&1 || die "canonical patch cannot be applied to immutable base $base."
+  git -C "$wt" add -A >/dev/null 2>&1
+  expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
+  git -C "$wt" diff --binary "$base" > "$actual"; [ "$(sha256_file "$actual")" = "$expected" ] || die "reconstructed source hash does not equal the canonical patch hash."
+  rm -f "$actual"
+  LIFECYCLE_PRIOR_TREE="$(git -C "$wt" write-tree)" || die "could not capture the proven pre-turn source tree."
+  pf="$(mktemp)"; out="$(mktemp)"; LIFECYCLE_PF="$pf"; LIFECYCLE_OUT="$out"; build_prompt_file "$pf"
+  { printf '%s\n\n' "NOTICE: This implementation continuation (write run) uses a newly reconstructed workspace. Git-visible source is exact. Ignored dependencies, build output, downloads, caches, and secrets did not persist. Recreate what is needed and rerun tests."; cat "$pf"; } > "$pf.notice"; mv "$pf.notice" "$pf"
+  if [ "$reset" = 1 ]; then
+    note "Qwen CONTEXT RESET (write run) '$name': preserving canonical code but starting a new conversation generation."
+    LIFECYCLE_SID=""; run_turn "$wt" "$out" "$pf" implement
+  else
+    note "Qwen implementation continuation (write run) '$name' resuming exact session $sid in a disposable workspace."
+    run_turn "$wt" "$out" "$pf" implement "$sid"
+  fi
+  rc="$RUN_TURN_RC"; LIFECYCLE_COMMAND_RC="$rc"
+  if ! await_result "$out" "implementation continuation '$name'"; then
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"; exit 1
+  fi
+  if [ "$reset" = 1 ]; then LIFECYCLE_SID="$(session_id_from "$out")"
+  else [ "$(session_id_from "$out")" = "$sid" ] || die "Qwen returned a different session id; refusing to advance canonical state."; fi
+  LIFECYCLE_STATE=completed; finish_turn "$repo" "$name" "$out"; lifecycle_finalize 0
+}
+
+finish_turn() {
+  local repo="$1" name="$2" out="$3" path
+  if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
+  path="$(write_review_file "$repo" "$name" "$out")"
+  [ -n "$path" ] && note "saved: $path"
+  jq -r 'select(.type=="result") | "usage: input=\(.usage.input_tokens // "?") output=\(.usage.output_tokens // "?") turns=\(.num_turns // "?")"' "$out" 2>/dev/null | tail -1 >&2
+  note "model: requested=$QWEN_MODEL returned=$(model_from "$out")"
+  return 0
+}
+
+cmd_list() {
+  local repo rid remote f stored_rid
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; remote="$(repo_remote "$repo")"
+  printf '%-24s %-8s %-11s %-46s %6s\n' NAME CALLER MODE SESSION TURNS
+  [ -d "$STATE_DIR/sessions" ] || return 0
+  while IFS= read -r f; do
+    stored_rid="$(basename "$(dirname "$f")")"
+    [ "$(basename "$f")" != metadata.json ] || stored_rid="$(basename "$(dirname "$(dirname "$f")")")"
+    if [ "$stored_rid" != "$rid" ]; then
+      [ -n "$remote" ] && [ "$(jq -r '.repo_remote // ""' "$f" 2>/dev/null)" = "$remote" ] || continue
+    fi
+    jq -r '[.name,.caller,.mode,.qwen_session_id,(.turns|tostring)]|@tsv' "$f" \
+      | awk -F'\t' '{printf "%-24s %-8s %-11s %-46s %6s\n",$1,$2,$3,$4,$5}'
+  done < <(find "$STATE_DIR/sessions" -type f \( -name '*.json' ! -name owner.json -o -name metadata.json \) -print 2>/dev/null | sort -u)
+}
+cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
+cmd_delete() {
+  local rid meta dir manifest sess_lock f base
+  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
+  [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
+  sess_lock="$(lock_path "$rid" "$1")"
+  [ ! -d "$sess_lock" ] || die "session '$1' has an active turn and cannot be deleted."
+  if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
+    dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
+    same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] || die "refusing to delete untrusted implementation state."
+    jq -e --arg dir "$dir" --arg meta "$meta" '.version==1 and .owner_dir==$dir and .metadata==$meta' "$manifest" >/dev/null 2>&1 \
+      || die "refusing to delete an implementation directory with an invalid owner manifest."
+    for f in "$dir"/* "$dir"/.[!.]*; do
+      [ -e "$f" ] || continue; base="$(basename "$f")"
+      case "$base" in
+        owner.json|metadata.json|cumulative.patch|.tmp.*|.cumulative.*) ;;
+        cumulative-*.patch) printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' \
+          || die "implementation state directory contains an unowned file and was left in place: $f" ;;
+        *) die "implementation state directory contains an unowned file and was left in place: $f" ;;
+      esac
+    done
+    rm -f "$dir"/metadata.json "$dir"/owner.json "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/.tmp.* "$dir"/.cumulative.*
+    rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
+  else rm -f "$meta"; fi
+  note "deleted local session record '$1'. Human-facing review and patch files were kept."
+}
+cmd_transcript() {
+  local sid qwen repo dir out tmp source; repo="$(repo_root)"
+  sid="$(jq -r .qwen_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
+  qwen="$(resolve_qwen)"
+  dir="$(reviews_dir "$repo")"; [ -n "$dir" ] || die "cannot export: '.ai/reviews' is not git-ignored."
+  mkdir -p "$dir"; out="$dir/qwen-$1-$(date -u +%Y%m%dT%H%M%SZ).jsonl"; tmp="$out.partial"
+  [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
+  source="$("$qwen" sessions list --json --limit 1000 2>/dev/null | jq -r --arg sid "$sid" 'select(.sessionId==$sid)|.filePath' | tail -1)"
+  [ -n "$source" ] || die "Qwen session $sid was not found in its project-scoped store."
+  if command -v cygpath >/dev/null 2>&1 && printf '%s' "$source" | grep -Eq '^[A-Za-z]:|\\'; then source="$(cygpath -u "$source")"; fi
+  [ -f "$source" ] || die "Qwen session file is missing: $source"
+  cp "$source" "$tmp" || { rm -f "$tmp"; die "could not copy the Qwen session transcript"; }
+  chmod 0600 "$tmp" 2>/dev/null || true; mv "$tmp" "$out"
+  note "Qwen transcript copy written inside the ignored review directory: $out"
+}
+
+cmd_implement() {
+  local name="$1" rid meta=""
+  rid="$(repo_id "$(repo_root)")"
+  meta="$(find_meta_optional "$rid" "$name")" || meta=""
+  if [ -n "$meta" ]; then
+    if [ "$(jq -r '.mode // ""' "$meta")" = implement ]; then
+      rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"
+    else
+      die "session '$name' is a review session. Choose a different name for implementation."
+    fi
+  elif [ -f "$(meta_path "$rid" "$name")" ]; then
+    meta="$(meta_path "$rid" "$name")"
+    [ "$(jq -r '.mode // ""' "$meta")" = implement ] && continue_implementation "$name" "$rid" "$meta"
+    die "session '$name' is a review session. Choose a different name for implementation."
+  else start_session "$name" implement; fi
+}
+
+cmd_reset_context() {
+  local rid meta
+  rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
+  [ "$(jq -r '.mode // ""' "$meta")" = implement ] || die "reset-context applies only to implementation sessions."
+  rid="$(rid_from_meta "$meta")"
+  continue_implementation "$1" "$rid" "$meta" 1
+}
+
+# ---------------------------------------------------------------------------
+CMD="${1:-}"; shift || true
+ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_LIVE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
+    --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
+    --json)        OPT_JSON=1; shift ;;
+    --live)        OPT_LIVE="--live"; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    --*)           die "unknown option '$1'. This wrapper deliberately does not forward arbitrary qwen flags; if you need a capability it lacks, say so rather than calling qwen directly." ;;
+    *)             [ -z "$ARG" ] && ARG="$1" || die "unexpected argument '$1'"; shift ;;
+  esac
+done
+need jq
+
+case "$CMD" in
+  new)        [ -n "$ARG" ] || die "usage: ai-qwen new <name> …";       start_session "$ARG" review ;;
+  implement)  [ -n "$ARG" ] || die "usage: ai-qwen implement <name> …"; cmd_implement "$ARG" ;;
+  ask)        [ -n "$ARG" ] || die "usage: ai-qwen ask <name> …";       cmd_ask "$ARG" ;;
+  list)       cmd_list ;;
+  show)       [ -n "$ARG" ] || die "usage: ai-qwen show <name>";        cmd_show "$ARG" ;;
+  transcript) [ -n "$ARG" ] || die "usage: ai-qwen transcript <name>";  cmd_transcript "$ARG" ;;
+  delete)     [ -n "$ARG" ] || die "usage: ai-qwen delete <name>";      cmd_delete "$ARG" ;;
+  reset-context) [ -n "$ARG" ] || die "usage: ai-qwen reset-context <name> …"; cmd_reset_context "$ARG" ;;
+  doctor)     cmd_doctor "$OPT_LIVE" ;;
+  -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
+  *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
+esac

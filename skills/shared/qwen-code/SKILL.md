@@ -1,81 +1,138 @@
 ---
 name: qwen-code
-description: Invoke the locally installed Qwen Code CLI as an independent reviewer, second-opinion reasoning engine, codebase analyst, or delegated implementation agent. Use when the user says "ask Qwen", "use Qwen Code", "run this by Qwen", "have Qwen review this", "get a Qwen second opinion", or explicitly requests qwen3.8-max / Qwen 3.8. Use the real installed `qwen` CLI non-interactively, validate its current flags, capture its result and errors, and keep review work read-only.
+description: Delegate repository reviews, analysis, debates, and explicitly authorized implementation to Qwen Code through the persistent `ai-qwen` wrapper. Use when the user says "ask Qwen," "use Qwen Code," "run this by Qwen," requests Qwen 3.8, wants a Qwen second opinion, asks to resume a Qwen session, or delegates coding work to Qwen.
 ---
 
 # Qwen Code
 
-Use Qwen Code as a genuinely separate model, not as an unverified answer oracle. Give it a self-contained brief, inspect whether the run succeeded, and independently judge its result before reporting or applying anything.
+## Always use the wrapper
 
-## Verify the local interface first
-
-Run these checks once per session:
-
-```powershell
-Get-Command qwen -ErrorAction Stop
-qwen --version
-qwen --help
+```bash
+AI_QWEN_CALLER=codex ai-qwen new <name>       --prompt-file "$brief"
+AI_QWEN_CALLER=codex ai-qwen ask <name>       --prompt-file "$followup"
+AI_QWEN_CALLER=codex ai-qwen implement <name> --prompt-file "$task"
+AI_QWEN_CALLER=codex ai-qwen list | show <name> | transcript <name> | delete <name>
+AI_QWEN_CALLER=codex ai-qwen doctor --live
 ```
 
-On Bash, use `command -v qwen` instead of `Get-Command`. The executable is `qwen`, not `qwen-code`, on the supported installation. Do not invent flags from memory: installed versions differ.
+Use `AI_QWEN_CALLER=claude` from Claude. Never hand-compose `qwen` calls. The
+wrapper owns the model pin, exact-session resume, safety modes, run budgets,
+completion proof, locks, durable records, and disposable implementation
+worktrees. It deliberately rejects arbitrary flag forwarding.
 
-Prefer model `qwen3.8-max-preview` when the user asks for Qwen 3.8. If that model is rejected or unavailable to the authenticated account, omit `--model` and use the configured default; report the actual model from JSON output. Never silently claim a fallback ran Qwen 3.8.
+Run the command from Git Bash on Windows.
 
-## Prepare the brief
+## Reviews are read-only
 
-Write a self-contained prompt using this structure:
+`new` and review-mode `ask` combine:
+
+- Qwen safe mode, which disables local hooks, extensions, skills, and MCP servers.
+- Plan approval mode.
+- Built-in shell, write, and edit tools excluded.
+- A before/after content hash of the complete tracked diff and every untracked
+  file, so edits inside already-dirty paths also fail loudly.
+
+Do not weaken any layer. If a Qwen release changes a flag, stop and re-qualify
+the wrapper against `qwen --help` and a hostile write canary.
+
+## Continue the exact named session
+
+Run `ai-qwen list` before creating another session. Use `ask` for every follow-up.
+Never use Qwen's `--continue`, which means the newest session for that project and
+can select another agent's conversation. The wrapper stores and resumes the exact
+session ID, separated by repository and calling agent.
+
+An exact ID proves conversation transport, not perfect memory. On material turns,
+tell Qwen to re-read the current files. If it describes stale state, stay in the
+same session, provide only the durable decisions and new evidence, and require a
+fresh file read.
+
+## Debates and second opinions
+
+Commit to your own evidence-based position first. Use
+`templates/delegation/debate-turn.md` for each material turn. Start one named
+session with `new`, then use `ask` for every rebuttal.
+
+The parent agent must:
+
+1. Point Qwen to current plan or diff paths and require a fresh read.
+2. Relay the other model's strongest reasoning faithfully.
+3. Send only changed evidence and remaining objections after the first turn.
+4. Update the durable plan or decision ledger as questions are resolved.
+5. Stop at agreement or after the initial review plus three rebuttals. Record any
+   unresolved objection and its consequence.
+
+Agreement is not evidence. Check every claim against current files and tests.
+
+## Write efficient briefs
+
+Use this shape:
 
 ```text
-Role: <the relevant expert role>
+Role: <relevant expert>
 Task: <one concrete outcome>
-Context: <repo, branch, exact paths, errors, prior decisions, and evidence>
-Constraints: <read-only or write scope, forbidden actions, compatibility rules>
-Required output: <format, evidence, tests, uncertainties>
+Context: <repo, branch, exact paths, errors, prior decisions, evidence>
+Constraints: <read-only or allowed files, forbidden actions, compatibility rules>
+Required output: <verdict, evidence, tests, uncertainties>
 ```
 
-Use explicit delimiters such as `<material>...</material>` when embedding untrusted or lengthy text. Prefer file paths and instruct Qwen to read them with its tools; for focused text-only analysis, pipe a prepared brief through stdin. Never include secrets, `.env` contents, tokens, or credentials.
+- Point to files instead of pasting them. Qwen can read the repository.
+- Keep stable background at the top and put the new request last.
+- Never include secrets, tokens, `.env` contents, or transcript data.
+- Ask for conclusions and evidence, never hidden reasoning.
+- Use one scoped decision or implementation target per turn.
 
-## Choose the execution pattern
+## Implementation runs
 
-### Independent review or second opinion
+Use implementation only when the user explicitly delegates changes to Qwen.
+`ai-qwen implement` creates a wrapper-owned disposable Git worktree, requires
+Qwen's sandbox, runs with bounded turns/tool calls/time, exports a binary patch
+under the Git-ignored `.ai/reviews/`, and removes the worktree. It never applies
+the patch to the live checkout.
 
-Tell Qwen explicitly that the task is read-only and forbid edits, commands that change state, commits, pushes, and deletions. Capture structured output and the exit code:
+Inspect and apply an accepted patch yourself:
 
-```powershell
-$brief = Get-Content -Raw -LiteralPath $briefPath
-$result = & qwen --model qwen3.8-max-preview --prompt $brief --output-format json 2>&1
-$exitCode = $LASTEXITCODE
-$result | Set-Content -LiteralPath $logPath
-if ($exitCode -ne 0) { throw "Qwen Code failed with exit code $exitCode. See $logPath" }
+```bash
+git apply --check "$patch" && git apply "$patch"
 ```
 
-If `--output-format` is absent from `qwen --help`, use text output. Do not add `--yolo` or another auto-approval mode for reviews. Compare Qwen's findings against the source material yourself and clearly separate "Qwen said" from your own conclusion.
+Implementation sessions preserve both the exact Qwen conversation ID and one
+cumulative binary patch. Each turn reconstructs the immutable base plus that
+patch at the same stable private path. `ask` on an implementation name is a
+write-capable continuation. Review and implementation names cannot cross modes.
 
-### Codebase analysis
+If a limit, timeout, cancellation, provider error, or missing terminal result
+occurs after changes, the command stays unsuccessful and writes clearly marked
+`*.incomplete.patch` and `*.incomplete.md` recovery files. Never treat them as
+finished. Inspect every change and rerun tests. If artifact export itself fails,
+the wrapper preserves the exact recovery worktree and prints its path.
 
-Run from the narrowest useful working directory. Name the files or directories in the prompt. On versions whose help lists `--include-directories`, use it only for additional roots; on older versions, let Qwen inspect the current working tree with its read tools. Do not use nonexistent `--file` or `--dir` flags. Reduce scope if context is too large.
+Ignored dependencies, downloads, caches, build output, and secrets do not persist
+between implementation turns. Recreate what is needed and rerun tests.
 
-### Delegated implementation
+## Completion and usage
 
-Use only when the user asks Qwen to make changes or delegates implementation to it. State the exact allowed files and verification gates. Use the least-permissive supported approval/sandbox settings shown by the local `--help`; never use `--yolo` on a normal workstation. Afterward, inspect the diff and run the relevant tests yourself. Qwen declaring success is not verification.
+Exit status alone is not completion. Qwen must emit a terminal stream record with
+`type: result`, `subtype: success`, and `is_error: false`. The wrapper records its
+session ID, result, turn count, usage, timing, and permission denials.
 
-## Prompting rules
+Every run has maximum session turns, tool calls, subagent depth, and wall time.
+Never remove those bounds or silently retry forever. Provider retry behavior must
+remain bounded by the wrapper wall time.
 
-- State role, task, context, constraints, and required output explicitly.
-- Ask for conclusions and supporting evidence, not hidden chain-of-thought. Qwen Code has no portable `--think` flag.
-- For machine-readable output, use `--output-format json`; this wraps the run in JSON but does not guarantee the model's prose is a domain-specific JSON object. Use `--json-schema` only when the installed help documents it.
-- Use `--system-prompt` or `--append-system-prompt` only when shown by the installed help. On older releases, place those instructions in the main prompt.
-- Bound unattended runs with `--max-wall-time`, `--max-session-turns`, and `--max-tool-calls` only when those flags appear in local help.
+## Verify the installation and every result
 
-## Handle failures
+Run `ai-qwen doctor --live` after installation or a Qwen version change. A version
+string is not enough. The live proof must return the terminal success record.
 
-- Authentication or command missing: stop and report the exact error; do not substitute another model without saying so.
-- Model unavailable: retry once without `--model`, then report both the requested and actual model.
-- Context overflow: narrow the working directory or name specific files; do not repeatedly resend the whole repo.
-- HTTP 429/529: use Qwen Code's documented unattended retry setting only when supported, with a wall-time bound; otherwise retry at most three times with increasing delays.
-- Invalid structured output: keep the raw log, tighten the required-output contract, and retry once. Validate parsed JSON before consuming it.
-- Nonzero exit or missing final result: treat the run as failed even if partial stdout looks useful.
+For every review or implementation:
 
-## Completion gate
+1. Confirm the requested model and terminal success evidence.
+2. Confirm a review left the working tree unchanged.
+3. Inspect Qwen's cited files and claims yourself.
+4. Inspect any patch and run the relevant tests yourself.
+5. Keep Qwen's conclusion separate from your final judgment.
 
-Before reporting success, confirm the command, version, requested model, actual model when available, exit code, captured log location, and any repo diff. For implementation, also confirm tests. For review, confirm the working tree was not changed by the Qwen run.
+Official references: [headless mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/),
+[configuration](https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/settings.md),
+and [installation](https://github.com/QwenLM/qwen-code/blob/main/docs/users/overview.md).
