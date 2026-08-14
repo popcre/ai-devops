@@ -12,7 +12,10 @@ On **Windows** use the native PowerShell installer instead — see
 
 The installer copies them to `~/.codex/skills/` when `~/.codex` exists and keeps
 `templates/system/AGENTS-global-codex.md` as the global standing instruction
-file.
+file. It **never replaces an existing `~/.codex/AGENTS.md`** — to do that, run
+`bash bin/ai-adopt-globals`, which preserves that machine's own facts and proves
+it with a diff. See
+[skills-usage-guide.md](skills-usage-guide.md#replacing-an-installed-global-that-already-exists--use-binai-adopt-globals).
 
 If you are deciding **where a rule or fact should live** (global vs machine vs
 repo vs topic doc vs skill vs memory vs plan vs handoff), read the context
