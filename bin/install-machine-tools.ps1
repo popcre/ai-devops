@@ -5,6 +5,31 @@ param(
 )
 $ErrorActionPreference = "Stop"
 if (-not $CatalogPath) { $CatalogPath = Join-Path $RepoPath "config\machine-tools.tsv" }
+
+# Launchers contain absolute source paths and outlive the process that creates
+# them. A linked Git worktree is disposable, so pointing a launcher into one
+# guarantees a later "file not found" when that worktree is removed. Fail
+# before creating or rewriting anything. Install from the durable primary
+# checkout instead.
+function Resolve-GitMetadataPath {
+  param([string]$Value)
+  if ([System.IO.Path]::IsPathRooted($Value)) {
+    return [System.IO.Path]::GetFullPath($Value)
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path $RepoPath $Value))
+}
+
+$gitDirRaw = (& git -C $RepoPath rev-parse --git-dir 2>$null)
+$gitCommonDirRaw = (& git -C $RepoPath rev-parse --git-common-dir 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $gitDirRaw -or -not $gitCommonDirRaw) {
+  throw "RepoPath is not a readable Git checkout: $RepoPath"
+}
+$gitDir = Resolve-GitMetadataPath $gitDirRaw.Trim()
+$gitCommonDir = Resolve-GitMetadataPath $gitCommonDirRaw.Trim()
+if ($gitDir -ne $gitCommonDir) {
+  throw "Refusing to install durable machine launchers from linked worktree '$RepoPath'. Run the canonical checkout's installer instead."
+}
+
 $target = Join-Path $UserProfilePath ".local\bin"
 $gitBash = @(
   (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
