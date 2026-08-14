@@ -523,6 +523,18 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
     Write-Note "Kimi Code CLI not found. Install/login separately if you want the kimi-code-delegation skill to run local Kimi jobs."
 }
 
+if (Get-Command qwen -ErrorAction SilentlyContinue) {
+    $qwenVersion = (& qwen --version 2>$null) -join " "
+    if ([string]::IsNullOrWhiteSpace($qwenVersion)) {
+        Write-Note "Qwen Code CLI found."
+    } else {
+        Write-Note "Qwen Code CLI found: $qwenVersion"
+    }
+    Write-Note "Verify model access and completion with: ai-qwen doctor --live"
+} else {
+    Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
+}
+
 Write-Step "Done"
 Write-Host "AI DevOps repo: $RepoPath"
 Write-Host "Codex skills:  $(Join-Path $CodexHome 'skills')"

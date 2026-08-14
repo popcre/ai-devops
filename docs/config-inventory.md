@@ -63,10 +63,11 @@ tools run via git-bash on Windows).
 | **`codex-cli` MCP entry** (Claude Desktop config + `~/.claude/settings.json`) | Lets Claude call Codex as a tool (`codex`, `codex-reply`) instead of shelling out | ✅ Windows: `bin/setup-machine.ps1`; Ubuntu: `bin/setup-secrets.sh` | No — Codex carries its own `codex login`, so it is **not** wrapped in the op launcher and never touches `mcp.env` |
 | **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine. Windows setup installs `ai-kimi` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash | No repo secret — Kimi carries its own interactive login |
 | **Grok Build CLI** (`grok`) | Optional xAI coding-agent target used by the shared `grok-cli` skill | ⚠️ Skill is synced by `ai-devops`; this machine's native install, docs, config, sessions, and login live under `%USERPROFILE%\.grok`; `%USERPROFILE%\.grok\bin` is on User PATH. Windows setup also installs `ai-grok-review` and `ai-grok-implement` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash, so neither wrapper depends on the repo `bin/` being on PATH | No repo secret — never read or sync machine-local `.grok/auth.json` |
+| **Qwen Code CLI** (`qwen`) | Optional Qwen coding-agent target used by the shared `qwen-code` skill | ⚠️ The CLI and OAuth login remain per-machine. `ai-qwen` is repo-owned and installed on Windows for PowerShell and Git Bash and on Ubuntu as a normal command. It provides exact named sessions, read-only reviews, bounded runs, and sandboxed disposable-worktree implementation | No repo secret. Qwen stores its own login and project-scoped sessions under `~/.qwen` |
 | **GLM sessions** (`ai-glm`) | Named, persistent GLM-5.2 sessions on a loopback-only OpenCode server; read-only reviews and worktree-isolated implementation | ✅ repo-owned client, pinned OpenCode, canonical agents, systemd user service, `ai-glm doctor` | Z.ai key stays in 1Password; only an `op://` reference is distributed |
 | **DeepSeek debates** (`ai-deepseek-agent`) | Bounded text-and-file debates used by the shared `deepseek-second-opinion` skill | ✅ repo-owned wrapper and skill; each turn resends the stored conversation | DeepSeek key stays in 1Password; only its `op://` reference is distributed |
 
-Open reconciliation plan: [`plan_sync-machine-wrapper-reconciliation.md`](../plan_sync-machine-wrapper-reconciliation.md). Read its STATUS table before changing how “sync my dotfiles” checks local Grok, Kimi, GLM, or DeepSeek commands.
+The completed reconciliation plan is [`plan_sync-machine-wrapper-reconciliation.md`](../plan_sync-machine-wrapper-reconciliation.md). The command catalog now covers Grok, Kimi, Qwen, GLM, and DeepSeek launchers.
 
 ## GLM: persistent sessions on a local OpenCode server
 
@@ -221,6 +222,10 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   machine-local: verify with `kimi --version` and `kimi -p "reply with OK"`.
   If auth fails, run `kimi login` and complete the device flow once; do not
   attempt to automate authentication inside a delegated coding prompt.
+- **Qwen Code CLI** — the skill and `ai-qwen` wrapper are repo-owned. Install the
+  official CLI, complete its OAuth flow once, then prove the full path with
+  `ai-qwen doctor --live`. A version check alone does not prove model access or
+  the terminal-result contract.
 - **gcloud defaults** — per-machine. Correct dflow values: project
   `lithe-breaker-323913`, region `us-east4` (Cloud Run/Build/Artifacts/Compute).
   Set via `bin/ai-gcloud-dflow`. **Why regional matters:** Cloud Build here is
