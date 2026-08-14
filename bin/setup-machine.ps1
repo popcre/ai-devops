@@ -600,6 +600,19 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
   Warn "Kimi Code CLI not found; the kimi-code-delegation skill is installed, but local Kimi jobs will not run."
   Warn "  Install Kimi Code CLI and run `kimi login` once, then re-run this script."
 }
+if (Get-Command qwen -ErrorAction SilentlyContinue) {
+  try {
+    $qwenVersion = (& qwen --version 2>$null) -join " "
+    if ([string]::IsNullOrWhiteSpace($qwenVersion)) { Ok "qwen found" }
+    else { Ok "qwen found: $qwenVersion" }
+    Note "Verify the full integration when needed with: ai-qwen doctor --live"
+  } catch {
+    Warn "qwen exists but `qwen --version` failed: $($_.Exception.Message)"
+  }
+} else {
+  Warn "Qwen Code CLI not found; the qwen-code skill is installed, but local Qwen jobs will not run."
+  Warn "  Install the official Qwen Code CLI, complete its OAuth flow, then run: ai-qwen doctor --live"
+}
 
 # --------------------------------------------------------------------------
 # 7. Claude Code (CLI) MCP config - same token-free treatment
