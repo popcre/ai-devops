@@ -1,4 +1,15 @@
-# Handoff: step 9 is HALF done — `hetz` rolled out and verified; `albt16` needs one command run at the keyboard
+# Handoff: step 9 is DONE — `hetz` and `albt16` both rolled out and verified; step 10 is next
+
+> **UPDATE 2026-08-14T1410Z — `albt16` is done.** Albert ran
+> `bin/ai-adopt-globals` at that keyboard. Both machine sections diffed CLEAN
+> against their pre-install copies, both installed bodies match the repo
+> templates ignoring CRLF, and the run also repaired four missing launchers
+> (`ai-grok-review`, `ai-grok-implement`, `ai-kimi`, `ai-deepseek-agent`).
+> **`albt16` is what proved the machine-section handling was still wrong** —
+> read §5 and §4 for what it caught and how, because the same shape will exist
+> on any machine restored from an older sync. Everything below that describes
+> `albt16` as pending is superseded by this block; everything about `hetz`, the
+> probes, and the traps still stands. The remaining open item is **step 10**.
 
 - **Machine:** `al8960ofc` (Windows 11, user `ahazan2`, PowerShell 7 primary)
 - **Agent:** Claude (Opus 5) in Claude Code
@@ -22,8 +33,12 @@ Put this whole list to Albert in ONE message before starting work.
 
 ### Blocking — the next session cannot finish without an answer
 
-1. **`albt16` cannot be reached from here, so Albert must run one command on
-   it.** It is powered on (Tailscale peer `t16`, `100.96.221.71`, active, and it
+**Items 1 and 2 are CLOSED: `albt16` was done at the keyboard on 2026-08-14.
+They are kept only as the standing procedure for a machine that cannot be
+reached. Start at item 3.**
+
+1. ~~**`albt16` cannot be reached from here, so Albert must run one command on
+   it.**~~ It is powered on (Tailscale peer `t16`, `100.96.221.71`, active, and it
    pushed a `memory sync from albt16` commit to `main` during this session), but
    **port 22 is closed** and no SSH host entry for it exists in
    `config/ssh-config.template` or `~/.ssh/ai-devops.conf`. The exact block to
@@ -234,10 +249,38 @@ Online, unreachable over SSH (see §0 item 1). Nothing on it has been changed.
   section, re-appends it, and **diffs it back** — the diff is the gate, not the
   exit code. Verified against this machine's real sections in `--dry-run`: it
   found both (Claude line 230, 962 bytes; Codex line 230, 3,162 bytes).
+- **A machine section is not always named after its machine, and not always
+  pure.** `albt16` proved both, in a preview, before anything was overwritten:
+  - Its headings are `# Machine atlas - 916 ("916-alien") and t16 and 4837 …`
+    and `# Local standing addition retained from previous AGENTS.md`. Neither
+    contains that machine's own hostname and neither says "machine facts" or
+    "machine-specific", so hostname matching reported **"no machine section"
+    on a file that had 166 lines of them**. Detection now also matches
+    "machine atlas" and "local standing addition".
+  - Its tail is **interleaved**: machine facts, then six blocks pasted in by
+    older template syncs (AI model settings, 1Password serialization,
+    production-infrastructure safety, commit identity, Response Style, rule 9a)
+    whose text the new global carries inline. A verbatim re-append would have
+    put about 4 KB of duplicate rules back into a file loaded on every session.
+    Each heading block is now classified and the decision printed: dropped when
+    the heading declares itself a template sync or matches a heading the repo
+    template owns, sub-sections following their parent; kept otherwise. On
+    `albt16` the Claude section went 11,372 → 4,809 bytes with no fact lost; on
+    `al8960ofc` nothing is dropped.
+  - **The safe direction is "keep".** A local block whose heading the template
+    does not own is kept even when the rule is arguably covered — `albt16`'s
+    `## No terraform apply against prod (hard rule — added 2026-07-22)` was
+    kept. Duplication is a budget problem; deletion is a data-loss problem.
+- **The preview is what saved this.** Two dry runs, read line by line, caught a
+  bug that a single `--adopt-globals` would have turned into silent permanent
+  loss of a machine's only copy of its own facts.
 - **A gate that is never exercised rots.** The parity suite had been failing on a
   clean tree while being cited as green. Run a suite before quoting it.
 
 ## 6. Exact next steps
+
+**Item 1 is DONE (2026-08-14) — kept because it is the procedure for any future
+machine, and for `916-alien` when it comes back on. Start at item 3.**
 
 1. **Finish step 9: `albt16`.** Albert runs this in **Git Bash** on `albt16`.
    One block, and it stops on its own if anything looks wrong:
