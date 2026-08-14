@@ -32,8 +32,11 @@ file that is not listed, **stop and report** — see §8.
 |---|---|---|
 | <name> | <branch> | <files> |
 
-Single-writer assignments for this session:
-- `supabase/migrations/` — owner: **<agent or NONE>**
+Migration-author assignments for this session (maximum three, unrelated exact objects):
+- author lane / claim / reserved version: **<agent / issue / 14-digit version>**
+- your exact database objects: **<parseable object list>**
+- preview lane owner: **<agent or NONE>**
+- merge lane owner: **<agent or NONE>**
 - `HANDOFF.md` — owner: **<agent or NONE>**
 - `AGENTS.md` — owner: **<agent or NONE>**
 
@@ -74,6 +77,9 @@ open PRs = `<list>`.
 - **Preview is shared and holds a production data clone.** Announce before and
   after you write to it. Treat its data and credentials as production-sensitive.
 - **Do not merge your own PR.** Open it, report the URL, stop.
+- **Before preview and merge**, fetch `origin/main`, update this branch from the
+  newly merged main tip, and rerun migration-version, object-collision, SQL and
+  contract checks. Author-lane permission is not preview or merge permission.
 - **Never edit an applied migration.** Fix forward with a new version. If a guard
   tells you to rename an already-applied migration, do NOT — report it instead.
 - **Do not create background task chips (`spawn_task`).** Follow-ups go in your
