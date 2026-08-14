@@ -10,6 +10,12 @@
 > on any machine restored from an older sync. Everything below that describes
 > `albt16` as pending is superseded by this block; everything about `hetz`, the
 > probes, and the traps still stands. The remaining open item is **step 10**.
+>
+> **Post-restart re-check on `albt16` passed** (both clients fully restarted,
+> 2026-08-14): `installed source drift: 2` — correct for a machine carrying a
+> machine section — with 0 broken links, 0 parity differences, 0 missing safety
+> markers, and the new-only shared-db STRUCTURE wording present in both installed
+> files. **`hetz` has still NOT had its clients restarted or re-checked** (§9).
 
 - **Machine:** `al8960ofc` (Windows 11, user `ahazan2`, PowerShell 7 primary)
 - **Agent:** Claude (Opus 5) in Claude Code
