@@ -70,10 +70,18 @@ DCP Vault is a paged Adobe Experience Manager asset library. The current private
 
 DCP Vault being one website does not make its content one database source. Keep
 **Disney, Lucasfilm, Marvel, and 20th Century** in separate capture outputs,
-separate table families, separate crawl histories, and separate guarded loaders.
-A portal tile or discriminator inside shared tables is not enough separation.
-Never send one studio's rows through another studio's loader. If a studio-specific
+separate table families, and separate crawl histories. A portal tile or
+discriminator inside shared tables is not enough separation. If a studio-specific
 landing family is not live, checkpoint locally and stop before the database write.
+
+**The loader is shared, not per-studio** (owner ruling, 2026-08-13). One guarded
+loader serves every studio; it takes the studio as an explicit required input and
+writes only into that studio's own table family. It must fail loudly rather than
+fall back to a default when the studio is missing or unrecognised — a silent
+default is how Lucasfilm rows end up in Disney's tables, which is the exact
+outcome the separate table families exist to prevent. An earlier draft of this
+section called for a separate loader per studio; that was overruled, because four
+copies of the same code means four places for the table mapping to drift.
 
 Do not assume Avatar's destination from portal placement. Record it as an open
 ownership decision until the private contract names its target.
