@@ -44,6 +44,11 @@ git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
 
 echo "1/2 fresh install: Bash and PowerShell agree file for file"
 mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex"
+# The fixture repo holds skills and templates only, not bin/ai-git-identity, so
+# the installer's machine-tools gate must be skipped here — exactly as
+# tests/test-ai-install-skills.sh does. Without it the installer correctly exits
+# 1 with "SYNC INCOMPLETE" and this whole suite dies at its first step.
+AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
 CLAUDE_HOME="$TMP_ROOT/bash/claude" CODEX_HOME="$TMP_ROOT/bash/codex" \
   bash "$fixture/bin/ai-install-skills" >/dev/null 2>&1
 pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
@@ -66,7 +71,8 @@ echo "2/2 cross-installer refresh reports 'up to date', not local edits"
 # The real failure this guards: install with one, refresh with the other. If the
 # marker formats disagreed at all, the second installer would see local edits,
 # back everything up, and rewrite it.
-out="$(CLAUDE_HOME="$TMP_ROOT/ps/claude" CODEX_HOME="$TMP_ROOT/ps/codex" \
+out="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
+  CLAUDE_HOME="$TMP_ROOT/ps/claude" CODEX_HOME="$TMP_ROOT/ps/codex" \
   bash "$fixture/bin/ai-install-skills" 2>&1)"
 grep -Fq 'LOCAL EDITS' <<<"$out" && fail "Bash saw PowerShell's install as locally edited"
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"

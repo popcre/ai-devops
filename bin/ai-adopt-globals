@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+#
+# Replace this machine's always-loaded global instruction files with the repo
+# copies, WITHOUT losing the machine's own hand-maintained facts.
+#
+#   ai-adopt-globals            # detect, preview, install, re-append, verify
+#   ai-adopt-globals --dry-run  # detect and preview only; writes nothing
+#
+# Why this exists
+# ---------------
+# `ai-install-skills --adopt-globals` installs the repo template over
+# ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md. Those installed files usually end
+# with a MACHINE SECTION — a block of facts true only for this computer (paths,
+# traps, SSH aliases) that exists nowhere in the repo. The installer only prints
+# a NOTE about it; re-appending it afterwards was a manual step done by hand on
+# every machine, and it is the single riskiest step in the rollout: forget it and
+# the machine silently loses facts that exist in exactly one place on earth.
+#
+# This script does that save/install/re-append/verify cycle, and FAILS LOUDLY
+# rather than guessing:
+#
+#   * If it cannot tell where the machine section starts, it prints the tail of
+#     the file and STOPS. It never guesses a boundary.
+#   * After re-appending it diffs the restored section against the copy it saved
+#     BEFORE the install. That diff is the gate — not an exit code.
+#   * Every original file is copied to ~/.ai-globals-backup/<UTC>/ first, and the
+#     installer keeps its own copy under <client>/globals-backup/ as well.
+#
+# On Windows run this from Git Bash, like `ai-install-skills` itself. There is
+# deliberately no PowerShell twin: this wraps the Bash installer, and the native
+# `install-ai-devops-windows.ps1 -AdoptGlobals` path still has the same
+# machine-section hazard, so use this script rather than that flag.
+#
+# A machine section is recognised by a Markdown heading that contains this
+# machine's short hostname, or the words "machine-specific" or "Machine facts".
+# That covers both shapes in use:
+#     ## al8960ofc — Windows 11 dev machine (machine-specific; not from the hub template)
+#     # Machine facts — al8960ofc
+# A machine with no such heading (e.g. the hetz VPS) is normal: the script says
+# so and simply installs.
+#
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DRY_RUN=false
+
+while (($#)); do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# Same home resolution as ai-install-skills: on Windows the clients read the
+# Windows profile, not $HOME, which may point at a mapped network drive.
+BASE_HOME="$HOME"
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+fi
+CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
+CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
+
+SHORT_HOST="$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_DIR="$BASE_HOME/.ai-globals-backup/$STAMP"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+fail() { echo "ERROR: $*" >&2; exit 1; }
+say()  { printf '%s\n' "$*"; }
+
+# Drop trailing blank lines, then a trailing horizontal rule, then blanks again.
+# The "\n---\n\n" separator written before a machine section is ours, not the
+# template's, so it must not count as a difference.
+trim_tail() {
+  awk '{ lines[NR] = $0 } END {
+    last = NR
+    while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
+    if (last > 0 && lines[last] ~ /^-{3,}[[:space:]]*$/) {
+      last--
+      while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
+    }
+    for (i = 1; i <= last; i++) print lines[i]
+  }'
+}
+
+# Print the 1-based line number where this file's machine section starts, or
+# nothing at all if there is no machine section.
+find_section_start() {
+  local file=$1
+  awk -v host="$SHORT_HOST" '
+    /^#{1,6} / {
+      line = tolower($0)
+      if ((host != "" && index(line, host) > 0) ||
+          index(line, "machine-specific") > 0 ||
+          index(line, "machine facts") > 0) { print NR; exit }
+    }
+  ' "$file"
+}
+
+# Files that will be replaced, as "label|installed path|repo template".
+TARGETS=(
+  "Claude|$CLAUDE_HOME/CLAUDE.md|$REPO_ROOT/templates/system/CLAUDE-global.md"
+  "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md"
+)
+
+say "==> machine: ${SHORT_HOST:-unknown}"
+say "==> repo:    $REPO_ROOT"
+say "==> backups: $BACKUP_DIR"
+say
+
+mkdir -p "$WORK"
+HAVE_SECTION=()
+
+for entry in "${TARGETS[@]}"; do
+  IFS='|' read -r label installed template <<<"$entry"
+  [[ -f "$template" ]] || fail "repo template missing: $template"
+
+  if [[ ! -f "$installed" ]]; then
+    say "$label: $installed does not exist yet — it will simply be installed."
+    HAVE_SECTION+=("$label|")
+    continue
+  fi
+
+  start="$(find_section_start "$installed")"
+  if [[ -z "$start" ]]; then
+    say "$label: no machine section found in $installed."
+    say "        Confirm that is right — here are its last 15 lines:"
+    tail -n 15 "$installed" | sed 's/^/        | /'
+    say "        If any of that is specific to THIS machine, stop now and say so;"
+    say "        adopting the repo copy would delete it."
+    say
+    HAVE_SECTION+=("$label|")
+  else
+    sed -n "${start},\$p" "$installed" > "$WORK/$label.section"
+    say "$label: machine section starts at line $start of $installed"
+    say "        first line: $(head -n 1 "$WORK/$label.section")"
+    say "        $(wc -l < "$WORK/$label.section") lines, $(wc -c < "$WORK/$label.section") bytes — saved and will be re-appended."
+    say
+    HAVE_SECTION+=("$label|$WORK/$label.section")
+  fi
+done
+
+if $DRY_RUN; then
+  say "==> --dry-run: previewing the installer, writing nothing."
+  bash "$REPO_ROOT/bin/ai-install-skills" --dry-run
+  say
+  say "Dry run only. Nothing was changed."
+  exit 0
+fi
+
+mkdir -p "$BACKUP_DIR"
+for entry in "${TARGETS[@]}"; do
+  IFS='|' read -r label installed _ <<<"$entry"
+  [[ -f "$installed" ]] && cp "$installed" "$BACKUP_DIR/$label-BEFORE.md"
+done
+say "==> originals copied to $BACKUP_DIR"
+say
+
+bash "$REPO_ROOT/bin/ai-install-skills" --adopt-globals
+
+say
+say "==> re-appending machine sections"
+for entry in "${HAVE_SECTION[@]}"; do
+  IFS='|' read -r label section <<<"$entry"
+  [[ -n "$section" ]] || { say "$label: nothing to re-append."; continue; }
+  installed=""
+  for t in "${TARGETS[@]}"; do
+    IFS='|' read -r l i _ <<<"$t"
+    [[ "$l" == "$label" ]] && installed="$i"
+  done
+  printf '\n---\n\n' >> "$installed"
+  cat "$section" >> "$installed"
+
+  # The gate: what is on disk now must match what we saved before the install.
+  restored_start="$(find_section_start "$installed")"
+  [[ -n "$restored_start" ]] || fail "$label: re-appended section is not detectable in $installed — restore from $BACKUP_DIR"
+  sed -n "${restored_start},\$p" "$installed" > "$WORK/$label.restored"
+  if diff -q "$section" "$WORK/$label.restored" >/dev/null; then
+    say "$label: machine section restored and diffs CLEAN against the saved copy."
+  else
+    diff "$section" "$WORK/$label.restored" | sed 's/^/    /' >&2
+    fail "$label: restored machine section DIFFERS from the saved copy. Restore from $BACKUP_DIR/$label-BEFORE.md"
+  fi
+done
+
+say
+say "==> verifying the installed bodies against the repo"
+for entry in "${TARGETS[@]}"; do
+  IFS='|' read -r label installed template <<<"$entry"
+  section=""
+  for h in "${HAVE_SECTION[@]}"; do
+    IFS='|' read -r l s <<<"$h"
+    [[ "$l" == "$label" ]] && section="$s"
+  done
+  if [[ -n "$section" ]]; then
+    body_end=$(( $(find_section_start "$installed") - 1 ))
+    head -n "$body_end" "$installed" | tr -d '\r' | trim_tail > "$WORK/$label.body"
+  else
+    tr -d '\r' < "$installed" | trim_tail > "$WORK/$label.body"
+  fi
+  tr -d '\r' < "$template" | trim_tail > "$WORK/$label.template"
+  if diff -q "$WORK/$label.body" "$WORK/$label.template" >/dev/null; then
+    say "$label: installed body matches the repo template exactly (ignoring CRLF)."
+  else
+    say "$label: installed body DIFFERS from the repo template — review this:" >&2
+    diff "$WORK/$label.template" "$WORK/$label.body" | head -n 40 | sed 's/^/    /' >&2
+    fail "$label: body mismatch. Backup: $BACKUP_DIR/$label-BEFORE.md"
+  fi
+done
+
+say
+say "DONE. Both globals adopted and both machine sections proven intact."
+say "Backups: $BACKUP_DIR (and <client>/globals-backup/ written by the installer)."
+say
+say "NEXT, and it is not optional: fully restart Claude Code and Codex on this"
+say "machine, then re-check that both files are still intact. Exit 0 here means"
+say "the files are right on disk, never that a running session picked them up."
