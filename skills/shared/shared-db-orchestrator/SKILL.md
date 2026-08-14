@@ -37,6 +37,7 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Maintain three dynamic queues grouped by exact object overlap. Recompute them after every merge.
 - Refill every free lane in the same turn. Never wait for Albert to request status or say start.
 - Skip blocked, owner-decision, data-only and non-structural issues.
+- Assign each exact-head issue one external reviewer from the durable round robin.
 
 Acquire a lane from the shared-db checkout:
 
@@ -66,6 +67,11 @@ node scripts/manage-migration-author-lanes.mjs --cleanup-stale
 the complete audit proves no eligible work exists. See
 [references/operating-manual.md](references/operating-manual.md) for the issue
 block and refill rules.
+
+Assign review with `--assign-reviewer --issue <n> --pr <n> --head-sha <sha>`.
+Use the returned approved wrapper and one persistent named session. Read
+[references/operating-manual.md](references/operating-manual.md) for the bounded
+debate, evidence log, and production boundary.
 
 Release a claim explicitly when its PR merges or work is safely abandoned.
 Expiry never removes collision protection. Cleanup must prove ownership and
