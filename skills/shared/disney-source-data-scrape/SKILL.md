@@ -58,7 +58,9 @@ OPA loads the complete Property-to-Character tree into the product-create page. 
 ### OPA facts and limits
 
 - The verified 2026-08-06 Home snapshot contains 10,262 unique ID pairs. Use that only as a regression baseline, never as a required future count.
-- Character identity is scoped by Property in the landing table. Never deduplicate on Character name.
+- **Never deduplicate on a display name, Property or Character.** Measured on the 2026-08-06 snapshot: 1,445 Property IDs share 1,444 names and 9,613 Character IDs share 9,591 names, so two Properties and 22 Characters legitimately collide by name. Every ID maps to exactly one name, so the ID is the identity.
+- **A Character is NOT owned by one Property.** 609 Character IDs appear under more than one Property. Earlier wording here said character identity is "scoped by Property", which invited a per-Property character row; that is wrong. `characterID` is globally stable, and the relationship is many-to-many.
+- `brandPropertyID` is a property of the PAIR, not of the Property: 24 Properties carry more than one. Keep it on the link row.
 - The capture proves the Home line of business only. Other lines of business remain unverified unless separately captured.
 - OPA is a full re-capture, not a change feed. Absence alone does not authorize deletion.
 
@@ -135,7 +137,13 @@ Scrape-data rows belong to the application session. They do not require a shared
 
 Never load Disney scrape rows into `core.*`. Use the dedicated source-landing tables:
 
-- OPA rows: `plm.opa_property_character`
+- OPA entities: `plm.opa_property` (one row per `licensedPropertyID`) and
+  `plm.opa_character` (one row per `characterID`) — display names belong HERE
+- OPA relationships: `plm.opa_property_character`, now a LINK table. Write the ID pair and
+  `brandPropertyID` to it and nothing else. Its `property_name`, `character_name` and
+  `property_id` columns are deprecated duplicates kept only until this loader stops
+  writing them, so stop writing them. Never delete the link table: 609 characters belong
+  to more than one property, so that many-to-many exists nowhere else.
 - DCP crawl history: `plm.dcp_crawl`, `plm.dcp_crawl_section`, and `plm.dcp_crawl_gap`
 - DCP identities: `plm.dcp_asset`, `plm.dcp_style_guide`, and `plm.dcp_portal_tile`
 - DCP evidence: `plm.dcp_asset_crawl` and `plm.dcp_asset_tile_observation`
