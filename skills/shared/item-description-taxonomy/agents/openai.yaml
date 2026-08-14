@@ -1,0 +1,4 @@
+interface:
+  display_name: "Item Description Taxonomy"
+  short_description: "Turn item descriptions into a sensible taxonomy"
+  default_prompt: "Use $item-description-taxonomy to interpret item descriptions and build a consolidated item-type dictionary."

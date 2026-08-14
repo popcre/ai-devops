@@ -1,6 +1,10 @@
 ---
 name: shared-db-change
-description: Discipline for any STRUCTURAL change to the shared supabase.com backend — schema, tables, columns, views, functions/RPCs, triggers, RLS, indexes, migrations, cross-app data contracts. It does NOT gate DATA: an application session owns the rows it writes, updates, or deletes in the normal course of its work, with no issue and no dispatch (owner ruling 2026-08-13, shared-db `AGENTS.md` §0.0-B); the ONE exception is bulk/ad-hoc loading of outside-sourced content into curated Master Data (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`). Use before making db/schema/migration/RLS/API-contract changes in ANY app repo (popdam3, popcrm-web, poppim-web, monitor, dflow), or when the user says "make db changes the proper way", "mirror it to shared-db", or "re-author it properly in shared-db". Also states Rule 0 — read-only inspection of the shared schema (tables, columns, keys, indexes, views, functions/RPCs, triggers, RLS, migration history, generated types) is ALLOWED from every application repo with no issue and no dispatch — so load it too when the ask is "does the shared database fit our data", "compare our data shape to the schema", "review the schema", or "what columns exist".
+description: >-
+  Discipline for structural changes to the shared database, including schema,
+  migrations, security rules, and cross-app contracts. It also explains that
+  ordinary application data belongs to the application session and that
+  read-only inspection is allowed from every application repository.
 ---
 
 # shared-db-change
@@ -25,7 +29,7 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > correct change; that one covers how a session is run — one orchestrator, all work
 > in isolated sub-agent worktrees, never background task chips (four of them once
 > wrote competing `CREATE OR REPLACE` migrations on the same function),
-> single-writer ownership of `supabase/migrations/`, and the two-part orchestrator
+> up to three isolated authors with atomic GitHub-backed reservations, and the two-part orchestrator
 > handoff. To end or hand over that session, use **`shared-db-handover`**.
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.
@@ -125,11 +129,10 @@ unless the target is curated Master Data.
    create the local migration file with the **identical** timestamp.~~
    **SUPERSEDED 2026-08-09 — it is the same apply-through-MCP-first drift as rule 1.**
    The file comes FIRST: write a new `YYYYMMDDHHMMSS_*.sql` under
-   `supabase/migrations/`, choosing a version **above the current maximum**
-   (`ls supabase/migrations | cut -c1-14 | sort | tail -1`), then apply it to
-   **preview** with the CLI. Pick the version by hand —
-   `check-dispatch-collision.mjs --allocate-version` was withdrawn on 2026-08-07
-   and now exits `2`. **Never reuse a timestamp:** Supabase's ledger keys on the
+   `supabase/migrations/`, using the version assigned by
+   `manage-migration-author-lanes.mjs --claim` before the file exists, then apply it to
+   **preview** only through the exclusive preview lane. Never pick a version from a
+   local directory listing. **Never reuse a timestamp:** Supabase's ledger keys on the
    version alone, so a duplicate makes one migration **silently skip** with no
    error (`AGENTS.md` §4 rule 5; this has happened twice). Never edit a migration
    that may already be applied — fix forward.

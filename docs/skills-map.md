@@ -49,6 +49,7 @@ the others live where noted.
 
 | Skill | What it does | Say this |
 |---|---|---|
+| ⚙ `item-description-taxonomy` | Semantically parses item descriptions into item type, size, licensor, property and artwork; consolidates spelling, prefix and detail variants into merchant-sensible canonical product families instead of treating text fragments as separate types. Shared by Claude and Codex. | "break down these item descriptions" / "build an item-type phrase list" / "clean up the item taxonomy" |
 | ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex. | "read the entire codebase and tell me if you find any bugs" |
 | `designflow-e2e-tester` | AI-driven end-to-end/visual testing of the dflow app. | "run the E2E tester" (lives in designflow-frontend/.claude/skills) |
 

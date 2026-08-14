@@ -23,6 +23,26 @@ instructions (`templates/system/CLAUDE-global.md`) to `~/.claude/CLAUDE.md` if
 absent. Then append the machine's section from
 `templates/system/machine-atlas.md` to that CLAUDE.md.
 
+### Replacing an installed global that already exists — use `bin/ai-adopt-globals`
+
+An installed global usually **ends with a machine section** — facts true only for
+that computer, which exist nowhere in this repo. `ai-install-skills
+--adopt-globals` replaces the file and only *prints a note* about that section,
+so doing it by hand loses those facts the moment anyone forgets. Run this
+instead (Git Bash on Windows):
+
+```bash
+bash bin/ai-adopt-globals --dry-run   # read every line, then:
+bash bin/ai-adopt-globals
+```
+
+It saves the machine section, installs the repo copy, re-appends the section, and
+**diffs it back against the pre-install copy** — that diff is the gate, not the
+exit code. It also drops blocks that older template syncs pasted in and the
+current global already carries, printing every KEPT/DROPPED decision, and keeps
+the untouched original in `~/.ai-globals-backup/<UTC>/`. If it cannot identify
+the section boundary it prints the file's tail and stops rather than guessing.
+
 Windows: use the **native PowerShell installer**
 `bin/install-ai-devops-windows.ps1`, not the Bash script:
 
