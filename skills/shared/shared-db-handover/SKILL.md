@@ -20,7 +20,9 @@ just realised you are working in this repo without being the orchestrator, you a
 
 Then take exactly one path:
 
-- **NOT the orchestrator → path (A) below.** Stop and open a `db-work` issue.
+- **NOT the orchestrator → path (A) below.** Stop database mutation, classify the
+  work, and open an issue only when a real handover is needed. The `db-work` label
+  is intake, not orchestrator ownership.
 - **The orchestrator → path (B), the rest of this skill.**
 
 ---
@@ -34,11 +36,19 @@ orchestrator may resume them, and an agent that tidies itself away destroys the
 evidence.
 
 **Do exactly one thing: open a GitHub issue** on `u2giants/shared-db` describing
-what you were doing and what state you left it in.
+what you were doing and what state you left it in. Include a `db-work-scope` block
+with separate `status`, `work_type`, and `route`. Never infer the route from the
+repository, `db-work`, or `needs-albert`.
 
 ```bash
 gh issue create --repo u2giants/shared-db --label db-work   --title "HANDOVER: <what you were doing>"   --body-file <a file you wrote>
 ```
+
+Only structural work uses `route: shared-db-orchestrator`. Source-data decisions,
+application data, documentation, repository maintenance, and security settings
+keep their own routes. Outside-sourced writes into curated `core.*` Master Data
+use `route: curated-master-data-governance`; they remain governed without entering
+the structural migration-author queue.
 
 > ⚠️ **CHANGED 2026-08-07.** This used to say "write a handover block into
 > `COORDINATOR_INTAKE.md` using the template inside that file". **That file is

@@ -20,7 +20,7 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 ## Start
 
 1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
-2. Fetch current `main`, inspect open `db-work` issues, `db-claim` issues, PRs, worktrees and open handoffs.
+2. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of orchestrator ownership.
 3. Record every active workstream and exact claimed database objects.
 4. Warn if more than five open handoffs exist.
 
@@ -36,7 +36,9 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Do not count read-only analysis, application code, tests or planning against the three author lanes.
 - Maintain three dynamic queues grouped by exact object overlap. Recompute them after every merge.
 - Refill every free lane in the same turn. Never wait for Albert to request status or say start.
-- Skip blocked, owner-decision, data-only and non-structural issues.
+- Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
+- Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
+- Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, but they never consume a migration-author lane.
 - Assign each exact-head issue one external reviewer from the durable round robin.
 
 Acquire a lane from the shared-db checkout:
@@ -62,7 +64,8 @@ node scripts/manage-migration-author-lanes.mjs --queue-audit
 node scripts/manage-migration-author-lanes.mjs --cleanup-stale
 ```
 
-`--queue-audit` must classify every open `db-work` issue. Dispatch every
+`--queue-audit` must classify every open `db-work` issue across independent status,
+work type, and route fields. Dispatch every
 `REFILL REQUIRED NOW` result immediately. An empty lane is acceptable only when
 the complete audit proves no eligible work exists. See
 [references/operating-manual.md](references/operating-manual.md) for the issue
@@ -105,6 +108,12 @@ exact production result.
 ## Owner decisions
 
 Ask Albert one question at a time in plain business English when business judgment is required. Name the recommendation and a short acceptable answer range. Do not ask him to manage branches, PRs or claims.
+
+`needs-albert` and `status: owner-decision` identify who must answer, not who owns
+the eventual work. Record work type and route before asking. After Albert answers,
+change status only; never promote or rewrite the work type or route automatically.
+For example, NBCU rights classification stays `source-data` routed to the
+`source-data-session` after its answer and can never become structural by status change.
 
 ## Agent brief
 
