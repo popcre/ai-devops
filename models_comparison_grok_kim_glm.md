@@ -873,6 +873,43 @@ Report A's routing guidance holds. Add this for work like Report B's — adoptin
   newly merged `main`; required update, rerun, exact-head review if changed,
   preview and guarded merge remain pending.
 
+### shared-db #1049 / PR #1059, post-main-update review cycle
+
+- First reviewer: Grok 4.6, proven by the `ai-grok-review` wrapper. Exact reviewed
+  head: `a26995a69c325daaf12f8b35c50cf7571350ef0a`.
+- Grok verdict: REVISE. It found three material defects: independently refreshed
+  relationship streams could produce `first_seen_at > last_seen_at`; no test
+  asserted the timestamp contract; and each result pair ran correlated endpoint
+  scans without matching endpoint indexes.
+- Confirmed defects caught: 3. False positives: 0. The implementation changed all
+  six views to publish earliest corroboration and latest corroboration, added an
+  all-view non-inversion test plus an exact timestamp assertion, and replaced the
+  correlated union scans with grouped endpoint counts and the set identity
+  `left + right - intersection`.
+- Grok suggestions: broader branch/ratio test coverage, comments on all six views,
+  explicit least-privilege cleanup, and an authenticated RLS behavior test. The
+  migration added all six caution comments; remaining suggestions are non-blocking.
+- Grok policy/tool adherence: exact-head standalone clone, read-only wrapper, no
+  database, secret, licensed row, edit, push, preview or production access.
+- Grok usage: 2,268,325 tokens total, including 176,891 uncached input and
+  2,071,552 cached; 17 turns; reported cost $0.2565045; returned model
+  `grok-4.6-build`.
+- Final reviewer after fixes: Kimi K3 requested through the manager-assigned
+  `ai-kimi` wrapper. Exact reviewed head:
+  `9e11485db7f0a5863621d61ef3b71688a557c45f`.
+- Kimi verdict: APPROVE after a fresh read that was explicitly required to verify
+  all three Grok findings were resolved. No unresolved Critical, High or Medium
+  objection was reported.
+- Kimi policy/tool adherence: one named read-only session in an exact-head
+  standalone clone; no database, secret, licensed row, edit, push, preview or
+  production access.
+- Kimi tokens, cache, cost, context size and returned model are unavailable from
+  headless output and intentionally not estimated.
+- Final outcome at recording time: current-main update is merged into the branch;
+  all required PR checks pass, including the complete ephemeral-database suite and
+  migration-author lease. Priority preview #853 remains ahead; #1049 has not
+  acquired preview or merge permission.
+
 ### shared-db #1042 / PRs #1043, #1061 and #1062
 
 - PR #1043 reviewer: Kimi K3 requested and pinned by the `ai-kimi` wrapper.
