@@ -61,10 +61,12 @@ proof rules that could encourage deletion of unfinished work.
   `plan_repo-housekeeping-visibility.md` and, under Albert's explicit “fix it”
   instruction, its companion
   `HANDOFF.d/2026-08-14T2015Z-al8960ofc-claude-housekeeping-visibility.md`.
-- This file is the required Codex closeout handoff. The plan links here and to
-  the original companion handoff.
+- Commit `49c5627` on `origin/main` contains the corrected plan, corrected Claude
+  companion handoff, and this required Codex closeout handoff. The plan links to
+  both handoffs.
 - No implementation code was written and no product tests were required.
-- The working checkout was 113 commits behind `origin/main` at closeout and
+- The working checkout was more than 100 commits behind `origin/main` at
+  closeout and
   contained unrelated work owned by other sessions. Do not stage, rewrite, or
   discard those files. Confirm the final pushed plan correction with:
   `git log -1 --oneline origin/main -- plan_repo-housekeeping-visibility.md`.
