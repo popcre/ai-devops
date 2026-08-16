@@ -19,7 +19,7 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 ## Start
 
-1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator.
+1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
 2. Fetch current `main`, inspect open `db-work` issues, `db-claim` issues, PRs, worktrees and open handoffs.
 3. Record every active workstream and exact claimed database objects.
 4. Warn if more than five open handoffs exist.
