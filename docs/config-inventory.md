@@ -125,6 +125,18 @@ base/developer-instructions) and `codex-reply` (thread continuation). Trade-off
 accepted: we gave up the third-party wrapper's `changeMode`/`fetch-chunk`,
 `batch-codex` and `brainstorm` tools; all are reproducible by prompting `codex`.
 
+**3. Vercel on Codex uses Codex's native Streamable HTTP transport.** Run
+`codex mcp add vercel --url https://mcp.vercel.com`; do not put Vercel behind
+`mcp-remote`. Vercel lists Codex CLI as an approved native OAuth client, and the
+old `mcp-remote@0.1.38` entry failed its authorization-code exchange on Hetz even
+after clearing its local state. On a headless host, keep the printed login command
+running, forward its printed callback port from the computer with the browser
+(`ssh -N -L PORT:127.0.0.1:PORT vps`), then open the printed one-time URL. This is
+an account-specific authorization step, so machine setup does not overwrite an
+established `~/.codex/config.toml` or attempt it non-interactively. Verify with
+`codex mcp get vercel`: `transport` must be `streamable_http` and `url` must be
+`https://mcp.vercel.com`.
+
 **Verify, never assume:** `ai-devops doctor` performs a real
 `--sandbox workspace-write` write and fails loudly if Codex cannot write. A
 `--version` probe cannot see this failure mode — that is exactly why it stayed
