@@ -123,5 +123,13 @@ if grep -q 'model_reasoning_effort = "low"' config/codex-portable.toml &&
   ok "portable Codex defaults pin safe effort without hard-coding a model"
 else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
+echo "== Chrome DevTools MCP is managed for both clients =="
+if grep -q '\$McpServers\["chrome-devtools"\]' bin/setup-machine.ps1; then
+  ok "Claude MCP set includes Chrome DevTools"
+else bad "Claude MCP set does not include Chrome DevTools"; fi
+if grep -q 'configure-codex-chrome-devtools.ps1' bin/setup-machine.ps1; then
+  ok "Windows setup configures Chrome DevTools for Codex"
+else bad "Windows setup leaves Codex Chrome DevTools unmanaged"; fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

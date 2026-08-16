@@ -1,0 +1,11 @@
+interface:
+  display_name: "Human App QA"
+  short_description: "Explore web apps like a real customer"
+  default_prompt: "Use $human-app-qa to explore this web app like a real customer and report evidence-backed usability and behavior problems."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "chrome-devtools"
+      description: "Controls and diagnoses a live Chrome browser"
+      transport: "stdio"

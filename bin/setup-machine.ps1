@@ -35,7 +35,8 @@ What it does (idempotent - safe to re-run):
      machine, and a fresh machine ends up matching an established one.
        - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
-       - no secret, plain npx      : playwright, ag-grid, vercel (browser OAuth)
+       - no secret, plain npx      : playwright, chrome-devtools, ag-grid,
+                                      vercel (browser OAuth)
        - codex-cli                 : native `codex mcp-server`, absolute exe
      No token is ever written into either config; only URLs and op:// references.
      Servers we do not define (the Windows-MCP extension, anything hand-added)
@@ -353,13 +354,17 @@ $McpServers["1password"] = @{
   args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
 }
 
-# playwright / ag-grid - plain npx stdio servers, no secret of any kind.
+# playwright / chrome-devtools / ag-grid - plain npx stdio servers, no secret.
 # vercel is remote but authenticates with an interactive OAuth flow that
 # mcp-remote opens in a browser, so it needs no token either - and must NOT go
 # through the remote launcher, which would force a bearer header onto it.
 $McpServers["playwright"] = @{
   command = "cmd"
   args = @("/c", "npx", "-y", "@playwright/mcp@latest")
+}
+$McpServers["chrome-devtools"] = @{
+  command = "cmd"
+  args = @("/c", "npx", "-y", "chrome-devtools-mcp@latest")
 }
 $McpServers["ag-grid"] = @{
   command = "cmd"
@@ -711,6 +716,14 @@ if (Test-Path -LiteralPath $codexFix) {
   & pwsh -NoProfile -File $codexFix -Launcher $Launcher
 } else {
   Warn "Missing $codexFix - Codex 1password left as-is."
+}
+
+Step "Wiring Chrome DevTools MCP into Codex"
+$codexChromeSetup = Join-Path $RepoPath "bin\configure-codex-chrome-devtools.ps1"
+if (Test-Path -LiteralPath $codexChromeSetup) {
+  & pwsh -NoProfile -File $codexChromeSetup
+} else {
+  Warn "Missing $codexChromeSetup - Codex Chrome DevTools MCP left as-is."
 }
 
 # --------------------------------------------------------------------------
