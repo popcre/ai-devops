@@ -76,9 +76,9 @@ from `git worktree list`, and its empty leftover folder was removed). `main` has
 since moved to `99311f8` by other sessions.
 
 **Committed together originally:** `d5215a2` added
-`plan_repo-housekeeping-visibility.md` and this file. **Revised but not yet
-committed on 2026-08-15:** both files were corrected after a Codex critique of
-the proof model. Do not revert those corrections to the original wording.
+`plan_repo-housekeeping-visibility.md` and this file. **Corrected and pushed on
+2026-08-15:** commit `49c5627` repaired the unsafe proof model after a Codex
+critique. Do not revert those corrections to the original wording.
 
 **Not started:** all eight steps of the plan.
 
