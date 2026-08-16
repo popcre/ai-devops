@@ -41,7 +41,7 @@ cd /worksp/ai-devops
 5. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects
-   the Z.ai Coding Plan key from 1Password and proves a real GLM-5.2 Claude Code
+   the Z.ai Coding Plan key from 1Password and proves a real GLM-5.3 OpenCode
    agent call; non-interactive updates reuse the existing protected bootstrap
    file automatically and never change normal Claude/Codex authentication.
 6. Runs `ai-devops doctor`.

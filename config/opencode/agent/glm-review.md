@@ -1,7 +1,7 @@
 ---
 description: Read-only GLM reviewer for ai-devops (ask-glm review sessions)
 mode: primary
-model: zai-coding-plan/glm-5.2
+model: zai-coding-plan/glm-5.3
 tools:
   write: false
   edit: false
