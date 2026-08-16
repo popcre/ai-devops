@@ -1,0 +1,4 @@
+interface:
+  display_name: "DesignFlow Human QA"
+  short_description: "Test DesignFlow through real user journeys"
+  default_prompt: "Use $designflow-human-qa to test DesignFlow as each real user role."
