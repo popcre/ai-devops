@@ -133,6 +133,13 @@ This is different from assuming MG03 from the broad word `Canvas`. The explicit
 If comparable later analogs disagree and no clearly closer row resolves the
 disagreement, abstain.
 
+The comparison must not depend on `Mamba Mentality`, `Kobe`, or any other artwork,
+property, or character words. Reduce both rows to `Canvas | standard | Foil`,
+count the post-change keys for that semantic signature, confirm the dominant key
+means canvas with foil in the rework hierarchy, and then classify. A similar
+artwork phrase may select which evidence row to display, but may never change the
+classification.
+
 ## Review principle
 
 Neither longest-string wins nor shortest-string wins. Choose the phrase that a
