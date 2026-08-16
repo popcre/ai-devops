@@ -65,7 +65,9 @@ Every open `db-work` issue must carry this machine-readable block:
 
 ````text
 ```db-work-scope
-state: eligible
+status: ready
+work_type: structural
+route: shared-db-orchestrator
 priority: 100
 depends_on:
 objects:
@@ -73,10 +75,18 @@ objects:
 ````
 ```
 
-Allowed states are `eligible`, `blocked`, `owner-decision`, `data-only`, and
-`non-structural`. Use exact normalized objects, including every whole-body
-function or trigger the implementation replaces. Higher priority runs first.
-Open dependencies make otherwise eligible work wait.
+Allowed statuses are `ready`, `blocked`, and `owner-decision`. Allowed work types
+are `structural`, `curated-master-data`, `application-data`, `source-data`,
+`repo-maintenance`, `documentation`, and `security-settings`. Routes are explicit
+and have no default: `shared-db-orchestrator`, `curated-master-data-governance`,
+`application-session`, `source-data-session`, `owner-only`, or `repo-maintenance`.
+
+Only `ready + structural + shared-db-orchestrator` is eligible for an author lane.
+It must use exact normalized objects, including every whole-body function or
+trigger the implementation replaces. Non-structural work must not claim database
+objects. Outside-sourced writes into curated `core.*` Master Data keep the
+`curated-master-data-governance` route and never consume an author lane. Higher
+priority runs first. Open dependencies make otherwise ready structural work wait.
 
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
@@ -87,8 +97,9 @@ risk.
 
 An empty lane is justified only by a complete audit with no eligible candidate.
 Unclassified or malformed issues make that proof impossible and the command
-fails. Blocked, owner-decision, data-only and non-structural issues are reported
-but never consume a lane. Preview and merge remain globally serialized. An
+fails. Blocked, owner-decision, and every non-structural work type are reported
+but never consume a lane. `needs-albert` is not a route: after an answer, change
+status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
 
