@@ -872,3 +872,42 @@ Report A's routing guidance holds. Add this for work like Report B's — adoptin
   ephemeral-database contract suite and migration-author lease. The PR is behind
   newly merged `main`; required update, rerun, exact-head review if changed,
   preview and guarded merge remain pending.
+
+### shared-db #1042 / PRs #1043, #1061 and #1062
+
+- PR #1043 reviewer: Kimi K3 requested and pinned by the `ai-kimi` wrapper.
+  Exact reviewed head `5788d02f3c77d6b3e0621a263efa9aca7e189d68`.
+  Verdict: APPROVE. It confirmed the owner decision is authenticated, unedited,
+  exact-main, exact-source-PR, exact-risk and exact-allowlist bound; caller prose
+  and booleans cannot authorize production. It noted two accurate non-blocking
+  hardening opportunities: cleaner malformed-artifact errors and an additional
+  artifact workflow-run binding. Both current paths fail closed.
+- PR #1061 reviewer: the same persistent Kimi session re-read exact head
+  `31a21867ca19dc67ed9e4a557e8c40c9268ac1c7`. Verdict: APPROVE. It confirmed
+  historical preview recovery is a no-write ledger proof, refuses any missing
+  version, names the exact migration files and stays structurally distinct from a
+  normal exactly-once preview apply. No Critical or High finding remained.
+- Kimi policy/tool adherence: read-only wrapper only; no edit, shell, database
+  access, secret or licensed row. One first transport attempt continued after its
+  caller was cut off and produced no durable session or verdict, so it was rejected
+  and rerun durably. Tokens, cache, cost and returned model figures are unavailable
+  from Kimi headless output and are intentionally not estimated.
+- PR #1062 reviewer: Grok 4.6 through `ai-grok-review`, exact head
+  `470b9c8e0d1adc25c0455de7001fafce7d7def85`. Verdict: APPROVE. It confirmed the
+  absent historical author-lease check is waived only for the exact four-part pin:
+  PR 924, head `5135b668d87c1639281c506ae75fde75211b7019`, merge
+  `96bf385aa5c0f703ec98f5730249f586964f5142`, and ordered Disney pair
+  `20260813210000,20260813220000`. Every other check and later historical
+  source/preview proof remains mandatory. Defects caught: 0; false positives: 0.
+- Grok continuity and usage: the first broad turn cancelled at the 20-turn bound
+  without a verdict and was rejected. It reported 2,119,168 tokens, 1,961,216
+  cached, 20 turns and $0.23232336. The required fresh narrow retry completed in
+  14 turns with 1,261,130 tokens, 1,155,968 cached and $0.14194184. Total reported
+  cost: $0.37426520. No permission was broadened.
+- Final outcome: #1043, #1061 and #1062 merged. Governed production run
+  `31929434954` applied exactly the Disney pair and catalog verification passed.
+  Its final lock-release proof false-failed after the lock ref was already deleted;
+  a fresh read and coordination audit proved no production lock remained. An
+  independent ledger run read 452 production versions and removed the pair from
+  drift; a separate read-only catalog query confirmed all four nullable columns,
+  the style-guide foreign key and partial index.
