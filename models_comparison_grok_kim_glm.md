@@ -948,3 +948,25 @@ Report A's routing guidance holds. Add this for work like Report B's — adoptin
   independent ledger run read 452 production versions and removed the pair from
   drift; a separate read-only catalog query confirmed all four nullable columns,
   the style-guide foreign key and partial index.
+
+### shared-db #1049 / PR #1059, final current-main review
+
+- Reviewer: Qwen 3.8 Max, selected by manager rotation sequence 32 and proven by
+  the persistent `ai-qwen` wrapper. Requested and returned model:
+  `qwen3.8-max-preview`.
+- Exact reviewed head: `78f6e2a6428106e204b4ed5563d0c5f757a2f6c0`, based on
+  `main` commit `dbfa280eb154d1a87166ae14fcdfa3e9ee227c48`.
+- Verdict: APPROVE. No material defect or uncertainty was reported after a fresh
+  review of all six security-invoker views, identity and many-to-many behavior,
+  support ratios, timestamp semantics, direct/inferred separation, grants,
+  licensed-field exclusion, query shape and invented-data contracts.
+- Confirmed defects caught: 0. False positives: 0. No implementation change was
+  requested by this final review.
+- Policy/tool adherence: one named read-only session in a standalone exact-head
+  clone. The clone remained clean. No database, secret, licensed row, edit, push,
+  preview or production access was given to Qwen.
+- Reported usage: 1,678,294 input and 32,517 output tokens across 19 internal
+  turns. Cache, cost and latency were not reported and are not estimated.
+- Final outcome at recording time: every PR check is green, including the full
+  ephemeral-database contracts, SQL guards, object collision and author lease.
+  The bounded preview rehearsal and guarded merge remain separate governed steps.
