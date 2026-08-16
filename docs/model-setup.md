@@ -12,7 +12,7 @@ roles, adapting CLI flags, and how the scripts use the commands.
   final product/architecture review.
 - **GPT-5.5 / Codex** — coding, implementation, testing, fixing.
 - **Opus** — independent review throughout (plan, diff, security, final).
-- **GLM-5.2** — optional independent second opinion invoked by either Claude or
+- **GLM-5.3** — optional independent second opinion invoked by either Claude or
   Codex through `ai-glm`, in named persistent sessions; defaults to read-only review.
 
 ## GLM configuration

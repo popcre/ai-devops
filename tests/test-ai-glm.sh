@@ -32,7 +32,7 @@ echo "== pinned config =="
 check "version file exists"                 "test -s '$REPO_ROOT/config/opencode/version'"
 check "version is a bare semver"            "grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' '$REPO_ROOT/config/opencode/version'"
 check "opencode.json is valid json"         "jq -e . '$REPO_ROOT/config/opencode/opencode.json' >/dev/null"
-check "model is pinned to glm-5.2"          "jq -e '.model==\"zai-coding-plan/glm-5.2\"' '$REPO_ROOT/config/opencode/opencode.json' >/dev/null"
+check "model is pinned to glm-5.3"          "jq -e '.model==\"zai-coding-plan/glm-5.3\"' '$REPO_ROOT/config/opencode/opencode.json' >/dev/null"
 check "autoupdate disabled"                 "jq -e '.autoupdate==false' '$REPO_ROOT/config/opencode/opencode.json' >/dev/null"
 check "sharing disabled"                    "jq -e '.share==\"disabled\"' '$REPO_ROOT/config/opencode/opencode.json' >/dev/null"
 
@@ -41,7 +41,7 @@ for a in glm-review glm-implement; do
   f="$REPO_ROOT/config/opencode/agent/$a.md"
   check "$a exists"                         "test -f '$f'"
   check "$a has webfetch: false"            "grep -q '^  webfetch: false' '$f'"
-  check "$a pins the model"                 "grep -q '^model: zai-coding-plan/glm-5.2$' '$f'"
+  check "$a pins the model"                 "grep -q '^model: zai-coding-plan/glm-5.3$' '$f'"
 done
 check "glm-review has write: false"         "grep -q '^  write: false' '$REPO_ROOT/config/opencode/agent/glm-review.md'"
 check "glm-review has edit: false"          "grep -q '^  edit: false'  '$REPO_ROOT/config/opencode/agent/glm-review.md'"
@@ -342,7 +342,7 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
           return 124
         fi
         [ "$JOB_TURN" = success ] || return 1
-        printf "%s" '\''{"finish":"stop","model":{"id":"glm-5.2"},"content":[{"type":"text","text":"done"}],"tokens":null}'\''
+        printf "%s" '\''{"finish":"stop","model":{"id":"glm-5.3"},"content":[{"type":"text","text":"done"}],"tokens":null}'\''
       }
       PROMPT_TEXT=fixture; PROMPT_FILE=""; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex
       AI_GLM_TEST_MODE=1; AI_GLM_TEST_PAUSE_AT="$JOB_PAUSE"; AI_GLM_TEST_READY="$JOB_READY"; AI_GLM_TEST_RELEASE="$JOB_RELEASE"; AI_GLM_TEST_FAIL_AT="$JOB_FAIL"
