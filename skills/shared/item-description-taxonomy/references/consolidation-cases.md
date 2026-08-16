@@ -118,6 +118,21 @@ wording across keys is expected and should be reviewed for missing distinguishin
 detail, not presented as a categorization conflict. For old items, leave MG03
 unresolved whenever reliable evidence does not identify it.
 
+## Historical-to-later analogs
+
+An explicit treatment is reliable MG03 evidence when a closely corresponding
+post-change item has the same physical product and treatment. For example,
+`Printed Canvas w Holofoil_[artwork]_20x16 x1.5` and a later
+`Printed Canvas w Holofoil_[related artwork]_16x20 x1.5` are strong analogs.
+Treat `20x16` and `16x20` as the same dimensions, ignore artwork-wording changes,
+and propose the later item's complete stored MG01+MG02+MG03 key. Do not reduce
+that key to its first characters.
+
+This is different from assuming MG03 from the broad word `Canvas`. The explicit
+`Holofoil` treatment plus the corresponding later item supplies the evidence.
+If comparable later analogs disagree and no clearly closer row resolves the
+disagreement, abstain.
+
 ## Review principle
 
 Neither longest-string wins nor shortest-string wins. Choose the phrase that a

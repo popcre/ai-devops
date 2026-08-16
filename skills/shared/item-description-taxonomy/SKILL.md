@@ -73,6 +73,11 @@ product concept plus its observed variants.
   not evidence that a key is wrong.
 - Use pre-change descriptions only as candidates to match into a trusted keyed
   group. Do not let their old MG values influence the new grouping.
+- Do not turn the abstention rule into a blanket ban on historical assignments.
+  When a later item is a clear physical-product and treatment analog, carry its
+  complete stored MG01+MG02+MG03 key to the older item and show the supporting
+  later item. Treat rotated dimensions such as `16x20` and `20x16` as the same
+  size when orientation does not change the product.
 - If an old description supports MG01 and MG02 but not MG03, leave MG03
   unresolved until other evidence identifies it. Never assume a default MG03.
 
