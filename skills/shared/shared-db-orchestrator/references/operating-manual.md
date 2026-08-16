@@ -12,7 +12,17 @@
 
 ## Startup recovery
 
-Fail closed if GitHub cannot be read. Confirm the sole open orchestrator marker,
+Fail closed if GitHub cannot be read. First distinguish a real GitHub outage or
+login failure from the known Windows Codex profile failure. If `gh config get
+git_protocol` reports `GitHub CLI\\config.yml: Access is denied`, say exactly
+that the restricted Codex task profile cannot read the local GitHub settings.
+Repair it with `pwsh -NoProfile -File
+C:\repos\ai-devops\bin\repair-codex-github-cli-access.ps1`, then repeat the
+same command. Do not call GitHub unavailable and do not widen the task to full
+filesystem access. The repair grants read-only access to that one settings
+folder; GitHub credentials remain in Windows Credential Manager.
+
+Confirm the sole open orchestrator marker,
 then rebuild state from current `main`, open `db-work` and `db-claim` issues,
 open pull requests, GitHub coordination refs and local worktrees. Documents and
 local scratch registers are never authority.
