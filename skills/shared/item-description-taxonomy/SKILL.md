@@ -78,6 +78,16 @@ product concept plus its observed variants.
   complete stored MG01+MG02+MG03 key to the older item and show the supporting
   later item. Treat rotated dimensions such as `16x20` and `20x16` as the same
   size when orientation does not change the product.
+- Make the MG decision from a semantic signature consisting of physical product,
+  meaningful construction or shape, and treatment. Licensor, property, artwork,
+  slogan, color, character, and size orientation must have zero classification
+  weight. Use those excluded fields only to choose a readable supporting example
+  after the MG result is already decided.
+- Count every post-change full key associated with the semantic signature and
+  show that distribution. Select a full key only when one result has strong,
+  explainable support and agrees with the rework definition. If the evidence
+  consistently supports MG01+MG02 but splits across sibling MG03 values, propose
+  MG01+MG02 and leave MG03 blank.
 - If an old description supports MG01 and MG02 but not MG03, leave MG03
   unresolved until other evidence identifies it. Never assume a default MG03.
 
@@ -152,6 +162,9 @@ Provide two review surfaces:
    wording, count, examples, confidence, and reviewer decision.
 2. **Row-level parsing:** original description and the five extracted chunks,
    linked to the proposed canonical family.
+3. **Classification evidence:** physical product, construction/shape, treatment,
+   later full-key distribution, chosen level, rework meaning, and a plain-English
+   decision trace. State explicitly that artwork was excluded from the decision.
 
 Flag ambiguity and MG disagreement. Do not hide it behind a numeric score.
 
