@@ -834,3 +834,41 @@ Report A's routing guidance holds. Add this for work like Report B's — adoptin
 2. **Kimi takes the phase with the most sub-items and the most downstream dependents**, because its drift documentation is what later phases actually build on.
 3. **Grok reviews**, and implements only well-bounded, self-contained additions — with a checker.
 4. **Run the real thing before declaring done.** Not a fourth review. An execution.
+
+## 2026-08-16 review rotation evidence
+
+### shared-db #1049 / PR #1059
+
+- Reviewer: Qwen 3.8 Max requested through the manager-assigned `ai-qwen`
+  wrapper. The wrapper reported requested and returned model
+  `qwen3.8-max-preview`.
+- Exact reviewed head: `428a28a7c497e0774bd659cd08d566f25b160ea3`.
+- Verdict: APPROVE, with no blocking findings. A same-session follow-up preserved
+  APPROVE after a fresh exact-file read.
+- Confirmed: all six security-invoker views use normalized Asset relationships;
+  preserve source namespaces, source IDs and many-to-many pairs; expose support
+  counts, Jaccard ratios, evidence strength and timestamps; keep inferred
+  Property-to-Character evidence separate from direct Warner assertions; retain
+  the existing authenticated/service-role access pattern; deny anonymous access;
+  and expose no raw payload, asset name, path, URL or label fields.
+- Findings: five accurate, non-blocking suggestions. In priority order: correlated
+  per-pair support subqueries and missing endpoint indexes; undocumented timestamp
+  interval semantics; missing caution comments on four of six views; contract tests
+  that do not pin every strength branch and timestamp; redundant `DISTINCT` over
+  unique Asset endpoint pairs.
+- Defects caught: 0. False positives: 0. No Critical, High or Medium objection.
+- Policy/tool adherence: the read-only wrapper was used from a standalone review
+  clone pinned to the exact head because the linked implementation worktree's
+  external `.git` directory correctly failed the wrapper permission gate. No edit,
+  database call, secret, licensed row, push, preview or production action occurred.
+- Continuity: one named persistent session and one follow-up. The initial review
+  used 19 internal turns; the focused follow-up used 3. The follow-up requested the
+  five suggestions omitted by the wrapper's extracted verdict and retained the
+  same conclusion.
+- Reported usage: initial review 1,233,354 input and 24,082 output tokens; follow-up
+  1,543,541 input and 27,036 output tokens. Cache and cost were not reported and
+  are not estimated.
+- Final outcome at recording time: all PR checks green, including the complete
+  ephemeral-database contract suite and migration-author lease. The PR is behind
+  newly merged `main`; required update, rerun, exact-head review if changed,
+  preview and guarded merge remain pending.
