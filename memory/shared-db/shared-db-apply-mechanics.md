@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: c2fb38ad-dde0-459e-9563-443c4d2c38e1
-  modified: 2026-08-06T17:58:56.647Z
+  modified: 2026-08-13T20:21:32.241Z
 ---
 
 Applying `u2giants/shared-db` migrations to the shared backend
@@ -14,12 +14,6 @@ Applying `u2giants/shared-db` migrations to the shared backend
 - The **Supabase MCP is read-only** in this environment — `apply_migration`
   fails with "Cannot apply migration in read-only mode." Use `execute_sql` only
   for read-only validation. DDL goes through GitHub, not MCP.
-- **The Supabase MCP is connected to PRODUCTION `qsllyeztdwjgirsysgai`, not
-  preview** (confirmed 2026-08-06). This misleads: querying a preview-only
-  object such as `plm.taxonomy_parallel_observation` returns
-  `42P01 relation does not exist`, which reads as a broken schema but actually
-  means *wrong database*. Phase 6 objects exist ONLY on preview. There is no MCP
-  route to preview — use the workflow lanes or the Management API.
 - **The workflow is only safe when the backlog is empty.** It runs a plain
   `supabase db push`, which promotes EVERY pending file, not just yours. When
   others are pending (deliberately-held ColdLion work, etc.), use the bounded
@@ -34,10 +28,20 @@ Applying `u2giants/shared-db` migrations to the shared backend
   applied), db push refuses: "Found local migration files to be inserted before
   the last migration… Rerun with --include-all." Then apply batch-applies ALL
   pending migrations from every session — a coordination decision, not unilateral.
-- **Preview project (`rjyboqwcdzcocqgmsyel`) ledger is unreliable** (has
-  `preview_ledger_marker` rows): dry-run says "up to date" while apply fails with
-  "repair the migration history table." Preview could not be used to de-risk
-  as of 2026-07-22. Verify logic read-only against prod data instead.
+- **Preview project (`rjyboqwcdzcocqgmsyel`): its LEDGER still lies, but preview
+  itself IS usable.** Corrected 2026-08-13. The ledger is applied out of order and
+  carries `preview_ledger_marker` rows, so a dry-run can say "up to date" while an
+  apply fails with "repair the migration history table," and a high max applied
+  version does NOT mean everything below it is applied. **The old line "preview
+  could not be used to de-risk" (2026-07-22) is SUPERSEDED** — through August
+  preview carried real rehearsals and the full PopDAM OrderList import (3,212
+  orders / 24,010 lines, idempotent, all 10 balance checks pass). Apply there by
+  the bounded path, then verify **by catalog object, never by the ledger**.
+- **Preview and production have diverged in BOTH directions — neither predicts the
+  other** (`AGENTS.md` §12.1 item 11, verified 2026-08-11). Preview holds all 23
+  `plm.pmt_*` tables and production holds none; `20260810140000` is on production
+  and not on preview. A green preview rehearsal never means production will match:
+  post-apply verification against production objects is mandatory.
 
 Related: [[shared-db-change]]. popdam3 is main-only and its GitHub ruleset
 **blocks creating new branches** ("creations being restricted") — feature work
