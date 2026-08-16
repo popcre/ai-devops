@@ -159,6 +159,17 @@ if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$nul
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
 if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
 
+# GitHub CLI creates its config folder with inheritance disabled on some Windows
+# installations. Codex's restricted task account can then see the workspace but
+# `gh` fails before it can run because config.yml is unreadable. Repair only that
+# folder and grant only read/execute; credentials remain in Windows Credential
+# Manager and no token is copied or exposed.
+$repairGhAccess = Join-Path $RepoPath "bin\repair-codex-github-cli-access.ps1"
+if (Get-Command gh -ErrorAction SilentlyContinue -and (Test-Path -LiteralPath $repairGhAccess)) {
+  Step "GitHub CLI access for restricted Codex tasks"
+  & $repairGhAccess
+}
+
 # cloudflared - used by the SSH config's ProxyCommand so `ssh vps` works on any network.
 if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) { Ensure-Winget "Cloudflare.cloudflared" "cloudflared" }
 if (Get-Command cloudflared -ErrorAction SilentlyContinue) { Ok "cloudflared" } else { Warn "cloudflared not found; `ssh vps` (tunnel) will not work until it is installed." }
