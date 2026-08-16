@@ -231,8 +231,9 @@ else
   cat > "$LAUNCH_SH" <<EOF
 #!/usr/bin/env sh
 # [ai-devops] managed by setup-secrets.sh — do not edit by hand.
-# Reuses the one-shot shell environment. The fallback is locked so simultaneous
-# non-login MCP startups cannot create a parallel 1Password request storm.
+# Resolve secrets while holding the refresh lock, then release it BEFORE the
+# long-running MCP server starts. Holding this lock around the server leaves
+# every later MCP waiting until Codex times out.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -240,7 +241,20 @@ fi
 if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; then
   exec "\$@"
 fi
-exec flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- "\$@"
+_aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
+_aidev_exports="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+import os, shlex, sys
+for name in sys.argv[1:]:
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit("empty 1Password value: " + name)
+    print("export %s=%s" % (name, shlex.quote(value)))
+' \$_aidev_names 2>/dev/null)" && eval "\$_aidev_exports" || {
+  echo "ai-devops: serialized MCP secret refresh failed" >&2
+  exit 1
+}
+unset _aidev_names _aidev_exports
+exec "\$@"
 EOF
   chmod 755 "$LAUNCH_SH"
   ok "Wrote $LAUNCH_SH"
