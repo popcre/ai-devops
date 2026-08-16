@@ -123,3 +123,16 @@ removing `--` from both generated launchers. **Do not re-add `--` or remove
 3. **The config/launch layer, not the server, was the primary lever** — confirmed
    by an independent Codex review.
 
+### 2026-08-16 Ubuntu follow-up: the lock covered the server lifetime
+
+Hetz Codex startups began timing out on the 1Password MCP. The Ubuntu launcher
+ran `flock ... op run ... -- <MCP server>`. Because the child inherited the open
+lock, one long-running GLM process held the shared refresh lock for about 11
+days. Every later 1Password startup queued behind it and missed Codex's 30-second
+startup limit.
+
+The permanent fix is in `bin/setup-secrets.sh`: hold the lock only while
+resolving secrets, release it, then start the MCP server with the resolved values
+already in memory. Do not extend the timeout. Do not wrap a long-running server
+inside `flock` or `op run`.
+

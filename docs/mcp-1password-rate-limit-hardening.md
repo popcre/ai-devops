@@ -95,6 +95,19 @@ Empirically verified on t16 (2026-07-23): cold launch created the cache and ran
 the child; a warm launch 2 s later ran the child with the cache **mtime
 unchanged** — proving zero 1Password calls on reuse.
 
+### Ubuntu lock lifetime correction (2026-08-16)
+
+The Ubuntu launcher used `flock ... op run ... -- <MCP server>`. File locks are
+inherited by child processes, so the lock remained held for the MCP server's
+entire lifetime. A long-running GLM process on Hetz exposed the failure: every
+later 1Password MCP launch waited behind that lock and exceeded Codex's startup
+limit.
+
+`bin/setup-secrets.sh` now runs only the short secret-resolution command under
+`flock`, imports the resolved environment in memory, releases the lock, and then
+starts the MCP server. Never wrap a long-running server in `flock` or `op run`.
+The lock must cover secret resolution only.
+
 ## The launcher bug this work also fixed (important)
 
 The caching launcher was **committed but had never been deployed** (the on-disk
@@ -156,6 +169,7 @@ hand-edited client config. The durable source is the `ai-devops` repo:
 |---|---|
 | `bin/mcp-secret-launch.ps1` | Runtime launcher: single-flight mutex + 15-min DPAPI cache. |
 | `bin/setup-machine.ps1` | Generator: writes both `.cmd` launchers and merges one server list into Claude Desktop + Claude Code; now also calls the Codex step. |
+| `bin/setup-secrets.sh` | Ubuntu generator: holds its file lock only during secret resolution, never for the MCP server lifetime. |
 | `bin/configure-codex-1password.ps1` | Routes Codex's 1Password through the launcher; strips its plaintext token. |
 | `config/mcp.env.example` | Template copied to `mcp.env`. |
 
