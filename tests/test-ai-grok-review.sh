@@ -44,6 +44,14 @@ STUB="$TMP/bin"; mkdir -p "$STUB"
 cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
+# Keep a copy of the prompt: the wrapper deletes it, and the tests need to
+# assert what the reviewer was actually told.
+for _i in $(seq 1 $#); do :; done
+_prev=""
+for _a in "$@"; do
+  [ "$_prev" = "--prompt-file" ] && [ -f "$_a" ] && cp "$_a" "$TMPDIR_FOR_TEST/prompt-copy"
+  _prev="$_a"
+done
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "grok 0.2.118 (stub)"; exit 0 ;;
@@ -326,6 +334,42 @@ run new plainreview --prompt "review this" >/dev/null 2>&1
 PLAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
 check "ordinary clone still reviewed in place" \
   "[ \"\$(cd '$PLAIN' && pwd -P)\" = \"\$(cd '$REPO' && pwd -P)\" ]"
+
+echo "== evidence packet (issue #34, step 3) =="
+# Grok runs with --deny Bash, so it cannot run `git diff` and cannot work out
+# what changed. Without a packet it burns its whole budget rediscovering the
+# comparison: 20 turns, ~3M tokens, no verdict (2026-08-16/17).
+: > "$TMP/argv.txt"
+echo second > "$REPO/b.txt"; git -C "$REPO" add -A; git -C "$REPO" commit -qm second
+run new packetreview --prompt "review this" >/dev/null 2>&1
+PF="$(grep -o -- '--prompt-file [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+check "packet is built in the review directory" "test -s '$REPO/.ai-review/MANIFEST.md'"
+check "packet carries the real head sha" \
+  "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$REPO/.ai-review/MANIFEST.md'"
+check "packet is sealed with a hash"            "test -s '$REPO/.ai-review/MANIFEST.sha256'"
+check "packet verifies"                         "'$REPO_ROOT/bin/ai-review-packet' verify '$REPO/.ai-review'"
+check "packet never enters the repository"      "[ -z \"\$(git -C '$REPO' status --porcelain -- .ai-review)\" ]"
+
+# The prompt must point at the packet AND keep the reviewer's freedom to read on.
+check "prompt points at the manifest"           "grep -q '.ai-review/MANIFEST.md' '$TMP/prompt-copy'"
+check "prompt keeps the caller's own brief"     "grep -q 'review this' '$TMP/prompt-copy'"
+check "prompt still demands the verdict heading" "grep -qF '## Verdict' '$TMP/prompt-copy'"
+check "prompt does NOT fence the reviewer in" \
+  "grep -q 'not a boundary' '$TMP/prompt-copy'"
+
+# Identity is the wrapper's job. A caller-typed SHA may only be CHECKED.
+META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*packetreview.json' | head -1)"
+check "meta records the head sha"               "[ \"\$(jq -r .head '$META')\" = \"\$(git -C '$REPO' rev-parse HEAD)\" ]"
+BASE_IN_META="$(jq -r '.base // ""' "$META")"
+check "meta records the base sha derived by the wrapper" \
+  "[ \"$BASE_IN_META\" = \"\$(git -C '$REPO' rev-parse HEAD~1)\" ]"
+check "meta records the packet hash"            "[ -n \"\$(jq -r .packet_sha256 '$META')\" ]"
+check "wrong --assert-head is refused" \
+  "! ( cd '$REPO' && bash '$SCRIPT' new badsha --prompt x --assert-head 0000000000000000000000000000000000000000 )"
+check "refusal names both shas" \
+  "( cd '$REPO' && bash '$SCRIPT' new badsha2 --prompt x --assert-head 0000000000000000000000000000000000000000 ) 2>&1 | grep -q 'actual'"
+check "right --assert-head is accepted" \
+  "( cd '$REPO' && bash '$SCRIPT' new goodsha --prompt x --assert-head \"\$(git -C '$REPO' rev-parse HEAD)\" ) >/dev/null 2>&1"
 
 echo
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"

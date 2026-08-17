@@ -191,7 +191,19 @@ check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI
 # boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
 if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
 if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
-if [ "$(grep -Fc 'boundary="$(review_boundary "$root" "$name")"' "$AI_GLM")" -eq 2 ]; then ok "review boundary is worktree-safe"; else bad "review boundary is worktree-safe"; fi
+# Since the evidence packet landed (issue #34), both call sites go through
+# prepare_review, which resolves the boundary via review_boundary and then builds
+# the packet inside it. The guarantee is unchanged: the directory handed to GLM is
+# never a raw worktree.
+if [ "$(grep -Fc 'prepare_review "$root" "$name"' "$AI_GLM")" -eq 2 ]; then ok "both review paths go through prepare_review"; else bad "both review paths go through prepare_review"; fi
+if [ "$(grep -Fc 'boundary="$REVIEW_DIR"' "$AI_GLM")" -eq 2 ]; then ok "boundary comes from prepare_review"; else bad "boundary comes from prepare_review"; fi
+check "prepare_review is worktree-safe"      "grep -Fq 'REVIEW_DIR=\"\$(review_boundary \"\$root\" \"\$name\")\"' '$AI_GLM'"
+check "prepare_review builds an evidence packet" "grep -Fq '\$PACKET_BIN\" build' '$AI_GLM'"
+check "review prompt points at the packet"   "grep -Fq '.ai-review/MANIFEST.md' '$AI_GLM'"
+check "packet does not fence the reviewer in" "grep -Fq 'not a boundary' '$AI_GLM'"
+check "wrapper derives head itself"          "grep -Fq 'REVIEW_HEAD=\"\$(git -C \"\$REVIEW_DIR\" rev-parse HEAD' '$AI_GLM'"
+check "caller sha is only ever checked"      "grep -Fq 'assert-head does not match' '$AI_GLM'"
+check "stale head is announced"              "grep -Fq 'The earlier evidence is STALE' '$AI_GLM'"
 if grep -Fq 'create_session "$name" glm-review "$boundary"' "$AI_GLM"; then ok "session is created on the safe boundary"; else bad "session is created on the safe boundary"; fi
 if grep -Fq 'await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META"' "$AI_GLM"; then ok "implement passes sandbox directory"; else bad "implement passes sandbox directory"; fi
 
