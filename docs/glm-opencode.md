@@ -373,6 +373,17 @@ first and then re-measure before touching it.
 9. **No per-call overrides** (`--model`, `--agent`, `--directory`, ...). A stable request
    prefix is what makes provider caching work and a stable agent is what keeps a review
    read-only. Adding one override quietly costs both.
+10. **A review that starts in a linked Git worktree is given a snapshot, never the
+   worktree itself.** OpenCode gives a session exactly ONE directory, and in a linked
+   worktree `.git` is a FILE pointing at `<main-repo>/.git/worktrees/<name>` — outside
+   that directory. On 2026-08-17 that killed a GLM review on its first git-adjacent read,
+   before any code was read: *"GLM's first review attempt stopped before reading code
+   because this worktree's Git control files live outside its review boundary."*
+   There is no second-directory option to turn on, so `ai-glm` routes the review
+   directory through `review_boundary()` → `bin/ai-review-sandbox`, which builds a
+   self-contained disposable clone carrying HEAD, uncommitted edits and untracked files.
+   The same wiring exists in `ai-kimi`, `ai-qwen` and `ai-grok-review`. Do not hand any
+   reviewer a raw worktree path, and do not try to widen a boundary instead.
 
 ### Windows - every one of these cost a failed setup run in front of Albert
 

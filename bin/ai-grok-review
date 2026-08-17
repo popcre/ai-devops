@@ -124,6 +124,26 @@ repo_root() {
     || die "ai-grok-review must be run inside a git repository."
 }
 
+
+# --- review boundary ----------------------------------------------------------
+# A delegated reviewer gets exactly ONE directory. In a linked worktree the
+# repository's control files live outside it, so the reviewer is refused on its
+# first git-adjacent read and the run dies before any code is read.
+# ai-review-sandbox turns such a worktree into a self-contained snapshot; in an
+# ordinary clone it echoes the root unchanged. See that script's header.
+SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
+[ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
+review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
+  [ -f "$1/.git" ] || { printf '%s' "$1"; return 0; }
+  [ -n "$SANDBOX_BIN" ] || die "this is a linked worktree and ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
+  "$SANDBOX_BIN" ensure "$1" "$2" || die "could not prepare a review snapshot for the worktree $1"
+}
+release_boundary() { # release_boundary ROOT TAG
+  [ -f "$1/.git" ] || return 0
+  [ -n "$SANDBOX_BIN" ] || return 0
+  "$SANDBOX_BIN" remove "$1" "$2" || true
+}
+
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
   local root="$1" remote
@@ -511,7 +531,7 @@ cmd_new() {
   build_prompt_file "$pf"
 
   note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
-  rc="$(run_turn "$repo" "$out" "$pf" "$turns")"
+  rc="$(run_turn "$(review_boundary "$repo" "grok-$name")" "$out" "$pf" "$turns")"
   if ! await_result "$out" "review '$name'"; then
     note "  grok exit status was $rc — which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -569,7 +589,7 @@ cmd_ask() {
   build_prompt_file "$pf"
 
   note "Grok review '$name' continuing session $sid (max-turns $turns)…"
-  rc="$(run_turn "$repo" "$out" "$pf" "$turns" "$sid")"
+  rc="$(run_turn "$(review_boundary "$repo" "grok-$name")" "$out" "$pf" "$turns" "$sid")"
   if ! await_result "$out" "review '$name'"; then
     note "  grok exit status was $rc — which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -650,6 +670,7 @@ cmd_delete() {
   local rid meta; rid="$(repo_id "$(repo_root)")"
   meta="$(find_meta "$rid" "$1")"
   rm -f "$meta"
+  release_boundary "$(repo_root)" "grok-$1"   # disposable snapshot, never outlives its session
   note "deleted local session record '$1' (Grok's own session history is untouched)."
 }
 

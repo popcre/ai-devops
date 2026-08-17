@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# ai-review-sandbox — make a linked Git worktree reviewable by a single-directory reviewer.
+#
+# WHY THIS EXISTS
+#
+# Every delegated reviewer we drive (GLM/OpenCode, Kimi, Qwen, Grok, Codex,
+# DeepSeek) is given exactly ONE directory as its boundary. That is fine in an
+# ordinary clone, where `.git/` sits inside that directory. It is NOT fine in a
+# linked worktree: there `.git` is a one-line FILE pointing at
+# `<main-repo>/.git/worktrees/<name>`, which is outside the boundary. The
+# reviewer's first `git`-adjacent read is refused and the run dies before any
+# code is read — observed on 2026-08-17 as "GLM's first review attempt stopped
+# before reading code because this worktree's Git control files live outside its
+# review boundary".
+#
+# None of those tools accept a second directory, so the boundary cannot simply be
+# widened. Instead this script hands the reviewer a SELF-CONTAINED, disposable
+# snapshot of the worktree: a real clone (its own `.git/` inside the boundary),
+# checked out at the worktree's HEAD, with the worktree's uncommitted edits and
+# untracked files reproduced on top. The reviewer sees exactly the code under
+# review and never needs to look outside its own directory.
+#
+# The recipe is the one already proven by ai-glm's implementation clone
+# (clone --no-hardlinks, detach at base, apply `diff HEAD`), plus untracked
+# files, which a review needs because brand-new files are usually the point.
+#
+#   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
+#   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
+#   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
+#   ai-review-sandbox is-worktree <dir>          # exit 0 when <dir> is a linked worktree
+#
+# In an ordinary clone every command is a no-op and `ensure`/`path` simply echo
+# <repo-root>, so callers can wire this in unconditionally.
+#
+# <tag> namespaces one caller/session against another (e.g. "glm-authfix").
+# Snapshots live under $AI_REVIEW_SANDBOX_DIR and are safe to delete at any time;
+# they are never the source of truth and are never pushed anywhere.
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
+MARKER=".ai-review-sandbox"
+
+die()  { printf 'ai-review-sandbox: %s\n' "$1" >&2; exit 1; }
+warn() { printf 'ai-review-sandbox: %s\n' "$1" >&2; }
+
+# A linked worktree is exactly the case where `.git` is a file, not a directory.
+is_worktree() { [ -f "$1/.git" ] && ! [ -d "$1/.git" ]; }
+
+canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
+
+valid_tag() {
+  case "$1" in
+    ''|*[!a-zA-Z0-9._-]*) return 1 ;;
+    *) [ "${#1}" -le 64 ] ;;
+  esac
+}
+
+sandbox_id() { # sandbox_id ROOT TAG -> stable directory name
+  local h
+  h="$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+  printf '%s-%s' "$2" "$h"
+}
+
+sandbox_path() { printf '%s/%s' "$SANDBOX_DIR" "$(sandbox_id "$1" "$2")"; }
+
+# Refuse to touch anything that is not one of ours: a managed snapshot always
+# carries the marker file AND lives under the sandbox directory.
+is_managed() {
+  local d="$1"
+  case "$d" in "$SANDBOX_DIR"/*) ;; *) return 1 ;; esac
+  [ -f "$d/$MARKER" ]
+}
+
+remove_sandbox() {
+  local d="$1"
+  [ -e "$d" ] || return 0
+  is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+}
+
+copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-ignored files
+  local src="$1" dst="$2" rel
+  while IFS= read -r -d '' rel; do
+    [ -n "$rel" ] || continue
+    mkdir -p "$dst/$(dirname "$rel")"
+    cp -p "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
+  done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
+}
+
+create_or_refresh() { # create_or_refresh ROOT TAG STAGE
+  local root="$1" tag="$2" stage="$3" base carry
+  base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
+    || die "worktree $root has no commits yet; there is nothing to snapshot."
+
+  # Reuse the snapshot only when it already holds the commit we need; otherwise
+  # rebuild it. Rebuilding is always correct and a stale snapshot never is.
+  if [ -d "$stage/.git" ] && is_managed "$stage" \
+     && git -C "$stage" cat-file -e "${base}^{commit}" 2>/dev/null; then
+    git -C "$stage" reset --hard --quiet "$base" 2>/dev/null || die "could not reset the review snapshot to $base"
+    git -C "$stage" clean -fdq 2>/dev/null || true
+  else
+    remove_sandbox "$stage"
+    mkdir -p "$(dirname "$stage")"
+    git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$stage" 2>/dev/null \
+      || die "could not create the review snapshot at $stage"
+    git -C "$stage" remote remove origin >/dev/null 2>&1 || true
+    git -C "$stage" checkout --quiet --detach "$base" 2>/dev/null \
+      || die "could not check out $base in the review snapshot"
+  fi
+
+  # Uncommitted edits, then untracked files: together these make the snapshot
+  # byte-identical to what a human sees in the worktree.
+  carry="$(mktemp)"
+  git -C "$root" diff HEAD --binary > "$carry" 2>/dev/null || true
+  if [ -s "$carry" ]; then
+    git -C "$stage" apply "$carry" 2>/dev/null \
+      || { rm -f "$carry"; die "could not reproduce the worktree's uncommitted changes in the review snapshot"; }
+  fi
+  rm -f "$carry"
+  copy_untracked "$root" "$stage"
+
+  printf '%s\n' "$root" > "$stage/$MARKER"
+  printf '%s\n' "$MARKER" >> "$stage/.git/info/exclude"
+  printf 'AI-REVIEW-SANDBOX.md\n' >> "$stage/.git/info/exclude"
+  cat > "$stage/AI-REVIEW-SANDBOX.md" <<EOF
+# Review snapshot — not the working copy
+
+This directory is a disposable, self-contained snapshot of:
+
+    $root
+
+That path is a linked Git worktree, so its Git control files live outside any
+single-directory review boundary. Reviewing it directly fails before any code is
+read. This snapshot carries its own \`.git/\`, is checked out at \`$base\`, and
+reproduces the worktree's uncommitted edits and untracked files.
+
+Review the code here as if it were the real worktree. Do not commit, push, or
+treat this path as the source of truth: it is rebuilt on demand and deleted when
+the review session ends. Refer to files by their path relative to this directory
+(that path is identical in the real worktree).
+
+Snapshot tag: $tag
+EOF
+}
+
+cmd_ensure() {
+  local root tag stage
+  root="$(canon "${1:?usage: ai-review-sandbox ensure <repo-root> <tag>}")"
+  tag="${2:?usage: ai-review-sandbox ensure <repo-root> <tag>}"
+  valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
+  if ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
+  stage="$(sandbox_path "$root" "$tag")"
+  create_or_refresh "$root" "$tag" "$stage"
+  printf '%s' "$stage"
+}
+
+cmd_path() {
+  local root tag
+  root="$(canon "${1:?usage: ai-review-sandbox path <repo-root> <tag>}")"
+  tag="${2:?usage: ai-review-sandbox path <repo-root> <tag>}"
+  valid_tag "$tag" || die "invalid tag '$tag'"
+  if is_worktree "$root"; then printf '%s' "$(sandbox_path "$root" "$tag")"; else printf '%s' "$root"; fi
+}
+
+cmd_remove() {
+  local root tag
+  root="$(canon "${1:?usage: ai-review-sandbox remove <repo-root> <tag>}")"
+  tag="${2:?usage: ai-review-sandbox remove <repo-root> <tag>}"
+  valid_tag "$tag" || die "invalid tag '$tag'"
+  is_worktree "$root" || return 0
+  remove_sandbox "$(sandbox_path "$root" "$tag")"
+}
+
+case "${1:-}" in
+  ensure)      shift; cmd_ensure "$@" ;;
+  path)        shift; cmd_path "$@" ;;
+  remove)      shift; cmd_remove "$@" ;;
+  is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
+  --version)   printf '%s\n' "$VERSION" ;;
+  *) die "usage: ai-review-sandbox {ensure|path|remove|is-worktree} ..." ;;
+esac
