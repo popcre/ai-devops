@@ -5,6 +5,17 @@
 **Evidence base:** supervised work in `u2giants/shared-db`, principally the ColdLion licensor/property correction and cutover Phases 3–6  
 **Models compared:** Grok 4.5 through Grok Build, Kimi K3 through Kimi Code, and GLM 5.2 through the isolated Z.ai/Claude Code agent
 
+> **2026-08-17 operational correction:** recent Kimi review failures in delegated
+> Windows tasks were execution failures, not model-quality evidence. The restricted
+> task could not create Kimi session files under the credential-bearing user data
+> directory; relocating only wrapper state did not relocate Kimi state; and a
+> foreground wrapper could disappear before saving a later result. When Kimi actually
+> ran, its review quality remained strong. Track the permanent fix in
+> [`plan_kimi-windows-execution-reliability.md`](plan_kimi-windows-execution-reliability.md)
+> and [issue #31](https://github.com/u2giants/ai-devops/issues/31). Until that plan is
+> complete, treat **Kimi work quality** and **Kimi Windows availability** as separate
+> ratings, and run credentialed Kimi calls from the Full Access main task.
+
 > **This file now holds TWO independent field reports on the same three models.**
 > They were run on different projects by different supervising sessions, and they
 > **do not fully agree** — which is itself the most useful thing in here.
