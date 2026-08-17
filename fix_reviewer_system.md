@@ -2,6 +2,14 @@
 
 Status: analysis complete; implementation is tracked by [ai-devops issue #34](https://github.com/u2giants/ai-devops/issues/34).
 
+Ownership is deliberately split. `ai-devops` owns the reviewer wrappers, the
+rules installed into every AI session, provider health checks, review packets,
+and the source-level rule that prevents non-structural work from being sent to
+shared-db. `shared-db` owns only its database-specific lane scheduling, merge
+freeze, exact-main sequencing, and production-promotion workflow. The latter is
+tracked separately in shared-db and must not be implemented as generic reviewer
+behavior.
+
 This report records what failed during the 24-hour shared-db orchestrator session
 of 2026-08-16/17 and the permanent fixes required.
 
@@ -229,6 +237,10 @@ Start final review only after implementation and tests are complete, CI is on a
 stable head, prerequisites are merged, and merge order is declared. Briefly queue
 unrelated merges behind production-bound final review.
 
+The generic reviewer service should expose whether evidence is current or stale.
+The shared-db repository, not ai-devops, decides when to freeze its own merges,
+which database change goes first, and when production promotion may begin.
+
 ### P1: failure-specific rotation
 
 Encode the differentiated responses above. In particular, turn exhaustion must
@@ -285,7 +297,10 @@ Over at least 30 real reviews:
 4. Add short ordinary budgets and early verdicts.
 5. Add failure-specific rotation.
 6. Add performance metrics and a 30-review trial.
-7. Add shared-db scope enforcement and the #1113 regression.
+7. Add the global source-routing rule and the #1113 regression to the installed
+   instructions and shared-db routing skills.
+8. Implement shared-db's lane scheduling, merge-freeze, and promotion sequencing
+   in shared-db under its separate tracker.
 
 Do not trade safety for speed. Remove wasted search, waiting, and repeated work
 while preserving read-only, exact-head, independent, fail-closed review.
