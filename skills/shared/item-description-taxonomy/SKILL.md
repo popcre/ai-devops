@@ -39,12 +39,11 @@ product concept plus its observed variants.
 6. Exclude size, licensor, property, artwork, color, slogan, character pose,
    packaging instructions, manufacturing specifications, and incidental contents
    from the canonical item type unless they define the sold product itself.
-7. When the business gives a reliable category-change date, treat the combined
-   MG01-MG03 on and after that date as the classification key. The three values
-   together roughly describe the product. Do not assume MG01+MG02 alone is the
-   product and MG03 is detachable; its meaning depends on the hierarchy. The same
-   broad wording may legitimately occur under several full keys. Do not call that
-   a conflict. Do not use earlier MG codes to define the new rules.
+7. When the business gives a reliable category-change date, build three independent
+   association maps from rows on and after that date: MG01, MG01+MG02, and
+   MG01+MG02+MG03. Each map associates its key with the accepted physical-product
+   meanings observed under that key. Match older products deepest-first, then fall
+   back one level at a time. Do not use earlier MG codes to define or choose results.
 8. Never call an automated phrase list final. A model must review every proposed
    family semantically and consolidate it before user review.
 9. Abstain when the physical product is genuinely ambiguous. Explain exactly what
@@ -58,38 +57,39 @@ product concept plus its observed variants.
 - Work in a confidential location when descriptions contain licensed content.
 - Never place licensed rows in a public repository.
 
-### 2. Establish the trusted MG groups
+### 2. Build the governed dictionary and three trusted MG maps
 
-- Split rows at the business-provided change date.
-- For rows on or after that date, create the primary key
-  `MG01|MG02|MG03`. Treat blank or incomplete keys as unresolved.
-- Read the merchandise-group definition workbook before interpreting the key.
-- Learn product-description wording for each complete MG01+MG02+MG03 key, while
-  comparing related keys to understand shared broad terms and distinguishing
-  details.
-- Keep each row's full three-part key. A broad product term may span keys, but
-  that does not make the keys interchangeable.
-- Treat identical broad wording across sibling MG03 keys as expected ambiguity,
-  not evidence that a key is wrong.
-- Use pre-change descriptions only as candidates to match into a trusted keyed
-  group. Do not let their old MG values influence the new grouping.
-- Do not turn the abstention rule into a blanket ban on historical assignments.
-  When a later item is a clear physical-product and treatment analog, carry its
-  complete stored MG01+MG02+MG03 key to the older item and show the supporting
-  later item. Treat rotated dimensions such as `16x20` and `20x16` as the same
-  size when orientation does not change the product.
-- Make the MG decision from a semantic signature consisting of physical product,
-  meaningful construction or shape, and treatment. Licensor, property, artwork,
-  slogan, color, character, and size orientation must have zero classification
-  weight. Use those excluded fields only to choose a readable supporting example
-  after the MG result is already decided.
-- Count every post-change full key associated with the semantic signature and
-  show that distribution. Select a full key only when one result has strong,
-  explainable support and agrees with the rework definition. If the evidence
-  consistently supports MG01+MG02 but splits across sibling MG03 values, propose
-  MG01+MG02 and leave MG03 blank.
-- If an old description supports MG01 and MG02 but not MG03, leave MG03
-  unresolved until other evidence identifies it. Never assume a default MG03.
+- Split rows at the business-provided change date and read the merchandise-group
+  definition workbook before interpreting any code.
+- Create one dictionary row for every distinct observed description wording.
+  Record a stable family ID, canonical physical product, construction or shape,
+  treatment, all observed variants, counts, status, and decision reason.
+- Use explicit statuses: `accepted`, `alias`, `needs_review`, and `placeholder`.
+  Only `accepted` and `alias` rows may teach or receive an MG assignment.
+- Parse every old and new description into physical product, size, licensor,
+  property, and artwork wording. Also retain construction/shape and treatment as
+  separate product attributes. Never use licensor, property, artwork, slogan,
+  color, character, or size orientation in an MG decision.
+- From post-change rows only, independently list every MG01, every MG01+MG02, and
+  every MG01+MG02+MG03 and all accepted product signatures observed under each.
+  Require every component through that depth to be present.
+- For each historical accepted product, try an exact reviewed
+  product+construction+treatment association at MG01+MG02+MG03. If unsupported,
+  try the reviewed product+construction association at MG01+MG02. If unsupported,
+  try its approved broad physical format at MG01.
+- Require at least two supporting later rows, a dominant winning share, and a
+  clear lead over the runner-up before populating MG02 or MG03. Store support,
+  total evidence, winning share, and the complete competing distribution.
+- The approved MG01 definition workbook may supply the final broad physical-format
+  fallback because MG01 is itself a broad product format. Do not invent, rewrite,
+  or "repair" MG01 codes.
+- Keep unsupported lower levels blank. Loose word overlap, fuzzy similarity, and
+  artwork similarity may suggest review candidates but must never populate proposed
+  MG fields.
+- Count five outcomes separately: full match, MG01+MG02 match, MG01-only match,
+  readable accepted product without MG01, and no usable accepted product type.
+- Treat rotated dimensions such as `16x20` and `20x16` as the same size when
+  orientation does not change the product, but do not use size to select MG.
 
 ### 3. Learn the company's language holistically
 
