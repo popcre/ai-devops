@@ -79,6 +79,14 @@ one lifecycle trap. The implementation profile removes named web and subagent to
 but its Bash tool can reach the network. That is a documented accepted limit, not a
 network sandbox.
 
+Windows review submission has a second, durable lifecycle. `start` preflights the
+current process's access to the credential-bearing `KIMI_CODE_HOME`, writes an
+allowlisted job record, and launches a hidden worker. `wait` is only an observer:
+losing it does not cancel the worker. `status`, `logs`, `result`, `cancel`, and
+`recover` operate on the same job record. Only a terminal `session.resume_hint`
+allows `completed`; every other unproven worker exit is a failed or recovery-needed
+state.
+
 All three delegate wrappers identify repositories from the normalized root path plus
 the origin URL and keep caller names separate. Metadata files are atomic and private on
 Unix. Legacy path-only Grok and Kimi records migrate when first opened.
