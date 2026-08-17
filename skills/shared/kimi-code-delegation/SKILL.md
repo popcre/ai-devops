@@ -22,6 +22,28 @@ to forward arbitrary `kimi` flags. **If it seems to be missing something you nee
 
 Run it from Git Bash on Windows (it is a Bash script, like `ai-glm`).
 
+## Open Windows execution-reliability work
+
+Read [`plan_kimi-windows-execution-reliability.md`](../../../plan_kimi-windows-execution-reliability.md)
+and its STATUS table before changing or relying on Windows Kimi execution while
+`u2giants/ai-devops#31` is open.
+
+The main Codex task and delegated collaboration tasks can have different Windows
+permissions even when the main task says Full Access. Kimi's own data root contains
+both OAuth credentials and writable session files. Until issue #31 lands its executable
+preflight and durable worker:
+
+- run credentialed Kimi calls from the Full Access main task;
+- let delegated tasks prepare the exact-head clone, brief, and evidence only;
+- if Kimi cannot create its session directory, stop immediately and hand the request
+  back to the main task;
+- never broaden the Kimi-home ACL, copy credentials into a repo, or keep retrying for
+  the full 900-second wait.
+
+Current official Kimi documentation supports `KIMI_CODE_HOME`, which relocates config,
+OAuth credentials, sessions, and logs together. `AI_KIMI_STATE_DIR` relocates only this
+wrapper's records. They are not interchangeable.
+
 ## Why the wrapper matters more here than anywhere else
 
 **Kimi reports neither the model nor token usage in headless output.** You cannot assert
@@ -184,8 +206,10 @@ checks auth. Two traps it exists to handle:
 - **`kimi provider list` exits 0 while printing "No providers configured"** — the exit
   code alone is a false OK.
 
-Kimi's credentials are **per-user OAuth** under `~/.kimi-code`, with no config-dir
-override. On `hetz` they belong to user `ai`; a root session borrows them automatically
+Kimi's credentials are **per-user OAuth** under `~/.kimi-code` by default. Current Kimi
+releases support `KIMI_CODE_HOME`, which relocates the entire Kimi data root, including
+credentials and sessions; it is not a safe way to copy credentials into a writable
+repository directory. On `hetz` the credentials belong to user `ai`; a root session borrows them automatically
 for reviews (`AI_KIMI_OWNER`, default `ai`). Implement runs are not borrowed — their
 writes would land owned by the wrong user, so run those as `ai`.
 
@@ -198,5 +222,7 @@ writes would land owned by the wrong user, so run those as `ai`.
    cost, or model figure for a Kimi run — there isn't one.
 
 Official references: [command options](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html)
-and [interaction modes](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/interaction.html).
+and [interaction modes](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/interaction.html),
+[data locations](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/data-locations.html),
+and [environment variables](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html).
 Re-verify against `kimi --help` before trusting any flag statement here, including this one.
