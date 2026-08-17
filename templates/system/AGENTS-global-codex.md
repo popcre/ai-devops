@@ -99,6 +99,16 @@ hand it back; do not raise the dial.
     over unreviewed work, never `git add -A` over another session's files, never
     delete a directory you do not own, and never overwrite a machine-local
     overlay. If you cannot state the recovery path in one line, stop and ask.
+19. **Never point a sandboxed tool at a linked Git worktree as its only allowed
+    folder.** A worktree's `.git` is a FILE pointing into the MAIN repo, so the
+    tool's first Git-adjacent read lands outside its boundary and the run dies
+    before reading any code (2026-08-17: a GLM review died exactly this way).
+    The delegated reviewers accept one directory and no second one, so widening
+    the boundary is not an option. Get a self-contained copy instead:
+    `ai-review-sandbox ensure <worktree-path> <tag>` (it echoes the path
+    unchanged in an ordinary clone, so it is always safe to call), or run from
+    the main repo. `ai-glm`, `ai-kimi`, `ai-qwen` and `ai-grok-review` already
+    do this for you — do not undo it, and never hand one a raw worktree path.
 
 ## Production infrastructure safety (absolute rule)
 
