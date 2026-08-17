@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# ai-review-packet — build the sealed evidence packet a delegated reviewer needs.
+#
+# WHY THIS EXISTS
+#
+# Every delegated reviewer we drive (Grok, GLM, Kimi) runs with `Read` and
+# `Grep` over its review directory and NO shell: `--deny Bash` for Grok,
+# `bash: false` in GLM's review agent, and a toolset without bash for Kimi.
+# That read-only boundary is correct and is not negotiable — a shell is
+# arbitrary execution and would end structural read-only review.
+#
+# But it has a cost nobody paid for. Without a shell a reviewer cannot run
+# `git diff`, `git log`, `git rev-parse`, or the test suite. So it cannot answer
+# the one question a review is actually about: WHAT CHANGED? It is handed a
+# repository and left to reconstruct the comparison by reading and grepping.
+# Measured on 2026-08-16/17: 20 turns, ~3,000,000 tokens, and NO verdict, three
+# times over. See fix_reviewer_system.md.
+#
+# This script closes that gap. It writes a small `.ai-review/` directory inside
+# the review boundary containing exactly the facts a shell would have produced.
+#
+# THE PACKET IS ADDITIVE, NOT A REPLACEMENT.
+#
+# Read that twice before changing anything here. The reviewer KEEPS full read
+# and grep access to the whole repository, and the manifest explicitly invites
+# it to open any file to confirm a finding. The packet exists so the reviewer
+# does not HAVE TO rediscover the basic comparison — not so that it CANNOT look
+# around. A packet that seals the reviewer off from the repository fixes the
+# wrong problem and starves the review of the background it needs to judge the
+# change. `tests/test-ai-review-packet.sh` guards this property on purpose.
+#
+# INCLUSION RULE (this is what keeps a packet from becoming a repo dump):
+#
+#   A fact goes in the packet if and only if the reviewer could not obtain it
+#   without a shell.
+#
+# So: base/head SHAs, the changed-file list, the patch, untracked-file
+# inventory, and test results go IN. Policy documents, dependency files, and
+# source files do NOT — they are readable, and inlining them buries the diff.
+# They are referenced BY PATH as pointers instead.
+#
+#   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
+#   ai-review-packet verify <packet-dir>                  # re-derive the hash
+#   ai-review-packet path   <review-dir>                  # print it, create nothing
+#   ai-review-packet remove <review-dir>                  # delete the packet
+#
+# <review-dir> must already be a reviewable directory. In a linked Git worktree
+# `.git` is a FILE pointing outside any single-directory review boundary, so
+# this script REFUSES a raw worktree and tells the caller to route through
+# `ai-review-sandbox ensure` first. Do not "fix" that by widening a boundary:
+# none of the reviewer CLIs accept a second directory.
+#
+# Options:
+#   --base REF        base of the comparison (default: resolved and REPORTED)
+#   --tests CMD       run CMD in the review dir; record command, exit code, tail
+#   --decision TEXT   the one-sentence decision being asked for
+#   --scope TEXT      what the reviewer IS being asked to judge   (repeatable)
+#   --exclude TEXT    what the reviewer is NOT being asked to judge (repeatable)
+#   --pointer P:NOTE  a file worth reading, BY PATH, with a one-line why
+#                     (repeatable; never inlined — see the inclusion rule)
+#   --class CLASS     small | medium | architecture  (records the budget class)
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+PACKET_DIR_NAME=".ai-review"
+MARKER=".ai-review-packet"
+MANIFEST="MANIFEST.md"
+HASHFILE="MANIFEST.sha256"
+PATCH="patch.diff"
+PATCH_FULL="patch.full.diff"
+
+# A patch larger than this is SPLIT, never silently truncated. Standing rule:
+# no silent failures. Tune with AI_REVIEW_PATCH_MAX_BYTES and say why in the
+# plan if a real review proves this wrong.
+PATCH_MAX_BYTES="${AI_REVIEW_PATCH_MAX_BYTES:-409600}"
+TEST_OUTPUT_TAIL="${AI_REVIEW_TEST_TAIL:-200}"
+
+# File lists are capped for the same reason the patch is. Caught on 2026-08-18
+# building a packet against this repo: an unrelated untracked `.ai/` scratch
+# directory pushed the manifest to 33 KB of filenames and buried the one changed
+# file. An overflowing list moves to its own file and the manifest says so.
+LIST_MAX_LINES="${AI_REVIEW_LIST_MAX_LINES:-40}"
+
+die()  { printf 'ai-review-packet: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-review-packet: warning: %s\n' "$*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
+
+# A linked worktree is exactly the case where `.git` is a file, not a directory.
+is_worktree() { [ -f "$1/.git" ] && ! [ -d "$1/.git" ]; }
+
+packet_path() { printf '%s/%s' "$1" "$PACKET_DIR_NAME"; }
+
+# Refuse to delete anything this script did not create. Standing rule: every
+# destructive action must be recoverable before you take it. Same guard shape as
+# ai-review-sandbox's is_managed().
+is_managed() {
+  local d="$1"
+  case "$(basename "$d")" in "$PACKET_DIR_NAME") ;; *) return 1 ;; esac
+  [ -f "$d/$MARKER" ]
+}
+
+remove_packet() {
+  local d="$1"
+  [ -e "$d" ] || return 0
+  is_managed "$d" || die "refusing to delete $d: it is not a managed review packet."
+  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+}
+
+# ---------------------------------------------------------------------------
+# Base resolution.
+#
+# There is no universally right base, so this NEVER guesses silently: whichever
+# rule wins is written into the manifest with the reason, so a human reading the
+# evidence months later can tell what was actually compared.
+#
+# Note the snapshots ai-review-sandbox builds have their `origin` remote removed,
+# so origin/* refs usually do not exist there. That is why the local branch names
+# are tried first and why falling through is normal, not an error.
+# ---------------------------------------------------------------------------
+# Sets the globals BASE_SHA and BASE_RULE. It must NOT be called in a command
+# substitution: that runs it in a subshell and the rule would be silently lost,
+# leaving the manifest unable to say what was actually compared.
+BASE_SHA=""; BASE_RULE=""
+resolve_base() { # resolve_base REPO [REQUESTED_REF]
+  local repo="$1" want="${2:-}" sha mb ref
+  if [ -n "$want" ]; then
+    sha="$(git -C "$repo" rev-parse --verify --quiet "${want}^{commit}" || true)"
+    [ -n "$sha" ] || die "the requested base '$want' does not exist in $repo. Nothing was compared; fix the ref rather than letting a review proceed against an unknown base."
+    BASE_SHA="$sha"; BASE_RULE="explicitly requested by the caller as '$want'"
+    return 0
+  fi
+  for ref in main master origin/main origin/master; do
+    git -C "$repo" rev-parse --verify --quiet "${ref}^{commit}" >/dev/null || continue
+    mb="$(git -C "$repo" merge-base HEAD "$ref" 2>/dev/null || true)"
+    [ -n "$mb" ] || continue
+    # A base identical to HEAD compares nothing; keep looking.
+    [ "$mb" = "$(git -C "$repo" rev-parse HEAD)" ] && continue
+    BASE_SHA="$mb"; BASE_RULE="merge-base of HEAD with '$ref' (no --base was given)"
+    return 0
+  done
+  if git -C "$repo" rev-parse --verify --quiet 'HEAD~1^{commit}' >/dev/null; then
+    BASE_SHA="$(git -C "$repo" rev-parse 'HEAD~1')"
+    BASE_RULE="HEAD~1 — no --base was given and HEAD is not ahead of any main/master branch, so the previous commit is the only comparison available. If that is not the change you meant to review, rebuild the packet with --base"
+    return 0
+  fi
+  # Root commit: compare against Git's empty tree so a first-commit review works.
+  BASE_SHA="$(git -C "$repo" hash-object -t tree /dev/null)"
+  BASE_RULE="the empty tree (HEAD is a root commit, so every file is new)"
+}
+
+# ---------------------------------------------------------------------------
+# build
+# ---------------------------------------------------------------------------
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_CLASS="small"
+SCOPE=(); EXCLUDE=(); POINTERS=()
+
+# Inline a file list, or spill it to its own file when it is long enough to bury
+# the change. Never silently drops entries.
+list_block() { # list_block PACKET_DIR FILENAME EMPTY_TEXT CONTENT
+  local pkt="$1" name="$2" empty="$3" content="$4" n
+  if [ -z "$content" ]; then printf '%s' "$empty"; return 0; fi
+  n="$(printf '%s\n' "$content" | wc -l | tr -d ' ')"
+  if [ "$n" -le "$LIST_MAX_LINES" ]; then printf '%s' "$content"; return 0; fi
+  printf '%s\n' "$content" > "$pkt/$name"
+  printf '%s\n\n(%s entries in total. The first %s are shown; the COMPLETE list is in `%s` in this directory. Nothing was dropped.)' \
+    "$(printf '%s\n' "$content" | head -n "$LIST_MAX_LINES")" "$n" "$LIST_MAX_LINES" "$name"
+}
+
+cmd_build() {
+  local root tag pkt base head base_subj head_subj base_date head_date
+  root="$(canon "${1:?usage: ai-review-packet build <review-dir> <tag> [options]}")"; shift
+  tag="${1:?usage: ai-review-packet build <review-dir> <tag> [options]}"; shift
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --base)     OPT_BASE="${2:?--base needs a ref}"; shift 2 ;;
+      --tests)    OPT_TESTS="${2:?--tests needs a command}"; shift 2 ;;
+      --decision) OPT_DECISION="${2:?--decision needs text}"; shift 2 ;;
+      --class)    OPT_CLASS="${2:?--class needs a value}"; shift 2 ;;
+      --scope)    SCOPE+=("${2:?--scope needs text}"); shift 2 ;;
+      --exclude)  EXCLUDE+=("${2:?--exclude needs text}"); shift 2 ;;
+      --pointer)  POINTERS+=("${2:?--pointer needs PATH:NOTE}"); shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || die "$root is not a Git repository."
+
+  # Enforce the standing worktree rule at the door rather than producing a
+  # packet a reviewer will die trying to read.
+  if is_worktree "$root"; then
+    die "$root is a linked Git worktree: its Git control files live outside any single-directory review boundary, so a reviewer dies there before reading code. Route it through 'ai-review-sandbox ensure $root <tag>' and pass the path that prints."
+  fi
+
+  head="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
+    || die "$root has no commits yet; there is nothing to review."
+  resolve_base "$root" "$OPT_BASE"   # sets BASE_SHA and BASE_RULE; not a subshell
+  base="$BASE_SHA"
+
+  pkt="$(packet_path "$root")"
+  remove_packet "$pkt" 2>/dev/null || rm -rf "$pkt"
+  mkdir -p "$pkt"
+  printf '%s\n' "$root" > "$pkt/$MARKER"
+
+  # The packet must never become part of the change under review.
+  # --git-path prints a path relative to the repository, so it must be resolved
+  # against $root — appending it from the caller's CWD silently writes the
+  # exclusion into the wrong file and the packet then shows up as a change.
+  local excl
+  excl="$(git -C "$root" rev-parse --git-path info/exclude)"
+  case "$excl" in /*|[A-Za-z]:[/\\]*) ;; *) excl="$root/$excl" ;; esac
+  mkdir -p "$(dirname "$excl")"
+  grep -qxF "$PACKET_DIR_NAME/" "$excl" 2>/dev/null || printf '%s/\n' "$PACKET_DIR_NAME" >> "$excl"
+
+  # --- the patch -------------------------------------------------------------
+  # Committed range AND uncommitted edits: what a human sees in the directory.
+  local tmp_patch; tmp_patch="$(mktemp)"
+  git -C "$root" diff --binary "$base" "$head" > "$tmp_patch" 2>/dev/null || true
+  git -C "$root" diff --binary HEAD >> "$tmp_patch" 2>/dev/null || true
+
+  local patch_bytes split_note=""
+  patch_bytes="$(wc -c < "$tmp_patch" | tr -d ' ')"
+  if [ "$patch_bytes" -gt "$PATCH_MAX_BYTES" ]; then
+    cp "$tmp_patch" "$pkt/$PATCH_FULL"
+    head -c "$PATCH_MAX_BYTES" "$tmp_patch" > "$pkt/$PATCH"
+    cat >> "$pkt/$PATCH" <<EOF
+
+*** TRUNCATED BY ai-review-packet ***
+This patch is $patch_bytes bytes and was cut at $PATCH_MAX_BYTES.
+The COMPLETE patch is in this same directory as $PATCH_FULL. Read it before
+judging anything that is not visible above. Nothing was discarded.
+EOF
+    split_note="**The patch was split.** It is $patch_bytes bytes. \`$PATCH\` holds the first $PATCH_MAX_BYTES bytes and \`$PATCH_FULL\` holds all of it. Nothing was discarded."
+  else
+    cp "$tmp_patch" "$pkt/$PATCH"
+  fi
+  rm -f "$tmp_patch"
+
+  # --- identity ---------------------------------------------------------------
+  base_subj="$(git -C "$root" log -1 --format=%s "$base" 2>/dev/null || printf '(empty tree)')"
+  head_subj="$(git -C "$root" log -1 --format=%s "$head" 2>/dev/null || printf '?')"
+  base_date="$(git -C "$root" log -1 --format=%aI "$base" 2>/dev/null || printf '-')"
+  head_date="$(git -C "$root" log -1 --format=%aI "$head" 2>/dev/null || printf '-')"
+
+  # --- tests -----------------------------------------------------------------
+  # Silence must never read as a pass. Either a real result or an explicit
+  # statement that nothing was run.
+  local test_block
+  if [ -n "$OPT_TESTS" ]; then
+    local tout rc
+    tout="$(mktemp)"; rc=0
+    ( cd "$root" && eval "$OPT_TESTS" ) > "$tout" 2>&1 || rc=$?
+    test_block="Command: \`$OPT_TESTS\`
+Exit code: \`$rc\` ($([ "$rc" -eq 0 ] && printf 'PASSED' || printf 'FAILED'))
+
+Last $TEST_OUTPUT_TAIL lines of output:
+
+\`\`\`
+$(tail -n "$TEST_OUTPUT_TAIL" "$tout")
+\`\`\`"
+    rm -f "$tout"
+  else
+    test_block="**No tests were run for this packet.** Treat this as unknown, not
+as a pass. If the change needs test evidence to judge, say so in your verdict."
+  fi
+
+  # --- file lists -------------------------------------------------------------
+  local changed untracked dirty
+  changed="$(git -C "$root" diff --name-status "$base" "$head" 2>/dev/null || true)"
+  dirty="$(git -C "$root" diff --name-status HEAD 2>/dev/null || true)"
+  untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null \
+               | grep -vx "$PACKET_DIR_NAME" || true)"
+  changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
+  dirty="$(list_block "$pkt"     dirty-files.txt     "(none — the working tree is clean)"           "$dirty")"
+  untracked="$(list_block "$pkt" untracked-files.txt "(none)"                                        "$untracked")"
+
+  # --- optional sections ------------------------------------------------------
+  local scope_block exclude_block pointer_block p path note
+  scope_block="$(printf '%s\n' "${SCOPE[@]+"${SCOPE[@]}"}" | sed '/^$/d;s/^/- /')"
+  [ -n "$scope_block" ] || scope_block="- The change described by the patch below, in full."
+  exclude_block="$(printf '%s\n' "${EXCLUDE[@]+"${EXCLUDE[@]}"}" | sed '/^$/d;s/^/- /')"
+  [ -n "$exclude_block" ] || exclude_block="- Anything not reachable from the changed files listed above."
+
+  pointer_block=""
+  for p in ${POINTERS[@]+"${POINTERS[@]}"}; do
+    path="${p%%:*}"; note="${p#*:}"
+    [ "$path" = "$p" ] && note="relevant context"
+    if [ -e "$root/$path" ]; then
+      pointer_block+="- \`$path\` — $note"$'\n'
+    else
+      warn "pointer '$path' does not exist in $root; recording it as missing rather than dropping it."
+      pointer_block+="- \`$path\` — $note **(NOT PRESENT in this directory)**"$'\n'
+    fi
+  done
+  [ -n "$pointer_block" ] || pointer_block="- \`AGENTS.md\` — the repository's operating guide and documentation router."$'\n'
+
+  # --- manifest ---------------------------------------------------------------
+  cat > "$pkt/$MANIFEST" <<EOF
+# Review evidence packet
+
+You are reviewing a specific, exact change. Everything below was produced by the
+wrapper with a shell, because your review profile deliberately has none. Read
+this file first.
+
+**This packet is a starting point, not a fence.** You have read and search
+access to every file in this directory. Open anything you need to confirm a
+finding, check a caller, or read a policy document. What you must NOT do is
+spend turns reconstructing the diff by hand — it is already in \`$PATCH\`.
+
+## 1. What is under review
+
+- Repository directory: \`$root\`
+- Packet tag: \`$tag\`
+- Review class: \`$OPT_CLASS\`
+
+## 2. Exact commits
+
+|  | SHA | Subject | Author date |
+|---|---|---|---|
+| **base** | \`$base\` | $base_subj | $base_date |
+| **head** | \`$head\` | $head_subj | $head_date |
+
+Base selection rule: $BASE_RULE.
+
+Your verdict applies to head \`$head\` and to no other commit. If this directory
+does not match those commits, say so instead of reviewing something else.
+
+## 3. What changed
+
+Committed between base and head (\`git diff --name-status\`):
+
+\`\`\`
+$changed
+\`\`\`
+
+Uncommitted edits present in the working tree:
+
+\`\`\`
+$dirty
+\`\`\`
+
+Untracked files included in this review (brand-new files are usually the point
+of a change, so they are listed deliberately):
+
+\`\`\`
+$untracked
+\`\`\`
+
+## 4. The patch
+
+The complete unified diff is in \`$PATCH\` in this directory. $split_note
+
+## 5. Test results
+
+$test_block
+
+## 6. The decision requested
+
+${OPT_DECISION:-Approve or reject this change, with reasons.}
+
+## 7. Scope
+
+You ARE being asked to judge:
+
+$scope_block
+
+You are NOT being asked to judge:
+
+$exclude_block
+
+## 8. Worth reading (by path — read them if you need them)
+
+$pointer_block
+## 9. Required answer format
+
+Structure your reply in this order:
+
+1. **Provisional verdict** — state one early, before you finish investigating.
+   If your run is cut short, this is what the orchestrator gets.
+   A provisional verdict cannot approve a change on its own; it exists so that
+   work can continue instead of waiting blind.
+2. **Findings** — each with the file and line that evidences it.
+3. **Final verdict** — last, under a literal \`## Verdict\` heading.
+
+Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
+Use BLOCKED when you could not reach a judgment; never approve by default.
+EOF
+
+  hash_packet "$pkt" > "$pkt/$HASHFILE"
+  printf '%s' "$pkt"
+}
+
+# Hash every file in the packet except the hash file itself, in sorted order, so
+# the digest is reproducible on any machine.
+hash_packet() { # hash_packet PACKET_DIR
+  local pkt="$1"
+  ( cd "$pkt" && find . -type f ! -name "$HASHFILE" -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 cat \
+      | sha256sum | cut -d' ' -f1 )
+}
+
+cmd_verify() {
+  local pkt want have
+  pkt="$(canon "${1:?usage: ai-review-packet verify <packet-dir>}")"
+  [ -f "$pkt/$HASHFILE" ] || die "$pkt has no $HASHFILE; it is not a review packet."
+  want="$(cat "$pkt/$HASHFILE")"
+  have="$(hash_packet "$pkt")"
+  if [ "$want" = "$have" ]; then
+    printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
+  else
+    die "packet hash mismatch in $pkt
+  recorded: $want
+  actual:   $have
+The evidence was modified after it was sealed. Do not review from it; rebuild."
+  fi
+}
+
+cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir>}")")"; }
+cmd_remove() { remove_packet "$(packet_path "$(canon "${1:?usage: ai-review-packet remove <review-dir>}")")"; }
+
+need git; need sha256sum
+
+case "${1:-}" in
+  build)     shift; cmd_build "$@" ;;
+  verify)    shift; cmd_verify "$@" ;;
+  path)      shift; cmd_path "$@" ;;
+  remove)    shift; cmd_remove "$@" ;;
+  --version) printf '%s\n' "$VERSION" ;;
+  *) die "usage: ai-review-packet {build|verify|path|remove} ..." ;;
+esac

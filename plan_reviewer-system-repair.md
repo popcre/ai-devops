@@ -12,7 +12,7 @@ Read this table first. Do not re-derive or re-plan what is already done.
 
 | # | Step | Status | Evidence (artifact, not a number) |
 |---|---|---|---|
-| 1 | `ai-review-packet` builder + hashed manifest | ⬜ open | — |
+| 1 | `ai-review-packet` builder + hashed manifest | ✅ done 2026-08-18 | [`bin/ai-review-packet`](bin/ai-review-packet); 57 tests pass via `bash tests/test-ai-review-packet.sh` |
 | 2 | Wrapper-owned SHA identity (no caller-typed SHAs) | ⬜ open | — |
 | 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ⬜ open | — |
 | 4 | Provider preflight + quarantine (`ai-review-preflight`) | ⬜ open | — |
@@ -22,7 +22,7 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | 8 | 30-review trial against the success criteria | ⬜ open | — |
 | 9 | Global source-routing rule + #1097→#1113 regression | ⬜ open | — |
 
-**A fresh session starts at Step 1.** Steps 1–3 are one phase and must land
+**A fresh session starts at Step 2.** Steps 1–3 are one phase and must land
 together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
 different session.
 
@@ -435,6 +435,24 @@ prints a packet directory, `verify` exits 0, and `MANIFEST.md` contains two
 full 40-character SHAs, a non-empty changed-file list, and an explicit test
 result line. Then hand-edit one byte of `patch.diff` and confirm `verify`
 exits 1.
+
+**DONE 2026-08-18.** Built as [`bin/ai-review-packet`](bin/ai-review-packet)
+with 57 tests in [`tests/test-ai-review-packet.sh`](tests/test-ai-review-packet.sh).
+Three things were learned building it, and later steps should assume them:
+
+- **File lists need the same cap as the patch.** The first real packet built
+  against this repo was **33 KB**, almost all of it an unrelated untracked
+  `.ai/` scratch directory — the changed file was buried under 200 lines of npm
+  cache paths. Lists over `AI_REVIEW_LIST_MAX_LINES` (default 40) now spill to
+  their own file with the true total announced. Same packet rebuilt: **8.4 KB**,
+  nothing dropped. This is the "too much" failure mode arriving in practice, so
+  do not raise the caps without a measured reason.
+- **Base resolution must never be silent.** There is no universally right base,
+  so the rule that won is written into the manifest in words. `--base` is
+  honoured exactly; a bad `--base` is refused rather than quietly falling back.
+- **A raw linked worktree is refused at the door**, with the
+  `ai-review-sandbox ensure` command named in the error. Emitting a packet a
+  reviewer would die trying to read is worse than refusing.
 
 ---
 
