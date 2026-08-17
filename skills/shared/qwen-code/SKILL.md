@@ -136,3 +136,25 @@ For every review or implementation:
 Official references: [headless mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/),
 [configuration](https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/settings.md),
 and [installation](https://github.com/QwenLM/qwen-code/blob/main/docs/users/overview.md).
+
+## Running from a linked Git worktree
+
+Just run it. Since 2026-08-17 the wrapper handles this itself and you do not
+have to think about it.
+
+Background, so nobody "fixes" it back: a delegated reviewer is given exactly ONE
+directory, and in a linked worktree `.git` is a FILE pointing at
+`<main-repo>/.git/worktrees/<name>` — outside that directory. Pointing a
+reviewer at the raw worktree kills the run on its first git-adjacent read,
+before any code is read. No reviewer we drive accepts a second directory, so the
+boundary cannot be widened. The wrapper therefore hands over a self-contained
+disposable snapshot built by `bin/ai-review-sandbox`: its own `.git`, the
+worktree's HEAD, its uncommitted edits, and its untracked files.
+
+What this means for you:
+
+- Paths in the reviewer's report are relative to the snapshot and are identical
+  in the real worktree. Quote them unchanged.
+- The reviewer never sees an absolute path from your machine as the source of
+  truth; do not ask it to edit files there, and never commit from the snapshot.
+- The snapshot refreshes on every turn and is deleted with the session.

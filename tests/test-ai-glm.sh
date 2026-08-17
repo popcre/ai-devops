@@ -185,8 +185,14 @@ check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' ||
 check "detects the 400 permission wedge"    "grep -q 'InvalidRequestError' '$AI_GLM'"
 check "names the stuck tool on timeout"     "grep -q 'tool still running' '$AI_GLM'"
 check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI_GLM'"
-if grep -Fq 'await_turn "$sid" "$name" review "$root"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
-if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$root"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+# The review directory is the boundary the permission classifier measures against,
+# and since 2026-08-17 it is the snapshot directory in a linked worktree — never
+# the raw worktree, whose git control files sit outside any single-directory
+# boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
+if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
+if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+if [ "$(grep -Fc 'boundary="$(review_boundary "$root" "$name")"' "$AI_GLM")" -eq 2 ]; then ok "review boundary is worktree-safe"; else bad "review boundary is worktree-safe"; fi
+if grep -Fq 'create_session "$name" glm-review "$boundary"' "$AI_GLM"; then ok "session is created on the safe boundary"; else bad "session is created on the safe boundary"; fi
 if grep -Fq 'await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META"' "$AI_GLM"; then ok "implement passes sandbox directory"; else bad "implement passes sandbox directory"; fi
 
 echo "== permission classifier =="

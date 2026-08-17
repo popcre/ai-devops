@@ -131,6 +131,25 @@ repo_root() {
   r="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository (cd into one, or pass --repo)."
   printf '%s' "$r"
 }
+
+# --- review boundary ----------------------------------------------------------
+# OpenCode gives a session exactly ONE directory, and in a linked worktree the
+# repository's control files sit outside it, so the reviewer dies before reading
+# any code. ai-review-sandbox turns such a worktree into a self-contained
+# snapshot; in an ordinary clone it echoes the root unchanged. See that script's
+# header for the full story.
+SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
+[ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
+review_boundary() { # review_boundary ROOT NAME -> directory to hand the reviewer
+  [ -f "$1/.git" ] || { printf '%s' "$1"; return 0; }
+  [ -n "$SANDBOX_BIN" ] || die "this is a linked worktree and ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
+  "$SANDBOX_BIN" ensure "$1" "glm-$2" || die "could not prepare a review snapshot for the worktree $1"
+}
+release_boundary() { # release_boundary ROOT NAME
+  [ -f "$1/.git" ] || return 0
+  [ -n "$SANDBOX_BIN" ] || return 0
+  "$SANDBOX_BIN" remove "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
+}
 repo_id() {
   local root remote
   root="$(cd "$1" && pwd -P)"
@@ -809,7 +828,7 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root rid mp sid pf msg text tokens report lock
+  local name="$1" root boundary rid mp sid pf msg text tokens report lock
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"
@@ -819,17 +838,18 @@ cmd_new() {
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
   pf="$(read_prompt)"
-  sid="$(create_session "$name" glm-review "$root")"
-  if ! write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
+  boundary="$(review_boundary "$root" "$name")"
+  sid="$(create_session "$name" glm-review "$boundary")"
+  if ! write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
       --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
-      '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, repository_remote:$remote,
+      '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, boundary_root:$b, repository_remote:$remote,
         repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
         created_at:$ts, last_activity_at:$ts, status:"active"}')"; then
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
   fi
   send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name" review "$root")"
+  msg="$(await_turn "$sid" "$name" review "$boundary")"
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
@@ -837,7 +857,7 @@ cmd_new() {
 }
 
 cmd_ask() {
-  local name="$1" root rid mp sid pf msg text tokens report before after lock
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
   [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
@@ -852,8 +872,12 @@ cmd_ask() {
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s.
        If you are sure nothing else is running, remove: $lock"
   before="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
+  # Refresh the snapshot so a later turn reviews the CURRENT working tree rather
+  # than a stale copy. The snapshot path is deterministic, so the live OpenCode
+  # session keeps the directory it was created with.
+  boundary="$(review_boundary "$root" "$name")"
   send_prompt "$sid" "$pf"; rm -f "$pf"
-  msg="$(await_turn "$sid" "$name" review "$root")"
+  msg="$(await_turn "$sid" "$name" review "$boundary")"
   verify_model "$msg"
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then
@@ -1320,7 +1344,7 @@ cmd_transcript() {
 }
 
 cmd_delete() {
-  local mp sid type state clone; mp="$(find_meta "$1")"; type="$(jq -r '.type // empty' "$mp")"
+  local mp sid type state clone root; mp="$(find_meta "$1")"; type="$(jq -r '.type // empty' "$mp")"
   sid="$(jq -r '.opencode_session_id // empty' "$mp")"
   if [ "$type" = implementation ]; then
     implementation_record_path_valid "$mp" && implementation_meta_valid "$mp" "" "$CALLER" || die "implementation record '$mp' is malformed; refusing to delete it."
@@ -1334,6 +1358,11 @@ cmd_delete() {
     fi
   else
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
+  fi
+  # Review snapshots are disposable and must not outlive their session.
+  if [ "$type" != implementation ]; then
+    root="$(jq -r '.repository_root // empty' "$mp")"
+    [ -z "$root" ] || [ ! -e "$root" ] || release_boundary "$root" "$1"
   fi
   rm -f "$mp"
   note "deleted session: $1"

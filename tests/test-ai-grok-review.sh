@@ -300,6 +300,33 @@ if [ "${AI_GROK_LIVE:-0}" = 1 ]; then
   else printf '  warn cache read was 0 on turn 2 (not a failure; caching is not wrapper-controlled)\n'; fi
 fi
 
+echo "== linked worktree boundary (2026-08-17 regression) =="
+# A reviewer gets ONE directory. Run from a linked worktree, that directory used
+# to be the worktree itself, whose `.git` is a FILE pointing outside it — the
+# reviewer died before reading any code. The wrapper must hand over a
+# self-contained snapshot instead.
+WT="$TMP/worktree"
+export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+git -C "$REPO" worktree add -q -b wt-branch "$WT" >/dev/null 2>&1
+echo only-in-worktree > "$WT/wt-only.txt"
+: > "$TMP/argv.txt"
+( cd "$WT" && bash "$SCRIPT" new wtreview --prompt "review this" ) >/dev/null 2>&1
+HANDED="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+check "worktree run hands over a directory"      "test -n '$HANDED'"
+check "handed directory is not the raw worktree" "[ \"\$(cd '$HANDED' && pwd -P)\" != \"\$(cd '$WT' && pwd -P)\" ]"
+check "handed directory owns its git control files" \
+  "test -d '$HANDED/.git' && ! test -f '$HANDED/.git'"
+check "handed directory carries the worktree's untracked work" \
+  "grep -q only-in-worktree '$HANDED/wt-only.txt'"
+check "delete removes the snapshot" \
+  "( cd '$WT' && bash '$SCRIPT' delete wtreview ) >/dev/null 2>&1; test ! -d '$HANDED'"
+# An ordinary clone must be untouched by all of this.
+: > "$TMP/argv.txt"
+run new plainreview --prompt "review this" >/dev/null 2>&1
+PLAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+check "ordinary clone still reviewed in place" \
+  "[ \"\$(cd '$PLAIN' && pwd -P)\" = \"\$(cd '$REPO' && pwd -P)\" ]"
+
 echo
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
