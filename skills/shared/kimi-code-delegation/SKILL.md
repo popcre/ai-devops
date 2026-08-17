@@ -10,6 +10,8 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 ```bash
 ai-kimi new <name>       --prompt-file "$brief"   # read-only review / analysis
 ai-kimi ask <name>       --prompt-file "$next"    # continue that same session
+ai-kimi start <name>     --prompt-file "$brief"   # submit a durable review job
+ai-kimi wait <name> | status <name> | result <name> | cancel <name>
 ai-kimi implement <name> --prompt-file "$task"    # explicit write run, isolated
 ai-kimi list | show <name> | transcript <name> | delete <name>
 ai-kimi doctor
@@ -30,13 +32,15 @@ and its STATUS table before changing or relying on Windows Kimi execution while
 
 The main Codex task and delegated collaboration tasks can have different Windows
 permissions even when the main task says Full Access. Kimi's own data root contains
-both OAuth credentials and writable session files. Until issue #31 lands its executable
-preflight and durable worker:
+both OAuth credentials and writable session files. The wrapper now checks that boundary
+before starting a provider call and runs review ownership in a durable hidden worker:
 
 - run credentialed Kimi calls from the Full Access main task;
 - let delegated tasks prepare the exact-head clone, brief, and evidence only;
-- if Kimi cannot create its session directory, stop immediately and hand the request
-  back to the main task;
+- run `AI_KIMI_CALLER=codex ai-kimi start <name> ...` from the main task;
+- if preflight returns `execution-context-denied`, send its structured hand-back request
+  to the main task immediately;
+- use `status` while other safe work continues, then `result` only after completion;
 - never broaden the Kimi-home ACL, copy credentials into a repo, or keep retrying for
   the full 900-second wait.
 
