@@ -92,8 +92,14 @@ Follow the STATUS table in the plan. In order:
 6. Replace generic rotation with failure-specific responses.
 7. Build the `ai-review` front door and the performance ledger.
 8. Run the 30-review trial and commit the report.
-9. shared-db scope enforcement plus the #1097→#1113 regression (independent;
+9. The global source-routing rule plus the #1097→#1113 regression (independent;
    may run in parallel with 1–8).
+
+**Ownership split (commit `d51655a`, now merged):** `ai-devops` owns the
+wrappers, installed rules, health checks, packets, and the source-routing rule.
+`shared-db` owns its own lane scheduling, merge freeze, exact-main sequencing,
+and production promotion, under its own tracker. This plan builds a staleness
+*signal* only — no merge queue, no scheduler, in any reviewer wrapper.
 
 Each step in the plan has its own verification gate; do not mark a STATUS row
 done without citing an artifact.

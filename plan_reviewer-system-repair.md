@@ -20,7 +20,7 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | 6 | Failure-specific rotation | ⬜ open | — |
 | 7 | Performance ledger + `ai-review` front door | ⬜ open | — |
 | 8 | 30-review trial against the success criteria | ⬜ open | — |
-| 9 | shared-db scope enforcement + #1097→#1113 regression | ⬜ open | — |
+| 9 | Global source-routing rule + #1097→#1113 regression | ⬜ open | — |
 
 **A fresh session starts at Step 1.** Steps 1–3 are one phase and must land
 together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
@@ -141,8 +141,20 @@ Steps 6–9 address these; Steps 1–5 address the reviewer itself.
 - New short default budgets and an early-provisional-verdict protocol.
 - Failure-specific rotation guidance emitted by the wrappers.
 - A new `bin/ai-review` front door and a JSONL performance ledger.
+- A **staleness signal**: the review service reports whether evidence is current
+  or stale. It reports; it does not decide what anyone does about it.
 - Tests in `tests/` for every one of the above.
-- A `shared-db` scope-classification rule plus the #1097→#1113 regression test.
+- The **global source-routing rule** (installed into every AI session) plus the
+  #1097→#1113 regression test.
+
+**Ownership split — added to `fix_reviewer_system.md` on 2026-08-17 in commit
+`d51655a`, and it binds this plan.** `ai-devops` owns the reviewer wrappers, the
+rules installed into every AI session, provider health checks, review packets,
+and the source-level rule that stops non-structural work reaching shared-db.
+`shared-db` owns **only** its own database lane scheduling, merge freeze,
+exact-main sequencing, and production-promotion workflow — tracked separately,
+in that repository. Do not implement any of shared-db's scheduling as generic
+reviewer behaviour.
 
 **NOT in this plan — do not do these:**
 
@@ -155,6 +167,11 @@ Steps 6–9 address these; Steps 1–5 address the reviewer itself.
 - ❌ Fixing the seven real safety defects the gates found in shared-db (sequence
   lock transactions, production approval retry, etc.). Those are separate work
   in `u2giants/shared-db`.
+- ❌ **Merge freezing, lane scheduling, exact-main sequencing, or
+  production-promotion ordering.** Those belong to `shared-db` under its own
+  tracker. This plan builds the staleness *signal* only. Deciding when to freeze
+  merges, which database change goes first, and when promotion may begin is
+  shared-db's call, not the reviewer's.
 - ❌ Any CI/CD, container, or deployment scaffolding in this repo.
 - ❌ Raising any turn or time ceiling as a fix for anything.
 
@@ -266,6 +283,11 @@ Exact-head binding is correct and stays. The scheduling was wrong: final reviews
 launched while prerequisite or unrelated merges were still likely, so `main`
 advanced mid-review and the verdict expired. Recurred across #1072, #1089,
 #1090, #1108, #1115.
+
+**But the fix here is a signal, not a scheduler** (§4 ownership split). This
+repo makes the review service say clearly whether its evidence is current or
+stale. `shared-db` decides when to freeze its merges and in what order its
+database changes go. Do not build a merge queue in a reviewer wrapper.
 
 ## 7. Approaches considered and REJECTED
 
@@ -612,16 +634,22 @@ tune and re-run rather than lowering the bar.
 
 ---
 
-### Phase C — scope enforcement (Step 9). Independent; may run in parallel.
+### Phase C — source routing (Step 9). Independent; may run in parallel.
 
 ---
 
-#### Step 9 — shared-db scope enforcement and the #1113 regression
+#### Step 9 — the global source-routing rule and the #1113 regression
 
-**Note:** the enforcement itself lives in `u2giants/shared-db` (issue templates
-and orchestrator rules), not in this repo. What belongs **here** is the rule
-text in the `shared-db-orchestrator` / `shared-db-change` skills and the
-regression fixture.
+**What belongs in THIS repo** (per the ownership split in §4): the rule text
+itself, installed into every AI session. That means the global instructions
+template `templates/system/` and the `shared-db-orchestrator` /
+`shared-db-change` skills under `skills/shared/`, plus the regression fixture in
+`tests/`. This is the source-level rule that stops non-structural work being
+sent to shared-db in the first place.
+
+**What does NOT belong here:** issue templates, lane scheduling, and orchestrator
+runtime enforcement inside `u2giants/shared-db`. Those are that repository's
+work under its own tracker. Write the rule; do not reach into shared-db.
 
 Every new or successor issue must answer, from scratch: *does this work change
 the shape of the shared database?*
@@ -632,7 +660,7 @@ the shape of the shared database?*
 - **Planning or repo maintenance** → non-migration route; no shared-db
   implementation agent.
 
-Enforcement to encode: require a machine-readable scope block on every actionable
+Rule text to encode: require a machine-readable scope block on every actionable
 shared-db issue; **reclassify successors rather than inheriting the predecessor's
 route**; refuse shared-db implementation unless the route is structural or the
 Master Data exception; require exact database objects before a structural claim;
