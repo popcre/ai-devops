@@ -150,6 +150,67 @@ release_boundary() { # release_boundary ROOT NAME
   [ -n "$SANDBOX_BIN" ] || return 0
   "$SANDBOX_BIN" remove "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
 }
+
+# --- evidence packet ----------------------------------------------------------
+# The glm-review agent profile sets `bash: false`, so GLM cannot run `git diff`
+# and cannot work out what changed. Without a packet it spends its budget
+# rediscovering the comparison — and on 2026-08-16/17 it also reached for web
+# search when a local reference was missing. ai-review-packet writes the
+# shell-derived facts into .ai-review/ inside the review directory.
+#
+# The packet is ADDITIVE: read and grep over the whole directory are unchanged
+# and the manifest says so. It is git-excluded, so it cannot trip the read-only
+# working-tree canary in cmd_ask.
+PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
+[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
+
+REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
+# Sets the globals above. Never call it in a command substitution: the identity
+# would be computed in a subshell and lost.
+prepare_review() { # prepare_review ROOT NAME
+  local root="$1" name="$2" pkt want
+  REVIEW_DIR="$(review_boundary "$root" "$name")"
+  REVIEW_HEAD="$(git -C "$REVIEW_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [ -n "$REVIEW_HEAD" ] || die "could not read HEAD in $REVIEW_DIR; refusing to review a directory with no commit identity."
+  if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
+    want="$(git -C "$REVIEW_DIR" rev-parse --verify --quiet "${OPT_ASSERT_HEAD}^{commit}" || true)"
+    [ "$want" = "$REVIEW_HEAD" ] || die "--assert-head does not match this repository.
+  you said : $OPT_ASSERT_HEAD
+  actual   : $REVIEW_HEAD
+A verdict recorded against the wrong commit is worthless evidence. Nothing was
+reviewed. Re-read the SHA from git rather than transcribing it."
+  fi
+  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
+  pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "glm-$name" --class small \
+           ${OPT_BASE:+--base "$OPT_BASE"} \
+           ${OPT_TESTS:+--tests "$OPT_TESTS"} \
+           ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
+    || die "could not build the review evidence packet for $REVIEW_DIR"
+  REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
+  PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
+  note "  evidence packet: $pkt (base ${REVIEW_BASE:0:12}, head ${REVIEW_HEAD:0:12}, sha ${PACKET_HASH:0:12})"
+}
+
+PACKET_PREAMBLE="Your evidence packet is at .ai-review/MANIFEST.md in this directory. Read it
+first. It contains the exact commits under review, the changed files, the full
+patch, and what you are being asked to decide.
+
+You may read any other file in this directory to confirm a finding — the packet
+is your starting point, not a boundary. What you must NOT do is spend turns
+reconstructing the diff yourself; it is already in .ai-review/patch.diff.
+Everything you need is local; do not search the web.
+
+---
+
+"
+# Prepend the preamble to a prompt file in place.
+prefix_packet_preamble() { # prefix_packet_preamble PROMPT_FILE
+  local pf="$1" tmp
+  [ -n "$PACKET_HASH" ] || return 0
+  tmp="$(mktemp)"
+  { printf '%s' "$PACKET_PREAMBLE"; cat "$pf"; } > "$tmp"
+  mv "$tmp" "$pf"
+}
 repo_id() {
   local root remote
   root="$(cd "$1" && pwd -P)"
@@ -838,12 +899,16 @@ cmd_new() {
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
   pf="$(read_prompt)"
-  boundary="$(review_boundary "$root" "$name")"
+  prepare_review "$root" "$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
+  boundary="$REVIEW_DIR"
+  prefix_packet_preamble "$pf"
   sid="$(create_session "$name" glm-review "$boundary")"
   if ! write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
       --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
+      --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
       '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, boundary_root:$b, repository_remote:$remote,
         repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
+        base:$base, head:$head, packet_sha256:$pkthash,
         created_at:$ts, last_activity_at:$ts, status:"active"}')"; then
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
@@ -857,7 +922,7 @@ cmd_new() {
 }
 
 cmd_ask() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head
   require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
   [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
@@ -875,7 +940,18 @@ cmd_ask() {
   # Refresh the snapshot so a later turn reviews the CURRENT working tree rather
   # than a stale copy. The snapshot path is deterministic, so the live OpenCode
   # session keeps the directory it was created with.
-  boundary="$(review_boundary "$root" "$name")"
+  prepare_review "$root" "$name"
+  boundary="$REVIEW_DIR"
+  prev_head="$(jq -r '.head // ""' "$mp")"
+  if [ -n "$prev_head" ] && [ "$prev_head" != "$REVIEW_HEAD" ]; then
+    warn "the repository moved since session '$name' started.
+  reviewed at: $prev_head
+  now at     : $REVIEW_HEAD
+The earlier evidence is STALE and cannot approve this head. The packet has been
+rebuilt for the new head; treat any verdict from this session as applying to
+$REVIEW_HEAD only."
+  fi
+  prefix_packet_preamble "$pf"
   send_prompt "$sid" "$pf"; rm -f "$pf"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   verify_model "$msg"
@@ -885,7 +961,7 @@ cmd_ask() {
     die "review session '$name' CHANGED the working tree. Review mode must be read-only.
        The session is marked failed; inspect 'git status' before doing anything else."
   fi
-  write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)" '.last_activity_at=$ts' "$mp")"
+  write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
   emit "$name" review "$sid" "$text" "$tokens" "$report"
@@ -1706,6 +1782,7 @@ usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
 
 main() {
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 CMD="${1:-}"; shift || true
 [ -n "$CMD" ] || { usage; return 2; }
 ARG=""
@@ -1715,6 +1792,10 @@ while [ "$#" -gt 0 ]; do
     --prompt-file)  PROMPT_FILE="${2:-}"; shift 2 ;;
     --repo)         REPO_OVERRIDE="$(cd "${2:-}" && pwd)"; shift 2 ;;
     --caller)       CALLER="${2:-}"; shift 2 ;;
+    --base)         OPT_BASE="${2:-}"; shift 2 ;;
+    --tests)        OPT_TESTS="${2:-}"; shift 2 ;;
+    --decision)     OPT_DECISION="${2:-}"; shift 2 ;;
+    --assert-head)  OPT_ASSERT_HEAD="${2:-}"; shift 2 ;;
     --json)         JSON_OUT=1; shift ;;
     --timeout)      TIMEOUT="${2:-}"; shift 2 ;;
     --lock-timeout) LOCK_TIMEOUT="${2:-}"; shift 2 ;;

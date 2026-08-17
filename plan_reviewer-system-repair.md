@@ -13,8 +13,8 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | # | Step | Status | Evidence (artifact, not a number) |
 |---|---|---|---|
 | 1 | `ai-review-packet` builder + hashed manifest | ✅ done 2026-08-18 | [`bin/ai-review-packet`](bin/ai-review-packet); 57 tests pass via `bash tests/test-ai-review-packet.sh` |
-| 2 | Wrapper-owned SHA identity (no caller-typed SHAs) | ⬜ open | — |
-| 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ⬜ open | — |
+| 2 | Wrapper-owned SHA identity (no caller-typed SHAs) | ✅ done 2026-08-18 | `prepare_review()` in [`bin/ai-grok-review`](bin/ai-grok-review), [`bin/ai-kimi`](bin/ai-kimi), [`bin/ai-glm`](bin/ai-glm); proven by `meta records the base sha derived by the wrapper` and `wrong --assert-head is refused` in `tests/test-ai-grok-review.sh` |
+| 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ✅ done 2026-08-18 | `bash tests/test-ai-grok-review.sh` 100/0, `tests/test-ai-kimi.sh` 134/0, `tests/test-ai-glm.sh` 221/0 |
 | 4 | Provider preflight + quarantine (`ai-review-preflight`) | ⬜ open | — |
 | 5 | Short ordinary budgets + early provisional verdict | ⬜ open | — |
 | 6 | Failure-specific rotation | ⬜ open | — |
@@ -22,7 +22,7 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | 8 | 30-review trial against the success criteria | ⬜ open | — |
 | 9 | Global source-routing rule + #1097→#1113 regression | ⬜ open | — |
 
-**A fresh session starts at Step 2.** Steps 1–3 are one phase and must land
+**A fresh session starts at Step 4.** Steps 1–3 are one phase and must land
 together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
 different session.
 

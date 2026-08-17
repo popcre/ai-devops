@@ -144,6 +144,60 @@ release_boundary() { # release_boundary ROOT TAG
   "$SANDBOX_BIN" remove "$1" "$2" || true
 }
 
+# --- evidence packet ----------------------------------------------------------
+# Grok reviews run with --deny Bash, so Grok cannot run `git diff` and cannot
+# work out what changed. Left to itself it reconstructs the comparison by
+# reading and grepping: 20 turns, ~3M tokens, no verdict (2026-08-16/17).
+# ai-review-packet writes those shell-derived facts into .ai-review/ inside the
+# review directory. The packet is ADDITIVE — Read and Grep over the whole
+# directory are unchanged, and the manifest says so explicitly.
+PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
+[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
+
+REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
+# Sets the globals above. Never call it in a command substitution — the identity
+# would be computed in a subshell and lost, which is the whole failure this
+# replaces (agents hand-expanding short SHAs into wrong full ones).
+prepare_review() { # prepare_review ROOT TAG
+  local root="$1" tag="$2" pkt
+  REVIEW_DIR="$(review_boundary "$root" "$tag")"
+
+  # Identity comes from Git, in this wrapper, always. A caller-supplied SHA is
+  # only ever an assertion to CHECK (--assert-head), never a source of truth.
+  REVIEW_HEAD="$(git -C "$REVIEW_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [ -n "$REVIEW_HEAD" ] || die "could not read HEAD in $REVIEW_DIR; refusing to review a directory with no commit identity."
+  if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
+    local want; want="$(git -C "$REVIEW_DIR" rev-parse --verify --quiet "${OPT_ASSERT_HEAD}^{commit}" || true)"
+    [ "$want" = "$REVIEW_HEAD" ] || die "--assert-head does not match this repository.
+  you said : $OPT_ASSERT_HEAD
+  actual   : $REVIEW_HEAD
+A verdict recorded against the wrong commit is worthless evidence. Nothing was
+reviewed. Re-read the SHA from git rather than transcribing it."
+  fi
+
+  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
+  pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class small \
+           ${OPT_BASE:+--base "$OPT_BASE"} \
+           ${OPT_TESTS:+--tests "$OPT_TESTS"} \
+           ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
+    || die "could not build the review evidence packet for $REVIEW_DIR"
+  REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
+  PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
+  note "  evidence packet: $pkt (base ${REVIEW_BASE:0:12}, head ${REVIEW_HEAD:0:12}, sha ${PACKET_HASH:0:12})"
+}
+
+PACKET_PREAMBLE="Your evidence packet is at .ai-review/MANIFEST.md in this directory. Read it
+first. It contains the exact commits under review, the changed files, the full
+patch, and what you are being asked to decide.
+
+You may read any other file in this directory to confirm a finding — the packet
+is your starting point, not a boundary. What you must NOT do is spend turns
+reconstructing the diff yourself; it is already in .ai-review/patch.diff.
+
+---
+
+"
+
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
   local root="$1" remote
@@ -386,6 +440,8 @@ Do not put the verdict anywhere else."
 
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
   local dest="$1"
+  printf '%s' "$PACKET_PREAMBLE" > "$dest"
+  dest="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
     [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
     cat "$OPT_PROMPT_FILE" > "$dest"
@@ -397,7 +453,9 @@ build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/st
     die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
   fi
   [ -s "$dest" ] || die "the prompt is empty."
-  printf '%s' "$PROMPT_FOOTER" >> "$dest"
+  cat "$dest" >> "${dest%.body}"
+  rm -f "$dest"
+  printf '%s' "$PROMPT_FOOTER" >> "${dest%.body}"
 }
 
 # Refuse to write review artifacts into a repo that would commit them.
@@ -456,6 +514,12 @@ Options:
   --prompt TEXT        the brief (small briefs only; prefer --prompt-file)
   --prompt-file FILE   the brief, read from a file (no argv size limit)
   --max-turns N        turn ceiling for THIS call (default $DEFAULT_MAX_TURNS)
+  --base REF           base of the comparison in the evidence packet
+  --tests CMD          run CMD and record its exact result in the packet
+  --decision TEXT      the one-sentence decision being asked for
+  --assert-head SHA    refuse unless the repository is really at SHA. The wrapper
+                       always derives identity itself; this only CHECKS a caller's
+                       claim, so a mistyped SHA can never enter the evidence.
   --json               print the raw Grok result instead of the extracted answer
 
 Reviews are read-only: Edit and Bash are denied and web search is disabled.
@@ -528,10 +592,11 @@ cmd_new() {
   trap "lock_release '$rid_lock'" EXIT INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
-  build_prompt_file "$pf"
 
   note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
-  rc="$(run_turn "$(review_boundary "$repo" "grok-$name")" "$out" "$pf" "$turns")"
+  prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
+  build_prompt_file "$pf"
+  rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns")"
   if ! await_result "$out" "review '$name'"; then
     note "  grok exit status was $rc — which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -546,12 +611,14 @@ cmd_new() {
   write_meta "$meta" "$(jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
+    --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     --argjson turns 1 \
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
+      base:$base, head:$head, packet_sha256:$pkthash,
       turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
 
   finish_turn "$repo" "$name" "$out" "$turns"
@@ -586,10 +653,22 @@ cmd_ask() {
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
-  build_prompt_file "$pf"
 
   note "Grok review '$name' continuing session $sid (max-turns $turns)…"
-  rc="$(run_turn "$(review_boundary "$repo" "grok-$name")" "$out" "$pf" "$turns" "$sid")"
+  prepare_review "$repo" "grok-$name"
+  # A continuation that silently moved to a different commit would let a verdict
+  # about one head be recorded against another. Say so rather than proceed.
+  local prev_head; prev_head="$(jq -r '.head // ""' "$meta")"
+  if [ -n "$prev_head" ] && [ "$prev_head" != "$REVIEW_HEAD" ]; then
+    warn "the repository moved since session '$name' started.
+  reviewed at: $prev_head
+  now at     : $REVIEW_HEAD
+The earlier evidence is STALE and cannot approve this head. The packet has been
+rebuilt for the new head; treat any verdict from this session as applying to
+$REVIEW_HEAD only."
+  fi
+  build_prompt_file "$pf"
+  rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid")"
   if ! await_result "$out" "review '$name'"; then
     note "  grok exit status was $rc — which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -607,7 +686,9 @@ cmd_ask() {
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
-    '.updated=$updated | .turns=(.turns+1)
+    --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
+    '.head=$head | .base=$base | .packet_sha256=$pkthash |
+     .updated=$updated | .turns=(.turns+1)
      | .total_tokens=(.total_tokens+$tokens)
      | .total_cost_usd=(.total_cost_usd+$cost)
      | .last_stop_reason=$stop' "$meta")"
@@ -682,12 +763,17 @@ cmd_delete() {
 CMD="${1:-}"; shift || true
 ARG=""
 OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_MAX_TURNS=""; OPT_JSON=0; OPT_LIVE=""
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --prompt)       OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file)  OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
     --max-turns)    OPT_MAX_TURNS="${2:-}"; shift 2 ;;
+    --base)         OPT_BASE="${2:-}"; shift 2 ;;
+    --tests)        OPT_TESTS="${2:-}"; shift 2 ;;
+    --decision)     OPT_DECISION="${2:-}"; shift 2 ;;
+    --assert-head)  OPT_ASSERT_HEAD="${2:-}"; shift 2 ;;
     --json)         OPT_JSON=1; shift ;;
     --live)         OPT_LIVE="--live"; shift ;;
     -h|--help)      usage; exit 0 ;;

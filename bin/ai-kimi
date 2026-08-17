@@ -187,6 +187,57 @@ release_boundary() { # release_boundary ROOT TAG
   "$SANDBOX_BIN" remove "$1" "$2" || true
 }
 
+# --- evidence packet ----------------------------------------------------------
+# A Kimi review runs under an agent profile whose toolset has no bash, so Kimi
+# cannot run `git diff` and cannot work out what changed. Without a packet it
+# spends its budget rediscovering the comparison. ai-review-packet writes those
+# shell-derived facts into .ai-review/ inside the review directory.
+#
+# The packet is ADDITIVE: read/grep/glob/ls over the whole directory are
+# unchanged and the manifest says so. It is also git-excluded, so it can never
+# trip the read-only working-tree canary below.
+PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
+[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
+
+REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
+# Sets the globals above. Never call it in a command substitution: the identity
+# would be computed in a subshell and lost.
+prepare_review() { # prepare_review ROOT TAG
+  local root="$1" tag="$2" pkt want
+  REVIEW_DIR="$(review_boundary "$root" "$tag")"
+  REVIEW_HEAD="$(git -C "$REVIEW_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [ -n "$REVIEW_HEAD" ] || die "could not read HEAD in $REVIEW_DIR; refusing to review a directory with no commit identity."
+  if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
+    want="$(git -C "$REVIEW_DIR" rev-parse --verify --quiet "${OPT_ASSERT_HEAD}^{commit}" || true)"
+    [ "$want" = "$REVIEW_HEAD" ] || die "--assert-head does not match this repository.
+  you said : $OPT_ASSERT_HEAD
+  actual   : $REVIEW_HEAD
+A verdict recorded against the wrong commit is worthless evidence. Nothing was
+reviewed. Re-read the SHA from git rather than transcribing it."
+  fi
+  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
+  pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class small \
+           ${OPT_BASE:+--base "$OPT_BASE"} \
+           ${OPT_TESTS:+--tests "$OPT_TESTS"} \
+           ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
+    || die "could not build the review evidence packet for $REVIEW_DIR"
+  REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
+  PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
+  note "  evidence packet: $pkt (base ${REVIEW_BASE:0:12}, head ${REVIEW_HEAD:0:12}, sha ${PACKET_HASH:0:12})"
+}
+
+PACKET_PREAMBLE="Your evidence packet is at .ai-review/MANIFEST.md in this directory. Read it
+first. It contains the exact commits under review, the changed files, the full
+patch, and what you are being asked to decide.
+
+You may read any other file in this directory to confirm a finding — the packet
+is your starting point, not a boundary. What you must NOT do is spend turns
+reconstructing the diff yourself; it is already in .ai-review/patch.diff.
+
+---
+
+"
+
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
   local root="$1" remote
@@ -493,15 +544,21 @@ Formatting requirement: structure your reply so the final answer is last, under 
 literal '## Verdict' heading. Put any narration above it."
 
 build_prompt_file() {
-  local dest="$1"
+  local dest="$1" body
+  body="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
     [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
-    cat "$OPT_PROMPT_FILE" > "$dest"
-  elif [ -n "${OPT_PROMPT:-}" ]; then printf '%s\n' "$OPT_PROMPT" > "$dest"
-  elif [ ! -t 0 ]; then cat > "$dest"
+    cat "$OPT_PROMPT_FILE" > "$body"
+  elif [ -n "${OPT_PROMPT:-}" ]; then printf '%s\n' "$OPT_PROMPT" > "$body"
+  elif [ ! -t 0 ]; then cat > "$body"
   else die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
   fi
-  [ -s "$dest" ] || die "the prompt is empty."
+  [ -s "$body" ] || die "the prompt is empty."
+  # A review gets the packet preamble first; an implement run does not (it has a
+  # shell and works in its own worktree, so there is nothing to hand it).
+  if [ -n "$PACKET_HASH" ]; then printf '%s' "$PACKET_PREAMBLE" > "$dest"; else : > "$dest"; fi
+  cat "$body" >> "$dest"
+  rm -f "$body"
   printf '%s' "$PROMPT_FOOTER" >> "$dest"
 }
 
@@ -895,7 +952,10 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_PRIOR_TREE=""
 
   local workdir="$repo"
-  [ "$mode" = implement ] || workdir="$(review_boundary "$repo" "kimi-$name")"
+  if [ "$mode" != implement ]; then
+    prepare_review "$repo" "kimi-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
+    workdir="$REVIEW_DIR"
+  fi
   if [ "$mode" = implement ]; then
     base="$(git -C "$repo" rev-parse HEAD)"
     wt="$(workspace_path "$rid" "$name")"
@@ -943,8 +1003,10 @@ start_session() { # start_session NAME MODE
     write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
+    --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     '{kimi_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
-      model:$model, created:$created, updated:$created, turns:$turns}')"
+      model:$model, created:$created, updated:$created, turns:$turns,
+      base:$base, head:$head, packet_sha256:$pkthash}')"
   fi
 
   finish_turn "$repo" "$name" "$out"
@@ -973,7 +1035,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode
+  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode prev_head
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
@@ -988,10 +1050,23 @@ cmd_ask() {
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
   trap cancel_plain_turn INT TERM
 
-  pf="$(mktemp)"; out="$(mktemp)"; build_prompt_file "$pf"
+  pf="$(mktemp)"; out="$(mktemp)"
+  prepare_review "$repo" "kimi-$name"
+  # A continuation that silently moved to a different commit would let a verdict
+  # about one head be recorded against another.
+  prev_head="$(jq -r '.head // ""' "$meta")"
+  if [ -n "$prev_head" ] && [ "$prev_head" != "$REVIEW_HEAD" ]; then
+    warn "the repository moved since session '$name' started.
+  reviewed at: $prev_head
+  now at     : $REVIEW_HEAD
+The earlier evidence is STALE and cannot approve this head. The packet has been
+rebuilt for the new head; treat any verdict from this session as applying to
+$REVIEW_HEAD only."
+  fi
+  build_prompt_file "$pf"
   before="$(tree_state "$repo")"
   note "Kimi '$name' continuing session $sid…"
-  run_turn "$(review_boundary "$repo" "kimi-$name")" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  run_turn "$REVIEW_DIR" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   if ! await_result "$out" "'$name'"; then
     note "  kimi exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -1149,6 +1224,7 @@ cmd_reset_context() {
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
 ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_LIVE=""
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
