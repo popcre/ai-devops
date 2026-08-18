@@ -83,7 +83,7 @@ No Muse code, configuration, credential, service, or test has been added yet. Th
 - A separate Muse OpenCode service, configuration home, local state, port, password, logs, Ubuntu service, and Windows Scheduled Task.
 - One pinned OpenCode binary version shared by installation code, but no shared live server or session database with GLM.
 - A provider-neutral harness library used by both `ai-glm` and `ai-muse`, with compatibility tests proving that extracting it does not change GLM behavior.
-- Meta Model API through its OpenAI-compatible endpoint, with the exact available Muse Spark 1.2 standard model discovered and pinned from authenticated provider evidence.
+- Meta Model API through its OpenAI-compatible endpoint, with the Contributor model `muse-spark-1.2-contributor` verified against Albert's authenticated account and pinned.
 - API-key storage in 1Password vault `vibe_coding`, item title `Meta Model API`, field `api key`; the plan references the location only and never stores the value.
 - Windows 11 and Ubuntu installation, diagnosis, crash recovery, offline tests, paid live qualification, documentation, and a shared Claude/Codex delegation skill.
 - Review evidence packets, exact-head checking, linked-worktree snapshots, provider preflight, quarantine, scoreboard reporting, and redacted usage/cost evidence.
@@ -93,7 +93,7 @@ No Muse code, configuration, credential, service, or test has been added yet. Th
 - Installing, wrapping, or comparing Meta Muse Code in WSL. That is a later experiment after `ai-muse` is qualified.
 - Replacing `ai-glm`, changing its public command syntax, changing its qualified model, or merging GLM and Muse into one live service.
 - Automatic provider selection, automatic fallback to another model, or replacing Grok, Kimi, Qwen, Gemini, Codex, or Opus.
-- Using the discounted Contributor model, which permits Meta training on prompts and completions, unless Albert explicitly approves that privacy tradeoff in a later instruction. The default target is the standard, no-training service tier.
+- The standard Muse Spark 1.2 service tier. Albert explicitly stated on 2026-08-18 that he is only interested in Contributor.
 - A model override on individual calls. The exact model is pinned in repository-owned configuration and verified at runtime.
 - Direct Meta API calls outside OpenCode after the contract-probe step.
 - Browser automation, Windows-to-WSL control, database work, shared cloud changes, production deployment, or user-interface work.
@@ -122,7 +122,7 @@ No Muse code, configuration, credential, service, or test has been added yet. Th
 ### Not present
 
 - No `ai-muse` command, Muse config directory, setup script, system service, Windows task, tests, docs, skill, command-catalog row, preflight entry, scoreboard normalization, or machine-local credential exists in this repository.
-- There is no measured Meta API contract report for Albert’s account and no proof yet of the exact standard-tier Muse Spark 1.2 model identifier.
+- There is no measured Meta API contract report for Albert’s account and no proof yet that `muse-spark-1.2-contributor` is enabled for that account.
 - There is no evidence yet that Muse emits the same OpenCode tool, permission, completion, cache, token, or error shapes as GLM.
 
 ### Git and release state
@@ -135,8 +135,8 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 2. **The existing wrapper is safe but provider-bound.** `ai-glm` combines general OpenCode lifecycle code with GLM names, environment variables, messages, state paths, doctor checks, and recovery records. Copying it to `ai-muse` would create two large safety implementations that inevitably drift.
 3. **One shared live server is the wrong economy.** It would couple two credentials, providers, service restarts, default models, session stores, logs, and outage domains. A broken Muse configuration could take down GLM. Separate services on separate ports preserve fault isolation.
 4. **Two independent copies of OpenCode are unnecessary.** Both services can use the same pinned OpenCode installation while keeping configuration, state, cache, password, port, logs, and process lifecycle separate.
-5. **The model identifier must be discovered, not guessed.** Public examples may lag the live catalog, and Meta offers standard and Contributor variants with materially different data-use terms. Step 1 must record the authenticated `/models` result and select the standard service tier.
-6. **Privacy is a release requirement.** The Contributor discount permits provider training on prompts and completions. Repositories can contain proprietary business logic. The standard service tier is the locked default unless Albert explicitly chooses otherwise later.
+5. **The requested model must be verified, not silently substituted.** The required identifier is `muse-spark-1.2-contributor`, but Step 1 must prove it appears in Albert's authenticated catalog and works through OpenCode. Any standard-model fallback is a failure.
+6. **Contributor data use is an accepted owner decision.** Contributor permits Meta to train on submitted prompts and completions. Albert explicitly accepted that tradeoff on 2026-08-18 by stating he is only interested in Contributor. The harness must disclose this in its docs and doctor output; it must not second-guess the decision or silently use the standard tier.
 7. **Review safety remains tool removal.** In the qualified OpenCode version, the agent-file `tools:` map is the only measured enforcement. Muse review must have no bash, write, edit, patch, web fetch, or sub-agent tool. A permission prompt is not a safety boundary.
 8. **Implementation safety remains physical isolation.** A writable model needs a disposable clone with no remote. No provider permission response is trusted to prevent a push or an outside write.
 9. **Linked worktrees require a self-contained snapshot.** Their `.git` file points outside the handed directory. Every review must call `ai-review-sandbox ensure`; widening the allowed folder is not supported.
@@ -152,7 +152,7 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 5. **Rewrite `ai-glm` from scratch into a generic framework in one step. Rejected.** A large unmeasured rewrite could silently weaken a working provider. The plan extracts behavior behind characterization tests and proves live GLM parity before Muse is allowed to depend on it.
 6. **Trust OpenCode permission maps. Rejected by existing live evidence.** They allowed actions they claimed to deny. Only removed tools and the remote-less clone are treated as controls.
 7. **Use a linked Git worktree directly. Rejected by a measured 2026-08-17 failure.** OpenCode received one directory and immediately encountered Git control data outside it. The wrapper must make a self-contained snapshot.
-8. **Default to `muse-spark-1.2-contributor` for lower cost. Rejected.** Its discount changes the data-use agreement. Cost cannot silently override repository privacy.
+8. **Use the standard Muse Spark tier for privacy. Rejected by owner direction.** Albert stated on 2026-08-18 that he is only interested in Contributor. The accepted training terms must be disclosed, but they are not grounds to substitute the standard tier.
 9. **Accept the provider’s default model. Rejected.** Provider defaults can change. Every session must use and verify one exact pinned model.
 10. **Treat exit code, HTTP success, or any non-empty text as completion. Rejected.** The GLM history proves that transport success and a real completed answer are different facts. Muse must satisfy a measured strict completion rule.
 11. **Store the Meta key in a file or OpenCode config. Permanently rejected.** The key belongs only in 1Password and the launched process environment. It must not appear in Git, logs, arguments, reports, or generated service files.
@@ -167,8 +167,8 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 - **Shared implementation:** provider-neutral safety and lifecycle code is extracted once and used by both thin commands. GLM’s public behavior must remain byte-for-byte compatible where output is part of tests.
 - **OpenCode version:** start with the repository’s qualified pin in `config/opencode/version`. Do not upgrade OpenCode as part of adding Muse unless Step 1 proves Meta requires it; if it does, stop and write a separate upgrade plan with full GLM requalification.
 - **Default port:** reserve `127.0.0.1:4097` for Muse, configurable through `AI_MUSE_PORT`; GLM keeps `4096`.
-- **Model:** pin the exact standard-tier Muse Spark 1.2 identifier returned by Albert’s authenticated Meta model catalog. Never guess it from a third-party listing and never silently fall back.
-- **Privacy:** standard service tier only. Contributor/data-training tier is out of scope without explicit owner approval.
+- **Model:** require `muse-spark-1.2-contributor`, verify it against Albert's authenticated Meta catalog, and pin it. Never silently fall back to the standard tier or another model.
+- **Privacy:** Contributor is the only permitted tier. Its provider-training terms are explicitly accepted by Albert as of 2026-08-18 and must be disclosed in permanent documentation and diagnostic output.
 - **Review tools:** `read`, `list`, `glob`, `grep`, and the exact measured todo tool only. No shell, writing, patching, web access, or sub-agents.
 - **Implementation tools:** enabled only inside a disposable clone. Remove its remote before creating the OpenCode session; preserve the existing artifact export and cleanup rules.
 - **Review boundary:** always run `ai-review-sandbox ensure`, then build the additive evidence packet. The reviewer retains read/search access to the entire safe snapshot.
@@ -199,11 +199,11 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 - Save sanitized outputs under `docs/verification/muse-opencode/<UTC>-contract/README.md` and fixtures under `tests/fixtures/muse-opencode/`.
 - Probe authenticated model listing, a minimal completion, streaming if OpenCode needs it, function/tool calling, multi-turn continuity, usage fields, cache fields, malformed authentication, invalid model, rate-limit shape, and provider cancellation.
 - Verify OpenCode 1.18.12 can load the provider through `@opencode-ai/ai/providers/openai-compatible`. Do not start the permanent service yet.
-- Record whether standard and Contributor are separately selectable and prove the chosen standard ID. Do not send repository content during this step.
+- Prove `muse-spark-1.2-contributor` is separately selectable and that OpenCode sends that exact ID. Do not send repository content during this step.
 
 **Dependencies:** none. This is the gate for all later work.
 
-**Verification gate:** You’ll know it worked when the redacted report names one exact standard Muse Spark 1.2 model ID, documents every response shape the wrapper needs, the fixture test replays without network access, and no secret-shaped string appears in `git diff` or the saved artifacts. If the standard model is unavailable, tool calling is unsupported, or OpenCode 1.18.12 cannot use it, mark the plan blocked and stop.
+**Verification gate:** You’ll know it worked when the redacted report proves `muse-spark-1.2-contributor` is available and used exactly, documents every response shape the wrapper needs, the fixture test replays without network access, and no secret-shaped string appears in `git diff` or the saved artifacts. If Contributor is unavailable, tool calling is unsupported, or OpenCode 1.18.12 cannot use it, mark the plan blocked and stop. Never substitute the standard model.
 
 #### Step 2 — Extract a provider-neutral OpenCode core without changing GLM behavior
 
@@ -227,14 +227,14 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 
 **Change:**
 
-- Create `config/opencode-muse/opencode.json` with sharing and automatic updates disabled, the authenticated standard model pinned, and a custom Meta provider using the official base URL and `MODEL_API_KEY` environment variable.
+- Create `config/opencode-muse/opencode.json` with sharing and automatic updates disabled, `muse-spark-1.2-contributor` pinned, and a custom Meta provider using the official base URL and `MODEL_API_KEY` environment variable.
 - Create `config/opencode-muse/agent/muse-review.md` and `muse-implement.md` based on the measured GLM tool controls, with Muse-specific wording and exact model pin.
 - Use the shared `config/opencode/version` unless Step 1 triggered the separate upgrade stop condition.
 - Add configuration validation to `tests/test-ai-muse.sh`: valid JSON, exact provider/base/model, no literal key, no default fallback, review tools removed, implementation tools present only in its profile, sharing disabled, auto-update disabled.
 
 **Dependencies:** Steps 1 and 2.
 
-**Verification gate:** You’ll know it worked when offline tests reject any model mismatch, contributor model, missing `MODEL_API_KEY`, enabled review write/bash/web tools, enabled sharing/update, or literal credential, and accept only the exact recorded standard configuration.
+**Verification gate:** You’ll know it worked when offline tests reject any model other than `muse-spark-1.2-contributor`, missing `MODEL_API_KEY`, enabled review write/bash/web tools, enabled sharing/update, or literal credential, and accept only the exact Contributor configuration.
 
 #### Step 4 — Build `ai-muse` with the proven lifecycle
 
@@ -323,7 +323,7 @@ This plan and its linked handoff are planning-only. Implementation has not begun
 
 **Dependencies:** Steps 1 through 8.
 
-**Verification gate:** You’ll know it worked when every required case has observable evidence, all protected hashes match, exact model proof names the pinned standard model, continuity survives restart, failed/incomplete work stays nonzero and clearly labeled, successful implementation exports a reviewable patch, cleanup leaves no unexplained clone/session, and GLM still passes doctor.
+**Verification gate:** You’ll know it worked when every required case has observable evidence, all protected hashes match, exact model proof names `muse-spark-1.2-contributor`, continuity survives restart, failed/incomplete work stays nonzero and clearly labeled, successful implementation exports a reviewable patch, cleanup leaves no unexplained clone/session, and GLM still passes doctor.
 
 #### Step 10 — Qualify live Ubuntu behavior and compare platforms
 
@@ -371,7 +371,7 @@ This plan and its linked handoff are planning-only. Implementation has not begun
   - no secret-shaped value is persisted or printed.
 - `tests/test-ai-muse.sh`
   - syntax, help, invalid options, empty prompts, bad names, non-Git paths;
-  - exact provider/model/base URL and standard-tier pin;
+  - exact provider/model/base URL and Contributor-only pin;
   - review agent lacks bash/write/edit/patch/web/sub-agent tools;
   - implementation clone has no remote and uses Windows long-path support;
   - new/ask/list/show/transcript/diff/abort/delete behavior;
@@ -451,7 +451,7 @@ Provide explicit opt-in flags, parallel to `AI_GLM_LIVE=1`, for example `AI_MUSE
 - Environment name expected by Meta: `MODEL_API_KEY`, subject to Step 1 official verification.
 - Never place the value in this plan, Git, OpenCode JSON, service files, task arguments, logs, or reports.
 
-If the item or key does not exist, the implementing session must ask Albert once for access to Meta Model API and permission to store the resulting key, then use the `secrets-to-1password` skill. A correct access result is an authenticated, redacted model-list response containing the standard Muse Spark 1.2 model. Do not ask Albert to run shell commands if browser access can be granted to the session instead.
+If the item or key does not exist, the implementing session must ask Albert once for access to Meta Model API and permission to store the resulting key, then use the `secrets-to-1password` skill. A correct access result is an authenticated, redacted model-list response containing `muse-spark-1.2-contributor`. Do not ask Albert to run shell commands if browser access can be granted to the session instead.
 
 ### Local service identities
 
@@ -466,7 +466,7 @@ If the item or key does not exist, the implementing session must ask Albert once
 - [ ] All 11 STATUS rows are marked done with reproducible artifacts.
 - [ ] One provider-neutral OpenCode core serves thin `ai-glm` and `ai-muse` profiles without changing GLM’s public behavior.
 - [ ] `ai-muse` supports the full approved command lifecycle on Windows and Ubuntu.
-- [ ] The exact standard-tier Muse Spark 1.2 model is pinned and verified; no Contributor fallback exists.
+- [ ] `muse-spark-1.2-contributor` is pinned and verified; no standard-model fallback exists.
 - [ ] Review is proven unable to write inside or outside its safe directory.
 - [ ] Implementation is proven confined to a remote-less disposable clone and exports truthful complete/incomplete artifacts.
 - [ ] Linked worktrees, evidence packets, exact-head checks, preflight, quarantine, scoreboard, and the shared skill are integrated.
@@ -484,7 +484,7 @@ If the item or key does not exist, the implementing session must ask Albert once
 - **Shared-core regression:** extracting code could weaken GLM. Control: characterization tests and paid live parity before Muse work continues.
 - **Provider behavior differs from GLM:** control: Step 1 fixtures and provider-specific adapters that cannot relax common safety.
 - **Meta changes the catalog/default:** control: exact model pin and runtime doctor/session checks.
-- **Privacy-tier mistake:** control: authenticated catalog evidence, standard-only test, explicit Contributor rejection.
+- **Wrong-tier mistake:** control: authenticated catalog evidence, Contributor-only tests, explicit standard-tier rejection, and visible disclosure of Contributor training terms.
 - **Duplicate services collide:** control: separate paths, ports, task/unit names, doctor ownership checks, and tests that both run simultaneously.
 - **Windows task becomes unrepairable:** control: ordinary-user live test and explicit task access inspection.
 - **Paid request is replayed:** control: retry only local polls or provider-declared undelivered/rate-limited requests.
@@ -502,7 +502,7 @@ If the item or key does not exist, the implementing session must ask Albert once
 
 ### Genuine open questions and decision criteria
 
-- **What is the exact standard Muse Spark 1.2 model ID?** Step 1 answers from Albert’s authenticated Meta catalog. No third-party guess is acceptable.
+- **Is `muse-spark-1.2-contributor` enabled for Albert's account?** Step 1 answers from the authenticated Meta catalog and a minimal live call. If not, the work blocks; standard Muse is not an acceptable substitute.
 - **Does Meta expose reliable cache accounting through OpenCode?** Report it only if a live repeated-prefix test returns stable cache fields. Otherwise mark unavailable.
 - **Does Muse use the same permission/tool event shapes as GLM?** Reuse the common classifier only for identical measured shapes; add a narrow Muse adapter for differences and fail closed on unknowns.
 - **Does OpenCode 1.18.12 fully support Meta’s current API?** If not, stop. Do not upgrade OpenCode inside this plan without a separate GLM requalification plan.
