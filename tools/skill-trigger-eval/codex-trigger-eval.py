@@ -88,7 +88,7 @@ def run_query(query: str, skill: str, installed: Path, project: Path,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, OSError):
         return None
 
     text = proc.stdout.decode("utf-8", errors="replace")
@@ -227,7 +227,7 @@ def main() -> int:
     out = args.eval_set.with_suffix(".codex-results.json")
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nPer-query results: {out}")
-    return 0
+    return 2 if total_err else 0
 
 
 if __name__ == "__main__":

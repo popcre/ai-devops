@@ -38,9 +38,11 @@ published source (`E18C7A8F9154928C0DE4219FF104D2C65DFE7C52B1A783011A9C85663E857
 Offline Skill, installer, parity, Codex-runner, and context tests pass. Live
 trigger measurement is blocked on this machine: `claude auth status` reports
 `loggedIn: false`, and Windows returns `Access is denied` when the runner starts
-the Codex desktop executable. The Claude runner misleadingly reports logged-out
-runs as 0/10 with zero errors; that result is invalid and must not be used to
-rewrite the Skill. Issue #35 remains open for valid live evidence.
+the Codex desktop executable. The original Claude runner misleadingly reported
+logged-out runs as 0/10 with zero errors; that result was invalid. The runner now
+refuses a score unless authentication is proven. The Codex runner now converts
+an inaccessible executable into an explicit incomplete-run failure instead of
+crashing. Issue #35 remains open for valid live evidence.
 
 ## 4. What did not work
 

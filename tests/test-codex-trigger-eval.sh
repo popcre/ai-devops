@@ -69,5 +69,16 @@ noise = json.dumps({"type": "item.completed", "item": {
 if m._mentions_skill(noise, "qwen-code", installed):
     fail("the skill path appearing in command OUTPUT counted as a trigger")
 
+# A protected/missing executable is an excluded run, never a crash or a clean miss.
+original_run = m.subprocess.run
+def denied(*args, **kwargs):
+    raise PermissionError("blocked")
+m.subprocess.run = denied
+try:
+    if m.run_query("q", "qwen-code", installed, Path.cwd(), "low", 1) is not None:
+        fail("an access-denied Codex launch counted as a completed run")
+finally:
+    m.subprocess.run = original_run
+
 print("PASS: codex-trigger-eval effort, sandbox, and trigger detection")
 PY
