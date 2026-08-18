@@ -23,7 +23,7 @@ recovered verbatim from his transcripts). Summary of the file-role table:
 
 | File | Update when |
 |---|---|
-| `AGENTS.md` | Only high-signal guidance future sessions must see fast: new quirks, critical warnings, task routing, identifiers, "do not repeat this mistake" notes |
+| `AGENTS.md` | Only high-signal ROUTING future sessions must see fast: task routing, identifiers, critical warnings, pointers. **Subject to the size cap below** — new quirks go in `docs/idiosyncrasies.md`, incidents in `docs/incident-log.md`, status in `docs/pending-work.md`, each with a one-line index entry here |
 | `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` | Only if work is unfinished/blocked/partially deployed — **one NEW write-once file of your own**, never another session's. Delete YOUR file when the work it describes is truly complete. See the handoff gate below |
 | `HANDOFF.md` | **Never rewrite it.** It is a short static pointer to `HANDOFF.d/`. The only write allowed is creating it (or replacing a legacy full document with it) during migration — see the handoff gate below |
 | **Any plan file** (`IMPLEMENTATION-PLAN.md`, `plan_<topic>.md`) the session did work against | **Always — see the plan-file gate below.** A plan describes the world as it was when written; every step you execute makes it lie a little more |
@@ -32,9 +32,30 @@ recovered verbatim from his transcripts). Summary of the file-role table:
 | `CLAUDE.md` | Only Claude Code-specific workflow rules; general guidance goes in AGENTS.md |
 
 Hard rules:
+- **Respect the `AGENTS.md` size cap below. Check `wc -c AGENTS.md` before appending to it.**
 - Derive every update from code, config, migrations, or verified session findings. Never document guesses as facts.
 - Never add secrets, tokens, passwords, or credential values.
 - If nothing needs updating, say so explicitly — do not invent updates.
+
+
+### AGENTS.md size cap (hard rule, added 2026-08-18)
+
+`AGENTS.md` is a ROUTER, not an archive. It is loaded in full at the start of every
+session, so its size is a permanent tax on every future session's context window.
+
+- **Check the byte size before you append** (`wc -c AGENTS.md`).
+- **Soft ceiling 60 KB. Hard ceiling 80 KB.**
+- If your addition would cross the soft ceiling, you must NOT simply append. Split the
+  largest growing section into `docs/<topic>.md`, leave a pointer plus a one-line title
+  index in `AGENTS.md`, and repoint any `§N` cross-references in other docs.
+- Sections that grow one entry per session — quirks/idiosyncrasies, incident logs,
+  pending-work boards — belong in `docs/` from the start:
+  `docs/idiosyncrasies.md`, `docs/incident-log.md`, `docs/pending-work.md`.
+- Never delete history to make room. Move it.
+
+Why: `designflow-frontend/AGENTS.md` reached 151 KB (~38k tokens, ~19% of a 200k
+window) by 2026-08 because 87 sessions each appended a quirk or incident and nothing
+ever moved out. Split on 2026-08-18.
 
 ## Mandatory plan-file gate (a plan you worked against MUST NOT be left stale)
 
