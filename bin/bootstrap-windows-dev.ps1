@@ -100,6 +100,17 @@ try {
     Add-Result 'Package-manager exceptions' 'APPLIED' 'Vercel, Trigger.dev, and Supabase CLI'
   }
 
+  $providerClis = Join-Path $RepoPath 'bin\install-windows-ai-provider-clis.ps1'
+  if (-not (Test-Path -LiteralPath $providerClis)) { throw "Missing AI provider installer: $providerClis" }
+  $providerArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$providerClis)
+  if ($TestOnly) { $providerArgs += '-TestOnly' }
+  & powershell.exe @providerArgs
+  if ($LASTEXITCODE -eq 0) {
+    Add-Result 'Grok and Kimi CLIs' $(if ($TestOnly) { 'COMPLIANT' } else { 'APPLIED' }) 'Official Grok Build and Kimi Code installers'
+  } elseif ($LASTEXITCODE -eq 2 -and $TestOnly) {
+    Add-Result 'Grok and Kimi CLIs' 'DRIFT' 'One or both provider CLIs are missing.'
+  } else { throw "Grok/Kimi CLI setup failed with exit code $LASTEXITCODE." }
+
   if (-not $SkipRemoteAccess) {
     $remoteAccess = Join-Path $RepoPath 'bin\configure-windows-bootstrap-access.ps1'
     $remoteArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$remoteAccess,'-RepoPath',$RepoPath)
