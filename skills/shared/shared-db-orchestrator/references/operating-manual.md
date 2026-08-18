@@ -103,6 +103,20 @@ status only and preserve work type and route. Preview and merge remain globally 
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
 
+### Close what you supersede, in the same turn
+
+Opening a new HANDOVER/tracker issue that restates or carries forward the scope
+of an older open issue is normal — but the old issue must be closed in that same
+session, with a one-line "superseded by #NNNN" comment, not left for a future
+triage pass. This is not optional housekeeping: a 2026-08-18 audit of this
+repo's `db-work` queue found ~90 open issues, of which only one was genuinely
+live structural work — the rest were stale HANDOVER notes nobody had closed.
+Before opening a new issue that continues or restates prior scope, check whether
+an older issue already covers it; if so, close the older one instead of leaving
+both open. When you file a HANDOVER note as a status record rather than a live
+ask, say so explicitly in the issue body so a future triage pass can tell the
+difference between "still needs doing" and "recorded for the log."
+
 Every successor issue must write this block from scratch after classifying its
 own requested work. It must not copy the predecessor's `work_type`, `route`, or
 `objects`. A structural predecessor does not make an offline-analysis,
