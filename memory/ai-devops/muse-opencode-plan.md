@@ -13,7 +13,7 @@ Muse Spark 1.2 OpenCode work is specified in
 chat.
 
 Locked architecture: separate `ai-muse` and `ai-glm` commands and live services,
-but one provider-neutral tested OpenCode safety core. Muse defaults to the Meta
-standard service tier; the Contributor/data-training tier is out of scope without
-explicit Albert approval. Preserve every measured constraint in
+but one provider-neutral tested OpenCode safety core. Albert stated on 2026-08-18
+that he is only interested in `muse-spark-1.2-contributor`; its provider-training
+terms are accepted, and standard Muse must never be substituted. Preserve every measured constraint in
 `docs/glm-opencode.md` section 5.

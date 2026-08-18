@@ -16,7 +16,7 @@ If the `Meta Model API` item or key does not exist in 1Password, implementation 
 
 ### RECOVERABLE
 
-N/A. The plan deliberately chooses Meta’s standard service tier. The cheaper Contributor tier is not an implementation option because it permits provider training on prompts and completions.
+N/A. Albert explicitly accepted Contributor's provider-training terms on 2026-08-18 and stated that Contributor is the only model he wants.
 
 ### ALREADY SETTLED
 
@@ -24,7 +24,7 @@ N/A. The plan deliberately chooses Meta’s standard service tier. The cheaper C
 - Keep `ai-muse` separate from `ai-glm` at the command, service, credential, port, state, and report levels.
 - Share one provider-neutral safety implementation rather than copying the large GLM wrapper.
 - Preserve the qualified OpenCode version unless Meta proves it cannot work. An upgrade requires a separate GLM requalification plan.
-- Use the standard Muse service tier. Contributor is out of scope without new explicit owner approval.
+- Use `muse-spark-1.2-contributor` only. Never substitute the standard tier.
 
 ## 1. What this application is
 
@@ -57,7 +57,7 @@ The intended result is a dependable `ai-muse` command usable by Claude and Codex
 3. One shared live OpenCode service was rejected because it would couple credentials, restarts, sessions, logs, and outages.
 4. Copying and renaming the large GLM wrapper was rejected because two safety implementations would drift.
 5. A one-step generic rewrite was rejected because it would put the working GLM harness at unnecessary risk. The plan requires characterization tests and live GLM parity before Muse work continues.
-6. Contributor pricing was rejected as the default because it changes the data-use agreement and permits training on submitted content.
+6. The standard tier was rejected after Albert clarified on 2026-08-18 that he is only interested in Contributor. Contributor's training terms are accepted and must be disclosed.
 
 ## 5. Root causes, findings, and decisions
 
@@ -68,14 +68,14 @@ The intended result is a dependable `ai-muse` command usable by Claude and Codex
 - Implementation safety is a disposable clone with its Git remote removed.
 - Linked Git worktrees must be converted to self-contained review snapshots before delegation.
 - Muse and GLM use separate ports: GLM stays on 4096; Muse is planned for 4097.
-- The exact standard Muse Spark 1.2 model ID remains intentionally open until authenticated Meta evidence proves it.
+- The required model ID is `muse-spark-1.2-contributor`; authenticated Meta evidence must prove it is enabled for Albert's account.
 
 ## 6. Exact next steps
 
 1. Open [`plan_muse-opencode-harness.md`](../plan_muse-opencode-harness.md) and read its STATUS table, §§1, 8, 9 Step 1, 11, and 12.
 2. Fetch `origin/main`, record the current SHA, inspect concurrent changes, and preserve unrelated work.
 3. Confirm access to 1Password item `vibe_coding / Meta Model API / api key`. If absent, request browser access and storage approval once, then use the `secrets-to-1password` skill.
-4. Execute plan Step 1 only. Save redacted contract evidence and stop if the standard Muse Spark 1.2 model, tool calling, or OpenCode 1.18.12 compatibility is not proven.
+4. Execute plan Step 1 only. Save redacted contract evidence and stop if `muse-spark-1.2-contributor`, tool calling, or OpenCode 1.18.12 compatibility is not proven. Never substitute standard Muse.
 5. Update the plan STATUS and §5 in the same commit as the Step 1 evidence.
 6. Continue in order. Use a fresh session after Steps 2, 6, and 10 as directed by the plan.
 
@@ -106,7 +106,7 @@ Each step has its own verification gate. Do not mark a step done with a bare cla
 
 ## 9. Open questions and risks
 
-- The exact standard Muse Spark 1.2 model ID must come from the authenticated Meta catalog.
+- `muse-spark-1.2-contributor` must be present in Albert's authenticated Meta catalog or the implementation blocks.
 - Meta’s cache, usage, permission, and error fields may differ from GLM and must be measured.
 - Extracting a common core could regress GLM; the plan makes live GLM parity a hard stop before Muse proceeds.
 - Meta may require a newer OpenCode version. If so, this plan stops and a separate OpenCode upgrade/requalification plan is required.
