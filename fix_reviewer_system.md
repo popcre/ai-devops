@@ -1,6 +1,9 @@
 # Fix the delegated reviewer system
 
-Status: analysis complete; implementation is tracked by [ai-devops issue #34](https://github.com/u2giants/ai-devops/issues/34).
+Status: reduced repair implemented and independently verified on 2026-08-18;
+shipping evidence is recorded in
+[`plan_reviewer-system-repair.md`](plan_reviewer-system-repair.md) and tracked by
+[ai-devops issue #34](https://github.com/u2giants/ai-devops/issues/34).
 
 Ownership is deliberately split. `ai-devops` owns the reviewer wrappers, the
 rules installed into every AI session, provider health checks, review packets,

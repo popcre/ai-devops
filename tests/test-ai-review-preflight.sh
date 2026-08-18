@@ -33,7 +33,9 @@ chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 
 echo '== ai-review-preflight'
-mkdir -p "$REPO/.ai-review"; printf 'live-review-evidence\n' > "$REPO/.ai-review/sentinel"
+mkdir -p "$REPO/.ai-review"
+printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"
+printf 'live-review-evidence\n' > "$REPO/.ai-review/sentinel"
 check "valid provider passes offline checks" "$SCRIPT check grok '$REPO' | grep -q 'packet=verified'"
 check "live review packet is never touched" "grep -qx 'live-review-evidence' '$REPO/.ai-review/sentinel'"
 check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
