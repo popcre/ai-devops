@@ -1,5 +1,11 @@
 # Codex skills usage guide
 
+For POP business meaning, say “use our Business Logic Library,” “add this business
+rule,” or “audit this feature against our business rules.” The shared
+`pop-business-rules` Skill starts at
+`u2giants/shared-db/docs/business-rules/application-map.md` and loads only the
+applicable topics.
+
 Codex now has repo-owned skills under `skills/codex/`, plus cross-client skills
 under `skills/shared/`. Install them on **Ubuntu or Git Bash** with:
 
