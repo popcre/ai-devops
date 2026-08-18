@@ -81,7 +81,7 @@ def run_query(query: str, skill: str, project: Path, timeout: int) -> bool | Non
             stderr=subprocess.DEVNULL,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, OSError):
         return None
 
     skill_blocks: dict[int, bool] = {}
@@ -121,6 +121,28 @@ def run_query(query: str, skill: str, project: Path, timeout: int) -> bool | Non
                     if skill_blocks.get(se.get("index")) and skill in delta.get("partial_json", ""):
                         return True
     return False
+
+
+def claude_is_authenticated() -> tuple[bool, str]:
+    """Prove Claude CLI authentication before scoring any prompts."""
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"could not run `claude auth status`: {exc}"
+    try:
+        status = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return False, "`claude auth status` did not return valid JSON"
+    if proc.returncode != 0 or status.get("loggedIn") is not True:
+        return False, "Claude CLI is logged out; run `claude` and complete `/login` first"
+    return True, ""
 
 
 NEUTRAL_FILES = {
@@ -184,6 +206,11 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    authenticated, reason = claude_is_authenticated()
+    if not authenticated:
+        print(f"ERROR: {reason}. No trigger score was produced.", file=sys.stderr)
+        return 2
+
     evals = json.loads(args.eval_set.read_text(encoding="utf-8"))
     if args.project:
         project = args.project
@@ -232,7 +259,7 @@ def main() -> int:
     out = args.eval_set.with_suffix(".results.json")
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nPer-query results: {out}")
-    return 0
+    return 2 if total_err else 0
 
 
 if __name__ == "__main__":
