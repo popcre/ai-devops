@@ -1,0 +1,1 @@
+{"conversation_id":"conversation-123","status":"SUCCESS","response":"","duration_seconds":0,"num_turns":1,"usage":{"total_tokens":0},"command":{"name":"model","data":{"id":"gemini-3.7-flash-high","label":"Gemini 3.7 Flash (High)","effort":"high","is_default":false}}}
