@@ -148,8 +148,12 @@ Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
 session for rebuttals and relay them with `templates/delegation/debate-turn.md`.
 Stop at evidence-backed agreement or after the initial review plus three
-rebuttals. If a material disagreement remains, stop merge and ask Albert one
-concise decision. Never expose secrets or licensed rows.
+rebuttals. If a material disagreement remains, the merge stays stopped and the
+dispute goes to a THIRD independent reviewer, or to an engineer. Do NOT ask
+Albert to adjudicate it (owner ruling 2026-08-18): he is not a programmer, and a
+technical disagreement between two models is not a judgement he can make. Handing
+it to him produces a coin-flip dressed as a decision, recorded as owner
+judgement. Never expose secrets or licensed rows.
 
 After every review, append objective evidence to
 `C:\repos\ai-devops\models_comparison_grok_kim_glm.md` through an ai-devops PR:
