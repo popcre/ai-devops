@@ -13,6 +13,10 @@ behavior.
 This report records what failed during the 24-hour shared-db orchestrator session
 of 2026-08-16/17 and the permanent fixes required.
 
+For the broader failure beyond delegated reviews, including concrete issues that
+crossed sessions or remained unfinished, read
+[`shared-db_orchestrator_failure_analysis.md`](shared-db_orchestrator_failure_analysis.md).
+
 ## Executive conclusion
 
 The poor throughput was not caused by one problem. The reviewer system caused a
