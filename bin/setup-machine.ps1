@@ -166,7 +166,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn
 # folder and grant only read/execute; credentials remain in Windows Credential
 # Manager and no token is copied or exposed.
 $repairGhAccess = Join-Path $RepoPath "bin\repair-codex-github-cli-access.ps1"
-if (Get-Command gh -ErrorAction SilentlyContinue -and (Test-Path -LiteralPath $repairGhAccess)) {
+if ((Get-Command gh -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $repairGhAccess)) {
   Step "GitHub CLI access for restricted Codex tasks"
   & $repairGhAccess
 }
