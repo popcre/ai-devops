@@ -28,18 +28,31 @@ The full plan is [`plan_pop-business-rules-skill.md`](../plan_pop-business-rules
 
 ## 3. Current state
 
-The plan and this handoff were created on branch `codex/pop-business-rules-plan`
-from `origin/main` commit `74b78f6`. No Skill implementation has started. The
-central library files existed only as uncommitted shared-db work when the plan
-was written, so the plan correctly makes publication to `shared-db/main` its
-first hard gate.
+The companywide library is merged through `u2giants/shared-db` PR #1178. The
+Skill, trigger set, tests, and usage documentation are merged through
+`u2giants/ai-devops` PR #36, merge commit `e7d713d`. The Skill was installed to
+both `~/.claude/skills/pop-business-rules/` and
+`~/.codex/skills/pop-business-rules/`; both SHA-256 hashes exactly match the
+published source (`E18C7A8F9154928C0DE4219FF104D2C65DFE7C52B1A783011A9C85663E8576F1`).
+
+Offline Skill, installer, parity, Codex-runner, and context tests pass. Live
+trigger measurement is blocked on this machine: `claude auth status` reports
+`loggedIn: false`, and Windows returns `Access is denied` when the runner starts
+the Codex desktop executable. The Claude runner misleadingly reports logged-out
+runs as 0/10 with zero errors; that result is invalid and must not be used to
+rewrite the Skill. Issue #35 remains open for valid live evidence.
 
 ## 4. What did not work
 
-No implementation was attempted. The rejected designs are recorded in plan
-Section 7: copied rules in the Skill, application-specific Skills, global prompt
-bloat, premature search infrastructure, code-as-business-authority, and the
-obsolete skill-creator trigger loop.
+- Running the normal installer from a linked worktree installed and verified the
+  Skill, then correctly refused to install durable machine launchers from that
+  non-canonical path. Do not call that Skill installation a failure; do not call
+  the whole machine sync complete either.
+- Claude live evaluation returned 0/10 because Claude was logged out. The runner
+  failed to classify authentication responses as errors.
+- Codex live evaluation failed with `WinError 5` because the WindowsApps desktop
+  executable cannot be launched as a child process from the runner.
+- The rejected designs remain recorded in plan Section 7.
 
 ## 5. Root causes and key findings
 
@@ -50,15 +63,11 @@ map prevents unnecessary whole-library loading.
 
 ## 6. Exact next steps
 
-1. Read the plan STATUS table and the entire plan.
-2. Prove the central map and library home exist on `shared-db/main`; success is
-   two non-404 GitHub content responses.
-3. Follow plan Phases 2–4 to author, test, and document the Skill; success is the
-   offline contract test passing and all load-bearing procedures present.
-4. Follow Phase 5 for real Claude and Codex installation and trigger evidence;
-   success is byte-identical installation, all positives firing, and no negatives firing.
-5. Follow Phase 6 to land the work, update the plan, close issue #35, and delete
-   this handoff when GitHub proves completion.
+1. Log Claude CLI in on this machine and verify `claude auth status` says `loggedIn: true`.
+2. Provide a callable Codex CLI outside the protected WindowsApps desktop package, or fix the runner to use the supported Codex CLI launcher without weakening its read-only/low-effort safeguards.
+3. Re-run both three-round evals from plan Phase 5. Inspect transcripts before treating a miss as a Skill defect.
+4. Run the three read/add/audit probes.
+5. Record valid evidence, close issue #35, update the plan to complete, and delete this handoff in the completing commit.
 
 ## 7. Constraints and gotchas
 
