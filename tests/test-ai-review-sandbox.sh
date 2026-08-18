@@ -52,6 +52,14 @@ OUT="$("$SCRIPT" ensure "$MAIN" reviewtag)"
 check "ordinary_repo_passes_through"          "[ \"\$(cd '$MAIN' && pwd -P)\" = '$OUT' ]"
 check "ordinary_repo_creates_no_sandbox"      "[ ! -d '$TMP/sandboxes' ]"
 
+# Preflight must never build or delete a packet in the live ordinary clone.
+mkdir -p "$MAIN/.ai-review"; echo live > "$MAIN/.ai-review/sentinel"
+COPY_STAGE="$("$SCRIPT" ensure-copy "$MAIN" preflight)"
+check "ensure_copy_isolates_ordinary_clone"   "[ '$COPY_STAGE' != '$MAIN' ] && [ -d '$COPY_STAGE/.git' ]"
+check "ensure_copy_excludes_live_packet"      "[ ! -e '$COPY_STAGE/.ai-review' ] && grep -qx live '$MAIN/.ai-review/sentinel'"
+"$SCRIPT" remove-copy "$MAIN" preflight
+check "remove_copy_deletes_only_snapshot"     "[ ! -d '$COPY_STAGE' ] && [ -d '$MAIN/.git' ]"
+
 STAGE="$("$SCRIPT" ensure "$WT" reviewtag)"
 check "worktree_gets_a_sandbox_path"          "[ '$STAGE' != '$WT' ] && [ -d '$STAGE' ]"
 
