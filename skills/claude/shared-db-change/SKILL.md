@@ -120,6 +120,17 @@ and production alike, and quote the proof in your report.
 **The test:** *shape or contents?* Shape → everything below. Contents → your own session,
 unless the target is curated Master Data.
 
+## Successor issues must be routed from scratch
+
+Never inherit the route of a predecessor issue. Classify the successor's own
+requested work: structural work routes to `shared-db-orchestrator` and names
+exact database objects; ordinary application data or offline analysis routes to
+the owning application session; outside-sourced curated Master Data uses its
+existing governed exception; planning and repository maintenance do not consume
+a migration-author lane. If the issue is misrouted, stop before implementation,
+preserve private artifacts in their approved private repository, and hand off to
+the correct route. A predecessor's repository is context, not routing proof.
+
 ## Hard rules (these govern STRUCTURAL CHANGES)
 
 1. ~~**DDL via MCP `apply_migration` only** — never `execute_sql` for DDL.~~

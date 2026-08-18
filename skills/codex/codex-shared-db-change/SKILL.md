@@ -87,6 +87,17 @@ app-repo-only migration. **Author it in `u2giants/shared-db` first.** App repos
 only get updated (models, generated types, adapters, API code) AFTER the shared-db
 change is applied.
 
+## Successor issues must be routed from scratch
+
+Never inherit the route of a predecessor issue. Classify the successor's own
+requested work: structural work routes to `shared-db-orchestrator` and names
+exact database objects; ordinary application data or offline analysis routes to
+the owning application session; outside-sourced curated Master Data uses its
+existing governed exception; planning and repository maintenance do not consume
+a migration-author lane. If the issue is misrouted, stop before implementation,
+preserve private artifacts in their approved private repository, and hand off to
+the correct route. A predecessor's repository is context, not routing proof.
+
 ## Procedure (local Supabase CLI — the working path)
 
 1. **Stop and switch to `u2giants/shared-db`** (local clone, e.g. `C:\repos\shared-db`

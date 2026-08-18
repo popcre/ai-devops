@@ -113,7 +113,12 @@ check "remove_refuses_unmarked_dir"             "! '$SCRIPT' remove '$WT' guarde
 # worktree path back to a delegated reviewer.
 for w in ai-glm ai-kimi ai-qwen ai-grok-review; do
   check "${w}_defines_review_boundary"        "grep -q '^review_boundary()' '$REPO_ROOT/bin/$w'"
-  check "${w}_uses_review_boundary"           "[ \"\$(grep -c 'review_boundary \"' '$REPO_ROOT/bin/$w')\" -ge 2 ]"
+  if grep -q '^prepare_review()' "$REPO_ROOT/bin/$w"; then
+    check "${w}_prepares_through_boundary"     "grep -q 'REVIEW_DIR=\"\$(review_boundary' '$REPO_ROOT/bin/$w'"
+    check "${w}_uses_prepared_review_twice"    "[ \"\$(grep -c '^ *prepare_review \"' '$REPO_ROOT/bin/$w')\" -ge 2 ]"
+  else
+    check "${w}_uses_review_boundary"          "[ \"\$(grep -c 'review_boundary \"' '$REPO_ROOT/bin/$w')\" -ge 2 ]"
+  fi
   check "${w}_releases_its_snapshot"          "grep -q 'release_boundary' '$REPO_ROOT/bin/$w'"
 done
 # ai-codex-review and ai-deepseek-agent send the diff as text and never hand a

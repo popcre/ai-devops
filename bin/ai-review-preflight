@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# ai-review-preflight - fast provider health checks and temporary quarantine.
+#
+# WHY THIS EXISTS
+# A provider that is logged out, out of allowance, or locally unavailable must
+# be rejected before it receives a durable review assignment. A failed check is
+# not a review attempt. Quarantine prevents the next caller from immediately
+# assigning the same unhealthy provider again.
+set -euo pipefail
+
+VERSION="1.0.0"
+STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
+CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
+COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+die()  { printf 'ai-review-preflight: error: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+valid_provider() { case "$1" in grok|kimi|glm) return 0 ;; *) return 1 ;; esac; }
+provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
+now_epoch() { date +%s; }
+
+PREFLIGHT_REPO=""
+PREFLIGHT_TAG=""
+PREFLIGHT_SANDBOX=""
+cleanup_check() {
+  [ -z "$PREFLIGHT_SANDBOX" ] || "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" remove "$PREFLIGHT_SANDBOX" >/dev/null 2>&1 || true
+  [ -z "$PREFLIGHT_REPO" ] || "${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}" remove "$PREFLIGHT_REPO" "$PREFLIGHT_TAG" >/dev/null 2>&1 || true
+}
+
+write_atomic() { # FILE JSON
+  local f="$1" tmp
+  mkdir -p "$(dirname "$f")"; chmod 0700 "$(dirname "$f")" 2>/dev/null || true
+  tmp="$(mktemp "$(dirname "$f")/.preflight.XXXXXX")"
+  printf '%s\n' "$2" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$f"
+}
+
+quarantine() { # PROVIDER CLASS [SECONDS]
+  local provider="$1" class="$2" seconds="${3:-$COOLDOWN}" now expires f
+  valid_provider "$provider" || die "unknown provider '$provider' (expected grok, kimi, or glm)."
+  case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
+  [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
+  now="$(now_epoch)"; expires=$((now + seconds)); f="$(provider_file "$provider")"
+  write_atomic "$f" "$(jq -nc --arg provider "$provider" --arg class "$class" \
+    --argjson created "$now" --argjson expires "$expires" \
+    '{version:1,provider:$provider,failure_class:$class,created_epoch:$created,expires_epoch:$expires}')"
+  note "ai-review-preflight: quarantined $provider for ${seconds}s ($class)."
+}
+
+active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
+  local f now expires
+  f="$(provider_file "$1")"; [ -f "$f" ] || return 1
+  jq -e --arg p "$1" '.version==1 and .provider==$p and (.expires_epoch|type=="number")' "$f" >/dev/null 2>&1 \
+    || die "invalid quarantine record: $f"
+  now="$(now_epoch)"; expires="$(jq -r .expires_epoch "$f")"
+  if [ "$expires" -le "$now" ]; then rm -f "$f"; return 1; fi
+  return 0
+}
+
+classify_failure() { # OUTPUT
+  local text; text="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$text" in
+    *403*|*429*|*allowance*|*usage.limit*|*quota*|*out.of.credit*) printf allowance-exhausted ;;
+    *not.authenticated*|*login*required*|*credential*|*unauthorized*|*401*) printf authentication-failed ;;
+    *timed.out*|*timeout*) printf provider-timeout ;;
+    *unreachable*|*connection.refused*|*health.endpoint*failed*|*service*unavailable*) printf service-unavailable ;;
+    *) printf provider-unhealthy ;;
+  esac
+}
+
+explain_failure() {
+  case "$1" in
+    allowance-exhausted) printf 'Quarantine this provider. Do not assign another review until the cooling period expires.\n' ;;
+    broken-snapshot) printf 'Rebuild once with ai-review-sandbox. If it still fails, quarantine the provider; never use a raw linked worktree.\n' ;;
+    empty-assistant-turns) printf 'Stop within 2-3 minutes and report no usable answer. Do not keep retrying empty turns.\n' ;;
+    turn-exhaustion) printf 'Do not increase the turn ceiling automatically. Check for a vague brief, an oversized change, or reviewer wandering, then narrow the work.\n' ;;
+    service-unavailable) printf 'Retry the service check once after a short delay, then wait. Do not misclassify an outage as a code verdict.\n' ;;
+    substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
+    authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
+    *) die "unknown failure class '$1'." ;;
+  esac
+}
+
+provider_wrapper() {
+  case "$1" in
+    grok) printf '%s' "${AI_REVIEW_GROK_WRAPPER:-$SCRIPT_DIR/ai-grok-review}" ;;
+    kimi) printf '%s' "${AI_REVIEW_KIMI_WRAPPER:-$SCRIPT_DIR/ai-kimi}" ;;
+    glm)  printf '%s' "${AI_REVIEW_GLM_WRAPPER:-$SCRIPT_DIR/ai-glm}" ;;
+  esac
+}
+
+check_provider() { # PROVIDER REPO LIVE BASE
+  local provider="$1" repo="$2" live="$3" base="$4" wrapper sandbox packet tag out rc class
+  valid_provider "$provider" || die "unknown provider '$provider' (expected grok, kimi, or glm)."
+  [ -d "$repo" ] || die "review directory does not exist: $repo"
+  repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
+  if active_quarantine "$provider"; then
+    jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' "$(provider_file "$provider")" >&2
+    return 3
+  fi
+
+  need jq; need git; need timeout
+  git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
+  [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
+    || die "base ref does not resolve: $base"
+
+  tag="preflight-$provider-$$"
+  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure "$repo" "$tag")"
+  PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
+  trap cleanup_check EXIT
+  packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
+  "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
+  mkdir -p "$STATE_DIR"; out="$(mktemp "$STATE_DIR/.result.XXXXXX")"; rm -f "$out"
+
+  wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
+  set +e
+  if [ "$live" = 1 ] && [ "$provider" != glm ]; then
+    out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+  else
+    out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+  fi
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    class="$(classify_failure "$out")"; quarantine "$provider" "$class"
+    printf 'ai-review-preflight: %s failed: %s\n' "$provider" "$class" >&2
+    printf '%s\n' "$out" | tail -12 >&2
+    return 1
+  fi
+  printf 'PASS provider=%s repository=%s packet=verified health=ok allowance=%s\n' \
+    "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
+}
+
+usage() {
+  cat <<EOF
+Usage:
+  ai-review-preflight check <grok|kimi|glm> <repo> [--base REF] [--live]
+  ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
+  ai-review-preflight clear <provider>
+  ai-review-preflight status [provider]
+  ai-review-preflight explain <failure-class>
+EOF
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  check)
+    provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
+    while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
+    check_provider "$provider" "$repo" "$live" "$base" ;;
+  quarantine)
+    provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
+    [ "${1:-}" != --seconds ] || { seconds="${2:-}"; shift 2; }
+    [ "$#" -eq 0 ] || die "unexpected argument '$1'."
+    quarantine "$provider" "$class" "$seconds" ;;
+  clear)
+    provider="${1:-}"; valid_provider "$provider" || die "unknown provider '$provider'."
+    rm -f "$(provider_file "$provider")"; note "ai-review-preflight: cleared $provider quarantine." ;;
+  status)
+    provider="${1:-}"
+    if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
+    else providers=(grok kimi glm); fi
+    for provider in "${providers[@]}"; do
+      if active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"; else printf '{"provider":"%s","status":"available"}\n' "$provider"; fi
+    done ;;
+  explain) explain_failure "${1:-}" ;;
+  --version) printf 'ai-review-preflight %s\n' "$VERSION" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

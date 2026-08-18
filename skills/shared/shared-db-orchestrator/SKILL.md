@@ -38,6 +38,10 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Refill every free lane in the same turn. Never wait for Albert to request status or say start.
 - Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
 - Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
+- Classify every new or successor issue from its own requested work. Never
+  inherit `work_type`, `route`, or database objects from a predecessor issue.
+  A successor that performs offline analysis or application work remains
+  non-structural even when its predecessor changed the database.
 - Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, but they never consume a migration-author lane.
 - Assign each exact-head issue one external reviewer from the durable round robin.
 
@@ -128,3 +132,11 @@ Start from [references/sub-agent-brief-template.md](references/sub-agent-brief-t
 - incremental status and exact blockers
 
 Read [references/incident-ledger.md](references/incident-ledger.md) when a safety rule seems unnecessary or contradictory.
+
+## Misrouted work
+
+If an issue is not structural and is not the curated Master Data exception,
+refuse shared-db implementation before assigning an agent or lane. Preserve any
+private artifact in its approved private repository, record the correct route,
+and hand the work to that owning application session. Never publish or copy a
+private artifact into a public shared-db issue to make the handoff easier.

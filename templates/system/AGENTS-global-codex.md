@@ -189,10 +189,21 @@ before touching any prod trigger or Terraform state.
     (spreadsheet, CSV, export, pasted rows, API pull) into curated Master Data —
     `core.licensor`, `core.property`, `core.character`, `core.customer`,
     `core.factory`, `*_ext` — stays orchestrator work under §6.4.
+  - **Route every successor from its own work.** Never inherit a predecessor's
+    repository, work type, route, or database-object claim. Structural work must
+    name exact objects; application data and offline analysis stay with the
+    owning application; the curated Master Data carve-out stays governed. Stop
+    a misroute before dispatch and keep private artifacts in their approved
+    private repository.
   - **Unchanged:** prove which database you are pointed at immediately before every
     `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`, preview or production, and quote it (§4.2).
   - Licensed licensor rows never leave their approved private repo. Read the
     full procedure before any change. [full: codex-shared-db-change]
+- **Independent review is required for the reviewer safety path:** changes to
+  delegated-review wrappers, packet/snapshot/preflight tools, their safety tests,
+  or installed rules that change reviewer or shared-database routing need one
+  read-only, exact-head, final-verdict review before merge. Ordinary plans,
+  analysis notes and documentation-router wording do not.
 - **Deploy verify (hetz apps):** Actions green → GHCR image → Coolify (services
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).

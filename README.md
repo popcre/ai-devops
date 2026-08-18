@@ -152,6 +152,19 @@ Coding Plan key is resolved from 1Password only at launch. See
 either Claude or Codex invoke it when
 Albert says “ask GLM” or “run this by GLM.”
 
+### Reviewer health and measurement
+
+`ai-review-preflight check <grok|kimi|glm> <repo>` verifies the repository,
+evidence packet, writable result area, and provider health before a review is
+assigned. Failed providers are temporarily quarantined so the next caller does
+not immediately repeat the same failure. Add `--live` only when a small paid
+allowance probe is justified.
+
+`ai-review-scoreboard append ...` normalizes outcome metadata from the existing
+provider wrappers into a JSONL scoreboard. It reports recurrence of long waits,
+missing verdicts, provider failures, and stale evidence. It does not choose a
+provider or replace the wrappers.
+
 ---
 
 ## Fresh server install

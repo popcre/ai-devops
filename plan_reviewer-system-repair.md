@@ -15,12 +15,12 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | 1 | `ai-review-packet` builder + hashed manifest | ✅ done 2026-08-18 | [`bin/ai-review-packet`](bin/ai-review-packet); 57 tests pass via `bash tests/test-ai-review-packet.sh` |
 | 2 | Wrapper-owned SHA identity (no caller-typed SHAs) | ✅ done 2026-08-18 | `prepare_review()` in [`bin/ai-grok-review`](bin/ai-grok-review), [`bin/ai-kimi`](bin/ai-kimi), [`bin/ai-glm`](bin/ai-glm); proven by `meta records the base sha derived by the wrapper` and `wrong --assert-head is refused` in `tests/test-ai-grok-review.sh` |
 | 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ⚠️ built, **gate NOT met** 2026-08-18 | code shipped and green (`tests/test-ai-grok-review.sh` 102/0, `test-ai-kimi.sh` 134/0, `test-ai-glm.sh` 221/0) but the live A/B below did **not** reduce turns. Do not treat the premise as proven. |
-| 4 | Provider preflight + quarantine (`ai-review-preflight`) | ⬜ open | — |
-| 5 | Short ordinary budgets + early provisional verdict | ⬜ open | — |
-| 6 | Failure-specific rotation | ⬜ open | — |
-| 7 | Performance ledger + `ai-review` front door | ⬜ open | — |
-| 8 | 30-review trial against the success criteria | ⬜ open | — |
-| 9 | Global source-routing rule + #1097→#1113 regression | ⬜ open | — |
+| 4 | Provider preflight + quarantine (`ai-review-preflight`) | ✅ complete | [`bin/ai-review-preflight`](bin/ai-review-preflight); 19 checks pass; live preflight passed for Grok, Kimi, and GLM on 2026-08-18. |
+| 5 | Short ordinary budgets + early provisional verdict | 🛑 dropped 2026-08-18 | Five live Grok 4.6 reviews used 6, 6, 7, 7, and 6 turns; the earlier A/B used 8 turns both ways. A 6-turn default would manufacture no-verdict failures. See [`docs/reviewer-five-run-trial-2026-08-18.md`](docs/reviewer-five-run-trial-2026-08-18.md). |
+| 6 | Failure-specific guidance | ✅ complete | `ai-review-preflight explain` classifies six outcomes; Grok no longer recommends increasing turns; 19 fixture checks pass. |
+| 7 | Performance scoreboard | ✅ complete | [`bin/ai-review-scoreboard`](bin/ai-review-scoreboard) records and summarizes wrapper results without choosing providers; 9 checks pass. |
+| 8 | Mixed-provider failure check | ⬜ open, rewritten | Replace the obsolete 30-review speed trial with bounded Grok, Kimi, and GLM checks for no-verdict, allowance, empty-turn, and long-wait failures. |
+| 9 | Global source-routing rule + #1097→#1113 regression | ✅ complete | Installed global and shared-db skill rules plus [`tests/fixtures/shared-db-routing/1097-successor-1113.md`](tests/fixtures/shared-db-routing/1097-successor-1113.md); 11 checks pass. |
 
 **A fresh session starts at Step 4.** Steps 1–3 are one phase and must land
 together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
@@ -66,6 +66,33 @@ What the completed phase changed for the phases that follow:
   is additive (full repo read is retained, guarded by
   `reviewer_retains_access_outside_the_packet`); the packet is git-excluded so it
   cannot trip the read-only canaries.
+
+### DRIFT RECORDED 2026-08-18 (five-run trial and independent review)
+
+Five additional live Grok 4.6 reviews were run on real, already-pushed small
+commits with the current packet, unchanged read-only permissions, and the
+existing 20-turn / 15-minute ceiling. All five returned usable verdicts in about
+1m43s to 3m01s. Turns were 6, 6, 7, 7, and 6. The trial cost $0.26060184.
+The durable report is
+[`docs/reviewer-five-run-trial-2026-08-18.md`](docs/reviewer-five-run-trial-2026-08-18.md).
+
+This changes the remaining work:
+
+- **Step 5 is dropped, not deferred.** Two healthy reviews needed 7 turns and the
+  earlier A/B needed 8. Keep the existing ceiling; do not build halfway-result
+  capture or a new review-class budget system.
+- **Step 6 depends on Step 4 only.** Replace provider-specific bad advice with
+  failure-specific guidance. Turn exhaustion must diagnose vague scope, an
+  oversized change, or reviewer wandering; it must never recommend more turns.
+- **Step 7 is a scoreboard only.** Do not build a new `ai-review` front door or
+  automatically choose the fastest provider from a five-run Grok-only sample.
+- **Step 8 is a bounded mixed-provider failure check.** The Grok-small slice is
+  healthy, but the old Kimi allowance and GLM empty-response failures remain
+  unmeasured.
+- **Independent review is required only on the safety path:** reviewer wrappers,
+  packet/snapshot/preflight tools, their safety tests, and installed rules that
+  change reviewer or shared-database routing. It is not required for ordinary
+  plans, analysis notes, or documentation-router wording.
 
 ---
 
@@ -650,38 +677,13 @@ a message naming the failure class. Confirm the wall-clock with `time`.
 
 ---
 
-#### Step 5 — Short ordinary budgets and the early verdict protocol
+#### Step 5 — Dropped: short ordinary budgets and halfway-result capture
 
-**What to change:** the defaults at
-[`bin/ai-grok-review:70`](bin/ai-grok-review#L70),
-[`bin/ai-kimi:82`](bin/ai-kimi#L82), and
-[`bin/ai-glm:69`](bin/ai-glm#L69), plus a new review-class concept.
-
-| Review class | Turns | Wall time | On limit |
-|---|---:|---:|---|
-| Small exact-head diff (**the new default**) | 6 | 5 min | verdict, or an explicit no-verdict. No automatic continuation. |
-| Medium / security diff | 10 | 8 min | same |
-| Explicit architecture investigation | 20 | 15 min | opt-in only, never automatic |
-
-The existing long ceilings survive **only** as the explicitly requested
-exceptional mode. The env overrides (`AI_GROK_MAX_TURNS`, etc.) stay so an
-operator can still reach them deliberately.
-
-**Early verdict protocol** — add to the prompt preamble a required three-part
-shape: a **provisional verdict** stated early, then findings with evidence, then
-the **final verdict**. At the halfway point of the turn budget the wrapper
-captures whatever provisional result exists. State plainly in the wrapper's own
-output that a provisional verdict **cannot approve a change** — it exists so the
-orchestrator can narrow scope or start fixing instead of waiting blind.
-
-**Behaviour when done:** a small review that dies at turn 6 still leaves the
-orchestrator something actionable, and still cannot approve anything.
-
-**Dependencies:** Step 3.
-
-**Verification gate:** a two-file fixture diff returns a verdict within 6 turns
-and 5 minutes on Grok. Kill a run at its halfway point and confirm a provisional
-result was captured and is labelled non-approving.
+Do not implement this step. Five live reviews needed 6–7 turns and the earlier
+A/B needed 8. A 6-turn default would recreate the no-verdict failure. Keep the
+existing provider ceilings and their environment overrides. The packet already
+asks for an early working answer; the wrapper must continue to accept only a
+terminal final verdict for approval.
 
 ---
 
@@ -697,11 +699,11 @@ the "double the turns" advice at
 | Exhausted allowance | Quarantine the provider (Step 4). |
 | Broken snapshot | Rebuild once via `ai-review-sandbox`, then quarantine. |
 | Empty assistant turns | Fail in 2–3 minutes. |
-| Turn exhaustion | **Shrink the packet.** Never increase turns. |
+| Turn exhaustion | Name the likely cause: vague brief, oversized change, or reviewer wandering. Never increase turns automatically. |
 | Service outage (HTTP 5xx) | Bounded retry, then wait. Distinguish from provider failure — GitHub's outage was misread as reviewer failure. |
 | Substantive finding / blocker | **Stop and fix.** Never rotate to shop for a friendlier verdict. |
 
-**Dependencies:** Steps 4 and 5.
+**Dependencies:** Step 4 only.
 
 **Verification gate:** force each class with a fixture and confirm the emitted
 guidance matches the table. Specifically confirm turn exhaustion never prints a
@@ -709,12 +711,11 @@ larger `--max-turns`.
 
 ---
 
-#### Step 7 — `bin/ai-review` front door and the performance ledger
+#### Step 7 — Performance scoreboard without a new front door
 
-**What to create:** one `ai-review` command that callers use instead of picking
-a provider wrapper by hand. It runs preflight, picks the fastest healthy
-provider for the review class from the ledger, builds the packet, runs the
-review, classifies the outcome, and appends a ledger row.
+**What to create:** one small reporting command that reads the existing wrapper
+session metadata and appends normalized JSONL rows. It must not choose a
+provider, replace the wrappers, or automatically optimize for speed.
 
 Ledger row fields: timestamp, repo, base, head, packet hash, provider, review
 class, elapsed seconds, turns, tokens, cost, verdict, accepted findings, failure
@@ -722,34 +723,30 @@ class, and whether the evidence went stale. **Token and cost must be allowed to
 be absent** — not every provider reports them, and a missing value must not
 break the row.
 
-Provider wrappers stay below this interface and remain directly callable.
-Agents must stop hand-assembling prompts, clones, turn limits, and terminal-state
-interpretations.
+Provider wrappers remain the callable interface. The scoreboard exists only to
+spot a recurrence of long waits, missing verdicts, allowance failures, and stale
+evidence across providers.
 
-**Dependencies:** Steps 1–6.
+**Dependencies:** Steps 1–4 and 6.
 
-**Verification gate:** three consecutive `ai-review` runs append three
-well-formed ledger rows; one run with a quarantined provider shows it was
-skipped without being contacted.
+**Verification gate:** three fixture metadata files append three well-formed
+ledger rows, including one provider with missing token and cost values.
 
 ---
 
-#### Step 8 — The 30-review trial
+#### Step 8 — Bounded mixed-provider failure check
 
-Run at least **30 real reviews** through `ai-review` and measure against the
-success criteria in `fix_reviewer_system.md`:
+Run one bounded, representative check through each available provider after
+Steps 4, 6, and 7. Include one larger change across the sample. Measure whether
+each provider returns a usable verdict, exceeds 15 minutes, reports an allowance
+failure, produces empty assistant turns, or leaves stale evidence. A provider
+that is unavailable in preflight is recorded as unavailable and is not assigned
+a paid review.
 
-- 90% of small reviews finish within 5 minutes;
-- 95% return a usable verdict;
-- no small review exceeds 10 turns;
-- no exhausted provider receives a durable assignment;
-- no SHA is manually transcribed;
-- under 5% of verdicts go stale before use;
-- provider failures identified within 2 minutes.
-
-**Verification gate:** a written report committed to `docs/` citing the ledger
-file, with per-criterion pass/fail. If a criterion fails, the plan is not done —
-tune and re-run rather than lowering the bar.
+**Verification gate:** a written report committed to `docs/` cites the
+scoreboard rows and gives a pass/fail result for Grok, Kimi, and GLM. The purpose
+is to detect catastrophic failure modes, not to enforce the obsolete five-minute
+speed target.
 
 ---
 
@@ -920,17 +917,20 @@ cd /c/repos/ai-devops && ai-glm selftest && ai-kimi doctor && ai-grok-review doc
 
 **Definition of done — every box ticked:**
 
-- [ ] `bin/ai-review-packet`, `bin/ai-review-preflight`, `bin/ai-review` exist,
-      are executable, pass `shellcheck`, and carry a `# WHY THIS EXISTS` header.
+- [x] `bin/ai-review-packet`, `bin/ai-review-preflight`, and
+      `bin/ai-review-scoreboard` exist, are executable, parse successfully, and
+      carry a `# WHY THIS EXISTS` header. A new `ai-review` front door was
+      deliberately dropped after the five-run trial and independent review.
 - [ ] The three wrappers build and consume packets; none of their read-only
       boundaries were widened (proved by `ai-glm selftest`, `ai-kimi doctor`,
       `ai-grok-review doctor`).
-- [ ] All 17 tests in §10 exist and pass; the whole existing `tests/` suite is
-      still green.
-- [ ] Baseline vs. post-packet turn count and elapsed time are recorded (Step 3).
-- [ ] The 30-review trial report is committed to `docs/` and every success
-      criterion passes.
-- [ ] `git var GIT_COMMITTER_IDENT` verified before the first commit.
+- [x] The relevant packet, wrapper, worktree-safety, preflight, scoreboard, and
+      routing suites pass locally.
+- [x] Baseline vs. post-packet turn count and elapsed time are recorded (Step 3).
+- [x] The replacement five-run Grok 4.6 trial is recorded in
+      `docs/reviewer-five-run-trial-2026-08-18.md`: 5/5 usable verdicts and
+      0/5 15-minute failures. The obsolete 30-review trial was dropped.
+- [x] `git var GIT_COMMITTER_IDENT` verified before the first commit.
 - [ ] Work committed **and pushed**; commit SHA reported.
 - [ ] `AGENTS.md` router updated to link this plan and the new commands;
       `docs/` updated where reviewer behaviour is described.
@@ -951,16 +951,17 @@ verified" reduces to: the test suite passes locally and the commit is pushed.
 | Packets grow into repository dumps | The inclusion rule (§ Step 1: "a fact the reviewer cannot obtain without a shell") plus the 400 KB split rule. Test 3 enforces reference-don't-inline. |
 | A future change quietly widens permissions | Test 4 plus the three wrapper self-tests are the canaries. |
 | Changing Grok's frozen prefix discards its cache | Do not change `GROK_PERMS`. The preamble goes in the prompt, not the flags. |
-| Everything is behind one new `ai-review` front door | Provider wrappers stay directly callable, so the front door is never a single point of failure. |
+| One new front door becomes a single point of failure | No front door was built. Provider wrappers remain directly callable. |
 
 **Open questions:**
 
-- Final budget numbers are provisional until the 30-review trial validates them.
+- No lower turn budget will be introduced from the current evidence. The five
+  live Grok reviews used 6–7 turns, so the proposed six-turn ceiling was dropped.
 - The right set of "pointer" files in a packet will vary by repository. Start
   with `AGENTS.md` plus any policy doc the changed paths obviously implicate,
   and let the trial refine it.
-- Provider metrics must tolerate absent token/cost data; confirm which providers
-  actually report it during the trial.
+- Provider metrics tolerate absent token/cost data. The mixed-provider check
+  records what each wrapper actually exposes.
 - #1113's private artifact must be handed only to the private DesignFlow Item
   Master workflow, and must not be published or moved before a safe private
   handoff exists.
