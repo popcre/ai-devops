@@ -28,11 +28,10 @@ What it does (idempotent - safe to re-run):
      and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
      from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
      immediately. Uses cloudflared so it works on any network without Tailscale.
-  7. Wires the FULL MCP server set into BOTH Claude Desktop's
-     claude_desktop_config.json and Claude Code's ~/.claude/settings.json (each
-     backed up first). The set is defined exactly once, in step 5d, and both
-     surfaces merge it - so a server added there reaches every surface on every
-     machine, and a fresh machine ends up matching an established one.
+  7. Wires the FULL MCP server set into Claude Desktop, Claude Code, and Codex
+     (each backed up first). The set is defined exactly once, in step 5d, and
+     every surface receives it, so a server added there reaches every client on
+     every machine and a fresh machine matches an established one.
        - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
        - no secret, plain npx      : playwright, chrome-devtools, ag-grid,
@@ -296,15 +295,14 @@ Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
 
 # --------------------------------------------------------------------------
-# 5d. The MCP server set - ONE definition, used by BOTH Claude Desktop and Code
+# 5d. The MCP server set - ONE definition, used by Claude and Codex
 # --------------------------------------------------------------------------
-# Defined once, deliberately. Claude Desktop and Claude Code keeping separate
-# hand-maintained server lists is the root cause of every gap this script has
-# had: a server wired into one silently never existed in the other, and servers
-# this script did not define survived only on machines that happened to already
-# have them (created by the legacy Dropbox script) while being absent on any new
-# machine. Both consumers below merge THIS hashtable, so anything added here
-# reaches every surface on every machine. Add new servers HERE and nowhere else.
+# Defined once, deliberately. Separate hand-maintained lists are the root cause
+# of every gap this script has had: a server wired into one client silently never
+# existed in another, and servers this script did not define survived only on
+# machines that happened to already have them. Claude Desktop, Claude Code, and
+# Codex all consume this hashtable, so anything added here reaches every client
+# on every machine. Add new servers HERE and nowhere else.
 Step "Building the MCP server set"
 $McpServers = [ordered]@{}
 
@@ -714,27 +712,38 @@ shell.Run """$escapedBash"" -lc ""'$escapedSync' >/dev/null 2>&1""", 0, True
 }
 
 # --------------------------------------------------------------------------
-# 6c. Codex's OWN config (~/.codex/config.toml) - route 1Password through the
-# shared caching launcher, so Codex shares the one single-flight refresh + DPAPI
-# cache and carries NO plaintext service-account token. Codex reads its own file,
-# which the Claude consumers above never touch; without this step the 1password
-# block drifts back to a direct `npx` + inline token - outside the cache and a
-# contributor to the per-hour rate-limit lockout. Idempotent; safe if Codex absent.
+# 6c. Codex's OWN config (~/.codex/config.toml) - install the same complete MCP
+# set built above. Codex-specific transport details are applied to a copy so the
+# Claude Desktop/Code definitions remain unchanged.
 # --------------------------------------------------------------------------
-Step "Routing Codex 1Password MCP through the caching launcher"
-$codexFix = Join-Path $RepoPath "bin\configure-codex-1password.ps1"
-if (Test-Path -LiteralPath $codexFix) {
-  & pwsh -NoProfile -File $codexFix -Launcher $Launcher
-} else {
-  Warn "Missing $codexFix - Codex 1password left as-is."
-}
+Step "Wiring the complete MCP server set into Codex"
+$codexMcpSetup = Join-Path $RepoPath "bin\configure-codex-mcps.ps1"
+if (Test-Path -LiteralPath $codexMcpSetup) {
+  $CodexMcpServers = [ordered]@{}
+  foreach ($name in $McpServers.Keys) {
+    $copy = [ordered]@{}
+    foreach ($key in $McpServers[$name].Keys) { $copy[$key] = $McpServers[$name][$key] }
+    $CodexMcpServers[$name] = $copy
+  }
 
-Step "Wiring Chrome DevTools MCP into Codex"
-$codexChromeSetup = Join-Path $RepoPath "bin\configure-codex-chrome-devtools.ps1"
-if (Test-Path -LiteralPath $codexChromeSetup) {
-  & pwsh -NoProfile -File $codexChromeSetup
+  # Codex supports native Streamable HTTP and OAuth. Keep Vercel native so its
+  # stored Codex OAuth session works; mcp-remote is only for Claude consumers.
+  $CodexMcpServers['vercel'] = [ordered]@{
+    url = 'https://mcp.vercel.com'
+    startup_timeout_sec = 20
+  }
+  $CodexMcpServers['chrome-devtools']['env'] = [ordered]@{
+    SystemRoot = $(if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' })
+    PROGRAMFILES = $(if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' })
+  }
+  $CodexMcpServers['chrome-devtools']['startup_timeout_sec'] = 20
+  if ($CodexMcpServers.Contains('codex-cli')) {
+    $CodexMcpServers['codex-cli']['tool_timeout_sec'] = 3600
+  }
+
+  & $codexMcpSetup -Servers $CodexMcpServers
 } else {
-  Warn "Missing $codexChromeSetup - Codex Chrome DevTools MCP left as-is."
+  Warn "Missing $codexMcpSetup - Codex MCP server set left as-is."
 }
 
 # --------------------------------------------------------------------------
