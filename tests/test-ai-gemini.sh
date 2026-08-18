@@ -30,5 +30,22 @@ check 'quota failure is distinct from success' "jq -e '.status == \"ERROR\" and 
 check 'authentication failure is distinct from success' "jq -e '.status == \"ERROR\" and .error.code == \"UNAUTHENTICATED\"' '$FIXTURES/auth-error.json'"
 check 'malformed JSON is rejected' "! jq -e . '$FIXTURES/malformed.json'"
 
+SCRIPT="$ROOT/bin/ai-gemini"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/agy" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) echo 1.1.14 ;;
+  --help) echo '  --sandbox' ;;
+  models) echo -e 'gemini-3.7-flash-high\tGemini 3.7 Flash (High)' ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$TMP/bin/agy"
+check 'wrapper exposes its help' "$SCRIPT --help | grep -q 'ai-gemini new'"
+check 'wrapper reports its version' "$SCRIPT --version | grep -q 'ai-gemini 0.1.0'"
+check 'doctor verifies sandbox and configured model without a live turn' "AI_GEMINI_BIN='$TMP/bin/agy' $SCRIPT doctor | grep -q 'disposable-copy=yes'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
