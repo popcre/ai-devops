@@ -17,7 +17,7 @@ Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execut
 | 5. Enforce main-session routing for credentialed runs | ✅ complete | 2026-08-18 | Shared Kimi skill and structured preflight failure route credentialed execution to the Full Access main task without ACL changes. |
 | 6. Qualify the complete Windows path live | ✅ complete | 2026-08-18 | Kimi 0.36.1 passed `doctor --live`; the strengthened authenticated suite passed 174 checks with all eight canaries recorded in `tests/verification/kimi-windows-2026-08-18/README.md`. |
 | 7. Update model comparison and operating docs | ✅ complete | 2026-08-18 | Architecture, configuration, model setup, shared skill, and model comparison distinguish quality from transport and document the durable private-workspace path. |
-| 8. Review, land, install, and verify | ⬜ open | 2026-08-17 | Definition of done is §13. |
+| 8. Review, land, install, and verify | ✅ complete | 2026-08-18 | PR #37 merged as `dea3a30`; canonical `main` and `origin/main` were reconciled at `e4fe6dc`; the installed launcher points to `C:\repos\ai-devops\bin\ai-kimi`, source and remote share blob `526ec66`, and installed `ai-kimi doctor --live` passed on Kimi 0.36.1. |
 
 **Fresh-session starting point:** begin at the first open row. Re-read §§6–8 before changing code. After each completed row, update this table with a reproducible artifact, commit SHA, or exact test command. Do not cite a bare count.
 
