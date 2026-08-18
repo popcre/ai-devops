@@ -1,6 +1,6 @@
 ---
 name: division-code-two-encodings
-description: "division_code columns hold BOTH ColdLion codes (CW001) and DesignFlow ids (1); DesignFlow id 2 is internal-only and means CW001, confirmed live against ColdLion"
+description: "division_code columns hold BOTH ColdLion codes (CW001) and DesignFlow ids (1); 78% of items sit in \"dead\" division 2, which blocks the erp_items_current backfill"
 metadata: 
   node_type: memory
   type: project
@@ -14,16 +14,10 @@ Shared PLM item tables store the **ColdLion spelling**; never `1`/`8`/`9`, never
 deprecated id `2` or unused `7`. Company is always `EDGEHOME`. Proven live on item
 `BRT10DYWP01` (2026-08-14) — do not re-verify.
 
-**The trap:** 15,185 of 19,463 DesignFlow item headers (78%) carry `div_code_fk = 2`.
-That id is **DesignFlow-internal — ColdLion has no division `2` and never did** (their four
-codes are `CW001`, `EH001`, `SP001`, retired `EP001`). Tell: those rows have their ColdLion
-text column empty while ids 1/8/9 carry theirs. Asked live 2026-08-17, **19 of 19 division-2
-items came back `CW001`** from ColdLion, so **id `2` → `CW001`** and the
-`erp_items_current` backfill is unblocked. Never *store* `2`; translate it on the way in.
-Do not re-raise this as an owner decision — it was one for a few hours and is settled.
-
-**Separate and still open:** ColdLion calls those items active; the DesignFlow mirror marks
-all 15,185 inactive. Not a division problem.
+**The trap:** 15,185 of 19,463 DesignFlow item headers (78%) sit in division `2`, the one
+everyone calls dead — none active, but that is where item history lives. Division `2` has no
+ColdLion code under the rule above, so `public.erp_items_current.division_code` **must not be
+backfilled** until the owner rules on it. As of 2026-08-17 Albert has not answered.
 
 `EP001` is a **real retired book/education division**, not a mis-keyed `EH001` — never
 "correct" it. Three `core."merchGroup"` rows (`mg_id` 2, 3, 4) carry no division at all, look
