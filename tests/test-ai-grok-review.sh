@@ -121,6 +121,8 @@ check "Grok debate has three-rebuttal bound" "grep -qi 'at most three rebuttal t
 check "Grok debate has default cost ceiling" "grep -Fq '\$1.50' '$GROK_SKILL'"
 check "Grok debate reports unresolved objections" "grep -qi 'report unresolved objections' '$GROK_SKILL'"
 check "Grok skill keeps frozen prefix" "grep -qi 'Never broaden permissions, change the frozen prefix' '$GROK_SKILL'"
+check "Grok skill forbids automatic turn increases" "grep -q 'do not automatically raise.*--max-turns' '$GROK_SKILL'"
+check "Grok skill removes higher-turn recovery" "! grep -q 'same session with a higher.*--max-turns' '$GROK_SKILL'"
 check "wrapper still reports cached tokens" "grep -Fq 'cached:' '$SCRIPT'"
 check "wrapper still reports cost" "grep -Fq 'cost:' '$SCRIPT'"
 

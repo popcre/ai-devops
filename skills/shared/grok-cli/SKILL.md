@@ -93,16 +93,13 @@ is an order of magnitude low.
 
 The wrapper tells you which case you are in and what to do. The one thing to internalise:
 
-> **A denied tool does not cancel a run.** With Bash denied, Grok says "Shell is blocked,
-> so I'll stick to file reads and greps" and finishes using its other tools. If a review
-> ends with no verdict, the cause is almost always the **turn limit**, not permissions.
-> Never broaden permissions chasing it — that is the wrong lever and it also throws away
-> the cached prefix.
-
-Recovery is an `ask` on the same session with a higher `--max-turns`, which the error
-message spells out for you. Cancellation is different: an empty resumed run after a
-cancellation is a known 0.2.112/0.2.118 behaviour, so start a fresh session rather than
-retrying that one.
+> **A denied tool does not cancel a run.** With Bash denied, Grok can finish using its
+> read and search tools. If a review reaches the turn ceiling without a verdict, do not
+> broaden permissions and do not automatically raise `--max-turns`. Diagnose a vague
+> brief, an oversized change, or reviewer wandering; then start a fresh session with a
+> smaller exact scope. Cancellation is different: an empty resumed run after a
+> cancellation is a known 0.2.112/0.2.118 behaviour, so start a fresh session rather than
+> retrying that one.
 
 ## Verifying the install
 
