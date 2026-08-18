@@ -1,6 +1,7 @@
 # command<TAB>repo_source<TAB>windows_form<TAB>ubuntu_link<TAB>provider<TAB>windows_owner
 ai-grok-review	bin/ai-grok-review	bash+cmd	yes	grok	install-machine-tools.ps1
 ai-grok-implement	bin/ai-grok-implement	bash+cmd	yes	grok	install-machine-tools.ps1
+ai-gemini	bin/ai-gemini	bash+cmd	yes	gemini	install-machine-tools.ps1
 ai-kimi	bin/ai-kimi	bash+cmd	yes	kimi	install-machine-tools.ps1
 ai-qwen	bin/ai-qwen	bash+cmd	yes	qwen	install-machine-tools.ps1
 ai-deepseek-agent	bin/ai-deepseek-agent	bash+cmd	yes	none	install-machine-tools.ps1

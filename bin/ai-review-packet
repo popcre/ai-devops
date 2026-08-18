@@ -286,7 +286,7 @@ This patch is $patch_bytes bytes. Read patch.part-000, patch.part-001, and the
 remaining numbered parts in manifest order. Do not open patch.full.diff through
 a bounded Read tool; it exists only as the complete sealed source. Nothing was discarded.
 EOF
-    split -b "$PATCH_MAX_BYTES" -d -a 3 "$tmp_patch" "$pkt/patch.part-" \
+    split -b "$PATCH_MAX_BYTES" -d -a 6 "$tmp_patch" "$pkt/patch.part-" \
       || { rm -f "$tmp_patch"; die "could not split the patch into directly readable parts"; }
     local part_map="" part
     for part in "$pkt"/patch.part-*; do

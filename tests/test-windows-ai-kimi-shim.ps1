@@ -41,7 +41,7 @@ try {
 }
 $rows = Get-Content $catalog | Where-Object { $_ -and -not $_.StartsWith('#') }
 $names = $rows | ForEach-Object { ($_ -split "`t")[0] }
-foreach ($name in @('ai-grok-review','ai-grok-implement','ai-kimi','ai-deepseek-agent','ai-glm')) {
+foreach ($name in @('ai-grok-review','ai-grok-implement','ai-gemini','ai-kimi','ai-deepseek-agent','ai-glm')) {
   if ($names -notcontains $name) { throw "Catalog missing $name" }
 }
 $glm = $rows | Where-Object { $_.StartsWith("ai-glm`t") }
