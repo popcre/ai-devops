@@ -931,14 +931,15 @@ cd /c/repos/ai-devops && ai-glm selftest && ai-kimi doctor && ai-grok-review doc
       `docs/reviewer-five-run-trial-2026-08-18.md`: 5/5 usable verdicts and
       0/5 15-minute failures. The obsolete 30-review trial was dropped.
 - [x] `git var GIT_COMMITTER_IDENT` verified before the first commit.
-- [ ] Work committed **and pushed**; commit SHA reported.
+- [x] Work committed and pushed to `main`; implementation and verification
+      landed through `dd37d8b`.
 - [x] `AGENTS.md` router updated to link this plan and the new commands;
       `docs/` updated where reviewer behaviour is described.
 - [x] This plan's STATUS table updated with real artifact evidence per row.
 - [x] The predecessor session's write-once `HANDOFF.d/` file was left untouched,
       as required; this plan now carries the completed status and evidence.
-- [ ] `fix_reviewer_system.md` status line updated from "analysis complete" to
-      reflect what shipped; issue #34 closed with the evidence.
+- [x] `fix_reviewer_system.md` status line reflects what shipped; issue #34 was
+      closed with the evidence on 2026-08-18.
 
 There is no CI and no deployment in this repo, so "CI green / deployed SHA
 verified" reduces to: the test suite passes locally and the commit is pushed.
