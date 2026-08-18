@@ -44,13 +44,16 @@ it there merely to test it. See
 [the Windows desired-state guide](docs/windows-winget-configuration.md) for
 ownership, expected changes, recovery, and rollout gates.
 
-It installs the complete Windows dev-tool set, configures Tailscale-only
+It installs the complete Windows dev-tool set, including Grok Build and Kimi
+Code, configures Tailscale-only
 OpenSSH, prepares Ubuntu/WSL as an Ansible controller, configures AI DevOps,
 and asks you to paste the code once. If Windows requires a reboot, rerun the
 same line afterward; completed stages are reconciled rather than repeated.
 When it finishes,
 follow the short checklist it prints (fully close and reopen Claude Desktop; if
 it lists two "connectors" to add, add them once in Settings → Connectors).
+The first Grok and Kimi use each open their provider's sign-in page; that login
+is not automated or stored by AI DevOps.
 
 ### Ubuntu server (hetz and others) — Claude Code
 

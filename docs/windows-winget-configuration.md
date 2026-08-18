@@ -71,6 +71,10 @@ packages. The bootstrap calls `bin/reconcile-windows-package-exceptions.ps1`
 internally for those three, keeping one user-facing command while leaving the
 declarative WinGet file honest about package ownership.
 
+The bootstrap also runs the official Windows installers for Grok Build and Kimi
+Code. Their first login remains an intentional one-time browser step owned by
+each provider; no provider password or API key is stored by this repository.
+
 ## Run it
 
 From PowerShell in an existing checkout (the script self-elevates):
