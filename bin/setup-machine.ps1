@@ -504,6 +504,20 @@ if (Test-Path $sshTmpl) {
 }
 
 # --------------------------------------------------------------------------
+# 5d. SSH known hosts - verified server identity keys
+# --------------------------------------------------------------------------
+# Keep the public server keys in source control so a fresh Windows setup can
+# connect without an interactive trust prompt.  A changed entry is recoverable:
+# preserve the complete prior file before replacing only the managed host entry.
+Step "SSH known hosts (verified server keys)"
+$knownHostsTmpl = Join-Path $RepoPath "config\ssh-known-hosts.template"
+$knownHosts = Join-Path $sshDir "known_hosts"
+$knownHostsSync = Join-Path $RepoPath "bin\sync-ssh-known-hosts.ps1"
+if ((Test-Path $knownHostsTmpl) -and (Test-Path $knownHostsSync)) {
+  try { & $knownHostsSync -TemplatePath $knownHostsTmpl -KnownHostsPath $knownHosts } catch { Warn "Could not install managed SSH server keys: $_" }
+} else { Warn "Managed SSH server-key source is missing - skipping it." }
+
+# --------------------------------------------------------------------------
 # 6. Best-effort: wire MCP servers into Claude Desktop config
 # --------------------------------------------------------------------------
 if ($SkipDesktopMcp) {

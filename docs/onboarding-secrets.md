@@ -149,9 +149,11 @@ from Claude Code, and these are *verified* limitations:
 
 It also restores the **916-alien SSH key** from 1Password
 (`op://vibe_coding/916-alien SSH key/...`) to `~\.ssh\916-alien` (+ `.pub`) with
-a user-only ACL, and installs the managed **SSH host aliases**
-(`config/ssh-config.template` → `~/.ssh/ai-devops.conf`, `Include`d from
-`~/.ssh/config` at the end so any existing entry still wins), so `ssh vps`,
+a user-only ACL, installs the managed **SSH host aliases**
+(`config/ssh-config.template` → `~/.ssh/ai-devops.conf`, included first from
+`~/.ssh/config`), and registers the repository-verified server keys
+(`config/ssh-known-hosts.template` → `~/.ssh/known_hosts`). This allows the
+first strict connection to approved servers without blindly accepting a key, so `ssh vps`,
 `ssh vps2` (same box), `ssh seafile`, etc. work immediately. The tunnel-backed
 hosts connect via `cloudflared` (installed by the script) so they work on any
 network without Tailscale — the same path on Windows and Linux. The private key
