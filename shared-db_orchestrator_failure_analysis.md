@@ -4,6 +4,8 @@ Date: 2026-08-18
 
 Status: evidence-based postmortem. This document describes the operating failure. It does not propose weakening database safety or bypassing preview and production verification.
 
+Replacement implementation plan: [`plan_shared-db-finish-first-delivery.md`](plan_shared-db-finish-first-delivery.md). Read its STATUS table first; this postmortem remains the historical evidence, not the build specification.
+
 ## Executive conclusion
 
 The shared-db orchestrator began as a good solution to a real coordination problem: five applications share one database, so simultaneous uncoordinated structure changes can collide or break each other.

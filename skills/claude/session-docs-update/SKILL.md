@@ -168,6 +168,21 @@ completeness gate above does not pass without it.
 
 ## Closers (always run after the doc update)
 
+0. **Doc-shape check** — run this in every repo you touched and report the numbers:
+
+   ```bash
+   wc -c AGENTS.md HANDOFF.md
+   ```
+
+   `AGENTS.md` over 60 KB → split its largest growing section into `docs/` before
+   you finish (see the size cap above). `HANDOFF.md` over ~1 KB, or line 1 lacking
+   `handoff-pointer: v1`, → it is a legacy full document: `git mv` it verbatim into
+   `HANDOFF.d/` and write the pointer, per the handoff gate above.
+
+   Both rules already existed and were silently ignored for months — five of six
+   designflow repos had drifted by 2026-08-18. Reporting the two numbers is what
+   makes the drift visible, so do not skip this step or report it from memory.
+
 1. **Secrets sweep** — run the `secrets-to-1password` skill.
 2. **Handoff-safe state** — no repo may be left with mystery untracked files
    (especially shared-db). If work is complete: run checks, commit/push per repo

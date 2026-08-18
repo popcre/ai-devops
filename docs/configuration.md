@@ -47,6 +47,22 @@ for how to adapt the exact flags to your installed CLIs (they may differ).
 
 None. There are no feature flags in this toolkit.
 
+## Kimi wrapper settings
+
+These are process settings for `ai-kimi`, not entries to add to committed config:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `KIMI_CODE_HOME` | Kimi OAuth, sessions, and logs. Treat as credential-bearing. | `~/.kimi-code` |
+| `AI_KIMI_STATE_DIR` | Wrapper-owned session and durable job records. | `~/.local/state/ai-devops/kimi` |
+| `AI_KIMI_WAIT_TIMEOUT` | Full wall limit for the exact Kimi child. Ending a foreground waiter does not end the durable worker. | `900` seconds |
+| `AI_KIMI_STARTUP_TIMEOUT` | Startup diagnostic bound. | `60` seconds |
+| `AI_KIMI_HEARTBEAT_INTERVAL` | Bounded job-status heartbeat interval. | `30` seconds |
+
+Durable review records are under `AI_KIMI_STATE_DIR/jobs/`. They contain only
+allowlisted job identity and status fields, never a prompt, environment dump,
+OAuth value, or credential-file details.
+
 ## GLM coding-agent settings
 
 The cross-platform GLM launcher reads these managed entries from

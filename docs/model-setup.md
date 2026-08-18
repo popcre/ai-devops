@@ -33,6 +33,19 @@ silently substituted model.
 There is no local GLM server on Windows. Windows Claude and Codex sessions run
 `ai-glm` on the Ubuntu host over the normal SSH workflow.
 
+## Kimi Code on Windows
+
+`ai-kimi` uses `KIMI_CODE_HOME` for Kimi's own data. That directory holds both
+OAuth sign-in material and Kimi sessions, so it is credential-bearing. Keep its
+normal user-only permissions. Do not point it into a repository, worktree, or
+shared writable folder.
+
+Before any Kimi review, the wrapper tests its own state folder, the effective
+Kimi home, the read-only review profile, and provider availability. A restricted
+task that cannot pass receives `execution-context-denied` and must send the same
+request to the Full Access main task. It must not retry, change permissions, or
+copy credentials.
+
 ## Important: the exact flags may differ on your machine
 
 The Claude/Codex CLIs evolve, and the exact model identifiers and flags
