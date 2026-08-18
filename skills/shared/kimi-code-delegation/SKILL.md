@@ -8,7 +8,8 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 ## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 
 ```bash
-ai-kimi new <name>       --prompt-file "$brief"   # read-only review / analysis
+AI_KIMI_CALLER=codex ai-kimi new <name> --review-kind diff --prompt-file "$brief"
+AI_KIMI_CALLER=codex ai-kimi new <name> --review-kind architecture --prompt-file "$brief"
 ai-kimi ask <name>       --prompt-file "$next"    # continue that same session
 ai-kimi start <name>     --prompt-file "$brief"   # submit a durable review job
 ai-kimi wait <name> | status <name> | result <name> | cancel <name>
@@ -23,6 +24,20 @@ to forward arbitrary `kimi` flags. **If it seems to be missing something you nee
 — do not route around it.**
 
 Run it from Git Bash on Windows (it is a Bash script, like `ai-glm`).
+
+Every new review must name its contract with `--review-kind diff`, `plan`,
+`architecture`, or `analysis`. Diff reviews receive the sealed patch and an
+APPROVE/REVISE contract. The other kinds receive a decision packet and must answer
+decision by decision with an unresolved-objection ledger. Keep large source material
+in repository files and name those paths in the brief. Do not paste it into the command.
+The caller is also mandatory. Codex uses `AI_KIMI_CALLER=codex`; Claude uses
+`AI_KIMI_CALLER=claude`. The wrapper refuses to guess because a wrong default hides the
+job under the other client's session records.
+
+Each named review runs from one private, wrapper-owned snapshot, including reviews
+started from ordinary clones. Every continuation refreshes and reuses that exact path
+because Kimi sessions are directory-bound. Concurrent edits in the source checkout
+make evidence stale; they are not attributed to read-only Kimi.
 
 ## Open Windows execution-reliability work
 
@@ -86,8 +101,8 @@ codeword, an unrelated call created session B in the same directory, and `-c` an
 from B and got it wrong. With several AI sessions per repo, the newest is routinely not
 yours. `ai-kimi` always resumes by explicit id.
 
-Claude and Codex keep separate sessions. **Set `AI_KIMI_CALLER=codex` when running from
-Codex**; it defaults to `claude`.
+Claude and Codex keep separate sessions. Set `AI_KIMI_CALLER=codex` from Codex and
+`AI_KIMI_CALLER=claude` from Claude. The wrapper refuses to guess.
 
 ## Relaying a debate
 

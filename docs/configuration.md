@@ -55,7 +55,7 @@ These are process settings for `ai-kimi`, not entries to add to committed config
 |---|---|---|
 | `KIMI_CODE_HOME` | Kimi OAuth, sessions, and logs. Treat as credential-bearing. | `~/.kimi-code` |
 | `AI_KIMI_STATE_DIR` | Wrapper-owned session and durable job records. | `~/.local/state/ai-devops/kimi` |
-| `AI_KIMI_WAIT_TIMEOUT` | Maximum foreground wait only. The durable worker keeps running if the waiter ends. | `900` seconds |
+| `AI_KIMI_WAIT_TIMEOUT` | Full wall limit for the exact Kimi child. Ending a foreground waiter does not end the durable worker. | `900` seconds |
 | `AI_KIMI_STARTUP_TIMEOUT` | Startup diagnostic bound. | `60` seconds |
 | `AI_KIMI_HEARTBEAT_INTERVAL` | Bounded job-status heartbeat interval. | `30` seconds |
 
