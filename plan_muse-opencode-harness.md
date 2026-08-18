@@ -15,7 +15,7 @@ Read this table first. Do not re-plan completed work. Whoever executes a step mu
 
 | # | Step | Status | Evidence required before marking done |
 |---|---|---|---|
-| 1 | Freeze the Meta API, model, pricing/privacy, and OpenCode contracts | ⬜ open | Redacted contract report under `docs/verification/muse-opencode/` plus replayable fixtures in `tests/fixtures/muse-opencode/` |
+| 1 | Freeze the Meta API, model, pricing/privacy, and OpenCode contracts | ✅ complete | [`docs/verification/muse-opencode/2026-08-18T2020Z-contract/README.md`](docs/verification/muse-opencode/2026-08-18T2020Z-contract/README.md), [`tests/fixtures/muse-opencode/contract-2026-08-18.json`](tests/fixtures/muse-opencode/contract-2026-08-18.json), and `bash tests/test-muse-opencode-contract.sh` |
 | 2 | Extract and prove a provider-neutral OpenCode harness core without changing GLM behavior | ⬜ open | `tests/test-ai-opencode-harness.sh` and the full existing GLM suites pass; live GLM parity report saved under `docs/verification/muse-opencode/` |
 | 3 | Add the pinned Muse provider configuration and safety profiles | ⬜ open | Configuration tests prove exact provider/model, disabled sharing/update, review tool removal, and implementation isolation |
 | 4 | Build the `ai-muse` command with GLM-equivalent lifecycle and failure handling | ⬜ open | `tests/test-ai-muse.sh` passes all offline lifecycle, recovery, boundary, and artifact cases |
@@ -121,13 +121,13 @@ No Muse code, configuration, credential, service, or test has been added yet. Th
 
 ### Not present
 
-- No `ai-muse` command, Muse config directory, setup script, system service, Windows task, tests, docs, skill, command-catalog row, preflight entry, scoreboard normalization, or machine-local credential exists in this repository.
-- There is no measured Meta API contract report for Albert’s account and no proof yet that `muse-spark-1.2-contributor` is enabled for that account.
-- There is no evidence yet that Muse emits the same OpenCode tool, permission, completion, cache, token, or error shapes as GLM.
+- No `ai-muse` command, Muse configuration directory, setup script, system service, Windows task, skill, command-catalog row, preflight entry, or scoreboard normalization exists yet.
+- Step 1 proved the account offers and returns `muse-spark-1.2-contributor`, supports streaming, tool calling, and multi-turn continuity, and returns structured 401/404 errors. It also proved pinned OpenCode 1.18.12 can use the Meta API through its legacy compatible-provider format. See `docs/verification/muse-opencode/2026-08-18T2020Z-contract/README.md`.
+- Cache accounting was not returned by the tested usage responses; rate limits and cancellation were intentionally not induced. Later code must report these as unavailable or incomplete rather than inventing a success, usage, or cost value.
 
 ### Git and release state
 
-This plan and its linked handoff are planning-only. Implementation has not begun. At plan creation, `main` matched `origin/main` at `9188144`; unrelated untracked paths `.ai/` and `docs/claude-remote-control-hardening-v2.md` were present and must remain untouched. There is no CI service, hosted release, or deployed SHA for this repository.
+Step 1 implementation began from `origin/main` commit `f25c725765f779012c3fc6448b109de3e09a81a6` on 2026-08-18. Unrelated untracked paths remain outside this work. There is no CI service, hosted release, or deployed SHA for this repository.
 
 ## 6. Key findings and root cause
 
