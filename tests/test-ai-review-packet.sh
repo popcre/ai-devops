@@ -79,6 +79,7 @@ check "patch_not_inlined_into_manifest"       "! grep -q '^+uncommitted' '$M'"
 
 # --- tests --------------------------------------------------------------------
 check "test_result_recorded"                  "grep -q 'Exit code' '$M' && grep -q 'PASSED' '$M'"
+check "test_duration_recorded"                "grep -q 'Measured duration:' '$M'"
 
 "$SCRIPT" remove "$R"
 PKT2="$("$SCRIPT" build "$R" notests)"
@@ -130,8 +131,11 @@ head -c 40000 /dev/urandom | base64 > "$R/big.txt"
 git -C "$R" add -A; git -C "$R" commit -qm big
 PKT="$(AI_REVIEW_PATCH_MAX_BYTES=2000 "$SCRIPT" build "$R" big)"
 check "oversized_patch_is_split_not_truncated" \
-  "[ -s '$PKT/patch.full.diff' ] && grep -q 'TRUNCATED BY ai-review-packet' '$PKT/patch.diff'"
+  "[ -s '$PKT/patch.full.diff' ] && grep -q 'SPLIT BY ai-review-packet' '$PKT/patch.diff'"
 check "split_is_announced_in_the_manifest"    "grep -q 'patch was split' '$PKT/MANIFEST.md'"
+PART_COUNT="$(find "$PKT" -name 'patch.part-*' | wc -l)"
+check "split_has_directly_readable_numbered_parts" \
+  "[ '$PART_COUNT' -gt 1 ] && grep -q 'patch.part-000' '$PKT/MANIFEST.md'"
 check "split_packet_still_verifies"           "'$SCRIPT' verify '$PKT'"
 
 # --- long file lists ----------------------------------------------------------

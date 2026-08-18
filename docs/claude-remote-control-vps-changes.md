@@ -1,5 +1,18 @@
 # Claude Code Remote Control on `hetz` — What Was Changed, How to Verify, How to Undo
 
+> **Decommissioned 2026-08-18.** The six Remote Control services and every
+> setup-owned server artifact were removed at Albert's request. This document is
+> retained only as the historical installation and recovery record. The removal
+> was verified live: no `claude-rc*` service or unit file remained and no
+> `claude remote-control` process was running. Claude conversation transcripts
+> under `/home/ai/.claude/projects/` were deliberately left untouched.
+>
+> Removed: both service templates and their backups, the shared slice, all six
+> startup links, `/etc/logrotate.d/claude-rc`, `/usr/local/bin/cc`,
+> `/usr/local/bin/ccls`, and `/home/ai/logs/claude-rc-*`. A recovery archive was
+> verified before removal and remains at
+> `/root/recovery/claude-remote-control-20260818T191705Z.tar.gz`.
+
 **Server:** `hetz` (Hetzner VPS, <removed-protected-address>)
 **Date:** 2026-08-05
 **Made by:** Claude, via `devops-mcp` `run_command`, as root

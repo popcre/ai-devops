@@ -115,7 +115,7 @@ Before opening a new issue that continues or restates prior scope, check whether
 an older issue already covers it; if so, close the older one instead of leaving
 both open. When you file a HANDOVER note as a status record rather than a live
 ask, say so explicitly in the issue body so a future triage pass can tell the
-difference between "still needs doing" and "recorded for the log."
+difference between "still needed" and "recorded for the log."
 
 Every successor issue must write this block from scratch after classifying its
 own requested work. It must not copy the predecessor's `work_type`, `route`, or

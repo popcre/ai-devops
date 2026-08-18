@@ -1,0 +1,22 @@
+[
+  {"query":"Use the pop-business-rules Skill. What are our rules for creating and activating Properties?","should_trigger":true},
+  {"query":"Use our Business Logic Library and explain how mgCategory relates to Product Types.","should_trigger":true},
+  {"query":"Add this POP business rule and mark conflicting old statements historical.","should_trigger":true},
+  {"query":"Before changing PopCRM customers, identify every applicable business rule.","should_trigger":true},
+  {"query":"Audit PopPIM's workflow against our settled business rules.","should_trigger":true},
+  {"query":"Is this DesignFlow sample process a settled rule or only a proposal?","should_trigger":true},
+  {"query":"Find the company rule for RFQ royalty and buyer margin.","should_trigger":true},
+  {"query":"Reconcile duplicate business logic documents across POP application repos.","should_trigger":true},
+  {"query":"What does POP mean by an active customer versus an ingested email domain?","should_trigger":true},
+  {"query":"Record Albert's decision about who approves production samples in the central business library.","should_trigger":true},
+  {"query":"Refactor this function so the programming logic is easier to read.","should_trigger":false},
+  {"query":"Fix our ESLint rules and formatting configuration.","should_trigger":false},
+  {"query":"Explain PostgreSQL row-level security policies.","should_trigger":false},
+  {"query":"Update the deployment runbook for Coolify.","should_trigger":false},
+  {"query":"Summarize this generic README file.","should_trigger":false},
+  {"query":"What are California's current employment laws?","should_trigger":false},
+  {"query":"Document the API request and response fields.","should_trigger":false},
+  {"query":"Why is this unit test failing?","should_trigger":false},
+  {"query":"Review another company's employee handbook policies.","should_trigger":false},
+  {"query":"Change the AG Grid column sizing behavior.","should_trigger":false}
+]

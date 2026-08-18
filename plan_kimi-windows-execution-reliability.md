@@ -7,16 +7,16 @@ Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execut
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Freeze the Windows failure matrix | ⬜ open | 2026-08-17 | Required artifacts are specified in §9.1 and §10. |
-| 2. Add security-preserving execution preflight | ⬜ open | 2026-08-17 | Required behavior and tests are specified in §9.2. |
-| 3. Add durable detached Kimi jobs | ⬜ open | 2026-08-17 | Required job lifecycle is specified in §§8–10. |
-| 4. Add progress, timeout, and recovery truth | ⬜ open | 2026-08-17 | Required states and tests are specified in §§9.4–9.5. |
-| 4a. Isolate reviews from concurrent checkout edits and directory-bound resumes | ⬜ open | 2026-08-18 | Live failures and required regression tests are specified in §§6.8, 9.4a, and 10. |
-| 4b. Separate analysis prompts from diff-review packets | ⬜ open | 2026-08-18 | The architecture-review anchoring failure and prompt-contract tests are specified in §§6.9, 9.4b, and 10. |
-| 4c. Bound Kimi packet work and record real stage timing | ⬜ open | 2026-08-18 | The measured six-minute review audit, exact Kimi self-audit, and required corrections are in §§6.10, 9.4c, and 10. |
-| 5. Enforce main-session routing for credentialed runs | ⬜ open | 2026-08-17 | Required skill/orchestrator changes are specified in §9.6. |
-| 6. Qualify the complete Windows path live | ⬜ open | 2026-08-17 | Live canaries are specified in §9.7 and §10. |
-| 7. Update model comparison and operating docs | ⬜ open | 2026-08-17 | Documentation targets are specified in §9.8. |
+| 1. Freeze the Windows failure matrix | ✅ complete | 2026-08-18 | `tests/test-kimi-windows-execution.ps1` passes; `tests/test-ai-kimi.sh` covers denied home, detached survival, duplicate refusal, exact terminal proof, timeout, cancellation, and recovery. |
+| 2. Add security-preserving execution preflight | ✅ complete | 2026-08-18 | Windows-native test passes; offline wrapper test proves unwritable Kimi home refuses before provider launch with Full Access hand-back. |
+| 3. Add durable detached Kimi jobs | ✅ complete | 2026-08-18 | `start`, `wait`, `status`, `logs`, `result`, `cancel`, and `recover` are covered by the 159-check offline wrapper suite, including true Windows detachment, atomic worker-confirmed cancellation, and fail-closed startup acknowledgment. |
+| 4. Add progress, timeout, and recovery truth | ✅ complete | 2026-08-18 | Exact-child wall timeout, heartbeats, terminal phases, incomplete recovery, and idempotent finalization pass in `tests/test-ai-kimi.sh`. |
+| 4a. Isolate reviews from concurrent checkout edits and directory-bound resumes | ✅ complete | 2026-08-18 | Offline tests prove ordinary clones use a private snapshot and named `ask` resumes from the same recorded path; `tests/test-ai-review-sandbox.sh` passes 48 checks. |
+| 4b. Separate analysis prompts from diff-review packets | ✅ complete | 2026-08-18 | Architecture fixture receives the decision contract and no diff preamble; diff evidence behavior remains covered. |
+| 4c. Bound Kimi packet work and record real stage timing | ✅ complete | 2026-08-18 | Kimi packets split at 40 KB into ordered readable parts, passing output is bounded, broad suites warn before launch, caller is mandatory, and job metadata separates snapshot, test, packet, provider, and unavailable model-step evidence. |
+| 5. Enforce main-session routing for credentialed runs | ✅ complete | 2026-08-18 | Shared Kimi skill and structured preflight failure route credentialed execution to the Full Access main task without ACL changes. |
+| 6. Qualify the complete Windows path live | ✅ complete | 2026-08-18 | Kimi 0.36.1 passed `doctor --live`; the strengthened authenticated suite passed 174 checks with all eight canaries recorded in `tests/verification/kimi-windows-2026-08-18/README.md`. |
+| 7. Update model comparison and operating docs | ✅ complete | 2026-08-18 | Architecture, configuration, model setup, shared skill, and model comparison distinguish quality from transport and document the durable private-workspace path. |
 | 8. Review, land, install, and verify | ⬜ open | 2026-08-17 | Definition of done is §13. |
 
 **Fresh-session starting point:** begin at the first open row. Re-read §§6–8 before changing code. After each completed row, update this table with a reproducible artifact, commit SHA, or exact test command. Do not cite a bare count.

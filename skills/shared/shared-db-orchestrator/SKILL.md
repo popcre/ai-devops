@@ -5,6 +5,8 @@ description: Open and run the single orchestrator for u2giants/shared-db, coordi
 
 # Shared DB Orchestrator
 
+> Replacement work is planned in [`../../../plan_shared-db-finish-first-delivery.md`](../../../plan_shared-db-finish-first-delivery.md). Read its STATUS table before changing this skill or the lane model. Until that plan is implemented, the safety rules below remain binding; do not partially remove them.
+
 Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep the full map of claims, branches, preview state, merges and owner decisions.
 
 ## Scope
