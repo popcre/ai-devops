@@ -235,11 +235,14 @@ cmd_build() {
   local test_block tree_before tree_after tree_note=""
   tree_before="$(git -C "$root" status --porcelain 2>/dev/null | sort)"
   if [ -n "$OPT_TESTS" ]; then
-    local tout rc
+    local tout rc test_started test_seconds
     tout="$(mktemp)"; rc=0
+    test_started="$(date +%s)"
     ( cd "$root" && eval "$OPT_TESTS" ) > "$tout" 2>&1 || rc=$?
+    test_seconds="$(( $(date +%s) - test_started ))"
     test_block="Command: \`$OPT_TESTS\`
 Exit code: \`$rc\` ($([ "$rc" -eq 0 ] && printf 'PASSED' || printf 'FAILED'))
+Measured duration: \`${test_seconds}s\`
 
 Last $TEST_OUTPUT_TAIL lines of output:
 
@@ -278,12 +281,21 @@ as a pass. If the change needs test evidence to judge, say so in your verdict."
     head -c "$PATCH_MAX_BYTES" "$tmp_patch" > "$pkt/$PATCH"
     cat >> "$pkt/$PATCH" <<EOF
 
-*** TRUNCATED BY ai-review-packet ***
-This patch is $patch_bytes bytes and was cut at $PATCH_MAX_BYTES.
-The COMPLETE patch is in this same directory as $PATCH_FULL. Read it before
-judging anything that is not visible above. Nothing was discarded.
+*** SPLIT BY ai-review-packet ***
+This patch is $patch_bytes bytes. Read patch.part-000, patch.part-001, and the
+remaining numbered parts in manifest order. Do not open patch.full.diff through
+a bounded Read tool; it exists only as the complete sealed source. Nothing was discarded.
 EOF
-    split_note="**The patch was split.** It is $patch_bytes bytes. \`$PATCH\` holds the first $PATCH_MAX_BYTES bytes and \`$PATCH_FULL\` holds all of it. Nothing was discarded."
+    split -b "$PATCH_MAX_BYTES" -d -a 3 "$tmp_patch" "$pkt/patch.part-" \
+      || { rm -f "$tmp_patch"; die "could not split the patch into directly readable parts"; }
+    local part_map="" part
+    for part in "$pkt"/patch.part-*; do
+      part_map="$part_map
+- \`$(basename "$part")\`: $(wc -c < "$part" | tr -d ' ') bytes"
+    done
+    split_note="**The patch was split.** It is $patch_bytes bytes. Read the numbered parts in this order:$part_map
+
+\`$PATCH_FULL\` also holds the complete sealed patch. Nothing was discarded."
   else
     cp "$tmp_patch" "$pkt/$PATCH"
   fi

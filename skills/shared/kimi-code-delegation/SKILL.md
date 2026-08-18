@@ -8,8 +8,11 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 ## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 
 ```bash
-ai-kimi new <name>       --prompt-file "$brief"   # read-only review / analysis
+AI_KIMI_CALLER=codex ai-kimi new <name> --review-kind diff --prompt-file "$brief"
+AI_KIMI_CALLER=codex ai-kimi new <name> --review-kind architecture --prompt-file "$brief"
 ai-kimi ask <name>       --prompt-file "$next"    # continue that same session
+ai-kimi start <name>     --prompt-file "$brief"   # submit a durable review job
+ai-kimi wait <name> | status <name> | result <name> | cancel <name>
 ai-kimi implement <name> --prompt-file "$task"    # explicit write run, isolated
 ai-kimi list | show <name> | transcript <name> | delete <name>
 ai-kimi doctor
@@ -22,6 +25,20 @@ to forward arbitrary `kimi` flags. **If it seems to be missing something you nee
 
 Run it from Git Bash on Windows (it is a Bash script, like `ai-glm`).
 
+Every new review must name its contract with `--review-kind diff`, `plan`,
+`architecture`, or `analysis`. Diff reviews receive the sealed patch and an
+APPROVE/REVISE contract. The other kinds receive a decision packet and must answer
+decision by decision with an unresolved-objection ledger. Keep large source material
+in repository files and name those paths in the brief. Do not paste it into the command.
+The caller is also mandatory. Codex uses `AI_KIMI_CALLER=codex`; Claude uses
+`AI_KIMI_CALLER=claude`. The wrapper refuses to guess because a wrong default hides the
+job under the other client's session records.
+
+Each named review runs from one private, wrapper-owned snapshot, including reviews
+started from ordinary clones. Every continuation refreshes and reuses that exact path
+because Kimi sessions are directory-bound. Concurrent edits in the source checkout
+make evidence stale; they are not attributed to read-only Kimi.
+
 ## Open Windows execution-reliability work
 
 Read [`plan_kimi-windows-execution-reliability.md`](../../../plan_kimi-windows-execution-reliability.md)
@@ -30,13 +47,15 @@ and its STATUS table before changing or relying on Windows Kimi execution while
 
 The main Codex task and delegated collaboration tasks can have different Windows
 permissions even when the main task says Full Access. Kimi's own data root contains
-both OAuth credentials and writable session files. Until issue #31 lands its executable
-preflight and durable worker:
+both OAuth credentials and writable session files. The wrapper now checks that boundary
+before starting a provider call and runs review ownership in a durable hidden worker:
 
 - run credentialed Kimi calls from the Full Access main task;
 - let delegated tasks prepare the exact-head clone, brief, and evidence only;
-- if Kimi cannot create its session directory, stop immediately and hand the request
-  back to the main task;
+- run `AI_KIMI_CALLER=codex ai-kimi start <name> ...` from the main task;
+- if preflight returns `execution-context-denied`, send its structured hand-back request
+  to the main task immediately;
+- use `status` while other safe work continues, then `result` only after completion;
 - never broaden the Kimi-home ACL, copy credentials into a repo, or keep retrying for
   the full 900-second wait.
 
@@ -82,8 +101,8 @@ codeword, an unrelated call created session B in the same directory, and `-c` an
 from B and got it wrong. With several AI sessions per repo, the newest is routinely not
 yours. `ai-kimi` always resumes by explicit id.
 
-Claude and Codex keep separate sessions. **Set `AI_KIMI_CALLER=codex` when running from
-Codex**; it defaults to `claude`.
+Claude and Codex keep separate sessions. Set `AI_KIMI_CALLER=codex` from Codex and
+`AI_KIMI_CALLER=claude` from Claude. The wrapper refuses to guess.
 
 ## Relaying a debate
 

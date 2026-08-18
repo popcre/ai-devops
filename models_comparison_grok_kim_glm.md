@@ -981,3 +981,19 @@ Report A's routing guidance holds. Add this for work like Report B's — adoptin
 - Final outcome at recording time: every PR check is green, including the full
   ephemeral-database contracts, SQL guards, object collision and author lease.
   The bounded preview rehearsal and guarded merge remain separate governed steps.
+## 2026-08-18 Windows Kimi transport correction
+
+Kimi's completed review quality and its Windows execution reliability are separate
+measurements. The observed failures were wrapper failures before or around provider
+execution: a restricted task could not write the credential-bearing Kimi home, a
+foreground caller could disappear before saving a verdict, concurrent checkout edits
+triggered a false read-only alarm, and a directory-bound session could be resumed from
+the wrong folder and then wait fifteen minutes after an immediate exit.
+
+The corrected wrapper refuses an unsafe execution context before launch, hands the job
+back to the Full Access main task, gives durable reviews a hidden worker and atomic job
+record, uses one private directory per named review, and treats only Kimi's terminal
+`session.resume_hint` as success. Diff reviews and decision reviews now have separate
+contracts. Kimi-specific patch evidence is split below its measured read limit. These
+changes improve transport truth; they do not change or inflate the model-quality score.
+Kimi still exposes no trustworthy returned-model, token, cache, context, or cost data.
