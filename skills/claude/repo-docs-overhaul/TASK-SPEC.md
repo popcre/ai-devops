@@ -8,6 +8,8 @@ PRIMARY OBJECTIVE
 Make AGENTS.md the canonical operating guide and documentation router for future developers and AI coding sessions.
 AGENTS.md MUST let a new senior engineer or AI session understand the repository in under 5 minutes.
 AGENTS.md MUST prevent future AI sessions from ingesting every .md file unnecessarily.
+AGENTS.md MUST stay under 60 KB (hard ceiling 80 KB). It is loaded in full every session, so size is a permanent context-window tax.
+Sections that grow one entry per session -- quirks/idiosyncrasies, incident logs, pending-work boards -- MUST live in docs/ (docs/idiosyncrasies.md, docs/incident-log.md, docs/pending-work.md) with only a pointer and a one-line title index in AGENTS.md.
 
 ABSOLUTE RULES
 MUST derive documentation from the actual repository state.
