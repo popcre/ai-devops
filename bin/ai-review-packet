@@ -202,7 +202,16 @@ cmd_build() {
   base="$BASE_SHA"
 
   pkt="$(packet_path "$root")"
-  remove_packet "$pkt" 2>/dev/null || rm -rf "$pkt"
+  # Never rebuild ON TOP of an existing packet. Files that only some runs create
+  # (patch.full.diff, *-files.txt) would survive, get hashed into the seal, and
+  # `verify` would then bless a mixture of two different reviews as valid.
+  # Reported by an independent Grok review of this script, 2026-08-18.
+  if [ -e "$pkt" ]; then
+    is_managed "$pkt" \
+      || die "refusing to overwrite $pkt: it exists and is not a managed review packet. Move or delete it yourself; this script does not touch directories it did not create."
+    rm -rf "$pkt" 2>/dev/null || { sleep 1; rm -rf "$pkt"; } \
+      || die "could not remove the previous packet at $pkt. Refusing to build on top of it: leftover files from the previous run would be sealed into this one and verify would call the mixture valid."
+  fi
   mkdir -p "$pkt"
   printf '%s\n' "$root" > "$pkt/$MARKER"
 
@@ -216,11 +225,51 @@ cmd_build() {
   mkdir -p "$(dirname "$excl")"
   grep -qxF "$PACKET_DIR_NAME/" "$excl" 2>/dev/null || printf '%s/\n' "$PACKET_DIR_NAME" >> "$excl"
 
+  # --- tests, BEFORE the evidence is captured ---------------------------------
+  # Order matters. A test command can write a log, delete a fixture, or reset a
+  # file. If the patch were captured first and the file lists after, the sealed
+  # packet could describe two different trees and the reviewer would be judging
+  # a picture that never existed. Tests run first; everything describing the
+  # tree is then captured together, and a tree that moved is announced.
+  # Reported by an independent Grok review of this script, 2026-08-18.
+  local test_block tree_before tree_after tree_note=""
+  tree_before="$(git -C "$root" status --porcelain 2>/dev/null | sort)"
+  if [ -n "$OPT_TESTS" ]; then
+    local tout rc
+    tout="$(mktemp)"; rc=0
+    ( cd "$root" && eval "$OPT_TESTS" ) > "$tout" 2>&1 || rc=$?
+    test_block="Command: \`$OPT_TESTS\`
+Exit code: \`$rc\` ($([ "$rc" -eq 0 ] && printf 'PASSED' || printf 'FAILED'))
+
+Last $TEST_OUTPUT_TAIL lines of output:
+
+\`\`\`
+$(tail -n "$TEST_OUTPUT_TAIL" "$tout")
+\`\`\`"
+    rm -f "$tout"
+    tree_after="$(git -C "$root" status --porcelain 2>/dev/null | sort)"
+    if [ "$tree_before" != "$tree_after" ]; then
+      warn "the --tests command changed the working tree; the packet describes the tree AFTER the tests ran, and says so."
+      tree_note="
+
+⚠️ **The test command changed the working tree.** Everything below describes the
+tree as it stood AFTER the tests ran, not before. If that matters to your
+judgment, say so rather than assuming."
+    fi
+  else
+    test_block="**No tests were run for this packet.** Treat this as unknown, not
+as a pass. If the change needs test evidence to judge, say so in your verdict."
+  fi
+
   # --- the patch -------------------------------------------------------------
   # Committed range AND uncommitted edits: what a human sees in the directory.
+  # A git failure here must never be swallowed: an empty patch would otherwise be
+  # sealed as "nothing changed" and could be approved on that basis.
   local tmp_patch; tmp_patch="$(mktemp)"
-  git -C "$root" diff --binary "$base" "$head" > "$tmp_patch" 2>/dev/null || true
-  git -C "$root" diff --binary HEAD >> "$tmp_patch" 2>/dev/null || true
+  git -C "$root" diff --binary "$base" "$head" > "$tmp_patch" \
+    || { rm -f "$tmp_patch"; die "git diff $base..$head failed in $root. Nothing was sealed: an empty patch must never be presented as 'no changes'."; }
+  git -C "$root" diff --binary HEAD >> "$tmp_patch" \
+    || { rm -f "$tmp_patch"; die "git diff HEAD failed in $root. Nothing was sealed."; }
 
   local patch_bytes split_note=""
   patch_bytes="$(wc -c < "$tmp_patch" | tr -d ' ')"
@@ -241,37 +290,30 @@ EOF
   rm -f "$tmp_patch"
 
   # --- identity ---------------------------------------------------------------
+  # $root may be a disposable snapshot built by ai-review-sandbox. Naming the
+  # throwaway copy as "the repository" is misleading in durable evidence, so
+  # read the real checkout out of the snapshot's marker file when there is one.
+  # Reported by an independent Grok review of this script, 2026-08-18.
+  local real_root="$root" snapshot_note=""
+  if [ -f "$root/.ai-review-sandbox" ]; then
+    real_root="$(head -1 "$root/.ai-review-sandbox")"
+    snapshot_note="
+- This directory is a **disposable snapshot** of that checkout, not the working
+  copy itself. Paths are identical; do not commit or push from here."
+  fi
+
   base_subj="$(git -C "$root" log -1 --format=%s "$base" 2>/dev/null || printf '(empty tree)')"
   head_subj="$(git -C "$root" log -1 --format=%s "$head" 2>/dev/null || printf '?')"
   base_date="$(git -C "$root" log -1 --format=%aI "$base" 2>/dev/null || printf '-')"
   head_date="$(git -C "$root" log -1 --format=%aI "$head" 2>/dev/null || printf '-')"
 
-  # --- tests -----------------------------------------------------------------
-  # Silence must never read as a pass. Either a real result or an explicit
-  # statement that nothing was run.
-  local test_block
-  if [ -n "$OPT_TESTS" ]; then
-    local tout rc
-    tout="$(mktemp)"; rc=0
-    ( cd "$root" && eval "$OPT_TESTS" ) > "$tout" 2>&1 || rc=$?
-    test_block="Command: \`$OPT_TESTS\`
-Exit code: \`$rc\` ($([ "$rc" -eq 0 ] && printf 'PASSED' || printf 'FAILED'))
-
-Last $TEST_OUTPUT_TAIL lines of output:
-
-\`\`\`
-$(tail -n "$TEST_OUTPUT_TAIL" "$tout")
-\`\`\`"
-    rm -f "$tout"
-  else
-    test_block="**No tests were run for this packet.** Treat this as unknown, not
-as a pass. If the change needs test evidence to judge, say so in your verdict."
-  fi
-
   # --- file lists -------------------------------------------------------------
+  # Captured immediately after the patch, from the same tree.
   local changed untracked dirty
-  changed="$(git -C "$root" diff --name-status "$base" "$head" 2>/dev/null || true)"
-  dirty="$(git -C "$root" diff --name-status HEAD 2>/dev/null || true)"
+  changed="$(git -C "$root" diff --name-status "$base" "$head")" \
+    || die "git diff --name-status $base..$head failed in $root. Nothing was sealed."
+  dirty="$(git -C "$root" diff --name-status HEAD)" \
+    || die "git diff --name-status HEAD failed in $root. Nothing was sealed."
   untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null \
                | grep -vx "$PACKET_DIR_NAME" || true)"
   changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
@@ -313,7 +355,8 @@ spend turns reconstructing the diff by hand — it is already in \`$PATCH\`.
 
 ## 1. What is under review
 
-- Repository directory: \`$root\`
+- Repository checkout: \`$real_root\`$snapshot_note
+- Directory you are reading: \`$root\`
 - Packet tag: \`$tag\`
 - Review class: \`$OPT_CLASS\`
 
@@ -329,7 +372,7 @@ Base selection rule: $BASE_RULE.
 Your verdict applies to head \`$head\` and to no other commit. If this directory
 does not match those commits, say so instead of reviewing something else.
 
-## 3. What changed
+## 3. What changed$tree_note
 
 Committed between base and head (\`git diff --name-status\`):
 
