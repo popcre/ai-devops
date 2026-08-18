@@ -27,7 +27,7 @@ PREFLIGHT_TAG=""
 PREFLIGHT_SANDBOX=""
 cleanup_check() {
   [ -z "$PREFLIGHT_SANDBOX" ] || "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" remove "$PREFLIGHT_SANDBOX" >/dev/null 2>&1 || true
-  [ -z "$PREFLIGHT_REPO" ] || "${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}" remove "$PREFLIGHT_REPO" "$PREFLIGHT_TAG" >/dev/null 2>&1 || true
+  [ -z "$PREFLIGHT_REPO" ] || "${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}" remove-copy "$PREFLIGHT_REPO" "$PREFLIGHT_TAG" >/dev/null 2>&1 || true
 }
 
 write_atomic() { # FILE JSON
@@ -97,24 +97,25 @@ check_provider() { # PROVIDER REPO LIVE BASE
   valid_provider "$provider" || die "unknown provider '$provider' (expected grok, kimi, or glm)."
   [ -d "$repo" ] || die "review directory does not exist: $repo"
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
+  need jq; need git; need timeout
   if active_quarantine "$provider"; then
     jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' "$(provider_file "$provider")" >&2
     return 3
   fi
 
-  need jq; need git; need timeout
   git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
   [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
     || die "base ref does not resolve: $base"
 
   tag="preflight-$provider-$$"
-  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure "$repo" "$tag")"
+  # Always isolate preflight. Ordinary wrappers keep their packet in an
+  # ordinary clone while a reviewer reads it; a preflight packet must never
+  # replace or delete that live evidence.
+  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
   PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
   "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
-  mkdir -p "$STATE_DIR"; out="$(mktemp "$STATE_DIR/.result.XXXXXX")"; rm -f "$out"
-
   wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
   set +e
   if [ "$live" = 1 ] && [ "$provider" != glm ]; then
