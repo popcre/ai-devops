@@ -7,10 +7,10 @@
 
 | Step | Status | Last updated | Evidence |
 |---|---|---|---|
-| 1. Confirm the canonical library is published | ⬜ open | 2026-08-18 | Verification commands in Phase 1 below |
-| 2. Author the shared Skill | ⬜ open | 2026-08-18 | Planned `skills/shared/pop-business-rules/SKILL.md` |
-| 3. Add trigger evaluations and behavioral contract tests | ⬜ open | 2026-08-18 | Planned eval and test files in Phase 3 |
-| 4. Register the Skill in repository documentation | ⬜ open | 2026-08-18 | Planned router and skills-map changes in Phase 4 |
+| 1. Confirm the canonical library is published | 🔄 in progress | 2026-08-18 | shared-db PR #1178 is accepted by Grok 4.6 and awaiting final CI/merge |
+| 2. Author the shared Skill | ✅ complete | 2026-08-18 | `skills/shared/pop-business-rules/SKILL.md` |
+| 3. Add trigger evaluations and behavioral contract tests | ✅ complete | 2026-08-18 | Eval JSON and offline contract test added; local tests pass |
+| 4. Register the Skill in repository documentation | ✅ complete | 2026-08-18 | Router and Claude/Codex usage guides updated |
 | 5. Install and verify on Claude and Codex | ⬜ open | 2026-08-18 | Planned installer and trigger evidence in Phase 5 |
 | 6. Commit, push, verify CI, and close the workstream | ⬜ open | 2026-08-18 | Planned GitHub and cleanup checks in Phase 6 |
 
