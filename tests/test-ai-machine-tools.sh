@@ -5,7 +5,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 target="$tmp/bin"
 bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >/dev/null
 bash "$repo/bin/ai-machine-tools-doctor" --platform ubuntu --target-dir "$target" | grep -q 'OK local AI command'
-for n in ai-grok-review ai-grok-implement ai-kimi ai-qwen ai-deepseek-agent ai-glm; do [[ -e "$target/$n" ]]; done
+for n in ai-grok-review ai-grok-implement ai-gemini ai-kimi ai-qwen ai-deepseek-agent ai-glm; do [[ -e "$target/$n" ]]; done
 bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >/dev/null
 rm "$target/ai-kimi"
 if bash "$repo/bin/ai-machine-tools-doctor" --platform ubuntu --target-dir "$target" >"$tmp/out" 2>&1; then exit 1; fi
