@@ -127,6 +127,12 @@ check "never uses --yolo"            "! grep -q -- '--yolo' '$TMP/argv.txt'"
 check "never uses --auto"            "! grep -q -- '--auto' '$TMP/argv.txt'"
 check "never uses -c/--continue"     "! grep -qE -- '(^| )-c( |$)|--continue' '$TMP/argv.txt'"
 
+HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+run new r-evidence --prompt "review" --base HEAD --tests true \
+  --decision "is this safe?" --assert-head "$HEAD_SHA" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "review accepts sealed evidence options" || bad "review accepts sealed evidence options"
+check "help documents evidence base" "run --help | grep -q -- '--base REF'"
+
 echo "== debate contract and context rules =="
 TEMPLATE="$REPO_ROOT/templates/delegation/debate-turn.md"
 SKILL="$REPO_ROOT/skills/shared/kimi-code-delegation/SKILL.md"

@@ -602,6 +602,12 @@ ai-kimi $VERSION — Kimi Code delegation in persistent, named sessions.
   ai-kimi list | show <name> | transcript <name> | delete <name>
   ai-kimi doctor [--live]
 
+Review evidence options for `new` and review-mode `ask`:
+  --base REF           base of the comparison in the evidence packet
+  --tests CMD          run CMD and record its exact result in the packet
+  --decision TEXT      the one-sentence decision being asked for
+  --assert-head SHA    refuse unless the repository is really at SHA
+
 'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
 read-only for reviews, but an implementation continuation (write run) for an
 implementation session. 'implement' creates or continues an isolated write
@@ -1229,6 +1235,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
+    --base)        OPT_BASE="${2:-}"; shift 2 ;;
+    --tests)       OPT_TESTS="${2:-}"; shift 2 ;;
+    --decision)    OPT_DECISION="${2:-}"; shift 2 ;;
+    --assert-head) OPT_ASSERT_HEAD="${2:-}"; shift 2 ;;
     --json)        OPT_JSON=1; shift ;;
     --live)        OPT_LIVE="--live"; shift ;;
     -h|--help)     usage; exit 0 ;;
