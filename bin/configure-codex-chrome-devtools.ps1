@@ -27,7 +27,7 @@ $newBlock = @(
   'command = "cmd"'
   'args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest"]'
   ("env = {{ SystemRoot = '{0}', PROGRAMFILES = '{1}' }}" -f $systemRoot, $programFiles)
-  'startup_timeout_ms = 20000'
+  'startup_timeout_sec = 20'
 )
 
 $lines = Get-Content -LiteralPath $ConfigPath

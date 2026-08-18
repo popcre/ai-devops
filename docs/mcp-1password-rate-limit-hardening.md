@@ -153,12 +153,16 @@ block used a **direct `npx` + inline plaintext service-account token**, meaning
 Codex's 1Password server was (a) outside the shared cache/mutex and (b) storing
 the token in cleartext in `config.toml`.
 
-`bin/configure-codex-1password.ps1` (new; called by `setup-machine.ps1`)
-surgically rewrites **only** that block to launch through `mcp-launch.cmd`
-(same path Claude uses), **deletes the `.env` plaintext-token table**, and
-**preserves every `[mcp_servers."1password".tools.*]` approval guard**. It is
-idempotent and safe when Codex is absent. It backs up to
-`config.toml.aidevops.bak` on first run.
+`bin/configure-codex-mcps.ps1` now owns the complete Codex MCP set and keeps the
+1Password entry on the same caching launcher. The earlier narrow
+`bin/configure-codex-1password.ps1` remains available for targeted repair but is
+no longer the machine-setup entry point.
+The complete reconciler writes the 1Password main block through
+`mcp-launch.cmd` (the same path Claude uses), **deletes the stale `.env`
+plaintext-token table**, and **preserves every
+`[mcp_servers."1password".tools.*]` approval guard**. It is idempotent, safe
+when Codex is absent, and creates a timestamped recovery copy before changing
+the file.
 
 ## Where the fix lives / how it persists to a new machine
 
@@ -170,7 +174,7 @@ hand-edited client config. The durable source is the `ai-devops` repo:
 | `bin/mcp-secret-launch.ps1` | Runtime launcher: single-flight mutex + 15-min DPAPI cache. |
 | `bin/setup-machine.ps1` | Generator: writes both `.cmd` launchers and merges one server list into Claude Desktop + Claude Code; now also calls the Codex step. |
 | `bin/setup-secrets.sh` | Ubuntu generator: holds its file lock only during secret resolution, never for the MCP server lifetime. |
-| `bin/configure-codex-1password.ps1` | Routes Codex's 1Password through the launcher; strips its plaintext token. |
+| `bin/configure-codex-mcps.ps1` | Reconciles the complete Codex MCP set; routes 1Password through the launcher and strips stale plaintext env values. |
 | `config/mcp.env.example` | Template copied to `mcp.env`. |
 
 A new computer bootstraps by cloning `ai-devops` and running

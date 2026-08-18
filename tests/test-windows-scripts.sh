@@ -123,13 +123,21 @@ if grep -q 'model_reasoning_effort = "low"' config/codex-portable.toml &&
   ok "portable Codex defaults pin safe effort without hard-coding a model"
 else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
-echo "== Chrome DevTools MCP is managed for both clients =="
+echo "== complete MCP set is managed for both clients =="
 if grep -q '\$McpServers\["chrome-devtools"\]' bin/setup-machine.ps1; then
   ok "Claude MCP set includes Chrome DevTools"
 else bad "Claude MCP set does not include Chrome DevTools"; fi
-if grep -q 'configure-codex-chrome-devtools.ps1' bin/setup-machine.ps1; then
-  ok "Windows setup configures Chrome DevTools for Codex"
-else bad "Windows setup leaves Codex Chrome DevTools unmanaged"; fi
+if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
+   grep -q '\$CodexMcpServers' bin/setup-machine.ps1; then
+  ok "Windows setup configures the complete MCP set for Codex"
+else bad "Windows setup leaves the Codex MCP set incomplete"; fi
+for server in ag-grid playwright codex-cli synology-monitor devops-mcp vercel trigger recall-ai 1password supabase; do
+  if grep -Fq "\$McpServers[\"$server\"]" bin/setup-machine.ps1; then
+    ok "shared MCP set includes $server"
+  else
+    bad "shared MCP set is missing $server"
+  fi
+done
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
