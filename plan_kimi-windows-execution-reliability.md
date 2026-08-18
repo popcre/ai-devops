@@ -11,6 +11,8 @@ Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execut
 | 2. Add security-preserving execution preflight | ⬜ open | 2026-08-17 | Required behavior and tests are specified in §9.2. |
 | 3. Add durable detached Kimi jobs | ⬜ open | 2026-08-17 | Required job lifecycle is specified in §§8–10. |
 | 4. Add progress, timeout, and recovery truth | ⬜ open | 2026-08-17 | Required states and tests are specified in §§9.4–9.5. |
+| 4a. Isolate reviews from concurrent checkout edits and directory-bound resumes | ⬜ open | 2026-08-18 | Live failures and required regression tests are specified in §§6.8, 9.4a, and 10. |
+| 4b. Separate analysis prompts from diff-review packets | ⬜ open | 2026-08-18 | The architecture-review anchoring failure and prompt-contract tests are specified in §§6.9, 9.4b, and 10. |
 | 5. Enforce main-session routing for credentialed runs | ⬜ open | 2026-08-17 | Required skill/orchestrator changes are specified in §9.6. |
 | 6. Qualify the complete Windows path live | ⬜ open | 2026-08-17 | Live canaries are specified in §9.7 and §10. |
 | 7. Update model comparison and operating docs | ⬜ open | 2026-08-17 | Documentation targets are specified in §9.8. |
@@ -174,6 +176,20 @@ A healthy Kimi review may legitimately take many minutes with no final verdict. 
 
 The canonical comparison contains strong Kimi implementation evidence and older operational warnings, but not this complete Windows incident. The final documentation must score code quality separately from provider/wrapper availability.
 
+### 6.8 The 2026-08-18 live review exposed three more wrapper failures
+
+During the shared-db orchestrator architecture review, two valid read-only Kimi turns were discarded because unrelated sessions changed the primary checkout between `tree_state` snapshots. The wrapper reported that Kimi had changed the working tree even though the review profile had no write tools. The canary observes the whole shared checkout, so it cannot distinguish Kimi writes from concurrent-session writes.
+
+Moving the review into a stable linked worktree then exposed a directory-binding failure. Kimi immediately returned `Session ... was created under a different directory`, but `run_turn` had already reaped the failed child before `await_result` began. `await_result` polls every machine process named `kimi`; when it never sees the exited child, or sees an unrelated Kimi process, it waits the full 900-second ceiling. The wrapper therefore turned an immediate deterministic failure into a fifteen-minute wait.
+
+The permanent correction is a stable wrapper-owned review workspace per named session, used from the first turn and refreshed in place for later turns. Read-only verification must compare that private workspace, not a concurrently edited primary checkout. A directory mismatch, nonzero child exit, or terminal stderr record must fail immediately without global process polling.
+
+### 6.9 Diff-review packaging distorted a non-diff architecture review
+
+Every read-only `ai-kimi` request currently receives an evidence-packet preamble saying that commits and a patch are “under review.” The first shared-db architecture turn consequently led with approval of an unrelated Git patch and compressed nine operating-model questions into one paragraph. A fresh Kimi session in a stable workspace answered all nine questions in detail, which separates prompt anchoring from model capability.
+
+`ai-kimi` needs explicit review kinds. Diff reviews keep the sealed patch packet and `APPROVE`/`REVISE` verdict contract. Plan, architecture, and analysis reviews receive a decision packet and conclusion contract that does not imply a Git patch is the subject. Callers must choose deliberately; no heuristic may silently reinterpret the task.
+
 ## 7. Approaches considered and rejected
 
 1. **Grant `CodexSandboxUsers` Modify access to the default Kimi home. Rejected.** It would let any restricted task read or replace OAuth/configuration material. The permission failure is protecting a real secret boundary.
@@ -186,6 +202,9 @@ The canonical comparison contains strong Kimi implementation evidence and older 
 8. **Accept exit code 0 or the text `APPROVE` as completion. Rejected.** The existing terminal `session.resume_hint` rule prevents partial or transport-failed output from becoming review evidence.
 9. **Automatically switch models after Kimi failure. Rejected.** Reviewer rotation and substitution are policy decisions outside this wrapper. The wrapper reports a typed failure; its caller decides the governed next step.
 10. **Blame Kimi K3 for permission/auth/session failures. Rejected.** Those failures occurred before the model produced a verdict. Model quality must be judged only from completed, exact-head runs.
+11. **Increase the 900-second ceiling for immediate child failures. Rejected.** The child had already exited with a deterministic directory error. A longer wait makes the defect worse.
+12. **Keep using the shared primary checkout and weaken the read-only canary. Rejected.** Concurrent edits both invalidate evidence and create false accusations. Reviews need a stable private workspace; the structural read-only profile and canary both remain.
+13. **Use one diff-oriented prompt contract for every read-only request. Rejected.** It anchored an architecture review on an unrelated patch. Review kind must be explicit.
 
 ## 8. Design decisions
 
@@ -305,6 +324,36 @@ Dependencies: §9.3.
 
 **You'll know it worked when:** supervisors can distinguish “not authenticated,” “could not create session storage,” “healthy and quiet,” “completed,” and “timed out” without inspecting Task Manager, and no case waits 900 seconds after a known startup failure.
 
+#### 9.4a Give every named review a stable private workspace and fail exited children immediately
+
+Change `bin/ai-kimi`, `bin/ai-review-sandbox`, and `tests/test-ai-kimi.sh`:
+
+- Create one wrapper-owned self-contained review workspace at `new` time for ordinary clones and linked worktrees alike. Record its exact path in review metadata and reuse that same path for every `ask` turn because Kimi binds a session to its creation directory.
+- Refresh the workspace in place from the current exact repository head before each turn. Refuse ambiguous uncommitted overlap; never point Kimi at a concurrently edited primary checkout.
+- Run the read-only tree canary against the private workspace. If the primary checkout changes concurrently, report `source-checkout-changed` and mark evidence stale without accusing Kimi of writing.
+- Replace `kimi_procs` global polling. `run_turn` already waits for and reaps its exact child. If that child exits without `session.resume_hint`, classify its exit and stderr immediately. A different machine-wide Kimi process is never evidence that this run remains alive.
+- Detect `created under a different directory`, authentication, quota, filesystem, and malformed-session errors as typed immediate failures.
+- Preserve terminal `session.resume_hint` as the only success proof.
+
+Dependencies: §§9.3–9.4 durable worker ownership. This step may share the stable workspace primitive with implementation continuation, but review and implementation state must remain separately validated.
+
+**You'll know it worked when:** a stub that exits immediately with a directory-binding error returns nonzero in under five seconds; an unrelated live Kimi process cannot extend that wait; concurrent edits in the primary checkout neither fail the read-only canary nor alter the private review workspace; and an exact named `ask` resumes in the same recorded directory.
+
+#### 9.4b Add explicit diff, plan, architecture, and analysis review contracts
+
+Change `bin/ai-kimi`, `bin/ai-review-packet`, the caller skills, and their tests:
+
+- Add an explicit required review kind for non-default use: `diff`, `plan`, `architecture`, or `analysis`. Keep backwards-compatible `diff` only for callers whose command is explicitly a code review.
+- For `diff`, retain the sealed patch packet and terminal `APPROVE`/`REVISE` contract.
+- For `plan`, `architecture`, and `analysis`, generate a decision packet containing the named source documents, current commit identity, requested decisions, constraints, and evidence manifest without telling Kimi that an unrelated Git patch is the subject.
+- Give each kind its own footer: code verdict for `diff`; decision-by-decision conclusion and unresolved-objection ledger for the other kinds.
+- Make the Kimi skill require callers to select the kind and to keep large source material in readable files rather than pasting it into argv.
+- Preserve exact-head identity and stable-workspace re-read requirements for every kind.
+
+Dependencies: §9.4a stable review workspace.
+
+**You'll know it worked when:** an architecture fixture containing an unrelated changed file never mentions approving that patch, answers every requested decision, and the diff fixture still produces the existing exact-head verdict and packet digest.
+
 #### 9.5 Make recovery idempotent and fail closed
 
 Change `bin/ai-kimi` recovery and lock code:
@@ -415,6 +464,11 @@ Dependencies: all earlier phases.
 - Foreground waiter death does not cancel worker.
 - Worker death is recoverable and never becomes success without `session.resume_hint`.
 - Immediate child error bypasses the full wall wait.
+- Immediate nonzero child exit is classified before any polling loop, even when another `kimi` process is running.
+- Review sessions retain one stable private workspace across exact-ID continuations and refuse a mismatched directory before provider launch.
+- Concurrent primary-checkout edits do not trigger the Kimi-write canary; writes inside the private review workspace still fail hard.
+- Diff packets and analysis/architecture decision packets have distinct preambles and terminal answer contracts.
+- Architecture prompts are not anchored on unrelated Git patches and must answer every requested decision.
 - Healthy silent child survives the startup deadline after proving startup.
 - Timeout and cancel target the exact owned process; PID reuse is refused.
 - Repeated status/wait/cancel/recover are idempotent.
@@ -459,6 +513,9 @@ Dependencies: all earlier phases.
 - `KIMI_CODE_HOME` moves credentials and sessions together. Treat it as a credential-bearing directory.
 - The main Codex task and delegated tasks can have different Windows permissions. Always test the actual current process.
 - Do not solve a wrapper timeout by increasing it. Startup failure and healthy long work need separate deadlines.
+- Do not use machine-wide `pgrep kimi` as liveness for a specific job. Track the exact owned child and its terminal files.
+- Kimi review sessions are directory-bound. Create them in their stable wrapper-owned workspace from turn one; never migrate a live review session by remote identity alone.
+- Do not prepend a diff-review packet to plan, architecture, or analysis work.
 - Do not create a Windows service or privileged broker without a new threat model and explicit owner approval.
 - Do not edit the primary checkout's unrelated `.ai/` or documentation files.
 - No database or production access is required.
@@ -486,6 +543,10 @@ Dependencies: all earlier phases.
 - [ ] Restricted execution fails in under five seconds with an automatic main-task hand-back.
 - [ ] Main-task execution creates a durable job that survives waiter/caller death.
 - [ ] Startup failures never wait to the full review deadline.
+- [ ] An immediate directory-binding or provider failure returns in under five seconds even while another Kimi process is active.
+- [ ] Concurrent repository edits cannot be misreported as Kimi writes or invalidate a private review workspace.
+- [ ] Named review continuation always resumes from its original stable directory.
+- [ ] Architecture and analysis reviews use decision packets and cannot approve an unrelated Git patch by prompt construction.
 - [ ] Healthy quiet reviews are not killed merely for silence.
 - [ ] Exact completion still requires `session.resume_hint`.
 - [ ] Review mode remains structurally read-only.
