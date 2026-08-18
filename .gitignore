@@ -58,6 +58,7 @@ node_modules/
 .ai/runs/
 .ai/tmp/
 .ai/reviews/
+.ai/
 
 # === Machine-local AI permissions ===
 .claude/settings.local.json
