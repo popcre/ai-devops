@@ -11,7 +11,7 @@
 | 2. Author the shared Skill | ✅ complete | 2026-08-18 | `skills/shared/pop-business-rules/SKILL.md` |
 | 3. Add trigger evaluations and behavioral contract tests | ✅ complete | 2026-08-18 | Eval JSON and offline contract test added; local tests pass |
 | 4. Register the Skill in repository documentation | ✅ complete | 2026-08-18 | Router and Claude/Codex usage guides updated |
-| 5. Install and verify on Claude and Codex | ⚠️ partly blocked | 2026-08-18 | Installed copies match source; Claude is logged out and Windows denies child access to the Codex desktop executable, so live trigger scores are not valid |
+| 5. Install and verify on Claude and Codex | ⚠️ partly blocked | 2026-08-18 | Installed copies match source. Claude live eval: 10/10 intended triggers, 0/10 near-miss triggers, three rounds, zero errors. Windows still denies child access to the Codex desktop executable |
 | 6. Commit, push, verify CI, and close the workstream | 🔄 in progress | 2026-08-18 | Skill merged in ai-devops PR #36; issue #35 stays open until valid live trigger evidence exists |
 
 **Fresh-session starting point:** Step 1. Read this entire plan before editing anything.

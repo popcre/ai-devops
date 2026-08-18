@@ -35,14 +35,16 @@ both `~/.claude/skills/pop-business-rules/` and
 `~/.codex/skills/pop-business-rules/`; both SHA-256 hashes exactly match the
 published source (`E18C7A8F9154928C0DE4219FF104D2C65DFE7C52B1A783011A9C85663E8576F1`).
 
-Offline Skill, installer, parity, Codex-runner, and context tests pass. Live
-trigger measurement is blocked on this machine: `claude auth status` reports
-`loggedIn: false`, and Windows returns `Access is denied` when the runner starts
-the Codex desktop executable. The original Claude runner misleadingly reported
-logged-out runs as 0/10 with zero errors; that result was invalid. The runner now
-refuses a score unless authentication is proven. The Codex runner now converts
-an inaccessible executable into an explicit incomplete-run failure instead of
-crashing. Issue #35 remains open for valid live evidence.
+Offline Skill, installer, parity, Codex-runner, and context tests pass. Claude
+live evaluation completed after login on 2026-08-18: all 10 intended prompts
+triggered in all three rounds, all 10 near-miss prompts stayed out in all three
+rounds, and no run errored. Windows still returns `Access is denied` when the
+runner starts the Codex desktop executable. The original Claude runner
+misleadingly reported logged-out runs as 0/10 with zero errors; that result was
+invalid. The runner now refuses a score unless authentication is proven. The
+Codex runner now converts an inaccessible executable into an explicit
+incomplete-run failure instead of crashing. Issue #35 remains open for valid
+Codex evidence.
 
 ## 4. What did not work
 
@@ -65,11 +67,10 @@ map prevents unnecessary whole-library loading.
 
 ## 6. Exact next steps
 
-1. Log Claude CLI in on this machine and verify `claude auth status` says `loggedIn: true`.
-2. Provide a callable Codex CLI outside the protected WindowsApps desktop package, or fix the runner to use the supported Codex CLI launcher without weakening its read-only/low-effort safeguards.
-3. Re-run both three-round evals from plan Phase 5. Inspect transcripts before treating a miss as a Skill defect.
-4. Run the three read/add/audit probes.
-5. Record valid evidence, close issue #35, update the plan to complete, and delete this handoff in the completing commit.
+1. Provide a callable Codex CLI outside the protected WindowsApps desktop package, or fix the runner to use the supported Codex CLI launcher without weakening its read-only/low-effort safeguards.
+2. Re-run the Codex three-round eval from plan Phase 5. Inspect evidence before treating a miss as a Skill defect.
+3. Run the three read/add/audit probes.
+4. Record valid Codex evidence, close issue #35, update the plan to complete, and delete this handoff in the completing commit.
 
 ## 7. Constraints and gotchas
 
