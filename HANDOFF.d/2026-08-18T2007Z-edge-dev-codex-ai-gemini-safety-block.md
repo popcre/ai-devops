@@ -49,8 +49,10 @@ normal interactive policy. This is required before any wrapper code may be built
   `https://github.com/u2giants/ai-devops/issues/38#issuecomment-5333437197`.
 - No `bin/ai-gemini`, installer entry, shared skill, machine configuration, OAuth
   file, or Antigravity settings file was created or changed.
-- These changes are not yet committed or pushed. The pre-existing untracked
-  `.ai/` directory is unrelated and must remain unstaged.
+- The evidence package is committed and pushed on `main` as
+  `d316216d30cc524df74904b7281c0afe156448e8` (`Record Gemini reviewer safety
+  blocker`). The pre-existing untracked `.ai/` directory is unrelated and must
+  remain unstaged.
 
 ## 4. Everything we tried that did NOT work
 
