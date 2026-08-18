@@ -26,6 +26,47 @@ Read this table first. Do not re-derive or re-plan what is already done.
 together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
 different session.
 
+### END-OF-PHASE RULE (applies to every phase, no exceptions)
+
+When you finish your phase, **re-read every remaining phase in this file through
+Step 9 and report any drift** — anything you did, changed, renamed, or learned
+that alters a later phase's assumptions, interfaces, or approach. Update this
+file for what you found, then update the STATUS row with an artifact you can
+open, never a bare number. A phase is not done until that sweep is done.
+
+### DRIFT RECORDED 2026-08-18 (Phase A) — read before starting Step 4
+
+What the completed phase changed for the phases that follow:
+
+- **Step 5 is now the riskiest step in this plan, not the safest.** Its 6-turn /
+  5-minute default was written on the assumption that packets would collapse
+  turn counts. The live A/B says they did not (8 turns either way; see the GATE
+  RESULT under Step 3). **Measure the real turn distribution across at least a
+  handful of live reviews BEFORE lowering any ceiling.** A budget below the work's
+  honest turn count manufactures the no-verdict failure this plan exists to end.
+- **Grok CLI moved 0.2.118 -> 1.0.3 (`grok-4.6`) on this machine.** Every measured
+  number in `fix_reviewer_system.md` predates that upgrade, and neither live run
+  reproduced the 20-turn / ~3M-token / no-verdict failure. Step 8's trial should
+  first establish whether that failure still occurs at all; if it does not, the
+  success criteria need rewriting against reality rather than against 0.2.118.
+- **Step 4 (preflight):** `bin/ai-review-packet` now exists and its `build` is a
+  cheap, offline, fail-fast check of exactly the things preflight must prove
+  (directory readable, base/head present, manifest writable). Reuse it; do not
+  write a second implementation. Remember `grok doctor` is a TERMINAL diagnostic,
+  not an auth check — use `grok models`, which is what `ai-grok-review doctor`
+  already does.
+- **Step 6 (rotation):** `extract_answer` in `bin/ai-grok-review` changed contract
+  on 2026-08-18 — it now emits the verdict first AND keeps the findings below it.
+  Anything that parses reviewer output must not assume the old verdict-only shape.
+- **Step 7 (front door + ledger):** the three wrappers already accept `--base`,
+  `--tests`, `--decision` and `--assert-head`, and already record `base`, `head`
+  and `packet_sha256` in their session metadata. `ai-review` should pass these
+  through and read those fields rather than inventing a parallel record.
+- **Unchanged and still binding:** no permission was widened anywhere; the packet
+  is additive (full repo read is retained, guarded by
+  `reviewer_retains_access_outside_the_packet`); the packet is git-excluded so it
+  cannot trip the read-only canaries.
+
 ---
 
 # Part 1 — Why
