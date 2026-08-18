@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# ai-review-scoreboard - normalize existing reviewer metadata into JSONL.
+#
+# WHY THIS EXISTS
+# The old plan proposed a new front door that would automatically pick the
+# fastest provider. The measured evidence does not justify that. This command
+# records comparable outcomes from the wrappers that already exist so a return
+# of long waits, missing verdicts, allowance failures, or stale evidence is
+# visible without changing provider selection.
+set -euo pipefail
+VERSION="1.0.0"
+STATE_DIR="${AI_REVIEW_SCOREBOARD_DIR:-$HOME/.local/state/ai-devops/review-scoreboard}"
+LEDGER="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_DIR/reviews.jsonl}"
+LOCK_WAIT="${AI_REVIEW_SCOREBOARD_LOCK_WAIT:-10}"
+SCOREBOARD_LOCK=""
+
+die(){ printf 'ai-review-scoreboard: error: %s\n' "$*" >&2; exit 1; }
+valid_provider(){ case "$1" in grok|kimi|glm) return 0 ;; *) return 1 ;; esac; }
+
+lock_acquire(){
+  local lock="$LEDGER.lock" waited=0
+  mkdir -p "$(dirname "$LEDGER")"; chmod 0700 "$(dirname "$LEDGER")" 2>/dev/null || true
+  while ! mkdir "$lock" 2>/dev/null; do
+    [ "$waited" -lt "$LOCK_WAIT" ] || die "scoreboard is busy: $lock"
+    sleep 1; waited=$((waited + 1))
+  done
+  SCOREBOARD_LOCK="$lock"
+  trap 'rmdir "$SCOREBOARD_LOCK" 2>/dev/null || true' EXIT
+}
+
+append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
+  local provider="$1" meta="$2" elapsed="$3" verdict="$4" failure="$5" stale="$6" row repo head actual
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  [ -s "$meta" ] && jq -e . "$meta" >/dev/null 2>&1 || die "metadata is not valid JSON: $meta"
+  case "$elapsed" in ''|*[!0-9]*) die "elapsed seconds must be a non-negative integer." ;; esac
+  case "$stale" in true|false|auto) ;; *) die "stale must be true, false, or auto." ;; esac
+  repo="$(jq -r '.repo // .repository_root // empty' "$meta")"
+  head="$(jq -r '.head // empty' "$meta")"
+  if [ "$stale" = auto ]; then
+    stale=false
+    if [ -n "$repo" ] && [ -d "$repo" ] && [ -n "$head" ]; then
+      actual="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
+      [ "$actual" = "$head" ] || stale=true
+    fi
+  fi
+  row="$(jq -nc --arg timestamp "$(date -u +%FT%TZ)" --arg provider "$provider" \
+    --arg repo "$repo" --arg base "$(jq -r '.base // empty' "$meta")" --arg head "$head" \
+    --arg packet "$(jq -r '.packet_sha256 // empty' "$meta")" --arg verdict "$verdict" \
+    --arg failure "$failure" --argjson elapsed "$elapsed" --argjson stale "$stale" \
+    --argjson turns "$(jq '.turns // null' "$meta")" \
+    --argjson tokens "$(jq '.total_tokens // .tokens // null' "$meta")" \
+    --argjson cost "$(jq '.total_cost_usd // null' "$meta")" \
+    '{schema_version:1,timestamp:$timestamp,provider:$provider,repo:$repo,base:$base,head:$head,
+      packet_sha256:$packet,elapsed_seconds:$elapsed,turns:$turns,tokens:$tokens,cost_usd:$cost,
+      verdict:(if $verdict=="" then null else $verdict end),
+      failure_class:(if $failure=="" then null else $failure end),stale:$stale}')"
+  lock_acquire
+  printf '%s\n' "$row" >> "$LEDGER"
+  printf '%s\n' "$row"
+}
+
+usage(){
+  cat <<EOF
+Usage:
+  ai-review-scoreboard append <grok|kimi|glm> <metadata.json> --elapsed N [--verdict V] [--failure CLASS] [--stale true|false|auto]
+  ai-review-scoreboard report [ledger.jsonl]
+EOF
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  append)
+    provider="${1:-}"; meta="${2:-}"; shift 2 || true; elapsed=""; verdict=""; failure=""; stale=auto
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --elapsed) elapsed="${2:-}"; shift 2 ;;
+        --verdict) verdict="${2:-}"; shift 2 ;;
+        --failure) failure="${2:-}"; shift 2 ;;
+        --stale) stale="${2:-}"; shift 2 ;;
+        *) die "unknown option '$1'." ;;
+      esac
+    done
+    append_row "$provider" "$meta" "$elapsed" "$verdict" "$failure" "$stale" ;;
+  report)
+    file="${1:-$LEDGER}"; [ -f "$file" ] || die "ledger not found: $file"
+    jq -s '{reviews:length,usable_verdicts:(map(select(.verdict!=null))|length),
+      failures:(map(select(.failure_class!=null))|length),stale:(map(select(.stale==true))|length),
+      over_15_minutes:(map(select(.elapsed_seconds>=900))|length),
+      by_provider:(group_by(.provider)|map({provider:.[0].provider,reviews:length}))}' "$file" ;;
+  --version) printf 'ai-review-scoreboard %s\n' "$VERSION" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

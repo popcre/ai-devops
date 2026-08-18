@@ -401,8 +401,9 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  This is NOT a permissions problem. A denied tool does not cancel a run —"
       note "  Grok says so and continues with its other tools. Do NOT broaden permissions."
       note ""
-      note "  Continue the SAME session with a higher ceiling:"
-      note "    ai-grok-review ask $name --max-turns $((turns * 2)) --prompt 'Continue and give the final verdict now.'"
+      note "  Do not raise the turn ceiling automatically. Check whether the brief was"
+      note "  vague, the change was too large, or the reviewer wandered. Narrow the"
+      note "  review and start a fresh, exact-scope session only after correcting that cause."
       return 1 ;;
     *)
       note "ai-grok-review: unrecognised stopReason '$sr' — refusing to guess. Inspect: $f"

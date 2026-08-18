@@ -103,6 +103,17 @@ status only and preserve work type and route. Preview and merge remain globally 
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
 
+Every successor issue must write this block from scratch after classifying its
+own requested work. It must not copy the predecessor's `work_type`, `route`, or
+`objects`. A structural predecessor does not make an offline-analysis,
+application-data, source-data, documentation, or repository-maintenance
+successor structural. Record the predecessor under ordinary issue context only;
+it is never routing evidence.
+
+When a successor is misrouted, stop before dispatch, preserve private artifacts
+in their approved private repository, and hand off to the route named in its own
+scope block. Never paste a private artifact into a public shared-db issue.
+
 ## Preview and merge locks
 
 Author permission never grants preview or merge permission. Acquire one exclusive
