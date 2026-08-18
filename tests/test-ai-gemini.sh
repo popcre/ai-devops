@@ -47,6 +47,7 @@ check 'wrapper exposes its help' "$SCRIPT --help | grep -q 'ai-gemini new'"
 check 'wrapper reports its version' "$SCRIPT --version | grep -q 'ai-gemini 0.1.0'"
 check 'model verification uses the same containment and mode as the review' "grep -q -- '--conversation \"\$c\" --sandbox --mode plan' '$SCRIPT'"
 check 'Git Bash does not rewrite the /model command as a Windows path' "grep -q 'MSYS_NO_PATHCONV=1' '$SCRIPT'"
+check 'tracked review history warns instead of blocking the review' "grep -q 'not writing a review file' '$SCRIPT' && ! grep -q \"die '.ai/reviews is not ignored'\" '$SCRIPT'"
 check 'doctor verifies sandbox and configured model without a live turn' "AI_GEMINI_BIN='$TMP/bin/agy' $SCRIPT doctor | grep -q 'disposable-copy=yes'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
