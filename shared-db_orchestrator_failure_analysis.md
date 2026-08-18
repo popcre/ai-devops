@@ -37,6 +37,122 @@ This report is based on:
 
 The issue state described below is the state at the end of the 2026-08-16/17 orchestrator session unless a later state is explicitly identified.
 
+## What this chat itself showed before later sessions finally closed some work
+
+The later completion of #853 and #764 does not erase the operating failure in this chat. The question is not whether the work was eventually possible. The question is whether one orchestrator session could accept an application-blocking request and finish it in a reasonable, predictable time.
+
+It could not.
+
+The orchestrator marker for this chat was opened as #1053 at 04:37 UTC on 2026-08-16 and was not closed until 21:36 UTC. That is roughly 17 hours for this session alone, after predecessor sessions had already worked on and handed forward the same issues.
+
+Albert's instruction was explicit:
+
+1. complete #853;
+2. assign every open issue to the three migration-author queues;
+3. complete every issue all the way through production;
+4. continue until the repository had zero open issues.
+
+The session did not achieve that outcome. It closed with a comprehensive handoff precisely because the most important inherited work was still unfinished.
+
+| Requested outcome | State when this chat ended | What consumed the session instead | Later result |
+|---|---|---|---|
+| #1049 Warner inferred views through production | Eventually completed in this chat, but only after Albert repeatedly asked why production was still pending | Multiple exact-head reviews, preview ancestry recovery, owner-evidence tooling that was hard-coded for a different migration batch, access-risk approval, and a correction after the issue had been treated as complete at merge rather than production | Production run `31969314143` finally applied and verified it |
+| #853 OrderList and ColdLion work through production | Not complete; #1074 atomic-runner tooling and #1071 safe-forward migration were still open, and no safe-forward production write had occurred | Claim splitting, claim restoration, object expansion, multiple reviewer failures, preview lock recovery, a performance index, transaction experiments, retirement of the first migration, and creation of a general atomic migration runner | Completed only in the successor session on 2026-08-17 |
+| #764 DesignFlow sequence repair through production | Not complete; tooling PR #1072 and migration PR #1047 were still open, with no preview or production apply from this session | A reserved migration number became too old, requiring new claim-reversion tooling; that tooling then needed filename discovery, real Git tests, rollback repair, fresh review, and another refresh from `main` | Completed only in the successor session on 2026-08-17 |
+| Zero open issues | Not remotely achieved | The session classified a large queue into blocked, owner-decision, data-only, documentation, application, and production categories; it opened five new handover issues #1079–#1083 to carry unfinished work forward | Many legitimate issues remained open |
+| Reliable independent review | Not achieved | Kimi and Grok calls from delegated tasks could not access their Windows credential/session locations; Qwen exhausted quota; GLM had worktree-boundary failures; more reviewer-recovery tooling became another dependency | Continued as separate ai-devops repair work |
+
+### #1049 showed that “merged” had replaced “delivered”
+
+Albert asked several times why production deployment for #1049 was still pending. The implementation agent had completed the migration, tests, exact-head review, preview proof, and merge. The issue nevertheless was not a finished application outcome because production had not run.
+
+The chat then exposed three additional gates:
+
+- the production owner-evidence tool was hard-coded for an earlier Disney two-migration deployment and refused #1049;
+- preview already contained a #853 migration that was absent from the #1049 branch, so an ordinary preview run refused the history mismatch;
+- the six views changed signed-in access, requiring an exact owner risk decision.
+
+Each stop was individually defensible. The system failure was that these were discovered after implementation and review, not during one early end-to-end preflight. #1049 finally reached production only after another tooling PR, another exact-main evidence cycle, a historical preview recovery, and Albert's risk approval.
+
+The predecessor handoff explicitly records that #1049 had first been closed after merge even though its delivery contract required production. It had to be reopened, promoted, verified, and closed again. This is direct evidence that the orchestrator's completion state was tied to repository activity rather than the requested live outcome.
+
+### #853 was the named first priority and still crossed into another session
+
+#853 had already been open since 2026-08-12 and was handed into this chat as priority work. During this chat it made real technical progress:
+
+- 19,315 ColdLion identities were reconciled against 17,703 legacy IDs;
+- ambiguous identities were correctly left unresolved rather than guessed;
+- existing ERP links were preserved;
+- bridge and index migrations were merged and rehearsed on preview;
+- the scale refresh fell from a timeout to 4.720 seconds after indexing.
+
+But it did not reach the requested production finish. The work repeatedly changed shape:
+
+1. A preview refresh timed out, so a new index was required.
+2. Adding the index to the same pull request violated the one-version-per-PR lease rule.
+3. Restoring the original claim and splitting the index required new same-owner claim-split tooling.
+4. The index parser discovered an additional table object, requiring new active-claim expansion tooling.
+5. Preview lock cleanup failed twice because GitHub's deleted reference remained briefly visible, requiring new delayed-readback tooling.
+6. The original migration's table lock failed outside a transaction.
+7. Adding an explicit transaction made the SQL legal but proved that database changes could commit without the migration history row.
+8. Removing the explicit commit still failed because the Supabase command did not wrap the migration in a transaction.
+9. A general atomic runner became mandatory, producing PR #1074 before the actual safe-forward PR #1071 could proceed.
+10. Reviewer transport failures then blocked both tooling and migration progress.
+
+At handoff, the chat's own briefing said: “#853/#868 OrderList workstream is unfinished but stable.” It also said no safe-forward preview or production write had occurred. The first requested outcome therefore survived a roughly 17-hour orchestrator session and moved into yet another session.
+
+This is the best example of the dependency-chain complaint. None of the dependencies was imaginary, but the orchestration model had no ceiling on how many new platform repairs could enter the critical path before the original application change was delivered.
+
+### #764 had already waited for days and still left this chat unfinished
+
+#764 was opened on 2026-08-11. By the end of this chat on 2026-08-16, it still had not reached preview or production.
+
+The sequence repair itself was small and its live risk was already known. The migration's reserved version became older than newer merged migrations, so the repository guard correctly rejected it. Instead of having a stable supported version-replacement path, the session had to build one:
+
+- active-claim reversion tooling;
+- filename-only migration discovery;
+- rollback after partial rename failure;
+- real temporary-Git tests;
+- another exact-head external review;
+- another update after `main` advanced.
+
+The handoff described #764 as “unfinished but stable,” with PR #1072 and PR #1047 both still open. The next session had to merge the tooling, replace the version, refresh and review the migration again, preview it, merge it, and promote it. #764 did not reach production until 2026-08-17, nearly a week after it opened.
+
+### Reviewer failures became stopping points even though the main task had Full Access
+
+Albert correctly pointed out that the main Codex task had Full Access for the entire chat. The failures occurred because reviewer work was delegated into restricted child tasks.
+
+The chat recorded:
+
+- Kimi could not create `C:\Users\ahazan2\.kimi-code\sessions\...` and waited to its 900-second limit without a verdict;
+- Grok could not read `C:\Users\ahazan2\.grok\auth.json`, then also waited to the wrapper limit;
+- moving `AI_KIMI_STATE_DIR` or `AI_GROK_STATE_DIR` moved wrapper state but not the provider's own credentials and sessions;
+- GLM rejected linked worktrees whose real Git metadata lived outside its allowed folder;
+- Qwen exhausted its weekly quota;
+- several reviews became stale when `main` advanced before the long reviewer finished.
+
+These were not code-review findings. They were execution failures. The orchestrator nevertheless allowed them to pause the application work instead of immediately rerouting the same exact-head review through the Full Access main task or a proven alternate reviewer.
+
+The chat then opened more tooling work for reviewer replacement and provider failure records. That was another example of governance repair becoming a prerequisite to the database change.
+
+### “Everything is classified” was reported where “everything is finished” was requested
+
+The final audit was accurate: all returned open issues were classified, no issue was malformed or unclassified, and the queue had no immediately dispatchable unclaimed migration work.
+
+That was still not the requested result.
+
+Classification converted the impossible “finish every issue” instruction into an honest map of owner decisions, application work, source-data work, blocked programs, documentation, and production promotion. It prevented false closures, which was good. But the operating report repeatedly emphasized occupied lanes, clean locks, classified queues, green tests, and reviewer evidence while Albert's five applications still lacked their database outcomes.
+
+The session ended by opening five more handover issues:
+
+- #1079 for overall continuation;
+- #1080 for #853;
+- #1081 for #764;
+- #1082 for reviewer transport recovery;
+- #1083 for documentation cleanup.
+
+Opening precise handover issues was the correct closeout action. It is also direct evidence that the orchestrator had generated more tracked work while failing to finish the two main inherited application blockers.
+
 ## The clearest examples
 
 ### 1. Issue #853 crossed multiple sessions and consumed most of another day before completion
