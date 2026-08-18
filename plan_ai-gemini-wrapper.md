@@ -12,7 +12,7 @@ Read this table first. Do not re-derive or re-plan completed work. Whoever execu
 
 | # | Step | Status | Evidence required before marking done |
 |---|---|---|---|
-| 1 | Freeze and measure the Antigravity CLI contract | ⬜ open | Versioned contract report under `docs/verification/ai-gemini/` plus passing contract fixtures in `tests/test-ai-gemini.sh` |
+| 1 | Freeze and measure the Antigravity CLI contract | ⛔ blocked | `docs/verification/ai-gemini/antigravity-contract-2026-08-18-windows.md` and `tests/test-ai-gemini.sh` prove the current contract; no supported isolated permissions-profile/config-home selector exists. |
 | 2 | Prove a real read-only boundary on Windows and Ubuntu | ⬜ open | Hostile-write canary reports under `docs/verification/ai-gemini/`; every forbidden target remains byte-identical |
 | 3 | Build named, resumable `ai-gemini` review sessions | ⬜ open | `bin/ai-gemini`; offline wrapper suite passes |
 | 4 | Integrate evidence packets, exact-head checks, preflight, quarantine, and scoreboard | ⬜ open | Updated wrapper/helper fixtures and passing helper suites |
@@ -23,7 +23,7 @@ Read this table first. Do not re-derive or re-plan completed work. Whoever execu
 | 9 | Run paid live qualification on Windows and Ubuntu | ⬜ open | Redacted live reports proving model, resume, read-only, quota, completion, and linked-worktree behavior |
 | 10 | Independent review, landing, installation, and issue close | ⬜ open | Exact-head review report, commit SHA on `origin/main`, installed proof, and closed issue #38 |
 
-**Fresh-session starting point:** Step 1.
+**Fresh-session starting point:** blocked after Step 1. Do not begin Step 2 until Google documents a per-process, OAuth-reusing, isolated read-only permissions profile.
 
 **Natural context cuts:** after Steps 2, 5, and 9. At each cut, use the `fresh-session` skill, update this STATUS table, and re-read every downstream step before continuing.
 
@@ -117,6 +117,13 @@ The durable spike record is [`docs/ai-gemini-wrapper-investigation.md`](docs/ai-
 
 - No `bin/ai-gemini`, Gemini test suite, shared skill, installer catalog row, preflight provider, scoreboard normalization, configuration entry, or permanent wrapper documentation exists.
 - No supported isolated Antigravity configuration-home mechanism has yet been proven.
+- Step 1 is blocked as of 2026-08-18. The installed Windows CLI 1.1.14 and current
+  official documentation expose permissions through the shared settings file or
+  persistent interactive project settings, but expose no command-line selector for
+  an isolated reviewer policy. Evidence and offline contract fixtures are in
+  [`docs/verification/ai-gemini/antigravity-contract-2026-08-18-windows.md`](docs/verification/ai-gemini/antigravity-contract-2026-08-18-windows.md)
+  and [`tests/test-ai-gemini.sh`](tests/test-ai-gemini.sh). Per the locked safety
+  decision, no wrapper may inherit Albert's ordinary workspace-write permissions.
 - No hostile read/write canary has passed on either Windows or Ubuntu.
 - No live repository review has been qualified.
 

@@ -1,0 +1,1 @@
+{"conversation_id":"conversation-123","status":"SUCCESS","response":"## Verdict\n\nAPPROVE\n","duration_seconds":12,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":20,"thinking_tokens":30,"cache_read_tokens":4,"total_tokens":150}}
