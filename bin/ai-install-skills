@@ -72,6 +72,7 @@ fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 DRY_RUN=false
+SHOW_LOG=false
 KEEP_ORPHANS=false
 ADOPT_GLOBALS=false
 
@@ -80,6 +81,10 @@ usage() {
 Usage: ai-install-skills [--dry-run] [--keep-orphans] [--adopt-globals]
 
   --dry-run        Show every planned action without changing files.
+  --log            Print this machine's install run log and exit. The log
+                   records every run, what it installed from (revision,
+                   branch, whether the tree was dirty), and every locally
+                   edited file it overwrote.
   --keep-orphans   Leave retired/unknown skills active instead of moving them
                    into <client>/skills-quarantine/ (default is to quarantine).
   --adopt-globals  Replace an installed global that differs from the repo copy.
@@ -91,6 +96,7 @@ EOF
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
+    --log) SHOW_LOG=true ;;
     --keep-orphans) KEEP_ORPHANS=true ;;
     --adopt-globals) ADOPT_GLOBALS=true ;;
     # Deprecated: pruning is now the default and needs no flag. Accepted so
@@ -105,6 +111,67 @@ done
 run() { if $DRY_RUN; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; else "$@"; fi }
 
 MARKER=".ai-devops-managed"
+
+# --- run log ----------------------------------------------------------------
+# Append-only record of what every install actually did, because the installed
+# skill tree is a BUILD OUTPUT: this script rewrites it from the repo working
+# tree, so a hand-edit made under ~/.claude/skills is silently replaced on the
+# next sync. Without a log the only trace was <client>/skills-backup/, which
+# each run overwrites — so the second sync erases the evidence of the first.
+#
+# The source revision is logged too. Installing from a working tree that sits on
+# another branch, mid-rebase, or dirty is the one way this script can serve
+# content nobody expects, and it is invisible afterwards unless recorded here.
+#
+# Read it with:  ai-install-skills --log
+LOG_FILE="${AI_INSTALL_LOG:-$BASE_HOME/.cache/ai-devops/install-log.tsv}"
+LOG_MAX_LINES="${AI_INSTALL_LOG_MAX_LINES:-4000}"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+
+# Dry runs never write: a preview must not look like an install in the record.
+log_event() {
+  local event="$1" detail="${2:-}"
+  $DRY_RUN && return 0
+  mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RUN_ID" "$event" "$detail" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+# Trim oldest-first so the log cannot grow without bound.
+trim_log() {
+  $DRY_RUN && return 0
+  [[ -f "$LOG_FILE" ]] || return 0
+  local n; n="$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)"
+  ((n > LOG_MAX_LINES)) || return 0
+  tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "$LOG_FILE.trim" 2>/dev/null &&
+    mv "$LOG_FILE.trim" "$LOG_FILE" 2>/dev/null || true
+}
+
+# What the skills are being installed FROM, in one field.
+source_revision() {
+  local sha branch dirty=clean
+  sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+  [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]] && dirty=DIRTY
+  { [[ -d "$REPO_ROOT/.git/rebase-merge" ]] || [[ -d "$REPO_ROOT/.git/rebase-apply" ]]; } && dirty="$dirty,MID-REBASE"
+  printf 'rev=%s branch=%s tree=%s repo=%s' "$sha" "$branch" "$dirty" "$REPO_ROOT"
+}
+
+show_log() {
+  if [[ -s "$LOG_FILE" ]]; then
+    echo "Install run log: $LOG_FILE"
+    echo
+    column -t -s "$(printf '\t')" < "$LOG_FILE" 2>/dev/null || cat "$LOG_FILE"
+  else
+    echo "No install run log yet at $LOG_FILE"
+  fi
+}
+
+if $SHOW_LOG; then show_log; exit 0; fi
+
+# Recorded BEFORE anything is written, so a run that dies half way still leaves
+# a start line naming the source it was installing from.
+log_event run-start "$(source_revision) claude=$CLAUDE_HOME codex=$CODEX_HOME"
 
 # --- reconciliation primitives ---------------------------------------------
 # Every write below goes through do_write, so --dry-run is a property of the
@@ -247,11 +314,13 @@ reconcile_skill() {
       ;;
     local-edits)
       echo "  ! $name ($label) LOCAL EDITS — backing up, then updating: ${CHANGED[*]}" >&2
+      log_event overwrote-local-edits "$label/$name files=${CHANGED[*]} backup=$client_home/skills-backup/$name"
       backup_skill "$dst" "$client_home" "$name"
       sync_skill_files "$src" "$dst"
       ;;
     unmanaged)
       echo "  ! $name ($label) exists but ai-devops never installed it — backing up, then adopting" >&2
+      log_event adopted-unmanaged "$label/$name backup=$client_home/skills-backup/$name"
       backup_skill "$dst" "$client_home" "$name"
       do_write rm -rf "$dst"
       CHANGED=("${!SRC_HASHES[@]}")
@@ -384,6 +453,7 @@ install_global() {
     echo "$label already up to date."
   elif $ADOPT_GLOBALS; then
     echo "$dst differs — --adopt-globals given, replacing it."
+    log_event replaced-global "$label dst=$dst backup=$backup_dir/$(basename "$dst")"
     echo "    backup: $dst -> $backup_dir/$(basename "$dst")"
     do_write mkdir -p "$backup_dir"
     do_write cp "$dst" "$backup_dir/$(basename "$dst")"
@@ -466,3 +536,6 @@ else
     exit 1
   fi
 fi
+
+log_event run-end "completed"
+trim_log

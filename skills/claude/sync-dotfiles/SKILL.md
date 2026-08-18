@@ -37,6 +37,44 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
 
+## The installed copy is a build output — never edit it
+
+`~/.claude/skills/<name>/` and `~/.codex/prompts/` are **generated**.
+`bin/ai-install-skills` rewrites them from the ai-devops working tree on every
+sync and stamps each skill with a `.ai-devops-managed` fingerprint file. Any file
+whose fingerprint no longer matches is classified as a local edit: it is copied to
+`<client>/skills-backup/<name>/` and then overwritten.
+
+So **a change made only under `~/.claude/skills` is temporary.** It survives until
+the next time anyone on this machine syncs, then it is gone — and because each run
+replaces the previous backup, a second sync erases the evidence of the first.
+
+To change a skill: edit `<repo>/skills/...`, commit, push. Then sync.
+
+Two traps worth knowing:
+
+- **Line endings alone trigger the overwrite.** Git stores these files with Unix
+  line endings and checks them out on Windows with Windows line endings, so a file
+  installed straight from `git show` never matches the fingerprint of the same file
+  installed from the working tree. Identical text, flagged as edited.
+- **The install serves whatever the working tree holds at that moment.** If a
+  concurrent session has the ai-devops clone on another branch, mid-rebase, or
+  dirty, the sync installs that instead. The run log records the revision, branch
+  and dirty state of every run for exactly this reason.
+
+Who changed my skills, and when:
+
+```bash
+ai-install-skills --log
+```
+
+It prints this machine's append-only install log
+(`~/.cache/ai-devops/install-log.tsv`): one `run-start` line per run with the
+source revision, one `overwrote-local-edits` line naming every locally edited file
+that was replaced and where the backup went, and a `run-end` line. Dry runs write
+nothing. Added 2026-08-18, after an edit to `session-docs-update` was silently
+replaced twice in one afternoon and there was no record to explain it.
+
 ## Locate the repo
 Check, in order: `$HOME/repos/ai-devops`, `/worksp/ai-devops`,
 `C:\repos\ai-devops`, `D:\repos\ai-devops`. On Windows run the bash `bin/` tools
