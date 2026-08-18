@@ -1,0 +1,57 @@
+{
+  "checked_at_utc": "2026-08-18",
+  "endpoint": "https://api.meta.ai/v1",
+  "authentication_env": "MODEL_API_KEY",
+  "required_model": "muse-spark-1.2-contributor",
+  "model_listing": {
+    "status": 200,
+    "matched_models": [
+      "muse-spark-1.2-contributor",
+      "muse-spark-1.2",
+      "muse-spark-1.1"
+    ]
+  },
+  "chat_completion": {
+    "status": 200,
+    "response_fields": ["id", "choices", "created", "model", "object", "usage"],
+    "choice_fields": ["content", "refusal", "role"],
+    "finish_reason_observed": "length",
+    "usage_fields": [
+      "completion_tokens",
+      "prompt_tokens",
+      "total_tokens",
+      "completion_tokens_details",
+      "prompt_tokens_details"
+    ]
+  },
+  "streaming": {
+    "status": 200,
+    "data_events_observed": 2,
+    "exact_model_observed": true
+  },
+  "tool_calling": {
+    "status": 200,
+    "finish_reason": "tool_calls",
+    "function_name": "add",
+    "message_fields": ["content", "refusal", "tool_calls", "role"]
+  },
+  "multi_turn": {
+    "status": 200,
+    "reasoning_effort": "low",
+    "finish_reason": "stop",
+    "continuity_observed": true
+  },
+  "errors": {
+    "invalid_key": {
+      "status": 401,
+      "fields": ["code", "message", "param", "type"]
+    },
+    "invalid_model": {
+      "status": 404,
+      "fields": ["code", "message", "param", "type"]
+    }
+  },
+  "cache_usage_fields": "not returned by the tested completion responses",
+  "rate_limit": "not deliberately induced because it would waste allowance",
+  "provider_cancellation": "not deliberately induced; the wrapper must treat an interrupted stream as incomplete"
+}
