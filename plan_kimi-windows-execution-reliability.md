@@ -15,7 +15,7 @@ Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execut
 | 4b. Separate analysis prompts from diff-review packets | ✅ complete | 2026-08-18 | Architecture fixture receives the decision contract and no diff preamble; diff evidence behavior remains covered. |
 | 4c. Bound Kimi packet work and record real stage timing | ✅ complete | 2026-08-18 | Kimi packets split at 40 KB into ordered readable parts, passing output is bounded, broad suites warn before launch, caller is mandatory, and job metadata separates snapshot, test, packet, provider, and unavailable model-step evidence. |
 | 5. Enforce main-session routing for credentialed runs | ✅ complete | 2026-08-18 | Shared Kimi skill and structured preflight failure route credentialed execution to the Full Access main task without ACL changes. |
-| 6. Qualify the complete Windows path live | ⬜ open | 2026-08-18 | Preflight and authentication pass on Kimi 0.36.1, but the bounded provider turn returned the real account usage-limit response before model execution. Re-run the eight canaries after quota refresh. |
+| 6. Qualify the complete Windows path live | ✅ complete | 2026-08-18 | Kimi 0.36.1 passed `doctor --live`; the strengthened authenticated suite passed 174 checks with all eight canaries recorded in `tests/verification/kimi-windows-2026-08-18/README.md`. |
 | 7. Update model comparison and operating docs | ✅ complete | 2026-08-18 | Architecture, configuration, model setup, shared skill, and model comparison distinguish quality from transport and document the durable private-workspace path. |
 | 8. Review, land, install, and verify | ⬜ open | 2026-08-17 | Definition of done is §13. |
 
