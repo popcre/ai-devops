@@ -215,3 +215,82 @@ conceded the heavier design):
   non-derivable assignment state, a **dispatch comment on the `db-work` issue**.
   *(Corrected 2026-08-09: this said `IN PROGRESS` annotations, which lived in
   `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
+
+## The owner-decision block became a rubber stamp (2026-08-18)
+
+Sample Tracking Release A reached the production business-risk gate with every
+machine-verifiable check green. The gate stopped and demanded an "owner decision":
+a JSON block, in an exact schema, posted as an unedited GitHub comment
+authenticated to Albert, listing the risk keys to be accepted.
+
+Albert's objection, and it is correct:
+
+> "I didn't decide anything, i just followed what you told me to do. i'm not
+> posting anything on an issue and making believe that protects us."
+
+He is not a programmer. He cannot evaluate the SQL a risk flag refers to. The
+block was composed by the agent and handed to him to paste. What that produces is
+not human oversight — it is a signature on something unread, plus an audit trail
+asserting that oversight happened. **Manufactured assurance is worse than no gate,
+because it is believed.**
+
+It was also guarding the wrong thing. The classifier grepped raw SQL for bare
+keywords, and on this batch reported *"existing production data may be lost or
+permanently altered"* for a migration that only CREATES tables on a target holding
+none of them. What it had actually matched:
+
+- `ON UPDATE CASCADE` / `ON DELETE RESTRICT` — referential actions in a foreign
+  key, not statements that touch data
+- `DROP TRIGGER IF EXISTS x` immediately before recreating `x` — how every
+  idempotent migration in this repo is written
+- `BEFORE UPDATE ON` — a trigger timing clause
+- `UPDATE` inside a function body — runtime behaviour, not the apply-time effect
+
+So the ritual was collecting rubber stamps for false alarms. A gate that cries
+wolf is not a cautious gate: it teaches everyone to wave the warning through, and
+it spends the reader's attention so none is left when a real warning arrives.
+
+**Rule:** never gate on a human judgement the human cannot actually make. If a
+check cannot be evaluated by whoever is being asked, it is theatre — either make
+the machine decide it, or make the machine refuse and escalate to an engineer.
+Do not route it through a rubber stamp.
+
+**What changed:** the owner-decision block no longer blocks (it is still verified
+when supplied, and derived risks are recorded as `disclosedRisks`); the classifier
+was narrowed to stop firing on the four false-positive shapes above.
+
+**What still protects the lane, none of it removed:** exact-main pinning,
+immutable independent review evidence, the byte-bound preview rehearsal proof,
+bounded allowlists that refuse unrelated drift, exact production project proof
+immediately before every write, single-writer locks, post-apply verification.
+
+**What is genuinely given up:** there is no longer a human stop between a green
+evidence chain and a production write. That is an accepted owner decision, not an
+oversight, and it is written here so nobody later mistakes it for one.
+
+## Two gate defects found the same day, both by independent review (2026-08-18)
+
+Worth reading together, because they show what review is actually for.
+
+**Commit identity is not content identity.** The gate proved a preview rehearsal
+by comparing the run's commit SHA to the PR head. A generated-types commit landing
+after the rehearsal — which this repo *requires*, since types are generated FROM
+the repaired preview — permanently stranded the promotion, because an applied
+version can never be re-rehearsed. Meanwhile, for non-atomic migrations, it
+compared only the migration FILENAME, so a file edited on main after the rehearsal
+passed. Fixed in #1157 by binding to migration BYTES plus provenance.
+
+**Enumerating an execution closure by hand does not work.** The first fix accepted
+a rehearsal from any commit of the PR. Independent review showed that admits a
+complete forgery: `workflow_dispatch` runs the workflow as it exists at the
+dispatched ref, so a commit carrying a doctored workflow can fabricate the whole
+evidence bundle, and a follow-up commit restoring it leaves the reviewed diff
+clean. Pinning the producing files was then found incomplete twice more — the lane
+script that runs first, then a pinned script's unpinned import. **One unpinned
+executed file breaks custody for every pinned one**, because executed code can
+rewrite the workspace while the gate compares committed blobs. The list is now
+WALKED, not written, and the walk asserts it reached the previously-missed hops.
+
+**Rule:** a reviewer must not review its own design. The rotation assigned the
+same model that had recommended the approach; a different reviewer was used
+instead, and it found three Criticals in that design. Both roles were recorded.
