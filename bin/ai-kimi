@@ -73,7 +73,7 @@
 
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 
 STATE_DIR="${AI_KIMI_STATE_DIR:-$HOME/.local/state/ai-devops/kimi}"
 CALLER="${AI_KIMI_CALLER:-claude}"
@@ -81,6 +81,13 @@ KIMI_MODEL="${AI_KIMI_MODEL:-kimi-code/k3}"
 
 WAIT_TIMEOUT="${AI_KIMI_WAIT_TIMEOUT:-900}"
 POLL_INTERVAL="${AI_KIMI_POLL_INTERVAL:-5}"
+STARTUP_TIMEOUT="${AI_KIMI_STARTUP_TIMEOUT:-60}"
+HEARTBEAT_INTERVAL="${AI_KIMI_HEARTBEAT_INTERVAL:-30}"
+
+# Kimi's own home contains both OAuth data and sessions.  This is deliberately
+# separate from wrapper state: moving AI_KIMI_STATE_DIR must never make a
+# restricted process credential-capable.
+KIMI_HOME="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 
 # Resolve through the /usr/local/bin symlink, or SELF_DIR is /usr/local/bin and
 # the read-only profile is looked for at /usr/local/config/kimi/… — which does
@@ -96,6 +103,60 @@ warn() { printf 'ai-kimi: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
+job_dir()      { printf '%s/jobs/%s/%s--%s' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+job_meta()     { printf '%s/job.json' "$(job_dir "$1" "$2")"; }
+job_output()   { printf '%s/stream.jsonl' "$(job_dir "$1" "$2")"; }
+job_log()      { printf '%s/worker.log' "$(job_dir "$1" "$2")"; }
+job_is_terminal() { jq -e '.phase | IN("completed","failed","timed-out","cancelled","recovery-required")' "$1" >/dev/null 2>&1; }
+
+safe_home_hash() { printf '%s' "$KIMI_HOME" | sha256sum | awk '{print $1}'; }
+
+profile_is_readonly() {
+  [ -f "$RO_AGENT" ] &&
+    grep -qx 'tools: Read, Grep, Glob, ReadMediaFile' "$RO_AGENT" &&
+    ! grep -Eq '(^|[,[:space:]])(Write|Edit|Bash|FetchURL|WebSearch)([,[:space:]]|$)' "$RO_AGENT"
+}
+
+# Sets PREFLIGHT_CLASS and returns non-zero without launching the provider.
+# Callers can turn execution-context-denied into a hand-back to the main task.
+PREFLIGHT_CLASS=""
+preflight_execution_context() { # MODE REPO
+  local mode="$1" repo="$2" canary parent provider
+  PREFLIGHT_CLASS=""
+  mkdir -p "$STATE_DIR" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  canary="$STATE_DIR/.write-canary.$$"
+  ( umask 077; : > "$canary" && test -r "$canary" && rm -f "$canary" ) 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  [ -x "$(resolve_kimi)" ] || { PREFLIGHT_CLASS="provider-unavailable"; return 1; }
+  [ -r "$repo/.git" ] || git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  if [ "$mode" = review ] && ! profile_is_readonly; then PREFLIGHT_CLASS="profile-invalid"; return 1; fi
+  parent="$(dirname "$KIMI_HOME")"
+  [ -d "$KIMI_HOME" ] || [ -w "$parent" ] || { PREFLIGHT_CLASS="kimi-home-unwritable"; return 1; }
+  mkdir -p "$KIMI_HOME/sessions" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  canary="$KIMI_HOME/sessions/.ai-kimi-canary.$$"
+  ( umask 077; : > "$canary" && test -r "$canary" && rm -f "$canary" ) 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  provider="$(KIMI_CODE_HOME="$KIMI_HOME" "$(resolve_kimi)" provider list 2>/dev/null || true)"
+  if [ -z "$provider" ] || printf '%s' "$provider" | grep -qi 'no providers configured'; then
+    PREFLIGHT_CLASS="credentials-unavailable"; return 1
+  fi
+  return 0
+}
+
+preflight_or_die() { # MODE REPO
+  preflight_execution_context "$1" "$2" && return 0
+  printf 'ai-kimi: %s. No Kimi provider was started.\n' "$PREFLIGHT_CLASS" >&2
+  case "$PREFLIGHT_CLASS" in
+    execution-context-denied|kimi-home-unwritable)
+      printf 'Run this credentialed Kimi job from the Full Access main task. Do not change Kimi-home permissions or copy credentials.\n' >&2 ;;
+    credentials-unavailable) printf 'Kimi credentials are unavailable to this process. Run the job from the authenticated Full Access main task.\n' >&2 ;;
+    profile-invalid) printf 'The structural read-only review profile is invalid. No Kimi provider was started.\n' >&2 ;;
+  esac
+  if [ "${OPT_JSON:-0}" = 1 ]; then
+    jq -n --arg failure "$PREFLIGHT_CLASS" --arg action "run this credentialed Kimi job from the Full Access main task" \
+      '{ok:false,failure_class:$failure,hand_back_to_main_task:true,action:$action}'
+  fi
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Binary resolution. Kimi installs to ~/.kimi-code/bin, which is NOT added to
 # PATH by its installer — on hetz it is absent from both users' PATH. A bare
@@ -108,6 +169,8 @@ resolve_kimi() {
   fi
   local c
   for c in "$(command -v kimi 2>/dev/null || true)" \
+           "$KIMI_HOME/bin/kimi" \
+           "$KIMI_HOME/bin/kimi.exe" \
            "$HOME/.kimi-code/bin/kimi" \
            "$HOME/.kimi-code/bin/kimi.exe" \
            /home/ai/.kimi-code/bin/kimi \
@@ -487,7 +550,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     su - "$as" -c "cd $(printf '%q' "$repo") && \"\$HOME/.kimi-code/bin/kimi\"$q" \
       < /dev/null > "$out" 2>"$out.err" &
   else
-    ( cd "$repo" && exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
+    ( cd "$repo" && KIMI_CODE_HOME="$KIMI_HOME" exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
   fi
   RUN_TURN_PID=$!
   wait "$RUN_TURN_PID"
@@ -591,12 +654,139 @@ write_review_file() {
 }
 
 # ---------------------------------------------------------------------------
+# Durable review jobs.  The worker, not the foreground command, owns the Kimi
+# child and the final state.  Metadata is an allowlist: never add prompts,
+# raw environment values, or credential-file names here.
+# ---------------------------------------------------------------------------
+write_job_state() { # META JSON-PATCH
+  local meta="$1" next
+  shift
+  next="$(jq "$@" "$meta")" || return 1
+  write_meta "$meta" "$next"
+}
+
+create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
+  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid
+  dir="$(job_dir "$rid" "$name")"; meta="$dir/job.json"
+  mkdir -p "$dir" || die "could not create durable Kimi job state."
+  chmod 0700 "$dir" 2>/dev/null || true
+  now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"
+  write_meta "$meta" "$(jq -n --arg id "$jobid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
+    --arg head "$(git -C "$repo" rev-parse HEAD)" --arg caller "$CALLER" --arg name "$name" --arg mode "$mode" \
+    --arg sid "$sid" --arg model "$KIMI_MODEL" --arg home_hash "$(safe_home_hash)" --arg created "$now" \
+    --arg out "$dir/stream.jsonl" --arg log "$dir/worker.log" \
+    '{version:1,job_id:$id,repo:$repo,repo_remote:$remote,head:$head,caller:$caller,name:$name,mode:$mode,
+      kimi_session_id:(if $sid=="" then null else $sid end),model:$model,kimi_home_sha256:$home_hash,
+      created:$created,updated:$created,phase:"preflight",worker_pid:null,kimi_child_pid:null,
+      last_output_at:null,last_output_size:0,terminal_reason:null,exit_code:null,
+      artifact_paths:{stream:$out,log:$log}}')"
+}
+
+launch_review_worker() { # JOB-DIR PROMPT-FILE
+  local dir="$1" pf="$2" pid="" bash_bin win_dir win_pf win_self
+  # Start-Process is the Windows primitive that survives a Git-Bash/Codex
+  # caller boundary and does not show a console.  The generated launcher has
+  # only paths, never a prompt or credentials.
+  if command -v powershell.exe >/dev/null 2>&1; then
+    local launcher="$dir/launch-worker.ps1"
+    bash_bin="$(command -v bash)"
+    command -v cygpath >/dev/null 2>&1 && bash_bin="$(cygpath -w "$bash_bin")"
+    win_dir="$dir"; win_pf="$pf"; win_self="$SELF_DIR/ai-kimi"
+    if command -v cygpath >/dev/null 2>&1; then
+      win_dir="$(cygpath -w "$dir")"; win_pf="$(cygpath -w "$pf")"; win_self="$(cygpath -w "$SELF_DIR/ai-kimi")"
+    fi
+    printf '%s\n' '$ErrorActionPreference="Stop"' \
+      "\$p=Start-Process -FilePath '$bash_bin' -ArgumentList @('$win_self','__review-worker','$win_dir','$win_pf') -WindowStyle Hidden -RedirectStandardOutput '$win_dir\\worker.log' -RedirectStandardError '$win_dir\\worker.err' -PassThru" \
+      '[Console]::Write($p.Id)' > "$launcher"
+    pid="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$launcher" 2>/dev/null || true)"
+  else
+    nohup bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$(job_log "$(basename "$(dirname "$dir")")" "$(basename "$dir" | sed "s/^$CALLER--//")")" 2>&1 &
+    pid=$!
+  fi
+  printf '%s' "$pid"
+}
+
+review_worker() { # JOB-DIR PROMPT-FILE
+  local dir="$1" pf="$2" meta out repo name mode sid before rc reason new_sid path
+  meta="$dir/job.json"; [ -f "$meta" ] || exit 2
+  repo="$(jq -r .repo "$meta")"; name="$(jq -r .name "$meta")"; mode="$(jq -r .mode "$meta")"
+  sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
+  write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2
+  before="$(tree_state "$repo")"
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
+  run_turn "$repo" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  if has_resume_hint "$out"; then
+    new_sid="$(session_id_from "$out")"
+    [ -n "$new_sid" ] || { write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="malformed-output"|.updated=$u'; exit 1; }
+    if [ "$mode" = review ] && [ "$before" != "$(tree_state "$repo")" ]; then
+      write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="readonly-tree-changed"|.updated=$u'; exit 1
+    fi
+    write_meta "$(meta_path "$(repo_id "$repo")" "$name")" "$(jq -n --arg sid "$new_sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg created "$(date -u +%FT%TZ)" '{kimi_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:$mode,model:$model,created:$created,updated:$created,turns:1}')"
+    path="$(write_review_file "$repo" "$name" "$out")"
+    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg path "$path" --argjson rc "$rc" '.phase="completed"|.terminal_reason="session.resume_hint"|.kimi_session_id=$sid|.exit_code=$rc|.updated=$u|.review_artifact=$path' || exit 2
+    rm -f "$pf" "$dir/launch-worker.ps1" 2>/dev/null || true
+    exit 0
+  fi
+  reason="failed"
+  grep -Eqi 'EPERM|EACCES|permission denied|mkdir' "$out" "$out.err" 2>/dev/null && reason="execution-context-denied"
+  grep -Eqi 'auth|credential|provider|no providers' "$out" "$out.err" 2>/dev/null && reason="credentials-unavailable"
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="failed"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
+  rm -f "$pf" "$dir/launch-worker.ps1" 2>/dev/null || true
+  exit 1
+}
+
+start_review_job() { # NAME [CONTINUE]
+  local name="$1" cont="${2:-0}" repo rid existing sid pf dir pid
+  valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; dir="$(job_dir "$rid" "$name")"
+  if [ -f "$dir/job.json" ] && ! job_is_terminal "$dir/job.json"; then
+    jq -r '.job_id' "$dir/job.json"; return 0
+  fi
+  sid=""
+  if [ "$cont" = 1 ]; then
+    existing="$(find_meta "$rid" "$name")"; sid="$(jq -r .kimi_session_id "$existing")"
+  elif [ -f "$(meta_path "$rid" "$name")" ]; then
+    die "session '$name' already exists. Use: ai-kimi ask $name"
+  fi
+  preflight_or_die review "$repo" || return 1
+  pf="$(mktemp "$STATE_DIR/.kimi-prompt.XXXXXX")"; chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
+  create_review_job "$name" "$repo" "$rid" review "$sid" "$pf"
+  pid="$(launch_review_worker "$dir" "$pf")"
+  [ -n "$pid" ] || { write_job_state "$dir/job.json" '.phase="failed"|.terminal_reason="worker-start-failed"'; die "could not start durable Kimi worker"; }
+  # The worker can finish before Start-Process returns.  Do not overwrite its
+  # terminal phase in that race; only record the launcher PID.
+  write_job_state "$dir/job.json" --arg p "$pid" --arg u "$(date -u +%FT%TZ)" '.worker_pid=($p|tonumber)|.updated=$u'
+  jq -r '.job_id' "$dir/job.json"
+}
+
+job_for_name() { local rid; rid="$(repo_id "$(repo_root)")"; job_meta "$rid" "$1"; }
+cmd_wait_job() { # NAME
+  local meta out waited=0 phase size
+  meta="$(job_for_name "$1")"; [ -f "$meta" ] || die "no durable job '$1'. Start it first."
+  out="$(jq -r .artifact_paths.stream "$meta")"
+  while ! job_is_terminal "$meta"; do
+    sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))
+    [ "$waited" -lt "$WAIT_TIMEOUT" ] || die "wait limit reached; worker continues. Use: ai-kimi status $1"
+    if [ $((waited % HEARTBEAT_INTERVAL)) -eq 0 ]; then phase="$(jq -r .phase "$meta")"; size="$(wc -c < "$out" 2>/dev/null || echo 0)"; note "job $1: $phase, ${waited}s, output ${size} bytes"; fi
+  done
+  [ "$(jq -r .phase "$meta")" = completed ] || { jq . "$meta" >&2; return 1; }
+  finish_turn "$(jq -r .repo "$meta")" "$1" "$out"
+}
+cmd_status_job() { jq '{job_id,phase,created,updated,terminal_reason,worker_pid,kimi_child_pid,last_output_size}' "$(job_for_name "$1")"; }
+cmd_logs_job() { local f; f="$(jq -r .artifact_paths.log "$(job_for_name "$1")")"; tail -100 "$f" 2>/dev/null || true; }
+cmd_result_job() { local meta; meta="$(job_for_name "$1")"; [ "$(jq -r .phase "$meta")" = completed ] || die "job '$1' has no proven terminal result."; finish_turn "$(jq -r .repo "$meta")" "$1" "$(jq -r .artifact_paths.stream "$meta")"; }
+cmd_cancel_job() { local meta pid; meta="$(job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }; pid="$(jq -r '.worker_pid // empty' "$meta")"; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true; write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="cancelled"|.terminal_reason="cancelled-by-user"|.updated=$u'; }
+cmd_recover_job() { local meta; meta="$(job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }; if has_resume_hint "$(jq -r .artifact_paths.stream "$meta")"; then write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="recovery-required"|.terminal_reason="terminal-stream-needs-worker-finalization"|.updated=$u'; else write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="recovery-required"|.terminal_reason="worker-ended-without-terminal-proof"|.updated=$u'; fi; jq . "$meta"; }
+
+# ---------------------------------------------------------------------------
 usage() {
   cat <<EOF
 ai-kimi $VERSION — Kimi Code delegation in persistent, named sessions.
 
   ai-kimi new <name>       [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi ask <name>       [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-kimi start <name>     [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-kimi wait|status|logs|result|cancel|recover <name>
   ai-kimi implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-kimi list | show <name> | transcript <name> | delete <name>
@@ -615,7 +805,10 @@ Environment:
   AI_KIMI_BIN          explicit path to the kimi binary
   AI_KIMI_MODEL        model pin ($KIMI_MODEL)
   AI_KIMI_WAIT_TIMEOUT seconds to wait for completion ($WAIT_TIMEOUT)
+  AI_KIMI_STARTUP_TIMEOUT startup deadline ($STARTUP_TIMEOUT)
+  AI_KIMI_HEARTBEAT_INTERVAL durable job heartbeat interval ($HEARTBEAT_INTERVAL)
   AI_KIMI_STATE_DIR    session state ($STATE_DIR)
+  KIMI_CODE_HOME       Kimi OAuth and session home ($KIMI_HOME; credential-bearing)
 EOF
 }
 
@@ -651,11 +844,19 @@ cmd_doctor() {
   echo "kimi version  : $("$kimi" --version 2>&1 | head -1)"
   echo "caller        : $CALLER"
   echo "state dir     : $STATE_DIR"
+  echo "Kimi home     : $KIMI_HOME (credential-bearing; path is not copied)"
   echo "model pin     : $KIMI_MODEL"
-  if [ -f "$RO_AGENT" ]; then
-    echo "read-only     : $RO_AGENT"
+  if profile_is_readonly; then
+    echo "read-only     : PASS ($RO_AGENT)"
   else
-    echo "read-only     : MISSING ($RO_AGENT) — reviews will refuse to run"; rc=1
+    echo "read-only     : FAIL ($RO_AGENT) — profile is missing or grants a write/shell/network tool"; rc=1
+  fi
+  if preflight_execution_context review "$(pwd)"; then
+    echo "preflight     : PASS (state, Kimi home, provider, and safe session write canary)"
+  else
+    echo "preflight     : FAIL ($PREFLIGHT_CLASS)"
+    case "$PREFLIGHT_CLASS" in execution-context-denied|kimi-home-unwritable) echo "                Run credentialed Kimi jobs from the Full Access main task.";; esac
+    rc=1
   fi
   if [ -f "$IMPL_AGENT" ]; then
     echo "implement     : $IMPL_AGENT"
@@ -1223,6 +1424,13 @@ cmd_reset_context() {
 
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
+# Private worker entrypoint. It is intentionally not documented as public API.
+if [ "$CMD" = "__review-worker" ]; then
+  need jq
+  [ $# -eq 2 ] || exit 2
+  review_worker "$1" "$2"
+  exit $?
+fi
 ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_LIVE=""
 OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_ASSERT_HEAD=""
 while [ $# -gt 0 ]; do
@@ -1239,9 +1447,16 @@ done
 need jq
 
 case "$CMD" in
-  new)        [ -n "$ARG" ] || die "usage: ai-kimi new <name> …";       start_session "$ARG" review ;;
+  new)        [ -n "$ARG" ] || die "usage: ai-kimi new <name> …";       start_review_job "$ARG"; cmd_wait_job "$ARG" ;;
+  start)      [ -n "$ARG" ] || die "usage: ai-kimi start <name> …";     if [ -f "$(meta_path "$(repo_id "$(repo_root)")" "$ARG")" ]; then start_review_job "$ARG" 1; else start_review_job "$ARG"; fi ;;
   implement)  [ -n "$ARG" ] || die "usage: ai-kimi implement <name> …"; cmd_implement "$ARG" ;;
-  ask)        [ -n "$ARG" ] || die "usage: ai-kimi ask <name> …";       cmd_ask "$ARG" ;;
+  ask)        [ -n "$ARG" ] || die "usage: ai-kimi ask <name> …";       if [ -f "$(meta_path "$(repo_id "$(repo_root)")" "$ARG")" ] && [ "$(jq -r .mode "$(meta_path "$(repo_id "$(repo_root)")" "$ARG")")" = review ]; then start_review_job "$ARG" 1; cmd_wait_job "$ARG"; else cmd_ask "$ARG"; fi ;;
+  wait)       [ -n "$ARG" ] || die "usage: ai-kimi wait <name>";         cmd_wait_job "$ARG" ;;
+  status)     [ -n "$ARG" ] || die "usage: ai-kimi status <name>";       cmd_status_job "$ARG" ;;
+  logs)       [ -n "$ARG" ] || die "usage: ai-kimi logs <name>";         cmd_logs_job "$ARG" ;;
+  result)     [ -n "$ARG" ] || die "usage: ai-kimi result <name>";       cmd_result_job "$ARG" ;;
+  cancel)     [ -n "$ARG" ] || die "usage: ai-kimi cancel <name>";       cmd_cancel_job "$ARG" ;;
+  recover)    [ -n "$ARG" ] || die "usage: ai-kimi recover <name>";      cmd_recover_job "$ARG" ;;
   list)       cmd_list ;;
   show)       [ -n "$ARG" ] || die "usage: ai-kimi show <name>";        cmd_show "$ARG" ;;
   transcript) [ -n "$ARG" ] || die "usage: ai-kimi transcript <name>";  cmd_transcript "$ARG" ;;

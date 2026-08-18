@@ -100,6 +100,7 @@ STUBEOF
 chmod +x "$STUB/kimi"
 export TMPDIR_FOR_TEST="$TMP"
 export AI_KIMI_BIN="$STUB/kimi"
+export KIMI_CODE_HOME="$TMP/kimi-home"
 
 cat > "$TMP/fixture.jsonl" <<'EOF'
 {"role":"user","content":"review this"}
@@ -126,6 +127,18 @@ check "review uses stream-json"      "grep -q -- '--output-format stream-json' '
 check "never uses --yolo"            "! grep -q -- '--yolo' '$TMP/argv.txt'"
 check "never uses --auto"            "! grep -q -- '--auto' '$TMP/argv.txt'"
 check "never uses -c/--continue"     "! grep -qE -- '(^| )-c( |$)|--continue' '$TMP/argv.txt'"
+check "preflight created an isolated Kimi sessions directory" "test -d '$KIMI_CODE_HOME/sessions'"
+
+echo "== durable_review_jobs =="
+JOB_ID="$(run start durable --prompt review)"
+check "start returns a durable job id" "test -n '$JOB_ID'"
+check "status reports a durable phase" "run status durable | jq -e '.phase == \"starting\" or .phase == \"running\" or .phase == \"completed\"'"
+run wait durable >/dev/null 2>&1
+check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
+check "result is available after terminal proof" "run result durable | grep -q APPROVE"
+OUT="$(cd "$REPO" && KIMI_CODE_HOME="$TMP/does-not-exist/no-parent" bash "$SCRIPT" start denied --prompt x --json 2>&1)"; RC=$?
+[ $RC -ne 0 ] && ok "unwritable Kimi home refuses before launch" || bad "unwritable Kimi home refuses before launch"
+check "denial gives the main-task hand-back" "printf '%s' \"\$OUT\" | grep -q 'Full Access main task'"
 
 echo "== debate contract and context rules =="
 TEMPLATE="$REPO_ROOT/templates/delegation/debate-turn.md"
