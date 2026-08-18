@@ -25,6 +25,7 @@
 # files, which a review needs because brand-new files are usually the point.
 #
 #   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
+#   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
 #   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
 #   ai-review-sandbox is-worktree <dir>          # exit 0 when <dir> is a linked worktree
@@ -85,6 +86,9 @@ copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-igno
   local src="$1" dst="$2" rel
   while IFS= read -r -d '' rel; do
     [ -n "$rel" ] || continue
+    # Evidence packets are session-owned generated state. A fresh snapshot must
+    # build its own packet and must never copy another live review's packet.
+    case "$rel" in .ai-review|.ai-review/*) continue ;; esac
     mkdir -p "$dst/$(dirname "$rel")"
     cp -p "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
   done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
@@ -147,11 +151,11 @@ EOF
 }
 
 cmd_ensure() {
-  local root tag stage
+  local root tag stage force_copy="${3:-0}"
   root="$(canon "${1:?usage: ai-review-sandbox ensure <repo-root> <tag>}")"
   tag="${2:?usage: ai-review-sandbox ensure <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
-  if ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
+  if [ "$force_copy" != 1 ] && ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
   stage="$(sandbox_path "$root" "$tag")"
   create_or_refresh "$root" "$tag" "$stage"
   printf '%s' "$stage"
@@ -166,19 +170,21 @@ cmd_path() {
 }
 
 cmd_remove() {
-  local root tag
+  local root tag force_copy="${3:-0}"
   root="$(canon "${1:?usage: ai-review-sandbox remove <repo-root> <tag>}")"
   tag="${2:?usage: ai-review-sandbox remove <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag'"
-  is_worktree "$root" || return 0
+  [ "$force_copy" = 1 ] || is_worktree "$root" || return 0
   remove_sandbox "$(sandbox_path "$root" "$tag")"
 }
 
 case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
+  ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
+  remove-copy) shift; cmd_remove "${1:-}" "${2:-}" 1 ;;
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|path|remove|is-worktree} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|path|remove|remove-copy|is-worktree} ..." ;;
 esac
