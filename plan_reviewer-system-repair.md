@@ -19,12 +19,12 @@ Read this table first. Do not re-derive or re-plan what is already done.
 | 5 | Short ordinary budgets + early provisional verdict | 🛑 dropped 2026-08-18 | Five live Grok 4.6 reviews used 6, 6, 7, 7, and 6 turns; the earlier A/B used 8 turns both ways. A 6-turn default would manufacture no-verdict failures. See [`docs/reviewer-five-run-trial-2026-08-18.md`](docs/reviewer-five-run-trial-2026-08-18.md). |
 | 6 | Failure-specific guidance | ✅ complete | `ai-review-preflight explain` classifies six outcomes; Grok no longer recommends increasing turns; 19 fixture checks pass. |
 | 7 | Performance scoreboard | ✅ complete | [`bin/ai-review-scoreboard`](bin/ai-review-scoreboard) records and summarizes wrapper results without choosing providers; 9 checks pass. |
-| 8 | Mixed-provider failure check | ⬜ open, rewritten | Replace the obsolete 30-review speed trial with bounded Grok, Kimi, and GLM checks for no-verdict, allowance, empty-turn, and long-wait failures. |
+| 8 | Mixed-provider failure check | ✅ complete | [`docs/reviewer-mixed-provider-check-2026-08-18.md`](docs/reviewer-mixed-provider-check-2026-08-18.md): all three providers returned usable verdicts under 15 minutes; GLM found one real blocker, then approved its exact-head correction. |
 | 9 | Global source-routing rule + #1097→#1113 regression | ✅ complete | Installed global and shared-db skill rules plus [`tests/fixtures/shared-db-routing/1097-successor-1113.md`](tests/fixtures/shared-db-routing/1097-successor-1113.md); 11 checks pass. |
 
-**A fresh session starts at Step 4.** Steps 1–3 are one phase and must land
-together; Step 9 is independent of Steps 1–8 and may be done in parallel by a
-different session.
+**Implementation is complete.** Steps 1–3 landed as Phase A; Step 5 was dropped
+after live measurement; Steps 4 and 6–9 landed as the reduced repair agreed with
+the independent Grok review.
 
 ### END-OF-PHASE RULE (applies to every phase, no exceptions)
 
@@ -921,7 +921,7 @@ cd /c/repos/ai-devops && ai-glm selftest && ai-kimi doctor && ai-grok-review doc
       `bin/ai-review-scoreboard` exist, are executable, parse successfully, and
       carry a `# WHY THIS EXISTS` header. A new `ai-review` front door was
       deliberately dropped after the five-run trial and independent review.
-- [ ] The three wrappers build and consume packets; none of their read-only
+- [x] The three wrappers build and consume packets; none of their read-only
       boundaries were widened (proved by `ai-glm selftest`, `ai-kimi doctor`,
       `ai-grok-review doctor`).
 - [x] The relevant packet, wrapper, worktree-safety, preflight, scoreboard, and
@@ -932,10 +932,11 @@ cd /c/repos/ai-devops && ai-glm selftest && ai-kimi doctor && ai-grok-review doc
       0/5 15-minute failures. The obsolete 30-review trial was dropped.
 - [x] `git var GIT_COMMITTER_IDENT` verified before the first commit.
 - [ ] Work committed **and pushed**; commit SHA reported.
-- [ ] `AGENTS.md` router updated to link this plan and the new commands;
+- [x] `AGENTS.md` router updated to link this plan and the new commands;
       `docs/` updated where reviewer behaviour is described.
-- [ ] This plan's STATUS table updated with real artifact evidence per row.
-- [ ] The `HANDOFF.d/` file for this work updated or deleted once proven done.
+- [x] This plan's STATUS table updated with real artifact evidence per row.
+- [x] The predecessor session's write-once `HANDOFF.d/` file was left untouched,
+      as required; this plan now carries the completed status and evidence.
 - [ ] `fix_reviewer_system.md` status line updated from "analysis complete" to
       reflect what shipped; issue #34 closed with the evidence.
 
