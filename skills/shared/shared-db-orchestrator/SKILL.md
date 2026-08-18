@@ -104,10 +104,26 @@ Production remains a separate single lane. After review, green checks, preview,
 and guarded merge, use the production workflow's governed business-risk gate.
 It reads the exact merged PR/checks, immutable review artifact, pinned preview
 apply proof, current-main SQL, and activation record. Never supply risk booleans
-or prose as evidence. Automatically promote only when all five business risks
-are proven absent; otherwise ask Albert one plain business-risk question. See
-the operating manual. Freeze merges for the bounded promotion and verify the
-exact production result.
+or prose as evidence. Derived risks are DISCLOSED in the evidence; they do not
+block. See the operating manual. Freeze merges for the bounded promotion and
+verify the exact production result.
+
+**Do NOT ask Albert to sign off on technical risk (owner ruling 2026-08-18).**
+He is not a programmer and cannot evaluate the SQL a risk flag refers to. Asking
+him to paste an approval block an agent composed produces a signature on
+something unread plus an audit trail claiming oversight happened — worse than no
+gate, because it is believed. The block is retired as a blocker; it is verified
+only if someone supplies one.
+
+The general rule, which applies beyond this gate: **never gate on a human
+judgement the human cannot actually make.** If whoever is being asked cannot
+evaluate the check, it is theatre. Make the machine decide it, or make the
+machine refuse and escalate to an engineer. Do not route it through a rubber
+stamp. `incident-ledger.md` records why.
+
+This does NOT retire genuine owner questions. "Which property should the Coco
+style guide point at" is a real business judgement only Albert can make. "Do you
+accept `material_access_change`" is not.
 
 ## Owner decisions
 
