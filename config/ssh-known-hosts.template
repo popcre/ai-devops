@@ -1,0 +1,17 @@
+# Managed SSH server keys (ai-devops).
+#
+# These are public server identity keys, verified over Albert's Tailscale network.
+# The Windows setup merges them into ~/.ssh/known_hosts.  Do not add public
+# Cloudflare hostnames here: their SSH route has not been independently verified.
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+100.66.37.58,hetz.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBfJz87VaFASwYoi54oFqCuxPp39OgNksCep5Oyt0gHx
+100.107.131.35,edgesynology1.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII7oz8/F/nbaaH/MyaFcjH5BK5b9qhE0t8W2aj8Q5+sA
+[100.107.131.36]:1904,[edgesynology2.coho-banded.ts.net]:1904 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDSnYP96zeqCpwvFvTTPidhxGDr9JnyD2dkAJKzwwgyU
+100.94.183.1,restore-wizard.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAQoWhgrtm43alOnLBTDofzdYlX3woTvdGymJLI+SYuZ
+185.201.227.239 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDSpEmA6TZSZXJqajJYANDbo3yF1DE1u+AxFV68LRygI4W/+gYqkb06fhem219ZYj2Qrc8jRNW4OjXRnSwssweNyJ9Of2ekQTuO2+rZnOUClQhTr0MsMnjkxTfPg1LyldiyUgebrOGUGNVpB0ZfpXpC/bX/i+3anD4CGh6UXLa60j3WfZv+BFq5e93tOeTjMBToIhoSzF+Fm1eAMQzkWaJ6bmsxOsT7vJ72vqlH7w0SgQjoD6U2nOfJvXY7cDnQGQ6lkdLmXnqKhfdDuTffY3NYNtZeMe7p7JXyVtZxtK728iekaDz/qJj6BusZ2vNGqNqNNN7BuLIfIc8UPtINyhXhrtPryBH4mTVpW0UhtQG1jg8iz0XRKM3mlD2qGDdl5P7SQMV9Y/j/FnBYvkgfAt16rDIR92/1h/p0EwZMgAV4hreEFWWD36LzzFd9PJ97c+BJEWgUSl85ERVfwAaOZUaf4OyufNI6hZj+u68DZX7sjraKir3YU+MLLfHAykUqVrM=
+100.127.128.110,compshop.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAlFlhXKWQPbQa62hwCx2iicRNar8fF5+XG6kZngpcQh
+100.92.1.120,seafile-br.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAt5MXye3cTj3v4qcztZoyYZsfCHXP04lr8ghjikx/5J
+100.85.108.94,izbp114156wp4pjjf2pl40z.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyZ4b8/ln5pJhsqir03PsSpuzikXeMJFOHBSZIY0sDi
+[47.110.86.216]:1904 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOCBx5/A2q26DpOKPXarhX9xdN1JSz5reGyKq8eKmBny
+100.123.87.44,4837.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKPFs/C4CbdAYVqmnyFEaHuM1kZv13PUKoP25uYFWP2K
+100.110.219.31,916.coho-banded.ts.net ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBQ0a/QWT0ljFP6LIB6XEfet1VacemLvuwfpyPxTCjIK

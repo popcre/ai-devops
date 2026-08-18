@@ -112,11 +112,11 @@ Host comp hostdare
     ServerAliveCountMax 120
 
 # Linode Seafile Pro: Tailscale -> Cloudflare.
-Match host seafile !exec "ping -n 1 -w 800 100.92.1.120"
+Match host seafile,ssh-seafile.designflow.app !exec "ping -n 1 -w 800 100.92.1.120"
     HostName ssh-seafile.designflow.app
     ProxyCommand cloudflared access ssh --hostname %h
 
-Host seafile
+Host seafile ssh-seafile.designflow.app
     User ai
     HostName 100.92.1.120
     IdentityFile ~/.ssh/916-alien
