@@ -9,6 +9,7 @@ bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_QUARANTINE_DIR="$TMP/state"
+export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_PREFLIGHT_TIMEOUT=3
 
 REPO="$TMP/repo"; mkdir -p "$REPO"; git -C "$REPO" init -q; git -C "$REPO" config user.name Test; git -C "$REPO" config user.email t@example.com
@@ -32,8 +33,10 @@ chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 
 echo '== ai-review-preflight'
+mkdir -p "$REPO/.ai-review"; printf 'live-review-evidence\n' > "$REPO/.ai-review/sentinel"
 check "valid provider passes offline checks" "$SCRIPT check grok '$REPO' | grep -q 'packet=verified'"
-check "packet is cleaned after check" "test ! -d '$REPO/.ai-review'"
+check "live review packet is never touched" "grep -qx 'live-review-evidence' '$REPO/.ai-review/sentinel'"
+check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
 
