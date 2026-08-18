@@ -22,4 +22,6 @@ push, deploy, change a database, or access secrets.
 Write a short brief that names the change, relevant paths, constraints, and the
 decision required. Do not paste secrets or file contents. Treat an empty answer,
 wrong model, changed review copy, or stale checkout as a failed review, not an
-approval. The report is written under `.ai/reviews/`.
+approval. The report is written under `.ai/reviews/` only when that folder is
+ignored by Git. If the repository keeps historical reports there, Gemini warns
+and still completes the review without writing another report file.
