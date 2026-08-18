@@ -7,4 +7,5 @@
 - [4837 home-drive Z: trap](4837-home-drive-z-trap.md) — 4837 interactive Git Bash $HOME=Z: (roaming profile) sent $HOME-based installs to a network drive apps never read; fixed by pinning HOME=C: + ai-install-skills using %USERPROFILE%.
 - [remote-shell CWD trap](remote-shell-cwd-trap.md) — remote `bash -lc` over SSH starts in $HOME not the repo; use `git -C`/absolute paths, not relative. Includes the `4837` ssh alias (100.123.87.44, key 916-alien).
 - [GLM on OpenCode: hard-won constraints](glm-opencode-constraints.md) — `ai-glm` replaced `ai-glm-agent`; read docs/glm-opencode.md §5 before touching GLM or Windows setup. Only the agent `tools:` map enforces anything; `.ps1` files must be pure ASCII.
-- [Muse Spark 1.2 OpenCode plan](muse-opencode-plan.md) — issue #40; read `plan_muse-opencode-harness.md` STATUS first. Contributor only by Albert's 2026-08-18 decision; never substitute standard Muse.
+- [Globals machine-section trap](globals-machine-section-trap.md) — replacing an installed global wipes that machine's own facts; use `bin/ai-adopt-globals`, and drift 2 means success, not failure.
+- [Trigger-score variance](trigger-score-variance.md) — same skill scored 2, 1, 5 and 10 out of 10 with no text change; one run is not a verdict, and a global naming a skill does not suppress it.
