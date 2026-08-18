@@ -11,6 +11,9 @@ Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execut
 | 2. Add security-preserving execution preflight | ⬜ open | 2026-08-17 | Required behavior and tests are specified in §9.2. |
 | 3. Add durable detached Kimi jobs | ⬜ open | 2026-08-17 | Required job lifecycle is specified in §§8–10. |
 | 4. Add progress, timeout, and recovery truth | ⬜ open | 2026-08-17 | Required states and tests are specified in §§9.4–9.5. |
+| 4a. Isolate reviews from concurrent checkout edits and directory-bound resumes | ⬜ open | 2026-08-18 | Live failures and required regression tests are specified in §§6.8, 9.4a, and 10. |
+| 4b. Separate analysis prompts from diff-review packets | ⬜ open | 2026-08-18 | The architecture-review anchoring failure and prompt-contract tests are specified in §§6.9, 9.4b, and 10. |
+| 4c. Bound Kimi packet work and record real stage timing | ⬜ open | 2026-08-18 | The measured six-minute review audit, exact Kimi self-audit, and required corrections are in §§6.10, 9.4c, and 10. |
 | 5. Enforce main-session routing for credentialed runs | ⬜ open | 2026-08-17 | Required skill/orchestrator changes are specified in §9.6. |
 | 6. Qualify the complete Windows path live | ⬜ open | 2026-08-17 | Live canaries are specified in §9.7 and §10. |
 | 7. Update model comparison and operating docs | ⬜ open | 2026-08-17 | Documentation targets are specified in §9.8. |
@@ -174,6 +177,80 @@ A healthy Kimi review may legitimately take many minutes with no final verdict. 
 
 The canonical comparison contains strong Kimi implementation evidence and older operational warnings, but not this complete Windows incident. The final documentation must score code quality separately from provider/wrapper availability.
 
+### 6.8 The 2026-08-18 live review exposed three more wrapper failures
+
+During the shared-db orchestrator architecture review, two valid read-only Kimi turns were discarded because unrelated sessions changed the primary checkout between `tree_state` snapshots. The wrapper reported that Kimi had changed the working tree even though the review profile had no write tools. The canary observes the whole shared checkout, so it cannot distinguish Kimi writes from concurrent-session writes.
+
+Moving the review into a stable linked worktree then exposed a directory-binding failure. Kimi immediately returned `Session ... was created under a different directory`, but `run_turn` had already reaped the failed child before `await_result` began. `await_result` polls every machine process named `kimi`; when it never sees the exited child, or sees an unrelated Kimi process, it waits the full 900-second ceiling. The wrapper therefore turned an immediate deterministic failure into a fifteen-minute wait.
+
+The permanent correction is a stable wrapper-owned review workspace per named session, used from the first turn and refreshed in place for later turns. Read-only verification must compare that private workspace, not a concurrently edited primary checkout. A directory mismatch, nonzero child exit, or terminal stderr record must fail immediately without global process polling.
+
+### 6.9 Diff-review packaging distorted a non-diff architecture review
+
+Every read-only `ai-kimi` request currently receives an evidence-packet preamble saying that commits and a patch are “under review.” The first shared-db architecture turn consequently led with approval of an unrelated Git patch and compressed nine operating-model questions into one paragraph. A fresh Kimi session in a stable workspace answered all nine questions in detail, which separates prompt anchoring from model capability.
+
+`ai-kimi` needs explicit review kinds. Diff reviews keep the sealed patch packet and `APPROVE`/`REVISE` verdict contract. Plan, architecture, and analysis reviews receive a decision packet and conclusion contract that does not imply a Git patch is the subject. Callers must choose deliberately; no heuristic may silently reinterpret the task.
+
+### 6.10 The slow mixed-provider Kimi review was mostly self-inflicted packet work
+
+The 2026-08-18 review `reviewer-repair-kimi-d082c8d` looked like one very slow
+provider call, but it was two different delays hidden behind one silent wrapper
+call:
+
+1. **Before Kimi started, the caller asked the packet builder to run six test
+   suites, including the complete 136-check Kimi suite.** That full Kimi suite
+   had separately taken about two and a half minutes on this machine. The packet
+   builder runs `--tests` synchronously and prints no heartbeat while it runs.
+   This was the caller's mistake, enabled by a wrapper contract that accepts an
+   arbitrarily expensive test command without timing or progress evidence.
+2. **Kimi itself then ran for an exactly measured 247 seconds.** Its private log
+   spans `2026-08-18T13:49:04.791Z` through `13:53:11.925Z` and records nine
+   sequential model steps. The wrapper did not add a second wait after provider
+   completion: `run_turn` waited for the exact Kimi child, and the terminal
+   `session.resume_hint` was already present when `await_result` checked it.
+
+The exact saved session was resumed and asked to audit its own prior behavior.
+Kimi reconstructed these nine steps from its conversation: read the manifest;
+attempt a full patch read; follow the resulting overflow file and hit the same
+limit again; page the patch; inspect Kimi wiring; inspect Grok guidance; confirm
+review boundaries; then answer. Its directly observed findings were:
+
+- `patch.diff` was about 68.8 KB / 1,219 lines, above Kimi's approximately 50 KB
+  `Read` result limit. The current packet split threshold is 400 KB, so it does
+  not protect Kimi. One failed read plus one nested retry were pure waste.
+- The manifest contained roughly 200 lines of passing test output. Passing
+  output was treated as hundreds of lines instead of one summarized fact.
+- The comparison covered more than 25 heterogeneous files but every wrapper
+  hard-coded packet class `small`. The brief named six separate safety areas and
+  asked Kimi to confirm all review boundaries, so several source reads were a
+  predictable consequence of the task shape.
+- The read-only profile was not the main delay. It preserved the required safety
+  boundary. The expensive interaction was between its bounded `Read` tool and an
+  oversized unsplit packet.
+
+The Kimi log also records `thinkingEffort=high`. The focused self-audit used no
+tools and only one model step, yet that step still took 106 seconds to produce a
+2,897-token answer. Current `kimi --help` exposes no thinking-effort control, so
+payload and prompt corrections will reduce avoidable work but cannot guarantee a
+short provider response. Do not invent or pass an unsupported effort flag.
+
+The caller made two additional bookkeeping errors. It omitted
+`AI_KIMI_CALLER=codex`, so the session was stored under `claude`; and it later
+wrote an estimated 371-second elapsed value into the scoreboard because the
+wrapper records no stage timestamps. Neither slowed the provider, but both make
+the run harder to find and the latency claim less trustworthy. The permanent
+fix is executable caller identity plus measured timestamps, not more careful
+manual transcription.
+
+**Root-cause ranking:** (1) an unnecessarily broad synchronous `--tests`
+command before provider launch; (2) a 68.8 KB patch above Kimi's read limit but
+below the packet's 400 KB split threshold; (3) a 25-file heterogeneous change
+misclassified as `small`; (4) a confirm-everything prompt; (5) one avoidable
+nested overflow read by Kimi; (6) inherently slow high-effort generation. The
+wrapper's provider wait and structural read-only boundary were not the cause
+after Kimi started, but the wrapper is responsible for hiding the two stages and
+for handing Kimi a packet that violates its measured read limit.
+
 ## 7. Approaches considered and rejected
 
 1. **Grant `CodexSandboxUsers` Modify access to the default Kimi home. Rejected.** It would let any restricted task read or replace OAuth/configuration material. The permission failure is protecting a real secret boundary.
@@ -186,6 +263,12 @@ The canonical comparison contains strong Kimi implementation evidence and older 
 8. **Accept exit code 0 or the text `APPROVE` as completion. Rejected.** The existing terminal `session.resume_hint` rule prevents partial or transport-failed output from becoming review evidence.
 9. **Automatically switch models after Kimi failure. Rejected.** Reviewer rotation and substitution are policy decisions outside this wrapper. The wrapper reports a typed failure; its caller decides the governed next step.
 10. **Blame Kimi K3 for permission/auth/session failures. Rejected.** Those failures occurred before the model produced a verdict. Model quality must be judged only from completed, exact-head runs.
+11. **Increase the 900-second ceiling for immediate child failures. Rejected.** The child had already exited with a deterministic directory error. A longer wait makes the defect worse.
+12. **Keep using the shared primary checkout and weaken the read-only canary. Rejected.** Concurrent edits both invalidate evidence and create false accusations. Reviews need a stable private workspace; the structural read-only profile and canary both remain.
+13. **Use one diff-oriented prompt contract for every read-only request. Rejected.** It anchored an architecture review on an unrelated patch. Review kind must be explicit.
+14. **Raise Kimi's 900-second wall deadline to accommodate this review. Rejected.** The run completed far below the deadline; the avoidable delay was synchronous test work plus an oversized packet. A larger ceiling changes neither.
+15. **Give read-only Kimi Bash so it can page large files itself. Rejected.** That weakens the proven safety boundary to compensate for packet construction that we control.
+16. **Treat every passing test line as review evidence. Rejected.** The reviewer needs the command, exit status, duration, summary, and failures. Hundreds of repeated `ok` lines waste its bounded reads.
 
 ## 8. Design decisions
 
@@ -305,6 +388,84 @@ Dependencies: §9.3.
 
 **You'll know it worked when:** supervisors can distinguish “not authenticated,” “could not create session storage,” “healthy and quiet,” “completed,” and “timed out” without inspecting Task Manager, and no case waits 900 seconds after a known startup failure.
 
+#### 9.4a Give every named review a stable private workspace and fail exited children immediately
+
+Change `bin/ai-kimi`, `bin/ai-review-sandbox`, and `tests/test-ai-kimi.sh`:
+
+- Create one wrapper-owned self-contained review workspace at `new` time for ordinary clones and linked worktrees alike. Record its exact path in review metadata and reuse that same path for every `ask` turn because Kimi binds a session to its creation directory.
+- Refresh the workspace in place from the current exact repository head before each turn. Refuse ambiguous uncommitted overlap; never point Kimi at a concurrently edited primary checkout.
+- Run the read-only tree canary against the private workspace. If the primary checkout changes concurrently, report `source-checkout-changed` and mark evidence stale without accusing Kimi of writing.
+- Replace `kimi_procs` global polling. `run_turn` already waits for and reaps its exact child. If that child exits without `session.resume_hint`, classify its exit and stderr immediately. A different machine-wide Kimi process is never evidence that this run remains alive.
+- Detect `created under a different directory`, authentication, quota, filesystem, and malformed-session errors as typed immediate failures.
+- Preserve terminal `session.resume_hint` as the only success proof.
+
+Dependencies: §§9.3–9.4 durable worker ownership. This step may share the stable workspace primitive with implementation continuation, but review and implementation state must remain separately validated.
+
+**You'll know it worked when:** a stub that exits immediately with a directory-binding error returns nonzero in under five seconds; an unrelated live Kimi process cannot extend that wait; concurrent edits in the primary checkout neither fail the read-only canary nor alter the private review workspace; and an exact named `ask` resumes in the same recorded directory.
+
+#### 9.4b Add explicit diff, plan, architecture, and analysis review contracts
+
+Change `bin/ai-kimi`, `bin/ai-review-packet`, the caller skills, and their tests:
+
+- Add an explicit required review kind for non-default use: `diff`, `plan`, `architecture`, or `analysis`. Keep backwards-compatible `diff` only for callers whose command is explicitly a code review.
+- For `diff`, retain the sealed patch packet and terminal `APPROVE`/`REVISE` contract.
+- For `plan`, `architecture`, and `analysis`, generate a decision packet containing the named source documents, current commit identity, requested decisions, constraints, and evidence manifest without telling Kimi that an unrelated Git patch is the subject.
+- Give each kind its own footer: code verdict for `diff`; decision-by-decision conclusion and unresolved-objection ledger for the other kinds.
+- Make the Kimi skill require callers to select the kind and to keep large source material in readable files rather than pasting it into argv.
+- Preserve exact-head identity and stable-workspace re-read requirements for every kind.
+
+Dependencies: §9.4a stable review workspace.
+
+**You'll know it worked when:** an architecture fixture containing an unrelated changed file never mentions approving that patch, answers every requested decision, and the diff fixture still produces the existing exact-head verdict and packet digest.
+
+#### 9.4c Bound Kimi packet work and expose stage timing
+
+Change `bin/ai-kimi`, `bin/ai-review-packet`, the Kimi caller skill, scoreboard
+normalization, and their tests:
+
+- Record monotonic start/end times for snapshot preparation, the optional test
+  command, packet capture, provider execution, terminal verification, and total
+  elapsed time. Persist those stage durations in session metadata and print a
+  heartbeat at least every 30–60 seconds while tests or the provider are active.
+- Record Kimi's observed model-step count from its private session log when it
+  can be associated with the exact owned session without exposing prompts or
+  private model text. If that cannot be done safely, record `unavailable`; never
+  substitute wrapper-turn count.
+- Make caller identity explicit. Codex and Claude launchers must set their
+  caller value themselves; a credentialed call must not silently default to the
+  other client.
+- Give Kimi a packet split threshold below its measured `Read` result limit.
+  Start at 40 KB, preserve the full patch across numbered files, and put an
+  ordered file/line map in the manifest. Keep the provider-neutral packet's
+  existing 400 KB safety ceiling only if a provider-specific view can be
+  generated without changing the sealed source facts.
+- Replace the fixed `small` class in `prepare_review()` with an explicit or
+  measured class. A packet over 40 KB, ten changed files, or one subsystem must
+  not claim to be a small review. Never silently narrow the requested scope.
+- For passing tests, store command, exit status, measured duration, the final
+  summary, and a short bounded tail. Preserve complete failure diagnostics.
+  Default passing output must not consume 200 manifest lines.
+- Reject or warn before provider launch when `--tests` names a broad/full suite
+  for an ordinary review. The warning must state that tests run synchronously
+  before Kimi and show their live elapsed time. A final-check review may opt in
+  explicitly.
+- Update the Kimi prompt contract to name only the decision-critical subsystems,
+  distinguish files that require source confirmation from documents that can be
+  judged from the sealed diff, and tell Kimi to page the original numbered patch
+  after any `Read` overflow rather than reading an overflow artifact again.
+- Do not add an unsupported thinking-effort flag. First qualify any future Kimi
+  CLI/config control with an official-reference check and a live A/B that keeps
+  finding quality and structural read-only enforcement unchanged.
+
+Dependencies: §9.4 durable progress truth and §9.4b explicit review kinds.
+
+**You'll know it worked when:** metadata separates pre-provider test time from
+provider time; a simulated 68.8 KB patch is delivered in directly readable
+numbered parts with no nested overflow retry; passing test evidence is bounded;
+a broad test command produces visible pre-provider progress; caller identity is
+correct without manual environment setup; and the same focused Kimi review
+requires no packet-recovery step while preserving its substantive findings.
+
 #### 9.5 Make recovery idempotent and fail closed
 
 Change `bin/ai-kimi` recovery and lock code:
@@ -415,6 +576,16 @@ Dependencies: all earlier phases.
 - Foreground waiter death does not cancel worker.
 - Worker death is recoverable and never becomes success without `session.resume_hint`.
 - Immediate child error bypasses the full wall wait.
+- Immediate nonzero child exit is classified before any polling loop, even when another `kimi` process is running.
+- Review sessions retain one stable private workspace across exact-ID continuations and refuse a mismatched directory before provider launch.
+- Concurrent primary-checkout edits do not trigger the Kimi-write canary; writes inside the private review workspace still fail hard.
+- Diff packets and analysis/architecture decision packets have distinct preambles and terminal answer contracts.
+- Architecture prompts are not anchored on unrelated Git patches and must answer every requested decision.
+- Stage timing distinguishes tests, packet construction, provider work, and terminal verification; no operator-entered elapsed estimate is needed.
+- A 40–70 KB Kimi patch is split below the measured `Read` limit and can be consumed without an overflow-artifact retry.
+- Passing test output is summarized and broad synchronous test commands emit visible progress before provider launch.
+- Codex-created Kimi sessions are recorded as `codex` without relying on the caller to remember an environment variable.
+- Review class reflects measured patch size, changed-file count, and requested kind rather than always saying `small`.
 - Healthy silent child survives the startup deadline after proving startup.
 - Timeout and cancel target the exact owned process; PID reuse is refused.
 - Repeated status/wait/cancel/recover are idempotent.
@@ -459,6 +630,9 @@ Dependencies: all earlier phases.
 - `KIMI_CODE_HOME` moves credentials and sessions together. Treat it as a credential-bearing directory.
 - The main Codex task and delegated tasks can have different Windows permissions. Always test the actual current process.
 - Do not solve a wrapper timeout by increasing it. Startup failure and healthy long work need separate deadlines.
+- Do not use machine-wide `pgrep kimi` as liveness for a specific job. Track the exact owned child and its terminal files.
+- Kimi review sessions are directory-bound. Create them in their stable wrapper-owned workspace from turn one; never migrate a live review session by remote identity alone.
+- Do not prepend a diff-review packet to plan, architecture, or analysis work.
 - Do not create a Windows service or privileged broker without a new threat model and explicit owner approval.
 - Do not edit the primary checkout's unrelated `.ai/` or documentation files.
 - No database or production access is required.
@@ -486,6 +660,15 @@ Dependencies: all earlier phases.
 - [ ] Restricted execution fails in under five seconds with an automatic main-task hand-back.
 - [ ] Main-task execution creates a durable job that survives waiter/caller death.
 - [ ] Startup failures never wait to the full review deadline.
+- [ ] An immediate directory-binding or provider failure returns in under five seconds even while another Kimi process is active.
+- [ ] Concurrent repository edits cannot be misreported as Kimi writes or invalidate a private review workspace.
+- [ ] Named review continuation always resumes from its original stable directory.
+- [ ] Architecture and analysis reviews use decision packets and cannot approve an unrelated Git patch by prompt construction.
+- [ ] Kimi metadata truthfully separates pre-provider test, packet, provider, and finalization elapsed time.
+- [ ] A patch above 40 KB is paged for Kimi below its measured `Read` cap with a complete ordered map.
+- [ ] Passing test output is bounded; broad test suites show progress and require explicit final-check intent.
+- [ ] Codex and Claude sessions receive the correct caller identity automatically.
+- [ ] Review class cannot remain `small` for a 25-file / 68 KB heterogeneous change.
 - [ ] Healthy quiet reviews are not killed merely for silence.
 - [ ] Exact completion still requires `session.resume_hint`.
 - [ ] Review mode remains structurally read-only.
