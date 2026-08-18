@@ -182,6 +182,45 @@ mkdir -p "$GUARD"; touch "$GUARD/someone-elses-file"
 git -C "$TMP/guard" init -q 2>/dev/null
 check "remove_refuses_unmanaged"              "! '$SCRIPT' remove '$TMP/guard'; [ -f '$GUARD/someone-elses-file' ]"
 
+# --- defects found by an independent Grok review, 2026-08-18 -------------------
+# The original tests always removed the packet before rebuilding, so none of
+# these were exercised. That blind spot is the reason they existed.
+"$SCRIPT" remove "$R"
+
+# 1. A rebuild must never inherit files from the previous run. patch.full.diff
+#    only exists on oversized runs; if it survived into a small run it would be
+#    hashed into the seal and `verify` would bless the mixture.
+PKT="$(AI_REVIEW_PATCH_MAX_BYTES=2000 "$SCRIPT" build "$R" reb)"
+check "setup: oversized run wrote a full patch"  "[ -f '$PKT/patch.full.diff' ]"
+PKT="$("$SCRIPT" build "$R" reb)"
+check "rebuild does not inherit stale files"     "[ ! -f '$PKT/patch.full.diff' ]"
+check "rebuild verifies cleanly"                 "'$SCRIPT' verify '$PKT'"
+
+# 2. An unmanaged .ai-review must be refused LOUDLY, not silently.
+"$SCRIPT" remove "$R"
+mkdir -p "$R/.ai-review"; echo mine > "$R/.ai-review/someone-elses-file"
+check "unmanaged packet dir is refused"          "! '$SCRIPT' build '$R' clash"
+check "refusal is not silent"                    "'$SCRIPT' build '$R' clash 2>&1 | grep -q 'refusing to overwrite'"
+check "unmanaged packet dir survives"            "[ -f '$R/.ai-review/someone-elses-file' ]"
+rm -rf "$R/.ai-review"
+
+# 3. A --tests command that changes the tree must be announced, because the
+#    patch and the file lists then describe the post-test tree.
+PKT="$("$SCRIPT" build "$R" mut --tests 'echo mutated > side-effect.txt')"
+check "tree change during tests is announced"    "grep -q 'test command changed the working tree' '$PKT/MANIFEST.md'"
+rm -f "$R/side-effect.txt"
+"$SCRIPT" remove "$R"
+PKT="$("$SCRIPT" build "$R" nomut --tests 'true')"
+check "a clean test run is not falsely flagged"  "! grep -q 'changed the working tree' '$PKT/MANIFEST.md'"
+
+# 4. In a snapshot, the manifest must name the REAL checkout, not the throwaway.
+"$SCRIPT" remove "$R"
+SNAP="$("$REPO_ROOT/bin/ai-review-sandbox" ensure "$WT" realroot)"
+"$SCRIPT" build "$SNAP" snap >/dev/null
+check "manifest names the real checkout"         "grep -qF \"\$(cd '$WT' && pwd -P)\" '$SNAP/.ai-review/MANIFEST.md'"
+check "manifest says it is a snapshot"           "grep -q 'disposable snapshot' '$SNAP/.ai-review/MANIFEST.md'"
+"$REPO_ROOT/bin/ai-review-sandbox" remove "$WT" realroot
+
 # --- interface ----------------------------------------------------------------
 check "path_creates_nothing"                  "'$SCRIPT' remove '$R'; '$SCRIPT' path '$R' >/dev/null && [ ! -d '$R/.ai-review' ]"
 check "unknown_subcommand_rejected"           "! '$SCRIPT' nonsense"

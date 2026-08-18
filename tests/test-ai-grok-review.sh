@@ -234,7 +234,13 @@ check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.
 echo "== verdict_delimiter_extraction =="
 OUT="$(run new t7 --prompt x 2>/dev/null)"
 check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE'"
-check "narration is stripped"          "! printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
+check "verdict comes first"            "[ \"\$(printf '%s' \"\$OUT\" | head -1)\" = '## Verdict' ]"
+# Contract changed 2026-08-18. Emitting ONLY the verdict section discarded the
+# findings: a real measured review produced 42 lines of evidenced defects above
+# the heading and the caller saw two words. A verdict with no reasons cannot be
+# acted on. The verdict still leads; the reasoning is kept below it.
+check "findings are NOT discarded"     "printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
+check "findings are clearly labelled"  "printf '%s' \"\$OUT\" | grep -q 'Findings and reasoning'"
 cat > "$TMP/fixture2.json" <<'EOF'
 {"text":"no delimiter here","sessionId":"s2","stopReason":"end_turn","num_turns":1,
  "usage":{},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0}

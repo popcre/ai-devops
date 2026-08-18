@@ -14,7 +14,7 @@ Read this table first. Do not re-derive or re-plan what is already done.
 |---|---|---|---|
 | 1 | `ai-review-packet` builder + hashed manifest | ✅ done 2026-08-18 | [`bin/ai-review-packet`](bin/ai-review-packet); 57 tests pass via `bash tests/test-ai-review-packet.sh` |
 | 2 | Wrapper-owned SHA identity (no caller-typed SHAs) | ✅ done 2026-08-18 | `prepare_review()` in [`bin/ai-grok-review`](bin/ai-grok-review), [`bin/ai-kimi`](bin/ai-kimi), [`bin/ai-glm`](bin/ai-glm); proven by `meta records the base sha derived by the wrapper` and `wrong --assert-head is refused` in `tests/test-ai-grok-review.sh` |
-| 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ✅ done 2026-08-18 | `bash tests/test-ai-grok-review.sh` 100/0, `tests/test-ai-kimi.sh` 134/0, `tests/test-ai-glm.sh` 221/0 |
+| 3 | Packet wiring into `ai-grok-review` / `ai-kimi` / `ai-glm` | ⚠️ built, **gate NOT met** 2026-08-18 | code shipped and green (`tests/test-ai-grok-review.sh` 102/0, `test-ai-kimi.sh` 134/0, `test-ai-glm.sh` 221/0) but the live A/B below did **not** reduce turns. Do not treat the premise as proven. |
 | 4 | Provider preflight + quarantine (`ai-review-preflight`) | ⬜ open | — |
 | 5 | Short ordinary budgets + early provisional verdict | ⬜ open | — |
 | 6 | Failure-specific rotation | ⬜ open | — |
@@ -454,6 +454,29 @@ Three things were learned building it, and later steps should assume them:
   `ai-review-sandbox ensure` command named in the error. Emitting a packet a
   reviewer would die trying to read is worse than refusing.
 
+**Four defects found AFTER the first commit, by a real Grok review on
+2026-08-18 (`e724444`), all now fixed with a regression test each:**
+
+1. **A rebuild could seal a mixture of two runs.** `build` removed the old packet
+   with the error suppressed and continued on failure, so files created only by
+   some runs (`patch.full.diff`, `*-files.txt`) could survive into the next
+   packet, be hashed into the seal, and `verify` would call it valid. It could
+   also fail silently. Now: an unmanaged directory is refused loudly, and a
+   failed delete is fatal rather than built upon.
+2. **The patch and the file lists could describe different trees.** The patch was
+   captured before `--tests` ran and the lists after, so a test with side effects
+   produced a packet of a tree that never existed. Now tests run first, the
+   evidence is captured together, and a tree that moved during tests is announced
+   in the manifest.
+3. **`git diff` failures were swallowed** (`|| true`), so an empty patch could be
+   sealed as "nothing changed" and approved on that basis. Now fatal.
+4. **In a snapshot the manifest named the throwaway copy as the repository**,
+   contradicting this plan's own Step 1 item 1. Now it names the real checkout
+   and says plainly that the directory is a disposable snapshot.
+
+The original 57 tests missed all of these because every one of them deleted the
+packet before rebuilding. That blind spot is why tests 18-27 exist.
+
 ---
 
 #### Step 2 — Move commit identity into the wrapper
@@ -518,6 +541,43 @@ Compare `num_turns` and elapsed time against the recorded baseline. Expect a
 large drop. Record both numbers in the handoff — this is the evidence that the
 central premise is correct. If turns do **not** drop, stop and re-read §6a
 before continuing; something about the preamble or packet placement is wrong.
+
+### GATE RESULT 2026-08-18: NOT MET. Read this before building on Step 3.
+
+A live A/B was run against Grok: same commit (`e724444`), same question, same
+model (`grok-4.6`), same permissions, one disposable clone, run back to back.
+
+| | Prose brief (old) | Evidence packet (new) |
+|---|---:|---:|
+| Wall time | 408 s | 333 s (**-18%**) |
+| **Turns** | **8** | **8 (no change)** |
+| Tokens | 595,346 | 562,356 (-6%) |
+| Cost | $0.1047 | $0.0944 (-10%) |
+| Verdict returned | yes | yes |
+
+**The turn count did not move.** Wall time and cost improved modestly. That is
+worth having, but it is NOT the step change this plan predicted, so the premise
+in section 6a is **unconfirmed** and must not be cited as proven.
+
+Two things the run also established, both of which weaken the original case:
+
+- **Neither run reproduced the failure this project exists to fix.** Both
+  returned a verdict in 8 turns. The catastrophic runs (20 turns, ~3M tokens, no
+  verdict) were measured on Grok CLI **0.2.118**; this machine now runs **1.0.3**
+  with `grok-4.6`. Some of the original problem may have been fixed upstream.
+  Before more effort goes into speed, re-measure the actual failure rate.
+- **The old prose brief was a fair one** (it named the commit and asked for a
+  verdict in the required format). A vaguer brief would have looked worse, so the
+  comparison is, if anything, generous to the new design.
+
+What the run DID prove is that an independent reviewer is worth running: it
+rejected `bin/ai-review-packet` and was right on all three counts. Those defects
+and their regression tests are recorded in Step 1's notes.
+
+**Next session: do not assume the shorter budgets in Step 5 are safe because the
+packet made reviews cheap. It did not. Re-measure first. A 6-turn ceiling on work
+that genuinely takes 8 turns would return no verdict at all, which is the exact
+failure this plan exists to remove.**
 
 ---
 
