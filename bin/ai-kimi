@@ -957,7 +957,7 @@ ai-kimi $VERSION — Kimi Code delegation in persistent, named sessions.
   ai-kimi list | show <name> | transcript <name> | delete <name>
   ai-kimi doctor [--live]
 
-Review evidence options for `new` and review-mode `ask`:
+Review evidence options for \`new\` and review-mode \`ask\`:
   --base REF           base of the comparison in the evidence packet
   --tests CMD          run CMD and record its exact result in the packet
   --decision TEXT      the one-sentence decision being asked for

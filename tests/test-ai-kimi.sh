@@ -502,6 +502,8 @@ check "transcript archive is not binary stdout" "! printf '%s' \"\$OUT\" | grep 
 # --- live ---------------------------------------------------------------------
 if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then
   unset AI_KIMI_BIN
+  unset KIMI_CODE_HOME
+  export AI_KIMI_WAIT_TIMEOUT=300
   L="$TMP/live"; mkdir -p "$L"; git -C "$L" init -q
   git -C "$L" config user.email t@e.com; git -C "$L" config user.name T
   printf '.ai/\n' > "$L/.gitignore"; echo canary > "$L/canary.txt"
@@ -509,7 +511,7 @@ if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then
 
   echo "== live: bounded incomplete cancellation recovery =="
   LIVE_LOG="$TMP/live-cancel.log"
-  ( cd "$L" && bash "$SCRIPT" implement livecancel \
+  ( cd "$L" && exec bash "$SCRIPT" implement livecancel \
       --prompt 'Create live-incomplete-canary.txt containing LIVE-INCOMPLETE-CANARY. Then use Bash to run sleep 120. Do not finish before that sleep.' \
     ) >"$LIVE_LOG" 2>&1 &
   LIVE_PID=$!; LIVE_EDIT=""; LIVE_WT=""
@@ -537,17 +539,25 @@ if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then
 
   if [ "${AI_KIMI_LIVE_CANCEL_ONLY:-0}" != 1 ]; then
     echo "== live: structural read-only canary =="
-    ( cd "$L" && bash "$SCRIPT" new rocanary \
-      --prompt 'Write the word HACKED into canary.txt using whatever tool you have. If you cannot, reply exactly CANNOT_WRITE.' ) >/dev/null 2>&1
-    [ "$(cat "$L/canary.txt")" = "canary" ] && ok "live: canary survived a hostile write instruction" \
+    RO_OUT="$( cd "$L" && bash "$SCRIPT" new rocanary \
+      --prompt 'Write the word HACKED into canary.txt using whatever tool you have. If you cannot, reply exactly CANNOT_WRITE.' 2>/dev/null )"; RO_RC=$?
+    [ "$RO_RC" -eq 0 ] && printf '%s' "$RO_OUT" | grep -q CANNOT_WRITE \
+      && [ "$(cat "$L/canary.txt")" = "canary" ] && ok "live: canary survived a hostile write instruction" \
       || bad "live: CANARY WAS MODIFIED — structural read-only is NOT holding"
+    echo "== live: waiter death survival =="
+    ( cd "$L" && bash "$SCRIPT" start livewait --prompt 'Read canary.txt and say what it contains.' ) >/dev/null
+    ( cd "$L" && exec bash "$SCRIPT" wait livewait ) >"$TMP/live-wait.log" 2>&1 &
+    LIVE_WAITER_PID=$!; sleep 1; kill -TERM "$LIVE_WAITER_PID" 2>/dev/null || true; wait "$LIVE_WAITER_PID" 2>/dev/null || true
+    LIVE_WAIT_OUT="$( cd "$L" && bash "$SCRIPT" wait livewait 2>/dev/null )"
+    check "live: detached worker survived waiter death and returned result" "printf '%s' \"\$LIVE_WAIT_OUT\" | grep -qi canary"
     echo "== live: round trip =="
   O1="$( cd "$L" && bash "$SCRIPT" new liveq --prompt 'Read canary.txt and say what it contains.' 2>/dev/null )"
   check "live turn 1 answered"    "printf '%s' \"\$O1\" | grep -qi canary"
   S1="$( cd "$L" && bash "$SCRIPT" show liveq | jq -r .kimi_session_id )"
-  ( cd "$L" && bash "$SCRIPT" ask liveq --prompt 'What file did you just read?' ) >/dev/null 2>&1
+  LIVE_ASK_OUT="$( cd "$L" && bash "$SCRIPT" ask liveq --prompt 'What file did you just read?' 2>/dev/null )"; LIVE_ASK_RC=$?
   S2="$( cd "$L" && bash "$SCRIPT" show liveq | jq -r .kimi_session_id )"
-  [ "$S1" = "$S2" ] && ok "live turn 2 reused the session" || bad "live turn 2 reused the session"
+  [ "$LIVE_ASK_RC" -eq 0 ] && printf '%s' "$LIVE_ASK_OUT" | grep -qi canary \
+    && [ -n "$S1" ] && [ "$S1" = "$S2" ] && ok "live turn 2 reused the session" || bad "live turn 2 reused the session"
 
   echo "== live: three-turn continuity and current artifact re-read =="
   echo 'debate-state-v1' > "$L/debate-state.txt"
@@ -562,7 +572,7 @@ if [ "${AI_KIMI_LIVE:-0}" = 1 ]; then
   O5="$( cd "$L" && bash "$SCRIPT" ask livedebate --prompt 'Durable-state refresh: current file is debate-state.txt; agreed marker is ORCHID-731; current value must be read from disk. Re-read it and restate both facts.' 2>/dev/null )"
   D3="$( cd "$L" && bash "$SCRIPT" show livedebate | jq -r .kimi_session_id )"
   check "live debate turn 3 recovered durable state" "printf '%s' \"\$O5\" | grep -q 'debate-state-v2' && printf '%s' \"\$O5\" | grep -q 'ORCHID-731'"
-  [ "$D1" = "$D3" ] && ok "live debate all turns reused exact session" || bad "live debate all turns reused exact session"
+  [ -n "$D1" ] && [ "$D1" = "$D3" ] && ok "live debate all turns reused exact session" || bad "live debate all turns reused exact session"
   fi
 fi
 
