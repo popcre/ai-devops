@@ -35,16 +35,20 @@ cmd_doctor() {
 }
 
 cmd_review() {
-  local original="${1:-$PWD}" prompt="${2:-}" review_dir tag output status report now
+  local original="${1:-$PWD}" prompt="${2:-}" review_request review_dir tag output status report now
   original="$(repo_root "$original")"
   if [ -z "$prompt" ] && [ ! -t 0 ]; then prompt="$(cat)"; fi
   prompt="${prompt:-Review the current changes for correctness, security, and missing tests. Give concrete findings with file paths.}"
+  review_request="$prompt
+
+Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS.
+If you found anything, put the findings before that final line. Do not stop after narrating your review steps."
   need op; need jq
   [ -x "$BIN" ] || die "Muse is not installed. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
   [ -f "$CONFIG/opencode.json" ] || die "Muse is not configured. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
   review_dir="$($ROOT_DIR/bin/ai-review-sandbox ensure-copy "$original" muse)"
   tag="muse-$(date -u +%Y%m%dT%H%M%SZ)"
-  "$ROOT_DIR/bin/ai-review-packet" build "$review_dir" "$tag" --decision "$prompt" --class medium >/dev/null
+  "$ROOT_DIR/bin/ai-review-packet" build "$review_dir" "$tag" --decision "$review_request" --class medium >/dev/null
   export XDG_CONFIG_HOME="$CONFIG_DIR/opencode-xdg"
   export XDG_DATA_HOME="$HOME/.local/share/ai-devops/opencode-muse-direct"
   export XDG_STATE_HOME="$HOME/.local/state/ai-devops/muse-direct"
@@ -54,13 +58,21 @@ cmd_review() {
   [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
   export MODEL_API_KEY
   set +e
-  output="$("$BIN" run --dir "$review_dir" --agent muse-review --model "$MODEL" "$prompt" 2>&1)"
+  output="$("$BIN" run --dir "$review_dir" --agent muse-review --model "$MODEL" "$review_request" 2>&1)"
   status=$?
   set -e
   unset MODEL_API_KEY
-  [ "$status" -eq 0 ] || die "Muse review failed. No other model was used. Run: ai-muse doctor"
   now="$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$original/.ai/reviews"
+  if [ "$status" -ne 0 ] || ! printf '%s\n' "$output" | tr -d '\r' | grep -Eq '^VERDICT: (FINDINGS|NO FINDINGS)$'; then
+    report="$original/.ai/reviews/muse-incomplete-$now.md"
+    {
+      printf '# Muse incomplete review\n\n'
+      printf 'Muse did not produce the required final verdict. This is not a review result.\n\n'
+      printf '## Raw output\n\n%s\n' "$output"
+    } > "$report"
+    die "Muse stopped without a usable verdict. Incomplete output saved: $report"
+  fi
   report="$original/.ai/reviews/muse-review-$now.md"
   {
     printf '# Muse protected review\n\n'

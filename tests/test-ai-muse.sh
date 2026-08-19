@@ -10,6 +10,7 @@ check jq -e '.model == "meta-model-api/muse-spark-1.2-contributor" and .share ==
 check bash -c "! grep -Eq '^  (write|edit|patch|bash|webfetch|task): true$' '$ROOT/config/opencode-muse/agent/muse-review.md'"
 check bash -c "grep -q 'ensure-copy' '$ROOT/bin/ai-muse' && grep -q 'ai-review-packet' '$ROOT/bin/ai-muse'"
 check bash -c "! grep -q 'serve ' '$ROOT/bin/ai-muse'"
+check bash -c "grep -q 'VERDICT: FINDINGS' '$ROOT/bin/ai-muse' && grep -q 'muse-incomplete-' '$ROOT/bin/ai-muse'"
 check bash -c "! grep -q 'MODEL_API_KEY=.*[A-Za-z0-9]' '$ROOT/config/opencode-muse/opencode.json'"
 
 exit "$fail"
