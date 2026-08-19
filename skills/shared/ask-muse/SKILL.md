@@ -23,6 +23,7 @@ Then run the review from the repository root:
 ai-muse review "$PWD" "Review the current changes. Report concrete findings with file paths, severity, and missing tests."
 ```
 
-Read the report path printed by the command. Treat a failed command as a failed Muse
-review. Do not substitute GLM, another model, or your own opinion without stating that
-Muse did not complete.
+Read the report path printed by the command. A Muse result is valid only when it ends
+with `VERDICT: FINDINGS` or `VERDICT: NO FINDINGS`. A clean stop without that line is
+an incomplete review and is saved separately. Do not substitute GLM, another model, or
+your own opinion without stating that Muse did not complete.
