@@ -9,27 +9,34 @@ needed for diagnosis.
 
 Copy this sentence into the session:
 
-> Record the reviewer problem before trying again. Run
-> `ai-reviewer-issue record --provider <reviewer-name> --summary "<one sentence describing what went wrong>"`.
-> If the failed command wrote an error log, add `--error-file <exact-log-path>`.
-> Do not write a separate report and do not run `list` or `show`.
+> Record the reviewer problem before trying again. Run `ai-reviewer-issue record`
+> with the reviewer name, a short title, the exact failed command, and detailed
+> notes using `--details` or `--details-file`. If the failed command wrote an
+> error log, add `--error-file <exact-log-path>`. Do not run `list` or `show`.
 
 Example:
 
 ```bash
 ai-reviewer-issue record --provider grok \
-  --summary "The review ran for 15 minutes and returned no approve or reject decision."
+  --summary "No decision after 15 minutes" \
+  --command "ai-grok-review ask pricing-review --prompt-file review.md" \
+  --details "The reviewer completed its run but returned neither approval nor rejection. It was the first attempt; no retry has been made."
 ```
 
-The session supplies one sentence. The command automatically captures:
+The title is only an index label. `--details` has no length limit. For longer
+notes, the session can write a file and pass `--details-file <path>`, or pipe
+notes through standard input with `--details-file -`.
+
+The command automatically captures:
 
 - the repository, branch, current commit, remote, and existing working changes;
 - the computer and shell;
-- the newest structured metadata for that reviewer, with prompt and credential
-  fields removed;
-- the names and sizes of up to ten recent review artifacts; and
-- when supplied, the final 200 lines of the error log with common credential
-  forms redacted.
+- the newest structured metadata for that reviewer, with sensitive fields removed;
+- every matching review report, copied in full;
+- reviewer log files changed within the previous two days, copied in full;
+- the latest matching scoreboard record;
+- the names and sizes of recent review artifacts; and
+- when supplied, the complete error log and detailed session notes.
 
 Reports are stored under `.ai/reviewer-issues/` in the installed ai-devops
 checkout. That directory is excluded from Git because evidence can refer to
@@ -47,8 +54,7 @@ ai-reviewer-issue path
 ```
 
 `list` prints one line per recorded problem. `show` prints the safe structured
-summary. The path printed by `path` contains the redacted metadata, recent
-artifact inventory, and optional error tail.
+summary. The path printed by `path` contains the complete local evidence package.
 
 The command intentionally does not publish reports, create GitHub issues, retry
 the reviewer, select another provider, or alter the scoreboard. Those actions

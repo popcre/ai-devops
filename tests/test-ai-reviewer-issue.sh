@@ -10,26 +10,38 @@ check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEWER_ISSUE_DIR="$TMP/issues"
 export AI_REVIEWER_STATE_BASE="$TMP/state"
+export AI_REVIEW_SCOREBOARD_FILE="$TMP/state/review-scoreboard/reviews.jsonl"
 mkdir -p "$TMP/repo/.ai/reviews" "$TMP/state/grok/sessions/x"
 git -C "$TMP/repo" init -q
 git -C "$TMP/repo" config user.name Test
 git -C "$TMP/repo" config user.email test@example.com
 printf 'base\n' > "$TMP/repo/file.txt"
 git -C "$TMP/repo" add file.txt && git -C "$TMP/repo" commit -qm base
-printf 'review\n' > "$TMP/repo/.ai/reviews/grok-example.md"
+printf 'complete review output\ntoken=report-secret\n' > "$TMP/repo/.ai/reviews/grok-example.md"
 printf '{"repo":"%s","head":"abc","prompt":"private code","total_tokens":42,"credential":"do-not-copy"}\n' "$TMP/repo" > "$TMP/state/grok/sessions/x/session.json"
-printf 'authorization=Bearer-abc\nordinary failure line\ntoken=live-value\n' > "$TMP/error.log"
+printf 'provider stream line\nsecret=stream-secret\n' > "$TMP/state/grok/sessions/x/stream.jsonl"
+mkdir -p "$(dirname "$AI_REVIEW_SCOREBOARD_FILE")"
+printf '{"provider":"grok","elapsed_seconds":901,"failure_class":"no-verdict"}\n' > "$AI_REVIEW_SCOREBOARD_FILE"
+printf 'authorization=Bearer-abc\nordinary failure line 1\nordinary failure line 2\ntoken=live-value\n' > "$TMP/error.log"
+printf 'Observed behavior:\nThe reviewer returned empty output twice.\nExpected behavior:\nA clear decision.\n' > "$TMP/details.txt"
 
 echo '== ai-reviewer-issue'
-output="$($SCRIPT record --provider grok --summary 'Reviewer returned no verdict.' --repo "$TMP/repo" --error-file "$TMP/error.log")"
+output="$($SCRIPT record --provider grok --summary 'Reviewer returned no verdict.' --details-file "$TMP/details.txt" --command 'ai-grok-review ask test' --repo "$TMP/repo" --error-file "$TMP/error.log")"
 id="$(printf '%s\n' "$output" | sed -n 's/^ai-reviewer-issue: recorded //p')"
 report="$AI_REVIEWER_ISSUE_DIR/$id"
 check "record creates a valid issue" "jq -e '.provider==\"grok\" and .summary==\"Reviewer returned no verdict.\"' '$report/issue.json'"
 check "repository evidence is captured" "jq -e '.repository.head|length==40' '$report/issue.json'"
 check "recent review artifacts are inventoried" "grep -q 'grok-example.md' '$report/recent-review-artifacts.txt'"
+check "complete matching review output is captured" "grep -q 'complete review output' '$report/review-reports/001-grok-example.md'"
+check "captured review output is redacted" "! grep -q 'report-secret' '$report/review-reports/001-grok-example.md'"
+check "recent provider logs are captured" "grep -q 'provider stream line' '$report/provider-logs/001-stream.jsonl'"
+check "captured provider logs are redacted" "! grep -q 'stream-secret' '$report/provider-logs/001-stream.jsonl'"
+check "latest scoreboard outcome is captured" "jq -e '.elapsed_seconds==901 and .failure_class==\"no-verdict\"' '$report/latest-scoreboard-entry.json'"
 check "safe reviewer metrics are preserved" "jq -e '.total_tokens==42' '$report/reviewer-metadata.redacted.json'"
 check "prompt and credential fields are removed" "! jq -e 'has(\"prompt\") or has(\"credential\")' '$report/reviewer-metadata.redacted.json'"
-check "error tail is bounded and redacted" "grep -q 'token=\[REDACTED\]' '$report/error-tail.redacted.txt' && ! grep -q 'live-value' '$report/error-tail.redacted.txt'"
+check "complete error log is captured and redacted" "grep -q 'ordinary failure line 1' '$report/error.redacted.txt' && grep -q 'ordinary failure line 2' '$report/error.redacted.txt' && ! grep -q 'live-value' '$report/error.redacted.txt'"
+check "unrestricted details are captured" "grep -q 'returned empty output twice' '$report/details.redacted.txt'"
+check "exact command is recorded" "jq -e '.reported_command==\"ai-grok-review ask test\"' '$report/issue.json'"
 check "list finds the recorded issue" "$SCRIPT list | grep -q '$id'"
 check "show returns the recorded issue" "$SCRIPT show '$id' | jq -e '.id==\"$id\"'"
 check "path returns the configured directory" "test \"$($SCRIPT path)\" = '$AI_REVIEWER_ISSUE_DIR'"

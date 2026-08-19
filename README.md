@@ -165,11 +165,13 @@ provider wrappers into a JSONL scoreboard. It reports recurrence of long waits,
 missing verdicts, provider failures, and stale evidence. It does not choose a
 provider or replace the wrappers.
 
-`ai-reviewer-issue record --provider <name> --summary "one sentence"` records a
+`ai-reviewer-issue record --provider <name> --summary "title"` records a
 detailed local diagnostic package when a reviewer behaves unexpectedly. The
-reporting session supplies only the short summary; the command captures recent
-reviewer metadata, repository state, machine facts, and review artifact names.
-Use `--error-file <path>` to include a redacted 200-line error tail. Reports stay
+command captures complete matching review reports, recent provider logs,
+reviewer metadata, the latest scoreboard outcome, repository state, and machine
+facts. Use unrestricted `--details` or `--details-file` for the session's own
+account, `--command` for the exact invocation, and `--error-file` to include the
+complete error log. Reports stay
 under this checkout's git-ignored `.ai/reviewer-issues/` directory. Later
 ai-devops sessions can use `ai-reviewer-issue list` and `show <issue-id>`.
 
