@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# ai-reviewer-issue - record a detailed reviewer failure with one short summary.
+#
+# WHY THIS EXISTS
+# The performance scoreboard records comparable numbers, but those numbers are
+# not enough to diagnose an unusual reviewer failure. This command lets the
+# reporting session spend one sentence while the tool captures the surrounding
+# repository, machine, reviewer state, and recent artifact inventory itself.
+# Reports are local and git-ignored because reviewer state may describe private
+# code or provider sessions.
+set -euo pipefail
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ISSUE_DIR="${AI_REVIEWER_ISSUE_DIR:-$TOOLKIT_ROOT/.ai/reviewer-issues}"
+STATE_BASE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
+
+die(){ printf 'ai-reviewer-issue: error: %s\n' "$*" >&2; exit 1; }
+note(){ printf 'ai-reviewer-issue: %s\n' "$*"; }
+
+usage(){
+  cat <<'EOF'
+Usage:
+  ai-reviewer-issue record --provider NAME --summary "one sentence" [--repo PATH] [--error-file PATH]
+  ai-reviewer-issue list
+  ai-reviewer-issue show <issue-id>
+  ai-reviewer-issue path
+
+The record command automatically captures safe diagnostic evidence. --error-file
+adds the last 200 lines of an existing error log after common credentials are
+redacted. Reports remain local under the ai-devops checkout and are never committed.
+EOF
+}
+
+safe_provider(){
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+canonical_dir(){
+  [ -d "$1" ] || return 1
+  (cd "$1" && pwd -P)
+}
+
+repo_root(){
+  git -C "$1" rev-parse --show-toplevel 2>/dev/null || canonical_dir "$1"
+}
+
+latest_json(){ # latest_json DIRECTORY
+  local dir="$1" latest="" f
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    if [ -z "$latest" ] || [ "$f" -nt "$latest" ]; then latest="$f"; fi
+  done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
+  printf '%s' "$latest"
+}
+
+sanitize_json(){ # sanitize_json SOURCE DESTINATION
+  jq 'walk(if type == "object" then
+        with_entries(select((.key | ascii_downcase) as $k |
+          ($k == "prompt" or $k == "prompt_text" or $k == "content" or
+           $k == "body" or $k == "api_key" or $k == "credential" or
+           $k == "secret" or $k == "authorization" or
+           $k == "access_token" or $k == "refresh_token") | not))
+      else . end)' "$1" > "$2"
+}
+
+redact_text(){
+  sed -E \
+    -e 's/((api[_ -]?key|token|secret|password|authorization|credential)[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+    -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
+}
+
+write_artifact_inventory(){ # write_artifact_inventory REPO DESTINATION
+  local repo="$1" dest="$2" f count=0
+  : > "$dest"
+  [ -d "$repo/.ai/reviews" ] || return 0
+  while IFS= read -r -d '' f; do
+    printf '%s\t%s bytes\n' "${f#"$repo/"}" "$(wc -c < "$f" | tr -d ' ')" >> "$dest"
+    count=$((count + 1))
+    if [ "$count" -ge 10 ]; then break; fi
+  done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -print0 2>/dev/null)
+}
+
+record_issue(){
+  local provider="" summary="" repo="$(pwd)" error_file="" root now stamp host id report_dir
+  local metadata_source="" metadata_copy="" status_short="" branch="" head="" remote=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift 2 ;;
+      --summary) summary="${2:-}"; shift 2 ;;
+      --repo) repo="${2:-}"; shift 2 ;;
+      --error-file) error_file="${2:-}"; shift 2 ;;
+      *) die "unknown option '$1'." ;;
+    esac
+  done
+  safe_provider "$provider" || die "provider must use only letters, numbers, dot, dash, or underscore."
+  [ -n "$summary" ] || die "--summary is required."
+  [ "${#summary}" -le 1000 ] || die "summary must be 1000 characters or fewer."
+  root="$(repo_root "$repo")" || die "repository directory not found: $repo"
+  if [ -n "$error_file" ]; then [ -f "$error_file" ] || die "error file not found: $error_file"; fi
+
+  now="$(date -u +%FT%TZ)"; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  host="$(hostname 2>/dev/null || printf unknown)"
+  id="$stamp-$host-$provider-$$"
+  report_dir="$ISSUE_DIR/$id"
+  mkdir -p "$report_dir" || die "cannot create report directory: $report_dir"
+  chmod 0700 "$ISSUE_DIR" "$report_dir" 2>/dev/null || true
+
+  metadata_source="$(latest_json "$STATE_BASE/$provider")"
+  if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
+    metadata_copy="$report_dir/reviewer-metadata.redacted.json"
+    sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
+    chmod 0600 "$metadata_copy" 2>/dev/null || true
+  fi
+
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"
+    head="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
+    remote="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+    status_short="$(git -C "$root" status --short --untracked-files=no 2>/dev/null || true)"
+  fi
+
+  write_artifact_inventory "$root" "$report_dir/recent-review-artifacts.txt"
+  if [ -n "$error_file" ]; then
+    tail -n 200 "$error_file" | redact_text > "$report_dir/error-tail.redacted.txt"
+    chmod 0600 "$report_dir/error-tail.redacted.txt" 2>/dev/null || true
+  fi
+
+  jq -n \
+    --arg id "$id" --arg created "$now" --arg provider "$provider" --arg summary "$summary" \
+    --arg toolkit "$TOOLKIT_ROOT" --arg report_dir "$report_dir" --arg repo "$root" \
+    --arg remote "$remote" --arg branch "$branch" --arg head "$head" --arg status "$status_short" \
+    --arg host "$host" --arg os "$(uname -a 2>/dev/null || printf unavailable)" \
+    --arg shell "${SHELL:-unavailable}" --arg metadata_source "$metadata_source" \
+    --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" \
+    '{schema_version:1,id:$id,created_at:$created,provider:$provider,summary:$summary,
+      toolkit_root:$toolkit,report_directory:$report_dir,
+      repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
+      machine:{hostname:$host,os:$os,shell:$shell},
+      evidence:{latest_metadata_source:$metadata_source,redacted_metadata_copy:$metadata_copy,
+        recent_review_artifacts:"recent-review-artifacts.txt",
+        error_tail:(if $error_source=="" then null else "error-tail.redacted.txt" end)}}' \
+    > "$report_dir/issue.json"
+  chmod 0600 "$report_dir/issue.json" "$report_dir/recent-review-artifacts.txt" 2>/dev/null || true
+
+  note "recorded $id"
+  note "saved to $report_dir"
+}
+
+list_issues(){
+  local f found=0
+  [ -d "$ISSUE_DIR" ] || { note "no recorded issues"; return 0; }
+  for f in "$ISSUE_DIR"/*/issue.json; do
+    [ -f "$f" ] || continue; found=1
+    jq -r '[.id,.created_at,.provider,.summary]|@tsv' "$f"
+  done
+  [ "$found" -eq 1 ] || note "no recorded issues"
+}
+
+show_issue(){
+  local id="$1" file
+  safe_provider "$id" || die "invalid issue id."
+  file="$ISSUE_DIR/$id/issue.json"
+  [ -f "$file" ] || die "issue not found: $id"
+  jq . "$file"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  record) record_issue "$@" ;;
+  list) [ "$#" -eq 0 ] || die "list takes no arguments."; list_issues ;;
+  show) [ "$#" -eq 1 ] || die "show requires one issue id."; show_issue "$1" ;;
+  path) [ "$#" -eq 0 ] || die "path takes no arguments."; printf '%s\n' "$ISSUE_DIR" ;;
+  --version) printf 'ai-reviewer-issue %s\n' "$VERSION" ;;
+  -h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
