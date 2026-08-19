@@ -165,7 +165,7 @@ Chrome's own download path does not work here and wastes an hour if retried. An 
 
 The working pattern is the same browser-pushes-to-a-local-receiver bridge the Peanuts scraper uses. The credential never leaves the tab, and the receiver is the only thing that touches the NAS:
 
-1. Run `warner-bros/scraper/file-receiver.mjs --dest "<UNC path with forward slashes>" --port 8788` in the private data repo. It binds to 127.0.0.1, accepts `POST /file?name=&len=`, and answers `GET /have` with the names and sizes already written.
+1. Run `warner-bros/scripts/file-receiver.mjs --dest "<UNC path with forward slashes>" --port 8788` in the private data repo. It binds to 127.0.0.1, accepts `POST /file?name=&len=`, and answers `GET /have` with the names and sizes already written.
 2. In the portal tab, loop over the manifest: `fetch(url, {credentials:'include'})`, check the blob size against the manifest, then POST the blob to the receiver. Skip any file `/have` already reports at the right size, so a restart resumes instead of starting over. Retry a failed file three times with a pause; never restart the batch.
 3. Start the loop without awaiting it and poll the receiver log, rather than holding a browser tool call open for hours.
 
