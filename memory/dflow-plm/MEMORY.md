@@ -22,5 +22,3 @@
 - [dflow sandbox = PRODUCTION Supabase](dflow-sandbox-is-production-supabase.md) — alsand writes to `qsllyeztdwjgirsysgai`, schema-separated only; test data is permanent and only Albert can delete it
 - [shared-db production apply lane](shared-db-production-apply-lane.md) — merged ≠ applied; workflow dispatch + Albert's approval, and atomic batches (B9) forbid applying one migration alone
 - [AG Grid group id → context.col_id](aggrid-group-id-survives-as-context-colid.md) — on Standardized, `field` is cleared and `groupId` is auto-numbered; match saved group ids on `context.col_id`
-- [Skills are a build output](claude-skills-are-a-build-output.md) — `~/.claude/skills` is regenerated from ai-devops on every sync; edit the repo, never the installed copy (`ai-install-skills --log` shows what overwrote what)
-- [AGENTS.md size cap](agents-md-size-cap.md) — AGENTS.md is a router, keep under 60KB; quirks/incidents/pending-work live in docs/, enforced by session-docs-update
