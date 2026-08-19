@@ -148,6 +148,20 @@ Normalise these in any loader; do not silently "fix" them in the raw capture.
   exist. **Resolve by ID, never by name** — the names collide.
 - 208 assets carry no guide keyword and cannot be attributed to any guide.
 
+## Files and database are both kept, and differ on purpose
+
+The capture was copied into Supabase, not moved. Query the database for working
+answers; keep `raw/` because it is the only thing that rebuilds the database without
+re-scraping the portal.
+
+The database holds LESS than the files: it excludes every dictionary entry belonging
+to WildBrain's other, unlicensed IP (116 brands, 6 franchises, and most of the 217
+characters and 28 eras). That is a scope rule, not an omission. Everything about the
+licensed property is loaded. Do not "fix" the gap by loading the rest.
+
+`derived/guide-character.tsv` has no table: guide-to-character is derived through the
+assets, so it is a join, not a stored fact.
+
 ## Owner rulings — read before touching the guide layer
 
 Guide identity is reconstructed from free text, so where that text is wrong only the
