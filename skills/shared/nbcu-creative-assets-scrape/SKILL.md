@@ -9,6 +9,26 @@ Capture NBCU source truth without submitting a project.
 
 Scope note: the read-only rules below govern METADATA SCRAPING only. Downloading style-guide assets to Albert's own server is separate, allowed work when he asks for it by name (owner ruling 2026-08-19).
 
+
+## Refreshing this capture (incremental runs)
+
+Style guides change after a capture: guides get added, art is replaced in place under the
+same file name, and assets are withdrawn. Any refresh, re-scrape, delta or "what's new
+since last time" request on NBCU runs under the shared
+**`licensor-incremental-capture`** skill. Load it - it owns the bookmark format, the diff,
+the safety gates and the withdrawn-asset ruling. This skill still owns the endpoints,
+entitlement rules and field names below.
+
+Two things specific to NBCU:
+
+- **Change signal:** `display_modified` + `display_size` (medium - rendered strings, so an in-place art replacement can be missed)
+- **Re-index in full** from the search index per authorized `paths` scope on every run. Indexing is metadata-only and
+  cheap; only the detail fetches are skipped for rows whose signal has not moved.
+
+Never treat a run timestamp alone as the bookmark, and never let a short or failed index be
+read as the licensor withdrawing assets. The gates in the shared skill exist because that
+failure silently destroys data.
+
 ## Mandatory sources
 
 - Home and entitlement directory: `https://creativeassets.nbcuni.com/content/asset-share-commons/en.html`
