@@ -188,3 +188,53 @@ Concretely, in a repo that may be shared with a concurrent agent:
 **Lesson that made this slow to notice:** the loss produced no error and no output.
 Concurrent-agent damage is silent by construction, so the guard has to be *before*
 the command, not a check afterwards.
+
+
+## 2026-08-19 — a force-push silently dropped four commits from `main`
+
+**Impact:** in `u2giants/licensor-source-data`, four commits that had been pushed to
+`main` were removed from both `main` and `origin/main` by a later force-push from a
+different concurrent session. Two sessions' work vanished: a complete scraper with
+its tests, a docs commit, a handoff, and an unrelated session's scraper. The working
+tree reverted with it, so the files disappeared from disk too.
+
+**Symptom:** none at the time. It surfaced only because a wrap-up step listed the
+repo's tracked files and the count was implausibly small. `git status` looked
+ordinary; `git log` looked ordinary; the branch reported neither ahead nor behind.
+A deleted file had even reappeared, which is the tell — a revert, not a deletion.
+
+**Root cause:** a force-push that rewrote `main` without merging what was already
+there. This is the committed-work twin of the 2026-08-18 incident above, which
+destroyed *uncommitted* work with `reset --hard`. Same class, opposite side.
+
+**Recovery — this part matters, because it worked completely.** Unlike uncommitted
+work, pushed commits are recoverable: the objects survive in every clone that ever
+had them, even when no branch points at them any more.
+
+```bash
+git merge-base --is-ancestor <sha> HEAD || echo dropped   # confirm the loss
+git merge --no-ff <tip-sha> -m "Restore commits dropped by a force-push"
+```
+
+Merging the **tip** of the dropped chain restores the whole chain, and it restored a
+second session's commit for free because that commit was in the same ancestry. A
+merge is the right tool here, not another force-push: it is additive, it keeps both
+histories, and it cannot drop whatever arrived in the meantime.
+
+Find the SHAs in `git reflog`, or in earlier session output if you have it. Do this
+**before** running `git gc`, which is what eventually collects unreachable objects.
+
+**Prevention:**
+
+- **Never force-push a shared branch.** In these repos `main` is shared with
+  concurrent agents by design.
+- If a push is rejected, `git fetch` and rebase or merge onto what is there. A
+  rejected push is the safety net working, not an obstacle to overpower with `-f`.
+- Before any history rewrite on a shared branch, run `git log --oneline origin/main`
+  and read whose commits you are about to discard.
+
+**Lesson:** both of today's losses were silent, and both were noticed by accident
+during an unrelated check. Concurrent-agent damage does not announce itself, so the
+guard belongs before the destructive command. The difference is that committed work
+came back in one command and uncommitted work was gone forever — which is the
+strongest possible argument for committing early in a shared checkout.

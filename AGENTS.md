@@ -87,6 +87,7 @@ Then load additional docs only when relevant:
 | A behavior looks like a bug, or you are about to "fix"/simplify something odd | [`docs/design-decisions.md`](docs/design-decisions.md) | Do not change any behavior listed in "Intentional quirks" below until you have read its entry there |
 | A tool reports success but changed nothing, Codex sandboxing fails on Windows, or 1Password rate-limits | [`docs/critical-incidents.md`](docs/critical-incidents.md) | Unrelated docs |
 | About to run `git reset --hard`, `git checkout --`, or `git clean` in a repo another agent may be using | [`docs/critical-incidents.md`](docs/critical-incidents.md) (→ 2026-08-18) | **Run `git status --short` first. Any ` M` line is a hard stop — a hard reset destroyed another session's uncommitted work on 2026-08-18 and it was unrecoverable** |
+| A commit you pushed is missing from `main`, or a file you deleted has reappeared | [`docs/critical-incidents.md`](docs/critical-incidents.md) (→ 2026-08-19) | **A force-push dropped it. The commits are recoverable — `git merge --no-ff <tip-sha>`. Never force-push a shared branch** |
 | Continue unfinished work | `AGENTS.md`, `HANDOFF.md` → the OPEN files in `HANDOFF.d/` (newest-first), docs named inside them | Docs unrelated to the handoff scope |
 | Claude Code session | `CLAUDE.md`, then `AGENTS.md` | Other docs unless the task requires them |
 | Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
