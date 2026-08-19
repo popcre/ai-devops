@@ -136,3 +136,55 @@ resolving secrets, release it, then start the MCP server with the resolved value
 already in memory. Do not extend the timeout. Do not wrap a long-running server
 inside `flock` or `op run`.
 
+
+
+## 2026-08-18 — `git reset --hard` destroyed another session's uncommitted work
+
+**Impact:** an uncommitted working-tree edit to `bin/ai-glm`, made by a different
+concurrent session in this same working copy, was permanently lost. Uncommitted
+changes never enter Git's object store, so there is no reflog entry, no dangling
+blob, and no recovery. `git fsck --lost-found` was run and found nothing relevant.
+One file, unknown content, unrecoverable.
+
+**Symptom:** none at the time. The reset reported nothing, the push succeeded, and
+the loss was only noticed because ` M bin/ai-glm` had silently disappeared from a
+later `git status` that was being read for an unrelated reason.
+
+**Root cause:** the session needed to realign local `main` after pushing a commit
+through a temporary worktree, and reached for a hard reset as a cleanup step:
+
+```
+git reset -q --hard origin/main -- 2>/dev/null || git merge -q --ff-only origin/main
+```
+
+The trailing `--` with no pathspec does not scope anything. This is a full hard
+reset, and `--hard` overwrites the working tree, not just the index and HEAD. The
+`2>/dev/null` hid any complaint, and `-q` hid the result.
+
+**Why the session had already been warned.** The same session had, twenty minutes
+earlier, deliberately used a temporary worktree *specifically* to avoid disturbing
+this session's uncommitted files, and had explicitly committed with an explicit
+pathspec for the same reason. It knew the repository was dirty with someone else's
+work. The care was applied to the interesting steps and dropped on the boring
+cleanup step at the end.
+
+**Prevention — the rule this broke.** Global rule 16a: every destructive action
+must be recoverable before you take it, and `git reset --hard` over unreviewed work
+is named in it explicitly.
+
+Concretely, in a repo that may be shared with a concurrent agent:
+
+- **Never `git reset --hard` in a working copy you did not verify is clean.** Run
+  `git status --short` first, and treat any ` M` line as a hard stop.
+- To realign a local branch after pushing via a worktree, use
+  `git merge --ff-only origin/main` alone, with no `--hard` fallback. It refuses
+  rather than destroys, which is the entire point.
+- Never chain a destructive command as the fallback of a non-destructive one. The
+  `||` in the command above turned "try the safe thing" into "do the unsafe thing
+  whenever the safe thing is unavailable".
+- Do not silence a destructive command. `-q` and `2>/dev/null` on a `reset --hard`
+  remove the only evidence you would have had.
+
+**Lesson that made this slow to notice:** the loss produced no error and no output.
+Concurrent-agent damage is silent by construction, so the guard has to be *before*
+the command, not a check afterwards.
