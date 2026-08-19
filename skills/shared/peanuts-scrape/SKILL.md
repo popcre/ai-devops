@@ -168,6 +168,43 @@ peanuts/derived/   aggregates.json, character-counts.json,
 
 ## Database
 
-Schema for the shared Supabase database is governed by `u2giants/shared-db`
-(see the `shared-db-change` skill). Never write Peanuts structure from this repo.
-Licensed Peanuts rows stay in the approved private repo.
+The landing schema is **built and live in production**: 19 `plm.peanuts_*` tables
+plus `plm.begin_peanuts_capture` / `plm.finalize_peanuts_capture`, authored and
+applied through `u2giants/shared-db` issue #1217 on 2026-08-19. Do not propose it
+again, and never write Peanuts *structure* from the extract repo — that is
+shared-db's job (see the `shared-db-change` skill). The *rows* belong to this
+application, so loading them needs no issue and no dispatch.
+
+```bash
+export PGPASSWORD="$(op read 'op://vibe_coding/Supabase DB Password - shared POP database/password')"
+node peanuts/loader/peanuts-load.mjs --raw peanuts/raw --dry-run
+node peanuts/loader/peanuts-load.mjs --raw peanuts/raw
+```
+
+| Command | What it does |
+|---|---|
+| `npm --prefix peanuts test` | 40 unit tests over the row builder |
+| `node peanuts/loader/rehearse.mjs` | Whole DB path against the real schema in a transaction that always rolls back |
+| `node peanuts/loader/rehearse.mjs --negative` | Proves the count gate rejects a misreported capture |
+
+Things worth knowing before you touch the loader:
+
+- It runs as `service_role`, which has `SELECT` + `INSERT` and **no** update or
+  delete. The connection authenticates as the owner then `SET ROLE`s down. That
+  line is the reason a loader bug cannot destroy data. Leave it.
+- `finalize_peanuts_capture` compares three numbers per entity — declared,
+  reported, and actually present. Any disagreement records the capture as
+  `rejected` rather than complete. Rejected captures are immutable evidence and do
+  not replace a previous good one.
+- `plm.peanuts_asset` carries composite foreign keys to the style-guide,
+  asset-type, initiative and licensing-status vocabularies. A value stamped on an
+  asset but missing from its vocabulary would abort the load partway, so the
+  transform catches it first and names it.
+- The extract files must be in the shape the **scraper** emits
+  (`definitionId` / `controlledVocabularyId` / `multiSelect`, vocabularies keyed by
+  the portal's vocabulary display name). Vocabularies join to fields by
+  `vocabularyId`, never by display name. A hand-edited file in a different shape
+  produces zero vocabulary rows; the loader refuses rather than loading empty.
+
+Licensed Peanuts rows stay in the approved private repo, and no licensed value
+belongs in a shared-db issue, migration, test or commit message.
