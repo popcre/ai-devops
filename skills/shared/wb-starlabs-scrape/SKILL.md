@@ -134,7 +134,7 @@ Retrieve files one at a time. The bulk/zip download is a separate server-side jo
 
 ### Destination and naming, as the business already stores it
 
-The Warner library lives at `\\192.168.3.100\styleguides\WB`. Observed structure on 2026-08-18, which new downloads must match rather than invent:
+The Warner library lives at `\\192.168.3.100\styleguides\WB`. The share is `styleguides` and `WB` is a folder inside it; a request written as `styleguidesWB` is the same place, not a second share, and no share by that name exists. There is also an `oldStyleguides` share, described on the NAS as no longer used: never write into it. Observed structure on 2026-08-18, which new downloads must match rather than invent:
 
 - Level 1 is a Property or brand folder in the licensing team's own wording, not a Warner ID. Some names carry a year or a qualifier, and some carry a leading `_` to sort administrative folders to the end.
 - Level 2 is optional and varies per property: a release-year folder, a numbered ordering prefix, or a category grouping. It exists where a property has many guides and is absent where it has few. Do not add a level that a property does not already use.
@@ -146,9 +146,37 @@ Confirm the exact folder path and any season prefix with the licensing team befo
 
 ### Building the checklist
 
-The Art Assets Style Guide filter exposes each guide's exact name together with its asset count. That count is the completeness target for a retrieval pass: a guide's folder is done when its file count matches, and the mismatch tells you what to retry. Record the count at capture time, since it can move.
+Do not build the list from the filter panels. The NXQL search endpoint returns the whole guide in one authenticated read from the portal tab, with exact file names, byte sizes, UUIDs, and ready-made download URLs (proven 2026-08-19 on Harry Potter TV Series):
 
-Write a per-guide checklist file listing each asset's file name, UUID, and result, and update it as each file lands. The pass must resume from that file after a crash instead of starting over.
+```js
+const q = encodeURIComponent("SELECT * FROM Document WHERE public:styleGuideName LIKE '%Dark Train%' AND ecm:isVersion = 0 AND ecm:isTrashed = 0");
+const r = await fetch(`https://dam.starlabs.warnerbros.com/nuxeo/api/v1/search/lang/NXQL/execute?query=${q}&pageSize=1000&currentPageIndex=0`,
+  {credentials:'include', headers:{'properties':'file,common,dublincore,public','Content-Type':'application/json'}});
+```
+
+- Send the `properties` header or `file:content` comes back empty. Each entry then carries `file:content.name` (byte-for-byte), `.length`, and `.data`, which is the direct `nxfile` URL. That URL is the whole retrieval mechanism; nothing else is needed.
+- Assets sit in a per-guide Nuxeo folder, `/default-domain/workspaces/Asset/Style Guide/<Style Guide Name>/`. A `LIKE` search matches sibling guides that share a word, so filter the results by that exact folder path before downloading. "Dark Train" returned 337 rows spanning both `Dark Train Foundational Style Guide` (305 files, 15.3 GB) and `Dark Train Packaging Guide` (32 files). Confirm with the owner which guides are wanted, and never assume a near-name match is in scope.
+- `resultsCount` from the same response is the completeness target. `maxPageSize` is 1,000 and `resultsCountLimit` is 10,000, so a guide larger than 1,000 files needs paging and one larger than 10,000 needs the partition rules in the Art Assets section.
+- Write the name/UUID/size list to a local manifest file before downloading, and verify names and sizes against it at the end. The page can hand its own manifest over by POSTing it to the receiver below; do not paste 300 rows through chat.
+
+### Getting the bytes onto the NAS
+
+Chrome's own download path does not work here and wastes an hour if retried. An `<a download>` click on the cross-origin `nxfile` URL silently does nothing, and so does the blob-URL variant: no file appears in Downloads, no error appears anywhere, and `chrome://downloads` cannot be screenshotted to diagnose it. Do not go down this road.
+
+The working pattern is the same browser-pushes-to-a-local-receiver bridge the Peanuts scraper uses. The credential never leaves the tab, and the receiver is the only thing that touches the NAS:
+
+1. Run `warner-bros/scraper/file-receiver.mjs --dest "<UNC path with forward slashes>" --port 8788` in the private data repo. It binds to 127.0.0.1, accepts `POST /file?name=&len=`, and answers `GET /have` with the names and sizes already written.
+2. In the portal tab, loop over the manifest: `fetch(url, {credentials:'include'})`, check the blob size against the manifest, then POST the blob to the receiver. Skip any file `/have` already reports at the right size, so a restart resumes instead of starting over. Retry a failed file three times with a pause; never restart the batch.
+3. Start the loop without awaiting it and poll the receiver log, rather than holding a browser tool call open for hours.
+
+Receiver rules learned the hard way:
+
+- **Stream to disk.** Style-guide PSBs run past 2 GB (one was 2,936,991,642 bytes), and `writeFileSync` on a buffer that size throws `ERR_OUT_OF_RANGE` and kills the receiver mid-pass. Pipe the request straight into a write stream.
+- Write to `<name>.part` and rename only after the byte count matches the expected length. A mismatch deletes the partial and returns 409 so the browser retries that one file.
+- Send `Access-Control-Allow-Private-Network: true` plus normal CORS for the portal origin, or Chrome's Private Network Access check fails the loopback POST with a bare "Failed to fetch".
+- Reject any name containing a slash or `..` instead of trusting the portal's file name as a path.
+
+A completed pass must be proved by comparing the manifest against the folder on disk: count, every name present, every byte size equal, nothing extra.
 
 ### Reading the filter panels
 
@@ -159,6 +187,8 @@ Brand and Style Guide are separate axes. Brand is `public:franchise` and returne
 ### Session gate
 
 Warner SSO renders as a blank solid-colour page when the session is not authenticated, with the URL sitting on `ssobiz.wbd.com/app/.../sso/saml`. That is a sign-in prompt that never painted, not a portal outage. Stop and ask the user to sign in; never attempt the login, MFA, or any credential step.
+
+An expired session redirects instead to `portal.starlabs.warnerbros.com/timeout/`, a "Session Timeout" card with a LOGIN button. Clicking LOGIN only opens the Okta sign-in form, which is a navigation, not a credential step, so it is safe to do for the user; stop there and let them finish. The first screenshot after a session change can time out on `Page.captureScreenshot`; take it again rather than treating the tab as frozen.
 
 ## Output and validation
 
