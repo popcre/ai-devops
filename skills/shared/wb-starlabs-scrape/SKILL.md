@@ -7,6 +7,26 @@ description: Safely capture Warner Bros. STARLABS portal source data, especially
 
 Capture Warner source truth without submitting a job or turning raw labels into canonical data prematurely.
 
+
+## Refreshing this capture (incremental runs)
+
+Style guides change after a capture: guides get added, art is replaced in place under the
+same file name, and assets are withdrawn. Any refresh, re-scrape, delta or "what's new
+since last time" request on Warner STARLABS runs under the shared
+**`licensor-incremental-capture`** skill. Load it - it owns the bookmark format, the diff,
+the safety gates and the withdrawn-asset ruling. This skill still owns the endpoints,
+entitlement rules and field names below.
+
+Two things specific to Warner STARLABS:
+
+- **Change signal:** `modified_date` + `file_size_bytes` (strong)
+- **Re-index in full** from the Art Assets listings on every run. Indexing is metadata-only and
+  cheap; only the detail fetches are skipped for rows whose signal has not moved.
+
+Never treat a run timestamp alone as the bookmark, and never let a short or failed index be
+read as the licensor withdrawing assets. The gates in the shared skill exist because that
+failure silently destroys data.
+
 ## Mandatory sources
 
 - Direct property-character relationship: `https://portal.starlabs.warnerbros.com/submit/product/`.

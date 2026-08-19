@@ -7,6 +7,26 @@ description: Safely capture, resume, validate, reconcile, or load authorized Dis
 
 Capture Disney source truth without changing either portal or downloading licensed media.
 
+
+## Refreshing this capture (incremental runs)
+
+Style guides change after a capture: guides get added, art is replaced in place under the
+same file name, and assets are withdrawn. Any refresh, re-scrape, delta or "what's new
+since last time" request on Disney OPA and DCP Vault runs under the shared
+**`licensor-incremental-capture`** skill. Load it - it owns the bookmark format, the diff,
+the safety gates and the withdrawn-asset ruling. This skill still owns the endpoints,
+entitlement rules and field names below.
+
+Two things specific to Disney OPA and DCP Vault:
+
+- **Change signal:** presence + file name + extension for DCP Vault (weak - the portal publishes no modified date), and the OPA record fields for OPA
+- **Re-index in full** from each authorized portal scope on every run. Indexing is metadata-only and
+  cheap; only the detail fetches are skipped for rows whose signal has not moved.
+
+Never treat a run timestamp alone as the bookmark, and never let a short or failed index be
+read as the licensor withdrawing assets. The gates in the shared skill exist because that
+failure silently destroys data.
+
 ## Route the request
 
 - **OPA** is Disney Online Product Approval. Use it for the account-visible Property-to-Character picker and Disney's source IDs.

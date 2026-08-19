@@ -11,6 +11,26 @@ everything here transfers to any other Wedia DAM.
 Extract lives in `u2giants/licensor-source-data` under `wildbrain/`. Read
 `wildbrain/README.md` before using or extending the data.
 
+
+## Refreshing this capture (incremental runs)
+
+Style guides change after a capture: guides get added, art is replaced in place under the
+same file name, and assets are withdrawn. Any refresh, re-scrape, delta or "what's new
+since last time" request on Strawberry Shortcake / WildBrain runs under the shared
+**`licensor-incremental-capture`** skill. Load it - it owns the bookmark format, the diff,
+the safety gates and the withdrawn-asset ruling. This skill still owns the endpoints,
+entitlement rules and field names below.
+
+Two things specific to Strawberry Shortcake / WildBrain:
+
+- **Change signal:** the Wedia record's own modified/updated field where present, else file size (medium)
+- **Re-index in full** from the authorized era and keyword listings on every run. Indexing is metadata-only and
+  cheap; only the detail fetches are skipped for rows whose signal has not moved.
+
+Never treat a run timestamp alone as the bookmark, and never let a short or failed index be
+read as the licensor withdrawing assets. The gates in the shared skill exist because that
+failure silently destroys data.
+
 ## Run the scraper, do not hand-crawl
 
 The capture is already built and tested. Use it.
