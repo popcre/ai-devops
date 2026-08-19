@@ -1,0 +1,4 @@
+interface:
+  display_name: "Log Reviewer Issue"
+  short_description: "Capture complete reviewer failure evidence"
+  default_prompt: "Use $log-reviewer-issue to record the current reviewer problem."

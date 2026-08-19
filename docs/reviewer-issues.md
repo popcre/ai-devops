@@ -7,12 +7,13 @@ needed for diagnosis.
 
 ## Instruction to give the reporting session
 
-Copy this sentence into the session:
+Say only:
 
-> Record the reviewer problem before trying again. Run `ai-reviewer-issue record`
-> with the reviewer name, a short title, the exact failed command, and detailed
-> notes using `--details` or `--details-file`. If the failed command wrote an
-> error log, add `--error-file <exact-log-path>`. Do not run `list` or `show`.
+> Log the reviewer error.
+
+The installed `log-reviewer-issue` skill makes the session infer the reviewer,
+command, detailed symptoms, attempts, repository, and known logs from its current
+context. Albert does not need to type command options or repeat the problem.
 
 Example:
 
