@@ -148,12 +148,41 @@ Normalise these in any loader; do not silently "fix" them in the raw capture.
   exist. **Resolve by ID, never by name** — the names collide.
 - 208 assets carry no guide keyword and cannot be attributed to any guide.
 
+## Owner rulings — read before touching the guide layer
+
+Guide identity is reconstructed from free text, so where that text is wrong only the
+owner can rule. The rulings live in `wildbrain/guide-rulings.json` as DATA, with who
+ruled and when. To change one, edit that file and re-load — never edit the loader.
+
+Ruled 2026-08-19 (Albert Hazan): two guide spellings the licensor used for the same
+guide are merged (291 assets), and two junk keywords are dropped. Counts moved
+34 → 31 guides, 37 → 35 spellings, 2,168 → 2,166 asset links.
+
+The rulings file gates the load and feeds `source_commit_sha`, so a re-load after a
+new ruling is a NEW capture rather than a key collision with the old reading.
+
+`derived/` is deliberately NOT ruled — it stays faithful to what the portal literally
+says. `derived/guides.tsv` showing more guides than the database is expected, not drift.
+
 ## Landing it in Supabase
 
-Schema request: **u2giants/shared-db#1197** — 11 `plm.wildbrain_*` tables plus 2
-functions, append-only and capture-scoped. The `shared-db` orchestrator owns it. Never
-write shared-DB structure from this repo, and never copy licensed rows into `shared-db`,
-its migrations, its tests, or an issue body.
+**Done.** Schema shipped as shared-db #1197 (migrations `20260819014639` +
+`20260819112524`) and is applied to preview and production. The extract was loaded
+2026-08-19 into both; receipts are in `wildbrain/load-receipts/`.
+
+```bash
+op run --env-file wildbrain/.env.op -- npm --prefix wildbrain run load:preview
+op run --env-file wildbrain/.env.op -- npm --prefix wildbrain run load:production
+```
+
+The loader (`wildbrain/scripts/load-supabase.mjs`) writes ROWS only, through
+`plm.begin_wildbrain_capture` / `plm.finalize_wildbrain_capture`. It refuses to load an
+uncommitted capture, refuses to write without naming the database first, and the
+database rejects any capture whose counts or endpoints disagree. Tables are append-only
+and capture-scoped: a re-load adds a snapshot, it never overwrites one.
+
+Never write shared-DB structure from this repo, and never copy licensed rows into
+`shared-db`, its migrations, its tests, or an issue body.
 
 ## Finishing
 
