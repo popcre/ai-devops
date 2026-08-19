@@ -54,6 +54,7 @@ the others live where noted.
 | ⚙ `designflow-human-qa` | Applies human-style QA to DesignFlow's six user roles and complete PLM journeys, including RFQ royalty, cost, selling-price and margin math; Item Library; Art Piece; licensing; production; samples; factory work; role boundaries; and safe disposable records on `alsand.designflow.app`. Shared by Claude and Codex. | "use designflow-human-qa" / "test DesignFlow like each user" / "QA the DesignFlow RFQ math" |
 | ⚙ `item-description-taxonomy` | Semantically parses item descriptions into item type, size, licensor, property and artwork; consolidates spelling, prefix and detail variants into merchant-sensible canonical product families instead of treating text fragments as separate types. Shared by Claude and Codex. | "break down these item descriptions" / "build an item-type phrase list" / "clean up the item taxonomy" |
 | ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex. | "read the entire codebase and tell me if you find any bugs" |
+| ⚙ `log-reviewer-issue` | Records a reviewer failure with complete automatic evidence and detailed notes already present in the session. Shared by Claude and Codex. | "log the reviewer error" / "record this reviewer issue" |
 | `designflow-e2e-tester` | AI-driven end-to-end/visual testing of the dflow app. | "run the E2E tester" (lives in designflow-frontend/.claude/skills) |
 
 ## Meta

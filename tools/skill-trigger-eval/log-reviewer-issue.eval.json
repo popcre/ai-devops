@@ -1,0 +1,12 @@
+[
+  {"query":"log the reviewer error","should_trigger":true},
+  {"query":"record this reviewer issue with ai-reviewer-issue","should_trigger":true},
+  {"query":"save what just went wrong with the Grok review","should_trigger":true},
+  {"query":"log this review failure before you retry","should_trigger":true},
+  {"query":"the Kimi reviewer returned no decision; record the problem","should_trigger":true},
+  {"query":"show me the reviewer scoreboard","should_trigger":false},
+  {"query":"run a Grok review of this change","should_trigger":false},
+  {"query":"fix the bug that the reviewer found","should_trigger":false},
+  {"query":"list the existing reviewer issue reports","should_trigger":false},
+  {"query":"explain why the GLM review failed","should_trigger":false}
+]
