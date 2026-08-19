@@ -103,8 +103,42 @@ Use Warner's IDs wherever available. Record absent relationships explicitly in t
 - Record every hierarchy level and sub-brand verbatim with Warner's IDs. Do not decide during extraction which level maps to the internal property model.
 - Capture each asset file name byte-for-byte, including its extension, capitalization, whitespace, full path, and folder structure when exposed. Do not trim, clean, expand, normalize, or collapse near-duplicates. Never infer a licensor, property, or character from substrings in a file name.
 - Capture asset source ID, size, source dates, and listed metadata without downloading the asset itself.
-- Do not download artwork, PDFs, style-guide documents, previews, or other asset content. If names cannot be captured without a download, stop and report the limitation.
+- During a metadata scrape, do not download artwork, PDFs, style-guide documents, previews, or other asset content. If names cannot be captured without a download, stop and report the limitation. Deliberate file retrieval to the NAS is a separate, separately authorized task; see [Asset retrieval to the NAS](#asset-retrieval-to-the-nas).
 - Store only the schema's required columns as normal columns. Put useful, recoverable source fields into `raw`; do not store thumbnails, previews, permissions, analytics, or unrelated display filters merely because Nuxeo returned them.
+
+## Asset retrieval to the NAS
+
+This is a different job from the metadata scrape and never runs as a side effect of one. The owner authorized it on 2026-08-18 because the portal's bulk download repeatedly crashes and staff were downloading files one at a time by hand. Retrieval is allowed only for style guides the licensing team has explicitly named. Never download "everything reachable", and never start a retrieval pass without a named list.
+
+Retrieve files one at a time. The bulk/zip download is a separate server-side job and is the thing that fails; single-asset retrieval bypasses it entirely. Pace the requests, and treat a failure as a retry of that one file, never a restart of the batch.
+
+### Destination and naming, as the business already stores it
+
+The Warner library lives at `\\192.168.3.100\styleguides\WB`. Observed structure on 2026-08-18, which new downloads must match rather than invent:
+
+- Level 1 is a Property or brand folder in the licensing team's own wording, not a Warner ID. Some names carry a year or a qualifier, and some carry a leading `_` to sort administrative folders to the end.
+- Level 2 is optional and varies per property: a release-year folder, a numbered ordering prefix, or a category grouping. It exists where a property has many guides and is absent where it has few. Do not add a level that a property does not already use.
+- The deepest folder is one style guide, named after the portal's Style Guide value, usually with the licensing team's season prefix in front of it. Windows-illegal characters in the portal name are substituted, not stripped.
+- Some properties also hold loose files directly at the property level, outside any guide folder. Leave that alone; do not tidy or reorganize existing folders during a retrieval pass.
+- Asset file names are stored byte-for-byte as the portal serves them, including capitalization and extension case. Never rename, normalize, deduplicate, or re-case a downloaded file.
+
+Confirm the exact folder path and any season prefix with the licensing team before creating a new folder. The folder layer is a human convention that this skill records but does not own.
+
+### Building the checklist
+
+The Art Assets Style Guide filter exposes each guide's exact name together with its asset count. That count is the completeness target for a retrieval pass: a guide's folder is done when its file count matches, and the mismatch tells you what to retry. Record the count at capture time, since it can move.
+
+Write a per-guide checklist file listing each asset's file name, UUID, and result, and update it as each file lands. The pass must resume from that file after a crash instead of starting over.
+
+### Reading the filter panels
+
+The filter aggregations are Polymer `wbcp-checkbox-aggregation` elements nested several levels deep in shadow DOM; a plain `document.querySelector` will not reach them. Walk `children` and `shadowRoot` recursively with a visited set and a depth limit of about 40. Select a panel by its `label` property (`Brand`, `Season`, `Franchise / Property`, `Style Guide`, `Category/Theme`, `Subcategory`, `Character`, `Language`); the `field` property does not survive JSON serialization and reads as null. Each bucket carries `key`, `docCount`, and a `fetchedKey` whose `properties.label` is the display name. Some labels begin with a leading space, so trim before matching against a folder name. A panel must be expanded in the UI before its buckets populate; a collapsed panel reads as zero buckets.
+
+Brand and Style Guide are separate axes. Brand is `public:franchise` and returned a small closed list backed by a Nuxeo `franchise` directory whose entry `id` is the brand name itself, not a UUID. The Style Guide panel remains capped at 100 buckets, so it is a window, not the full catalogue; the 10,000-result and partition rules in the Art Assets section still apply.
+
+### Session gate
+
+Warner SSO renders as a blank solid-colour page when the session is not authenticated, with the URL sitting on `ssobiz.wbd.com/app/.../sso/saml`. That is a sign-in prompt that never painted, not a portal outage. Stop and ask the user to sign in; never attempt the login, MFA, or any credential step.
 
 ## Output and validation
 
