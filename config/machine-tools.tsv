@@ -8,4 +8,5 @@ ai-deepseek-agent	bin/ai-deepseek-agent	bash+cmd	yes	none	install-machine-tools.
 ai-review-preflight	bin/ai-review-preflight	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-scoreboard	bin/ai-review-scoreboard	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reviewer-issue	bin/ai-reviewer-issue	bash+cmd	yes	none	install-machine-tools.ps1
+ai-muse	bin/ai-muse	bash+cmd	yes	muse	install-machine-tools.ps1
 ai-glm	bin/ai-glm	cmd-only-external	yes	none	setup-opencode-glm.ps1

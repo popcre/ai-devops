@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# ai-muse — direct, protected Muse Spark review runner.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d ' \r\n' < "$ROOT_DIR/config/opencode/version")"
+CONFIG_DIR="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
+CONFIG="$CONFIG_DIR/opencode-xdg/opencode"
+BIN="$HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
+MODEL="meta-model-api/muse-spark-1.2-contributor"
+
+die() { printf 'ai-muse: error: %s\n' "$*" >&2; exit 1; }
+usage() {
+  cat <<'EOF'
+Usage: ai-muse review [repository] [request]
+
+Runs one protected, read-only Muse review in a disposable self-contained copy.
+If no request is supplied, it reads one from standard input; otherwise it reviews
+the current changes for correctness, safety, and missing tests.
+EOF
+}
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required."; }
+repo_root() { git -C "$1" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: $1"; }
+
+cmd_doctor() {
+  local failures=0
+  check() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"; else printf 'FAIL  %s\n' "$label"; failures=$((failures + 1)); fi; }
+  printf 'ai-muse doctor\n\n'
+  check 'pinned OpenCode is installed' test -x "$BIN"
+  check 'Muse configuration is installed' test -f "$CONFIG/opencode.json"
+  check 'Muse review profile removes write and shell access' bash -c "grep -q '^  write: false' '$CONFIG/agent/muse-review.md' && grep -q '^  bash: false' '$CONFIG/agent/muse-review.md'"
+  check '1Password command is available' command -v op
+  [ "$failures" -eq 0 ] || exit 1
+}
+
+cmd_review() {
+  local original="${1:-$PWD}" prompt="${2:-}" review_dir tag output status report now
+  original="$(repo_root "$original")"
+  if [ -z "$prompt" ] && [ ! -t 0 ]; then prompt="$(cat)"; fi
+  prompt="${prompt:-Review the current changes for correctness, security, and missing tests. Give concrete findings with file paths.}"
+  need op; need jq
+  [ -x "$BIN" ] || die "Muse is not installed. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
+  [ -f "$CONFIG/opencode.json" ] || die "Muse is not configured. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
+  review_dir="$($ROOT_DIR/bin/ai-review-sandbox ensure-copy "$original" muse)"
+  tag="muse-$(date -u +%Y%m%dT%H%M%SZ)"
+  "$ROOT_DIR/bin/ai-review-packet" build "$review_dir" "$tag" --decision "$prompt" --class medium >/dev/null
+  export XDG_CONFIG_HOME="$CONFIG_DIR/opencode-xdg"
+  export XDG_DATA_HOME="$HOME/.local/share/ai-devops/opencode-muse-direct"
+  export XDG_STATE_HOME="$HOME/.local/state/ai-devops/muse-direct"
+  export XDG_CACHE_HOME="$HOME/.cache/ai-devops/opencode-muse-direct"
+  mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+  MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"
+  [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
+  export MODEL_API_KEY
+  set +e
+  output="$("$BIN" run --dir "$review_dir" --agent muse-review --model "$MODEL" "$prompt" 2>&1)"
+  status=$?
+  set -e
+  unset MODEL_API_KEY
+  [ "$status" -eq 0 ] || die "Muse review failed. No other model was used. Run: ai-muse doctor"
+  now="$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$original/.ai/reviews"
+  report="$original/.ai/reviews/muse-review-$now.md"
+  {
+    printf '# Muse protected review\n\n'
+    printf '| field | value |\n|---|---|\n'
+    printf '| model | %s |\n' "$MODEL"
+    printf '| review copy | %s |\n' "$review_dir"
+    printf '| source repository | %s |\n\n' "$original"
+    printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$prompt" "$output"
+  } > "$report"
+  printf '%s\n' "$report"
+}
+
+case "${1:-}" in
+  review) shift; cmd_review "$@" ;;
+  doctor) cmd_doctor ;;
+  -h|--help|help|'') usage ;;
+  *) die "unknown command '$1'. Use: ai-muse review [repository] [request]" ;;
+esac

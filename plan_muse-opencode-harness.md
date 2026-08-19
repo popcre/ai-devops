@@ -27,6 +27,14 @@ Read this table first. Do not re-plan completed work. Whoever executes a step mu
 | 10 | Qualify live review and implementation behavior on Ubuntu | ⬜ open | Equivalent redacted Ubuntu qualification bundle and cross-platform comparison |
 | 11 | Independent review, landing, installation, and issue close | ⬜ open | Exact-head review report, commit SHA on `origin/main`, installed checks on both operating systems, and closed issue #40 |
 
+> **Design decision, 2026-08-19:** The long-running Muse server path was replaced
+> with the owner-approved direct protected runner. Both pinned 1.18.12 and newer
+> 1.18.18 returned provider authorization failures only in server mode while direct
+> Muse reviews completed with the same key. `ai-muse review` now uses a disposable
+> self-contained copy, the evidence packet, and the read-only Muse profile; it never
+> falls back to another model. GLM remains unchanged. Server-specific steps are
+> superseded; direct-runner tests and a successful live review are the release gate.
+
 **Fresh-session starting point:** Step 1.
 
 **Natural context cuts:** after Steps 2, 6, and 10. At each cut, use the `fresh-session` skill, update this STATUS table and §5, then re-read every downstream phase before starting it.
