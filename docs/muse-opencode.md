@@ -1,8 +1,9 @@
 # Muse Spark 1.2 OpenCode harness
 
-This is the evidence record and operating guide for `ai-muse`. The harness is not
-installed yet. Its first contract gate passed on 2026-08-18; the remaining work is
-tracked in [`../plan_muse-opencode-harness.md`](../plan_muse-opencode-harness.md).
+This is the operating guide for `ai-muse`. It runs a direct, protected Muse review
+inside a disposable self-contained repository copy. The former long-running OpenCode
+server path was rejected because it failed provider authorization while the same pinned
+binary and key worked in direct mode. GLM remains unchanged.
 
 ## Frozen first-contract facts
 
@@ -23,12 +24,30 @@ The redacted evidence and replayable fixture are in
 [`verification/muse-opencode/2026-08-18T2020Z-contract/`](verification/muse-opencode/2026-08-18T2020Z-contract/)
 and [`../tests/fixtures/muse-opencode/`](../tests/fixtures/muse-opencode/).
 
+## Run a review
+
+Run setup once, then verify the runner:
+
+```bash
+bin/setup-opencode-muse.sh
+ai-muse doctor
+```
+
+From the repository being reviewed:
+
+```bash
+ai-muse review "$PWD" "Review the current changes. Report concrete findings with file paths and missing tests."
+```
+
+The command creates a disposable self-contained copy, builds its evidence packet
+there, runs only `muse-spark-1.2-contributor`, and writes the result under
+`.ai/reviews/` in the original repository. It never falls back to GLM or another model.
+
 ## Safety boundary
 
-The future review profile removes every write, shell, patch, web, and sub-agent tool.
-The future implementation profile is allowed only in an isolated clone with no Git
-remote. These controls are inherited from the already-qualified GLM harness; OpenCode
-permission settings are not treated as a protection.
+The review profile removes every write, shell, patch, web, and sub-agent tool. The
+model receives only the disposable copy, whose remote is removed. These controls are
+independent of OpenCode permission settings.
 
 Contributor data-use terms were explicitly accepted by the owner on 2026-08-18. Do
 not substitute another service tier. Confirm current pricing in the authenticated Meta

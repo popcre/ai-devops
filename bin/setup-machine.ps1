@@ -773,6 +773,12 @@ if (Test-Path -LiteralPath $glmSetup) {
     & $glmSetup -RepoPath $RepoPath
     if ($LASTEXITCODE -ne 0) { throw "setup-opencode-glm.ps1 exited $LASTEXITCODE" }
     Ok "GLM runs locally: ai-glm is on PATH and the OpenCode server is healthy"
+    $museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
+    if (Test-Path -LiteralPath $museSetup) {
+      & $gitBash -lc "'$museSetup'"
+      if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
+      Ok "Muse direct protected reviews are installed: ai-muse doctor"
+    }
   } catch {
     # Loud, not silent: say what broke and what still works.
     Warn "Local GLM setup did not complete: $($_.Exception.Message)"
