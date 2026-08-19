@@ -1,11 +1,13 @@
 ---
 name: nbcu-creative-assets-scrape
-description: Safely capture NBCU Creative Asset Factory metadata for authorized Properties, IP Families, Characters, style guides, assets, file names, source IDs, and explicit relationships. Use when asked to scrape, refresh, inspect, validate, reconcile, or map NBCU, Universal, DreamWorks, Illumination, or NBCUniversal licensed source data from creativeassets.nbcuni.com, including Product Submissions and asset-search work.
+description: Capture NBCU Creative Asset Factory metadata, and download NBCU style-guide assets to Albert's server, for authorized Properties, IP Families, Characters, style guides, assets, file names, source IDs, and explicit relationships. Use when asked to scrape, refresh, inspect, validate, reconcile, or map NBCU, Universal, DreamWorks, Illumination, or NBCUniversal licensed source data from creativeassets.nbcuni.com, including Product Submissions and asset-search work, and when asked to download or pull an NBCU style guide, trend guide, design guide, or its art files to a local folder, the NAS, or an SMB share.
 ---
 
 # NBCU Creative Asset Factory scrape
 
-Capture NBCU source truth without submitting a project or downloading licensed media.
+Capture NBCU source truth without submitting a project.
+
+Scope note: the read-only rules below govern METADATA SCRAPING only. Downloading style-guide assets to Albert's own server is separate, allowed work when he asks for it by name (owner ruling 2026-08-19).
 
 ## Mandatory sources
 
@@ -17,7 +19,9 @@ Capture NBCU source truth without submitting a project or downloading licensed m
 
 Use the user's authenticated Chrome session. The user handles login and MFA. Never inspect or record passwords, cookies, browser storage, request headers, access tokens, account numbers, contact fields, or contract text.
 
-Treat the portal as read-only. Never accept terms, create or clone a submission, click Next in the creation wizard, upload, submit, share, add to a collection, add to cart, or download an asset. Metadata-only same-origin reads inside the authenticated browser are allowed.
+During a metadata scrape, treat the portal as read-only. Never accept terms, create or clone a submission, click Next in the creation wizard, upload, submit, or share. Metadata-only same-origin reads inside the authenticated browser are allowed.
+
+Downloading assets is NOT banned. When Albert explicitly asks for a named style guide or asset set to be pulled down to his server, downloading (including add-to-collection or add-to-cart steps the portal requires to produce a download) is permitted. Do not download during a routine metadata scrape.
 
 ## Licensed scope
 
@@ -87,7 +91,7 @@ Build the detail URL from the exact asset path:
 /content/asset-share-commons/en/details/document.html<asset-path>
 ```
 
-Use the document variant when the result link does. Parse the returned HTML without downloading the asset or rendition.
+Use the document variant when the result link does. During a metadata scrape, parse the returned HTML without downloading the asset or rendition.
 
 Capture:
 
@@ -165,3 +169,63 @@ Do not load a database, and do not change one. Database design changes and promo
 ## Learning loop
 
 After every real capture, update this skill with durable endpoints, field names, paging behavior, relationship evidence, failures, and recovery steps. Never add rights lists, licensed rows, account data, credentials, or asset content to the skill.
+
+## Downloading a style guide to Albert's server
+
+Owner-requested downloads are allowed (ruling 2026-08-19). Do not download during a routine
+metadata scrape.
+
+### 1. Resolve the guide to an exact DAM folder
+
+Do not trust a full-text search: `?fulltext=Dream Touch` on 2026-08-19 returned 11 files
+mixing Shrek, Illumination and Kung Fu Panda assets. Use full text only to discover the
+folder, then re-run the search scoped to that path and work from the scoped list:
+
+```text
+/content/asset-share-commons/en/search.html?paths=<dam-folder>
+```
+
+Guides live under `/content/dam/caf/en/<studio>/<property>/franchise/design-guides/<type>/<guide>_<season>/`
+with `_reference-pdf/`, `character-art/` and `composed-graphics/` subfolders. The scoped search
+returns the authoritative file list; confirm the displayed `N out of N files` count matches it.
+
+### 2. Queue each asset with the portal
+
+Direct DAM URLs work for PDFs but return HTTP 403 for high-res source art (TIF). Art must go
+through the portal's asynchronous packaging queue, one detail page at a time:
+
+1. Open the asset detail page and click `Download`. The header counter increments and the portal
+   answers `DOWNLOAD REQUESTED. REVIEW THE DOWNLOADS PAGE FOR STATUS.`
+2. Poll `/content/asset-share-commons/en/downloads.html` until the row reads `Successful`.
+   A ~600 MB TIF took roughly 2-4 minutes on 2026-08-19.
+3. Click that row's `Download` to stream the file to the browser.
+
+The bulk `Select all` + `Download` on the search page is unreliable: a 5-asset request on
+2026-08-19 packaged only the PDF. Queue assets individually.
+
+### 3. Know the failure that looks like a server problem
+
+**A native Chrome "Save as" dialog silently breaks everything.** It is modal, so no further
+download starts, and the portal's `Download` and `Add to Cart` buttons appear to do nothing:
+no network request fires, no error is shown, and the symptoms mimic NBCU throttling. If clicks
+stop registering, check for an open save dialog first. Ask the user to cancel it and to turn off
+`chrome://settings/downloads` -> "Ask where to save each file before downloading" for the run.
+
+### 4. File the results
+
+With the save prompt off, files land in the Downloads folder as `<asset>.original.tif`, and the
+browser extension may write a duplicate `(1)` copy. Strip `.original`, keep the portal's exact
+file name, and delete the duplicate.
+
+Verify every file by magic bytes before filing it: `49 49 2a 00` for TIFF, `%PDF` for PDF. A login
+or error page can otherwise be filed as if it were art.
+
+Destination convention on the style-guide NAS (`\\<removed-protected-address>\styleguides`):
+
+```text
+NBC UNIVERSAL/<Property>/<Year>/<Guide type>/<Guide name>/
+```
+
+Files sit flat in the guide folder; do not mirror the portal's `character-art/` and
+`composed-graphics/` subfolders. Sibling guides are usually named `<DD MMM> <Guide name>`;
+follow whatever name the user gives.
