@@ -4,3 +4,5 @@
 - [shared-db apply mechanics](shared-db-apply-mechanics.md) — Supabase MCP is read-only; apply via the GitHub workflow or the Management API query endpoint; the preview ledger is unreliable
 - [PopDAM two permission systems](popdam-two-permission-systems.md) — public schema (admin|user) vs app schema (administrator/designer/viewer); Master Data open writes are INTENTIONAL — never restrict them (see shared-db AGENTS.md 0.4)
 - [1Password MCP token race](onepassword-mcp-token-race.md) — "Service account token is required" = the MCP started tokenless, not a bad token; fixed in the ai-devops launcher + 1password-mcp 2.7.0 (published/live 2026-07-27); `op` CLI still works meanwhile
+- [Two kinds of property list (owner ruling)](property-list-two-kinds-ruling.md) — portal scrapes = licensed for, ColdLion = actually used; core.property Universe A is deleted (AGENTS.md 6.15)
+- [Contracts are not a data source](contracts-not-a-data-source.md) — licence contracts are NEVER a source of record; term/territory out of scope entirely; scrapes + ColdLion are canonical (AGENTS.md 6.16)
