@@ -137,11 +137,18 @@ Worldwide, Creative Associates, United Media, Bill Melendez.
 - Every controlled vocabulary (the master lists).
 - Every value on an asset: this asset has this style guide, these characters,
   this art program, this asset type, this holiday.
-- The **parent/child asset graph** via `getRelationshipByObjectId`. `linkType`
-  is `child`; `primaryId` is the parent. In practice the parent is the style
-  guide PDF (`asset_type = "Style Guide"`) and the children are the art files
-  extracted from it. Verified example: `DecoDreams.pdf` (Style Guide) is parent
-  of `DecoDreams_18rpt.eps` (Pattern), both tagged style guide "Deco Dreams".
+- The **asset-to-asset relationship graph** via `getRelationshipByObjectId`.
+  `primaryId` is the parent. The live graph has **15,770 edges over 5,220
+  parents** in three link types: `child` (11,502), `derivative` (4,267) and
+  `placed-graphic` (1). Store `link_type` verbatim; do not assume `child`.
+
+  **Do not crawl only the style-guide documents.** It is a tempting 1%-cost
+  shortcut (196 calls instead of 22,463) and it is wrong: a 400-asset
+  verification sample found 366 of 435 edges unreachable that way, across 256
+  parents outside the style-guide set. `scraper/peanuts-relationships.mjs --all`
+  does the full crawl in about 8 minutes at concurrency 4 and writes its own
+  `_coverage` block; the loader refuses any relationship file whose coverage is
+  not `complete`.
 
 **Inferred** (we computed it, label it as ours, never present as licensor-stated):
 - Style guide to art program.
@@ -157,6 +164,31 @@ A style guide can span more than one art program, so model it many-to-many.
 Confirmed cases: `70th Anniversary: Peanuts Logo`, `Great Pumpkin`,
 `Snoopy World Games`, `Beagle Scouts: Packaging`, `Beagle Scouts: Logos`,
 `Peanuts Core Everyday Packaging`, `Core Christmas Packaging`.
+
+## Three things the live capture corrected
+
+1. **The portal's asset count is short by two.** It reports 22,461; a partition
+   crawl reaches 22,463. The extras are metadata-only records (filename
+   "Metadata Asset", their own metadata template) that carry no file and are not
+   counted by the default search, but are real, available and current. The loader
+   reconciles against what it can prove exists and keeps the portal's own number
+   as `portal_default_search_total`.
+
+2. **The graph references superseded asset versions.** A capture holds current
+   versions only, so ~2,782 edges point at assets outside it (`currentVersion`
+   is `N`), and the portal also publishes 53 self-referencing edges. Neither is a
+   scrape bug and neither is fixable by re-scraping. The loader drops them,
+   counts them, and writes them onto the capture as
+   `raw_summary.excluded_by_design`. If you ever want those endpoints, the
+   capture would have to include versions (`includeVersions: true`), which is a
+   different and much larger capture.
+
+3. **Keywords are a controlled vocabulary of 31**, not an open axis. 30 are used
+   and nothing on an asset falls outside the list. The schema has no keyword
+   vocabulary table, which costs exactly one unused value ("Spacecraft"). Known
+   gap, deliberately not fixed -- a governed schema change is not worth one
+   descriptive tag. Note the separate free-text `keywords_unvalidated` field,
+   present on 17,831 assets, which stays in `raw`.
 
 ## Search gotchas
 
