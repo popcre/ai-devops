@@ -382,14 +382,63 @@ stop_run_turn() {
 
 cancel_plain_turn() { stop_run_turn; exit 130; }
 
+# ---------------------------------------------------------------------------
+# THE REVIEW-OUTPUT CONTRACT (shared-db issue #1220)
+#
+# Two separate defects were observed in one night, both of which let a wrapper
+# exit 0 with no usable review:
+#
+#  1. SILENCE READ AS APPROVE. A run ended after 637 seconds of provider time
+#     having written one assistant message ("let me verify a couple of
+#     environmental facts before finalizing findings") and no findings. The
+#     wrapper printed telemetry and exited 0. A caller reading only the exit code,
+#     or only stdout, cannot tell that from a clean review.
+#
+#  2. THE BODY THROWN AWAY. A run DID produce a full review -- five findings and a
+#     hand-traced coverage statement -- and the wrapper printed only:
+#         ## Verdict
+#         VERDICT: APPROVE
+#     because `sed -n '/^## Verdict/,$p'` prints from the heading to the END and
+#     discards everything above it. The body survived only in the raw stream. A
+#     caller quoting stdout as the review evidence would have posted a bare
+#     two-line APPROVE as the audit record for a change one step from a
+#     production write.
+#
+# In this repository's workflows a review is a MERGE GATE, and both failure modes
+# are biased toward "looks approved". So:
+#
+#   * the FULL text is printed, never the tail from a heading; and
+#   * a turn with no answer text, or with no '## Verdict' heading, is reported as
+#     a wrapper failure, not as a review that found nothing.
+# ---------------------------------------------------------------------------
+
+# Set by extract_answer: empty on success, otherwise why this turn produced no
+# usable review. A global rather than an exit status because finish_turn also runs
+# on the implement lifecycle path, where aborting early would skip artifact export.
+ANSWER_DEFECT=""
+
 extract_answer() { # extract_answer FILE
   local text
+  ANSWER_DEFECT=""
   text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed '/^$/d')"
-  if printf '%s' "$text" | grep -qF '## Verdict'; then
-    printf '%s\n' "$text" | sed -n '/^## Verdict/,$p'
-  else
-    printf '%s\n' "$text"
+  if [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
+    ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
+  elif ! printf '%s' "$text" | grep -qF '## Verdict'; then
+    ANSWER_DEFECT="the answer carries no '## Verdict' heading, so no verdict was reached"
   fi
+  # ALWAYS the whole body. Findings routinely sit ABOVE the verdict heading, and
+  # printing only the tail is how a complete review became a two-line APPROVE.
+  printf '%s\n' "$text"
+}
+
+# Report the defect loudly on stderr and return non-zero. Never downgrades to success.
+report_answer_defect() { # report_answer_defect NAME STREAM_PATH
+  [ -n "$ANSWER_DEFECT" ] || return 0
+  printf 'ai-qwen: error: no usable review for %s: %s\n' "${1:-this turn}" "$ANSWER_DEFECT" >&2
+  printf 'ai-qwen: this is a WRAPPER/PROVIDER failure, not a clean review. Silence is not approval.\n' >&2
+  printf 'ai-qwen: do NOT record this as a verdict. Re-run it, or replace the reviewer.\n' >&2
+  [ -n "${2:-}" ] && printf 'ai-qwen: raw provider stream: %s\n' "$2" >&2
+  return 1
 }
 
 PROMPT_FOOTER="
@@ -844,8 +893,11 @@ start_session() { # start_session NAME MODE
       model:$model, created:$created, updated:$created, turns:$turns}')"
   fi
 
-  finish_turn "$repo" "$name" "$out"
+  # #1220: keep the lifecycle bookkeeping, THEN fail. Aborting on the spot would
+  # skip lifecycle_finalize and lose the run's own record of what happened.
+  finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   lifecycle_finalize 0
+  [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
 }
 
 cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
@@ -899,8 +951,16 @@ cmd_ask() {
     die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
   fi
   write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.updated=$u | .turns=(.turns+1)' "$meta")"
-  finish_turn "$repo" "$name" "$out"
-  rm -f "$pf" "$out" "$out.err"
+  FINISH_RC=0
+  finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
+  if [ "$FINISH_RC" = 0 ]; then
+    rm -f "$pf" "$out" "$out.err"
+  else
+    # #1220: report_answer_defect just named "$out" as the place the review body
+    # can still be recovered from. Deleting it here would destroy the only copy.
+    rm -f "$pf"
+    exit "$FINISH_RC"
+  fi
 }
 
 continue_implementation() { # NAME RID META [RESET]
@@ -952,17 +1012,27 @@ continue_implementation() { # NAME RID META [RESET]
   fi
   if [ "$reset" = 1 ]; then LIFECYCLE_SID="$(session_id_from "$out")"
   else [ "$(session_id_from "$out")" = "$sid" ] || die "Qwen returned a different session id; refusing to advance canonical state."; fi
-  LIFECYCLE_STATE=completed; finish_turn "$repo" "$name" "$out"; lifecycle_finalize 0
+  # #1220: on the IMPLEMENT path the deliverable is the patch, so a missing verdict
+  # must never abort before lifecycle_finalize exports it. Record, export, then fail.
+  LIFECYCLE_STATE=completed
+  FINISH_RC=0; finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
+  lifecycle_finalize 0
+  [ "$FINISH_RC" = 0 ] || exit "$FINISH_RC"
 }
 
 finish_turn() {
-  local repo="$1" name="$2" out="$3" path
+  local repo="$1" name="$2" out="$3" path rc=0
+  ANSWER_DEFECT=""
   if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
   path="$(write_review_file "$repo" "$name" "$out")"
   [ -n "$path" ] && note "saved: $path"
   jq -r 'select(.type=="result") | "usage: input=\(.usage.input_tokens // "?") output=\(.usage.output_tokens // "?") turns=\(.num_turns // "?")"' "$out" 2>/dev/null | tail -1 >&2
   note "model: requested=$QWEN_MODEL returned=$(model_from "$out")"
-  return 0
+  # Issue #1220: a turn with no answer, or no verdict, must NOT read as a clean
+  # review. Returns non-zero so the caller can exit non-zero; the raw stream is
+  # named so the review body can still be recovered when the provider wrote one.
+  report_answer_defect "$name" "$out" || rc=4
+  return "$rc"
 }
 
 cmd_list() {

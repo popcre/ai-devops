@@ -469,9 +469,50 @@ echo ok > "$TMP/mode"
 echo "== output handling =="
 OUT="$(run new r7 --prompt x 2>/dev/null)"
 check "verdict is emitted"        "printf '%s' \"\$OUT\" | grep -q APPROVE"
-check "narration is stripped"     "! printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
+# CONTRACT CHANGE, shared-db issue #1220. This used to assert the opposite --
+# that everything above '## Verdict' was stripped. On PR #1176 that stripping
+# reduced a full review (five findings plus a hand-traced coverage statement) to
+# a bare two-line APPROVE, because the model had put its findings ABOVE the
+# heading, exactly where the prompt footer asks for "narration". Nothing in the
+# text distinguishes narration from findings, so a stripper cannot keep one and
+# drop the other -- and the failure is biased toward "looks approved" on what
+# this repository uses as a MERGE GATE. The body is now always emitted; a caller
+# that wants only the verdict can read from the '## Verdict' heading itself.
+check "the body above the verdict is NOT discarded" \
+  "printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
 ERR="$(run ask r7 --prompt x 2>&1 >/dev/null)"
 check "no token/cost is claimed"  "printf '%s' \"\$ERR\" | grep -qi 'reports no token'"
+
+echo "== #1220: silence must never read as APPROVE =="
+# Exercised directly against extract_answer: these are pure-text defects, so
+# driving a whole run would add stub plumbing between the input and the assertion
+# without testing anything more.
+sed -n '/^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
+probe(){ bash -c '. "$1"; ANSWER_DEFECT=""; extract_answer "$2" >/dev/null; printf "%s" "$ANSWER_DEFECT"' _ "$TMP/extract.sh" "$1"; }
+
+# Assistant text but no '## Verdict' heading: the observed "ended mid-run" case --
+# 637 seconds of provider time, one message saying it was about to start, no
+# findings, exit 0.
+cat > "$TMP/noverdict.jsonl" <<'NOVERDICT'
+{"role":"assistant","content":"I've read all four patch parts in full. Let me verify a couple of environmental facts before finalizing findings."}
+NOVERDICT
+NOV="$(probe "$TMP/noverdict.jsonl")"
+check "a stream with no verdict is reported as a defect" "printf '%s' \"\$NOV\" | grep -q Verdict"
+
+: > "$TMP/silent.jsonl"
+SIL="$(probe "$TMP/silent.jsonl")"
+check "a stream with no answer at all is reported as a defect" "printf '%s' \"\$SIL\" | grep -q 'no answer text'"
+
+# The healthy case must NOT be flagged, or the guard is noise that gets muted.
+printf '%s\n' '{"role":"assistant","content":"finding one\n## Verdict\nAPPROVE"}' > "$TMP/good.jsonl"
+GOOD="$(probe "$TMP/good.jsonl")"
+check "a complete review is NOT flagged as a defect" "[ -z \"\$GOOD\" ]"
+
+# And the body above the verdict survives -- the defect that turned a five-finding
+# review into a bare two-line APPROVE on PR #1176.
+BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
+check "the text above the verdict is still emitted" "printf '%s' \"\$BODY\" | grep -q 'finding one'"
+
 
 echo "== duplicate run refused (per-repo lock) =="
 RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"

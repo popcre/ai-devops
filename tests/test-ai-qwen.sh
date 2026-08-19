@@ -97,5 +97,28 @@ check 'doctor checks installed interface without a model call' 'run doctor'
 echo fail > "$TMP/mode"
 if run new no-terminal --prompt x >/dev/null 2>&1; then bad 'missing terminal result fails'; else ok 'missing terminal result fails'; fi
 
+echo "== #1220: silence must never read as APPROVE =="
+# ai-qwen carried the identical extract_answer defect as ai-kimi: it printed only
+# the tail from '## Verdict' (discarding findings that sat above it) and treated a
+# run that ended with no verdict as a review with nothing to say. Exercised
+# directly, because these are pure-text defects.
+sed -n '/^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
+probe(){ bash -c '. "$1"; ANSWER_DEFECT=""; extract_answer "$2" >/dev/null; printf "%s" "$ANSWER_DEFECT"' _ "$TMP/extract.sh" "$1"; }
+
+printf '%s\n' '{"type":"result","is_error":false,"result":"I have read the files. Let me verify a few things before finalizing findings."}' > "$TMP/noverdict.jsonl"
+NOV="$(probe "$TMP/noverdict.jsonl")"
+check 'a result with no verdict is reported as a defect' "printf '%s' \"\$NOV\" | grep -q Verdict"
+
+: > "$TMP/silent.jsonl"
+SIL="$(probe "$TMP/silent.jsonl")"
+check 'a stream with no answer at all is reported as a defect' "printf '%s' \"\$SIL\" | grep -q 'no answer text'"
+
+printf '%s\n' '{"type":"result","is_error":false,"result":"finding one\n## Verdict\nAPPROVE"}' > "$TMP/good.jsonl"
+GOOD="$(probe "$TMP/good.jsonl")"
+check 'a complete review is NOT flagged as a defect' "[ -z \"\$GOOD\" ]"
+
+BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
+check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))
