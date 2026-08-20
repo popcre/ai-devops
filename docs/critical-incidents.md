@@ -238,3 +238,50 @@ during an unrelated check. Concurrent-agent damage does not announce itself, so 
 guard belongs before the destructive command. The difference is that committed work
 came back in one command and uncommitted work was gone forever — which is the
 strongest possible argument for committing early in a shared checkout.
+
+
+## 2026-08-20 — MCP servers written to a file Claude Code never reads
+
+**Impact:** every machine `bin/setup-machine.ps1` or `bin/setup-secrets.sh` had
+ever "set up" in fact had **zero** Claude Code MCP servers registered, while the
+config on disk looked complete and correct. Albert had been reporting MCP servers
+"keep disappearing" across multiple sessions; each session reinstalled them into
+the same ignored file and declared success, so the complaint kept returning.
+
+**Symptom:** `~/.claude/settings.json` contained a full, valid `mcpServers` block
+with all 11 servers. `claude mcp list` returned only the account-synced
+`claude.ai` connectors and not one local server. No error anywhere.
+
+**Root cause:** Claude Code reads local MCP servers from **`~/.claude.json`
+only**. An `mcpServers` key in `~/.claude/settings.json` is silently ignored — it
+parses, it persists, it is visible in the file, and it is never loaded. Both
+setup scripts targeted settings.json. `~/.claude.json` had never held a single
+server: every rolling backup of it, going back the full retention window, showed
+an empty set.
+
+**Fix:** both scripts now write `~/.claude.json` and strip the stale copy of
+their own keys out of settings.json (with a backup), leaving permissions, hooks
+and foreign servers untouched. `CLAUDE_SETTINGS` still works as an override under
+the new name `CLAUDE_MCP_CONFIG`.
+
+**A SECOND, SEPARATE fault found while verifying the first — do not conflate
+them.** The Claude **desktop app** rewrites
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`
+and deletes the entire `mcpServers` key; every other key survives, the only log
+line is `Config file written`, the org blocklist was empty and the dxt allowlist
+disabled. **Settings → Developer** (not Settings → Connectors) is the screen that
+reads that file. The block was restored by hand on 2026-08-20 as a deliberate
+test and survived one app restart; if it vanishes again, restoring the file is a
+band-aid and the app version has stopped honouring it.
+
+**Prevention / lessons:**
+- A config file that parses is not a config file that is *read*. Prove a setting
+  took effect with the tool's own query (`claude mcp list`), never by cat-ing the
+  file you just wrote. Every session that "fixed" this had read the file back.
+- A recurring user complaint that keeps returning after a fix means the fix
+  addressed the wrong layer. Treat the third report as evidence about the
+  diagnosis, not about the user.
+- `claude mcp add ... -- cmd /c npx ...` run from **Git Bash** silently rewrites
+  the `/c` flag to `C:/` (MSYS path conversion), registering a server that can
+  never launch. Use `MSYS_NO_PATHCONV=1` with `//c` and correct the stored value,
+  or edit the JSON directly.
