@@ -764,10 +764,12 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     url = 'https://mcp.vercel.com'
     startup_timeout_sec = 20
   }
-  # Codex supports Railway's native HTTP transport. Claude consumers retain the
-  # shared mcp-remote definition above because their JSON config needs a command.
+  # Railway CLI 5.41.2 configures Codex's remote mode through its authenticated
+  # CLI proxy. Match the official installer output so `railway login` owns OAuth.
+  # Claude consumers retain the shared mcp-remote definition above.
   $CodexMcpServers['railway'] = [ordered]@{
-    url = 'https://mcp.railway.com'
+    command = 'railway'
+    args = @('mcp', 'proxy')
     startup_timeout_sec = 20
   }
   $CodexMcpServers['chrome-devtools']['env'] = [ordered]@{
