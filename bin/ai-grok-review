@@ -86,7 +86,7 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 # ---------------------------------------------------------------------------
 resolve_grok() {
   if [ -n "${AI_GROK_BIN:-}" ]; then
-    [ -x "$AI_GROK_BIN" ] || die "AI_GROK_BIN=$AI_GROK_BIN is not executable."
+    [ -x "$AI_GROK_BIN" ] || die "local_dependency_unavailable: AI_GROK_BIN=$AI_GROK_BIN is not executable. This is not a Grok provider fault."
     printf '%s' "$AI_GROK_BIN"; return 0
   fi
   local c
@@ -98,7 +98,7 @@ resolve_grok() {
            /usr/local/bin/grok; do
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
   done
-  die "grok binary not found. Set AI_GROK_BIN, or install Grok. Looked on PATH, \$HOME/.local/bin, \$HOME/.grok/bin, /home/ai/.local/bin, /usr/local/bin."
+  die "local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN, or install Grok. Looked on PATH, \$HOME/.local/bin, \$HOME/.grok/bin, /home/ai/.local/bin, /usr/local/bin."
 }
 
 # Process diagnostics only — NEVER a completion signal.

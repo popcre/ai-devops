@@ -75,6 +75,16 @@ die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
 note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
 
+local_service_fatal() {
+  printf '%s\n' \
+    'ai-glm: FATAL: local opencode server is not answering (health endpoint).' \
+    '  failure: local_dependency_unavailable' \
+    '  This is a LOCAL SERVICE fault on this machine, NOT a provider or model fault.' \
+    '  Start it with: ai-glm server start' \
+    '  Then re-run. (ai-glm doctor shows the full check list.)' >&2
+  exit 1
+}
+
 case "$(uname -s 2>/dev/null || echo unknown)" in
   MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
   *) IS_WINDOWS=0 ;;
@@ -112,12 +122,11 @@ api_code() { # api_code METHOD PATH -> HTTP status only
 server_up() { [ "$(api_code GET /global/health)" = "200" ]; }
 require_server() {
   if [ ! -s "$PW_FILE" ]; then
-    die "GLM is not set up on this machine (no $PW_FILE).
+    die "local_dependency_unavailable: GLM is not set up on this machine (no $PW_FILE). This is not a provider or model fault.
        Ubuntu:  bin/setup-opencode-glm.sh
        Windows: .\\bin\\setup-opencode-glm.ps1"
   fi
-  server_up || die "OpenCode GLM server is not answering on $BASE.
-       Try: ai-glm server start     (then: ai-glm doctor)"
+  server_up || local_service_fatal
 }
 
 # --------------------------------------------------------------------------------
