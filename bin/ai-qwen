@@ -101,21 +101,28 @@ repo_root() {
 # A delegated reviewer gets exactly ONE directory. In a linked worktree the
 # repository's control files live outside it, so the reviewer is refused on its
 # first git-adjacent read and the run dies before any code is read.
-# ai-review-sandbox turns such a worktree into a self-contained snapshot; in an
-# ordinary clone it echoes the root unchanged. See that script's header.
+# ai-review-sandbox gives every review a private snapshot, including ordinary
+# clones, so the live checkout cannot move underneath a running session.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
-  [ -f "$1/.git" ] || { printf '%s' "$1"; return 0; }
-  [ -n "$SANDBOX_BIN" ] || die "this is a linked worktree and ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure "$1" "$2" || die "could not prepare a review snapshot for the worktree $1"
+  [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
+  "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT TAG
-  [ -f "$1/.git" ] || return 0
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
 }
-
+refresh_review_boundary() { # refresh_review_boundary ROOT TAG RECORDED
+  local root="$1" tag="$2" recorded="$3" refreshed
+  if [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
+    printf '%s' "$recorded"; return 0
+  fi
+  refreshed="$(review_boundary "$root" "$tag")"
+  [ "$(cd "$refreshed" && pwd -P)" = "$(cd "$recorded" && pwd -P)" ] || \
+    die "review session is bound to $recorded but its private snapshot now resolves to $refreshed. Refusing to split one conversation across two directories."
+  printf '%s' "$recorded"
+}
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
   local root="$1" remote
@@ -867,7 +874,7 @@ start_session() { # start_session NAME MODE
   pf="$(mktemp)"; LIFECYCLE_PF="$pf"
   out="$(mktemp)"; LIFECYCLE_OUT="$out"
   build_prompt_file "$pf"
-  before="$(tree_state "$repo")"
+  before="$(tree_state "$workdir")"
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
   run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
@@ -884,7 +891,7 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_STATE=completed
   LIFECYCLE_SID="$sid"
 
-  after="$(tree_state "$repo")"
+  after="$(tree_state "$workdir")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
     die "a READ-ONLY Qwen review changed the working tree. The agent profile's tool
   restriction is not holding — do not trust further reviews until this is understood.
@@ -892,11 +899,11 @@ start_session() { # start_session NAME MODE
   fi
 
   if [ "$mode" = review ]; then
-    write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
-    --arg caller "$CALLER" --arg mode "$mode" --arg model "$QWEN_MODEL" \
+    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
+    --arg caller "$CALLER" --arg mode "$mode" --arg model "$QWEN_MODEL" --arg review_dir "$workdir" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
     '{qwen_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
-      model:$model, created:$created, updated:$created, turns:$turns}')"
+      model:$model, review_dir:$review_dir, created:$created, updated:$created, turns:$turns}')"
   fi
 
   # #1220: keep the lifecycle bookkeeping, THEN fail. Aborting on the spot would
@@ -928,7 +935,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode
+  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode workdir
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .qwen_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
@@ -944,15 +951,26 @@ cmd_ask() {
   trap cancel_plain_turn INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"; build_prompt_file "$pf"
-  before="$(tree_state "$repo")"
   note "Qwen '$name' continuing session $sid…"
-  run_turn "$(review_boundary "$repo" "qwen-$name")" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  workdir="$(jq -r '.review_dir // empty' "$meta")"
+  if [ -z "$workdir" ]; then
+    if [ -f "$repo/.git" ]; then
+      workdir="$($SANDBOX_BIN ensure "$repo" "qwen-$name")"
+    else
+      workdir="$repo"
+    fi
+    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$workdir" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
+    warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
+  fi
+  workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
+  before="$(tree_state "$workdir")"
+  run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   if ! await_result "$out" "'$name'"; then
     note "  qwen exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
-  after="$(tree_state "$repo")"
+  after="$(tree_state "$workdir")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
     die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
   fi

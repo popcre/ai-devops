@@ -145,19 +145,17 @@ repo_root() {
 # OpenCode gives a session exactly ONE directory, and in a linked worktree the
 # repository's control files sit outside it, so the reviewer dies before reading
 # any code. ai-review-sandbox turns such a worktree into a self-contained
-# snapshot; in an ordinary clone it echoes the root unchanged. See that script's
-# header for the full story.
+# snapshot. Reviews always use a private copy, including ordinary clones, so the
+# live checkout cannot move underneath a running session. See issue #53.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT NAME -> directory to hand the reviewer
-  [ -f "$1/.git" ] || { printf '%s' "$1"; return 0; }
-  [ -n "$SANDBOX_BIN" ] || die "this is a linked worktree and ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure "$1" "glm-$2" || die "could not prepare a review snapshot for the worktree $1"
+  [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
+  "$SANDBOX_BIN" ensure-copy "$1" "glm-$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT NAME
-  [ -f "$1/.git" ] || return 0
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
+  "$SANDBOX_BIN" remove-copy "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -179,9 +177,20 @@ PACKET_REL=".ai-review"
 REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
-prepare_review() { # prepare_review ROOT NAME
-  local root="$1" name="$2" pkt want
-  REVIEW_DIR="$(review_boundary "$root" "$name")"
+prepare_review() { # prepare_review ROOT NAME [RECORDED_BOUNDARY]
+  local root="$1" name="$2" recorded="${3:-}" pkt want refreshed
+  if [ -z "$recorded" ]; then
+    REVIEW_DIR="$(review_boundary "$root" "$name")"
+  elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
+    # Pre-issue-53 ordinary-clone sessions are fixed to the live checkout by
+    # OpenCode. Preserve that directory until the session is deleted.
+    REVIEW_DIR="$recorded"
+  else
+    refreshed="$(review_boundary "$root" "$name")"
+    [ "$(cd "$refreshed" && pwd -P)" = "$(cd "$recorded" && pwd -P)" ] || \
+      die "session '$name' is bound to $recorded but its private snapshot now resolves to $refreshed. Refusing to split one conversation across two directories."
+    REVIEW_DIR="$recorded"
+  fi
   REVIEW_HEAD="$(git -C "$REVIEW_DIR" rev-parse HEAD 2>/dev/null || true)"
   [ -n "$REVIEW_HEAD" ] || die "could not read HEAD in $REVIEW_DIR; refusing to review a directory with no commit identity."
   if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
@@ -948,7 +957,7 @@ cmd_new() {
   boundary="$REVIEW_DIR"
   prefix_packet_preamble "$pf"
   sid="$(create_session "$name" glm-review "$boundary")"
-  if ! write_meta "$mp" "$(jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
+  if ! write_meta "$mp" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
       --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
       --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
       '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, boundary_root:$b, repository_remote:$remote,
@@ -987,7 +996,14 @@ cmd_ask() {
   # Refresh the snapshot so a later turn reviews the CURRENT working tree rather
   # than a stale copy. The snapshot path is deterministic, so the live OpenCode
   # session keeps the directory it was created with.
-  prepare_review "$root" "$name"
+  boundary="$(jq -r '.boundary_root // empty' "$mp")"
+  [ -n "$boundary" ] || die "session '$name' has no recorded review directory; refusing to guess where its OpenCode conversation is bound."
+  if [ "$(cd "$boundary" 2>/dev/null && pwd -P || printf '%s' "$boundary")" = "$(cd "$root" && pwd -P)" ] && \
+     [ "$(jq -r '.boundary_migration_warned // false' "$mp")" != true ]; then
+    warn "session '$name' predates private snapshots and remains bound to the live checkout. Delete and recreate it when convenient; until then, do not move or update this checkout during a turn."
+    write_meta "$mp" "$(jq '.boundary_migration_warned=true' "$mp")"
+  fi
+  prepare_review "$root" "$name" "$boundary"
   boundary="$REVIEW_DIR"
   prev_head="$(jq -r '.head // ""' "$mp")"
   if [ -n "$prev_head" ] && [ "$prev_head" != "$REVIEW_HEAD" ]; then

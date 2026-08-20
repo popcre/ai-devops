@@ -195,13 +195,13 @@ check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI
 # boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
 if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
 if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
-# Since the evidence packet landed (issue #34), both call sites go through
-# prepare_review, which resolves the boundary via review_boundary and then builds
-# the packet inside it. The guarantee is unchanged: the directory handed to GLM is
-# never a raw worktree.
-if [ "$(grep -Fc 'prepare_review "$root" "$name"' "$AI_GLM")" -eq 2 ]; then ok "both review paths go through prepare_review"; else bad "both review paths go through prepare_review"; fi
+# Since issue #53, new sessions create a private copy and continuations refresh
+# the exact directory recorded when OpenCode created the session.
+if grep -Fq 'prepare_review "$root" "$name" "$boundary"' "$AI_GLM"; then ok "ask reuses recorded review directory"; else bad "ask reuses recorded review directory"; fi
 if [ "$(grep -Fc 'boundary="$REVIEW_DIR"' "$AI_GLM")" -eq 2 ]; then ok "boundary comes from prepare_review"; else bad "boundary comes from prepare_review"; fi
-check "prepare_review is worktree-safe"      "grep -Fq 'REVIEW_DIR=\"\$(review_boundary \"\$root\" \"\$name\")\"' '$AI_GLM'"
+check "new reviews always use a private copy" "grep -Fq 'ensure-copy \"\$1\" \"glm-\$2\"' '$AI_GLM'"
+check "new review records its fixed directory" "grep -Fq 'boundary_root:\$b' '$AI_GLM'"
+check "legacy live-checkout session warns once" "grep -Fq 'boundary_migration_warned=true' '$AI_GLM'"
 check "prepare_review builds an evidence packet" "grep -Fq '\$PACKET_BIN\" build' '$AI_GLM'"
 check "review prompt points at the packet"   "grep -Fq '.ai-review/MANIFEST.md' '$AI_GLM'"
 check "packet does not fence the reviewer in" "grep -Fq 'not a boundary' '$AI_GLM'"

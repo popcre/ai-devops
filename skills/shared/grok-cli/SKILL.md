@@ -172,10 +172,11 @@ error, missing response, permission violation, or unexpected working-tree change
 failure — and never let Grok commit, push, merge, deploy, alter shared databases, or touch
 production unless the user separately authorized that exact action.
 
-## Running from a linked Git worktree
+## Private review snapshots
 
-Just run it. Since 2026-08-17 the wrapper handles this itself and you do not
-have to think about it.
+Just run it. Every new review session uses a fixed private snapshot, including
+sessions started from ordinary clones. This prevents a pull, branch switch,
+commit, test run, or another session from moving the tree underneath Grok.
 
 Background, so nobody "fixes" it back: a delegated reviewer is given exactly ONE
 directory, and in a linked worktree `.git` is a FILE pointing at
@@ -192,4 +193,6 @@ What this means for you:
   in the real worktree. Quote them unchanged.
 - The reviewer never sees an absolute path from your machine as the source of
   truth; do not ask it to edit files there, and never commit from the snapshot.
-- The snapshot refreshes on every turn and is deleted with the session.
+- The snapshot path is recorded at session creation, refreshes on every turn,
+  and is deleted with the session. Pre-existing sessions keep their old path and
+  warn once so a live conversation is never silently moved.
