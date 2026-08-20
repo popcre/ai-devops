@@ -33,7 +33,7 @@ at launch by a wrapper the `ai-devops` repo generates onto each machine:
 - `bin/mcp-secret-launch.ps1` (in the repo) — the actual launcher logic both
   `.cmd` files call.
 
-Both **Claude Desktop** and **Claude Code** (`~/.claude/settings.json`) reference
+Both **Claude Desktop** and **Claude Code** (`~/.claude.json`) reference
 the same launcher, and (as of 2026-07-23) so does **Codex**
 (`~/.codex/config.toml`).
 

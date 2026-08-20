@@ -663,32 +663,60 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
 # --------------------------------------------------------------------------
 # 7. Claude Code (CLI) MCP config - same token-free treatment
 # --------------------------------------------------------------------------
-# Claude Code reads its OWN ~/.claude/settings.json, separate from Claude Desktop.
-# It gets the SAME server set (step 5d) rather than its own list: this section used
-# to only rewrite trigger + 1password *if they already existed*, so it converted
-# tokens but never created a server. On a new machine that left Claude Code with
-# nothing, and any server added to Desktop silently never reached it. Servers we do
-# not define (Windows-MCP, claude-in-chrome, ...) and all other settings keys are
-# preserved untouched. Runs regardless of -SkipDesktopMcp (that flag is about
+# Claude Code reads local MCP servers from ~/.claude.json ONLY, separate from
+# Claude Desktop's claude_desktop_config.json. An "mcpServers" block in
+# ~/.claude/settings.json is silently IGNORED: it parses fine, it is right there
+# when you open the file, and `claude mcp list` never sees one of them. This
+# script wrote to settings.json until 2026-08-20, so every machine it set up in
+# fact had ZERO Claude Code MCP servers while looking perfectly configured on
+# disk - which is why "my MCP servers keep disappearing" kept coming back. Do NOT
+# point this back at settings.json.
+#
+# It gets the SAME server set (step 5d) rather than its own list. Servers we do
+# not define (Windows-MCP, claude-in-chrome, ...) and all other keys in the file
+# are preserved untouched. Runs regardless of -SkipDesktopMcp (that flag is about
 # Claude Desktop only).
-Step "Token-free MCP for Claude Code (~/.claude/settings.json)"
-$ccSettings = Join-Path $HOME ".claude\settings.json"
+Step "Token-free MCP for Claude Code (~/.claude.json)"
+$ccConfig = Join-Path $HOME ".claude.json"
 $cc = @{}
-if (Test-Path $ccSettings) {
-  Copy-Item $ccSettings "$ccSettings.aidevops.bak" -Force
-  try { $cc = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable } catch {
-    Warn "$ccSettings is not valid JSON; leaving it alone. Fix or delete it and re-run."
+if (Test-Path $ccConfig) {
+  Copy-Item $ccConfig "$ccConfig.aidevops.bak" -Force
+  try { $cc = Get-Content $ccConfig -Raw | ConvertFrom-Json -AsHashtable } catch {
+    Warn "$ccConfig is not valid JSON; leaving it alone. Fix or delete it and re-run."
     $cc = $null
   }
 } else {
-  New-Item -ItemType Directory -Force -Path (Split-Path $ccSettings) | Out-Null
-  Note "No ~/.claude/settings.json yet - creating one."
+  Note "No ~/.claude.json yet - creating one."
 }
 if ($null -ne $cc) {
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
   foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
-  ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
+  ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccConfig -Encoding utf8
   Ok "Claude Code wired token-free: $McpServerList"
+
+  # Strip the stale copy out of settings.json. Leaving it behind is worse than
+  # useless - a plainly-present block in a plainly-ignored file is exactly what
+  # made this undiagnosable. Only the keys we own are removed; permissions,
+  # hooks, theme, plugins and foreign servers stay exactly as found.
+  $ccSettings = Join-Path $HOME ".claude\settings.json"
+  if (Test-Path $ccSettings) {
+    try {
+      $legacy = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable
+      if ($legacy.ContainsKey("mcpServers")) {
+        $removed = @($McpServers.Keys | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
+        if ($removed.Count -gt 0) {
+          Copy-Item $ccSettings "$ccSettings.aidevops.mcpclean.bak" -Force
+          foreach ($name in $removed) { $legacy["mcpServers"].Remove($name) }
+          if ($legacy["mcpServers"].Count -eq 0) { $legacy.Remove("mcpServers") }
+          ($legacy | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
+          Ok "Removed the stale (ignored) MCP block from settings.json: $($removed -join ', ')"
+          Ok "  backup: $ccSettings.aidevops.mcpclean.bak"
+        }
+      }
+    } catch {
+      Warn "$ccSettings is not valid JSON; left untouched (stale MCP block may remain)."
+    }
+  }
 }
 
 # --------------------------------------------------------------------------
