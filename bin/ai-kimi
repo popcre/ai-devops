@@ -764,7 +764,7 @@ build_prompt_file() {
 tree_state() { git -C "$1" status --porcelain 2>/dev/null | sort; }
 
 review_destination_safe() { # REPO EXACT-DESTINATION
-  local repo="$1" out="$2" rel physical_reviews physical_repo
+  local repo="$1" out="$2" rel physical_ai physical_reviews physical_repo
   case "$out" in "$repo"/.ai/reviews/*) ;; *) return 1 ;; esac
   rel="${out#"$repo"/}"
   # A tracked destination is committable even when --no-index also matches an
@@ -775,9 +775,14 @@ review_destination_safe() { # REPO EXACT-DESTINATION
   # physically inside the repository or in the wrapper's private state.
   [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ] || return 1
   physical_repo="$(cd "$repo" && pwd -P)" || return 1
-  mkdir -p "$repo/.ai/reviews" 2>/dev/null || return 1
-  physical_reviews="$(cd "$repo/.ai/reviews" && pwd -P)" || return 1
-  case "$physical_reviews" in "$physical_repo"/*) ;; *) return 1 ;; esac
+  if [ -e "$repo/.ai" ]; then
+    physical_ai="$(cd "$repo/.ai" && pwd -P)" || return 1
+    case "$physical_ai" in "$physical_repo"/*) ;; *) return 1 ;; esac
+  fi
+  if [ -e "$repo/.ai/reviews" ]; then
+    physical_reviews="$(cd "$repo/.ai/reviews" && pwd -P)" || return 1
+    case "$physical_reviews" in "$physical_repo"/*) ;; *) return 1 ;; esac
+  fi
   return 0
 }
 
@@ -1057,6 +1062,7 @@ job_for_name() {
   remote="$(repo_remote "$repo")"; found=""
   while IFS= read -r candidate; do
     [ "$(jq -r '.name // ""' "$candidate" 2>/dev/null)" = "$1" ] || continue
+    [ "$(jq -r '.caller // ""' "$candidate" 2>/dev/null)" = "$CALLER" ] || continue
     [ -n "$remote" ] && [ "$(jq -r '.repo_remote // ""' "$candidate" 2>/dev/null)" = "$remote" ] || continue
     [ -z "$found" ] || die "more than one durable job named '$1' matches this repository remote"
     found="$candidate"
@@ -1119,8 +1125,9 @@ cmd_cancel_job() {
   jq . "$meta"
 }
 cmd_recover_job() {
-  local meta out reason artifact defect kind phase
+  local meta out reason artifact defect kind phase prior_reason
   meta="$(job_for_name "$1")"; out="$(jq -r .artifact_paths.stream "$meta")"
+  prior_reason="$(jq -r '.terminal_reason // ""' "$meta")"
   artifact="$(jq -r '.artifact_paths.canonical // ""' "$meta")"
   if [ -f "$artifact" ]; then
     kind="$(jq -r '.artifact_kind // ""' "$meta")"
@@ -1134,7 +1141,7 @@ cmd_recover_job() {
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" '.phase="recovery-required"|.terminal_reason=$r|.exit_code=(.exit_code // 1)|.updated=$u'
   kind=incomplete; phase=recovery-required
   defect="$(review_answer_defect "$out")"
-  if has_resume_hint "$out" && [ -z "$defect" ]; then kind=complete; phase=completed; reason=session.resume_hint; fi
+  if [ "$prior_reason" = session.resume_hint ] && has_resume_hint "$out" && [ -z "$defect" ]; then kind=complete; phase=completed; reason=session.resume_hint; fi
   finalize_review_artifact "$meta" "$out" "$kind" "$reason" || die "recovery could not write the permanent artifact; raw stream kept at $out"
   write_job_state "$meta" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --arg k "$kind" --arg p "$phase" --arg r "$reason" '.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind=$k|.artifact_sha256=$h|.phase=$p|.terminal_reason=$r'
   jq . "$meta"; [ "$kind" = complete ]

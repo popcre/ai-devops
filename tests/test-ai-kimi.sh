@@ -159,6 +159,12 @@ run recover durable >/dev/null 2>&1
 check "recovery hashes and restores a proven complete artifact" "run status durable | jq -e '.phase==\"completed\" and .artifact_kind==\"complete\" and (.artifact_sha256|length)==64'"
 ALT="$TMP/alternate-checkout"; mkdir -p "$ALT"; git -C "$ALT" init -q; git -C "$ALT" remote add origin https://example.invalid/test/repo.git
 check "job remains retrievable from another clone of the same remote" "cd '$ALT' && bash '$SCRIPT' result durable | grep -q APPROVE"
+check "fallback retrieval never crosses caller identities" "cd '$ALT' && AI_KIMI_CALLER=codex bash '$SCRIPT' result durable >/dev/null 2>&1; test \$? -ne 0"
+UNSAFE_DIR="$(dirname "$DURABLE_META")/../claude--recover-unsafe"; mkdir -p "$UNSAFE_DIR"; cp "$(jq -r .artifact_paths.stream "$DURABLE_META")" "$UNSAFE_DIR/stream.jsonl"; : > "$UNSAFE_DIR/stream.jsonl.err"
+UNSAFE_DIR="$(cd "$UNSAFE_DIR" && pwd -P)"
+MSYS2_ARG_CONV_EXCL='*' jq --arg dir "$UNSAFE_DIR" '.name="recover-unsafe"|.job_id="recover-unsafe"|.phase="failed"|.terminal_reason="readonly-tree-changed"|.artifact_kind=null|.artifact_sha256=null|.artifact_paths.stream=($dir+"/stream.jsonl")|.artifact_paths.log=($dir+"/worker.log")|.artifact_paths.canonical=($dir+"/review-recovery.md")|.artifact_paths.repository=null' "$DURABLE_META" > "$UNSAFE_DIR/job.json"
+run recover recover-unsafe >/dev/null 2>&1 || true
+check "recovery cannot approve a worker-classified safety failure" "run status recover-unsafe | jq -e '.phase==\"recovery-required\" and .artifact_kind==\"incomplete\" and .terminal_reason!=\"session.resume_hint\"'"
 echo usagepartial > "$TMP/mode"
 run start quota-review --prompt review >/dev/null
 run wait quota-review >/dev/null 2>&1 || true
