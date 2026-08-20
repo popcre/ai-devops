@@ -669,6 +669,9 @@ running_read_boundary() { # ASSISTANT_JSON SESSION_DIR -> inside|outside|invalid
 }
 
 APPROVED_PERMISSION_IDS=""
+# Meta file of the turn currently in flight, so await_turn can prove liveness while it
+# blocks. Empty when no turn is running. See touch_liveness().
+TURN_META=""
 handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
   local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance
   guidance="$(permission_next_step "$name" "$impl_meta")"
@@ -777,6 +780,21 @@ send_prompt() { # send_prompt SID PROMPT_FILE
   rm -f "$body"
 }
 
+# Stamp last_activity_at while a turn is still in flight. Best effort by design: a
+# liveness stamp must never be able to fail a review, so every error is swallowed.
+touch_liveness() {
+  [ -n "$TURN_META" ] || return 0
+  [ -f "$TURN_META" ] || return 0
+  local tmp
+  tmp="$(mktemp "$(dirname "$TURN_META")/.tmp.XXXXXX" 2>/dev/null)" || return 0
+  if jq --arg ts "$(date -u +%FT%TZ)" '.last_activity_at=$ts' "$TURN_META" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$TURN_META" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
   local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck
   APPROVED_PERMISSION_IDS=""
@@ -785,6 +803,12 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta"
     if api GET /session/status | grep -q "$sid"; then
       idle=0
+      # LIVENESS. The provider is observably working right now, so stamp it. Without
+      # this, `last_activity_at` is written only AFTER await_turn returns, so it cannot
+      # move during a turn and a long healthy review is indistinguishable from a session
+      # that never started -- which is exactly how a live, correct review got aborted on
+      # 2026-08-20 (shared-db #1298).
+      touch_liveness
     else
       idle=$((idle + 1))
     fi
@@ -923,7 +947,9 @@ cmd_new() {
     die "could not save local metadata for session '$name'."
   fi
   send_prompt "$sid" "$pf"; rm -f "$pf"
+  TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
+  TURN_META=""
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
@@ -962,7 +988,9 @@ $REVIEW_HEAD only."
   fi
   prefix_packet_preamble "$pf"
   send_prompt "$sid" "$pf"; rm -f "$pf"
+  TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
+  TURN_META=""
   verify_model "$msg"
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then

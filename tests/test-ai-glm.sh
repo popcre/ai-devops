@@ -686,5 +686,21 @@ check "fallback is limited to a named user" \
 OUT="$(AI_GLM_SERVER_USER="$(id -un)" AI_DEVOPS_CONFIG_DIR="$SHTMP/empty2" bash "$AI_GLM" doctor 2>&1 || true)"
 check "never attaches to its own account" "! printf '%s' \"\$OUT\" | grep -q 'attached to the OpenCode server'"
 
+# LIVENESS DURING A TURN (shared-db #1298).
+# last_activity_at used to be written only AFTER await_turn returned, so it could not
+# move while the model worked. A long healthy review was then indistinguishable from a
+# session that never produced a turn -- and on 2026-08-20 that cost a live, correct
+# review, aborted by a caller who read `ai-glm show` and believed it. These checks pin
+# the fix: the helper exists, the poll loop calls it, both review call sites arm it,
+# and it is best effort so a liveness stamp can never fail a review.
+check "touch_liveness helper exists" \
+  "grep -q '^touch_liveness()' '$AI_GLM'"
+check "the await_turn poll loop stamps liveness while the provider is working" \
+  "awk '/^await_turn\(\)/,/^}/' '$AI_GLM' | grep -q touch_liveness"
+check "both review call sites arm TURN_META before await_turn" \
+  "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 2 ]"
+check "liveness stamping is best effort and cannot fail a turn" \
+  "awk '/^touch_liveness\(\)/,/^}/' '$AI_GLM' | grep -q 'return 0'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
