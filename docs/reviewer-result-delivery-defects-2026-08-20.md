@@ -1,5 +1,7 @@
 # Three active reviewers, three different ways of losing the result — 2026-08-20
 
+Grok concurrency, interruption, active-run visibility, progress, and evidence-correlation repair is specified in [`../plan_grok-review-concurrency-cancellation-observability.md`](../plan_grok-review-concurrency-cancellation-observability.md). Read its STATUS table first while [ai-devops issue #56](https://github.com/u2giants/ai-devops/issues/56) is open.
+
 **Status:** open. Root causes identified, none fixed as of 2026-08-20T03:30Z.
 **Affects:** `ai-glm`, `ai-muse`, `ai-grok-review` — i.e. **every reviewer in the
 active rotation** after `u2giants/shared-db#1290` (merged `cef67d6`).
