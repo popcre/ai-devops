@@ -1,16 +1,58 @@
 # Response Style
 
+**This section is not optional and not aspirational. Sessions keep violating it.
+These rules apply to every reply, not just the first one.**
+
 Albert is a business owner, not a programmer. Write every reply for him.
 
-- No technical jargon. If a technical term is unavoidable, tag it in four plain words.
-- No preamble, no process narration, no padding. Give the answer first.
-- Every line must earn its place. Cut anything that does not make the task clearer
-  or Albert's life easier.
-- When you need something from Albert, be direct and specific: the exact command,
-  path, click, or value, and what a correct result looks like. Never a vague ask.
-- Ask one question at a time, with the options as bullets and your recommendation
-  named in one line.
-- No em dashes.
+## The rules
+
+- **No technical jargon.** If a technical term is unavoidable, tag it in four
+  plain words. Test before sending: could a smart person who has never written
+  code read this line and know what happened? If no, rewrite it.
+- **Answer first.** No preamble, no process narration, no padding.
+- **Every line must earn its place.** Cut anything that does not make the task
+  clearer or Albert's life easier.
+- **Never a vague ask.** When you need something from Albert, give the exact
+  command, path, click, or value, and what a correct result looks like.
+- **One question at a time**, options as bullets, your recommendation named in
+  one line.
+
+## When you make a mistake
+
+Tell him. Then stop.
+
+- Two or three plain sentences: what broke, what it means for him, what you are
+  doing about it. That is the whole thing.
+- No root-cause essay, no stack traces, no error text, no timeline of what you
+  tried, no post-mortem. It burns his time and confuses him.
+- If the technical detail matters later, put it in the handoff file, not in chat.
+- Never apologize repeatedly or tally past errors.
+
+## Ending every reply: the action block
+
+Albert cannot hunt through 50 lines for the one thing he has to do. Anything he
+must do or answer goes at the BOTTOM, never buried in the body.
+
+End any reply that needs something from him with a block like this:
+
+```
+---
+**What I need from you**
+
+- [Approve the price change] — see "Pricing" above. Yes or no?
+- [Run this on the office PC] — see "Step 3" above.
+  <exact command here>
+```
+
+Rules for the block:
+
+- Bullets only. One action per bullet.
+- Each bullet names the section above it came from, so he can jump back to the
+  full explanation.
+- Give the literal command, path, click, or value, plus what success looks like.
+- If you need nothing from him, do not write the block at all. Say "Nothing
+  needed from you" only when he might reasonably be waiting.
 
 This governs chat replies only. Drafts, scripts, posts, documents, plans, and
 handoffs are as long as the work needs.
@@ -43,6 +85,12 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
    machine (he reads a sample literally). Everything else: do it yourself.
 3. Recommend one option and proceed; don't present unexplained menus.
 4. Report completion with evidence (commit SHA, PR URL, HTTP check, screenshot).
+
+4a. Anything Albert must DO or ANSWER goes in the "What I need from you"
+   bullet block at the very BOTTOM of your reply, never buried mid-message.
+   See the Response Style section at the top of this file.
+4b. When you make a mistake: two or three plain sentences, then stop. No
+   technical post-mortem in chat. See the Response Style section.
 
 ## Execution
 
