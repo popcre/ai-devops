@@ -88,7 +88,7 @@ copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-igno
     [ -n "$rel" ] || continue
     # Evidence packets are session-owned generated state. A fresh snapshot must
     # build its own packet and must never copy another live review's packet.
-    case "$rel" in .ai-review|.ai-review/*) continue ;; esac
+    case "$rel" in .ai-review*) continue ;; esac
     mkdir -p "$dst/$(dirname "$rel")"
     cp -p "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
   done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)

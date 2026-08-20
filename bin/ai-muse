@@ -166,7 +166,7 @@ cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="
     "$BIN" session delete "$sid" >/dev/null 2>&1 || die "could not positively confirm deletion of Muse session $sid; local record preserved."
     tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="provider_deleted"|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"
   fi
-  "$PACKET" remove "$(jq -r .review_dir "$m")" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag"; rm -f "$m"; unlock_session; printf 'deleted Muse session: %s\n' "$1"
+  "$PACKET" remove "$(jq -r .review_dir "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag"; rm -f "$m"; unlock_session; printf 'deleted Muse session: %s\n' "$1"
 }
 cmd_doctor(){ local failures=0; check(){ local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"; else printf 'FAIL  %s\n' "$label"; failures=$((failures+1)); fi; }; printf 'ai-muse doctor\n\n'; check 'pinned OpenCode is installed' test -x "$BIN"; check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"; check 'trusted provider configuration is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/opencode.json" "$OC_CFG/opencode.json"; check 'trusted review profile is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/agent/muse-review.md" "$OC_CFG/agent/muse-review.md"; check '1Password command is available' command -v op; [ "$failures" -eq 0 ] || exit 1; }
 usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }

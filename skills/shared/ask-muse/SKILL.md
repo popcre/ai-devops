@@ -37,8 +37,12 @@ If `ask` says reconciliation is required, inspect that transcript first, then ru
 `ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
 provider state. Never bypass or silently replace an uncertain session.
 
-For a code review, tell Muse to read `.ai-review/MANIFEST.md` first. For a focused
-debate that does not need repository inspection, do not force a packet read.
+For a code review, tell Muse to read the manifest in its evidence packet first.
+The packet directory is named after the session (`.ai-review-muse-<caller>-<name>`),
+not a fixed `.ai-review`, so two reviewers working from one checkout cannot
+overwrite each other's evidence. Take the exact name from the path the wrapper
+prints. For a focused debate that does not need repository inspection, do not
+force a packet read.
 
 A turn is valid only when the wrapper proves OpenCode's structured stop event, the
 exact session ID, and non-empty response text. Do not substitute GLM, another model,
