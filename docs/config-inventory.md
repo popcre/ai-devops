@@ -243,6 +243,20 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   official CLI, complete its OAuth flow once, then prove the full path with
   `ai-qwen doctor --live`. A version check alone does not prove model access or
   the terminal-result contract.
+- **Installing the three vendor CLIs (Grok, Kimi, Qwen)** — repo-owned, per
+  machine, per user:
+  - Windows: `bin/install-windows-ai-provider-clis.ps1` (run by
+    `bootstrap-windows-dev.ps1`).
+  - Linux/macOS: `install-ai-provider-clis.sh [grok|kimi|qwen ...]`.
+  Run it as the user that runs AI sessions — on hetz that is `ai`, not root.
+  The vendor installers write into `$HOME` (`~/.grok/bin`, `~/.kimi-code/bin`,
+  `~/.local/bin`), so installing as root leaves the session user still broken;
+  the script refuses to run as root for that reason. Qwen deliberately uses the
+  vendor standalone installer rather than npm, because the npm package needs
+  Node 22+ and hetz ships Node 20. **Login stays interactive and manual on every
+  platform** — never automate it inside a delegated coding prompt.
+  `ai-machine-tools-doctor` reporting `<provider> provider unavailable` is
+  informational: this repo's wrappers are installed, the vendor CLI is not.
 - **gcloud defaults** — per-machine. Correct dflow values: project
   `lithe-breaker-323913`, region `us-east4` (Cloud Run/Build/Artifacts/Compute).
   Set via `bin/ai-gcloud-dflow`. **Why regional matters:** Cloud Build here is
