@@ -764,7 +764,7 @@ build_prompt_file() {
 tree_state() { git -C "$1" status --porcelain 2>/dev/null | sort; }
 
 review_destination_safe() { # REPO EXACT-DESTINATION
-  local repo="$1" out="$2" rel
+  local repo="$1" out="$2" rel physical_ai physical_reviews physical_repo
   case "$out" in "$repo"/.ai/reviews/*) ;; *) return 1 ;; esac
   rel="${out#"$repo"/}"
   # A tracked destination is committable even when --no-index also matches an
@@ -774,6 +774,15 @@ review_destination_safe() { # REPO EXACT-DESTINATION
   # Refuse a symlink/junction-like path component.  Review output must stay
   # physically inside the repository or in the wrapper's private state.
   [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ] || return 1
+  physical_repo="$(cd "$repo" && pwd -P)" || return 1
+  if [ -e "$repo/.ai" ]; then
+    physical_ai="$(cd "$repo/.ai" && pwd -P)" || return 1
+    case "$physical_ai" in "$physical_repo"/*) ;; *) return 1 ;; esac
+  fi
+  if [ -e "$repo/.ai/reviews" ]; then
+    physical_reviews="$(cd "$repo/.ai/reviews" && pwd -P)" || return 1
+    case "$physical_reviews" in "$physical_repo"/*) ;; *) return 1 ;; esac
+  fi
   return 0
 }
 
@@ -783,7 +792,7 @@ reviews_dir() { # REPO EXACT-BASENAME
   review_destination_safe "$repo" "$out" && printf '%s/.ai/reviews' "$repo" || printf ''
 }
 
-assistant_text() { jq -r 'select(.role=="assistant") | .content // ""' "$1" 2>/dev/null | sed '/^$/d'; }
+assistant_text() { jq -r 'select(.role=="assistant") | .content // ""' "$1" 2>/dev/null; }
 
 review_answer_defect() { # STREAM -> reason or empty
   local text
@@ -837,7 +846,7 @@ render_review_artifact() { # META STREAM KIND REASON
 
 mirror_review_artifact() { # META CANONICAL
   local meta="$1" canonical="$2" repo name stamp base dir out tmp
-  repo="$(jq -r .repo "$meta")"; [ -d "$repo/.git" ] || { warn "repository copy is gone; canonical review kept at $canonical"; return 0; }
+  repo="$(jq -r .repo "$meta")"; [ -e "$repo/.git" ] || { warn "repository copy is gone; canonical review kept at $canonical"; return 0; }
   name="$(jq -r .name "$meta")"; stamp="$(basename "$canonical" .md | sed 's/^review-//')"
   base="kimi-${name}-${stamp}.md"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then warn "not mirroring review: exact destination '$repo/.ai/reviews/$base' is not safely git-ignored"; return 0; fi
@@ -963,7 +972,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
     if [ "$mode" = review ] && [ "$before" != "$(tree_state "$workdir")" ]; then
       reason=readonly-tree-changed
     fi
-    defect="$(review_answer_defect "$out")"; [ -z "$defect" ] || reason="$defect"
+    defect="$(review_answer_defect "$out")"; [ -n "${reason:-}" ] || [ -z "$defect" ] || reason="$defect"
     if [ -n "${reason:-}" ]; then
       write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
       finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
@@ -1047,7 +1056,19 @@ start_review_job() { # NAME [CONTINUE]
   jq -r '.job_id' "$dir/job.json"
 }
 
-job_for_name() { local rid; rid="$(repo_id "$(repo_root)")"; job_meta "$rid" "$1"; }
+job_for_name() {
+  local repo rid exact fallback remote found candidate
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; exact="$(job_meta "$rid" "$1")"; fallback="$exact"; [ -f "$exact" ] && { printf '%s' "$exact"; return; }
+  remote="$(repo_remote "$repo")"; found=""
+  while IFS= read -r candidate; do
+    [ "$(jq -r '.name // ""' "$candidate" 2>/dev/null)" = "$1" ] || continue
+    [ "$(jq -r '.caller // ""' "$candidate" 2>/dev/null)" = "$CALLER" ] || continue
+    [ -n "$remote" ] && [ "$(jq -r '.repo_remote // ""' "$candidate" 2>/dev/null)" = "$remote" ] || continue
+    [ -z "$found" ] || die "more than one durable job named '$1' matches this repository remote"
+    found="$candidate"
+  done < <(find "$STATE_DIR/jobs" -type f -name job.json -print 2>/dev/null)
+  [ -n "$found" ] && printf '%s' "$found" || printf '%s' "$fallback"
+}
 terminal_guidance() {
   case "$1" in
     usage-limit) note "ai-kimi: Kimi refused the run because the account usage limit was reached. The incomplete artifact preserves any partial answer; retry after quota is available." ;;
@@ -1104,14 +1125,26 @@ cmd_cancel_job() {
   jq . "$meta"
 }
 cmd_recover_job() {
-  local meta out reason
+  local meta out reason artifact defect kind phase prior_reason
   meta="$(job_for_name "$1")"; out="$(jq -r .artifact_paths.stream "$meta")"
-  if [ -f "$(jq -r '.artifact_paths.canonical // ""' "$meta")" ]; then jq . "$meta"; return 0; fi
+  prior_reason="$(jq -r '.terminal_reason // ""' "$meta")"
+  artifact="$(jq -r '.artifact_paths.canonical // ""' "$meta")"
+  if [ -f "$artifact" ]; then
+    kind="$(jq -r '.artifact_kind // ""' "$meta")"
+    if [ -z "$kind" ] && has_resume_hint "$out" && [ -z "$(review_answer_defect "$out")" ] && grep -q '^# Kimi review' "$artifact"; then kind=complete; phase=completed
+    else kind="${kind:-incomplete}"; phase="$(jq -r .phase "$meta")"; [ "$phase" = completed ] || phase=recovery-required
+    fi
+    write_job_state "$meta" --arg h "$(sha256_file "$artifact")" --arg k "$kind" --arg p "$phase" '.artifact_sha256=$h|.artifact_kind=$k|.phase=$p'
+    jq . "$meta"; [ "$kind" = complete ] && return 0 || return 1
+  fi
   reason="worker-ended-without-terminal-proof"; has_resume_hint "$out" && reason="terminal-stream-needs-worker-finalization"
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" '.phase="recovery-required"|.terminal_reason=$r|.exit_code=(.exit_code // 1)|.updated=$u'
-  finalize_review_artifact "$meta" "$out" incomplete "$reason" || die "recovery could not write the permanent artifact; raw stream kept at $out"
-  write_job_state "$meta" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h'
-  jq . "$meta"; return 1
+  kind=incomplete; phase=recovery-required
+  defect="$(review_answer_defect "$out")"
+  if [ "$prior_reason" = session.resume_hint ] && has_resume_hint "$out" && [ -z "$defect" ]; then kind=complete; phase=completed; reason=session.resume_hint; fi
+  finalize_review_artifact "$meta" "$out" "$kind" "$reason" || die "recovery could not write the permanent artifact; raw stream kept at $out"
+  write_job_state "$meta" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --arg k "$kind" --arg p "$phase" --arg r "$reason" '.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind=$k|.artifact_sha256=$h|.phase=$p|.terminal_reason=$r'
+  jq . "$meta"; [ "$kind" = complete ]
 }
 
 # ---------------------------------------------------------------------------

@@ -468,10 +468,13 @@ build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/st
 
 # Refuse to write review artifacts into a repo that would commit them.
 reviews_dir() { # reviews_dir REPO EXACT-BASENAME -> path, or empty if unsafe
-  local repo="$1" rel=".ai/reviews/$2"
+  local repo="$1" rel=".ai/reviews/$2" root physical
   if ! git -C "$repo" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 \
     && git -C "$repo" check-ignore --no-index -q -- "$rel" 2>/dev/null \
     && [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ]; then
+    root="$(cd "$repo" && pwd -P)" || { printf ''; return; }
+    if [ -e "$repo/.ai" ]; then physical="$(cd "$repo/.ai" && pwd -P)" || { printf ''; return; }; case "$physical" in "$root"/*) ;; *) printf ''; return ;; esac; fi
+    if [ -e "$repo/.ai/reviews" ]; then physical="$(cd "$repo/.ai/reviews" && pwd -P)" || { printf ''; return; }; case "$physical" in "$root"/*) ;; *) printf ''; return ;; esac; fi
     printf '%s/.ai/reviews' "$repo"
   else
     printf ''
