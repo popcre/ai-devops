@@ -1,7 +1,7 @@
 # Response Style
 
 **This section is not optional and not aspirational. Sessions keep violating it.
-Re-read it before you write your final message in every turn.**
+These rules apply to every reply, not just the first one.**
 
 Albert is a business owner, not a programmer. Write every reply for him.
 
