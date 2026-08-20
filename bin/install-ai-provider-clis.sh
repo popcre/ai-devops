@@ -101,6 +101,25 @@ resolve() {
   return 1
 }
 
+# Each vendor installer drops its binary in its own directory and edits a shell
+# rc file to add that directory to PATH. That is unreliable: on hetz the Kimi
+# directory never reached PATH, so `kimi` was installed and working yet the
+# doctor still called the provider unavailable (2026-08-20). Rather than trust
+# three different rc edits, link every provider into ~/.local/bin, which the
+# default Ubuntu profile already puts on PATH.
+LOCAL_BIN="$HOME/.local/bin"
+link_into_local_bin() {
+  local cmd="$1" real="$2" dst="$LOCAL_BIN/$1"
+  [ "$real" = "$dst" ] && return 0
+  mkdir -p "$LOCAL_BIN"
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    echo "WARN $cmd: $dst exists and is not a symlink; leaving it untouched" >&2
+    return 0
+  fi
+  ln -sfn "$real" "$dst"
+  echo "     linked $dst -> $real"
+}
+
 failed=0
 installed_any=0
 needs_path=()
@@ -111,6 +130,9 @@ for entry in "${PROVIDERS[@]}"; do
 
   if existing="$(resolve "$cmd" "$home_rel")" && ((FORCE == 0)); then
     echo "SKIP $name already installed ($existing)"
+    # Still repair reachability: "installed but not on PATH" is the exact state
+    # that makes the doctor report the provider unavailable.
+    ((DRY_RUN)) || link_into_local_bin "$cmd" "$existing"
     continue
   fi
 
@@ -142,7 +164,8 @@ for entry in "${PROVIDERS[@]}"; do
   if resolved="$(resolve "$cmd" "$home_rel")"; then
     echo "OK   $name installed ($resolved)"
     installed_any=1
-    command -v "$cmd" >/dev/null 2>&1 || needs_path+=("$(dirname "$resolved")")
+    link_into_local_bin "$cmd" "$resolved"
+    command -v "$cmd" >/dev/null 2>&1 || needs_path+=("$LOCAL_BIN")
   else
     echo "ERROR $name: installer finished but neither '$cmd' on PATH nor \$HOME/$home_rel exists" >&2
     failed=1

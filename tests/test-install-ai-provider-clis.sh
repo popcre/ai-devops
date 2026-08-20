@@ -60,6 +60,40 @@ grep -q 'SKIP grok already installed' "$tmp/skip"
 PATH="$fake:$PATH" bash "$script" --dry-run --force grok >"$tmp/force" 2>&1
 grep -q 'would install grok' "$tmp/force"
 
+# --- installed-but-not-on-PATH is repaired, not just reported --------------
+# hetz had all three CLIs installed and working while the doctor still called
+# them unavailable, because the vendor rc-file PATH edits had not taken.
+linkhome="$tmp/link-home"; mkdir -p "$linkhome/.grok/bin"
+printf '#!/usr/bin/env bash
+exit 0
+' >"$linkhome/.grok/bin/grok"
+chmod +x "$linkhome/.grok/bin/grok"
+env HOME="$linkhome" PATH="$minimal_path" bash "$script" grok >"$tmp/link" 2>&1
+grep -q 'SKIP grok already installed' "$tmp/link"
+# Assert reachability, not symlink-ness: Git Bash silently copies instead of
+# linking, and the target platform for this script is Linux/macOS.
+[[ -x "$linkhome/.local/bin/grok" ]] || { echo "FAIL: did not link grok into ~/.local/bin"; exit 1; }
+grep -q "linked $linkhome/.local/bin/grok" "$tmp/link"
+
+# An unrelated real file in ~/.local/bin must never be clobbered.
+guard="$tmp/guard-home"; mkdir -p "$guard/.grok/bin" "$guard/.local/bin"
+printf '#!/usr/bin/env bash
+exit 0
+' >"$guard/.grok/bin/grok"
+chmod +x "$guard/.grok/bin/grok"
+echo 'not-a-symlink' >"$guard/.local/bin/grok"
+env HOME="$guard" PATH="$minimal_path" bash "$script" grok >"$tmp/guarded" 2>&1
+grep -q 'is not a symlink; leaving it untouched' "$tmp/guarded"
+grep -q 'not-a-symlink' "$guard/.local/bin/grok"
+
+# A dry run must not create links.
+dry="$tmp/dry-home"; mkdir -p "$dry/.grok/bin"
+printf '#!/usr/bin/env bash
+exit 0
+' >"$dry/.grok/bin/grok"; chmod +x "$dry/.grok/bin/grok"
+env HOME="$dry" PATH="$minimal_path" bash "$script" --dry-run grok >/dev/null 2>&1
+[[ -e "$dry/.local/bin/grok" ]] && { echo "FAIL: dry run created a link"; exit 1; }
+
 # --- root guard ------------------------------------------------------------
 # The guard must exist and must be escapable only by explicit opt-in, because
 # the vendor installers write into $HOME and root's $HOME is not the session
