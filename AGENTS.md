@@ -46,6 +46,7 @@ Then load additional docs only when relevant:
 | Task / question | Read these docs | Usually do not need |
 |---|---|---|
 | Quick repo orientation | `README.md`, `AGENTS.md` | Deep docs under `docs/` unless task requires them |
+| Install a vendor AI CLI (Grok, Kimi, Qwen) on a machine, or explain `<provider> provider unavailable` | `bin/install-ai-provider-clis.sh` (Linux/macOS), `bin/install-windows-ai-provider-clis.ps1` (Windows), `docs/config-inventory.md` | That message is informational, not a failure: the repo's wrappers are installed, the vendor CLI is not. Run the installer as the AI-session user, never root — the vendor installers write into `$HOME`. Logins stay interactive; never automate one. |
 | Reduce always-loaded AI context, decide where a rule or fact lives, or work the context-engineering consolidation | `AGENTS.md`, [`docs/context-engineering.md`](docs/context-engineering.md), `plan_context-engineering-consolidation.md` | Global and skill source files unless the task requires them |
 | Fix or continue dotfiles-sync reconciliation of local Grok/Kimi/GLM commands | `AGENTS.md`, [`plan_sync-machine-wrapper-reconciliation.md`](plan_sync-machine-wrapper-reconciliation.md) STATUS first, both sync skills, platform installer, related tests | Do not re-plan from chat or add another per-skill command checklist |
 | Modify a `bin/` script or workflow behavior | `AGENTS.md`, `docs/architecture.md`, `docs/development.md` | `docs/deployment.md` unless install/symlink behavior changes |
