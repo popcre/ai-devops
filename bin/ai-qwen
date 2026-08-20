@@ -476,17 +476,20 @@ tree_state() {
 }
 
 reviews_dir() {
-  git -C "$1" check-ignore -q .ai/reviews 2>/dev/null && printf '%s/.ai/reviews' "$1" || printf ''
+  local repo="$1" rel=".ai/reviews/$2"
+  ! git -C "$repo" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 \
+    && git -C "$repo" check-ignore --no-index -q -- "$rel" 2>/dev/null \
+    && [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ] \
+    && printf '%s/.ai/reviews' "$repo" || printf ''
 }
 write_review_file() {
-  local repo="$1" name="$2" f="$3" dir ts out
-  dir="$(reviews_dir "$repo")"
+  local repo="$1" name="$2" f="$3" dir ts out base
+  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="qwen-${name}-${ts}.md"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
     return 0
   fi
-  mkdir -p "$dir"; ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  out="$dir/qwen-${name}-${ts}.md"
+  mkdir -p "$dir"; out="$dir/$base"
   {
     echo "# Qwen review — $name"; echo
     echo "- Repo: \`$repo\`"
@@ -663,10 +666,10 @@ safe_report_detail() { # safe_report_detail TERMINAL_STATE
   esac
 }
 
-artifact_dir() { # artifact_dir REPO
+artifact_dir() { # artifact_dir REPO EXACT-BASENAME
   local dir
   [ "${AI_QWEN_TEST_FAIL_EXPORT:-}" = destination ] && return 1
-  dir="$(reviews_dir "$1")"
+  dir="$(reviews_dir "$1" "$2")"
   if [ -z "$dir" ]; then
     dir="$STATE_DIR/recovery-patches"
     mkdir -p "$dir" 2>/dev/null || return 1
@@ -683,9 +686,9 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     warn "refusing artifact export from an ambiguous Qwen worktree owner record: $owner"
     return 1
   }
-  dir="$(artifact_dir "$repo")" || return 1
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   [ "$kind" = incomplete ] && suffix=.incomplete || suffix=""
+  dir="$(artifact_dir "$repo" "qwen-${name}-${ts}${suffix}.patch")" || return 1
   patch="$dir/qwen-${name}-${ts}${suffix}.patch"
   report="$dir/qwen-${name}-${ts}.incomplete.md"
   patch_tmp="$(mktemp "$dir/.qwen-patch.XXXXXX")" || return 1
@@ -1077,11 +1080,11 @@ cmd_delete() {
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
 }
 cmd_transcript() {
-  local sid qwen repo dir out tmp source; repo="$(repo_root)"
+  local sid qwen repo dir out tmp source base; repo="$(repo_root)"
   sid="$(jq -r .qwen_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
   qwen="$(resolve_qwen)"
-  dir="$(reviews_dir "$repo")"; [ -n "$dir" ] || die "cannot export: '.ai/reviews' is not git-ignored."
-  mkdir -p "$dir"; out="$dir/qwen-$1-$(date -u +%Y%m%dT%H%M%SZ).jsonl"; tmp="$out.partial"
+  base="qwen-$1-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"; dir="$(reviews_dir "$repo" "$base")"; [ -n "$dir" ] || die "cannot export: exact destination is not safely git-ignored."
+  mkdir -p "$dir"; out="$dir/$base"; tmp="$out.partial"
   [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
   source="$("$qwen" sessions list --json --limit 1000 2>/dev/null | jq -r --arg sid "$sid" 'select(.sessionId==$sid)|.filePath' | tail -1)"
   [ -n "$source" ] || die "Qwen session $sid was not found in its project-scoped store."

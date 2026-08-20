@@ -8,14 +8,14 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Reconcile concurrent reviewer-wrapper work and freeze the failure matrix | ⬜ open | 2026-08-20 | Start with `git status --short`, issue #46, and §5 below |
-| 2. Make the durable worker the single owner of every review artifact | ⬜ open | 2026-08-20 | Required tests in §10.2 |
-| 3. Correct ignored-folder detection across affected wrappers and add protected fallback storage | ⬜ open | 2026-08-20 | Required tests in §10.3 |
-| 4. Preserve failed partial reviews without turning them into verdicts | ⬜ open | 2026-08-20 | Required tests in §10.4 |
-| 5. Present exact typed failures and preserve diagnostic evidence | ⬜ open | 2026-08-20 | Required tests in §10.5 |
-| 6. Make temporary-copy provenance and retrieval unambiguous | ⬜ open | 2026-08-20 | Required tests in §10.6 |
-| 7. Run the complete offline regression and hostile safety suite | ⬜ open | 2026-08-20 | Commands in §10.7 |
-| 8. Requalify Kimi live, independently review the exact head, and land | ⬜ open | 2026-08-20 | Gates in §§9.8 and 13 |
+| 1. Reconcile concurrent reviewer-wrapper work and freeze the failure matrix | ✅ complete | 2026-08-20 | `docs/kimi-review-failure-analysis-2026-08-19.md` and committed fixtures |
+| 2. Make the durable worker the single owner of every review artifact | ✅ complete | 2026-08-20 | Canonical artifact is written and hashed before terminal job state |
+| 3. Correct ignored-folder detection across affected wrappers and add protected fallback storage | ✅ complete | 2026-08-20 | Exact-destination checks in Kimi, Grok, Gemini, and Qwen |
+| 4. Preserve failed partial reviews without turning them into verdicts | ✅ complete | 2026-08-20 | Incomplete artifacts state `NO VERDICT` and commands remain nonzero |
+| 5. Present exact typed failures and preserve diagnostic evidence | ✅ complete | 2026-08-20 | Typed guidance plus raw stream/stderr paths in the artifact |
+| 6. Make temporary-copy provenance and retrieval unambiguous | ✅ complete | 2026-08-20 | Artifact records launch repository, reviewed head, private canonical path, and optional mirror |
+| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-20 | Kimi 169/169, Grok 106/106, Qwen 23/23, Gemini 17/17 |
+| 8. Requalify Kimi live, independently review the exact head, and land | 🟨 in progress | 2026-08-20 | Auth/preflight pass; live Kimi returned no terminal record, so quarantine remains. Grok review pending. |
 
 **Fresh-session starting point:** Step 1. Read the entire plan before editing. The
 checkout had concurrent uncommitted changes to `bin/ai-kimi` and
