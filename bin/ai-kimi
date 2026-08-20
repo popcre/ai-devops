@@ -763,28 +763,106 @@ build_prompt_file() {
 # that silently stopped working (e.g. a Kimi upgrade changing frontmatter rules).
 tree_state() { git -C "$1" status --porcelain 2>/dev/null | sort; }
 
-reviews_dir() {
-  git -C "$1" check-ignore -q .ai/reviews 2>/dev/null && printf '%s/.ai/reviews' "$1" || printf ''
+review_destination_safe() { # REPO EXACT-DESTINATION
+  local repo="$1" out="$2" rel
+  case "$out" in "$repo"/.ai/reviews/*) ;; *) return 1 ;; esac
+  rel="${out#"$repo"/}"
+  # A tracked destination is committable even when --no-index also matches an
+  # ignore rule.  Never recreate a tracked historical report.
+  git -C "$repo" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 && return 1
+  git -C "$repo" check-ignore --no-index -q -- "$rel" 2>/dev/null || return 1
+  # Refuse a symlink/junction-like path component.  Review output must stay
+  # physically inside the repository or in the wrapper's private state.
+  [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ] || return 1
+  return 0
 }
-write_review_file() {
-  local repo="$1" name="$2" f="$3" dir ts out
-  dir="$(reviews_dir "$repo")"
-  if [ -z "$dir" ]; then
-    warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
-    return 0
+
+reviews_dir() { # REPO EXACT-BASENAME
+  local repo="$1" base="${2:-.ai-kimi-ignore-probe.md}" out
+  out="$repo/.ai/reviews/$base"
+  review_destination_safe "$repo" "$out" && printf '%s/.ai/reviews' "$repo" || printf ''
+}
+
+assistant_text() { jq -r 'select(.role=="assistant") | .content // ""' "$1" 2>/dev/null | sed '/^$/d'; }
+
+review_answer_defect() { # STREAM -> reason or empty
+  local text
+  text="$(assistant_text "$1")"
+  if [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then printf 'missing-answer'
+  elif ! printf '%s' "$text" | grep -qF '## Verdict'; then printf 'missing-verdict'
+  else printf ''
   fi
-  mkdir -p "$dir"; ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  out="$dir/kimi-${name}-${ts}.md"
+}
+
+FINAL_CANONICAL=""; FINAL_MIRROR=""; FINAL_HASH=""; FINAL_KIND=""
+render_review_artifact() { # META STREAM KIND REASON
+  local meta="$1" stream="$2" kind="$3" reason="$4" out tmp name repo sid rc head jobid
+  out="$(jq -r '.artifact_paths.canonical // ""' "$meta")"
+  [ -n "$out" ] || return 1
+  case "$(basename "$out")" in review-*.md) ;; *) return 1 ;; esac
+  same_path "$(dirname "$out")" "$(dirname "$meta")" || return 1
+  [ ! -e "$out" ] || return 1
+  tmp="$(mktemp "$(dirname "$out")/.review.XXXXXX")" || return 1
+  chmod 0600 "$tmp" 2>/dev/null || true
+  name="$(jq -r .name "$meta")"; repo="$(jq -r .repo "$meta")"
+  sid="$(session_id_from "$stream")"; [ -n "$sid" ] || sid=unavailable
+  rc="$(jq -r '.exit_code // "unavailable"' "$meta")"
+  head="$(jq -r '.head // "unavailable"' "$meta")"; jobid="$(jq -r .job_id "$meta")"
   {
-    echo "# Kimi review — $name"; echo
-    echo "- Repo: \`$repo\`"
-    echo "- Branch: \`$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')\`"
-    echo "- Session: \`$(session_id_from "$f")\`"
-    echo "- Model requested: \`$KIMI_MODEL\` (Kimi does not report which model answered)"
+    if [ "$kind" = complete ]; then
+      echo "# Kimi review — $name"
+    else
+      echo "# INCOMPLETE — NO VERDICT — Kimi review $name"
+      echo
+      echo "This is recovery evidence only. It cannot approve a change or satisfy a review gate."
+    fi
+    echo
+    echo "- Job: \`$jobid\`"
+    echo "- Repository at launch: \`$repo\`"
+    echo "- Reviewed head: \`$head\`"
+    echo "- Kimi session: \`$sid\`"
+    echo "- Model requested: \`$KIMI_MODEL\` (returned model, tokens, cache, and cost: unavailable)"
+    echo "- Artifact kind: \`$kind\`"
+    echo "- Terminal reason: \`${reason:-session.resume_hint}\`"
+    echo "- Command exit status: \`$rc\`"
+    echo "- Raw stream: \`$stream\`"
+    echo "- Provider stderr: \`$stream.err\`"
     echo; echo "---"; echo
-    jq -r 'select(.role=="assistant") | .content // ""' "$f" 2>/dev/null
-  } > "$out"
-  printf '%s' "$out"
+    assistant_text "$stream"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  FINAL_CANONICAL="$out"; FINAL_HASH="$(sha256_file "$out")"; FINAL_KIND="$kind"; FINAL_MIRROR=""
+  return 0
+}
+
+mirror_review_artifact() { # META CANONICAL
+  local meta="$1" canonical="$2" repo name stamp base dir out tmp
+  repo="$(jq -r .repo "$meta")"; [ -d "$repo/.git" ] || { warn "repository copy is gone; canonical review kept at $canonical"; return 0; }
+  name="$(jq -r .name "$meta")"; stamp="$(basename "$canonical" .md | sed 's/^review-//')"
+  base="kimi-${name}-${stamp}.md"; dir="$(reviews_dir "$repo" "$base")"
+  if [ -z "$dir" ]; then warn "not mirroring review: exact destination '$repo/.ai/reviews/$base' is not safely git-ignored"; return 0; fi
+  mkdir -p "$dir" || return 1; out="$dir/$base"; [ ! -e "$out" ] || { warn "not overwriting existing review mirror: $out"; return 0; }
+  tmp="$(mktemp "$dir/.kimi-review.XXXXXX")" || return 1; cp "$canonical" "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  FINAL_MIRROR="$out"
+}
+
+finalize_review_artifact() { # META STREAM KIND REASON
+  local meta="$1" stream="$2" kind="$3" reason="$4"
+  render_review_artifact "$meta" "$stream" "$kind" "$reason" || return 1
+  mirror_review_artifact "$meta" "$FINAL_CANONICAL" || warn "repository mirror failed; canonical review kept at $FINAL_CANONICAL"
+  return 0
+}
+
+# Foreground implementation conversations still get a human-facing transcript.
+# Durable review jobs use finalize_review_artifact instead and never call this.
+write_review_file() { # REPO NAME STREAM
+  local repo="$1" name="$2" stream="$3" stamp base dir out tmp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="kimi-${name}-${stamp}.md"; dir="$(reviews_dir "$repo" "$base")"
+  [ -n "$dir" ] || { warn "not writing transcript: exact destination is not safely git-ignored"; return 0; }
+  mkdir -p "$dir" || return 1; out="$dir/$base"; tmp="$(mktemp "$dir/.kimi-turn.XXXXXX")" || return 1
+  { echo "# Kimi turn — $name"; echo; assistant_text "$stream"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }; printf '%s' "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -800,20 +878,22 @@ write_job_state() { # META JSON-PATCH
 }
 
 create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
-  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid
+  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid stamp canonical
   dir="$(job_dir "$rid" "$name")"; meta="$dir/job.json"
   mkdir -p "$dir" || die "could not create durable Kimi job state."
   chmod 0700 "$dir" 2>/dev/null || true
   now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"; canonical="$dir/review-$stamp.md"
   write_meta "$meta" "$(jq -n --arg id "$jobid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
     --arg head "$(git -C "$repo" rev-parse HEAD)" --arg caller "$CALLER" --arg name "$name" --arg mode "$mode" \
     --arg sid "$sid" --arg model "$KIMI_MODEL" --arg home_hash "$(safe_home_hash)" --arg created "$now" \
-    --arg out "$dir/stream.jsonl" --arg log "$dir/worker.log" --arg cancel "$dir/cancel.request" \
+    --arg out "$dir/stream.jsonl" --arg log "$dir/worker.log" --arg canonical "$canonical" --arg cancel "$dir/cancel.request" \
     '{version:1,job_id:$id,repo:$repo,repo_remote:$remote,head:$head,caller:$caller,name:$name,mode:$mode,
       kimi_session_id:(if $sid=="" then null else $sid end),model:$model,kimi_home_sha256:$home_hash,
       created:$created,updated:$created,phase:"preflight",worker_pid:null,kimi_child_pid:null,
       last_output_at:null,last_output_size:0,terminal_reason:null,exit_code:null,
-      cancel_request:$cancel,artifact_paths:{stream:$out,log:$log}}')"
+      cancel_request:$cancel,artifact_paths:{stream:$out,log:$log,canonical:$canonical,repository:null},
+      artifact_kind:null,artifact_sha256:null}')"
 }
 
 launch_review_worker() { # JOB-DIR PROMPT-FILE
@@ -854,7 +934,7 @@ launch_review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 review_worker() { # JOB-DIR PROMPT-FILE
-  local dir="$1" pf="$2" meta out repo workdir repo_lock name mode sid before source_before rc reason new_sid path stale=false provider_started provider_seconds
+  local dir="$1" pf="$2" meta out repo workdir repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase
   meta="$dir/job.json"; [ -f "$meta" ] || exit 2
   repo="$(jq -r .repo "$meta")"; name="$(jq -r .name "$meta")"; mode="$(jq -r .mode "$meta")"
   workdir="$(jq -r '.review_workspace // .repo' "$meta")"
@@ -872,31 +952,43 @@ review_worker() { # JOB-DIR PROMPT-FILE
   write_job_state "$meta" --argjson seconds "$provider_seconds" --arg u "$(date -u +%FT%TZ)" '.timing.provider_seconds=$seconds|.timing.model_steps="unavailable"|.updated=$u' || exit 2
   if [ "$RUN_TURN_CANCELLED" = 1 ] || [ -f "$ACTIVE_CANCEL_FILE" ] \
     || jq -e '.cancel_requested == true' "$meta" >/dev/null 2>&1; then
-    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="cancelled"|.terminal_reason="cancelled-by-user"|.exit_code=$rc|.updated=$u' || exit 2
+    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="cancelled-by-user"|.exit_code=$rc|.updated=$u' || exit 2
+    finalize_review_artifact "$meta" "$out" incomplete cancelled-by-user || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="cancelled"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
     exit 1
   fi
   if has_resume_hint "$out"; then
     new_sid="$(session_id_from "$out")"
-    [ -n "$new_sid" ] || { write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="malformed-output"|.updated=$u'; exit 1; }
+    [ -n "$new_sid" ] || reason=malformed-output
     if [ "$mode" = review ] && [ "$before" != "$(tree_state "$workdir")" ]; then
-      write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="readonly-tree-changed"|.updated=$u'; exit 1
+      reason=readonly-tree-changed
+    fi
+    defect="$(review_answer_defect "$out")"; [ -z "$defect" ] || reason="$defect"
+    if [ -n "${reason:-}" ]; then
+      write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
+      finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+      write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="failed"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
+      exit 1
     fi
     [ "$source_before" = "$(tree_state "$repo")" ] || stale=true
     write_meta "$(meta_path "$(repo_id "$repo")" "$name")" "$(jq -n --arg sid "$new_sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg workspace "$workdir" --arg kind "$(jq -r '.review_kind // "diff"' "$meta")" --arg name "$name" --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg created "$(date -u +%FT%TZ)" '{kimi_session_id:$sid,repo:$repo,repo_remote:$remote,review_workspace:$workspace,review_kind:$kind,name:$name,caller:$caller,mode:$mode,model:$model,created:$created,updated:$created,turns:1}')"
-    path="$(write_review_file "$repo" "$name" "$out")"
-    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg path "$path" --argjson stale "$stale" --argjson rc "$rc" '.phase="completed"|.terminal_reason="session.resume_hint"|.kimi_session_id=$sid|.exit_code=$rc|.updated=$u|.review_artifact=$path|.source_checkout_changed=$stale' || exit 2
+    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="session.resume_hint"|.exit_code=$rc|.updated=$u' || exit 2
+    finalize_review_artifact "$meta" "$out" complete session.resume_hint || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+    write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --argjson stale "$stale" '.phase="completed"|.kimi_session_id=$sid|.updated=$u|.source_checkout_changed=$stale|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="complete"|.artifact_sha256=$h' || exit 2
     rm -f "$pf" "$dir/launch-worker.ps1" "$dir/launch-bootstrap.ps1" 2>/dev/null || true
     exit 0
   fi
-  reason="failed"
+  reason="provider-process-failed"
   [ "$RUN_TURN_TIMED_OUT" = 1 ] && reason="timed-out"
   [ "$RUN_TURN_STARTUP_FAILED" = 1 ] && reason="startup-timeout"
   grep -Eqi 'created under a different directory' "$out" "$out.err" 2>/dev/null && reason="directory-mismatch"
   grep -Eqi 'EPERM|EACCES|permission denied|mkdir' "$out" "$out.err" 2>/dev/null && reason="execution-context-denied"
   grep -Eqi 'usage limit|billing cycle|quota (reached|exceeded)|purchase extra usage' "$out" "$out.err" 2>/dev/null && reason="usage-limit"
-  [ "$reason" = failed ] && grep -Eqi 'auth|credential|provider|no providers' "$out" "$out.err" 2>/dev/null && reason="credentials-unavailable"
-  local terminal_phase="failed"; [ "$reason" = timed-out ] && terminal_phase="timed-out"
-  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --arg phase "$terminal_phase" --argjson rc "$rc" '.phase=$phase|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
+  [ "$reason" = provider-process-failed ] && grep -Eqi 'auth|credential|provider|no providers' "$out" "$out.err" 2>/dev/null && reason="credentials-unavailable"
+  terminal_phase="failed"; [ "$reason" = timed-out ] && terminal_phase="timed-out"
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
+  finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg phase "$terminal_phase" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase=$phase|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
   rm -f "$pf" "$dir/launch-worker.ps1" "$dir/launch-bootstrap.ps1" 2>/dev/null || true
   exit 1
 }
@@ -956,6 +1048,32 @@ start_review_job() { # NAME [CONTINUE]
 }
 
 job_for_name() { local rid; rid="$(repo_id "$(repo_root)")"; job_meta "$rid" "$1"; }
+terminal_guidance() {
+  case "$1" in
+    usage-limit) note "ai-kimi: Kimi refused the run because the account usage limit was reached. The incomplete artifact preserves any partial answer; retry after quota is available." ;;
+    timed-out|startup-timeout) note "ai-kimi: the provider did not finish before the safety deadline. The incomplete artifact preserves the available evidence." ;;
+    directory-mismatch) note "ai-kimi: Kimi rejected the private review directory. Start a new review after checking the saved paths." ;;
+    credentials-unavailable) note "ai-kimi: Kimi credentials or provider access were unavailable." ;;
+    execution-context-denied) note "ai-kimi: run this credentialed Kimi job from the Full Access main task." ;;
+    readonly-tree-changed) note "ai-kimi: the read-only restriction is not holding. This review is invalid." ;;
+    missing-answer|missing-verdict|malformed-output) note "ai-kimi: Kimi stopped without a usable review verdict. The incomplete artifact is evidence only." ;;
+    worker-start-failed) note "ai-kimi: the detached worker could not start; no provider review occurred." ;;
+    artifact-write-failed) note "ai-kimi: the permanent review artifact could not be written. Raw evidence remains in the job directory; run: ai-kimi recover $2" ;;
+    cancelled-by-user) note "ai-kimi: the review was cancelled. The incomplete artifact preserves any partial answer." ;;
+    *) note "ai-kimi: Kimi ended without the required session.resume_hint terminal record or a proven usable verdict. The incomplete artifact preserves the available evidence." ;;
+  esac
+}
+display_review_job() { # META
+  local meta="$1" artifact expected actual kind
+  artifact="$(jq -r '.artifact_paths.canonical // ""' "$meta")"; expected="$(jq -r '.artifact_sha256 // ""' "$meta")"
+  [ -n "$artifact" ] && [ -f "$artifact" ] || { terminal_guidance artifact-write-failed "$(jq -r .name "$meta")"; return 1; }
+  actual="$(sha256_file "$artifact")"; [ -n "$expected" ] && [ "$actual" = "$expected" ] || { note "ai-kimi: saved review artifact failed its integrity check: $artifact"; return 1; }
+  cat "$artifact"
+  note "canonical artifact: $artifact"
+  [ "$(jq -r '.artifact_paths.repository // ""' "$meta")" = "" ] || note "repository mirror: $(jq -r .artifact_paths.repository "$meta")"
+  note "note: Kimi reports no token, cost, or returned-model data; none is claimed for this run."
+  kind="$(jq -r '.artifact_kind // "incomplete"' "$meta")"; [ "$kind" = complete ]
+}
 cmd_wait_job() { # NAME
   local meta out waited=0 phase size
   meta="$(job_for_name "$1")"; [ -f "$meta" ] || die "no durable job '$1'. Start it first."
@@ -965,21 +1083,13 @@ cmd_wait_job() { # NAME
     [ "$waited" -lt "$WAIT_TIMEOUT" ] || die "wait limit reached; worker continues. Use: ai-kimi status $1"
     if [ $((waited % HEARTBEAT_INTERVAL)) -eq 0 ]; then phase="$(jq -r .phase "$meta")"; size="$(wc -c < "$out" 2>/dev/null || echo 0)"; note "job $1: $phase, ${waited}s, output ${size} bytes"; fi
   done
-  if [ "$(jq -r .phase "$meta")" != completed ]; then
-    case "$(jq -r '.terminal_reason // "failed"' "$meta")" in
-      readonly-tree-changed) note "ai-kimi: read-only restriction is not holding in the private review workspace." ;;
-      execution-context-denied) note "ai-kimi: execution-context-denied. Run this credentialed Kimi job from the Full Access main task." ;;
-      *) note "ai-kimi: Kimi ended without the required session.resume_hint terminal record." ;;
-    esac
-    jq . "$meta" >&2; return 1
-  fi
-  # #1220: propagate a no-verdict turn as a failure, so a caller reading only the
-  # exit code cannot mistake "the provider stopped" for "the reviewer approved".
-  finish_turn "$(jq -r .repo "$meta")" "$1" "$out"
+  display_review_job "$meta" && return 0
+  terminal_guidance "$(jq -r '.terminal_reason // "failed"' "$meta")" "$1"
+  return 1
 }
-cmd_status_job() { jq '{job_id,phase,created,updated,terminal_reason,worker_pid,kimi_child_pid,last_output_size,review_kind,timing,source_checkout_changed}' "$(job_for_name "$1")"; }
+cmd_status_job() { jq '{job_id,phase,created,updated,terminal_reason,exit_code,worker_pid,kimi_child_pid,last_output_size,review_kind,timing,source_checkout_changed,artifact_kind,artifact_sha256,artifact_paths}' "$(job_for_name "$1")"; }
 cmd_logs_job() { local f; f="$(jq -r .artifact_paths.log "$(job_for_name "$1")")"; tail -100 "$f" 2>/dev/null || true; }
-cmd_result_job() { local meta; meta="$(job_for_name "$1")"; [ "$(jq -r .phase "$meta")" = completed ] || die "job '$1' has no proven terminal result."; finish_turn "$(jq -r .repo "$meta")" "$1" "$(jq -r .artifact_paths.stream "$meta")"; }
+cmd_result_job() { local meta; meta="$(job_for_name "$1")"; job_is_terminal "$meta" || die "job '$1' is still running."; display_review_job "$meta" && return 0; terminal_guidance "$(jq -r '.terminal_reason // "failed"' "$meta")" "$1"; return 1; }
 cmd_cancel_job() {
   local meta request waited=0
   meta="$(job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }
@@ -993,7 +1103,16 @@ cmd_cancel_job() {
   fi
   jq . "$meta"
 }
-cmd_recover_job() { local meta; meta="$(job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }; if has_resume_hint "$(jq -r .artifact_paths.stream "$meta")"; then write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="recovery-required"|.terminal_reason="terminal-stream-needs-worker-finalization"|.updated=$u'; else write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="recovery-required"|.terminal_reason="worker-ended-without-terminal-proof"|.updated=$u'; fi; jq . "$meta"; }
+cmd_recover_job() {
+  local meta out reason
+  meta="$(job_for_name "$1")"; out="$(jq -r .artifact_paths.stream "$meta")"
+  if [ -f "$(jq -r '.artifact_paths.canonical // ""' "$meta")" ]; then jq . "$meta"; return 0; fi
+  reason="worker-ended-without-terminal-proof"; has_resume_hint "$out" && reason="terminal-stream-needs-worker-finalization"
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" '.phase="recovery-required"|.terminal_reason=$r|.exit_code=(.exit_code // 1)|.updated=$u'
+  finalize_review_artifact "$meta" "$out" incomplete "$reason" || die "recovery could not write the permanent artifact; raw stream kept at $out"
+  write_job_state "$meta" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h'
+  jq . "$meta"; return 1
+}
 
 # ---------------------------------------------------------------------------
 usage() {
@@ -1199,10 +1318,10 @@ safe_report_detail() { # safe_report_detail TERMINAL_STATE
   esac
 }
 
-artifact_dir() { # artifact_dir REPO
+artifact_dir() { # artifact_dir REPO EXACT-BASENAME
   local dir
   [ "${AI_KIMI_TEST_FAIL_EXPORT:-}" = destination ] && return 1
-  dir="$(reviews_dir "$1")"
+  dir="$(reviews_dir "$1" "$2")"
   if [ -z "$dir" ]; then
     dir="$STATE_DIR/recovery-patches"
     mkdir -p "$dir" 2>/dev/null || return 1
@@ -1219,9 +1338,9 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     warn "refusing artifact export from an ambiguous Kimi worktree owner record: $owner"
     return 1
   }
-  dir="$(artifact_dir "$repo")" || return 1
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   [ "$kind" = incomplete ] && suffix=.incomplete || suffix=""
+  dir="$(artifact_dir "$repo" "kimi-${name}-${ts}${suffix}.patch")" || return 1
   patch="$dir/kimi-${name}-${ts}${suffix}.patch"
   report="$dir/kimi-${name}-${ts}.incomplete.md"
   patch_tmp="$(mktemp "$dir/.kimi-patch.XXXXXX")" || return 1
@@ -1630,11 +1749,11 @@ cmd_delete() {
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
 }
 cmd_transcript() {
-  local sid kimi repo dir out tmp; repo="$(repo_root)"
+  local sid kimi repo dir out tmp base; repo="$(repo_root)"
   sid="$(jq -r .kimi_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
   kimi="$(resolve_kimi)"
-  dir="$(reviews_dir "$repo")"; [ -n "$dir" ] || die "cannot export: '.ai/reviews' is not git-ignored."
-  mkdir -p "$dir"; out="$dir/kimi-$1-$(date -u +%Y%m%dT%H%M%SZ).zip"; tmp="$out.partial"
+  base="kimi-$1-$(date -u +%Y%m%dT%H%M%SZ)-$$.zip"; dir="$(reviews_dir "$repo" "$base")"; [ -n "$dir" ] || die "cannot export: exact destination is not safely git-ignored."
+  mkdir -p "$dir"; out="$dir/$base"; tmp="$out.partial"
   [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
   "$kimi" export "$sid" -o "$tmp" -y --no-include-global-log >/dev/null \
     || { rm -f "$tmp"; die "'kimi export $sid' failed. Check: kimi export --help"; }

@@ -467,9 +467,11 @@ build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/st
 }
 
 # Refuse to write review artifacts into a repo that would commit them.
-reviews_dir() { # reviews_dir REPO -> path, or empty if unsafe
-  local repo="$1"
-  if git -C "$repo" check-ignore -q .ai/reviews 2>/dev/null; then
+reviews_dir() { # reviews_dir REPO EXACT-BASENAME -> path, or empty if unsafe
+  local repo="$1" rel=".ai/reviews/$2"
+  if ! git -C "$repo" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 \
+    && git -C "$repo" check-ignore --no-index -q -- "$rel" 2>/dev/null \
+    && [ ! -L "$repo/.ai" ] && [ ! -L "$repo/.ai/reviews" ]; then
     printf '%s/.ai/reviews' "$repo"
   else
     printf ''
@@ -477,15 +479,14 @@ reviews_dir() { # reviews_dir REPO -> path, or empty if unsafe
 }
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
-  local repo="$1" name="$2" f="$3" dir ts out
-  dir="$(reviews_dir "$repo")"
+  local repo="$1" name="$2" f="$3" dir ts out base
+  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="grok-${name}-${ts}.md"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo (it would be committable). Add '.ai/reviews/' to .gitignore."
     return 0
   fi
   mkdir -p "$dir"
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  out="$dir/grok-${name}-${ts}.md"
+  out="$dir/$base"
   {
     echo "# Grok review — $name"
     echo

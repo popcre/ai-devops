@@ -145,10 +145,19 @@ run wait durable >/dev/null 2>&1
 check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
 check "durable job records measured preparation and provider timing" "run status durable | jq -e '.timing.snapshot_seconds >= 0 and .timing.test_seconds >= 0 and .timing.packet_seconds >= 0 and .timing.provider_seconds >= 0 and .timing.model_steps == \"unavailable\"'"
 check "result is available after terminal proof" "run result durable | grep -q APPROVE"
+check "completed review has one hashed canonical artifact" "run status durable | jq -e '.artifact_kind == \"complete\" and (.artifact_sha256|length)==64 and (.artifact_paths.canonical|length)>0'"
+CANONICAL="$(run status durable | jq -r .artifact_paths.canonical)"
+MIRROR="$(run status durable | jq -r .artifact_paths.repository)"
+check "canonical and optional repository mirror both exist" "test -f '$CANONICAL' && test -f '$MIRROR'"
+MIRRORS_BEFORE="$(find "$REPO/.ai/reviews" -name 'kimi-durable-*.md' | wc -l)"
+run result durable >/dev/null 2>&1
+MIRRORS_AFTER="$(find "$REPO/.ai/reviews" -name 'kimi-durable-*.md' | wc -l)"
+[ "$MIRRORS_AFTER" = "$MIRRORS_BEFORE" ] && ok "repeated result retrieval creates no duplicate" || bad "repeated result retrieval creates no duplicate"
 echo usagepartial > "$TMP/mode"
 run start quota-review --prompt review >/dev/null
 run wait quota-review >/dev/null 2>&1 || true
 check "durable review classifies quota separately from authentication" "run status quota-review | jq -e '.phase == \"failed\" and .terminal_reason == \"usage-limit\"'"
+check "quota failure preserves an incomplete no-verdict artifact" "p=\$(run status quota-review | jq -r .artifact_paths.canonical); test -f \"\$p\" && grep -q 'INCOMPLETE.*NO VERDICT' \"\$p\" && grep -q 'Usage limit reached' \"\$p\""
 echo ok > "$TMP/mode"
 echo slow > "$TMP/mode"
 AI_KIMI_WAIT_TIMEOUT=2 run start durable-timeout --prompt review >/dev/null
