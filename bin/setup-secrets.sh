@@ -379,6 +379,8 @@ servers = {
     "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
     "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
                                               "https://mcp.vercel.com"]},
+    "railway":    {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
+                                              "https://mcp.railway.com"]},
 }
 
 # codex-cli: Codex carries its own `codex login` session, so no launcher and no
