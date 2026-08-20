@@ -567,6 +567,13 @@ if ($SkipDesktopMcp) {
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
     Ok "Wired token-free: $McpServerList - no tokens in the file"
+    Warn "KNOWN FAULT (seen 2026-08-20): the app itself rewrites this file and"
+    Warn "  DELETES the whole mcpServers block - every other key survives, no error,"
+    Warn "  no org blocklist involved. Settings > Developer (not Connectors) is the"
+    Warn "  screen that reads it; after a wipe it shows 0 servers. If you re-run this"
+    Warn "  script and they vanish again, re-installing them is a band-aid - the app"
+    Warn "  version has stopped honouring the file. Claude Code is NOT affected; it"
+    Warn "  reads ~/.claude.json (step 7)."
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
     Warn "  these MCPs show connected: $McpServerList."
   }
