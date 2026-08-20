@@ -777,7 +777,7 @@ if (Test-Path -LiteralPath $glmSetup) {
     if (Test-Path -LiteralPath $museSetup) {
       & $gitBash -lc "'$museSetup'"
       if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
-      Ok "Muse direct protected reviews are installed: ai-muse doctor"
+      Ok "Muse persistent protected conversations are installed: ai-muse doctor"
     }
   } catch {
     # Loud, not silent: say what broke and what still works.

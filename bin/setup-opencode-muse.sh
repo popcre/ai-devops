@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the direct, protected Muse review profile. Safe to re-run.
+# Install the direct, protected persistent Muse profile. Safe to re-run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,4 +17,4 @@ mkdir -p "$CFG/opencode-xdg/opencode/agent"
 cp "$ROOT/config/opencode-muse/opencode.json" "$CFG/opencode-xdg/opencode/opencode.json"
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$CFG/opencode-xdg/opencode/agent/muse-review.md"
 chmod 700 "$CFG" "$CFG/opencode-xdg" 2>/dev/null || true
-echo "Muse direct review profile installed. Check: bin/ai-muse doctor"
+echo "Muse persistent conversation profile installed. Check: ai-muse doctor"
