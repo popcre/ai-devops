@@ -32,6 +32,14 @@ index, constraint, extension, publication, storage policy, or a migration shippi
     not shape work: hand it to a FRESH sub-agent with an empty context window, exactly as a
     migration is dispatched. Do not read the code, debug it, or "just fix it quickly" here.
 
+**A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
+`return_to: owner/repo` in its scope block. Return it with
+`node scripts/manage-migration-author-lanes.mjs --return-issue <n>` — that files the issue in the
+owning repository FIRST, then comments the new URL here, then closes this one, so a failure at any
+step leaves the issue open rather than losing the task. Never close a rejected issue by hand. A
+reject with no `return_to` is reported as `NO RETURN ADDRESS` and makes `--queue-audit` exit 2.
+FORK items are not lost either: they stay open and dispatched until the work is done.
+
 No third exit and no size exemption. `db-work` is an intake label, never proof that an item passed
 this test. Your own window is for triage, dispatch, review, merge and promotion — nothing else.
 `--queue-audit` prints a `NOT ORCHESTRATOR WORK` block listing every open issue that fails the
