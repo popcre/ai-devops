@@ -16,26 +16,28 @@ Read this table first. Do not re-plan completed work. Whoever executes a step mu
 | # | Step | Status | Evidence required before marking done |
 |---|---|---|---|
 | 1 | Freeze the Meta API, model, pricing/privacy, and OpenCode contracts | ✅ complete | [`docs/verification/muse-opencode/2026-08-18T2020Z-contract/README.md`](docs/verification/muse-opencode/2026-08-18T2020Z-contract/README.md), [`tests/fixtures/muse-opencode/contract-2026-08-18.json`](tests/fixtures/muse-opencode/contract-2026-08-18.json), and `bash tests/test-muse-opencode-contract.sh` |
-| 2 | Extract and prove a provider-neutral OpenCode harness core without changing GLM behavior | ⬜ open | `tests/test-ai-opencode-harness.sh` and the full existing GLM suites pass; live GLM parity report saved under `docs/verification/muse-opencode/` |
-| 3 | Add the pinned Muse provider configuration and safety profiles | ⬜ open | Configuration tests prove exact provider/model, disabled sharing/update, review tool removal, and implementation isolation |
-| 4 | Build the `ai-muse` command with GLM-equivalent lifecycle and failure handling | ⬜ open | `tests/test-ai-muse.sh` passes all offline lifecycle, recovery, boundary, and artifact cases |
-| 5 | Add safe Ubuntu installation and service management | ⬜ open | Ubuntu installer tests plus redacted `ai-muse doctor` output from a real Ubuntu installation |
-| 6 | Add safe Windows installation and service management | ⬜ open | Windows tests plus redacted `ai-muse doctor` output from `al8960ofc` in an ordinary, non-elevated PowerShell window |
-| 7 | Integrate review packets, preflight, scoreboard, command catalog, and shared skill | ⬜ open | Helper suites, trigger-evaluation artifact, and installed-skill verification pass |
-| 8 | Complete permanent documentation, restore instructions, and machine routing | ⬜ open | All router links resolve and docs name both operating systems, setup, diagnosis, rollback, privacy, and costs |
-| 9 | Qualify live review and implementation behavior on Windows | ⬜ open | Redacted Windows qualification bundle proves exact model, continuity, read-only review, isolated implementation, failures, cache/usage reporting, and linked-worktree handling |
+| 2 | Extract a provider-neutral server core | superseded | Direct exact-session resume gives persistence without the server path that failed Meta authorization; GLM remains unchanged |
+| 3 | Add the pinned Muse provider configuration and safety profile | ✅ complete | `tests/test-ai-muse.sh` validates the exact Contributor model, key reference, and removed dangerous tools |
+| 4 | Build persistent `ai-muse new` / `ask` lifecycle | partial for persistent-debate scope | Named lifecycle, exact resume, recovery state, locking, reports, and delete pass. The original plan's broader timeout and live-provider failure matrix remains open. |
+| 5 | Add Ubuntu service management | superseded | Direct persistence needs no service; Ubuntu uses the same installed command and separate OpenCode state |
+| 6 | Add Windows service management | superseded | Direct persistence needs no task or port; Windows uses the same installed command and separate OpenCode state |
+| 7 | Integrate packets, command catalog, and shared skill | partial for persistent-debate scope | Persistent turns refresh the packet; machine catalog installs `ai-muse`; shared skill requires named continuation. Original preflight/scoreboard work remains open. |
+| 8 | Complete permanent documentation and routing | partial for persistent-debate scope | Core docs and the shared skill describe persistence. Final release evidence remains open with Step 11. |
+| 9 | Qualify persistent Windows behavior | partial for persistent-debate scope | A live `new` returned `FIRST-OK`; a separate `ask` on the same ID recalled `MUSE-WRAPPER-7731`; delete removed the session. The original implementation and broad failure matrix remain open. |
 | 10 | Qualify live review and implementation behavior on Ubuntu | ⬜ open | Equivalent redacted Ubuntu qualification bundle and cross-platform comparison |
 | 11 | Independent review, landing, installation, and issue close | ⬜ open | Exact-head review report, commit SHA on `origin/main`, installed checks on both operating systems, and closed issue #40 |
 
-> **Design decision, 2026-08-19:** The long-running Muse server path was replaced
-> with the owner-approved direct protected runner. Both pinned 1.18.12 and newer
-> 1.18.18 returned provider authorization failures only in server mode while direct
-> Muse reviews completed with the same key. `ai-muse review` now uses a disposable
-> self-contained copy, the evidence packet, and the read-only Muse profile; it never
-> falls back to another model. GLM remains unchanged. Server-specific steps are
-> superseded; direct-runner tests and a successful live review are the release gate.
+> **Revised owner decision, 2026-08-19:** Muse must support persistent named debates,
+> not only one-off reviews. The working design keeps direct mode because server mode
+> failed Meta authorization, but uses OpenCode's exact `run --session <id>` resume
+> contract. A measured second process resumed the same session and recalled the first
+> turn. This supplies the requested `new` then `ask` workflow without adding a second
+> background service. The former direct one-off decision is superseded.
+> This change delivers persistent protected review/debate only. The original plan's
+> implementation command, preflight/scoreboard integration, Ubuntu qualification, and
+> broad failure matrix remain open and must not be inferred from the completed rows.
 
-**Fresh-session starting point:** Step 1.
+**Fresh-session starting point:** Step 10. Step 11 cannot land or close the issue until every remaining mandatory gate is complete or the owner explicitly narrows it in a later decision.
 
 **Natural context cuts:** after Steps 2, 6, and 10. At each cut, use the `fresh-session` skill, update this STATUS table and §5, then re-read every downstream phase before starting it.
 

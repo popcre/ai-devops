@@ -1,54 +1,54 @@
-# Muse Spark 1.2 OpenCode harness
+# Muse Spark persistent conversations
 
-This is the operating guide for `ai-muse`. It runs a direct, protected Muse review
-inside a disposable self-contained repository copy. The former long-running OpenCode
-server path was rejected because it failed provider authorization while the same pinned
-binary and key worked in direct mode. GLM remains unchanged.
+`ai-muse` gives Codex and Claude named, persistent Muse Spark 1.2 Contributor
+conversations. It uses OpenCode's proven direct-session mode rather than a background
+server: server mode previously failed Meta authorization, while direct mode supports
+an exact session ID and survives separate command calls.
 
-## Frozen first-contract facts
-
-- Exact model: `muse-spark-1.2-contributor`. Standard Muse is never an acceptable
-  fallback.
-- API endpoint: `https://api.meta.ai/v1`.
-- Key environment variable: `MODEL_API_KEY`, resolved only at launch from the
-  `vibe_coding / Meta ai Muse Spark API Key / api key` 1Password field.
-- Meta is OpenAI-chat-compatible. Completion, streaming, tool calling, and multi-turn
-  continuity were proved with harmless test text.
-- The tested direct responses expose token counts but no cache fields. Treat cache and
-  cost as unavailable unless a later qualified call provides them.
-- The pinned OpenCode 1.18.12 build works with the API. It uses the legacy
-  `provider` plus `@ai-sdk/openai-compatible` format, not the current OpenCode v2
-  `providers` format.
-
-The redacted evidence and replayable fixture are in
-[`verification/muse-opencode/2026-08-18T2020Z-contract/`](verification/muse-opencode/2026-08-18T2020Z-contract/)
-and [`../tests/fixtures/muse-opencode/`](../tests/fixtures/muse-opencode/).
-
-## Run a review
-
-Run setup once, then verify the runner:
+## Commands
 
 ```bash
-bin/setup-opencode-muse.sh
 ai-muse doctor
+ai-muse new architecture-debate --prompt-file brief.md
+ai-muse ask architecture-debate --prompt-file follow-up.md
+ai-muse list
+ai-muse show architecture-debate
+ai-muse transcript architecture-debate
+ai-muse reconcile architecture-debate
+ai-muse delete architecture-debate
 ```
 
-From the repository being reviewed:
+`new` records the exact OpenCode session ID. `ask` must resume that same ID and fails
+if OpenCode returns another one. Sessions are separated by repository, caller, and
+name. Codex uses `AI_MUSE_CALLER=codex`; Claude uses `AI_MUSE_CALLER=claude`.
+If a provider turn or local check leaves the outcome uncertain, `ask` stops. Inspect
+the transcript, then run `reconcile` only when you deliberately accept that recorded
+state and want to continue the same conversation.
 
-```bash
-ai-muse review "$PWD" "Review the current changes. Report concrete findings with file paths and missing tests."
-```
+The older `ai-muse review [repository] [request]` command remains available. It now
+creates a timestamped named conversation, so the result is not trapped in a one-off
+call.
 
-The command creates a disposable self-contained copy, builds its evidence packet
-there, runs only `muse-spark-1.2-contributor`, and writes the result under
-`.ai/reviews/` in the original repository. It never falls back to GLM or another model.
+## Safety and evidence
 
-## Safety boundary
+- Exact model: `meta-model-api/muse-spark-1.2-contributor`. No fallback is accepted.
+- The review profile removes write, edit, patch, shell, web, and sub-agent tools.
+- Each turn runs in a disposable self-contained copy with no GitHub remote.
+- Each turn refreshes the verified evidence packet to the current repository state.
+- Completion requires OpenCode's structured `step_finish` reason `stop`, a session
+  ID, and non-empty response text. Exit status or text alone is not success.
+- Reports are written under `.ai/reviews/`; local metadata contains no prompt or key.
+- The key is read at launch from `vibe_coding / Meta ai Muse Spark API Key / api key`
+  and is never stored in Git or session metadata.
 
-The review profile removes every write, shell, patch, web, and sub-agent tool. The
-model receives only the disposable copy, whose remote is removed. These controls are
-independent of OpenCode permission settings.
+Contributor data-use terms were accepted by the owner on 2026-08-18. Do not
+substitute the standard tier. A measured follow-up call reused the exact session and
+recalled the prior turn; it also reported a large cache read. Provider cost is still
+reported only when OpenCode supplies it.
 
-Contributor data-use terms were explicitly accepted by the owner on 2026-08-18. Do
-not substitute another service tier. Confirm current pricing in the authenticated Meta
-account before any broad paid qualification, because `/models` does not return a price.
+## Why there is no Muse service
+
+Persistent conversation does not require a permanent process. OpenCode 1.18.12
+supports `run --session <exact-id>` in direct mode. This keeps the working Meta path,
+avoids another port, password, task, service, and crash-recovery loop, and still gives
+Codex the same everyday `new` then `ask` debate flow as GLM.

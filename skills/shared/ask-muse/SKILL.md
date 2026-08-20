@@ -1,15 +1,14 @@
 ---
 name: ask-muse
-description: Run an independent protected code review with Muse Spark 1.2 Contributor. Use when the user says "review with Muse", "ask Muse", "Muse review", or requests a Muse Spark review.
+description: Start or continue a persistent protected Muse Spark 1.2 Contributor review or debate. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", or requests a Muse Spark second opinion.
 ---
 
-# Review with Muse
+# Persistent Muse review and debate
 
 Use `ai-muse` only. Do not call OpenCode, the Meta API, or 1Password directly.
 
-Muse runs one read-only review in a disposable, self-contained copy of the target
-repository. It has no write or shell tools. The original repository is not supplied
-to the model, and no other model is used if Muse fails.
+Muse uses named persistent conversations in a disposable, self-contained copy of the
+target repository. It has no write or shell tools. No other model is used if Muse fails.
 
 First check the runner:
 
@@ -17,22 +16,30 @@ First check the runner:
 ai-muse doctor
 ```
 
-Then run the review from the repository root:
+Start once from the repository root:
 
 ```bash
-ai-muse review "$PWD" "Review the current changes. Report concrete findings with file paths, severity, and missing tests."
+ai-muse new <stable-name> --prompt-file <brief-file>
 ```
 
-Read the report path printed by the command. A Muse result is valid only when it
-carries a final `VERDICT: <word>` line. The wrapper accepts whatever verdict word the
-review asked for, so a brief may set its own vocabulary (`APPROVE` / `REVISE` is
-common); if your brief does not name one, the wrapper asks for `VERDICT: FINDINGS` or
-`VERDICT: NO FINDINGS`. Write the verdict wording into your brief once, not twice —
-the wrapper leaves a brief that already says `VERDICT:` alone.
+Continue the exact conversation for objections, rebuttals, or new evidence:
 
-A stop with no verdict line at all is a genuinely incomplete review and is saved
-separately as `muse-incomplete-*.md`. Do not substitute GLM, another model, or your own
-opinion without stating that Muse did not complete.
+```bash
+ai-muse ask <stable-name> --prompt-file <follow-up-file>
+```
 
-The report header records the verdict the wrapper extracted, so you can confirm what
-was detected without re-reading the whole review.
+Codex is the default caller. In Bash, Claude uses `AI_MUSE_CALLER=claude ai-muse ...`.
+In PowerShell, use `$env:AI_MUSE_CALLER='claude'` before `ai-muse ...`. Never create a replacement
+session when the named one can be continued. Read the report path printed after each
+turn; use `ai-muse transcript <stable-name>` for the full conversation.
+
+If `ask` says reconciliation is required, inspect that transcript first, then run
+`ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
+provider state. Never bypass or silently replace an uncertain session.
+
+For a code review, tell Muse to read `.ai-review/MANIFEST.md` first. For a focused
+debate that does not need repository inspection, do not force a packet read.
+
+A turn is valid only when the wrapper proves OpenCode's structured stop event, the
+exact session ID, and non-empty response text. Do not substitute GLM, another model,
+or your own opinion without stating that Muse did not complete.
