@@ -686,21 +686,45 @@ check "fallback is limited to a named user" \
 OUT="$(AI_GLM_SERVER_USER="$(id -un)" AI_DEVOPS_CONFIG_DIR="$SHTMP/empty2" bash "$AI_GLM" doctor 2>&1 || true)"
 check "never attaches to its own account" "! printf '%s' \"\$OUT\" | grep -q 'attached to the OpenCode server'"
 
-# LIVENESS DURING A TURN (shared-db #1298).
-# last_activity_at used to be written only AFTER await_turn returned, so it could not
-# move while the model worked. A long healthy review was then indistinguishable from a
-# session that never produced a turn -- and on 2026-08-20 that cost a live, correct
-# review, aborted by a caller who read `ai-glm show` and believed it. These checks pin
-# the fix: the helper exists, the poll loop calls it, both review call sites arm it,
-# and it is best effort so a liveness stamp can never fail a review.
-check "touch_liveness helper exists" \
-  "grep -q '^touch_liveness()' '$AI_GLM'"
-check "the await_turn poll loop stamps liveness while the provider is working" \
-  "awk '/^await_turn\(\)/,/^}/' '$AI_GLM' | grep -q touch_liveness"
+# LIVENESS DURING A TURN (shared-db #1298) -- BEHAVIOURAL, not structural.
+#
+# The first attempt at this fix hooked the stamp to the `/session/status` branch of the
+# await_turn poll loop. It did NOT work: on a real review that endpoint returned `{}` for
+# the entire turn, so the branch never ran and the field stayed frozen at creation time.
+# Four grep-based tests passed the whole time, because the code they looked for existed.
+# THAT is why the check below drives the real function and asserts what it DOES.
+#
+# Contract:
+#   last_poll_at          moves every poll            -> the wrapper is alive
+#   provider_progress_at  moves only on new output    -> the provider is working
+#   last_activity_at      tracks provider progress    -> what a caller should judge on
+LIVE_TMP="$(mktemp -d)"
+LIVE_META="$LIVE_TMP/meta.json"
+printf '{"name":"t","created_at":"2026-01-01T00:00:00Z","last_activity_at":"2026-01-01T00:00:00Z"}' > "$LIVE_META"
+(
+  set -u
+  TURN_META="$LIVE_META"
+  eval "$(sed -n '/^LIVENESS_SIG=""/,/^}/p' "$AI_GLM")"
+  g(){ jq -r ".$1 // \"absent\"" "$LIVE_META"; }
+  touch_liveness '{"text":"chunk one"}'
+  a_act=$(g last_activity_at); a_poll=$(g last_poll_at)
+  sleep 1; touch_liveness '{"text":"chunk one"}'
+  b_act=$(g last_activity_at); b_poll=$(g last_poll_at)
+  sleep 1; touch_liveness '{"text":"chunk two is different"}'
+  c_act=$(g last_activity_at)
+  [ "$a_act" != "2026-01-01T00:00:00Z" ] || exit 1   # stamped at all
+  [ "$b_poll" != "$a_poll" ]             || exit 2   # poll moves while idle
+  [ "$b_act"  =  "$a_act"  ]             || exit 3   # activity does NOT move without output
+  [ "$c_act" != "$b_act"  ]              || exit 4   # activity DOES move on new output
+  rm -f "$LIVE_META"; touch_liveness 'x' || exit 5   # best effort with no meta file
+)
+check "liveness stamping behaves: poll always, activity only on real provider output" "[ $? -eq 0 ]"
+rm -rf "$LIVE_TMP"
+
+check "touch_liveness is driven by the assistant message, not /session/status" \
+  "awk '/^await_turn\(\)/,/^}/' '$AI_GLM' | grep -q 'touch_liveness \"\$msg\"'"
 check "both review call sites arm TURN_META before await_turn" \
   "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 2 ]"
-check "liveness stamping is best effort and cannot fail a turn" \
-  "awk '/^touch_liveness\(\)/,/^}/' '$AI_GLM' | grep -q 'return 0'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
