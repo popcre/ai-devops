@@ -154,6 +154,9 @@ release_boundary() { # release_boundary ROOT TAG
 PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
 [ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
 
+# The packet directory is named after this session's tag (shared-db#1296), so
+# the preamble must name the directory that was actually built, not a fixed one.
+PACKET_REL=".ai-review"
 REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # Sets the globals above. Never call it in a command substitution — the identity
 # would be computed in a subshell and lost, which is the whole failure this
@@ -182,6 +185,7 @@ reviewed. Re-read the SHA from git rather than transcribing it."
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
     || die "could not build the review evidence packet for $REVIEW_DIR"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
+  PACKET_REL="$(basename "$pkt")"
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
   note "  evidence packet: $pkt (base ${REVIEW_BASE:0:12}, head ${REVIEW_HEAD:0:12}, sha ${PACKET_HASH:0:12})"
 }
@@ -448,7 +452,7 @@ Do not put the verdict anywhere else."
 
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
   local dest="$1"
-  printf '%s' "$PACKET_PREAMBLE" > "$dest"
+  printf '%s' "${PACKET_PREAMBLE//.ai-review/$PACKET_REL}" > "$dest"
   dest="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
     [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"

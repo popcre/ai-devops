@@ -353,15 +353,19 @@ echo "== evidence packet (issue #34, step 3) =="
 echo second > "$REPO/b.txt"; git -C "$REPO" add -A; git -C "$REPO" commit -qm second
 run new packetreview --prompt "review this" >/dev/null 2>&1
 PF="$(grep -o -- '--prompt-file [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
-check "packet is built in the review directory" "test -s '$REPO/.ai-review/MANIFEST.md'"
+check "packet is built in the review directory" "test -s '$REPO/.ai-review-grok-packetreview/MANIFEST.md'"
 check "packet carries the real head sha" \
-  "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$REPO/.ai-review/MANIFEST.md'"
-check "packet is sealed with a hash"            "test -s '$REPO/.ai-review/MANIFEST.sha256'"
-check "packet verifies"                         "'$REPO_ROOT/bin/ai-review-packet' verify '$REPO/.ai-review'"
-check "packet never enters the repository"      "[ -z \"\$(git -C '$REPO' status --porcelain -- .ai-review)\" ]"
+  "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$REPO/.ai-review-grok-packetreview/MANIFEST.md'"
+check "packet is sealed with a hash"            "test -s '$REPO/.ai-review-grok-packetreview/MANIFEST.sha256'"
+check "packet verifies"                         "'$REPO_ROOT/bin/ai-review-packet' verify '$REPO/.ai-review-grok-packetreview'"
+check "packet never enters the repository"      "[ -z \"\$(git -C '$REPO' status --porcelain | grep ai-review)\" ]"
 
 # The prompt must point at the packet AND keep the reviewer's freedom to read on.
-check "prompt points at the manifest"           "grep -q '.ai-review/MANIFEST.md' '$TMP/prompt-copy'"
+# The preamble must name THIS session's packet directory. A hard-coded
+# `.ai-review` would send the reviewer to another session's evidence, or to
+# nothing at all (shared-db#1296).
+check "prompt points at the manifest"           "grep -q '.ai-review-grok-packetreview/MANIFEST.md' '$TMP/prompt-copy'"
+check "prompt does not point at a shared packet" "! grep -q '[^-]\.ai-review/MANIFEST.md' '$TMP/prompt-copy'"
 check "prompt keeps the caller's own brief"     "grep -q 'review this' '$TMP/prompt-copy'"
 check "prompt still demands the verdict heading" "grep -qF '## Verdict' '$TMP/prompt-copy'"
 check "prompt does NOT fence the reviewer in" \
