@@ -285,3 +285,39 @@ band-aid and the app version has stopped honouring it.
   the `/c` flag to `C:/` (MSYS path conversion), registering a server that can
   never launch. Use `MSYS_NO_PATHCONV=1` with `//c` and correct the stored value,
   or edit the JSON directly.
+
+
+## 2026-08-20 — the doctor's Codex probe cried wolf (hung on stdin) and hid a revoked login
+
+**Impact:** `install.sh` on hetz reported a REQUIRED failure —
+`[FAIL] codex sandbox CANNOT write` with `last output: Reading additional input
+from stdin...`. The sandbox was never actually tested, and the real problem (an
+expired Codex login) was invisible. Every doctor run also stalled for the full
+180-second timeout.
+
+**Two separate faults, both real:**
+
+1. **Probe bug.** `check_codex_sandbox` ran `codex exec` without redirecting
+   stdin. `codex exec` also accepts a prompt on stdin, so whenever doctor ran
+   under a shell whose stdin stays open — `install.sh`, an ssh session, CI —
+   Codex sat at "Reading additional input from stdin..." until `timeout` killed
+   it. No file was written, so the probe blamed the sandbox. Fixed with
+   `</dev/null`.
+2. **Real Codex fault on hetz.** With stdin closed, the run fails immediately
+   with HTTP 401 `refresh_token_invalidated` — "Your session has ended. Please
+   log in again." The fix is `codex login` on the box; it is not a sandbox
+   problem at all.
+
+**The trap worth remembering:** `codex login status` on hetz still printed
+"Logged in using ChatGPT" while every request returned 401. This is the
+2026-07-16 lesson again — presence is not capability. Only a real run tells the
+truth.
+
+**Fix:** the probe now closes stdin and classifies the outcome into four
+verdicts — wrote the file (OK), auth failure (WARN, with `codex login` as the
+fix; doctor policy is that not-logged-in never fails a run), sandbox-helper
+failure (FAIL, the 2026-07-16 Windows junction case), and timeout (FAIL, named
+as a timeout instead of blamed on the sandbox).
+
+**Prevention:** `tests/test-ai-devops-doctor-codex-probe.sh` asserts the stdin
+redirect is present and drives all four verdicts through a fake `codex`.
