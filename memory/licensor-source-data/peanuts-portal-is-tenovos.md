@@ -20,6 +20,18 @@ the UI, and `program` is labelled **"Initiative"**. A Peanuts "Art Program" is a
 art-style/era bucket, not a franchise — the whole portal is one franchise. Any
 mapping that reads `property` as our master-data "property" is wrong.
 
-Full operating detail is in the `peanuts-scrape` skill; the extract and scraper
-are in `licensor-source-data` under `peanuts/`. Schema request:
-u2giants/shared-db#1217. Related: [[licensor-portals-two-layer-schema]].
+As of 2026-08-19 Peanuts is **captured and loaded**, not just tabled: capture
+`peanuts-2026-08-19-...` is `complete` in `plm.peanuts_*` with 22,463 assets,
+37,238 asset-character links and 12,935 relationship edges. So Peanuts is
+genuinely queryable, unlike Paramount and Sesame
+([[paramount-and-sesame-not-in-database]]).
+
+Two portal quirks that will confuse anyone who checks the numbers: the portal's
+own asset total is **short by two** (metadata-only records the default search does
+not count), and ~2,835 relationship edges are deliberately not loaded because they
+point at superseded asset versions or are self-referencing. Both counts are
+recorded on the capture row itself in `raw_summary`.
+
+Full operating detail is in the `peanuts-scrape` skill; the extract, scraper and
+loader are in `licensor-source-data` under `peanuts/`. Schema:
+u2giants/shared-db#1217 (built, applied, closed).
