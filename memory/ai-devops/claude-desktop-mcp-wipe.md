@@ -21,8 +21,7 @@ reading `~/.claude.json`; this one is the desktop chat surface.
 
 **How to apply:** Block restored by hand on 2026-08-20 (backup:
 `claude_desktop_config.json.pre-restore-20260820.bak`) as a deliberate test of
-whether the app wipes it again. TEST RESULT SO FAR: the block SURVIVED an app restart on 2026-08-20 (12 servers,
-railway added). Still unproven over days. CHECK THIS in any follow-up session:
+whether the app wipes it again. CHECK THAT FIRST in any follow-up session:
 `cat <path> | python -c "import sys,json;print(len(json.load(sys.stdin).get('mcpServers',{})))"`
 — 11 means it survived and the wipe was one-off; 0 means the app is actively
 deleting it and restoring the file is a band-aid, so the servers must be reached

@@ -71,31 +71,76 @@ check_file() {
 # sandbox helper. Invoking the real package bin
 # (~/.codex/packages/standalone/current/bin) worked. A liveness check that only
 # asks --version cannot see this class of failure; only a real write can.
+# Classify the outcome of the sandbox probe. Pure function so tests can drive
+# every branch without a real codex. $1 = exit status, $2 = combined output,
+# $3 = 1 if the probe file was written. Echoes one verdict word.
+codex_probe_verdict() {
+  local rc="$1" out="$2" wrote="$3"
+  if [ "$wrote" = "1" ]; then echo ok; return 0; fi
+  case "$out" in
+    *refresh_token_invalidated*|*token_invalidated*|*"refresh token was revoked"*|*"Please log out and sign in again"*|*"Please log in again"*|*"401 Unauthorized"*|*"Not logged in"*)
+      echo auth; return 0 ;;
+    *sandbox-setup*|*"program not found"*|*orchestrator_helper_launch_failed*)
+      echo sandbox; return 0 ;;
+  esac
+  # `timeout` reports 124 when it had to kill the probe.
+  if [ "$rc" = "124" ]; then echo timeout; return 0; fi
+  echo unknown
+}
+
 check_codex_sandbox() {
-  local tmp out
+  local tmp out rc wrote
   tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/codex-probe.$$")"
   mkdir -p "$tmp" || { c_warn "codex sandbox: could not create temp dir; skipped"; return 0; }
 
-  out="$(cd "$tmp" && timeout 180 codex exec --sandbox workspace-write \
-          --skip-git-repo-check -c model_reasoning_effort='low' \
-          'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.' 2>&1)"
+  # stdin MUST be closed. `codex exec` also reads a prompt from stdin, so when
+  # doctor runs under a shell whose stdin stays open (ssh, install.sh, CI) the
+  # probe sat at "Reading additional input from stdin..." until the timeout and
+  # then reported a sandbox failure that did not exist.
+  out="$(cd "$tmp" && timeout 180 codex exec --sandbox workspace-write           --skip-git-repo-check -c model_reasoning_effort='low'           'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.'           </dev/null 2>&1)"
+  rc=$?
+  wrote=0; [ -f "$tmp/probe.txt" ] && wrote=1
 
-  if [ -f "$tmp/probe.txt" ]; then
-    c_ok "codex sandbox can write (workspace-write verified end-to-end)"
-  else
-    c_fail "codex sandbox CANNOT write — 'codex exec' will silently change nothing"
-    printf '        codex resolves to: %s\n' "$(command -v codex)"
-    case "$out" in
-      *sandbox-setup*|*"program not found"*|*orchestrator_helper_launch_failed*)
-        printf '        cause: sandbox helper could not launch (known Windows junction/PATH issue).\n'
-        printf '        fix:   put the real package bin FIRST on PATH, e.g.\n'
-        printf '               %s/.codex/packages/standalone/current/bin\n' "$HOME"
-        printf '               (Windows: re-run bin/setup-machine.ps1, which repairs this.)\n'
-        ;;
-      *) printf '        last output: %s\n' "$(printf '%s' "$out" | tail -n 3 | tr '\n' ' ')" ;;
-    esac
-    FAILED=1
-  fi
+  case "$(codex_probe_verdict "$rc" "$out" "$wrote")" in
+    ok)
+      c_ok "codex sandbox can write (workspace-write verified end-to-end)" ;;
+    auth)
+      # Not-logged-in is a WARNING by this tool's policy, never a REQUIRED failure.
+      # `codex login status` can still say "Logged in" while the refresh token is
+      # revoked, so trust the real run, not the status command.
+      c_warn "codex is NOT authenticated — every 'codex exec' will fail (sandbox untested)"
+      printf '        fix: run  codex login  as this user (%s), then re-run: ai-devops doctor
+' "$(id -un 2>/dev/null)" ;;
+    sandbox)
+      c_fail "codex sandbox CANNOT write — 'codex exec' will silently change nothing"
+      printf '        codex resolves to: %s
+' "$(command -v codex)"
+      printf '        cause: sandbox helper could not launch (known Windows junction/PATH issue).
+'
+      printf '        fix:   put the real package bin FIRST on PATH, e.g.
+'
+      printf '               %s/.codex/packages/standalone/current/bin
+' "$HOME"
+      printf '               (Windows: re-run bin/setup-machine.ps1, which repairs this.)
+'
+      FAILED=1 ;;
+    timeout)
+      c_fail "codex sandbox probe TIMED OUT — codex never finished the write"
+      printf '        codex resolves to: %s
+' "$(command -v codex)"
+      printf '        last output: %s
+' "$(printf '%s' "$out" | tail -n 3 | tr '
+' ' ')"
+      FAILED=1 ;;
+    *)
+      c_fail "codex sandbox CANNOT write — 'codex exec' will silently change nothing"
+      printf '        codex resolves to: %s
+' "$(command -v codex)"
+      printf '        last output: %s
+' "$(printf '%s' "$out" | tail -n 3 | tr '
+' ' ')"
+      FAILED=1 ;;
+  esac
   rm -rf "$tmp" 2>/dev/null || true
 }
 
@@ -208,4 +253,7 @@ main() {
   esac
 }
 
-main "$@"
+# Allow tests to source the helpers without running a subcommand.
+if [ "${AI_DEVOPS_LIB_ONLY:-0}" != "1" ]; then
+  main "$@"
+fi
