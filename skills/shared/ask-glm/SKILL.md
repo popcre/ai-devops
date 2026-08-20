@@ -189,10 +189,11 @@ and `git apply --check`, review every hunk, and rerun all required tests. The re
 not a claim that the patch is safe, complete, or tested. Provider usage is recorded only
 when officially returned; failed or interrupted turns say `unavailable`, never zero.
 
-## Running from a linked Git worktree
+## Private review snapshots
 
-Just run it. Since 2026-08-17 the wrapper handles this itself and you do not
-have to think about it.
+Just run it. Every new review session uses a fixed private snapshot, including
+sessions started from ordinary clones. This prevents a pull, branch switch,
+commit, test run, or another session from moving the tree underneath GLM.
 
 Background, so nobody "fixes" it back: a delegated reviewer is given exactly ONE
 directory, and in a linked worktree `.git` is a FILE pointing at
@@ -209,4 +210,6 @@ What this means for you:
   in the real worktree. Quote them unchanged.
 - The reviewer never sees an absolute path from your machine as the source of
   truth; do not ask it to edit files there, and never commit from the snapshot.
-- The snapshot refreshes on every turn and is deleted with the session.
+- The snapshot path is recorded at session creation, refreshes on every turn,
+  and is deleted with the session. Pre-existing sessions keep their old path and
+  warn once so a live conversation is never silently moved.

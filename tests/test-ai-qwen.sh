@@ -64,9 +64,13 @@ check 'review excludes mutation tools' "grep -q -- '--exclude-tools shell,write,
 check 'review has all budgets' "grep -q -- '--max-session-turns 30' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 80' '$TMP/argv.txt' && grep -q -- '--max-wall-time 15m' '$TMP/argv.txt'"
 check 'review never uses yolo or continue' "! grep -qE -- '--approval-mode yolo|--continue' '$TMP/argv.txt'"
 check 'review record stores exact session' "run show review-1 | jq -e '.qwen_session_id==\"qwen-session-1\" and .caller==\"codex\"'"
+REVIEW_DIR="$(run show review-1 | jq -r .review_dir)"
+check 'ordinary clone review uses a private copy' "[ \"\$(cd '$REVIEW_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
+check 'private review copy owns its git controls' "test -d '$REVIEW_DIR/.git'"
 
 run ask review-1 --prompt 'follow up' >/dev/null 2>&1
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
+check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
 
 echo mutate-review > "$TMP/mode"
 if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi
@@ -77,7 +81,7 @@ BEFORE_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
 echo mutate-review > "$TMP/mode"
 if run new hostile-dirty --prompt 'write a file' >/dev/null 2>&1; then bad 'mutation inside an already-dirty file fails'; else ok 'mutation inside an already-dirty file fails'; fi
 AFTER_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
-[ "$BEFORE_DIRTY" != "$AFTER_DIRTY" ] || bad 'dirty-file canary actually changed'
+if [ "$BEFORE_DIRTY" = "$AFTER_DIRTY" ]; then ok 'private-copy mutation leaves owner work untouched'; else bad 'private-copy mutation leaves owner work untouched'; fi
 git -C "$REPO" checkout -q -- a.txt
 
 echo write > "$TMP/mode"; : > "$TMP/argv.txt"
@@ -92,6 +96,8 @@ check 'implementation removes disposable worktree' "test \"\$(git -C '$REPO' wor
 echo review > "$TMP/mode"
 run transcript review-1 >/dev/null 2>&1
 check 'transcript copy stays in ignored review directory' "/usr/bin/find '$REPO/.ai/reviews' -name 'qwen-review-1-*.jsonl' | grep -q ."
+run delete review-1 >/dev/null 2>&1
+check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
 check 'doctor checks installed interface without a model call' 'run doctor'
 
 echo fail > "$TMP/mode"

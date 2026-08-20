@@ -374,8 +374,12 @@ first and then re-measure before touching it.
 9. **No per-call overrides** (`--model`, `--agent`, `--directory`, ...). A stable request
    prefix is what makes provider caching work and a stable agent is what keeps a review
    read-only. Adding one override quietly costs both.
-10. **A review that starts in a linked Git worktree is given a snapshot, never the
-   worktree itself.** OpenCode gives a session exactly ONE directory, and in a linked
+10. **Every review session is given its own fixed private snapshot.** A live checkout
+   can move during a long review because of a pull, branch switch, commit, or another
+   session. Since issue #53, ordinary clones are copied too, and the snapshot path is
+   recorded once when the session is created and reused on every turn. Pre-existing
+   sessions keep their recorded directory and warn once instead of breaking continuity.
+   OpenCode gives a session exactly ONE directory, and in a linked
    worktree `.git` is a FILE pointing at `<main-repo>/.git/worktrees/<name>` — outside
    that directory. On 2026-08-17 that killed a GLM review on its first git-adjacent read,
    before any code was read: *"GLM's first review attempt stopped before reading code

@@ -338,12 +338,21 @@ check "handed directory carries the worktree's untracked work" \
   "grep -q only-in-worktree '$HANDED/wt-only.txt'"
 check "delete removes the snapshot" \
   "( cd '$WT' && bash '$SCRIPT' delete wtreview ) >/dev/null 2>&1; test ! -d '$HANDED'"
-# An ordinary clone must be untouched by all of this.
+# An ordinary clone must also be isolated. Otherwise a pull, branch switch, or
+# another session's commit moves the tree underneath the reviewer (issue #53).
 : > "$TMP/argv.txt"
 run new plainreview --prompt "review this" >/dev/null 2>&1
 PLAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
-check "ordinary clone still reviewed in place" \
-  "[ \"\$(cd '$PLAIN' && pwd -P)\" = \"\$(cd '$REPO' && pwd -P)\" ]"
+PLAIN_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*plainreview.json' | head -1)"
+check "ordinary clone is reviewed in a private copy" \
+  "[ \"\$(cd '$PLAIN' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
+check "ordinary-clone copy owns its git controls" "test -d '$PLAIN/.git'"
+check "ordinary-clone session records its fixed directory" \
+  "[ \"\$(jq -r .review_dir '$PLAIN_META')\" = '$PLAIN' ]"
+: > "$TMP/argv.txt"
+run ask plainreview --prompt "continue" >/dev/null 2>&1
+PLAIN_AGAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+check "ordinary-clone continuation reuses the recorded copy" "[ '$PLAIN_AGAIN' = '$PLAIN' ]"
 
 echo "== evidence packet (issue #34, step 3) =="
 # Grok runs with --deny Bash, so it cannot run `git diff` and cannot work out
@@ -353,11 +362,12 @@ echo "== evidence packet (issue #34, step 3) =="
 echo second > "$REPO/b.txt"; git -C "$REPO" add -A; git -C "$REPO" commit -qm second
 run new packetreview --prompt "review this" >/dev/null 2>&1
 PF="$(grep -o -- '--prompt-file [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
-check "packet is built in the review directory" "test -s '$REPO/.ai-review-grok-packetreview/MANIFEST.md'"
+PACKET_REVIEW_DIR="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+check "packet is built in the review directory" "test -s '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview/MANIFEST.md'"
 check "packet carries the real head sha" \
-  "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$REPO/.ai-review-grok-packetreview/MANIFEST.md'"
-check "packet is sealed with a hash"            "test -s '$REPO/.ai-review-grok-packetreview/MANIFEST.sha256'"
-check "packet verifies"                         "'$REPO_ROOT/bin/ai-review-packet' verify '$REPO/.ai-review-grok-packetreview'"
+  "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview/MANIFEST.md'"
+check "packet is sealed with a hash"            "test -s '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview/MANIFEST.sha256'"
+check "packet verifies"                         "'$REPO_ROOT/bin/ai-review-packet' verify '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview'"
 check "packet never enters the repository"      "[ -z \"\$(git -C '$REPO' status --porcelain | grep ai-review)\" ]"
 
 # The prompt must point at the packet AND keep the reviewer's freedom to read on.

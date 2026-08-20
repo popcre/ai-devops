@@ -129,19 +129,17 @@ repo_root() {
 # A delegated reviewer gets exactly ONE directory. In a linked worktree the
 # repository's control files live outside it, so the reviewer is refused on its
 # first git-adjacent read and the run dies before any code is read.
-# ai-review-sandbox turns such a worktree into a self-contained snapshot; in an
-# ordinary clone it echoes the root unchanged. See that script's header.
+# ai-review-sandbox gives every review a private snapshot, including ordinary
+# clones, so the live checkout cannot move underneath a running session.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
-  [ -f "$1/.git" ] || { printf '%s' "$1"; return 0; }
-  [ -n "$SANDBOX_BIN" ] || die "this is a linked worktree and ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure "$1" "$2" || die "could not prepare a review snapshot for the worktree $1"
+  [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
+  "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT TAG
-  [ -f "$1/.git" ] || return 0
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -161,9 +159,18 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # Sets the globals above. Never call it in a command substitution — the identity
 # would be computed in a subshell and lost, which is the whole failure this
 # replaces (agents hand-expanding short SHAs into wrong full ones).
-prepare_review() { # prepare_review ROOT TAG
-  local root="$1" tag="$2" pkt
-  REVIEW_DIR="$(review_boundary "$root" "$tag")"
+prepare_review() { # prepare_review ROOT TAG [RECORDED_BOUNDARY]
+  local root="$1" tag="$2" recorded="${3:-}" pkt refreshed
+  if [ -z "$recorded" ]; then
+    REVIEW_DIR="$(review_boundary "$root" "$tag")"
+  elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
+    REVIEW_DIR="$recorded"
+  else
+    refreshed="$(review_boundary "$root" "$tag")"
+    [ "$(cd "$refreshed" && pwd -P)" = "$(cd "$recorded" && pwd -P)" ] || \
+      die "session '${tag#grok-}' is bound to $recorded but its private snapshot now resolves to $refreshed. Refusing to split one conversation across two directories."
+    REVIEW_DIR="$recorded"
+  fi
 
   # Identity comes from Git, in this wrapper, always. A caller-supplied SHA is
   # only ever an assertion to CHECK (--assert-head), never a source of truth.
@@ -624,17 +631,17 @@ cmd_new() {
   sid="$(jq -r '.sessionId // ""' "$out")"
   [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
-  write_meta "$meta" "$(jq -n \
+  write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
-    --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
+    --arg review_dir "$REVIEW_DIR" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     --argjson turns 1 \
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
-      base:$base, head:$head, packet_sha256:$pkthash,
+      review_dir:$review_dir, base:$base, head:$head, packet_sha256:$pkthash,
       turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
 
   finish_turn "$repo" "$name" "$out" "$turns"
@@ -644,7 +651,7 @@ cmd_new() {
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta pf out sid rc turns sess_lock rid_lock
+  local name="$1" repo rid meta pf out sid rc turns sess_lock rid_lock boundary
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .grok_session_id "$meta")"
@@ -671,7 +678,19 @@ cmd_ask() {
   pf="$(mktemp)"; out="$(mktemp)"
 
   note "Grok review '$name' continuing session $sid (max-turns $turns)…"
-  prepare_review "$repo" "grok-$name"
+  boundary="$(jq -r '.review_dir // empty' "$meta")"
+  if [ -z "$boundary" ]; then
+    # Sessions created before issue #53 used the live checkout for ordinary
+    # clones and the deterministic snapshot for linked worktrees.
+    if [ -f "$repo/.git" ]; then
+      boundary="$($SANDBOX_BIN ensure "$repo" "grok-$name")"
+    else
+      boundary="$repo"
+    fi
+    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$boundary" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
+    warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
+  fi
+  prepare_review "$repo" "grok-$name" "$boundary"
   # A continuation that silently moved to a different commit would let a verdict
   # about one head be recorded against another. Say so rather than proceed.
   local prev_head; prev_head="$(jq -r '.head // ""' "$meta")"
