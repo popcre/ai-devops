@@ -12,6 +12,8 @@ check bash -c "grep -q 'ensure-copy' '$ROOT/bin/ai-muse' && grep -q 'ai-review-p
 check bash -c "! grep -q 'serve ' '$ROOT/bin/ai-muse'"
 check bash -c "grep -q 'VERDICT: FINDINGS' '$ROOT/bin/ai-muse' && grep -q 'muse-incomplete-' '$ROOT/bin/ai-muse'"
 check bash -c "! grep -q 'MODEL_API_KEY=.*[A-Za-z0-9]' '$ROOT/config/opencode-muse/opencode.json'"
+check bash -c "grep -q 'local_dependency_unavailable.*LOCAL OpenCode runtime' '$ROOT/bin/ai-muse'"
+check bash -c "grep -q 'This is not a Muse provider fault' '$ROOT/bin/ai-muse'"
 
 # --- verdict extraction regression (reviewer issue 20260820T013646Z) ---
 # A complete Muse review ending in "VERDICT: APPROVE" was filed as incomplete,

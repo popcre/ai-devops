@@ -126,7 +126,7 @@ preflight_execution_context() { # MODE REPO
   mkdir -p "$STATE_DIR" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
   canary="$STATE_DIR/.write-canary.$$"
   ( umask 077; : > "$canary" && test -r "$canary" && rm -f "$canary" ) 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
-  [ -x "$(resolve_kimi)" ] || { PREFLIGHT_CLASS="provider-unavailable"; return 1; }
+  [ -x "$(resolve_kimi)" ] || { PREFLIGHT_CLASS="local_dependency_unavailable"; return 1; }
   [ -r "$repo/.git" ] || git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
   if [ "$mode" = review ] && ! profile_is_readonly; then PREFLIGHT_CLASS="profile-invalid"; return 1; fi
   parent="$(dirname "$KIMI_HOME")"
@@ -149,6 +149,7 @@ preflight_or_die() { # MODE REPO
       printf 'Run this credentialed Kimi job from the Full Access main task. Do not change Kimi-home permissions or copy credentials.\n' >&2 ;;
     credentials-unavailable) printf 'Kimi credentials are unavailable to this process. Run the job from the authenticated Full Access main task.\n' >&2 ;;
     profile-invalid) printf 'The structural read-only review profile is invalid. No Kimi provider was started.\n' >&2 ;;
+    local_dependency_unavailable) printf 'The LOCAL Kimi runtime is missing or cannot start. This is not a Kimi provider fault. Run: ai-kimi doctor\n' >&2 ;;
   esac
   if [ "${OPT_JSON:-0}" = 1 ]; then
     jq -n --arg failure "$PREFLIGHT_CLASS" --arg action "run this credentialed Kimi job from the Full Access main task" \
@@ -164,7 +165,7 @@ preflight_or_die() { # MODE REPO
 # ---------------------------------------------------------------------------
 resolve_kimi() {
   if [ -n "${AI_KIMI_BIN:-}" ]; then
-    [ -x "$AI_KIMI_BIN" ] || die "AI_KIMI_BIN=$AI_KIMI_BIN is not executable."
+    [ -x "$AI_KIMI_BIN" ] || die "local_dependency_unavailable: AI_KIMI_BIN=$AI_KIMI_BIN is not executable. This is not a Kimi provider fault."
     printf '%s' "$AI_KIMI_BIN"; return 0
   fi
   local c
@@ -177,7 +178,7 @@ resolve_kimi() {
            /usr/local/bin/kimi; do
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
   done
-  die "kimi binary not found. Set AI_KIMI_BIN, or install Kimi Code. Looked on PATH, \$HOME/.kimi-code/bin, /home/ai/.kimi-code/bin, /usr/local/bin."
+  die "local_dependency_unavailable: kimi binary not found. This is not a Kimi provider fault. Set AI_KIMI_BIN, or install Kimi Code. Looked on PATH, \$HOME/.kimi-code/bin, /home/ai/.kimi-code/bin, /usr/local/bin."
 }
 
 # ---------------------------------------------------------------------------

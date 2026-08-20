@@ -49,6 +49,14 @@ check 'model verification uses the same containment and mode as the review' "gre
 check 'Git Bash does not rewrite the /model command as a Windows path' "grep -q 'MSYS_NO_PATHCONV=1' '$SCRIPT'"
 check 'tracked review history warns instead of blocking the review' "grep -q 'not writing a review file' '$SCRIPT' && ! grep -q \"die '.ai/reviews is not ignored'\" '$SCRIPT'"
 check 'doctor verifies sandbox and configured model without a live turn' "AI_GEMINI_BIN='$TMP/bin/agy' $SCRIPT doctor | grep -q 'disposable-copy=yes'"
+cat > "$TMP/bin/agy-broken" <<'EOF'
+#!/usr/bin/env bash
+exit 70
+EOF
+chmod +x "$TMP/bin/agy-broken"
+BROKEN_OUT="$(cd "$TMP" && git init -q && AI_GEMINI_BIN="$TMP/bin/agy-broken" "$SCRIPT" new local-fault --prompt test 2>&1 || true)"
+check 'review path names a broken local runtime distinctly' "printf '%s' \"\$BROKEN_OUT\" | grep -q 'local_dependency_unavailable.*LOCAL agy runtime'"
+check 'local runtime failure does not blame Gemini' "printf '%s' \"\$BROKEN_OUT\" | grep -q 'not a Gemini provider fault'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

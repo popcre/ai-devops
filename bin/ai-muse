@@ -22,6 +22,10 @@ EOF
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required."; }
 repo_root() { git -C "$1" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: $1"; }
+require_local_runtime() {
+  [ -x "$BIN" ] || die "local_dependency_unavailable: the LOCAL OpenCode runtime is not installed. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
+  "$BIN" --version >/dev/null 2>&1 || die "local_dependency_unavailable: the LOCAL OpenCode runtime cannot start. This is not a Muse provider fault. Run: ai-muse doctor"
+}
 # OpenCode writes a coloured interactive stream; matching text over it needs the
 # escape sequences and CR line endings removed first.
 strip_ansi() { sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b\][^\x07]*\x07//g' -e 's/\r$//'; }
@@ -53,7 +57,7 @@ Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS.
 If you found anything, put the findings before that final line. Do not stop after narrating your review steps."
   fi
   need op; need jq
-  [ -x "$BIN" ] || die "Muse is not installed. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
+  require_local_runtime
   [ -f "$CONFIG/opencode.json" ] || die "Muse is not configured. Run: $ROOT_DIR/bin/setup-opencode-muse.sh"
   review_dir="$($ROOT_DIR/bin/ai-review-sandbox ensure-copy "$original" muse)"
   tag="muse-$(date -u +%Y%m%dT%H%M%SZ)"
