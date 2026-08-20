@@ -15,16 +15,9 @@ ag-grid, trigger, recall-ai) were present in `~/.claude/settings.json` but
 them with `claude mcp add -s user` made 8 connect immediately. vercel and
 recall-ai need browser OAuth; trigger times out on npx cold start.
 
-**Fixed 2026-08-20** in commit 65ce7c0 on u2giants/ai-devops main. **How to apply:** the bug was upstream in `u2giants/ai-devops` —
+**How to apply:** The bug is upstream in `u2giants/ai-devops` —
 `bin/setup-secrets.sh` (~line 302-388) and `bin/setup-machine.ps1` (~line 666-689,
 whose comment wrongly claims "Claude Code reads its OWN ~/.claude/settings.json")
-both merged the server set into settings.json; they now write ~/.claude.json and
-strip the stale block out of settings.json. If MCP servers ever vanish again,
-check which file they landed in FIRST. Related:
+both merge the server set into settings.json. Until those are fixed, every
+machine re-setup silently un-registers every MCP server. Related:
 [[mcp-1password-launcher-storm]].
-
-**Git Bash trap:** `claude mcp add ... -- cmd /c npx ...` from Git Bash silently
-rewrites the `/c` flag to `C:/` (MSYS path conversion), producing a server that
-is registered but can never launch. Prefix with `MSYS_NO_PATHCONV=1` and use
-`//c`, then correct the stored value back to `/c` — or add the entry with a
-Python/PowerShell JSON edit instead. Bit railway on 2026-08-20.
