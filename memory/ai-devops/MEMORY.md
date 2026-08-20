@@ -7,6 +7,8 @@
 - [4837 home-drive Z: trap](4837-home-drive-z-trap.md) — 4837 interactive Git Bash $HOME=Z: (roaming profile) sent $HOME-based installs to a network drive apps never read; fixed by pinning HOME=C: + ai-install-skills using %USERPROFILE%.
 - [remote-shell CWD trap](remote-shell-cwd-trap.md) — remote `bash -lc` over SSH starts in $HOME not the repo; use `git -C`/absolute paths, not relative. Includes the `4837` ssh alias (100.123.87.44, key 916-alien).
 - [GLM on OpenCode: hard-won constraints](glm-opencode-constraints.md) — `ai-glm` replaced `ai-glm-agent`; read docs/glm-opencode.md §5 before touching GLM or Windows setup. Only the agent `tools:` map enforces anything; `.ps1` files must be pure ASCII.
-# Grok review concurrency and observability repair
-
-While `u2giants/ai-devops#56` is open, read `plan_grok-review-concurrency-cancellation-observability.md` and its STATUS table before re-deriving or changing Grok clone concurrency, cancellation truth, active-run visibility, mid-turn progress, or reviewer-issue evidence correlation.
+- [Claude MCP config file](claude-mcp-config-file.md) — local MCP servers must live in ~/.claude.json; ai-devops setup writes them to the ignored settings.json.
+- [Claude Desktop MCP wipe](claude-desktop-mcp-wipe.md) — the app deletes the mcpServers block from claude_desktop_config.json; restore is on trial as of 2026-08-20.
+- [Prove capability with a live call](prove-capability-with-a-live-call.md) — never report "works"/"signed in" from a file, --version, or PATH; invoke the thing.
+- [hetz provider PATH trap](hetz-provider-path-trap.md) — Grok/Kimi/Qwen were installed and working while the doctor called them unavailable; bare ssh gives a non-login PATH.
+- [hetz: Codex runs as the ai account](hetz-codex-runs-as-ai.md) — root has no Codex login, so doctor-as-root says "not authenticated" even when Codex works; hetz has two different 1Password SA tokens.
