@@ -11,4 +11,3 @@ keeps the text).
 **Ending a session:** create your OWN new file in `HANDOFF.d/` following
 `templates/system/handoff-standard.md` (all 9 sections). **Do not rewrite this
 file, and do not edit another session's file.** Concurrent sessions rely on that.
-
