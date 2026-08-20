@@ -17,6 +17,26 @@ Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep t
 - Gate outside-sourced writes into curated Master Data.
 - Use `shared-db-handover` to stop or close the session.
 
+## The admission test — protect your own context window (AGENTS.md 0.0-C)
+
+Before opening, accepting, or acting on ANY item, ask one question: **does this change the SHAPE
+of the database** (schema, table, column, type, view, function/RPC, trigger, RLS policy, grant,
+index, constraint, extension, publication, storage policy, or a migration shipping one of those)?
+
+- **Yes -> accept.** Queue it as `work_type: structural`, `route: shared-db-orchestrator`, and
+  dispatch it to a sub-agent in an isolated worktree.
+- **No -> two exits only, and `accept` is never one of them.**
+  - **REJECT** — `application-data`, `source-data`, `curated-master-data`. Comment naming the
+    session that owns it and close it. It must leave this queue.
+  - **FORK** — `repo-maintenance`, `documentation`, `security-settings`. Real shared-db work, but
+    not shape work: hand it to a FRESH sub-agent with an empty context window, exactly as a
+    migration is dispatched. Do not read the code, debug it, or "just fix it quickly" here.
+
+No third exit and no size exemption. `db-work` is an intake label, never proof that an item passed
+this test. Your own window is for triage, dispatch, review, merge and promotion — nothing else.
+`--queue-audit` prints a `NOT ORCHESTRATOR WORK` block listing every open issue that fails the
+test, stamped REJECT or FORK; clear it, do not carry it.
+
 Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rulebook. Read [references/operating-manual.md](references/operating-manual.md) only when startup recovery, incidents, credentials, promotion, or detailed exception handling is needed.
 
 ## Start
@@ -71,7 +91,9 @@ node scripts/manage-migration-author-lanes.mjs --cleanup-stale
 ```
 
 `--queue-audit` must classify every open `db-work` issue across independent status,
-work type, and route fields. Dispatch every
+work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
+the admission test above, stamped REJECT or FORK — act on each one rather than leaving it parked.
+Dispatch every
 `REFILL REQUIRED NOW` result immediately. An empty lane is acceptable only when
 the complete audit proves no eligible work exists. See
 [references/operating-manual.md](references/operating-manual.md) for the issue
