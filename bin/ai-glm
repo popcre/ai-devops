@@ -782,12 +782,18 @@ send_prompt() { # send_prompt SID PROMPT_FILE
 
 # Stamp last_activity_at while a turn is still in flight. Best effort by design: a
 # liveness stamp must never be able to fail a review, so every error is swallowed.
-touch_liveness() {
+LIVENESS_SIG=""
+touch_liveness() { # touch_liveness ASSISTANT_JSON
   [ -n "$TURN_META" ] || return 0
   [ -f "$TURN_META" ] || return 0
-  local tmp
+  local sig now tmp progressed=false
+  sig="$(printf '%s' "${1:-}" | sha256sum 2>/dev/null | cut -c1-16)"
+  if [ -n "$sig" ] && [ "$sig" != "$LIVENESS_SIG" ]; then
+    LIVENESS_SIG="$sig"; progressed=true
+  fi
+  now="$(date -u +%FT%TZ)"
   tmp="$(mktemp "$(dirname "$TURN_META")/.tmp.XXXXXX" 2>/dev/null)" || return 0
-  if jq --arg ts "$(date -u +%FT%TZ)" '.last_activity_at=$ts' "$TURN_META" > "$tmp" 2>/dev/null; then
+  if jq --arg ts "$now" --argjson prog "$progressed"        '.last_poll_at=$ts | if $prog then .provider_progress_at=$ts | .last_activity_at=$ts else . end'        "$TURN_META" > "$tmp" 2>/dev/null; then
     mv -f "$tmp" "$TURN_META" 2>/dev/null || rm -f "$tmp"
   else
     rm -f "$tmp"
@@ -803,16 +809,18 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta"
     if api GET /session/status | grep -q "$sid"; then
       idle=0
-      # LIVENESS. The provider is observably working right now, so stamp it. Without
-      # this, `last_activity_at` is written only AFTER await_turn returns, so it cannot
-      # move during a turn and a long healthy review is indistinguishable from a session
-      # that never started -- which is exactly how a live, correct review got aborted on
-      # 2026-08-20 (shared-db #1298).
-      touch_liveness
     else
       idle=$((idle + 1))
     fi
     msg="$(last_assistant "$sid")"
+    # LIVENESS -- stamped from the ASSISTANT MESSAGE, not from /session/status.
+    # A first attempt hooked this to the `idle=0` branch above and DID NOT WORK: on a
+    # real review /session/status returned `{}` for the whole turn, so that branch never
+    # ran and the field stayed frozen at creation time. Measured, not assumed.
+    # The message digest is the signal that actually moves while the model produces
+    # output, so `provider_progress_at` means "the provider emitted something new".
+    # `last_poll_at` is the weaker companion: the wrapper is alive and polling.
+    touch_liveness "$msg"
     finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
     if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ]; then
       printf '%s' "$msg"; return 0
