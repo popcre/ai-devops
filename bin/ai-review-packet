@@ -41,8 +41,11 @@
 #
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
 #   ai-review-packet verify <packet-dir>                  # re-derive the hash
-#   ai-review-packet path   <review-dir>                  # print it, create nothing
-#   ai-review-packet remove <review-dir>                  # delete the packet
+#   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
+#   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
+#
+# <tag> identifies the SESSION, and the packet directory is named after it, so
+# two reviewers working from one checkout cannot overwrite each other.
 #
 # <review-dir> must already be a reviewable directory. In a linked Git worktree
 # `.git` is a FILE pointing outside any single-directory review boundary, so
@@ -64,7 +67,23 @@ set -euo pipefail
 
 VERSION="1.0.0"
 
-PACKET_DIR_NAME=".ai-review"
+# ONE PACKET PER SESSION, NOT ONE PER DIRECTORY.
+#
+# The packet directory used to be the single fixed name `.ai-review` inside the
+# review directory. Two reviewers started from the SAME checkout therefore wrote
+# to the SAME path, and the second build deleted and replaced the first one's
+# evidence WHILE the first reviewer was still reading it. Observed live on
+# 2026-08-20 (shared-db#1296): ai-grok-review and ai-glm both reported
+# `/c/repos/shared-db/.ai-review`, with different content hashes, minutes apart.
+#
+# A reviewer whose packet is swapped mid-review can produce a confident verdict
+# about a different change than the one it was asked to judge, and nothing in
+# its output would say so. That is worse than a failed review.
+#
+# The packet directory is therefore named after the caller's tag, which is
+# already unique per session in every wrapper. Bare `.ai-review` is still
+# recognised as managed so packets written before this change can be removed.
+PACKET_DIR_BASE=".ai-review"
 MARKER=".ai-review-packet"
 MANIFEST="MANIFEST.md"
 HASHFILE="MANIFEST.sha256"
@@ -92,14 +111,28 @@ canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
 # A linked worktree is exactly the case where `.git` is a file, not a directory.
 is_worktree() { [ -f "$1/.git" ] && ! [ -d "$1/.git" ]; }
 
-packet_path() { printf '%s/%s' "$1" "$PACKET_DIR_NAME"; }
+# A directory name every filesystem accepts, short enough to keep paths sane,
+# and collision-free: an over-long tag keeps a readable prefix plus a digest of
+# the WHOLE tag, because plain truncation can map two sessions onto one packet
+# and that is the exact failure this naming exists to prevent.
+packet_dir_name() { # packet_dir_name TAG
+  local slug
+  slug="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-')"
+  [ -n "$slug" ] || { printf '%s' "$PACKET_DIR_BASE"; return 0; }
+  if [ "${#slug}" -gt 48 ]; then
+    slug="$(printf '%s' "$slug" | cut -c1-39)-$(printf '%s' "$1" | sha256sum | cut -c1-8)"
+  fi
+  printf '%s-%s' "$PACKET_DIR_BASE" "$slug"
+}
+
+packet_path() { printf '%s/%s' "$1" "${2:-$PACKET_DIR_BASE}"; }
 
 # Refuse to delete anything this script did not create. Standing rule: every
 # destructive action must be recoverable before you take it. Same guard shape as
 # ai-review-sandbox's is_managed().
 is_managed() {
   local d="$1"
-  case "$(basename "$d")" in "$PACKET_DIR_NAME") ;; *) return 1 ;; esac
+  case "$(basename "$d")" in "$PACKET_DIR_BASE"|"$PACKET_DIR_BASE"-*) ;; *) return 1 ;; esac
   [ -f "$d/$MARKER" ]
 }
 
@@ -201,7 +234,7 @@ cmd_build() {
   resolve_base "$root" "$OPT_BASE"   # sets BASE_SHA and BASE_RULE; not a subshell
   base="$BASE_SHA"
 
-  pkt="$(packet_path "$root")"
+  pkt="$(packet_path "$root" "$(packet_dir_name "$tag")")"
   # Never rebuild ON TOP of an existing packet. Files that only some runs create
   # (patch.full.diff, *-files.txt) would survive, get hashed into the seal, and
   # `verify` would then bless a mixture of two different reviews as valid.
@@ -209,11 +242,22 @@ cmd_build() {
   if [ -e "$pkt" ]; then
     is_managed "$pkt" \
       || die "refusing to overwrite $pkt: it exists and is not a managed review packet. Move or delete it yourself; this script does not touch directories it did not create."
+    # BACKSTOP for shared-db#1296. Per-tag naming already keeps two sessions
+    # apart, so reaching this means something rebuilt a packet under a tag that
+    # did not create it. Deleting it would destroy live evidence a reviewer may
+    # be reading right now, so refuse and name both tags. Never soften this into
+    # a warning: a swapped packet produces a normal-looking verdict about the
+    # wrong change, which is the whole reason the refusal exists.
+    local owner
+    owner="$(sed -n '2p' "$pkt/$MARKER" 2>/dev/null || true)"
+    [ -z "$owner" ] || [ "$owner" = "$tag" ] \
+      || die "refusing to overwrite the evidence packet at $pkt: it was built for tag '$owner' and this run is tag '$tag'. Another review may be reading it right now. If that review is finished, remove it explicitly: ai-review-packet remove $root $owner"
     rm -rf "$pkt" 2>/dev/null || { sleep 1; rm -rf "$pkt"; } \
       || die "could not remove the previous packet at $pkt. Refusing to build on top of it: leftover files from the previous run would be sealed into this one and verify would call the mixture valid."
   fi
   mkdir -p "$pkt"
-  printf '%s\n' "$root" > "$pkt/$MARKER"
+  # Line 1 is the review root, line 2 the owning tag. Both are read back above.
+  printf '%s\n%s\n' "$root" "$tag" > "$pkt/$MARKER"
 
   # The packet must never become part of the change under review.
   # --git-path prints a path relative to the repository, so it must be resolved
@@ -223,7 +267,9 @@ cmd_build() {
   excl="$(git -C "$root" rev-parse --git-path info/exclude)"
   case "$excl" in /*|[A-Za-z]:[/\\]*) ;; *) excl="$root/$excl" ;; esac
   mkdir -p "$(dirname "$excl")"
-  grep -qxF "$PACKET_DIR_NAME/" "$excl" 2>/dev/null || printf '%s/\n' "$PACKET_DIR_NAME" >> "$excl"
+  # One glob covers every session's packet, so concurrent reviews do not each
+  # append a line and none of them ever shows up as part of the change.
+  grep -qxF "$PACKET_DIR_BASE*/" "$excl" 2>/dev/null || printf '%s*/\n' "$PACKET_DIR_BASE" >> "$excl"
 
   # --- tests, BEFORE the evidence is captured ---------------------------------
   # Order matters. A test command can write a log, delete a fixture, or reset a
@@ -327,7 +373,7 @@ EOF
   dirty="$(git -C "$root" diff --name-status HEAD)" \
     || die "git diff --name-status HEAD failed in $root. Nothing was sealed."
   untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null \
-               | grep -vx "$PACKET_DIR_NAME" || true)"
+               | grep -v "^$PACKET_DIR_BASE" || true)"
   changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
   dirty="$(list_block "$pkt"     dirty-files.txt     "(none — the working tree is clean)"           "$dirty")"
   untracked="$(list_block "$pkt" untracked-files.txt "(none)"                                        "$untracked")"
@@ -475,8 +521,11 @@ The evidence was modified after it was sealed. Do not review from it; rebuild."
   fi
 }
 
-cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir>}")")"; }
-cmd_remove() { remove_packet "$(packet_path "$(canon "${1:?usage: ai-review-packet remove <review-dir>}")")"; }
+# The tag is optional so a caller holding a pre-#1296 packet can still clear it,
+# but a caller that knows its tag must pass it: with no tag this only ever
+# touches the bare `.ai-review` directory, never another session's packet.
+cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
+cmd_remove() { remove_packet "$(packet_path "$(canon "${1:?usage: ai-review-packet remove <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
 
 need git; need sha256sum
 

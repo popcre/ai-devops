@@ -55,7 +55,7 @@ PKT="$("$SCRIPT" build "$R" testtag --tests 'true' \
 M="$PKT/MANIFEST.md"
 
 check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
-check "packet_lives_inside_the_review_dir"    "[ '$PKT' = '$R/.ai-review' ]"
+check "packet_lives_inside_the_review_dir"    "[ '$PKT' = '$R/.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
 
 # --- identity: full SHAs, derived by the wrapper -----------------------------
@@ -69,7 +69,7 @@ check "verdict_is_bound_to_head"              "grep -q 'applies to head' '$M'"
 check "changed_files_listed"                  "grep -q 'a.txt' '$M' && grep -q 'newfile.txt' '$M'"
 check "uncommitted_edits_listed"              "grep -q 'Uncommitted edits' '$M'"
 check "untracked_files_listed"                "grep -q 'untracked.txt' '$M'"
-check "packet_dir_not_listed_as_untracked"    "! grep -q '^.ai-review$' '$M'"
+check "packet_dir_not_listed_as_untracked"    "! grep -q '^.ai-review' '$M'"
 
 # --- the patch ----------------------------------------------------------------
 check "patch_file_written"                    "[ -s '$PKT/patch.diff' ]"
@@ -107,7 +107,7 @@ check "pointer_is_listed_by_path"             "grep -q 'docs/policy.md' '$M'"
 check "policy_files_are_referenced_not_inlined" \
   "! grep -q 'policy text that must never be inlined' '$M'"
 check "missing_pointer_is_flagged_loudly" \
-  "'$SCRIPT' remove '$R'; '$SCRIPT' build '$R' miss --pointer 'docs/nope.md:x' >/dev/null && grep -q 'NOT PRESENT' '$R/.ai-review/MANIFEST.md'"
+  "'$SCRIPT' remove '$R'; '$SCRIPT' build '$R' miss --pointer 'docs/nope.md:x' >/dev/null && grep -q 'NOT PRESENT' '$R/.ai-review-miss/MANIFEST.md'"
 
 # --- verdict contract ---------------------------------------------------------
 "$SCRIPT" remove "$R"
@@ -155,7 +155,7 @@ check "changed_file_is_still_visible"         "grep -q 'big.txt' '$M' || grep -q
 rm -rf "$R/scratch"
 
 # --- git hygiene --------------------------------------------------------------
-check "packet_is_excluded_from_git"           "[ -z \"\$(git -C '$R' status --porcelain -- .ai-review)\" ]"
+check "packet_is_excluded_from_git"           "[ -z \"\$(git -C '$R' status --porcelain | grep ai-review)\" ]"
 check "exclusion_is_not_written_to_gitignore" "[ ! -f '$R/.gitignore' ]"
 
 # --- base resolution ----------------------------------------------------------
@@ -174,13 +174,14 @@ check "worktree_refusal_names_the_fix"        "'$SCRIPT' build '$WT' wt 2>&1 | g
 
 SNAP="$("$REPO_ROOT/bin/ai-review-sandbox" ensure "$WT" packettest)"
 check "sandbox_snapshot_is_accepted"          "'$SCRIPT' build '$SNAP' wt >/dev/null"
-check "snapshot_packet_verifies"              "'$SCRIPT' verify '$SNAP/.ai-review'"
+check "snapshot_packet_verifies"              "'$SCRIPT' verify '$SNAP/.ai-review-wt'"
 "$REPO_ROOT/bin/ai-review-sandbox" remove "$WT" packettest
 
 # --- deletion safety ----------------------------------------------------------
-"$SCRIPT" remove "$R"
-check "remove_deletes_its_own_packet"         "[ ! -d '$R/.ai-review' ]"
-check "remove_is_idempotent"                  "'$SCRIPT' remove '$R'"
+"$SCRIPT" build "$R" deltag >/dev/null
+"$SCRIPT" remove "$R" deltag
+check "remove_deletes_its_own_packet"         "[ ! -d '$R/.ai-review-deltag' ]"
+check "remove_is_idempotent"                  "'$SCRIPT' remove '$R' deltag"
 GUARD="$TMP/guard/.ai-review"
 mkdir -p "$GUARD"; touch "$GUARD/someone-elses-file"
 git -C "$TMP/guard" init -q 2>/dev/null
@@ -202,11 +203,11 @@ check "rebuild verifies cleanly"                 "'$SCRIPT' verify '$PKT'"
 
 # 2. An unmanaged .ai-review must be refused LOUDLY, not silently.
 "$SCRIPT" remove "$R"
-mkdir -p "$R/.ai-review"; echo mine > "$R/.ai-review/someone-elses-file"
+mkdir -p "$R/.ai-review-clash"; echo mine > "$R/.ai-review-clash/someone-elses-file"
 check "unmanaged packet dir is refused"          "! '$SCRIPT' build '$R' clash"
 check "refusal is not silent"                    "'$SCRIPT' build '$R' clash 2>&1 | grep -q 'refusing to overwrite'"
-check "unmanaged packet dir survives"            "[ -f '$R/.ai-review/someone-elses-file' ]"
-rm -rf "$R/.ai-review"
+check "unmanaged packet dir survives"            "[ -f '$R/.ai-review-clash/someone-elses-file' ]"
+rm -rf "$R/.ai-review-clash"
 
 # 3. A --tests command that changes the tree must be announced, because the
 #    patch and the file lists then describe the post-test tree.
@@ -221,12 +222,58 @@ check "a clean test run is not falsely flagged"  "! grep -q 'changed the working
 "$SCRIPT" remove "$R"
 SNAP="$("$REPO_ROOT/bin/ai-review-sandbox" ensure "$WT" realroot)"
 "$SCRIPT" build "$SNAP" snap >/dev/null
-check "manifest names the real checkout"         "grep -qF \"\$(cd '$WT' && pwd -P)\" '$SNAP/.ai-review/MANIFEST.md'"
-check "manifest says it is a snapshot"           "grep -q 'disposable snapshot' '$SNAP/.ai-review/MANIFEST.md'"
+check "manifest names the real checkout"         "grep -qF \"\$(cd '$WT' && pwd -P)\" '$SNAP/.ai-review-snap/MANIFEST.md'"
+check "manifest says it is a snapshot"           "grep -q 'disposable snapshot' '$SNAP/.ai-review-snap/MANIFEST.md'"
 "$REPO_ROOT/bin/ai-review-sandbox" remove "$WT" realroot
 
+# --- two reviewers, one checkout (shared-db#1296) ------------------------------
+# The defect: the packet directory was the single fixed name `.ai-review`, so a
+# second reviewer starting from the SAME checkout deleted and rebuilt the first
+# one's evidence while it was still being read. The first reviewer then judged a
+# different change and its verdict looked completely normal.
+#
+# These are the properties that make that impossible. Do not relax them into
+# warnings: silence is the entire failure mode.
+PKT_A="$("$SCRIPT" build "$R" reviewer-alpha --decision 'Alpha decision.')"
+PKT_B="$("$SCRIPT" build "$R" reviewer-beta  --decision 'Beta decision.')"
+check "concurrent_sessions_get_separate_packets" "[ '$PKT_A' != '$PKT_B' ]"
+check "first_packet_survives_the_second_build"   "[ -s '$PKT_A/MANIFEST.md' ]"
+check "first_packet_still_verifies"              "'$SCRIPT' verify '$PKT_A'"
+check "each_packet_keeps_its_own_brief"          "grep -q 'Alpha decision' '$PKT_A/MANIFEST.md' && grep -q 'Beta decision' '$PKT_B/MANIFEST.md'"
+check "packet_is_named_after_the_session_tag"    "[ '$PKT_A' = '$R/.ai-review-reviewer-alpha' ]"
+
+# Removing one session's packet must not touch the other's.
+"$SCRIPT" remove "$R" reviewer-beta
+check "remove_targets_only_the_named_session"    "[ ! -d '$PKT_B' ] && [ -s '$PKT_A/MANIFEST.md' ]"
+
+# A tag too long for a sane directory name still gets its OWN packet: truncation
+# that mapped two sessions onto one directory would reintroduce the defect.
+LONG_A="session-$(printf 'x%.0s' $(seq 1 60))-alpha"
+LONG_B="session-$(printf 'x%.0s' $(seq 1 60))-beta"
+P1="$("$SCRIPT" build "$R" "$LONG_A")"; P2="$("$SCRIPT" build "$R" "$LONG_B")"
+check "over_long_tags_do_not_collide"            "[ '$P1' != '$P2' ] && [ -s '$P1/MANIFEST.md' ]"
+check "over_long_packet_name_stays_bounded"      "[ \"\${#P1}\" -lt \"\$(( \${#R} + 70 ))\" ]"
+
+# THE BACKSTOP. Per-tag naming already keeps sessions apart, so a build that
+# lands on a packet owned by another tag means something is wrong. It must
+# refuse and name both tags rather than delete evidence a reviewer is reading.
+cp -r "$PKT_A" "$R/.ai-review-impostor"
+check "foreign_owner_build_is_refused"           "! '$SCRIPT' build '$R' impostor"
+check "refusal_names_both_tags"                  "'$SCRIPT' build '$R' impostor 2>&1 | grep -q 'reviewer-alpha' && '$SCRIPT' build '$R' impostor 2>&1 | grep -q 'impostor'"
+check "refusal_leaves_the_evidence_intact"       "[ -s '$R/.ai-review-impostor/MANIFEST.md' ]"
+check "refusal_says_how_to_clear_it"             "'$SCRIPT' build '$R' impostor 2>&1 | grep -q 'ai-review-packet remove'"
+rm -rf "$R/.ai-review-impostor"
+
+# Same tag = the same session rebuilding its own packet each turn. Always allowed.
+PKT_A2="$("$SCRIPT" build "$R" reviewer-alpha)"
+check "same_session_may_rebuild_its_own_packet"  "[ '$PKT_A2' = '$PKT_A' ] && '$SCRIPT' verify '$PKT_A2'"
+
+# Every session's packet stays out of the change under review, not just one.
+check "all_session_packets_excluded_from_git"    "[ -z \"\$(git -C '$R' status --porcelain | grep ai-review)\" ]"
+"$SCRIPT" remove "$R" reviewer-alpha; "$SCRIPT" remove "$R" "$LONG_A"; "$SCRIPT" remove "$R" "$LONG_B"
+
 # --- interface ----------------------------------------------------------------
-check "path_creates_nothing"                  "'$SCRIPT' remove '$R'; '$SCRIPT' path '$R' >/dev/null && [ ! -d '$R/.ai-review' ]"
+check "path_creates_nothing"                  "'$SCRIPT' path '$R' nonesuch >/dev/null && [ ! -d '$R/.ai-review-nonesuch' ]"
 check "unknown_subcommand_rejected"           "! '$SCRIPT' nonsense"
 check "unknown_option_rejected"               "! '$SCRIPT' build '$R' t --bogus x"
 check "non_git_directory_rejected"            "mkdir -p '$TMP/plain' && ! '$SCRIPT' build '$TMP/plain' t"
