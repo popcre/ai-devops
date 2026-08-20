@@ -5,6 +5,8 @@ description: Use xAI's Grok CLI (`grok`, branded Grok Build) as an independent c
 
 # Grok CLI
 
+While [ai-devops issue #56](https://github.com/u2giants/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
+
 ## Use `ai-grok-review`. Never call `grok` directly for a review.
 
 ```bash
