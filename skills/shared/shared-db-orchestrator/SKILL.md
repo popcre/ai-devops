@@ -26,11 +26,13 @@ index, constraint, extension, publication, storage policy, or a migration shippi
 - **Yes -> accept.** Queue it as `work_type: structural`, `route: shared-db-orchestrator`, and
   dispatch it to a sub-agent in an isolated worktree.
 - **No -> two exits only, and `accept` is never one of them.**
-  - **REJECT** — `application-data`, `source-data`, `curated-master-data`. Comment naming the
-    session that owns it and close it. It must leave this queue.
-  - **FORK** — `repo-maintenance`, `documentation`, `security-settings`. Real shared-db work, but
-    not shape work: hand it to a FRESH sub-agent with an empty context window, exactly as a
-    migration is dispatched. Do not read the code, debug it, or "just fix it quickly" here.
+  - **REJECT** — `application-data`, `source-data`. The work belongs to another repository and
+    must leave this queue, forwarded to it (see below).
+  - **FORK** — `repo-maintenance`, `documentation`, `security-settings`, and `curated-master-data`.
+    Real shared-db work, but not shape work: hand it to a FRESH sub-agent with an empty context
+    window, exactly as a migration is dispatched. Do not read the code, debug it, or "just fix it
+    quickly" here. Curated Master Data forks rather than leaves because AGENTS.md 6.4 governs it
+    inside this repo.
 
 **A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
 `return_to: owner/repo` in its scope block. Return it with
