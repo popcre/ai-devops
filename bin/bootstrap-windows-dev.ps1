@@ -93,11 +93,11 @@ try {
   if ($TestOnly) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $exceptions -TestOnly
     $status = if ($LASTEXITCODE -eq 0) { 'COMPLIANT' } else { 'DRIFT' }
-    Add-Result 'Package-manager exceptions' $status 'Vercel, Trigger.dev, and Supabase CLI'
+    Add-Result 'Package-manager exceptions' $status 'Vercel, Trigger.dev, Railway, and Supabase CLI'
   } else {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $exceptions
     if ($LASTEXITCODE -ne 0) { throw "Package exception reconciliation failed with exit code $LASTEXITCODE." }
-    Add-Result 'Package-manager exceptions' 'APPLIED' 'Vercel, Trigger.dev, and Supabase CLI'
+    Add-Result 'Package-manager exceptions' 'APPLIED' 'Vercel, Trigger.dev, Railway, and Supabase CLI'
   }
 
   $providerClis = Join-Path $RepoPath 'bin\install-windows-ai-provider-clis.ps1'
@@ -136,7 +136,7 @@ try {
     $setup = Join-Path $RepoPath 'bin\setup-machine.ps1'
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     if (-not $pwsh) { throw 'PowerShell 7 was installed but is not visible yet. Open a new terminal and rerun.' }
-    & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $setup -RepoPath $RepoPath
+    & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $setup -RepoPath $RepoPath -SkipRailwayCliReconcile
     if ($LASTEXITCODE -ne 0) { throw "AI DevOps machine setup failed with exit code $LASTEXITCODE." }
     Add-Result 'AI DevOps configuration' 'OK' 'Skills, managed dotfiles, SSH, MCPs, and runtime 1Password references reconciled.'
   } else {

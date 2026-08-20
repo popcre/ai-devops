@@ -55,6 +55,8 @@ Flags:
   -Token <ops_...>     Provide the token non-interactively (else you are asked).
   -SkipDesktopMcp      Do the token/env/skills wiring but do not touch the
                        Claude Desktop config.
+  -SkipRailwayCliReconcile
+                       Internal bootstrap flag; Railway was already reconciled.
   -RepoPath <path>     Where ai-devops lives (default: $HOME\repos\ai-devops).
 #>
 
@@ -62,6 +64,7 @@ Flags:
 param(
   [string]$Token = "",
   [switch]$SkipDesktopMcp,
+  [switch]$SkipRailwayCliReconcile,
   [string]$RepoPath = "",
   [string]$SupabaseProjectRef = "<removed-protected-project-ref>"
 )
@@ -158,6 +161,17 @@ if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$nul
 
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
 if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
+
+# Railway's official MCP is bundled into its CLI. Reconcile the current official
+# npm package even when setup-machine.ps1 is run directly. npm install is
+# idempotent and repairs an outdated or incomplete existing installation.
+if (-not $SkipRailwayCliReconcile -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+  Write-Host "    reconciling Railway CLI via npm..."
+  & npm.cmd install --global '@railway/cli@latest'
+  if ($LASTEXITCODE -ne 0) { throw "Railway CLI npm installation failed." }
+  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+}
+if (Get-Command railway -ErrorAction SilentlyContinue) { Ok "railway $(railway --version 2>$null)" } else { Warn "Railway CLI not found; rerun after Node/npm is available." }
 
 # GitHub CLI creates its config folder with inheritance disabled on some Windows
 # installations. Codex's restricted task account can then see the workspace but
@@ -382,6 +396,10 @@ $McpServers["ag-grid"] = @{
 $McpServers["vercel"] = @{
   command = "cmd"
   args = @("/c", "npx", "-y", "mcp-remote@0.1.38", "https://mcp.vercel.com")
+}
+$McpServers["railway"] = @{
+  command = "cmd"
+  args = @("/c", "npx", "-y", "mcp-remote@0.1.38", "https://mcp.railway.com")
 }
 
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
@@ -744,6 +762,12 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
   # stored Codex OAuth session works; mcp-remote is only for Claude consumers.
   $CodexMcpServers['vercel'] = [ordered]@{
     url = 'https://mcp.vercel.com'
+    startup_timeout_sec = 20
+  }
+  # Codex supports Railway's native HTTP transport. Claude consumers retain the
+  # shared mcp-remote definition above because their JSON config needs a command.
+  $CodexMcpServers['railway'] = [ordered]@{
+    url = 'https://mcp.railway.com'
     startup_timeout_sec = 20
   }
   $CodexMcpServers['chrome-devtools']['env'] = [ordered]@{

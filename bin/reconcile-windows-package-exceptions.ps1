@@ -20,7 +20,8 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 
 foreach ($package in @(
   @{ Name='Vercel CLI'; Npm='vercel@latest'; Command='vercel' },
-  @{ Name='Trigger.dev CLI'; Npm='trigger.dev@latest'; Command='trigger.dev' }
+  @{ Name='Trigger.dev CLI'; Npm='trigger.dev@latest'; Command='trigger.dev' },
+  @{ Name='Railway CLI'; Npm='@railway/cli@latest'; Command='railway' }
 )) {
   if ($TestOnly) {
     $present = [bool](Get-Command $package.Command -ErrorAction SilentlyContinue)
