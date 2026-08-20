@@ -997,3 +997,64 @@ record, uses one private directory per named review, and treats only Kimi's term
 contracts. Kimi-specific patch evidence is split below its measured read limit. These
 changes improve transport truth; they do not change or inflate the model-quality score.
 Kimi still exposes no trustworthy returned-model, token, cache, context, or cost data.
+
+## 2026-08-19 reviewer trial: GLM restored, Gemini and Muse measured
+
+Owner instruction: stop Kimi, restore GLM, trial Gemini and Muse and report. Full
+write-up in `docs/reviewer-trial-2026-08-19-glm-gemini-muse.md`. Measured during
+shared-db orchestrator session `claude-20260819-092000Z` (marker `#1229`). All three
+reviewed the SAME pull request (`u2giants/shared-db#1282`) from the SAME
+self-contained copy on the SAME brief, independently.
+
+- **kimi-k3 — 11 terminal failures against 5 successes in one session.** Three modes:
+  findings discarded above the verdict heading (1); usage-limit exhaustion (1); and
+  nine consecutive six-second `exit 127` deaths, all after the usage-limit hit. Its
+  five completed reviews were excellent — sequence 212 proved a guard fails CLOSED on
+  a missing table by tracing SQLSTATE 42P01 out of the trigger; sequence 210 audited
+  all 36 `raise warning` statements in a contract file individually. **The model is
+  not the problem; the wrapper is.** Nothing persists a discarded review: `show`,
+  `transcript` and the session JSON all hold metadata only. Recorded as reviewer issue
+  `20260820T004602Z-edge-dev-kimi-k3-385556`.
+- **glm-5.3 — restored; the pause was a false diagnosis.** Three
+  `provider_unavailable` failures on 2026-08-18 read as an unreliable provider. The
+  actual cause was a stopped local `opencode` server on this machine
+  (`ai-glm doctor` -> `FAIL health endpoint answers`). `opencode-glm-launch` fixed it;
+  every check then passed and GLM produced a 10 KB review with a coverage statement,
+  verdict APPROVE, no findings. Notably declared its own limits unprompted: no shell,
+  so it did not re-measure timings, byte-hash the compared bodies, or run the contract
+  tests. Reported usage 1,578 input / 2,640 output / 1,564 reasoning / 138,496 cache
+  read.
+- **muse-spark-1.2-contributor — good reviewer, broken verdict detection.** Produced a
+  complete seven-point review with file and line citations, a per-mutation spot-check
+  naming the exact catalogue predicate that would fail for each of 13 mutations, and a
+  final `VERDICT: APPROVE`. The wrapper failed to detect that verdict and wrote
+  *"Muse did not produce the required final verdict. This is not a review result."*
+  over correct work. Likely cause: ANSI escape sequences interleaved through the
+  captured stream. **It SAVES the output, so the review was fully recoverable** —
+  which is the material difference from Kimi, and the reason these two should not be
+  treated as the same severity. Recorded as reviewer issue
+  `20260820T013646Z-edge-dev-muse-spark-1.2-contributor-394599`.
+- **gemini-3.7-flash-high — not usable on this evidence.** Two attempts: first
+  returned only `no usable Gemini verdict` (65 bytes); second returned `PASS` with an
+  **empty report** (251 bytes). `ai-gemini doctor` passes, so the installation is
+  sound. The second attempt is the more concerning: a bare PASS with no coverage
+  statement is exactly the shape the 2026-08-19 `AGENTS.md` rule names as a provider
+  failure rather than a clean review, and a caller reading only the exit status would
+  have recorded an approval. Two attempts is thin evidence; retry after someone
+  establishes why the report comes back empty. Do not add to `ACTIVE_REVIEWERS` yet.
+- **grok-4.6 over the same session — 19 successes, 1 failure.** The failure was a
+  20-turn cancellation on an oversized four-migration promotion brief (2,706,144
+  tokens, $0.41); splitting the brief and raising `--max-turns` fixed it, so it is
+  arguably caller error. Recurring nuisance: omitted the `## Verdict` section on eight
+  separate sequences, discarding findings until asked to re-emit them in one block —
+  always recoverable in one extra turn, always complete when recovered.
+- **A false `.ai/reviews is not git-ignored` warning is confirmed in FOUR wrappers**
+  (`ai-kimi`, `ai-grok-review`, `ai-gemini`, and around `ai-muse`'s save path). Line 36
+  of shared-db's `.gitignore` is literally `.ai/reviews/` and the tree is clean after a
+  run. The check is wrong, not the repository, and its effect is that a wrapper
+  silently skips writing the artifact that makes a lost review recoverable. Should use
+  `git check-ignore`.
+- **`gh issue view` is blocked inside the `ai-grok-review` sandbox.** On sequence 229
+  the reviewer could not read the issue under review, said so plainly, and worked from
+  the brief instead. Briefs must carry what the reviewer needs rather than assuming it
+  can fetch its own issue.
