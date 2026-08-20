@@ -42,10 +42,16 @@ foreach ($script in @($bootstrap,$verify,$exceptions,$providerClis,$remoteAccess
 
 $bootstrapText = Get-Content -Raw $bootstrap
 $machineSetupText = Get-Content -Raw $machineSetup
+$exceptionsText = Get-Content -Raw $exceptions
 Assert ($bootstrapText -match 'setup-machine\.ps1') 'bootstrap must delegate repo-specific configuration'
 Assert ($bootstrapText -match 'TestOnly') 'bootstrap must expose a non-installing test path'
 Assert ($bootstrapText -match 'pull --ff-only') 'bootstrap must update without rewriting local history'
 Assert ($bootstrapText -match 'reconcile-windows-package-exceptions\.ps1') 'bootstrap must own non-WinGet package exceptions'
+Assert ($bootstrapText -match 'setup.*-SkipRailwayCliReconcile') 'bootstrap must not install Railway twice'
+Assert ($exceptionsText -match '@railway/cli@latest') 'package exceptions must install the official Railway CLI'
+Assert ($machineSetupText -match "https://mcp\.railway\.com") 'machine setup must configure Railway hosted MCP for Codex'
+Assert ($machineSetupText -match '(?s)reconciling Railway CLI via npm.*npm\.cmd install --global ''@railway/cli@latest''') 'direct machine setup must update or repair Railway CLI on every run'
+Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must be shared with Claude consumers'
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok and Kimi CLIs'
 Assert ($bootstrapText -match 'configure-windows-bootstrap-access\.ps1') 'bootstrap must own first-connection Tailscale/OpenSSH setup'
 Assert ($bootstrapText -match 'configure-wsl-ansible-controller\.ps1') 'bootstrap must own WSL Ansible controller setup'

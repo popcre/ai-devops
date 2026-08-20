@@ -10,7 +10,7 @@ function Check-Command([string]$Name) {
   $command = Get-Command $Name -ErrorAction SilentlyContinue
   $checks.Add([pscustomobject]@{ Check="command:$Name"; Passed=[bool]$command; Detail=$(if($command){$command.Source}else{'not found'}) })
 }
-@('winget','git','pwsh','node','python','gh','op','gcloud','az','cloudflared','wsl','claude','grok','kimi','vercel','trigger.dev','supabase') | ForEach-Object { Check-Command $_ }
+@('winget','git','pwsh','node','python','gh','op','gcloud','az','cloudflared','wsl','claude','grok','kimi','vercel','trigger.dev','railway','supabase') | ForEach-Object { Check-Command $_ }
 
 $codexApp = Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object {
   $_.Name -like '*Codex*' -or $_.PackageFamilyName -like '*Codex*'

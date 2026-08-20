@@ -13,12 +13,13 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-mcps-" + [guid]:
 $configPath = Join-Path $testRoot "config.toml"
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
-$names = @('ag-grid','playwright','codex-cli','synology-monitor','devops-mcp','vercel','trigger','recall-ai','1password','supabase','chrome-devtools')
+$names = @('ag-grid','playwright','codex-cli','synology-monitor','devops-mcp','vercel','railway','trigger','recall-ai','1password','supabase','chrome-devtools')
 $servers = [ordered]@{}
 foreach ($name in $names) {
   $servers[$name] = [ordered]@{ command = 'cmd'; args = @('/c', 'npx', '-y', "package-$name") }
 }
 $servers['vercel'] = [ordered]@{ url = 'https://mcp.vercel.com'; startup_timeout_sec = 20 }
+$servers['railway'] = [ordered]@{ url = 'https://mcp.railway.com'; startup_timeout_sec = 20 }
 $servers['codex-cli']['env'] = [ordered]@{ MCP_TOOL_TIMEOUT = '3600000' }
 $servers['codex-cli']['tool_timeout_sec'] = 3600
 
@@ -65,6 +66,7 @@ notifications = true
   Assert-True ($second.Contains('[desktop]')) "preserves machine-local Codex settings"
   Assert-True (-not $second.Contains('SHOULD_NOT_SURVIVE')) "removes stale plaintext env values"
   Assert-True ($second.Contains("url = 'https://mcp.vercel.com'")) "uses native Vercel transport"
+  Assert-True ($second.Contains("url = 'https://mcp.railway.com'")) "uses native Railway transport"
   Assert-True ($second.Contains('tool_timeout_sec = 3600')) "allows long codex-cli calls"
   Assert-True ((Get-ChildItem $testRoot -Filter 'config.toml.aidevops-*.bak').Count -eq 1) "creates one recoverable backup only when changed"
 } finally {

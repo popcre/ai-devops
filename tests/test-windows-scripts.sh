@@ -131,7 +131,12 @@ if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
    grep -q '\$CodexMcpServers' bin/setup-machine.ps1; then
   ok "Windows setup configures the complete MCP set for Codex"
 else bad "Windows setup leaves the Codex MCP set incomplete"; fi
-for server in ag-grid playwright codex-cli synology-monitor devops-mcp vercel trigger recall-ai 1password supabase; do
+if grep -Fq "\$CodexMcpServers['railway']" bin/setup-machine.ps1 &&
+   grep -Fq 'https://mcp.railway.com' bin/setup-machine.ps1 &&
+   grep -Fq '@railway/cli@latest' bin/reconcile-windows-package-exceptions.ps1; then
+  ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
+else bad "Windows setup does not fully manage Railway"; fi
+for server in ag-grid playwright codex-cli synology-monitor devops-mcp vercel railway trigger recall-ai 1password supabase; do
   if grep -Fq "\$McpServers[\"$server\"]" bin/setup-machine.ps1; then
     ok "shared MCP set includes $server"
   else
