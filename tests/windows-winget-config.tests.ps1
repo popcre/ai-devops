@@ -50,6 +50,7 @@ Assert ($bootstrapText -match 'reconcile-windows-package-exceptions\.ps1') 'boot
 Assert ($bootstrapText -match 'setup.*-SkipRailwayCliReconcile') 'bootstrap must not install Railway twice'
 Assert ($exceptionsText -match '@railway/cli@latest') 'package exceptions must install the official Railway CLI'
 Assert ($machineSetupText -match "https://mcp\.railway\.com") 'machine setup must configure Railway hosted MCP for Codex'
+Assert ($machineSetupText -match "args = @\('mcp', 'proxy'\)") 'Codex must use Railway CLI authenticated proxy'
 Assert ($machineSetupText -match '(?s)reconciling Railway CLI via npm.*npm\.cmd install --global ''@railway/cli@latest''') 'direct machine setup must update or repair Railway CLI on every run'
 Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must be shared with Claude consumers'
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok and Kimi CLIs'
