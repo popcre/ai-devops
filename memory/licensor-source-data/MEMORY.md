@@ -1,3 +1,4 @@
 - [Peanuts portal is Tenovos](peanuts-portal-is-tenovos.md) — Peanuts is a Tenovos DAM; its 1Password entry once held the Sesame URL, and its "property" field means Art Program.
 - [Disney OPA approvals plan](opa-approvals-plan-location.md) — where it lives; read its STATUS table, do not re-plan it.
-- [Paramount and Sesame are not in the database](paramount-and-sesame-not-in-database.md) — their captures are files only; six other licensors have plm.* tables.
+- [Paramount and Sesame are not in the database](paramount-and-sesame-not-in-database.md) — CORRECTED: Paramount IS loaded in plm.pmt_*; Sesame has tables but no rows.
+- [Orchestrator is structure only](orchestrator-is-structure-only.md) — never queue data deletes/backfills; the working session does them itself.

@@ -1,26 +1,30 @@
 ---
 name: paramount-and-sesame-not-in-database
-description: Paramount and Sesame Workshop captures exist only as files; unlike the other licensors they have no plm.* tables in the shared database.
-metadata: 
-  node_type: memory
+description: CORRECTED 2026-08-19 - Paramount IS in the database (plm.pmt_*, loaded). Sesame has a landing migration but no rows.
+metadata:
   type: project
-  originSessionId: e1eb03a2-ae1a-4810-a92f-74435fd2317b
-  modified: 2026-08-19T22:06:57.219Z
 ---
 
-As of 2026-08-19, six licensors have `plm.*` tables in the shared Supabase database:
-NBCU (`plm.nbcu_*`), Disney DCP Vault (`plm.dcp_*`), Disney OPA (`plm.opa_*`),
-Warner STARLABS (`plm.wb_*`), Strawberry Shortcake / WildBrain (`plm.wildbrain_*`)
-and Peanuts (`plm.peanuts_*`).
+**Correction (verified by live query 2026-08-19):** an earlier version of this note
+said Paramount had no tables. That was WRONG.
 
-**Paramount and Sesame Workshop have no tables at all.** Their captures live only as
-CSV/JSON files under `paramount/` and `sesame/` in `u2giants/licensor-source-data`.
-Neither has a loader or a `load-receipts/` directory. Designing their initial schema
-is unstarted work, not a retrofit.
+- **Paramount IS in the shared Supabase database**: `plm.pmt_*` (24 tables:
+  property, franchise, character, collection/style guide, brand, asset,
+  authorized title, the link tables, capture bookkeeping, and the lossless
+  `pmt_asset_metadata_value`). Loaded 2026-08-13; the complete capture's counts
+  match the repo CSVs exactly (67 properties, 62 characters, 538 collections,
+  22 franchises, 33,862 assets).
+- **Sesame** has a landing migration (`20260819212002_sesame_workshop_netx_source_landing.sql`)
+  but no data loaded as of 2026-08-19.
+- Also present: NBCU (`plm.nbcu_*`), Disney DCP Vault (`plm.dcp_*`), Disney OPA
+  (`plm.opa_*`), Warner STARLABS (`plm.wb_*`), WildBrain (`plm.wildbrain_*`),
+  Peanuts (`plm.peanuts_*`), Sega.
 
-Do not assume a licensor is queryable in the database just because its capture files
-exist in the repo, and do not promise a database answer for Paramount or Sesame
-without checking first. The authoritative check is a grep for `plm.<licensor>_` across
-the repo excluding `node_modules`.
+**How to check for real, instead of guessing:** psql against the pooler with the
+password from `op read 'op://vibe_coding/Supabase DB Password - shared POP database/password'`,
+host `aws-1-us-east-1.pooler.supabase.com:6543`, user `postgres.qsllyeztdwjgirsysgai`.
+psql IS installed on this Windows machine (18.6) despite older shared-db docs
+saying it is not. A grep of the repo proves a table exists; only a query proves
+it has rows.
 
-Related: [[nbcu-style-guide-downloads]], [[peanuts-portal-is-tenovos]]
+Related: [[peanuts-portal-is-tenovos]], [[orchestrator-is-structure-only]]
