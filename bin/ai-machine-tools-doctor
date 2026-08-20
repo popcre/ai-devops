@@ -46,7 +46,11 @@ while IFS=$'\t' read -r name source form ubuntu provider owner; do
 done < "$catalog"
 if [[ "$platform" == windows && ":${PATH,,}:" != *":${target_dir,,}:"* ]]; then echo "INFO current shell PATH is stale"; fi
 for provider in grok kimi qwen; do
-  if command -v "$provider" >/dev/null 2>&1; then echo "INFO $provider provider available"; else echo "INFO $provider provider unavailable"; fi
+  if command -v "$provider" >/dev/null 2>&1; then echo "INFO $provider provider available"; else
+    # Informational, not a failure: the repo's own wrappers are installed and
+    # current; the vendor CLI they call simply is not present on this machine.
+    echo "INFO $provider provider unavailable — install with: install-ai-provider-clis.sh $provider"
+  fi
 done
 ((failed == 0)) && echo "OK local AI command launchers are current"
 exit "$failed"
