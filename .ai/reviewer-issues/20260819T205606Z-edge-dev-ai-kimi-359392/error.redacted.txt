@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "job_id": "acd8985676fb-claude-pr1213-seq194",
+  "repo": "C:/repos/shared-db-review/pr1213-d94a637",
+  "repo_remote": "C:/repos/shared-db",
+  "head": "d94a637b0ad54c0b6b70a0751cb7793972cc700c",
+  "caller": "claude",
+  "name": "pr1213-seq194",
+  "mode": "review",
+  "kimi_session_id": null,
+  "model": "kimi-code/k3",
+  "kimi_home_sha256": "6a403ef2e38acd620c35d7fcedde522b8915b04abdbcfd496faafc51d2589091",
+  "created": "2026-08-19T03:46:23Z",
+  "updated": "2026-08-19T04:02:09Z",
+  "phase": "failed",
+  "worker_pid": 557030,
+  "kimi_child_pid": 557099,
+  "last_output_at": "2026-08-19T04:02:07Z",
+  "last_output_size": 309004,
+  "terminal_reason": "execution-context-denied",
+  "exit_code": 124,
+  "cancel_request": "C:/Users/ahazan/.local/state/ai-devops/kimi/jobs/acd8985676fb/claude--pr1213-seq194/cancel.request",
+  "artifact_paths": {
+    "stream": "C:/Users/ahazan/.local/state/ai-devops/kimi/jobs/acd8985676fb/claude--pr1213-seq194/stream.jsonl",
+    "log": "C:/Users/ahazan/.local/state/ai-devops/kimi/jobs/acd8985676fb/claude--pr1213-seq194/worker.log"
+  },
+  "review_workspace": "C:/Users/ahazan/.local/state/ai-devops/review-sandboxes/kimi-claude-pr1213-seq194-7ae9c6ec26e4",
+  "repo_lock": "C:/Users/ahazan/.local/state/ai-devops/kimi/locks/repo--acd8985676fb.lock.d",
+  "base": "fdb133c7c49c38d5ccd3fe685fe799bafe9aad60",
+  "packet_sha256": "c7813f1bd5a525f14ccd7544903eb59641950756ed95469fe4e00bde3b718e89",
+  "review_kind": "diff",
+  "timing": {
+    "snapshot_seconds": 2,
+    "test_seconds": 0,
+    "packet_seconds": 2,
+    "pre_provider_seconds": 4,
+    "provider_seconds": 944,
+    "model_steps": "unavailable"
+  }
+}

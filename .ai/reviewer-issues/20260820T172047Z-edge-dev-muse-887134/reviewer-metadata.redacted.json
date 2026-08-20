@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "status": "active",
+  "name": "review-1320-supersede",
+  "caller": "codex",
+  "repository_root": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/rv1320",
+  "repository_id": "c5c4fbc3514d",
+  "session_id": "ses_fe0616eaeffe6rK9JtyPFffHsM",
+  "review_dir": "C:/Users/ahazan/.local/state/ai-devops/review-sandboxes/muse-codex-review-1320-supersede-7345f2c69435",
+  "sandbox_tag": "muse-codex-review-1320-supersede",
+  "model": "meta-model-api/muse-spark-1.2-contributor",
+  "head": "0de021861ec9d9310f9b45b58d53f5f2654f1f28",
+  "packet_sha256": "b0ade82b0dd015d27c8231f515d061161d2694769d76bafbf651d6dc1a3d374e",
+  "last_report": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/rv1320/.ai/reviews/muse-review-1320-supersede-20260820T144718Z-732242-8509.md",
+  "created_at": "2026-08-20T14:47:18Z",
+  "updated_at": "2026-08-20T14:47:19Z"
+}

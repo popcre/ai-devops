@@ -1,0 +1,82 @@
+THE PER-REPOSITORY IN-FLIGHT LOCK DOES NOT PREVENT CONCURRENT GROK REVIEWS WHEN THE CALLER
+USES SEPARATE CLONES. I caused this, the owner caught it, and it is a genuine wrapper defect
+as well as my mistake.
+
+WHAT THE OWNER OBSERVED
+Albert Hazan, 2026-08-20: "are you intending to run 6 concurrent grok reviews? because that's
+what's happening". I was not. I believed the wrapper's own in-flight lock made that
+impossible -- its refusal text says so explicitly: "another Grok review is already running in
+this repository... Do NOT start a second one -- concurrent reviews are billed in full and were
+the most expensive part of the 2026-08-05 incident."
+
+THE MECHANISM, MEASURED
+The lock and the session store are keyed on a repository id derived from the checkout PATH
+(plus remote). A fresh clone therefore produces a DIFFERENT id and its OWN lock directory,
+so the "one review per repository" guarantee silently becomes "one review per clone".
+
+Sessions I created today, by repo id -- all of the same upstream repository:
+
+  c45fa053410d  C:/repos/shared-db (main checkout)   claude--review-1295-roster
+  678a9d795b6b  rv1295 clone (local-path origin)     claude--review-1295-r2
+  9b2d8492c958  rv1295gh clone (GitHub origin)       claude--review-1295-r2b
+  c5c4fbc3514d  rv1320 clone                         claude--review-1320-supersede
+  2a0037e019da  rv1335 clone                         claude--review-1335-restore
+
+Five distinct lock scopes for one repository. Only ONE lock directory exists on disk right
+now (repo--2a0037e019da.lock.d) because the others were released as their runs ended, but at
+no point did any of them exclude another.
+
+WHY I WAS MAKING CLONES AT ALL -- one guard's fix defeated another guard
+shared-db #1296: running two reviewers from the same checkout makes them overwrite each
+other's `.ai-review` evidence packet, and a local-path clone does not help because the
+wrapper resolves the repository from the remote and builds the packet from the ORIGIN path.
+A reviewer was fed the wrong commit that way and caught it only because it checked.
+My remedy was a fresh GitHub-remote clone per review. That fixed the packet collision and
+simultaneously removed the concurrency protection, which I did not anticipate and did not
+verify. **Two guards that are individually correct compose into a hole.**
+
+SECOND, WORSE CONTRIBUTOR: KILLING A RUN LOCALLY DOES NOT STOP IT REMOTELY
+I cancelled two runs mid-flight with a local process kill after discovering they had been
+given the wrong commit (`review-1295-roster`, `review-1295-r2`). The wrapper offers
+`ai-grok-review delete <name>` for local session records, but nothing in the interface
+indicates whether the PROVIDER-side turn is cancelled, and a local SIGKILL plainly cannot do
+it. Those turns may have continued running and billing after their local wrapper was gone.
+That is very likely part of the count the owner saw.
+
+IMPACT
+Concurrent billed reviews of the same repository, invisible to the caller, defeating the
+exact guard built after the 2026-08-05 incident. Unknown remote runs possibly still active
+after local cancellation. I have taken no cleanup action and started no further reviews,
+pending the owner's instruction, because I cannot distinguish my orphans from another
+session's live work from this side.
+
+SUGGESTED FIXES, in order of value
+1. KEY THE IN-FLIGHT LOCK ON THE UPSTREAM REMOTE, NOT THE CHECKOUT PATH. `git remote get-url
+   origin` normalised (or the resolved GitHub owner/name) identifies the repository the
+   review is actually about. Path-keying is what made isolation and exclusion mutually
+   exclusive. This single change closes the hole without forbidding clones -- which are
+   necessary for #1296.
+2. MAKE CANCELLATION REACH THE PROVIDER. If a remote turn can be aborted, `delete` (or a new
+   `abort`) should do it and say so; if it cannot, the wrapper must SAY that plainly when a
+   run is interrupted -- e.g. a trap that prints "local wrapper stopped; the provider turn
+   may still be running and billing; it cannot be cancelled from here". Silence here is what
+   let two orphans accumulate unnoticed.
+3. SHOW WHAT IS RUNNING ACROSS ALL CLONES. `ai-grok-review list` currently shows sessions for
+   the current repo id only, so a caller cannot see their own concurrent runs. Listing every
+   lock directory with its label, pid and start time would have made this visible in one
+   command instead of requiring the owner to notice it from outside.
+4. The progress-output gap recorded in 20260820T172906Z-edge-dev-grok-888349 remains, and
+   compounds this: with no per-turn output, a caller cannot tell a long run from an orphan.
+
+MY OWN CORRECTIVE ACTIONS
+- Started no further Grok reviews since the owner's message.
+- Will not create another per-review clone until this is resolved; the correct interim
+  behaviour is one review at a time, serialised by hand, accepting the #1296 packet risk by
+  never running two reviewers at once rather than by cloning.
+- Recorded rather than quietly cleaned up, so the evidence survives.
+
+RELATED
+- 20260820T172906Z-edge-dev-grok-888349 -- the missing mid-turn progress output, same wrapper.
+- shared-db #1296 -- the evidence-packet collision whose fix created this hole.
+- ai-devops#51 -- ai-muse's blocking failures the same day.
+- shared-db #1298 / ai-devops 12b0f0e -- the equivalent liveness gap in ai-glm, now fixed.

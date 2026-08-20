@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "promo-sesame-r2",
+  "caller": "codex",
+  "repository_root": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/review-sesame",
+  "repository_id": "58ec65d13983",
+  "session_id": "ses_fe2ed9882ffeOzJJ48SQNxIyv0",
+  "review_dir": "C:/Users/ahazan/.local/state/ai-devops/review-sandboxes/muse-codex-promo-sesame-r2-69a7f40c0e49",
+  "sandbox_tag": "muse-codex-promo-sesame-r2",
+  "model": "meta-model-api/muse-spark-1.2-contributor",
+  "head": "b172cf345695d87a83f4fcfce4744a43c09b6708",
+  "packet_sha256": "8871990c3d002f5f7cc866914b57804b2eb10973349b49b47ec9786cadc8c395",
+  "last_report": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/review-sesame/.ai/reviews/muse-promo-sesame-r2-20260820T025127Z-464073-19629.md",
+  "created_at": "2026-08-20T02:51:27Z",
+  "updated_at": "2026-08-20T02:51:27Z"
+}

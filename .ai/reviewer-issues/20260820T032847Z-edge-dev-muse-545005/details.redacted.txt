@@ -1,0 +1,75 @@
+Muse produced a COMPLETE, HIGH-QUALITY review and the wrapper returned NOTHING to
+the caller. The review was recovered only because the standing rule says to look for
+a saved artifact before recording a reviewer failure.
+
+WHAT HAPPENED
+During shared-db orchestrator session claude-20260820-030000Z I ran:
+
+  ai-muse new promo-sesame-212002 --prompt-file /tmp/brief-sesame.md
+
+from a self-contained clone at commit b172cf3. Observed:
+
+  - stdout: ZERO BYTES. Not a warning, not an error, not a partial line.
+  - the session did NOT appear in `ai-muse list` at all, under any caller.
+  - `ai-muse transcript promo-sesame-212002` -> "error: no session
+    'promo-sesame-212002' for caller 'codex' in this repository"
+    (note: caller defaulted to 'codex' on the read path even though the session was
+    created by this Claude session -- see SECOND DEFECT below).
+
+On every observable signal this was a dead reviewer. I treated it as one and moved
+on to another provider.
+
+THE REVIEW WAS ON DISK THE ENTIRE TIME
+  .ai/reviews/muse-promo-sesame-212002-20260820T024859Z-458758-8681.md   (10,362 bytes)
+
+It contained a complete seven-part review with a coverage statement declaring it had
+read all 2,629 lines of the migration across three sequential reads (1-842, 843-1778,
+1779-2629), findings with severities and exact line numbers, and `VERDICT: APPROVE`.
+Token accounting in its header: 118,519 total.
+
+That review was substantively the best of the session. It made the distinction the
+whole promotion turned on -- that the expensive row counts in the migration sit
+INSIDE function bodies and are stored source at apply time, not executed code -- and
+that is why 20260819212002 could be safely applied to production where 20260819151536
+could not. It is now the recorded review evidence for shared-db #1289, and that
+migration is in production.
+
+SECOND DEFECT, found while trying to recover it: CALLER MISMATCH ON THE READ PATH
+`ai-muse new` created the session under one caller, but `ai-muse list` / `transcript`
+resolved caller 'codex' by default in the same directory, so the session could not be
+found by name. A minimal probe (`ai-muse new musecheck --prompt "Reply with exactly:
+MUSE ALIVE"`) worked and returned promptly, which is what proved the provider itself
+was healthy and the fault was in session bookkeeping and result delivery, not in Muse.
+
+WHY THIS IS SERIOUS RATHER THAN COSMETIC
+Muse was added to the active reviewer rotation the same day (shared-db #1290, merged
+as cef67d6) precisely because it is a good reviewer. A reviewer whose wrapper returns
+nothing will be scored as a terminal failure by any caller that does not know to go
+looking on disk. That is exactly the mechanism that produced a two-day false pause for
+glm-5.3. Muse is now one of only three active reviewers; a false failure here costs a
+third of the rotation.
+
+SUGGESTED FIX (ranked)
+1. Never exit silently. If the turn produced text, print it. If the wrapper cannot
+   detect a verdict, print the text ANYWAY with an explicit banner such as
+   "verdict not detected -- full model output follows" and a non-zero-but-distinct
+   exit status. Silence must never be a possible outcome of a completed turn.
+2. Always print the saved report path, on every outcome including failure. One line
+   -- "report: <path>" -- turns an unrecoverable-looking failure into a recoverable
+   one, and costs nothing.
+3. Fix verdict detection to accept the plain final-line form `VERDICT: APPROVE`
+   (anchored at line start), which is what the shared-db review briefs mandate and
+   what Muse actually emitted.
+4. Make the caller identity used by `list`/`transcript`/`show` match the caller that
+   created the session, or make session lookup caller-agnostic with the caller shown
+   as a column. A session you just created must be findable by name.
+
+VERIFICATION FOR WHOEVER FIXES IT
+Run a Muse review whose brief mandates a final `VERDICT: APPROVE` line. The fix works
+when (a) stdout is non-empty, (b) it names the saved report path, and (c)
+`ai-muse list` shows the session under the same name immediately after creation.
+
+RELATED
+shared-db #1289 (the review this recovered), #1290 / cef67d6 (Muse added to the
+rotation, with this defect documented in the code comment as a caller obligation),
+#1298 (the GLM analogue), ai-devops docs/reviewer-wrapper-gitignore-false-warning.md.

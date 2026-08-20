@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260820T144201Z-edge-dev-muse-733415",
+  "created_at": "2026-08-20T14:42:01Z",
+  "provider": "muse",
+  "summary": "No output and NO session state for 17 minutes while opencode processes stayed alive",
+  "reported_command": "ai-muse new review-1320-supersede --prompt-file /tmp/brief-1320.md",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T144201Z-edge-dev-muse-733415",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "fix/backfill-133-art-pieces",
+    "head": "d75188de00661fd58c68171b882fe3cfa05fed9b",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "C:/Users/ahazan/.local/state/ai-devops/muse/sessions/f510ec0041c4/codex--decide-1314-backfill.json",
+    "redacted_metadata_copy": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T144201Z-edge-dev-muse-733415/reviewer-metadata.redacted.json",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": null
+  }
+}

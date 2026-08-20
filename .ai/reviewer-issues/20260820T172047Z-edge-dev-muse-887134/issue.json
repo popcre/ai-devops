@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260820T172047Z-edge-dev-muse-887134",
+  "created_at": "2026-08-20T17:20:47Z",
+  "provider": "muse",
+  "summary": "THIRD failure today: no output and no session state for 17 minutes, reproducing 733415 exactly",
+  "reported_command": "ai-muse new review-1335-restore --prompt-file /tmp/brief-1335.md",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T172047Z-edge-dev-muse-887134",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "fix/restore-art-piece-1024-1025",
+    "head": "e5459be24f98e8e4bacb0958a19a953c0c2d2064",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "C:/Users/ahazan/.local/state/ai-devops/muse/sessions/c5c4fbc3514d/codex--review-1320-supersede.json",
+    "redacted_metadata_copy": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T172047Z-edge-dev-muse-887134/reviewer-metadata.redacted.json",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": null
+  }
+}

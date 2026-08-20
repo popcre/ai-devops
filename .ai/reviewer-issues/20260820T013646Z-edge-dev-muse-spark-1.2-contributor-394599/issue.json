@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260820T013646Z-edge-dev-muse-spark-1.2-contributor-394599",
+  "created_at": "2026-08-20T01:36:46Z",
+  "provider": "muse-spark-1.2-contributor",
+  "summary": "ai-muse: complete review ending in VERDICT: APPROVE was mislabelled 'stopped without a usable verdict' - verdict-extraction defect, review recoverable from the saved file",
+  "reported_command": "ai-muse review . < C:/Users/ahazan/AppData/Local/Temp/claude/review-1282.md",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T013646Z-edge-dev-muse-spark-1.2-contributor-394599",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "main",
+    "head": "8efa4575e65b02e814815046dbaaa53b92da321b",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": "error.redacted.txt"
+  }
+}

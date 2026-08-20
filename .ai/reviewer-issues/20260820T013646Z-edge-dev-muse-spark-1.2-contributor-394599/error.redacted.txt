@@ -1,0 +1,62 @@
+# Muse incomplete review
+
+Muse did not produce the required final verdict. This is not a review result.
+
+## Raw output
+
+[0m
+> muse-review · muse-spark-1.2-contributor
+[0m
+[0m→ [0mRead .
+Reviewing PR #1282 claim by claim — starting with verification cost and lineage.
+[0m→ [0mRead .git/HEAD
+[0m→ [0mRead .git/refs/heads/issue-1280-wildbrain-verify-cost
+[0m→ [0mRead .ai-review-sandbox
+[0m✱ [0mGlob "supabase/migrations/2026082*.sql"[90m 1 match[0m
+[0m→ [0mRead .git/logs/HEAD
+[0m→ [0mRead supabase/migrations/20260820004338_wildbrain_inventory_and_finalize_sweep_catalogue_verified.sql
+Head confirmed — now auditing the migration source and view lineage.
+[0m→ [0mRead supabase/migrations/20260820004338_wildbrain_inventory_and_finalize_sweep_catalogue_verified.sql[90m [offset=897][0m
+Core migration reviewed — now verifying the remaining checks and historical lineage.
+Initial review complete — now tracing the full view history to confirm the lineage.
+[0m✱ [0mGlob "supabase/migrations/*.sql"[90m 100 matches[0m
+[0m✱ [0mGrep "source_capture_inventory"[90m 100 matches[0m
+[0m→ [0mRead supabase/migrations/20260819151536_wildbrain_inventory_classification_and_finalize_extra_key_sweep.sql
+Lineage spot-check underway — pulling the historical view definitions for comparison.
+[0m✗ [0mRead supabase/migrations/20260819212002_sesame_workshop_source_landing.sql failed
+[91m[1mError: [0mFile not found: C:\Users\ahazan\.local\state\ai-devops\review-sandboxes\muse-c62e361b96a5\supabase\migrations\20260819212002_sesame_workshop_source_landing.sql
+[0m✱ [0mGlob "supabase/migrations/20260819*.sql"[90m 10 matches[0m
+[0m✱ [0mGrep "source_capture_inventory"[90m in supabase/migrations/20260819212002_sesame_workshop_netx_source_landing.sql · 67 matches[0m
+[0m✱ [0mGrep "source_capture_inventory"[90m in supabase/migrations/20260819015333_sega_dsi_source_landing.sql · 67 matches[0m
+## Verdict
+Head: `50c7d2dd95a519061254825ee8113433be9bcab3` — `refs/heads/issue-1280-wildbrain-verify-cost` and `HEAD` both read that SHA; `git logs/HEAD` shows single clone+checkout of it. Self-contained copy derived.
+
+Coverage — files actually read:
+- `supabase/migrations/20260820004338_wildbrain_inventory_and_finalize_sweep_catalogue_verified.sql` — full, lines 1-1075, including view body 93-334, function body 338-792, verification DO 866-1075, all comments and grants
+- `supabase/migrations/20260819151536_wildbrain_inventory_classification_and_finalize_extra_key_sweep.sql` — full, lines 1-895+, view 113-341 and function 358-811 used for byte-faithful diff against the new file
+- `supabase/migrations/20260819212002_sesame_workshop_netx_source_landing.sql` — grep + read line 2615 confirming `DELIBERATELY NOT DONE: api.source_capture_inventory is NOT extended` and absence of `create or replace view`
+- `supabase/migrations/20260819125713_peanuts_tenovos_source_landing.sql` (lines 2167-2408), `20260819015333_sega_dsi_source_landing.sql` (1639-1853), `20260814233342_source_capture_inventory_latest_complete.sql`, `20260814030000_source_capture_inventory.sql` — lineage existence and view-redefinition chain
+- `supabase/migrations/20260819151510*` and `20260819151527*` — excluded from grep result, confirming no intervening view redefine between `19151536` and `20004338`
+- Contract tests `supabase/tests/wildbrain_landing_contracts.sql` §I, `sega_landing_contracts.sql` §F referenced for behavioural proof location
+
+Conditions covered in order asked:
+
+1. Verification cost — checked every statement in the new DO block 866-1075, grepped block for `from plm.` and `from api.source_capture_inventory` — none found. Worst case per statement: check 1 `pg_class join pg_namespace like 'wildbrain\_%'` — catalog scan of `pg_class` (~1-2k rows), bounded by table count (~hundreds) not captured rows; check 2 same plus `pg_attribute` for 11 tables × ~20 cols = ~220 rows; check 3 same catalog scan for `like '%wildbrain%'` (~0-11 matches) plus in-memory `left()` loop; check 4 one `pg_get_viewdef` — one `pg_rewrite` row + deparse of ~15-25 KB view text, then `position()` string searches in memory — dominated by deparse, milliseconds, grows with number of CASE arms (objects) not row volume; check 5 `information_schema.columns` for one relation — 10 rows, catalog only; check 6 three `has_table_privilege` ACL lookups on one `pg_class` row; check 7 `to_regprocedure` plus two `pg_proc` reads of one `prosrc` (~20-30 KB) with `LIKE` in memory. No statement's cost grows with `plm.wildbrain_*` or other licensor capture row counts. Old file's verification (lines 836-870 of `19151536`) was contrasted — it did `select count(*) from api.source_capture_inventory where ...` eleven times, each executing `query_to_xml('select count(*) from plm.%I')` for every plm table before the outer filter (VOLATILE, not pushed), confirmed as production-timeout root cause.
+
+2. Byte-faithful carry-forward — lineage claim verified: view creators are exactly `14030000 -> 14233342 -> 19015333 (Sega) -> 19125713 (Peanuts) -> 19151536`; nothing after `19151536` redefines it before the new file — grep for `source_capture_inventory` across `supabase/migrations` returns only those five plus the new file; `19212002` explicitly states not extended and contains no `create or replace view`. View body diff `19151536:113-341` vs `20004338:93-321` and function body `19151536:358-811` vs `20004338:338-792` are identical in classifier order (`dcp/opa,pmt,nbcu,wb,erp,sega,peanuts,wildbrain,else other`), latest CTE ids, `counted/latest_count/count_basis/latest_complete_status/count_note` WildBrain arms mirroring NBCU/Sega/Peanuts, comment, and `revoke/grant`, plus full `finalize_wildbrain_capture` body including `v_pairs`, dual sweep loops, duplicate/orphan/G2/G3/H/I gates and ordering — all byte-identical except header comments, so Sega/Peanuts arms cannot be silently reverted.
+
+3. Double application — verification asserts only installed catalogue end state, never that this migration caused it. All checks read `pg_class/pg_attribute/pg_get_viewdef/information_schema/has_table_privilege/pg_proc` after the `create or replace` has executed in the same transaction. Preview (already has `19151536`) reinstalls identical objects and checks same end state; production (blank ledger for `19151536`) installs first time and checks same end state. No check reads `supabase_migrations`, row counts, or ledger; no `v_tables=11` literal, no `count(*) from api.source_capture_inventory`; no assertion fails on one database but not the other. Applying twice leaves identical passing result as author claimed.
+
+4. Caught defect fix — old check 3 scanned only `like 'wildbrain\_%'` so a misnamed `wb_wildbrain_asset` never entered the scan and was unfalsifiable. New lines 930-950 scan `where relname like '%wildbrain%' and not like 'wildbrain\_%'` then flag (a) `left(v_rel,length(prefix))=prefix` for each prior prefix `dcp_,opa_,pmt_,nbcu_,wb_,erp_,sega_,peanuts_` and (b) `v_rel <> 'wildbrain'` for fallback to `other`. Fix is real: `wb_wildbrain_asset` now enters loop and triggers (a); `zz_wildbrain_asset` triggers (b); renaming or shadowing mutations now fail. Narrow exemption for exact name `wildbrain` noted but not material — no such table exists among the 11 `wildbrain_*` tables.
+
+5. Mutation evidence spot-check — most damaging five verified against code: dropping `capture_id` from `plm.wildbrain_era` → check 2 `not exists capture_id` count >0 → fail; view without `wildbrain` arm → check 4a `position('''wildbrain\_%'''` )=0 → fail; view without `peanuts` arm → check 4b `position('''peanuts'''` )=0 → fail; function dropped → `to_regprocedure is null` raises immediately; sweep predicate removed → `prosrc like '%not (v_obs ? e.key)%'` count 0 → fail. Remaining eight (all wildbrain tables dropped, note missing, arm moved above prior arms, extra column, anon grant, range-refusal removed) align with checks 1,4a,4c,5,6,7 respectively — by-name range check `'% (v_val #>> ''{}'')::numeric > v_max%'` would also fail if removed.
+
+6. House rules — all pass: no raw `::bigint` from `->>`/`#>>` text, all numeric values go `::numeric` first and `> v_max` range-refused by name before `::bigint` (lines 452-469, 536-542, 555-561); JSON `null` handled by `jsonb_typeof <> 'number'` after `?` test (entity loops and sweep loops separate `elsif` branches, string `"12"` yields `string` type and is rejected, never cast); no `exception when others`; no `raise warning` as sole failure — verification ends with single `raise exception 'verify FAILED...'` (line 1070), finalize warnings persist rejection row and intentionally do not abort; no pinned row-count literals — check 1 asserts `v_tables>0` and reports `v_tables` in notice, not `=11`; column list literal in check 5 is contract, not row count.
+
+7. Outside objects — file writes only `view api.source_capture_inventory` (plus `comment` and `revoke/grant` at 323-334) and `function plm.finalize_wildbrain_capture(uuid,jsonb,jsonb)` (338-792 plus comment 770-792). No `create table/column/constraint/index/policy` and no `insert/update/delete` of data rows; DO block is read-only catalogue verification.
+
+Known and accepted not re-raised: production-cost property unguarded (issue #1285) noted in file header — no guard missed; `DO` block has no `pg_proc` row and self-timing guard would be theatre on empty DB, as author explains.
+
+Findings: No findings. The PR correctly supersedes `19151536` with a catalogue-only verification, faithfully carries forward both bodies without reverting Sega/Peanuts, is safe for both preview reinstall and production first-install, and leaves no house-rule or scope violations.
+
+VERDICT: APPROVE

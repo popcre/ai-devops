@@ -1,0 +1,45 @@
+Session: shared-db orchestrator claude-20260819-092000Z, marker issue u2giants/shared-db#1229, 2026-08-19. Machine edge-dev.
+
+KIMI K3 (ai-kimi wrapper) - 11 TERMINAL FAILURES vs 5 SUCCESSES IN ONE SESSION.
+Grok 4.6 over the same session: 19 successes, 1 failure. The model is not the problem; the wrapper is. Kimi's five completed reviews were among the best of the day (rotation sequence 212 proved a guard fails CLOSED on a missing table by tracing SQLSTATE 42P01 out of the trigger; sequence 210 audited all 36 raise-warning statements in a contract file individually).
+
+THREE DISTINCT FAILURE MODES.
+
+MODE 1 - FINDINGS DISCARDED ABOVE THE VERDICT HEADING (1 occurrence, the most dangerous).
+Rotation sequence 202, PR #1233, head 6ff9272effb7f3f24a67a262cee0c666f33b6af8. Kimi completed successfully and returned a correct "VERDICT: REVISE" naming ONE blocking finding. The finding itself never reached the caller. All that survived was the summary sentence: "Finding 1 is a live, reachable path that re-creates the exact wedge defect the issue enumerates, through the very validation this PR adds, with zero test coverage." No file, no line, no predicate, no input value.
+
+Reproduced THREE times:
+  (a) ai-kimi new NAME --prompt-file BRIEF                      -> findings above the verdict cut
+  (b) ai-kimi ask NAME "Restate ALL of your findings in full"   -> same
+  (c) ai-kimi ask NAME with an explicit instruction to put every finding INSIDE one final block headed "## Findings" -> STILL cut, because Kimi then wrote "## Verdict" BELOW "## Findings" and the extractor cut at the later heading.
+
+Diagnosis: the extractor keeps everything from the LAST heading onward and discards the rest. Nothing else persists it. ai-kimi show and ai-kimi transcript both failed from the review sandbox ("no session NAME for caller claude in this repository", plus "jq: error: Could not open file : Invalid argument"). The session JSON at ~/.local/state/ai-devops/kimi/sessions/4c4d070b02d7/claude--seq202-1219-nbcu-count-gate.json contains ONLY metadata - twelve keys (kimi_session_id, repo, repo_remote, review_workspace, review_kind, name, caller, mode, model, created, updated, turns) - with no message content at all.
+
+WORKAROUND FOUND AND PROVEN, used in every brief afterwards: instruct the model that only the FINAL block is captured and that it must put findings AND the verdict together in ONE block beginning with the heading "## Verdict", writing no heading after it. Naming "## Verdict" specifically is what makes it work. This is a workaround, not a fix: it depends on the model obeying a formatting rule, and any reviewer that writes a heading after its findings still loses them.
+
+MODE 2 - USAGE-LIMIT EXHAUSTION (1 occurrence).
+Rotation sequence 214, PR #1255, head c8db4389f1579462c79ab0b729117e789e35cecd, approximately 16:14 local. Job state file recorded terminal_reason "usage-limit", exit_code 1, after provider_seconds 468 and last_output_size 203640 bytes. Nothing usable returned; a grep for "VERDICT:" over ~/.local/state/ai-devops/kimi/jobs/287d26eaa827/claude--seq214-1249-licensing-read/stream.jsonl found no verdict line despite 203 KB of output having been produced.
+
+MODE 3 - SIX-SECOND EXIT 127 DEATHS (9 occurrences, all after Mode 2).
+Rotation sequences 216, 218, 220, 222, 224, 228, 230, 232, 234. Every one returned a job state file of roughly 165-430 bytes with exit_code 127 and timing.provider_seconds of 6 (pre_provider_seconds 3-4, snapshot_seconds 1-2, packet_seconds 1-2). No stdout, no findings, no verdict, no error message explaining the cause.
+
+Exit 127 is "command not found". Six seconds is far too fast for any real work. This looks like the wrapper failing to locate or launch its provider binary, or failing a credential/auth step, and surfacing it as a bare non-zero exit rather than a named error. THE CALLER CANNOT DISTINGUISH THIS FROM A MODEL THAT REVIEWED AND CRASHED. All nine came AFTER the usage-limit hit at 16:14, which suggests the wrapper never recovered from that state.
+
+FOURTH, SEPARATE DEFECT AFFECTING BOTH WRAPPERS - FALSE ".ai/reviews is not git-ignored" WARNING.
+Both ai-kimi and ai-grok-review printed, on essentially every run:
+  warning: not writing a review file: '.ai/reviews' is not git-ignored in PATH (it would be committable). Add '.ai/reviews/' to .gitignore.
+The warning is FALSE. Line 36 of C:/repos/shared-db/.gitignore is literally ".ai/reviews/", and git status --porcelain after a run is empty. The check is wrong, not the repository. Consequence: the wrapper silently skips writing the review file, which would otherwise have been the LAST SURVIVING COPY of the findings lost in Mode 1. The ignore test should use git check-ignore rather than whatever string comparison it currently performs.
+
+GROK 4.6 - SEPARATE, LOWER SEVERITY, BUT RECURRING.
+ai-grok-review repeatedly omitted the "## Verdict" section entirely, so the harness printed only its progress narration and discarded both findings and verdict. Observed on rotation sequences 205, 223, 225, 227, 229, 231, 233 and 235 - eight times. Recoverable in one extra turn by asking the same named session to re-emit everything inside a single "## Verdict" block, and the recovered content was always complete and high quality. Cost is one extra round trip each time, plus the risk that a caller reads the narration as the review.
+
+Also on Grok: rotation sequence 209 was CANCELLED at its 20-turn limit with no verdict at all (stopReason: cancelled) on a large four-migration promotion brief, after 2,706,144 tokens and $0.41. Splitting the brief into two smaller reviews and passing --max-turns 40 fixed it completely. That one is arguably a brief-sizing error on the caller's part rather than a wrapper defect, and is recorded for completeness.
+
+A THIRD, ENVIRONMENTAL LIMITATION worth recording: gh issue view is BLOCKED inside the ai-grok-review sandbox. On sequence 229 the reviewer could not read issue #1216 and said so plainly, working instead from the brief and the migration header. It reached a correct verdict, but any review whose brief assumes the reviewer can fetch the issue will silently lose that context.
+
+OPERATIONAL IMPACT.
+Each Kimi failure cost a full rotation cycle: detect no verdict, call --replace-failed-reviewer with a recognised failure code, rebuild the review sandbox, re-run on the replacement. Eleven times. With GLM and Qwen already paused by the owner, the rotation was effectively down to Grok alone for most of the session, which removes the independent second opinion the rotation exists to provide - and that mattered: on TWO occasions a second reviewer overturned the first reviewer's conclusion, and on one of those the second reviewer refuted an author's design rationale using the author's own test fixture.
+
+Note also that --replace-failed-reviewer REFUSES when the pull request is a merged one ("REFUSED: review replacement requires the exact open PR head"), which is the case for every production-promotion review. So a Kimi assignment landing on a promotion cannot be repaired through the tool at all and has to be worked around by hand.
+
+OWNER DECISION TAKEN 2026-08-19: stop using Kimi, restore GLM, and begin trialling Gemini and Muse, reporting back on whether they are helpful.

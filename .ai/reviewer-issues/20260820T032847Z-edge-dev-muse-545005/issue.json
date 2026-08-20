@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260820T032847Z-edge-dev-muse-545005",
+  "created_at": "2026-08-20T03:28:47Z",
+  "provider": "muse",
+  "summary": "Returns zero bytes and no session listing while a complete 10 KB APPROVE review sits on disk",
+  "reported_command": "ai-muse new promo-sesame-212002 --prompt-file /tmp/brief-sesame.md",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T032847Z-edge-dev-muse-545005",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "main",
+    "head": "e4ea9010cbec77357cbe3d5e6f2f386d51ec1809",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "C:/Users/ahazan/.local/state/ai-devops/muse/sessions/58ec65d13983/codex--promo-sesame-r2.json",
+    "redacted_metadata_copy": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T032847Z-edge-dev-muse-545005/reviewer-metadata.redacted.json",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": null
+  }
+}

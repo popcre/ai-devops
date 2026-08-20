@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260819T205606Z-edge-dev-ai-kimi-359392",
+  "created_at": "2026-08-19T20:56:06Z",
+  "provider": "ai-kimi",
+  "summary": "ai-kimi exits 0 on six terminal failures and once truncated a full review to its verdict line",
+  "reported_command": "AI_KIMI_CALLER=claude ai-kimi new pr1213-seq196 --prompt-file /tmp/rev1213g.md --assert-head f46870d6816de8c935ad0d2ddc381f2a30f2958b --base e9fb39e30ba4287fdc0d330c25f39ebec2a9f1bf --review-kind diff",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260819T205606Z-edge-dev-ai-kimi-359392",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "claude/ep001-filter-ruling",
+    "head": "0d59a324632e56afd4eb98ed35ba20fdf560ed02",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": "error.redacted.txt"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260820T004602Z-edge-dev-kimi-k3-385556",
+  "created_at": "2026-08-20T00:46:02Z",
+  "provider": "kimi-k3",
+  "summary": "ai-kimi: 11 terminal failures in one session - findings discarded above the verdict heading, usage-limit exhaustion, and repeated 6s exit-127 deaths",
+  "reported_command": "AI_KIMI_CALLER=claude ai-kimi new seq228-1216-sesame --prompt-file C:/Users/ahazan/AppData/Local/Temp/claude/review-1274.md",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260820T004602Z-edge-dev-kimi-k3-385556",
+  "repository": {
+    "root": "C:/repos/shared-db",
+    "remote": "https://github.com/u2giants/shared-db.git",
+    "branch": "main",
+    "head": "41b8f74b5fb7179e3d314b3b121eaba88b30d161",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": null
+  }
+}

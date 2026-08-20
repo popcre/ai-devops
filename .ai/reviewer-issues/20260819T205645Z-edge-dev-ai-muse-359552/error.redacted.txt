@@ -1,0 +1,33 @@
+# Muse protected review
+
+| field | value |
+|---|---|
+| model | meta-model-api/muse-spark-1.2-contributor |
+| review copy | /C/Users/ahazan/.local/state/ai-devops/review-sandboxes/muse-40bb3774d9ac |
+| source repository | C:/repos/shared-db-review/pr1176-3fc2677 |
+
+## Request
+
+You are an INDEPENDENT reviewer for u2giants/shared-db, PR #1176, issue #1171, head 3fc2677834998e44ac2d9c8e2f579fd4b895d523. Review adversarially; you did not write this.
+
+The change is supabase/migrations/20260819011639_popdam_bulk_operation_revision_lease.sql plus its pgTAP contracts in supabase/tests/popdam_bulk_operation_revision_lease_contracts.sql and a baseline update in supabase/ci-bootstrap/010_pre_adoption_baseline.sql. Use 'git diff main...HEAD' for the exact change. This database is shared by about nine production applications and this migration is one step from a production write.
+
+It guards PopDAM bulk-operation state with an optimistic-concurrency revision and a submission lease. Five prior review rounds each closed a real defect: guards computed from attacker-writable values; a lease_proof two-call attack; anyone being able to rewrite ambiguous_prior_owner and ambiguous_reason (the forensic record of who held the lease when money may have been spent); and a fix that made the holder's own re-claim rotate its receipt, breaking a documented invariant. Do not rubber-stamp any of that: assume nothing was checked.
+
+Priorities: (1) correctness and security of the concurrency control - enumerate concrete interleavings, can two callers both believe they hold the lease, can a stale revision win, is every guard computed from values the caller cannot influence; (2) privilege and RLS - SECURITY DEFINER, search_path, who may execute, can a low-privilege caller escalate or reach another tenant's operation; (3) forensic integrity - can any caller rewrite or erase prior ownership, receipts, or ambiguity; (4) idempotence and failure atomicity under retry, reconnect and crash mid-transaction; (5) backward compatibility - existing callers use a three-argument form, and anything that breaks must break LOUDLY not silently; (6) migration safety on a live shared database - locking, ordering, non-idempotent or irreversible steps; (7) whether the contract tests actually prove what they claim - a test passing through an inverted or unasserted condition is itself a defect, so check the assertions and not the test names.
+
+For each finding give severity (Critical/High/Medium/Low), exact file and line, what is wrong, a concrete exploit or failure scenario with inputs, and what would make it right. End with a final line that is exactly 'VERDICT: APPROVE' or 'VERDICT: REVISE'. Return REVISE if there is any Critical or High. If you find nothing, say so plainly and state what you checked and how, so the coverage is auditable.
+
+## Result
+
+[0m
+> muse-review · muse-spark-1.2-contributor
+[0m
+[0m→ [0mRead supabase/migrations/20260819011639_popdam_bulk_operation_revision_lease.sql
+Reviewing your bulk-operation lease migration adversarially — probing concurrency, privileges, forensic integrity, and test coverage before a shared-DB production write.
+[0m→ [0mRead supabase/migrations/20260819011639_popdam_bulk_operation_revision_lease.sql[90m [offset=918][0m
+Initial lease and revision scan flagged potential attack surfaces — now digging into the contract tests and baseline to verify the fixes hold.
+[0m→ [0mRead supabase/tests/popdam_bulk_operation_revision_lease_contracts.sql
+Mapping the full change set — now auditing the proof contracts and legacy compatibility shims.
+[0m→ [0mRead supabase/tests/popdam_bulk_operation_revision_lease_contracts.sql[90m [offset=1142][0m
+Core migration review is solid — now pressure-testing the legacy path and retry semantics.

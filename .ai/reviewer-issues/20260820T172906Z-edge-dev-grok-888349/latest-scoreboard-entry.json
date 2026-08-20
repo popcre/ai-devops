@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-08-18T14:05:58Z",
+  "provider": "grok",
+  "repo": "C:/repos/ai-devops-worktrees/reviewer-repair-livecheck-25e3096",
+  "base": "2224112acf7fcdbc745b135dc397610464587804",
+  "head": "25e309647c760bc6b24a149f81533639b3958b50",
+  "packet_sha256": "7c0a9cde862ff1f4acf5fedb22304631466b3109e7d4489e0853a6c672df254e",
+  "elapsed_seconds": 257,
+  "turns": 1,
+  "tokens": 816358,
+  "cost_usd": 0.12710152,
+  "verdict": "APPROVE",
+  "failure_class": null,
+  "stale": true
+}

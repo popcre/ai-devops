@@ -1,0 +1,82 @@
+ai-muse produced NOTHING for ~17 minutes on a narrow review, created NO session state file,
+and never appeared in `ai-muse list`, while its opencode processes stayed alive throughout.
+I stopped it and switched reviewers because a live money leak was waiting on the result.
+
+EXACT SYMPTOM AND TIMELINE
+Invoked at roughly 14:24Z on 2026-08-20 in orchestrator session claude-20260820-113000Z
+(shared-db marker #1308), reviewing PR #1320 at head
+0de021861ec9d9310f9b45b58d53f5f2654f1f28 from a fresh clone of the GitHub remote.
+
+  - stdout capture file: 0 bytes for the entire run. Not a warning, not a partial line.
+  - `ai-muse list`, run from the same directory: the session `review-1320-supersede` never
+    appeared, at any point.
+  - No session JSON was ever created. `ls /c/Users/ahazan/.local/state/ai-devops/muse/
+    sessions/*/` showed only two unrelated sessions, and `find ... -name "*.json" -newermt
+    "-25 minutes"` returned NOTHING -- so no state file was written or touched during the
+    entire run.
+  - No report appeared under `.ai/reviews/` in the review clone at any point.
+  - `ps -W | grep -c opencode` returned 2 throughout, so processes existed and did not die.
+  - Checked repeatedly over ~17 minutes (roughly 14:24Z to 14:41Z). No change in any signal.
+
+WHY I DID NOT DECLARE IT DEAD IMMEDIATELY, AND WHY THAT MATTERS
+Earlier the same day I aborted a LIVE and CORRECT glm-5.3 review because its status field
+had not moved, destroying ~25 minutes of good work (shared-db #1298, fixed in ai-devops
+12b0f0e). So on this occasion I deliberately did not trust a single signal. I checked four
+independent ones -- stdout, `ai-muse list`, the on-disk session state directory with an
+mtime filter, and the process table -- before concluding. Three of the four said "nothing
+has happened at all"; only the process table said anything was alive, and a live process
+that has written no state in 17 minutes is not evidence of progress.
+
+I am recording this as a probable wrapper/session-creation failure rather than as a
+provider failure, because NO SESSION WAS EVER CREATED. Muse itself may never have been
+reached. If the harness can tell the difference after the fact, that distinction is the
+useful one.
+
+CONTRAST WITH THE SAME WRAPPER SUCCEEDING EARLIER TODAY
+About 90 minutes earlier, `ai-muse new decide-1314-backfill` in a different fresh clone
+produced a complete, high-quality recommendation. Two differences worth checking:
+  1. That successful session registered under caller `codex`
+     (`sessions/f510ec0041c4/codex--decide-1314-backfill.json`) even though it was started
+     by a Claude session -- the caller-mismatch defect already recorded in
+     20260820T140623Z-edge-dev-muse-719800.
+  2. That run ALSO first refused with "refusing Muse reports: .ai/reviews contains tracked
+     files", and only succeeded after I ran `git rm -r --cached .ai/reviews` in the
+     throwaway clone. I applied the same workaround before this run, so the refusal path is
+     not the explanation here -- but the two runs differ only in the prompt and the clone,
+     which is worth knowing when diagnosing.
+
+BRIEF SHAPE, in case size or content is a factor
+The prompt file was a narrow, structured review brief of roughly 60 lines with six numbered
+questions and an explicit output contract. Substantially shorter than the #1314 brief that
+succeeded. The repository clone was a full shared-db checkout at a specific commit with
+`.ai/reviews` untracked and removed.
+
+IMPACT
+This is the second reviewer-blocking incident with ai-muse today and it removes a third of
+the active rotation (grok-4.6, glm-5.3, muse-spark-1.2-contributor after shared-db #1290).
+On this occasion it delayed a promotion that the owner had flagged as blocking a leaking
+OpenAI API token costing real money. I switched to glm-5.3 rather than wait further.
+
+SUGGESTED DIAGNOSIS DIRECTIONS
+1. Determine whether the session-creation step can hang or fail without writing state and
+   without emitting anything on stdout or stderr. If it can, that is the bug: a wrapper
+   should never be able to occupy a reviewer slot while leaving no trace it started.
+2. Emit a line at session creation -- before any provider call -- naming the session and its
+   state file path. That single line distinguishes "never started" from "started and
+   working" and would have answered this in one second instead of seventeen minutes.
+3. Consider a startup watchdog: if no state file exists N seconds after invocation, fail
+   loudly with a distinct code rather than continuing silently.
+4. Check whether the earlier `.ai/reviews` refusal path can leave residue that affects a
+   later run in a different clone (shared lock, shared state directory, stale caller
+   mapping), given both of today's runs touched that path.
+
+RELATED
+- 20260820T140623Z-edge-dev-muse-719800 -- today's other ai-muse blocker (tracked-files
+  refusal) plus the caller-mismatch observation.
+- 20260820T032847Z-edge-dev-muse-545005 -- ai-muse returning zero bytes while a complete
+  review sat on disk. NOTE THE DIFFERENCE: in that case a report existed and was
+  recoverable. Here nothing exists anywhere, which is why this is filed separately.
+- shared-db #1304 -- the tracked-files contradiction in the repository.
+- shared-db #1290 / cef67d6 -- Muse added to the active rotation.
+- ai-devops docs/reviewer-result-delivery-defects-2026-08-20.md -- the three-reviewer
+  result-delivery analysis from earlier today.

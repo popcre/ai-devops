@@ -1,0 +1,78 @@
+ai-muse REFUSED TO START AT ALL in a fresh clone of u2giants/shared-db. Not a bad review,
+not a missing verdict -- it never ran a turn.
+
+EXACT SYMPTOM
+Single line to stdout, non-zero outcome, no session created, no report written:
+
+  ai-muse: error: refusing Muse reports: .ai/reviews contains tracked files.
+
+CONTEXT AND WHAT I WAS DOING
+Orchestrator session claude-20260820-113000Z on shared-db (marker #1308). Albert asked for
+Muse's independent recommendation on shared-db issue #1314 -- whether to backfill 133
+art-piece records into the live dflow schema or write them off. I cloned the repository
+fresh from the GitHub remote (deliberately, not a local-path clone -- see shared-db #1296,
+where a local-path clone caused a wrapper to build its evidence packet from the wrong
+repository and a reviewer was fed the wrong commit), then invoked ai-muse in that clone.
+
+WHY THE REFUSAL FIRES, AND WHY IT FIRES ON EVERY CLONE
+u2giants/shared-db has 25 TRACKED files under .ai/reviews/ (`git ls-files .ai/reviews/ |
+wc -l` -> 25), committed before `.ai/reviews/` was added to .gitignore. .gitignore does not
+untrack what is already tracked, so the files come down with every checkout. ai-muse's
+guard tests for tracked files in that directory and refuses.
+
+Consequence: ai-muse cannot run in ANY fresh clone of this repository. It is not
+intermittent and it is not environment-specific -- it will reproduce for every caller on
+every machine until the repository's tracked files are resolved.
+
+IS THE GUARD WRONG? NO -- AND THIS IS THE IMPORTANT PART
+I do not think ai-muse is misbehaving. Refusing to write a review into a directory that
+contains tracked files is defensible: a tracked review file really could be committed by
+accident, which is the exact harm the guard exists to prevent. The repository is what is
+inconsistent -- its .gitignore declares .ai/reviews/ disposable session scratch while 25
+files in it are tracked, several of them added by the commit that introduced the production
+review-evidence gate.
+
+So this is filed as a reviewer issue because it makes a rotation reviewer unusable, NOT as
+a request to weaken the guard. Please do not "fix" this by removing the tracked-file check.
+
+NOTE THE WRAPPERS DISAGREE WITH EACH OTHER ABOUT THIS DIRECTORY
+- ai-grok-review checks only that the directory is GIT-IGNORED. Its check passes in this
+  repository today (it probes a file path inside the directory, which resolves the rule
+  correctly even when the directory does not exist).
+- ai-muse additionally refuses if the directory contains TRACKED FILES -- stricter.
+Both positions are reasonable in isolation. The divergence itself is worth a decision:
+callers currently cannot predict from one wrapper's success whether another will run.
+
+WORKAROUND USED, and why it is not a fix
+In the throwaway clone only, never pushed:
+  git rm -r --cached .ai/reviews && rm -rf .ai/reviews
+Muse then ran normally and produced a complete, high-quality recommendation with a proper
+coverage statement that correctly flagged the five facts it could not verify itself. So the
+provider and the wrapper are both healthy once past this guard.
+This workaround is not acceptable as standing practice: it requires every future session to
+know the trick, and to know the deletion must never be committed.
+
+TIMING
+Refusal was immediate -- well under a second, before any provider call. No retry was needed
+or made; the second invocation after the workaround succeeded first time.
+
+SUGGESTED FIXES, in preference order
+1. Repository side (shared-db #1304): decide whether those 25 files are durable evidence or
+   scratch, and make .gitignore and the tracked state agree. This removes the cause.
+2. Wrapper side, optional and secondary: make the refusal message actionable by naming the
+   offending paths and the exact remedy, e.g. "N tracked files under .ai/reviews (first:
+   <path>); this repository tracks review artifacts while .gitignore declares them scratch.
+   Resolve in the repository, or run Muse from a checkout without them." The current message
+   states the rule but not which files or what to do, so the caller has to go and find out.
+3. Consider aligning ai-grok-review and ai-muse on one shared rule for this directory, so a
+   caller can predict from one wrapper whether another will run.
+
+RELATED
+- shared-db #1304 -- the tracked-vs-ignored contradiction; I had filed it as latent, and
+  this occurrence is the evidence that it is now a live blocker.
+- shared-db #1296 -- evidence-packet isolation, and the git check-ignore false negative that
+  affected ai-grok-review.
+- ai-devops docs/reviewer-result-delivery-defects-2026-08-20.md -- the three-reviewer
+  result-delivery analysis from earlier the same day.
+- shared-db #1290 / cef67d6 -- Muse is one of only THREE reviewers in the active rotation,
+  so this removes a third of review capacity in this repository.

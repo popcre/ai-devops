@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-08-18T14:05:59Z",
+  "provider": "glm",
+  "repo": "C:/repos/ai-devops-worktrees/reviewer-repair-livecheck-c175770",
+  "base": "d082c8d0ee0e773311eaff0eee12c15489729aa2",
+  "head": "c1757702afe70daa3ef50170dcb6b3c12441bbd5",
+  "packet_sha256": "13601c11f0f39d1a032e2a99041831ed9f51bf77eb25672543ceb8fe3e2c2944",
+  "elapsed_seconds": 197,
+  "turns": null,
+  "tokens": null,
+  "cost_usd": null,
+  "verdict": "APPROVE",
+  "failure_class": null,
+  "stale": false
+}

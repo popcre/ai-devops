@@ -1,0 +1,50 @@
+SIX terminal failures of ai-kimi in one orchestrator session on u2giants/shared-db, 2026-08-19 between roughly 01:30Z and 08:00Z. Every one exited 0 to the caller. Reviews in this repository are a merge gate, so a failure that reads as a clean pass is the worst possible failure direction.
+
+THREE DISTINCT FAILURE MODES OBSERVED
+
+(1) EXIT 0 WITH NO VERDICT, provider ran and produced nothing usable.
+Sequence 186, PR #1214 head a299234b11cd28c1ad59d52b9351ad5935cf9e1a. 637 seconds of provider time. stream.jsonl was 185543 bytes with 14 lines and exactly ONE assistant message: "I've read all four patch parts in full. Let me verify a couple of environmental facts before finalizing findings." Then nothing. No findings, no VERDICT line. Console output was telemetry only (pre_provider_seconds / provider_seconds / model_steps). job.json phase was "failed". Wrapper exited 0.
+
+(2) EXIT 0 ON A HARD QUOTA STOP.
+Sequence 188, PR #1215 head 47f879371aa3784593a8f947464a840ab12e8b99. Job died after SIX seconds of provider time with an empty stream. job.json recorded exactly:
+  "phase": "failed",
+  "last_output_size": 0,
+  "terminal_reason": "usage-limit",
+  "exit_code": 1,
+The wrapper still exited 0. Sequence 192 (PR #1213 head 3486f69906120f5ca9c7093a5511b09e46297d7d) was identical: terminal_reason usage-limit, exit_code 1 internally, exit 0 to the caller.
+
+THIS IS THE KEY FINDING: the wrapper ALREADY KNOWS the run failed and ALREADY KNOWS why. It writes phase, terminal_reason and exit_code:1 into its own job.json and then discards all three on the way out. The minimum fix is to propagate the job's own exit_code and terminal_reason to the caller's exit status and stderr. That alone would have caught all six of tonight's failures automatically instead of requiring an operator to notice an empty output file.
+
+(3) EXECUTION-CONTEXT-DENIED / TIMEOUT AFTER SUBSTANTIAL WORK.
+Sequences 194, 196 and 198, all on PR #1213 (heads d94a637b0ad54c0b6b70a0751cb7793972cc700c, f46870d6816de8c935ad0d2ddc381f2a30f2958b, 11d2a3be7bea0f1df27e945e1280a6147bae2629). Each ran for minutes with large streams (194 reached 219874 bytes, 198 reached 339497 bytes) and then ended with job.json phase "failed", terminal_reason "execution-context-denied", exit_code 124. Wrapper exited 0 each time.
+
+Each of these three died mid-analysis and left a partial lead as its last assistant message. Those leads were real and two of them became the NEXT round's confirmed findings:
+  - seq 194's last words: "pending confirmation of several details in the full source files, particularly how blob_sha treats a file absent at the merge commit, which decides whether the honest-old-recovery path works at all." That became a High finding in the following review.
+  - seq 196's last words: "whether any test drives the original run's artifact-name commit (original_commit) foreign to the PR, the helper hardcodes it into pr_commits." That became a Medium in the following review.
+  - seq 198's last words: "Two exemption-reason claims to spot-check, then I'm ready to conclude."
+So the partial work has genuine value and is currently only recoverable by hand from stream.jsonl. Consider emitting whatever the model produced before the context was denied.
+
+A FOURTH, SEPARATE DEFECT: EVIDENCE LOSS ON A *SUCCESSFUL* RUN.
+Sequence 180, PR #1176 head 3fc2677834998e44ac2d9c8e2f579fd4b895d523, completed a full substantive review: five Low findings, a hand-traced coverage statement, concrete interleavings, exact line citations. The wrapper printed ONLY:
+  ## Verdict
+  VERDICT: APPROVE
+The entire review body existed only in stream.jsonl and had to be reconstructed with a node script reading assistant messages. A caller quoting the wrapper's stdout as the audit record would have posted a bare two-line APPROVE as the review evidence for a change one step from a production write. Sequence 200 behaved correctly and printed in full, so this is intermittent.
+
+TIMING AND SEQUENCE
+Sequences 180 and 184 completed normally earlier in the session. 186 failed (mode 1). 188 and 192 failed (mode 2, quota). 194, 196, 198 failed (mode 3). 200 completed normally and printed correctly. So quota exhaustion around 02:45Z did not fully explain the later failures, which were context-denied rather than quota.
+
+OPERATIONAL WORKAROUND ALREADY IN USE
+Every failure was recorded through the repository's own governed path, scripts/manage-migration-author-lanes.mjs --replace-failed-reviewer, with --failure-code insufficient_quota for mode 2 and wrapper_terminal_failure for modes 1 and 3, then a different provider ran the review. No failure was silently retried until something approved. The repository-side tracking issue is u2giants/shared-db#1220.
+
+SEPARATE SMALLER BUG, SAME WRAPPER
+ai-kimi new --base main fails inside the review sandbox with: "ai-review-packet: error: the requested base 'main' does not exist in /C/Users/ahazan/.local/state/ai-devops/review-sandboxes/kimi-claude-<name>-<hash>. Nothing was compared; fix the ref rather than letting a review proceed against an unknown base." The source clone DID contain a local main branch. Workaround is to pass the base as an explicit 40-char SHA, which works. Worth checking whether the sandbox build drops branch refs.
+
+ALSO POSSIBLY CAUSED BY THE CALLER, DISCLOSED FOR HONESTY
+Before sequence 194 died with execution-context-denied, the caller ran "ai-kimi ask <session>" against the still-running job in an attempt to collect a partial result. That ask returned "no session ... for caller 'claude' in this repository". Causation is unproven and sequences 196 and 198 died the same way without any such interference, but it should not be ruled out.
+
+EXPECTED BEHAVIOUR
+1. A review run that produces no VERDICT line must exit non-zero with a message naming what was missing. Silence must never read as approval.
+2. Propagate job.json's own exit_code and terminal_reason to the caller.
+3. Emit the full review body, not the tail; when the provider stream carries a complete review and the printed output does not, persist the reconstructed body to the report file and print its path.
+4. Emit whatever partial analysis exists when a run is terminated, since those leads proved valuable.
+5. Audit ai-glm, ai-qwen, ai-gemini and ai-muse for the same wrapper-contract problem. ai-muse exhibited failure mode 1 in this same session on PR #1176.

@@ -1,0 +1,52 @@
+ai-muse was tested for the first time at Albert's explicit request ("test out 'review with Muse' the next time you need to review something") during an orchestrator session on u2giants/shared-db, 2026-08-19 at approximately 01:18Z. It produced NO findings and NO verdict, and exited 0.
+
+WHAT WAS ASKED FOR
+A full adversarial code review of PR #1215... correction: PR #1176, u2giants/shared-db, at exact head 3fc2677834998e44ac2d9c8e2f579fd4b895d523. The change was a 1328-line PostgreSQL migration adding optimistic-concurrency revision and submission-lease guards to PopDAM bulk-operation state, plus a 2060-line pgTAP contract test file and a CI baseline update. The prompt asked for severity-rated findings with file and line references, concrete exploit scenarios, and a final line of exactly "VERDICT: APPROVE" or "VERDICT: REVISE".
+
+WHAT HAPPENED
+ai-muse doctor passed all four checks beforehand:
+  PASS  pinned OpenCode is installed
+  PASS  Muse configuration is installed
+  PASS  Muse review profile removes write and shell access
+  PASS  1Password command is available
+
+The review command exited 0 and printed a single report path:
+  C:/repos/shared-db-review/pr1176-3fc2677/.ai/reviews/muse-review-20260819T011818Z.md
+
+That report file is 33 lines total. It contains the standard header table (model meta-model-api/muse-spark-1.2-contributor, the review copy path under /C/Users/ahazan/.local/state/ai-devops/review-sandboxes/muse-40bb3774d9ac, and the source repository), then the full request text that was passed in, then a "## Result" section whose ENTIRE content is four tool calls and four narration lines:
+
+  > muse-review . muse-spark-1.2-contributor
+  -> Read supabase/migrations/20260819011639_popdam_bulk_operation_revision_lease.sql
+  "Reviewing your bulk-operation lease migration adversarially - probing concurrency, privileges, forensic integrity, and test coverage before a shared-DB production write."
+  -> Read supabase/migrations/20260819011639_popdam_bulk_operation_revision_lease.sql [offset=918]
+  "Initial lease and revision scan flagged potential attack surfaces - now digging into the contract tests and baseline to verify the fixes hold."
+  -> Read supabase/tests/popdam_bulk_operation_revision_lease_contracts.sql
+  "Mapping the full change set - now auditing the proof contracts and legacy compatibility shims."
+  -> Read supabase/tests/popdam_bulk_operation_revision_lease_contracts.sql [offset=1142]
+  "Core migration review is solid - now pressure-testing the legacy path and retry semantics."
+
+Then the file ends. No findings. No severities. No VERDICT line. The narration explicitly says it "flagged potential attack surfaces" and that the core review is "solid", so the model clearly formed opinions that were never emitted.
+
+WHY THIS MATTERS MORE THAN A NORMAL BUG
+In this repository a review is a merge gate on a database shared by about nine production applications. The failure is silent and biased toward looking approved: clean exit code, a report file that exists, no findings. An operator or agent under time pressure who checks the exit code, or who greps for the absence of "REVISE", would read this as a clean pass and merge an unreviewed change to the last safety layer before production.
+
+For scale: the same PR was reviewed by two other providers that same night and they returned five substantive findings between them, including a two-call attack on lease_proof and the fact that anyone could rewrite the forensic record of who held a lease when money may have been spent. Muse's silence was not because there was nothing to say.
+
+WHAT WAS DONE ABOUT IT
+Per the ask-muse skill's own instruction ("Treat a failed command as a failed Muse review. Do not substitute GLM, another model, or your own opinion without stating that Muse did not complete"), this was recorded as a FAILED review, not an approval, and no other model's opinion was substituted for it. The review was re-run properly through the repository's rotation with a different provider.
+
+NOT RETRIED
+Muse was not re-run, so it is unknown whether this reproduces or was a one-off. Worth reproducing before diagnosing.
+
+A CO-OCCURRING WRAPPER WARNING, PROBABLY UNRELATED TO THE SILENCE
+The same run also printed:
+  ai-grok-review: warning: not writing a review file: '.ai/reviews' is not git-ignored in C:/repos/shared-db-review/pr1176-3fc2677 (it would be committable). Add '.ai/reviews/' to .gitignore.
+(that warning text came from the ai-grok-review run on the same clone, not from ai-muse; noted only because the two ran against the same directory and the .ai/reviews path is shared). In u2giants/shared-db the .ai/reviews directory is COMMITTED, not ignored, which trips at least one other wrapper's precondition on this repo.
+
+SAME FAILURE MODE SEEN IN ANOTHER PROVIDER THE SAME SESSION
+ai-kimi exhibited an identical "exit 0, no verdict, work clearly done" failure on PR #1214 sequence 186 (637 seconds of provider time, one assistant message, no findings). That is filed separately. The shared symptom suggests this is a wrapper-contract problem across the ai-devops review launchers rather than a Muse-specific model problem.
+
+EXPECTED BEHAVIOUR
+1. A review run that produces no VERDICT line must exit NON-ZERO with a message naming what was missing. Silence must never be indistinguishable from approval.
+2. If the provider emitted narration and tool calls but no final answer, say so explicitly in the report file rather than writing a report that merely stops.
+3. Audit the other ai-devops review launchers (ai-glm, ai-qwen, ai-gemini, ai-kimi) for the same contract gap.

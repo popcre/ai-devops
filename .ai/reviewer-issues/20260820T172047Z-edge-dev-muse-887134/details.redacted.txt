@@ -1,0 +1,76 @@
+THIRD blocking ai-muse failure in one day, and the SECOND with this exact signature. Filed
+because a reproduced failure is a different fact from a one-off, and because Muse is now
+demonstrably not usable in this repository.
+
+EXACT SYMPTOM, checked across four independent signals
+Invoked ~16:59Z on 2026-08-20 in orchestrator session claude-20260820-155000Z (shared-db
+marker #1333), reviewing PR #1335 at head e5459be24f98e8e4bacb0958a19a953c0c2d2064, from a
+fresh clone of the GitHub remote with .ai/reviews untracked and removed. After ~17 minutes:
+
+  1. stdout capture file: 0 bytes. Nothing at all.
+  2. `ai-muse list` in the same directory: session `review-1335-restore` NOT present.
+  3. `find /c/Users/ahazan/.local/state/ai-devops/muse/sessions -name "*.json"
+     -newermt "-25 minutes"` -> NOTHING. No session state file written or touched.
+  4. No report under `.ai/reviews/` in the review clone.
+  Process table: `ps -W | grep -c opencode` returned 1 (it had been 2 during the earlier
+  failure), so a process existed but had produced nothing.
+
+I stopped it and switched reviewers.
+
+WHY FOUR SIGNALS AND NOT ONE
+Earlier the same day I aborted a LIVE and CORRECT glm-5.3 review because a single status
+field had not moved, destroying ~25 minutes of good work (shared-db #1298; fixed in
+ai-devops 12b0f0e). Since then I check four independent signals before declaring any
+reviewer dead. Three of the four said nothing had happened at all. A live process that has
+written no state in 17 minutes is not evidence of progress.
+
+IDENTICAL TO THE EARLIER FAILURE TODAY
+This is the same signature as 20260820T144201Z-edge-dev-muse-733415: no stdout, no session
+listing, NO SESSION STATE FILE EVER CREATED, processes alive. Same machine, same repository,
+different clone, different prompt, ~2.5 hours apart. It reproduces.
+
+Because no session state is ever written, the Muse provider may never be reached at all.
+That distinction -- never started versus started and stuck -- is the one the harness should
+be able to answer and currently cannot.
+
+WHAT VARIED AND WHAT DID NOT, in case it narrows the cause
+  - Both failures: fresh GitHub-remote clone of u2giants/shared-db, .ai/reviews removed
+    locally first (the workaround for 20260820T140623Z-edge-dev-muse-719800), narrow
+    structured brief of roughly 40-60 lines with numbered questions and an output contract.
+  - The one Muse SUCCESS today (decide-1314-backfill, ~13:55Z) used a longer, more
+    discursive brief and registered under caller `codex` rather than the invoking caller --
+    the caller-mismatch already recorded in 20260820T140623Z-edge-dev-muse-719800.
+  - So: two failures and one success, all on the same machine and repository within ~3 hours.
+    The successful one differed in brief shape and in which caller its session registered
+    under. Neither difference is obviously causal; both are worth checking.
+
+IMPACT, concretely
+Muse is one of THREE reviewers in the active rotation (shared-db #1290). Today it blocked
+two separate promotions and consumed roughly 35 minutes of wall-clock across two stalls,
+one of them while a migration the owner had flagged as blocking a leaking OpenAI token was
+waiting. In both cases I replaced it through the governed
+`--replace-failed-reviewer` path, which required explicit confirmation that no verdict and
+no artifact existed.
+
+RECOMMENDATION, and it is stronger than last time
+1. Emit ONE line at session creation, before any provider call, naming the session and its
+   state-file path. This is the single highest-value change: it distinguishes "never
+   started" from "started and working" in one second instead of seventeen minutes, and it
+   would have resolved all three of today's incidents immediately.
+2. Add a startup watchdog: if no state file exists N seconds after invocation, fail loudly
+   with a distinct code rather than continuing silently.
+3. Investigate whether session creation can hang or fail without writing state AND without
+   emitting anything on stdout or stderr. If it can, that is the defect.
+4. Until 1-3 land, consider whether Muse should remain in the active rotation. It has failed
+   3 times in 3 attempts at review work today (one refusal to start, two silent stalls) and
+   succeeded once on a non-review recommendation task. That is a rotation slot that mostly
+   costs time.
+
+RELATED
+- 20260820T144201Z-edge-dev-muse-733415 -- the identical stall earlier today.
+- 20260820T140623Z-edge-dev-muse-719800 -- the tracked-files refusal, plus caller mismatch.
+- 20260820T032847Z-edge-dev-muse-545005 -- zero stdout WITH a recoverable saved report; note
+  that failure mode at least left an artifact, and these two leave nothing.
+- ai-devops#51 -- the umbrella issue opened for the first two.
+- shared-db #1304 -- the tracked-files contradiction behind the refusal mode.
+- shared-db #1290 / cef67d6 -- Muse added to the active rotation.

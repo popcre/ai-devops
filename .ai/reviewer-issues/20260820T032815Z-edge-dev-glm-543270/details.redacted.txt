@@ -1,0 +1,74 @@
+ROOT CAUSE CONFIRMED IN THE HARNESS, not in the caller's reading of the value.
+
+WHAT HAPPENED
+During shared-db orchestrator session claude-20260820-030000Z I started
+`ai-glm new promo-20260819151510` to review a production promotion. For the whole
+run, `ai-glm show <name>` reported:
+
+  "last_activity_at": "2026-08-20T02:39:44Z"   <- identical to created_at, never moved
+  "status": "active"
+
+and the wrapper had printed nothing beyond its two startup lines. Every observable
+signal matched the documented "session that never produced a turn" failure -- the
+exact signature that caused GLM's false pause on 2026-08-18. On that evidence I
+aborted the session.
+
+`ai-glm transcript <name>` showed it had been working the entire time, and working
+well: it had read all 364 lines of the migration, confirmed the read predicate was
+character-identical to the Sega one at 20260819015333:1298, confirmed no later
+migration alters those objects (the forward-only check), and had independently
+spotted an evidence-packet defect nobody had asked it about. It had not yet reached
+a verdict, so all of that work was unusable and was thrown away.
+
+THE CODE PATH -- this is a harness defect, and it is structural
+In bin/ai-glm, `cmd_new` and `cmd_ask` both do, in this exact order:
+
+  send_prompt "$sid" "$pf"                       # send the brief
+  msg="$(await_turn "$sid" "$name" review ...)"  # BLOCKS for the whole model turn
+  ...
+  write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)" ... '.last_activity_at=$ts | ...')"
+
+`last_activity_at` is written ONLY AFTER `await_turn` returns. During the entire
+turn -- which is precisely when a caller queries it to ask "is this alive?" -- it
+still holds the value written at session creation (line ~921) or at the end of the
+previous turn (line ~973).
+
+So the field CANNOT move while the model is working. It is a "last completed turn"
+timestamp carrying a name that promises liveness. A long, healthy turn is therefore
+indistinguishable from a session that never started, using the wrapper's own status
+command.
+
+MY SHARE OF IT, stated plainly
+I treated a field with no documented semantics as authoritative and took a
+destructive action (abort) on it without first reading the transcript, which the
+standing evidence rule already required. The harness invited the misreading; I still
+should not have acted on it. Both halves are real. The harness half is the fixable one.
+
+WHY THIS IS PROBABLY THE ORIGIN OF GLM'S BAD REPUTATION
+This is very likely a large part of why glm-5.3 was paused for two days as an
+unreliable provider. It compounds the known evidence asymmetry: pausing a reviewer
+requires no evidence about WHY it failed, and the cheapest evidence available is a
+status field that structurally lies about long work. Note that in this session
+`ai-glm doctor` PASSED every check and the session still looked dead -- so this is a
+distinct fault from the 2026-08-18 stopped-opencode-server case.
+
+SUGGESTED FIX (ranked)
+1. Update `last_activity_at` on every streamed event from the provider, not only
+   after the turn completes. Then "seconds since last activity" becomes a real
+   liveness signal and the field matches its name.
+2. If (1) is impractical because `await_turn` blocks: have `show` derive and report
+   the transcript's own last-event time and event count, so `show` alone answers
+   "is it working?" without the caller needing to know to run `transcript`.
+3. Cheapest interim, and worth doing regardless: rename the field to
+   `last_turn_completed_at`, and have `show` print an explicit line such as
+   "liveness: run `ai-glm transcript <name>`; this field does not move during a turn."
+   A correctly named field would have prevented this entirely.
+
+VERIFICATION FOR WHOEVER FIXES IT
+Start a review with a deliberately long brief. While it is still running, in another
+shell run `ai-glm show <name>` twice, 60 seconds apart. The fix works when the two
+calls report different liveness values. Today they report identical ones.
+
+RELATED
+shared-db #1298 (this issue), #1296 (evidence-packet isolation and the Grok
+git-ignore false negative), ai-devops docs/reviewer-wrapper-gitignore-false-warning.md.

@@ -1,0 +1,17 @@
+{
+  "grok_session_id": "01a01f9f-ee02-78e0-94ea-9a6f914276ea",
+  "repo": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/rv1320",
+  "repo_remote": "https://github.com/u2giants/shared-db",
+  "name": "review-1320-supersede",
+  "caller": "claude",
+  "frozen_prefix": "grok-4.6|--permission-mode default --allow Read --allow Grep --deny Edit --deny Bash --disable-web-search --no-memory ",
+  "created": "2026-08-20T14:47:10Z",
+  "updated": "2026-08-20T14:47:10Z",
+  "base": "b3832570773e82e00b552dcef513e20bf348d80c",
+  "head": "0de021861ec9d9310f9b45b58d53f5f2654f1f28",
+  "packet_sha256": "3e5e353b878abea33b0710890d98ab5d53dbc074bcc0a7fe8288d60fe1059f6e",
+  "turns": 1,
+  "total_tokens": 1836119,
+  "total_cost_usd": 0.2379881,
+  "last_stop_reason": "end_turn"
+}

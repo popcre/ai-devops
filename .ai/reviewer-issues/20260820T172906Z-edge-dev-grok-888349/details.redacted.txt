@@ -1,0 +1,75 @@
+grok-4.6 has produced no verdict and no incremental output on a NARROW review, well beyond
+its normal completion time, while holding its per-repository in-flight lock and showing a
+live owning process. Recorded at the owner's request while the run is still in flight.
+
+STATE AT TIME OF RECORDING (2026-08-20T17:28Z)
+  - stdout capture file: 261 bytes -- ONLY the two startup lines, unchanged since launch:
+        Grok review 'review-1335-restore' starting (model grok-4.6, max-turns 20, read-only)
+        evidence packet: .../rv1335/.ai-review (base 9fb240cfb92c, head e5459be24f98,
+        sha 0a54287ab616)
+  - per-repo lock HELD: /c/Users/ahazan/.local/state/ai-devops/grok/locks/repo--2a0037e019da.lock.d
+    containing label `new:review-1335-restore` and owner pid 887262.
+  - `ai-grok-review list` does NOT yet show the session -- consistent with Grok registering a
+    session only on completion, so this is expected mid-run and is NOT itself a fault.
+  - No review file written yet under the clone's .ai/reviews/.
+
+WHY THIS IS BEING RECORDED RATHER THAN JUST WAITED OUT
+The packet line proves the wrapper started correctly and resolved the intended commit
+(e5459be24f98 = PR #1335 head), so this is NOT the "never started" class. But the run has
+produced no observable progress since that line, and the brief is deliberately SMALL: one
+migration file of roughly 100 lines, eight numbered questions, an explicit output contract.
+Comparable Grok reviews in this same session completed in 15-25 minutes with far larger
+subjects -- including a 1,328-line migration compared statement-by-statement against another
+1,328-line file (session `promo-1320-supersede`, 16 turns, 1.84M tokens) and two rounds on
+`review-1295-roster`. A ~100-line single-file review taking materially longer than those is
+the anomaly worth capturing.
+
+WHAT THE OBSERVABILITY GAP IS
+`ai-grok-review` emits its startup lines and then NOTHING until the turn completes. There is
+no per-turn progress line, no turn counter, and no way from outside to distinguish:
+  (a) a long but healthy turn,
+  (b) a turn looping toward its max-turns ceiling,
+  (c) a hung provider call.
+The lock file and pid prove a process is alive; they prove nothing about progress. This is
+the same class of problem as ai-glm's `last_activity_at` (shared-db #1298, fixed in
+ai-devops 12b0f0e by stamping liveness from the assistant message) and ai-muse's silent
+stalls (records 20260820T144201Z-edge-dev-muse-733415 and 20260820T172047Z-edge-dev-muse-887134).
+Grok is the LAST of the three active reviewers without a mid-turn progress signal.
+
+CONTEXT: THIS RUN IS A REPLACEMENT
+grok-4.6 is reviewing PR #1335 only because muse-spark-1.2-contributor was assigned first
+(durable sequence 240), stalled for 17 minutes with no session state at all, and was replaced
+through the governed `--replace-failed-reviewer` path to sequence 241. So this is the second
+reviewer on the same pull request, and the wall-clock cost of the two attempts is additive.
+
+WHAT THE REVIEW IS OF, for reproduction
+supabase/migrations/20260820165926_restore_art_piece_1024_1025_to_batman.sql -- two data
+statements against dflow.art_piece: a CTE-driven UPDATE moving two rows onto ids from
+nextval while rewriting an art_number suffix, and an INSERT copying two rows from a frozen
+schema into the vacated ids. Brief asks eight numbered questions including CTE MATERIALIZED
+semantics, regex safety, FK ON UPDATE behaviour, and whether the remedy is right at all.
+Read-only profile; Bash denied.
+
+NO CONCLUSION IS BEING DRAWN YET
+I am explicitly NOT declaring this a failure. Earlier today I aborted a live and correct
+glm-5.3 review on a single misleading signal and destroyed ~25 minutes of good work
+(shared-db #1298). The lock and pid here are genuine liveness evidence that Muse never
+produced, so the run is being left to finish. This record exists so that (a) the duration is
+captured while accurate rather than reconstructed later, and (b) the observability gap is
+filed whether or not this particular run ends well.
+
+SUGGESTED FIXES
+1. Emit a progress line per completed turn -- turn number, elapsed, and cumulative tokens.
+   Grok already reports `turns:` and `tokens:` in its final summary, so the data exists; it
+   is only withheld until the end. This is the single highest-value change and mirrors what
+   was just done for ai-glm.
+2. Emit a line when the max-turns ceiling is approached, so a looping run is visible before
+   it is cancelled rather than after.
+3. Consider surfacing the lock's owner pid and start time in `ai-grok-review list`, so a
+   caller can compute elapsed time without inspecting the lock directory by hand.
+
+FOLLOW-UP EXPECTED
+If this run ends with a normal verdict, the correct outcome is to keep this record as an
+observability request and note the final duration and turn count against it. If it ends
+without a verdict or is cancelled at max-turns, this record should be updated with that
+outcome rather than a new one opened.

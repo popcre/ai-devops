@@ -1,0 +1,2 @@
+/c/Users/ahazan/.local/state/ai-devops/muse/server-11818.log	001-server-11818.log	51 bytes
+/c/Users/ahazan/.local/state/ai-devops/muse/server.log	002-server.log	51 bytes

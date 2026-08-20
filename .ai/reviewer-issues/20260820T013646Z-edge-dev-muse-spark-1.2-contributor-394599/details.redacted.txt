@@ -1,0 +1,81 @@
+Session: shared-db orchestrator claude-20260819-092000Z, marker issue u2giants/shared-db#1229, 2026-08-20T01:21Z. Machine edge-dev.
+
+SUMMARY OF THE DEFECT
+ai-muse reported "Muse stopped without a usable verdict. This is not a review result." The model had in fact produced a COMPLETE, high-quality review ENDING IN THE EXACT REQUIRED LINE "VERDICT: APPROVE". The verdict was present, correctly formatted, and the last line of the model's output. The wrapper's verdict detection failed to see it and classified a finished review as an incomplete one.
+
+This is a VERDICT-EXTRACTION defect in the wrapper, not a model failure. Muse Spark 1.2 Contributor performed well.
+
+EXACT COMMAND
+  cd /c/Users/ahazan/.local/state/ai-devops/review-sandboxes/review-1282-da6140248209
+  ai-muse review . < C:/Users/ahazan/AppData/Local/Temp/claude/review-1282.md
+
+The brief was supplied on standard input, per `ai-muse review [repository] [request]` reading the request from stdin when none is given as an argument.
+
+WHAT THE WRAPPER PRINTED (total stdout 231 bytes, exit code 0)
+  ai-muse: error: Muse stopped without a usable verdict. Incomplete output saved: C:/Users/ahazan/.local/state/ai-devops/review-sandboxes/review-1282-da6140248209/.ai/reviews/muse-incomplete-20260820T012150Z.md
+
+Note the wrapper exits 0 while printing "error:". A caller checking the exit status alone would treat this as success; a caller reading stdout would treat a complete review as a failure. Both readings are wrong in different directions.
+
+WHAT THE SAVED FILE ACTUALLY CONTAINS (9,843 bytes)
+Header written by the wrapper:
+  # Muse incomplete review
+  Muse did not produce the required final verdict. This is not a review result.
+  ## Raw output
+
+That header is false. The raw output below it is a complete review. Its final two lines are:
+
+  Findings: No findings. The PR correctly supersedes `19151536` with a catalogue-only verification, faithfully carries forward both bodies without reverting Sega/Peanuts, is safe for both preview reinstall and production first-install, and leaves no house-rule or scope violations.
+
+  VERDICT: APPROVE
+
+The review itself is substantive and was independently corroborated. It answered all seven numbered questions in the brief, with file and line citations, including:
+  - a per-mutation spot-check naming the exact catalogue predicate that would fail for each of the 13 mutations, e.g. view without the peanuts arm -> check 4b `position('peanuts')` = 0 -> fail; function dropped -> `to_regprocedure is null` raises immediately; sweep predicate removed -> `prosrc like '%not (v_obs ? e.key)%'` count 0 -> fail;
+  - a house-rule audit with line numbers: no raw text-to-int cast, all numeric values go `::numeric` first and are `> v_max` range-refused by name before `::bigint` (lines 452-469, 536-542, 555-561); JSON null handled by `jsonb_typeof <> 'number'` after the `?` test; a numeric-looking string yields type `string` and is rejected, never cast; no bare `exception when others`; no `raise warning` as sole failure signal; no pinned row-count literals (check 1 asserts `v_tables > 0` rather than `= 11`);
+  - a scope check confirming the file writes only `view api.source_capture_inventory` (plus comment and revoke/grant at 323-334) and `function plm.finalize_wildbrain_capture(uuid,jsonb,jsonb)` (338-792 plus comment 770-792), with no table/column/constraint/index/policy and no data-row DML;
+  - correct handling of the "known and accepted, do not re-raise" section of the brief: it acknowledged the unguarded production-cost property (issue #1285) without re-reporting it, and confirmed it saw no guard the author had missed.
+
+A second, independent reviewer (GLM 5.3, `zai-coding-plan/glm-5.3`) reviewed the same head from the same self-contained copy on the same brief and also returned APPROVE with no findings. So Muse's discarded verdict was correct as well as complete.
+
+THE TRACE SHOWS ORDERLY WORK, NOT A CRASH
+The saved raw output begins with the model reading the repository and reasoning aloud:
+  > muse-review . muse-spark-1.2-contributor
+  Read .            Reviewing PR #1282 claim by claim - starting with verification cost and lineage.
+  Read .git/HEAD
+  Read .git/refs/heads/issue-1280-wildbrain-verify-cost
+  Read .ai-review-sandbox
+  Glob "supabase/migrations/2026082*.sql"  1 match
+  Read .git/logs/HEAD
+  Read supabase/migrations/20260820004338_wildbrain_inventory_and_finalize_sweep_catalogue_verified.sql
+  Head confirmed - now auditing the migration source and view lineage.
+  Read supabase/migrations/20260820004338_...sql [offset=897]
+  Core migration reviewed - now verifying the remaining checks and historical lineage.
+  Initial review complete - now tracing the full view history to confirm the lineage.
+  Glob "supabase/migrations/*.sql"  100 matches
+  Grep "source_capture_inventory"  100 matches
+  Read supabase/migrations/20260819151536_...
+There is no truncation, no error, and no abrupt stop. The session ran to completion and ended on the verdict line.
+
+LIKELY CAUSE, FOR WHOEVER FIXES IT
+The raw output is full of ANSI escape sequences (ESC[0m, ESC[90m and similar) interleaved with the text, because the wrapper captures the interactive renderer's output rather than a plain-text stream. A verdict matcher applied to that stream will fail on any line where an escape sequence lands inside or adjacent to the matched token, or where the matcher anchors to start/end of line. The verdict line survived into the file intact, so the text is there; the detection over it is what failed.
+
+Two things to check:
+  1. Whether the matcher strips ANSI sequences before searching. A `sed 's/\x1b\[[0-9;]*m//g'` pass over the captured output made the verdict trivially greppable for me.
+  2. Whether the matcher only inspects a bounded tail or a particular block, rather than the whole output. The verdict is the final line here, so a whole-output search would have found it.
+
+SEVERITY AND IMPACT
+Lower than the equivalent ai-kimi defect recorded earlier today (issue id 20260820T004602Z-edge-dev-kimi-k3-385556), and for one specific reason worth preserving: ai-muse SAVES THE OUTPUT. The review was fully recoverable from the saved file. ai-kimi discarded its findings with no artifact at all and no recoverable copy anywhere - not in `ai-kimi show`, not in `ai-kimi transcript`, and not in the session JSON, which holds metadata only.
+
+So the correct characterisation is: ai-muse mislabels a good review as a failure and makes the caller go and read the file; ai-kimi destroys the review. Muse's behaviour is a nuisance with a workaround; Kimi's is data loss.
+
+Nevertheless the impact is real and should not be dismissed:
+  - Under this repository's governing rule (AGENTS.md, added 2026-08-19: "an orchestrator must never accept a bare verdict as review evidence" and "silence is never approval"), a wrapper reporting no usable verdict must be treated as `verdict=none` and the reviewer replaced through the governed rotation. Followed literally, a correct APPROVE would be discarded and a full replacement cycle spent - which is exactly the cost that eleven ai-kimi failures inflicted today.
+  - A caller who trusts the wrapper's own summary line, rather than opening the saved artifact, loses a complete review.
+  - The file is named `muse-incomplete-<timestamp>.md` and headed "This is not a review result", so a future reader has every reason to skip it. The most misleading part of this defect is not the missed detection, it is the confident false header written over correct work.
+
+ALSO OBSERVED IN THE SAME TRIAL, worth recording alongside
+  - ai-gemini (gemini-3.7-flash-high, agy=1.1.15) was trialled on the identical brief and self-contained copy. Attempt 1 returned only `ai-gemini: error: no usable Gemini verdict` (65 bytes). Attempt 2 returned `PASS session=trial-1282-gemini-b report=` - a bare pass with an EMPTY report (251 bytes). `ai-gemini doctor` passes. Two attempts, no usable review. That one IS a bare verdict of the kind the repository rule names explicitly.
+  - The FALSE ".ai/reviews is not git-ignored" warning appears in ai-gemini too. It is now confirmed in FOUR wrappers: ai-kimi, ai-grok-review, ai-gemini and (by its own save path) ai-muse's neighbourhood. Line 36 of C:/repos/shared-db/.gitignore is literally ".ai/reviews/" and `git status --porcelain` after a run is empty. The check is wrong, not the repository, and its consequence is that a wrapper silently skips writing the very artifact that makes a lost review recoverable. It should use `git check-ignore`.
+  - ai-glm was restored to service in the same trial after being paused on 2026-08-18 for three consecutive `provider_unavailable` failures. The cause was mundane and not the model: its local opencode server was not running, so `ai-glm doctor` reported `FAIL health endpoint answers`. Running `opencode-glm-launch` fixed it; every doctor check then passed and GLM produced a full 10 KB review with a coverage statement, saved to `.ai/reviews/glm-trial-1282-glm-20260820T012255Z.md`. Worth recording because "provider unavailable" was read as unreliability when it was a stopped local service.
+
+OWNER CONTEXT
+Owner decision 2026-08-19: stop using Kimi, restore GLM, begin trialling Gemini and Muse and report whether they are helpful. This trial is that evidence. On it, GLM and Muse are both usable and Gemini is not.

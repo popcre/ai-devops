@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "id": "20260819T205645Z-edge-dev-ai-muse-359552",
+  "created_at": "2026-08-19T20:56:45Z",
+  "provider": "ai-muse",
+  "summary": "ai-muse read the whole change, narrated four review steps, then exited 0 with no findings and no verdict",
+  "reported_command": "ai-muse review \"$PWD\" \"You are an INDEPENDENT reviewer for u2giants/shared-db, PR #1176, issue #1171, head 3fc2677834998e44ac2d9c8e2f579fd4b895d523 ... End with a final line that is exactly 'VERDICT: APPROVE' or 'VERDICT: REVISE'.\"",
+  "toolkit_root": "C:/repos/ai-devops",
+  "report_directory": "C:/repos/ai-devops/.ai/reviewer-issues/20260819T205645Z-edge-dev-ai-muse-359552",
+  "repository": {
+    "root": "C:/repos/shared-db-review/pr1176-3fc2677",
+    "remote": "C:/repos/shared-db",
+    "branch": "",
+    "head": "3fc2677834998e44ac2d9c8e2f579fd4b895d523",
+    "working_tree_changes": ""
+  },
+  "machine": {
+    "hostname": "edge-dev",
+    "os": "MINGW64_NT-10.0-26200 edge-dev 3.6.9-b4195d69.x86_64 2026-06-06 17:49 UTC x86_64 Msys",
+    "shell": "C:/Program Files/Git/usr/bin/bash.exe"
+  },
+  "evidence": {
+    "latest_metadata_source": "",
+    "redacted_metadata_copy": "",
+    "recent_review_artifacts": "recent-review-artifacts.txt",
+    "complete_matching_review_reports": "review-reports/",
+    "recent_provider_logs": "provider-logs/",
+    "latest_scoreboard_entry": "latest-scoreboard-entry.json",
+    "session_details": "details.redacted.txt",
+    "complete_error_log": "error.redacted.txt"
+  }
+}

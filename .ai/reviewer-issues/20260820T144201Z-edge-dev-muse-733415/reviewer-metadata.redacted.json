@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "status": "active",
+  "name": "decide-1314-backfill",
+  "caller": "codex",
+  "repository_root": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/rv1314",
+  "repository_id": "f510ec0041c4",
+  "session_id": "ses_fe08cdf44ffeFsaAFJYFgey6fa",
+  "review_dir": "C:/Users/ahazan/.local/state/ai-devops/review-sandboxes/muse-codex-decide-1314-backfill-b3719bbe108f",
+  "sandbox_tag": "muse-codex-decide-1314-backfill",
+  "model": "meta-model-api/muse-spark-1.2-contributor",
+  "head": "217438f560b253690f48aabdb4b8110e1e2cdfd1",
+  "packet_sha256": "1ff77e5190cb876605c11bdc5c34134f7e748a1a6b41fdb270620e8d1592cdaf",
+  "last_report": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db/a87711f0-3d28-4365-aee3-ad0ad2ba6211/scratchpad/rv1314/.ai/reviews/muse-decide-1314-backfill-20260820T135514Z-716179-30257.md",
+  "created_at": "2026-08-20T13:55:14Z",
+  "updated_at": "2026-08-20T13:55:14Z"
+}
