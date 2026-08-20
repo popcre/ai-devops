@@ -321,3 +321,16 @@ as a timeout instead of blamed on the sandbox).
 
 **Prevention:** `tests/test-ai-devops-doctor-codex-probe.sh` asserts the stdin
 redirect is present and drives all four verdicts through a fake `codex`.
+
+**Follow-up the same day — the account matters.** The remaining warning on hetz
+was itself misleading: doctor runs as `root` (that is who runs `install.sh`), but
+Codex on hetz is logged in as the `ai` service account
+(`/home/ai/.codex/auth.json`); `root` has no `auth.json` at all. A real
+`codex exec` as `ai` writes the probe file end to end. So "Codex is broken on
+hetz" was never true — it was never logged in *for root*. The warning now names
+the account that does have credentials and tells you to re-check there.
+
+Unrelated noise seen during that login: `codex_apps` (Codex's built-in hosted
+apps MCP) reported `token_revoked` from the pre-login token, and the other MCP
+servers reported "startup interrupted" because startup was cut short. Both
+cleared once the fresh login was in place.

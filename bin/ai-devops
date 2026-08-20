@@ -71,6 +71,19 @@ check_file() {
 # sandbox helper. Invoking the real package bin
 # (~/.codex/packages/standalone/current/bin) worked. A liveness check that only
 # asks --version cannot see this class of failure; only a real write can.
+# List other accounts on this box that DO have Codex credentials. Doctor is often
+# run as root (install.sh) while Codex is actually used by a service account.
+codex_auth_other_user() {
+  local me f u out=""
+  me="$(id -un 2>/dev/null)"
+  for f in /root/.codex/auth.json /home/*/.codex/auth.json; do
+    [ -f "$f" ] || continue
+    u="$(stat -c '%U' "$f" 2>/dev/null || echo "")"
+    [ -n "$u" ] && [ "$u" != "$me" ] && out="${out:+$out }$u"
+  done
+  echo "$out"
+}
+
 # Classify the outcome of the sandbox probe. Pure function so tests can drive
 # every branch without a real codex. $1 = exit status, $2 = combined output,
 # $3 = 1 if the probe file was written. Echoes one verdict word.
@@ -108,8 +121,16 @@ check_codex_sandbox() {
       # Not-logged-in is a WARNING by this tool's policy, never a REQUIRED failure.
       # `codex login status` can still say "Logged in" while the refresh token is
       # revoked, so trust the real run, not the status command.
-      c_warn "codex is NOT authenticated — every 'codex exec' will fail (sandbox untested)"
-      printf '        fix: run  codex login  as this user (%s), then re-run: ai-devops doctor
+      c_warn "codex is NOT authenticated for $(id -un 2>/dev/null) — 'codex exec' will fail for THIS user (sandbox untested)"
+      other="$(codex_auth_other_user)"
+      if [ -n "$other" ]; then
+        # The 2026-08-20 hetz case: root ran doctor, but Codex is logged in as
+        # 'ai'. Without this line the warning reads as "Codex is broken on this
+        # box" when Codex is in fact fine for the account that actually uses it.
+        printf '        note: codex IS logged in as: %s — re-check there:  su - %s -c '"'"'ai-devops doctor'"'"'
+' "$other" "${other%% *}"
+      fi
+      printf '        fix: run  codex login  as %s, then re-run: ai-devops doctor
 ' "$(id -un 2>/dev/null)" ;;
     sandbox)
       c_fail "codex sandbox CANNOT write — 'codex exec' will silently change nothing"

@@ -35,6 +35,16 @@ grep -q 'NOT authenticated' "$tmp/out"
 grep -q 'codex login' "$tmp/out"
 [ "$FAILED" = "0" ]
 
+# 2b. The warning must name the account that IS logged in, when one exists.
+#     (hetz 2026-08-20: doctor ran as root; Codex was logged in as 'ai'.)
+grep -q 'codex_auth_other_user' "$repo/bin/ai-devops"
+grep -qF '/home/*/.codex/auth.json' "$repo/bin/ai-devops"
+codex_auth_other_user() { echo ai; }
+set +e; check_codex_sandbox >"$tmp/out2" 2>&1; set -e
+grep -q 'codex IS logged in as: ai' "$tmp/out2"
+grep -q "su - ai -c 'ai-devops doctor'" "$tmp/out2"
+[ "$FAILED" = "0" ]
+
 # 3. A genuinely broken sandbox must still FAIL.
 cat >"$fake/codex" <<'FAKE'
 #!/usr/bin/env bash
