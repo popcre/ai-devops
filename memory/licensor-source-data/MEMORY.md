@@ -2,3 +2,4 @@
 - [Disney OPA approvals plan](opa-approvals-plan-location.md) — where it lives; read its STATUS table, do not re-plan it.
 - [Paramount and Sesame are not in the database](paramount-and-sesame-not-in-database.md) — CORRECTED: Paramount IS loaded in plm.pmt_*; Sesame has tables but no rows.
 - [Orchestrator is structure only](orchestrator-is-structure-only.md) — never queue data deletes/backfills; the working session does them itself.
+- [Licensor repo uses main](licensor-repo-uses-main.md) — commit straight to main here; the Warner skill's branch-and-PR line is overridden.
