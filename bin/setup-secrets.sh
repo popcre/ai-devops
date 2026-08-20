@@ -25,10 +25,11 @@
 #   5. Installs two MCP launchers (~/.config/ai-devops/mcp-launch.sh and
 #      mcp-remote-launch.sh) so each MCP server resolves its own secrets at
 #      launch, independent of whether the session sourced .bashrc.
-#   6. Merges the FULL MCP server set into ~/.claude/settings.json — the same set
+#   6. Merges the FULL MCP server set into ~/.claude.json — the same set
 #      bin/setup-machine.ps1 installs on Windows, so every machine and both
-#      surfaces agree. Only our own mcpServers keys are touched; permissions,
-#      hooks, plugins and any other server are preserved untouched.
+#      surfaces agree. Only our own mcpServers keys are touched; every other
+#      key in that file is preserved untouched. It also strips any stale copy
+#      of those same keys out of ~/.claude/settings.json (see step 4c).
 #   7. Comments out any legacy RAW `export OP_SERVICE_ACCOUNT_TOKEN=ops_...`
 #      lines and old per-app op-read blocks left in ~/.bashrc (with a backup),
 #      so the only copy of the token on disk is the locked-down file.
@@ -54,7 +55,15 @@ LAUNCH_SH="$CFG_DIR/mcp-launch.sh"
 REMOTE_SH="$CFG_DIR/mcp-remote-launch.sh"
 EXAMPLE="$REPO_ROOT/config/mcp.env.example"
 VAULT="vibe_coding"
-CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+# Claude Code reads local MCP servers from ~/.claude.json ONLY. An "mcpServers"
+# block in ~/.claude/settings.json is silently IGNORED — it parses fine, it shows
+# up when you cat the file, and `claude mcp list` never sees a single one of them.
+# This script wrote to settings.json until 2026-08-20, which meant every machine
+# it "set up" in fact had ZERO MCP servers registered while looking correct on
+# disk. Do not point this back at settings.json.
+CLAUDE_MCP_CONFIG="${CLAUDE_MCP_CONFIG:-${CLAUDE_SETTINGS:-$HOME/.claude.json}}"
+# Stale mcpServers keys from the pre-2026-08-20 layout get removed from here.
+CLAUDE_SETTINGS_LEGACY="$HOME/.claude/settings.json"
 # The one shared POP production project. Overridable, never hard-coded downstream.
 SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF:-qsllyeztdwjgirsysgai}"
 
@@ -299,10 +308,15 @@ fi
 # nothing else. This installs the same set bin/setup-machine.ps1 installs on
 # Windows, so every machine and both surfaces agree.
 #
-# Only the mcpServers keys we define are touched. permissions, hooks,
-# enabledPlugins, extraKnownMarketplaces and any server we do not define are
-# preserved exactly as found.
-info "MCP servers -> $CLAUDE_SETTINGS"
+# Only the mcpServers keys we define are touched. Every other key in the file
+# and any server we do not define are preserved exactly as found.
+info "MCP servers -> $CLAUDE_MCP_CONFIG"
+# The canonical server NAMES are defined once, inside the python block below.
+# Step 4d needs them to strip the stale copy out of settings.json, so that block
+# writes them here rather than the list being retyped (and drifting) in bash.
+OWNED_NAMES=""
+OWNED_FILE="$(mktemp)"
+trap 'rm -f "$OWNED_FILE"' EXIT
 CODEX_BIN="$(command -v codex 2>/dev/null || true)"
 [ -n "$CODEX_BIN" ] || warn "codex not found on PATH — codex-cli MCP will be skipped."
 
@@ -310,14 +324,14 @@ CODEX_BIN="$(command -v codex 2>/dev/null || true)"
 # PATH: a stub/shim (e.g. Windows' Store alias) satisfies `command -v` and then
 # fails on use. Presence != capability.
 if ! python3 -c 'import json' >/dev/null 2>&1; then
-  warn "python3 present but not usable — cannot safely edit $CLAUDE_SETTINGS; skipped."
+  warn "python3 present but not usable — cannot safely edit $CLAUDE_MCP_CONFIG; skipped."
   warn "  No MCP servers were wired. Install a working python3 and re-run."
 elif [ "$DRY_RUN" -eq 1 ]; then
-  echo "[dry-run] would merge the MCP server set into $CLAUDE_SETTINGS"
+  echo "[dry-run] would merge the MCP server set into $CLAUDE_MCP_CONFIG"
 else
-  mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-  [ -f "$CLAUDE_SETTINGS" ] && cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.aidevops.bak"
-  python3 - "$CLAUDE_SETTINGS" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
+  mkdir -p "$(dirname "$CLAUDE_MCP_CONFIG")"
+  [ -f "$CLAUDE_MCP_CONFIG" ] && cp "$CLAUDE_MCP_CONFIG" "$CLAUDE_MCP_CONFIG.aidevops.bak"
+  AI_DEVOPS_OWNED_OUT="$OWNED_FILE" python3 - "$CLAUDE_MCP_CONFIG" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
 import json, os, sys
 
 path, launch, remote, supa_ref, codex = sys.argv[1:6]
@@ -380,15 +394,74 @@ cfg.setdefault("mcpServers", {}).update(servers)
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
+with open(os.environ["AI_DEVOPS_OWNED_OUT"], "w") as fh:
+    fh.write(",".join(sorted(servers)))
 print("  ok wired: " + ", ".join(servers))
 PY
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    ok "Merged the MCP server set into $CLAUDE_SETTINGS"
-    [ -f "$CLAUDE_SETTINGS.aidevops.bak" ] && ok "Backup: $CLAUDE_SETTINGS.aidevops.bak"
+    OWNED_NAMES="$(cat "$OWNED_FILE" 2>/dev/null || true)"
+    ok "Merged the MCP server set into $CLAUDE_MCP_CONFIG"
+    [ -f "$CLAUDE_MCP_CONFIG.aidevops.bak" ] && ok "Backup: $CLAUDE_MCP_CONFIG.aidevops.bak"
   else
     warn "Did NOT wire MCP servers (see the error above). Nothing was changed."
   fi
+fi
+
+# --------------------------------------------------------------------------
+# 4d. Remove the stale mcpServers block from ~/.claude/settings.json
+# --------------------------------------------------------------------------
+# Before 2026-08-20 this script (and bin/setup-machine.ps1) wrote the server set
+# into settings.json, where Claude Code never reads it. Leaving that copy behind
+# is worse than useless: it is the exact thing that made "my MCP servers keep
+# disappearing" impossible to diagnose — the servers were plainly there in a file
+# that was plainly being ignored. Delete ONLY the keys we own; anything else in
+# settings.json (permissions, hooks, theme, plugins, foreign servers) is kept.
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[dry-run] would strip stale mcpServers keys from $CLAUDE_SETTINGS_LEGACY"
+elif [ "$CLAUDE_MCP_CONFIG" = "$CLAUDE_SETTINGS_LEGACY" ]; then
+  :   # explicitly overridden to the legacy path; do not fight the operator
+elif [ -z "$OWNED_NAMES" ]; then
+  warn "server set was not wired above — skipping the settings.json cleanup"
+elif [ ! -f "$CLAUDE_SETTINGS_LEGACY" ]; then
+  ok "no settings.json — no stale MCP block to remove"
+elif ! python3 -c 'import json' >/dev/null 2>&1; then
+  warn "python3 unusable — cannot clean $CLAUDE_SETTINGS_LEGACY"
+else
+  CLAUDE_SETTINGS_LEGACY="$CLAUDE_SETTINGS_LEGACY" AI_DEVOPS_OWNED="$OWNED_NAMES" python3 - <<'PY2'
+import json, os, shutil, sys
+
+path = os.environ["CLAUDE_SETTINGS_LEGACY"]
+owned = set(filter(None, os.environ["AI_DEVOPS_OWNED"].split(",")))
+try:
+    with open(path) as fh:
+        cfg = json.load(fh)
+except Exception as exc:                      # noqa: BLE001 - report, never clobber
+    print(f"  [WARN] could not parse {path} ({exc}); left untouched")
+    sys.exit(0)
+
+block = cfg.get("mcpServers")
+if not isinstance(block, dict):
+    print("  ok no stale mcpServers block in settings.json")
+    sys.exit(0)
+
+removed = [n for n in list(block) if n in owned]
+if not removed:
+    print("  ok settings.json holds no ai-devops MCP servers")
+    sys.exit(0)
+
+shutil.copy2(path, path + ".aidevops.mcpclean.bak")
+for n in removed:
+    del block[n]
+if not block:
+    cfg.pop("mcpServers", None)               # don't leave an empty block
+with open(path, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("
+")
+print("  ok removed from settings.json (ignored there): " + ", ".join(sorted(removed)))
+print(f"  ok backup: {path}.aidevops.mcpclean.bak")
+PY2
 fi
 
 # --------------------------------------------------------------------------
@@ -476,7 +549,7 @@ fi
 # NOTE: codex-cli used to be wired by its own separate step here. It is now part of
 # the one server set in step 4c, so this step was removed: two steps writing the
 # same key to the same file is exactly the drift this script is fixing. The old one
-# also hard-coded ~/.claude/settings.json and so ignored $CLAUDE_SETTINGS.
+# also hard-coded ~/.claude/settings.json and so ignored $CLAUDE_MCP_CONFIG.
 
 echo
 info "Verifying references resolve from 1Password (no values printed)"

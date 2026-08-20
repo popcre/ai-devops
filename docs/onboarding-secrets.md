@@ -241,7 +241,7 @@ changes, every machine-local raw copy must be updated by hand:
 - the token file `%USERPROFILE%\.config\ai-devops\op-service-account` (Windows) /
   `~/.config/ai-devops/op-service-account` (Ubuntu);
 - on machines still using the older literal-token model, the raw token embedded
-  in the `1password` MCP entry of `~/.claude/settings.json`, `~/.codex/config.toml`,
+  in the `1password` MCP entry of `~/.claude.json`, `~/.codex/config.toml`,
   and `%APPDATA%\Claude\claude_desktop_config.json`;
 - the OS env var `OP_SERVICE_ACCOUNT_TOKEN` if a machine sets one (al8960ofc does);
 - the vault backup fields on item `vibe_coding-service-account`
