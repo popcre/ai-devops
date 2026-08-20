@@ -14,7 +14,7 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 | 4. Preserve failed partial reviews without turning them into verdicts | ✅ complete | 2026-08-20 | Incomplete artifacts state `NO VERDICT` and commands remain nonzero |
 | 5. Present exact typed failures and preserve diagnostic evidence | ✅ complete | 2026-08-20 | Typed guidance plus raw stream/stderr paths in the artifact |
 | 6. Make temporary-copy provenance and retrieval unambiguous | ✅ complete | 2026-08-20 | Artifact records launch repository, reviewed head, private canonical path, and optional mirror |
-| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-20 | Kimi 169/169, Grok 106/106, Qwen 23/23, Gemini 17/17 |
+| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-20 | Kimi 171/171, Grok 106/106, Qwen 23/23, Gemini 17/17 |
 | 8. Requalify Kimi live, independently review the exact head, and land | 🟨 in progress | 2026-08-20 | Auth/preflight pass; live Kimi returned no terminal record, so quarantine remains. Grok review pending. |
 
 **Fresh-session starting point:** Step 1. Read the entire plan before editing. The
