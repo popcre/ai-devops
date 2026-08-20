@@ -60,3 +60,11 @@ summary. The path printed by `path` contains the complete local evidence package
 The command intentionally does not publish reports, create GitHub issues, retry
 the reviewer, select another provider, or alter the scoreboard. Those actions
 require a maintenance session to review the evidence first.
+
+## Active Kimi repair
+
+The 2026-08-19 Kimi evidence exposed report-persistence, partial-output, and
+terminal-diagnostic defects. While issue #46 is open, read the STATUS table in
+[`plan_kimi-review-failure-recovery.md`](../plan_kimi-review-failure-recovery.md)
+before changing or restoring Kimi. The original local evidence packages remain
+historical records and must not be rewritten.
