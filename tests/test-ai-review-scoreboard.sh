@@ -10,15 +10,23 @@ check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_SCOREBOARD_DIR="$TMP/state"
 export AI_REVIEW_SCOREBOARD_FILE="$TMP/state/reviews.jsonl"
+mkdir -p "$TMP/repo"
+git -C "$TMP/repo" init -q
+git -C "$TMP/repo" config user.name Test
+git -C "$TMP/repo" config user.email test@example.com
+printf 'base\n' > "$TMP/repo/file.txt"
+git -C "$TMP/repo" add file.txt
+git -C "$TMP/repo" commit -qm base
+HEAD_SHA="$(git -C "$TMP/repo" rev-parse HEAD)"
 
 cat > "$TMP/grok.json" <<EOF
-{"repo":"$TMP/repo","base":"$(printf 'a%.0s' {1..40})","head":"$(printf 'b%.0s' {1..40})","packet_sha256":"p1","turns":7,"total_tokens":300000,"total_cost_usd":0.05}
+{"repo":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p1","turns":7,"total_tokens":300000,"total_cost_usd":0.05}
 EOF
 cat > "$TMP/kimi.json" <<EOF
-{"repo":"$TMP/repo","base":"$(printf 'a%.0s' {1..40})","head":"$(printf 'b%.0s' {1..40})","packet_sha256":"p2","turns":1}
+{"repo":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p2","turns":1}
 EOF
 cat > "$TMP/glm.json" <<EOF
-{"repository_root":"$TMP/repo","base":"$(printf 'a%.0s' {1..40})","head":"$(printf 'b%.0s' {1..40})","packet_sha256":"p3"}
+{"repository_root":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p3"}
 EOF
 
 echo '== ai-review-scoreboard'
@@ -37,6 +45,9 @@ printf '{"packet_sha256":"p"}\n' > "$TMP/unknown.json"
 row="$($SCRIPT append qwen "$TMP/unknown.json" --elapsed 1)"
 check "missing repository and head are unknown" "printf '%s' '$row' | jq -e '.evidence_state==\"unknown\" and .stale==false'"
 check "unknown evidence is never usable" "$SCRIPT report | jq -e '.usable_verdicts==1 and .unknown>=1'"
+row_false="$($SCRIPT append qwen "$TMP/unknown.json" --elapsed 1 --verdict APPROVE --stale false)"
+check "stale false cannot promote identity-free evidence" "printf '%s' '$row_false' | jq -e '.evidence_state==\"unknown\" and .stale==false'"
+check "identity-free verdict remains unusable" "$SCRIPT report | jq -e '.usable_verdicts==1'"
 check "unknown provider is refused" "! $SCRIPT append nope '$TMP/grok.json' --elapsed 1"
 check "invalid elapsed is refused" "! $SCRIPT append grok '$TMP/grok.json' --elapsed nope"
 

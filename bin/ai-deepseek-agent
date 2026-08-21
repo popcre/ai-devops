@@ -248,6 +248,7 @@ PY
 
 write_review_metadata() { # id verdict
   local id="$1" verdict="$2" meta tmp head repo
+  [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" != 1 ] || return 1
   meta="$(session_path "$id" .meta.json)" || return 1
   tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
   REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" "$PYTHON" - "$tmp" <<'PY'
@@ -315,7 +316,11 @@ End the response with a literal ## Verdict heading followed on the next line by 
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; conversation was not created." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
-    [ "$REVIEW" = 0 ] || write_review_metadata "$ID" "$VERDICT"
+    if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
+      release_lock
+      echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
+      exit 1
+    fi
     release_lock
     echo "SESSION_ID: $ID"
     echo
@@ -348,7 +353,11 @@ End the response with a literal ## Verdict heading followed on the next line by 
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; canonical conversation is unchanged." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
-    [ "$REVIEW" = 0 ] || write_review_metadata "$ID" "$VERDICT"
+    if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
+      release_lock
+      echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
+      exit 1
+    fi
     release_lock
     echo "$REPLY"
     ;;

@@ -83,14 +83,14 @@ remove_sandbox() {
 }
 
 copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-ignored files
-  local src="$1" dst="$2" rel resolved src_root
-  src_root="$(canon "$src")"
-  # Validate every link before copying anything. A refusal therefore cannot
-  # leave a half-built snapshot containing material from an outside target.
+  local src="$1" dst="$2" rel
+  # An untracked link is not self-contained: even an in-repository absolute
+  # target would still point back into the live checkout after cp -P. Refuse
+  # every untracked link before copying anything. Tracked links remain exactly
+  # as committed and are visible in the review diff.
   while IFS= read -r -d '' rel; do
     [ -L "$src/$rel" ] || continue
-    resolved="$(readlink -f "$src/$rel" 2>/dev/null || true)"
-    case "$resolved" in "$src_root"/*) ;; *) die "refusing untracked link outside repository: $rel" ;; esac
+    die "refusing untracked link in review snapshot: $rel"
   done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
   while IFS= read -r -d '' rel; do
     [ -n "$rel" ] || continue
@@ -100,6 +100,15 @@ copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-igno
     mkdir -p "$dst/$(dirname "$rel")"
     cp -Pp "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
   done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
+}
+
+validate_snapshot_links() { # validate_snapshot_links STAGE
+  local stage="$1" stage_root link resolved
+  stage_root="$(canon "$stage")"
+  while IFS= read -r -d '' link; do
+    resolved="$(readlink -f "$link" 2>/dev/null || true)"
+    case "$resolved" in "$stage_root"/*) ;; *) die "refusing link that escapes review snapshot: ${link#"$stage"/}" ;; esac
+  done < <(find "$stage" -path "$stage/.git" -prune -o -type l -print0 2>/dev/null)
 }
 
 create_or_refresh() { # create_or_refresh ROOT TAG STAGE
@@ -133,6 +142,7 @@ create_or_refresh() { # create_or_refresh ROOT TAG STAGE
   fi
   rm -f "$carry"
   copy_untracked "$root" "$stage"
+  validate_snapshot_links "$stage"
 
   printf '%s\n' "$root" > "$stage/$MARKER"
   printf '%s\n' "$MARKER" >> "$stage/.git/info/exclude"

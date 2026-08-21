@@ -50,6 +50,13 @@ check "exact command is recorded" "jq -e '.reported_command==\"ai-grok-review as
 check "list finds the recorded issue" "$SCRIPT list | grep -q '$id'"
 check "show returns the recorded issue" "$SCRIPT show '$id' | jq -e '.id==\"$id\"'"
 check "path returns the configured directory" "test \"$($SCRIPT path)\" = '$AI_REVIEWER_ISSUE_DIR'"
+uncorrelated="$($SCRIPT record --provider grok --summary 'Identifiers unavailable.' --repo "$TMP/repo")"
+uncorrelated_id="$(printf '%s\n' "$uncorrelated" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+uncorrelated_report="$AI_REVIEWER_ISSUE_DIR/$uncorrelated_id"
+check "missing join identifiers capture no nearby metadata" "test ! -e '$uncorrelated_report/reviewer-metadata.redacted.json'"
+check "missing join identifiers capture no nearby scoreboard row" "test ! -e '$uncorrelated_report/latest-scoreboard-entry.json'"
+check "missing join identifiers capture no reports or provider logs" "test -z \"\$(find '$uncorrelated_report/review-reports' '$uncorrelated_report/provider-logs' -type f -print -quit 2>/dev/null)\""
+check "missing join identifiers are labelled" "grep -q 'No exact reviewer metadata' '$uncorrelated_report/missing-evidence.txt'"
 check "missing summary is refused" "! $SCRIPT record --provider grok --repo '$TMP/repo'"
 check "unsafe provider name is refused" "! $SCRIPT record --provider '../bad' --summary bad --repo '$TMP/repo'"
 

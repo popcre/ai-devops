@@ -82,6 +82,21 @@ if ln -s "$TMP/outside.txt" "$WT/outside-link" 2>/dev/null && [ -L "$WT/outside-
   check "outside_link_target_never_copied"      "! grep -Rqs outside-secret '$HOSTILE_STAGE' 2>/dev/null"
   rm -f "$WT/outside-link"
 fi
+# Even a link whose current target is inside the source checkout would remain
+# an absolute link back to the live checkout after a preserving copy.
+if ln -s "$WT/a.txt" "$WT/inside-absolute-link" 2>/dev/null && [ -L "$WT/inside-absolute-link" ]; then
+  check "inside_absolute_untracked_link_is_refused" "! '$SCRIPT' ensure '$WT' inside-absolute-link"
+  INSIDE_LINK_STAGE="$("$SCRIPT" path "$WT" inside-absolute-link)"
+  check "inside_absolute_link_never_enters_snapshot" "[ ! -L '$INSIDE_LINK_STAGE/inside-absolute-link' ]"
+  rm -f "$WT/inside-absolute-link"
+fi
+if ln -s "$TMP/outside.txt" "$WT/tracked-outside-link" 2>/dev/null && [ -L "$WT/tracked-outside-link" ]; then
+  git -C "$WT" add tracked-outside-link
+  git -C "$WT" commit -qm tracked-hostile-link
+  check "tracked_outside_link_is_refused" "! '$SCRIPT' ensure '$WT' tracked-hostile-link"
+  git -C "$WT" rm -q tracked-outside-link
+  git -C "$WT" commit -qm remove-tracked-hostile-link
+fi
 check "head_matches_the_worktree" \
   "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 check "sandbox_is_labelled_for_the_reviewer"  "grep -q 'Review snapshot' '$STAGE/AI-REVIEW-SANDBOX.md'"

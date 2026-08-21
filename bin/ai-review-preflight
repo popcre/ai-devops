@@ -21,6 +21,13 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 valid_provider() { case "$1" in grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
+static_status() {
+  case "$1" in
+    gemini) printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
+    codex|deepseek) printf '{"provider":"%s","status":"unknown","failure_class":"doctor-unsupported"}\n' "$1"; return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 PREFLIGHT_REPO=""
 PREFLIGHT_TAG=""
@@ -107,6 +114,10 @@ check_provider() { # PROVIDER REPO LIVE BASE
     jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' "$(provider_file "$provider")" >&2
     return 3
   fi
+  if static_status "$provider" >/dev/null; then
+    static_status "$provider" >&2
+    case "$provider" in gemini) return 3 ;; *) return 4 ;; esac
+  fi
 
   git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
   [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
@@ -169,7 +180,9 @@ case "$cmd" in
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
     else providers=(grok kimi glm muse gemini qwen codex deepseek); fi
     for provider in "${providers[@]}"; do
-      if active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"; else printf '{"provider":"%s","status":"available"}\n' "$provider"; fi
+      if static_status "$provider"; then :
+      elif active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"
+      else printf '{"provider":"%s","status":"available"}\n' "$provider"; fi
     done ;;
   explain) explain_failure "${1:-}" ;;
   --version) printf 'ai-review-preflight %s\n' "$VERSION" ;;

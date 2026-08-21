@@ -63,13 +63,14 @@ latest_json(){ # latest_json DIRECTORY
 
 exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER
   local dir="$1" run="$2" session="$3" repo="$4" head="$5" caller="$6" f
+  { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
   [ -d "$dir" ] || return 0
   while IFS= read -r -d '' f; do
     jq -e --arg run "$run" --arg session "$session" --arg repo "$repo" --arg head "$head" --arg caller "$caller" '
       ($run=="" or (.run_id // .job_id // .id // "")==$run) and
       ($session=="" or (.session_id // .session // .name // "")==$session) and
       ((.repo // .repository_root // "")==$repo) and (.head // "")==$head and
-      ($caller=="" or (.caller // "")==$caller)' "$f" >/dev/null 2>&1 && { printf '%s' "$f"; return 0; }
+      (.caller // "")==$caller' "$f" >/dev/null 2>&1 && { printf '%s' "$f"; return 0; }
   done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
 }
 
@@ -126,11 +127,12 @@ capture_provider_logs(){ # capture_provider_logs PROVIDER_DIR JOIN DEST INVENTOR
 
 capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER DESTINATION
   local provider="$1" repo="$2" head="$3" run="$4" session="$5" caller="$6" dest="$7" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
+  { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
   [ -f "$ledger" ] || return 0
   jq -s --arg provider "$provider" --arg repo "$repo" --arg head "$head" --arg run "$run" --arg session "$session" --arg caller "$caller" \
     '[.[] | select(.provider==$provider and .repo==$repo and .head==$head and
       ($run=="" or (.run_id // "")==$run) and ($session=="" or (.session_id // "")==$session) and
-      ($caller=="" or (.caller // "")==$caller))] | last // empty' "$ledger" > "$dest"
+      (.caller // "")==$caller)] | last // empty' "$ledger" > "$dest"
   [ -s "$dest" ] || rm -f "$dest"
 }
 
@@ -168,7 +170,9 @@ record_issue(){
   mkdir -p "$report_dir" || die "cannot create report directory: $report_dir"
   chmod 0700 "$ISSUE_DIR" "$report_dir" 2>/dev/null || true
 
-  join="${run_id:-$session_id}"
+  if { [ -n "$run_id" ] || [ -n "$session_id" ]; } && [ -n "$caller" ]; then
+    join="${run_id:-$session_id}"
+  fi
 
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"

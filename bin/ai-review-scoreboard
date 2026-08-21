@@ -36,7 +36,7 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
   case "$stale" in true|false|auto) ;; *) die "stale must be true, false, or auto." ;; esac
   repo="$(jq -r '.repo // .repository_root // empty' "$meta")"
   head="$(jq -r '.head // empty' "$meta")"
-  if [ "$stale" = auto ]; then
+  if [ "$stale" != true ]; then
     evidence_state=unknown
     identity="$(jq -r '.packet_sha256 // .tree_sha256 // empty' "$meta")"
     if [ -n "$repo" ] && [ -d "$repo" ] && [ -n "$head" ] && [ -n "$identity" ]; then
@@ -48,8 +48,7 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
       elif [ -n "$expected_dirty" ] && [ "$dirty" != "$expected_dirty" ]; then evidence_state=stale
       else evidence_state=current; fi
     fi
-  elif [ "$stale" = true ]; then evidence_state=stale
-  else evidence_state=current
+  else evidence_state=stale
   fi
   [ "$evidence_state" != stale ] || stale=true
   [ "$evidence_state" = stale ] || stale=false

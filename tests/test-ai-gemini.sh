@@ -51,8 +51,9 @@ case "${MOCK_MODE:-normal}" in
 esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
-if [ "${MOCK_MODE:-normal}" = empty ]; then response=''; else response='## Verdict
-PASS'; fi
+if [ "${MOCK_MODE:-normal}" = empty ]; then response=''; elif [ "${MOCK_MODE:-normal}" = badverdict ]; then response='## Verdict
+PASS'; else response='## Verdict
+APPROVE'; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
@@ -66,7 +67,12 @@ echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.7-flash-high\"' '$FIXTURES/model-mismatch.json'"
 check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.0'"
-check 'doctor keeps Gemini quarantined pending live proof' "$SCRIPT doctor | grep -q '^QUARANTINED'"
+set +e; DOCTOR_OUT="$("$SCRIPT" doctor 2>&1)"; DOCTOR_RC=$?; set -e
+check 'doctor keeps Gemini quarantined pending live proof' "test '$DOCTOR_RC' -ne 0 && printf '%s' '$DOCTOR_OUT' | grep -q '^QUARANTINED'"
+check 'normal operation cannot bypass quarantine' "! '$SCRIPT' new blocked --prompt review"
+sed 's/^QUARANTINED=1$/QUARANTINED=0/' "$SCRIPT" > "$TMP/bin/ai-gemini-test"
+chmod +x "$TMP/bin/ai-gemini-test"
+SCRIPT="$TMP/bin/ai-gemini-test"
 
 echo '== byte identity and exact identity gates'
 R1="$TMP/repo1"; make_repo "$R1"; printf first-change > "$R1/dirty.txt"
@@ -83,6 +89,7 @@ check 'wrong model is rejected' "! new_run '$R4' wrongmodel wrongmodel"
 printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
+check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
 
 echo '== lifecycle, concurrency, report, and head gates'
 R5="$TMP/repo5"; make_repo "$R5" no
@@ -91,6 +98,8 @@ check 'report failure remains recovery-required' "test \"\$(jq -r .status \"\$(m
 R6="$TMP/repo6"; make_repo "$R6"
 (cd "$R6" && exec env MOCK_MODE=sleep "$SCRIPT" new concurrent --prompt wait) >/dev/null 2>&1 & RUNPID=$!
 for _ in $(seq 1 100); do [ -n "$(meta_for concurrent 2>/dev/null || true)" ] && break; sleep .05; done
+CONCURRENT_COPY="$(jq -r .review_dir "$(meta_for concurrent)")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
+check 'concurrent new is refused before touching evidence' "! (cd '$R6' && '$SCRIPT' new concurrent --prompt collide) && grep -qx owner-evidence '$CONCURRENT_COPY/concurrency-owner'"
 check 'concurrent delete is refused while review runs' "! (cd '$R6' && '$SCRIPT' delete concurrent)"
 check 'concurrent follow-up is refused while review runs' "! (cd '$R6' && '$SCRIPT' ask concurrent --prompt collide)"
 kill -TERM "$RUNPID" 2>/dev/null || true; RUNRC=0; wait "$RUNPID" 2>/dev/null || RUNRC=$?

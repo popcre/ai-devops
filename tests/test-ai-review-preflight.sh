@@ -42,6 +42,11 @@ check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandbo
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
 check "all active providers are registered" "for p in grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
+check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
+check "Codex status is unknown without a doctor contract" "$SCRIPT status codex | jq -e '.status==\"unknown\" and .failure_class==\"doctor-unsupported\"'"
+check "DeepSeek status is unknown without a doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"unknown\" and .failure_class==\"doctor-unsupported\"'"
+check "unsupported doctor does not create a quarantine" "! $SCRIPT check codex '$REPO' >/dev/null 2>&1; test ! -e '$TMP/state/codex.json'"
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
 START=$(date +%s); OUT="$($SCRIPT check kimi "$REPO" 2>&1)"; RC=$?; ELAPSED=$(( $(date +%s) - START ))
