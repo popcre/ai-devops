@@ -276,8 +276,9 @@ lock_path()      { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLE
 repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
 
 # Portable mutex: `flock` does not exist in Git Bash, so this is an atomic mkdir
-# plus a pid file. A lock whose owning process is gone is reclaimed, so a
-# crashed run never wedges a repo or a session permanently.
+# plus a pid file. A dead repository-lock owner does not prove the paid remote
+# turn stopped, so that lock is retained for manual reconciliation. Session
+# locks remain separately scoped and can be released by their owning wrapper.
 lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE]
   local dir="$1" label="$2" upstream="${3:-}" session="${4:-}" source="${5:-}" owner
   mkdir -p "$(dirname "$dir")"
@@ -321,6 +322,9 @@ mark_remote_uncertain() { # retain paid-work lock after local interruption
   local dir="$1"
   [ -d "$dir" ] || return 0
   [ "$(cat "$dir/pid" 2>/dev/null || true)" = "$$" ] || return 0
+  # Offline hostile test hook. Even if this write fails, callers disable normal
+  # EXIT cleanup first, so the paid-work lock itself remains fail-closed.
+  [ "${AI_GROK_TEST_MARK_FAILURE:-0}" != 1 ] || return 1
   date -u +%FT%TZ > "$dir/remote-uncertain"
 }
 
@@ -836,10 +840,10 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
 }
 
 cmd_list() {
-  local rid dir f lock upstream session caller source pid started state
+  local rid dir f lock upstream session caller source pid started state started_epoch now elapsed
   rid="$(repo_id "$(repo_root)")"
   printf '%s\n' 'ACTIVE PAID GROK REVIEWS (all repositories on this computer)'
-  printf '%-34s %-24s %-8s %-7s %-20s %s\n' REPOSITORY SESSION CALLER PID STARTED SOURCE
+  printf '%-34s %-24s %-8s %-7s %-20s %-9s %s\n' REPOSITORY SESSION CALLER PID STARTED ELAPSED SOURCE
   for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
     [ -d "$lock" ] || continue
     upstream="$(cat "$lock/upstream" 2>/dev/null || true)"; session="$(cat "$lock/session" 2>/dev/null || true)"
@@ -850,7 +854,11 @@ cmd_list() {
       continue
     fi
     kill -0 "$pid" 2>/dev/null && state=alive || state=stopped
-    printf '%-34s %-24s %-8s %-7s %-20s %s (%s)\n' "$upstream" "$session" "$caller" "$pid" "$started" "$source" "$state"
+    elapsed='?'
+    if started_epoch="$(date -d "$started" +%s 2>/dev/null)"; then
+      now="$(date +%s)"; elapsed="$((now - started_epoch))s"
+    fi
+    printf '%-34s %-24s %-8s %-7s %-20s %-9s %s (%s)\n' "$upstream" "$session" "$caller" "$pid" "$started" "$elapsed" "$source" "$state"
   done
   printf '\n%s\n' 'COMPLETED SESSIONS (this checkout)'
   dir="$STATE_DIR/sessions/$rid"

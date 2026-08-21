@@ -125,7 +125,7 @@ echo ok > "$TMP/mode"
 echo wait > "$TMP/mode"
 LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
 check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
-check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'alive'"
+check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq '[0-9]+s.*alive'"
 wait "$FIRST_PID"
 check "slow_turn_emits_truthful_bounded_heartbeat" "grep -q 'does not prove provider activity' '$TMP/first.err'"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
@@ -166,6 +166,18 @@ echo ok > "$TMP/mode"
 AFTER_MISSING="$( cd "$CLONE" && bash "$SCRIPT" new after-missing --prompt x 2>&1 )"; AFTER_MISSING_RC=$?
 [ "$AFTER_MISSING_RC" -ne 0 ] && printf '%s' "$AFTER_MISSING" | grep -q 'unconfirmed provider state' && ok "missing_terminal_result_blocks_second_paid_turn" || bad "missing_terminal_result_blocks_second_paid_turn"
 rm -rf "$UNCERTAIN_LOCK"
+
+# Losing the uncertainty-marker write must still preserve the directory that
+# blocks a second paid turn. The next caller converts the dead-owner lock into
+# an explicit uncertainty marker and remains blocked.
+echo empty > "$TMP/mode"
+MARK_FAIL="$( cd "$REPO" && AI_GROK_TEST_MARK_FAILURE=1 AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; MARK_FAIL_RC=$?
+MARK_FAIL_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+check "marker_write_failure_preserves_paid_work_lock" "[ \"$MARK_FAIL_RC\" -ne 0 ] && test -d '$MARK_FAIL_LOCK' && test ! -f '$MARK_FAIL_LOCK/remote-uncertain'"
+echo ok > "$TMP/mode"
+AFTER_MARK_FAIL="$( cd "$CLONE" && bash "$SCRIPT" new after-marker-failure --prompt x 2>&1 )"; AFTER_MARK_FAIL_RC=$?
+check "marker_write_failure_still_blocks_second_paid_turn" "[ \"$AFTER_MARK_FAIL_RC\" -ne 0 ] && printf '%s' \"$AFTER_MARK_FAIL\" | grep -q 'remote completion is unconfirmed' && test -f '$MARK_FAIL_LOCK/remote-uncertain'"
+rm -rf "$MARK_FAIL_LOCK"
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }

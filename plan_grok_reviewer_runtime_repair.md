@@ -7,10 +7,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Baseline and upstream identity | ✅ complete locally | `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
-| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 125/125 |
+| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 127/127 |
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
-| 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 25 incident tests |
+| 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |
 | 6 | Live qualification and landing | ⬜ open | remote SHA, issue #56 close |
 
 Fresh session starts at Step 6. This is the provider-facing companion to the more
@@ -34,8 +34,9 @@ snapshots, evidence packets, fixed permissions and bounded turns.
 
 Six concurrent shared-db reviews proved the paid lock was checkout-scoped. Audit
 findings 7, 18 and 19 confirmed wrong identity, uncertain cancellation/deletion,
-and no cross-clone activity/progress. Issue #56 is open and its nine-step plan is
-unimplemented.
+  and no cross-clone activity/progress. At audit time, issue #56 was open and its
+  nine-step plan was unimplemented; the STATUS table above now records the integrated
+  source repairs and the remaining landing work.
 
 ## 4. Scope — in and out
 
