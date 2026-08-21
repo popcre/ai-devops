@@ -275,6 +275,19 @@ lock_path()      { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLE
 # first "looked dead". A per-session lock does not stop that; this does.
 repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
 
+legacy_paid_lock_guard() { # legacy_paid_lock_guard NEW_LOCK
+  local new_lock="$1" lock schema
+  for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
+    [ -d "$lock" ] || continue
+    [ "$lock" != "$new_lock" ] || continue
+    schema="$(cat "$lock/schema" 2>/dev/null || true)"
+    [ "$schema" = 2 ] && continue
+    warn "a legacy Grok paid-work lock is present: $(basename "$lock"). Its repository and remote completion cannot be proved safely, so no new paid review may start until it is manually reconciled."
+    return 1
+  done
+  return 0
+}
+
 # Portable mutex: `flock` does not exist in Git Bash, so this is an atomic mkdir
 # plus a pid file. A dead repository-lock owner does not prove the paid remote
 # turn stopped, so that lock is retained for manual reconciliation. Session
@@ -688,6 +701,7 @@ cmd_new() {
 
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
   rid_lock="$(repolock_path "$lockid")"
+  legacy_paid_lock_guard "$rid_lock" || die "legacy Grok work may still be running; refusing a duplicate paid review."
   if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo"; then
     die "another Grok review is already running in this repository: $(lock_info "$rid_lock").
   Do NOT start a second one — concurrent reviews are billed in full and were the most
@@ -753,6 +767,10 @@ cmd_ask() {
   sess_lock="$(lock_path "$rid" "$name")"
   rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  if ! legacy_paid_lock_guard "$rid_lock"; then
+    lock_release "$sess_lock"
+    die "legacy Grok work may still be running; refusing a duplicate paid review."
+  fi
   if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo"; then
     lock_release "$sess_lock"
     die "another Grok review is running in this repository: $(lock_info "$rid_lock")"

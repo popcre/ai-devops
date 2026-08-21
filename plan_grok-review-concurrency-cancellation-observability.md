@@ -27,7 +27,7 @@ govern. In particular, a dead local owner never proves remote paid work stopped.
 | 2 | Replace checkout-path locking with normalized upstream-repository locking | ✅ complete locally | Clone, HTTPS/SSH/case/`.git`, local-origin, unrelated-repository, and uncertainty-block tests in `tests/test-ai-grok-review.sh` |
 | 3 | Make active work visible across clones and callers | ✅ complete locally | `list_shows_active_reviews_across_clones_and_callers` and owner-state fixture pass |
 | 4 | Make interruption and deletion tell the truth about the remote turn | ✅ complete locally | Signal fixture preserves a `remote-uncertain` paid-work block; active deletion refusal remains implemented |
-| 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Heartbeat, elapsed activity, and marker-write-failure fixtures pass; full Grok review suite passes 127/127 |
+| 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Heartbeat, elapsed activity, marker-write-failure, and legacy-rollout fixtures pass; full Grok review suite passes 128/128 |
 | 6 | Correlate reviewer-issue evidence to the affected run | ✅ complete locally | 28 incident tests prove exact metadata-owned reports/logs win; similar names, duplicate matches, and missing identity capture nothing |
 | 7 | Update user guidance, install, and run offline verification | 🟨 source complete | Skill guidance and five offline suites pass; installed hash verification remains after merge |
 | 8 | Run bounded live qualification and independent exact-head review | ⬜ open | Redacted live evidence plus an exact-head independent review with no unresolved Critical/High/Medium finding |
@@ -298,7 +298,7 @@ Add named tests for:
 - `local_remote_cycle_or_missing_upstream_fails_closed`
 - `unrelated_upstreams_do_not_block_each_other`
 - `legacy_live_lock_for_same_upstream_blocks_rollout`
-- `dead_owned_lock_is_reclaimed_but_malformed_lock_is_not`
+- `dead_owner_becomes_remote_uncertain`
 - `list_shows_active_reviews_across_clones_and_callers`
 - `list_reports_start_elapsed_pid_checkout_and_owner_state`
 - `signal_releases_owned_locks_and_warns_about_remote_turn`
@@ -385,7 +385,7 @@ The adjacent packet, snapshot, scoreboard, and Windows suites remain green becau
 1. **Over-normalizing two different repositories into one lock.** Mitigation: canonical host/owner/repo fixtures and unrelated-repository tests. Recovery: revert the owned commit; no user data lives in locks.
 2. **Under-normalizing a remote spelling and leaving the hole open.** Mitigation: table-driven HTTPS/SSH/local-path fixtures plus the two-clone live canary.
 3. **Stranding existing named sessions.** Mitigation: leave checkout/session `repo_id()` intact and add a separate lock id. Recovery: backward-compatible `find_meta()` remains the source for existing records.
-4. **A stale or malformed lock blocks work.** This is the safe failure. Print exact inspection guidance; reclaim only a well-formed lock with a provably dead owner. Never delete ambiguous state automatically.
+4. **A stale, dead-owner, legacy, or malformed paid-work lock blocks work.** This is the safe failure because local process death does not prove remote completion. Print exact inspection guidance and require manual reconciliation; never delete or reclaim ambiguous state automatically.
 5. **A trap releases another process's lock.** Mitigation: record ownership and release only when the lock still matches the current process/token.
 6. **Heartbeat survives the wrapper or becomes noisy.** Mitigation: parent-owned cleanup, bounded interval, no output for fast calls, interruption tests.
 7. **Provider abort semantics differ by installed version.** Mitigation: keep the decision open until version-matched documentation and a harmless canary prove it. Warning-only behavior is acceptable and safer.

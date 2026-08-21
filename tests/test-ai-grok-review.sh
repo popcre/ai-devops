@@ -144,6 +144,16 @@ mkdir -p "$LOCK_EQ"; printf 'not-a-pid\n' > "$LOCK_EQ/pid"; printf 'malformed\n'
 MALFORMED="$( cd "$CLONE" && bash "$SCRIPT" new malformed --prompt x 2>&1 )"; MALFORMED_RC=$?
 [ "$MALFORMED_RC" -ne 0 ] && printf '%s' "$MALFORMED" | grep -q 'malformed lock' && ok "malformed_lock_is_not_reclaimed" || bad "malformed_lock_is_not_reclaimed"
 rm -rf "$LOCK_EQ"
+
+# During a mixed-version rollout, an older wrapper's checkout-keyed lock has no
+# trustworthy upstream field. Fail closed on that legacy paid-work record.
+LEGACY_ID="$(printf '%s\n%s' "$(cd "$REPO" && pwd -P)" "$(git -C "$REPO" config --get remote.origin.url)" | sha256sum | cut -c1-12)"
+LEGACY_LOCK="$AI_GROK_STATE_DIR/locks/repo--$LEGACY_ID.lock.d"
+mkdir -p "$LEGACY_LOCK"; printf '%s\n' "$$" > "$LEGACY_LOCK/pid"; printf 'new:old-wrapper\n' > "$LEGACY_LOCK/label"
+LEGACY_CALLS="$(wc -l < "$TMP/argv.txt")"
+LEGACY_BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new legacy-overlap --prompt x 2>&1 )"; LEGACY_RC=$?
+check "legacy_live_lock_for_same_upstream_blocks_rollout" "[ \"$LEGACY_RC\" -ne 0 ] && printf '%s' \"$LEGACY_BLOCKED\" | grep -q 'legacy Grok paid-work lock' && [ \"$LEGACY_CALLS\" -eq \"\$(wc -l < '$TMP/argv.txt')\" ]"
+rm -rf "$LEGACY_LOCK"
 echo wait > "$TMP/mode"
 
 # A locally interrupted wrapper must not claim or assume that the paid remote

@@ -6,7 +6,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (30 cases) |
+| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (32 cases) |
 | 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
 | 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback and concurrent reply fixtures |
 | 4 | Review completion/governance contract | ✅ complete | `--review` verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |
@@ -40,10 +40,11 @@ provider API redesign, credential rotation, model selection, other wrappers.
 
 ## 5. Current state of the code
 
-Session files are derived directly from `$ID`; `show` and `reply` trust that
-path. `append_and_save()` rewrites the live JSON and a failed API call leaves a
-dangling user message. There is no dedicated hostile traversal/concurrency suite
-or shared scoreboard integration. No fix is committed.
+The source now validates session names and containment, locks each conversation,
+publishes history and reviewer metadata atomically, and leaves failed provider
+turns out of durable history. The hostile traversal, link, concurrency, failed-call,
+and publication-failure tests pass. The STATUS table above is authoritative;
+GitHub landing and permitted installation remain.
 
 ## 6. Key findings and root cause
 

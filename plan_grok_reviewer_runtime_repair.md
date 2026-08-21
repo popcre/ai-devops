@@ -7,7 +7,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Baseline and upstream identity | ✅ complete locally | `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
-| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 127/127 |
+| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 128/128 |
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |

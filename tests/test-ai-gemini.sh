@@ -94,6 +94,14 @@ GOOD_AFTER="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -
 check 'duplicate new preserves metadata report packet and private copy byte-for-byte' "test '$GOOD_BEFORE' = '$GOOD_AFTER'"
 check 'duplicate new never invokes the provider' "test '$GOOD_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 check 'wrong resumed conversation ID is rejected' "! (cd '$R4' && MOCK_MODE=wrongid '$SCRIPT' ask good --prompt follow-up)"
+new_run "$R4" frozen-model normal >/dev/null
+FROZEN_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'follow-up refuses configured model drift before provider contact' "! (cd '$R4' && AI_GEMINI_MODEL=gemini-other '$SCRIPT' ask frozen-model --prompt follow-up) && test '$FROZEN_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+new_run "$R4" frozen-copy normal >/dev/null
+FROZEN_COPY="$(jq -r .review_dir "$(meta_for frozen-copy)")"; printf tampered > "$FROZEN_COPY/between-turns.txt"
+COPY_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'follow-up refuses between-turn private-copy tampering before provider contact' "! (cd '$R4' && '$SCRIPT' ask frozen-copy --prompt follow-up) && test '$COPY_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+check 'private-copy tampering remains recovery-required' "test \"\$(jq -r .status \"\$(meta_for frozen-copy)\")\" = RECOVERY_REQUIRED"
 check 'wrong model is rejected' "! new_run '$R4' wrongmodel wrongmodel"
 printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"

@@ -7,7 +7,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Reconcile contradictory plan/docs and quarantine | ✅ done 2026-08-21 | `AGENTS.md`, `plan_ai-gemini-wrapper.md`, `skills/shared/gemini-code-delegation/SKILL.md` |
-| 2 | Hostile write and conversation fixtures | ✅ done 2026-08-21 | `bash tests/test-ai-gemini.sh` covers dirty/ignored/outside/model-call writes and wrong conversation |
+| 2 | Hostile write and conversation fixtures | ✅ done 2026-08-21 | 33 tests cover dirty/ignored/outside/model-call writes, wrong conversation, model drift, and between-turn copy tampering |
 | 3 | Durable locked lifecycle | ✅ done 2026-08-21 | `bin/ai-gemini`; locks precede snapshot/state creation; concurrent-new, interruption, follow-up/delete, and recovery cases pass |
 | 4 | Exact completion and report contract | ✅ done 2026-08-21 | empty/wrong-model/unsafe-report/stale-head cases in `tests/test-ai-gemini.sh` |
 | 5 | Cross-platform live qualification | ⛔ blocked | No live Windows or Ubuntu hostile evidence; quarantine remains mandatory |
