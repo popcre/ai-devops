@@ -5,23 +5,16 @@ description: Use Gemini 3.7 Flash through the ai-gemini wrapper for an independe
 
 # Gemini code review
 
-Use `ai-gemini`, never `agy` directly, for a repository review. The wrapper uses
-a disposable copy, enables containment, checks that the copy did not change, and
-verifies the exact Gemini model before accepting its response.
+Gemini is quarantined and must not be used as an approval-capable reviewer until
+both Windows and Ubuntu pass the live hostile qualification required by
+`plan_gemini_reviewer_safety_repair.md`. Never bypass that quarantine by calling
+`agy` directly. `ai-gemini doctor` deliberately reports `QUARANTINED`.
 
 ```bash
 AI_GEMINI_CALLER=codex ai-gemini doctor
-AI_GEMINI_CALLER=codex ai-gemini new <work-name> --prompt-file <brief-file>
-AI_GEMINI_CALLER=codex ai-gemini ask <work-name> --prompt-file <follow-up-file>
 ```
 
-Use a specific name such as `payment-review`, not `gemini`. Reuse the same name
-for follow-up questions. Gemini is review-only: do not ask it to edit, commit,
-push, deploy, change a database, or access secrets.
-
-Write a short brief that names the change, relevant paths, constraints, and the
-decision required. Do not paste secrets or file contents. Treat an empty answer,
-wrong model, changed review copy, or stale checkout as a failed review, not an
-approval. The report is written under `.ai/reviews/` only when that folder is
-ignored by Git. If the repository keeps historical reports there, Gemini warns
-and still completes the review without writing another report file.
+Until qualification finishes, stop after `doctor` and choose another governed
+reviewer. An empty answer, wrong model or conversation, changed protected file,
+stale checkout, interruption, or missing durable report is always a failed
+review. Gemini remains review-only even after eventual qualification.
