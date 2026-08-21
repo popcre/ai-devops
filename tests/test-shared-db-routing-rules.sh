@@ -11,6 +11,7 @@ ORCH="$ROOT/skills/shared/shared-db-orchestrator/SKILL.md"
 MANUAL="$ROOT/skills/shared/shared-db-orchestrator/references/operating-manual.md"
 CLAUDE="$ROOT/templates/system/CLAUDE-global.md"
 CODEX="$ROOT/templates/system/AGENTS-global-codex.md"
+REPO_AGENTS="$ROOT/AGENTS.md"
 
 field(){ sed -n "s/^$1:[[:space:]]*//p" "$FIX" | head -1; }
 eligible(){ [ "$(field status)" = ready ] && [ "$(field work_type)" = structural ] && [ "$(field route)" = shared-db-orchestrator ] && grep -q '^  - ' "$FIX"; }
@@ -26,7 +27,7 @@ check "manual requires reclassification from scratch" "grep -qi 'successor issue
 check "Codex global carries successor rule" "grep -qi 'Route every successor from its own work' '$CODEX'"
 check "Claude global carries successor rule" "grep -qi 'Route every successor from its own work' '$CLAUDE'"
 check "misroute preserves private artifacts" "grep -qi 'private artifact' '$ORCH'"
-check "review safety gate is scoped, not blanket" "grep -qi 'Independent review is required for the reviewer safety path' '$CODEX' && grep -qi 'Ordinary plans' '$CODEX'"
+check "review safety gate is scoped to this toolkit, not every project" "grep -qi 'Independent review is required for the reviewer safety path' '$REPO_AGENTS' && grep -qi 'Ordinary plans' '$REPO_AGENTS'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

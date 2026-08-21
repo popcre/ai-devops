@@ -93,8 +93,8 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 # Keep in sync with tools/context-audit/budgets.json and the table in
 # docs/context-engineering.md — a budget number lives in exactly three places.
 DEFAULT_BUDGETS = {
-    "alwaysLoadedBytes": {"budget": 26946, "target": 24500},
-    "startupRoutedBytes": {"budget": 37088, "target": 35340},
+    "alwaysLoadedBytes": {"budget": 13563, "target": 12500},
+    "startupRoutedBytes": {"budget": 11987, "target": 11000},
     "claudeSkillManifestBytes": {"budget": 22777, "target": 20000},
     "codexSkillManifestBytes": {"budget": 14847, "target": 13000},
 }

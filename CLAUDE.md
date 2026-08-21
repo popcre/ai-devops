@@ -1,47 +1,20 @@
-# CLAUDE.md — Claude Code notes
+# CLAUDE.md — Claude Code adapter
 
-**Read [`AGENTS.md`](AGENTS.md) first.** It is the canonical operating guide and
-documentation router for this repo. This file only holds Claude Code-specific
-notes; it does not repeat AGENTS.md.
+Read [`AGENTS.md`](AGENTS.md) first. It is the canonical repository contract and
+task router. This file contains only Claude-specific differences.
 
-## Context / ignore
+- `.claudeignore` controls Claude Code's excluded paths. Keep it aligned with
+  the transcript, secret, generated-output, and dependency exclusions routed by
+  `AGENTS.md`; do not bulk-load Markdown or raw transcript archives.
+- New skills belong in `skills/shared/` unless they truly require a
+  Claude-only tool or behavior. The installer rejects a skill name duplicated
+  between shared and client-specific trees.
+- Finished Claude changes are committed and pushed under Albert's verified Git
+  identity. Add the repository's current Claude co-author trailer when its
+  documented workflow requires one.
+- Use Git Bash for Bash suites and PowerShell for PowerShell suites on Windows.
+  Installation is local machine setup, not an application deployment.
 
-- `.claudeignore` controls what Claude Code ignores here. Keep it aligned with the
-  "What to ignore" section of `AGENTS.md`.
-- Do not load every `.md` file. Use the **Documentation map** in `AGENTS.md` to
-  pull only the docs a task needs.
-
-## Repo-specific behaviors
-
-- This repo is 100% owned Bash + Markdown. There is no app, database, container,
-  or CI/CD — do not go looking for them or scaffold them unprompted.
-- The toolkit home is always `/worksp/ai-devops`. Never use `/opt/ai-devops`.
-- Real config lives in `/etc/ai-devops/*.env` (never in the repo). Never commit
-  real `.env` files or secrets; only `*.env.example` belongs in git.
-- Model roles: Opus 4.8 (high reasoning) plans + final-reviews; Opus reviews the
-  gates; Codex/GPT-5.5 implements + tests. **Do not mention or use Fable.**
-
-## New skills go in `skills/shared/` by default (installs to BOTH Claude and Codex)
-
-- `bin/ai-install-skills` routes by folder: `skills/claude/` → Claude only,
-  `skills/codex/` → Codex only, `skills/shared/` → **both**. So **every new skill
-  is authored in `skills/shared/` unless it is genuinely client-specific** (uses
-  a tool only one client has, or drives the other client — e.g. `codex-handoff`).
-  Do not put a general skill in `skills/claude/` and force Albert to ask for it in
-  Codex later. Default = shared, no exceptions unless you can name the
-  client-specific reason. A name may live in `shared/` OR a client tree, never
-  both (the installer fails closed on the collision).
-
-## Commits
-
-- Always commit. Do not wait to be asked — every change you finish gets
-  committed (and pushed) as part of the work.
-- This repo pushes with a GitHub `@users.noreply.github.com` email (email-privacy
-  protection blocks the private gmail address). Keep using the noreply email.
-- End commit messages with the `Co-Authored-By: Claude Opus 4.8` trailer.
-
-## SSH / deployment
-
-- There is no deploy automation. Installation is a local operation (`install.sh`)
-  run on the target host over an ordinary SSH login. SSH is not a special deploy
-  path here.
+All repository layout, model setup, reviewer restrictions, deployment details,
+secrets handling, and task-specific reading now live behind the pointers in
+`AGENTS.md`; do not duplicate them here.
