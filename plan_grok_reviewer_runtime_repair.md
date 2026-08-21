@@ -6,10 +6,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Baseline and upstream identity | ⬜ open | issue-56 verification folder |
-| 2 | Cross-clone paid-turn lock/activity | ⬜ open | `tests/test-ai-grok-review.sh` |
-| 3 | Truthful interruption/deletion | ⬜ open | signal/delete fixtures |
-| 4 | Mid-turn progress | ⬜ open | slow-turn fixture |
+| 1 | Baseline and upstream identity | ✅ complete locally | `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
+| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 121/121 |
+| 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
+| 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
 | 5 | Exact incident correlation | ⬜ open | shared evidence plan/tests |
 | 6 | Live qualification and landing | ⬜ open | remote SHA, issue #56 close |
 
