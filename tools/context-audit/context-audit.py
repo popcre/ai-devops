@@ -23,11 +23,19 @@ SECRET_SUFFIXES = {".env", ".key", ".pem", ".pfx", ".p12"}
 SKILL_RE = re.compile(r"^skills/(shared|claude|codex)/([^/]+)/SKILL\.md$")
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
+CAPABILITY_REPAIR_PATTERNS = {
+    r"Preserve the capability|repair is complete": "a repair must preserve the capability",
+    r"(?:reported )?problem is gone|symptom is gone": "the reported problem must be gone",
+    r"original capability still works": "the original capability must still work",
+    r"symptom suppression": "symptom suppression is not a fix",
+}
+
 SAFETY_MARKERS = {
     "production mutation": [r"production", r"terraform apply|mutating.*gcloud|read-only"],
     "shared database routing": [r"shared[- ]db|shared database", r"shared-db|branch.*PR|authored"],
     "secret handling": [r"secret", r"1Password|never.*secret|vault"],
     "destructive actions": [r"destructive", r"delete|overwrite|recover"],
+    "capability preservation": list(CAPABILITY_REPAIR_PATTERNS),
     "Git identity": [r"GIT_COMMITTER_IDENT|Git identity", r"Albert Hazan|users\.noreply\.github\.com"],
     "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
     "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting"],
@@ -51,6 +59,10 @@ SAFETY_REASONS = {
     "destructive actions": (
         "no always-loaded rule requires destructive actions to be recoverable, so "
         "a delete or overwrite could be unrecoverable"
+    ),
+    "capability preservation": (
+        "no always-loaded rule requires a repair to preserve the original "
+        "capability, so a session could suppress a symptom by removing what broke"
     ),
     "Git identity": (
         "no always-loaded rule requires verifying GIT_COMMITTER_IDENT, so Git can "
@@ -80,6 +92,10 @@ PARITY_RULES = {
     "Synology long-read safety": r"Synology",
     "handoff quality standard": r"HANDOFF",
     "destructive actions recoverable": r"destructive action",
+    "repair instruction preserves capability": r"Preserve the capability",
+    "repairs resolve reported problem": r"(?:reported )?problem is gone|symptom is gone",
+    "repairs preserve original capability": r"original capability still works",
+    "symptom suppression is not a fix": r"symptom suppression",
     "never replace system binaries": r"system binaries|operating-system binaries",
 }
 
@@ -560,12 +576,22 @@ def run(args: argparse.Namespace) -> dict:
     safety = {}
     safety_issues = []
     for category, patterns in SAFETY_MARKERS.items():
-        present = all(re.search(pattern, safety_text, re.I | re.S) is not None for pattern in patterns)
+        missing_patterns = [
+            pattern for pattern in patterns
+            if re.search(pattern, safety_text, re.I | re.S) is None
+        ]
+        present = not missing_patterns
         safety[category] = present
         if not present:
+            reason = SAFETY_REASONS[category]
+            if category == "capability preservation":
+                missing = "; ".join(
+                    CAPABILITY_REPAIR_PATTERNS[pattern] for pattern in missing_patterns
+                )
+                reason = f"the repair contract is missing this protection: {missing}"
             safety_issues.append({
                 "category": category,
-                "reason": f"Missing safety marker '{category}': {SAFETY_REASONS[category]}.",
+                "reason": f"Missing safety marker '{category}': {reason}.",
             })
 
     class_bytes: dict[str, int] = defaultdict(int)

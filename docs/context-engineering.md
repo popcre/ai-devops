@@ -17,10 +17,19 @@ and "delete vestiges on sight".
 `templates/system/CLAUDE-global.md` and
 `templates/system/AGENTS-global-codex.md` now make the intended behavior
 explicit: start authorized work immediately, do not create approval loops,
-recover from routine errors, preserve the capability when asked to fix it, and
-load only handoffs relevant to the current task. Tests guard both clients
-against restoring the bad wording. Production, secret, database, Git identity,
-reasoning-effort, and recoverable-deletion protections remain.
+recover from routine errors, and load only handoffs relevant to the current
+task. After a second report that the weaker repair wording was still failing,
+capability preservation became a locked safety category: reporting a broken
+module or service never authorizes its removal, and a repair is complete only
+when the symptom is gone and the original capability still works. Tests guard
+both clients against restoring the bad wording or weakening this two-part
+completion gate. Production, secret, database, Git identity, reasoning-effort,
+and recoverable-deletion protections remain.
+
+Verification on 2026-08-21 against the exact combined tree on current
+`origin/main`: the context enforcement suite, the safe global-adoption suite,
+the strict context audit, and `git diff --check` all pass. The audit reports zero
+missing safety markers and zero cross-client parity mismatches.
 
 ## Baseline frozen on 2026-08-12
 
@@ -311,24 +320,27 @@ covered by the parity check.
 
 ### Locked safety markers
 
-Seven categories must be present in the always-loaded and startup-routed text:
+Eight categories must be present in the always-loaded and startup-routed text:
 production mutation, shared database routing, secret handling, destructive
-actions, Git identity, the GPT-5.6 low/medium limit, and the prohibition on
-replacing operating-system binaries. Removing any one of
+actions, capability preservation during repair, Git identity, the GPT-5.6
+low/medium limit, and the prohibition on replacing operating-system binaries.
+Removing any one of
 them from a fixture produces a plain-English failure naming that category and
-what protection was lost. `tests/test-context-audit.ps1` proves all seven
-independently, and proves that removing one does not disturb the other six.
+what protection was lost. `tests/test-context-audit.ps1` proves all eight
+independently, and proves that removing one does not disturb the other seven.
 
 ### Cross-client parity and its divergence allowlist
 
 Claude and Codex load different global files, so identical behavior has to be
-asserted rather than assumed. Twelve rules must appear in both globals: the
+asserted rather than assumed. Sixteen rules must appear in both globals: the
 response-style contract, GPT-5.6 low/medium, production infrastructure safety,
 no `terraform apply` against prod, verifying the Git committer identity, secrets
 in 1Password, serialized 1Password access, the shared-database change gate,
 Synology long-read safety, the handoff quality standard, and (added in step 5)
 destructive actions being recoverable, and operating-system binaries never
-being replaced.
+being replaced. Four independently checked repair rules require the preservation
+instruction, resolution of the reported problem, survival of the original
+capability, and rejection of symptom suppression as a fix.
 
 Text that genuinely belongs to one client only lives in a small divergence
 allowlist (each client's own install line, and the Codex edition framing). If an

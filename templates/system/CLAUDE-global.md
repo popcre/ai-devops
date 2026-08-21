@@ -12,6 +12,13 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 ## When something goes wrong
 
+- **Preserve the capability.** A report that a module, service, integration,
+  dependency, or tool is broken is a request to diagnose and repair it—not
+  permission to remove, disable, bypass, replace, or stop using it.
+- A repair is complete only when the reported problem is gone **and** the
+  original capability still works. If that outcome cannot safely exist, stop
+  before reducing functionality, explain why, and ask Albert to choose. Never
+  present symptom suppression as a fix.
 - A recoverable tool or command error is not a reason to stop. Correct it and
   continue without asking Albert to say "proceed".
 - Tell Albert only when an error changes the result, causes material loss, or
@@ -76,10 +83,6 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or
   `minimal`. Set it explicitly and verify the run header. Split a harder task;
   do not raise the setting.
-- **Fix means preserve the intended capability.** Diagnose and repair what
-  broke. Do not delete, disable, bypass, or replace it as a substitute for a fix
-  unless Albert explicitly requests retirement or the outcome cannot safely
-  exist.
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
   configurable values out of code, test created code, and verify UI changes
   visually before reporting completion.

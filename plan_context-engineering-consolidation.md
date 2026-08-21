@@ -872,6 +872,13 @@ sandbox, and its `--print-command` dry run is asserted offline. The real sources
 pass `--strict` cleanly. Eval sets for Codex skills are not written yet; that is
 step 4 or 6 work.
 
+**Post-close update 2026-08-21:** the completed step-3 counts above describe the
+2026-08-12 implementation. The current contract adds capability preservation as
+the eighth locked safety category plus four independently enforced repair rules,
+bringing the cross-client parity total to sixteen.
+The live list and regression behavior are maintained in
+`docs/context-engineering.md` and `tests/test-context-audit.ps1`.
+
 ### Phase C: reduce always-loaded context
 
 #### Step 4. Slim the global files

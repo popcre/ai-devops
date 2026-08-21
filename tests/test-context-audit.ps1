@@ -13,6 +13,7 @@ $safetyLines = [ordered]@{
     "shared database routing" = "Shared database changes are authored in shared-db with a branch and PR."
     "secret handling"         = "Never expose a secret. Use the 1Password vault."
     "destructive actions"     = "Destructive actions such as delete or overwrite must be recoverable."
+    "capability preservation" = "Preserve the capability. A repair is complete only when the problem is gone and the original capability still works; removal is symptom suppression."
     "Git identity"            = "Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com."
     "GPT-5.6 effort"          = "GPT-5.6 must use low or medium effort."
     "system binaries"         = "Never replace operating-system binaries or overwrite system commands."
@@ -230,7 +231,65 @@ try {
             throw "Strict mode did not print a plain reason for the missing '$category' rule."
         }
     }
-    Write-Host "PASS: all seven locked safety categories fail individually with a plain-English reason"
+    Write-Host "PASS: all eight locked safety categories fail individually with a plain-English reason"
+
+    # A repair has two independent success conditions. Remove each condition
+    # alone from both clients (safety failure), then from Codex alone (parity
+    # failure). The other condition and all surrounding anti-removal wording
+    # remain, so neither can substitute for the missing protection.
+    $repairClauseCases = @(
+        [pscustomobject]@{
+            Name = "symptom resolution"
+            Phrase = "problem is gone and the "
+            Reason = "reported problem must be gone"
+            Parity = "repairs resolve reported problem"
+        },
+        [pscustomobject]@{
+            Name = "capability survival"
+            Phrase = "original capability still works; "
+            Reason = "original capability must still work"
+            Parity = "repairs preserve original capability"
+        }
+    )
+    foreach ($case in $repairClauseCases) {
+        New-AuditFixture -Path $fixture
+        foreach ($relative in @(
+            "templates\system\CLAUDE-global.md",
+            "templates\system\AGENTS-global-codex.md"
+        )) {
+            $path = Join-Path $fixture $relative
+            $text = Get-Content -LiteralPath $path -Raw
+            $weakened = $text.Replace($case.Phrase, "")
+            if ($weakened -eq $text) { throw "The $($case.Name) fixture phrase was not found in $relative." }
+            Write-Utf8 $path $weakened
+        }
+        $result = Invoke-Audit -Path $fixture -Strict
+        if ($result.report.safetyMarkers."capability preservation") {
+            throw "Capability preservation passed after $($case.Name) was removed from both clients."
+        }
+        $issue = $result.report.safetyMarkerIssues |
+            Where-Object { $_.category -eq "capability preservation" }
+        if (-not $issue -or $issue.reason -notmatch [regex]::Escape($case.Reason)) {
+            throw "The missing $($case.Name) protection was not named: '$($issue.reason)'"
+        }
+        if ($result.exit -eq 0) { throw "Strict mode accepted a repair without $($case.Name)." }
+
+        New-AuditFixture -Path $fixture
+        $codexPath = Join-Path $fixture "templates\system\AGENTS-global-codex.md"
+        $codexText = Get-Content -LiteralPath $codexPath -Raw
+        $weakened = $codexText.Replace($case.Phrase, "")
+        if ($weakened -eq $codexText) { throw "The Codex $($case.Name) fixture phrase was not found." }
+        Write-Utf8 $codexPath $weakened
+        $result = Invoke-Audit -Path $fixture -Strict
+        if (-not $result.report.safetyMarkers."capability preservation") {
+            throw "A one-client $($case.Name) deletion unexpectedly cleared the combined safety marker."
+        }
+        if ($result.report.crossClientParity.mismatches -notcontains $case.Parity) {
+            throw "A Codex-only $($case.Name) deletion was not caught by cross-client parity."
+        }
+        if ($result.exit -eq 0) { throw "Strict mode accepted Codex without $($case.Name)." }
+    }
+    Write-Host "PASS: both repair conditions are enforced independently in one client and both clients"
 
     # ------------------------------------------------------ cross-client parity
     New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("GPT-5.6 effort")
@@ -366,7 +425,10 @@ owner: claude/fixture-$n
             "Start immediately",
             "No approval loops",
             "recover first and finish",
-            "Fix means preserve the intended capability",
+            "Preserve the capability",
+            "reported problem is gone",
+            "original capability still works",
+            "present symptom suppression as a fix",
             "Do not load unrelated handoffs"
         )) {
             if ($clientGlobals[$client] -notmatch [regex]::Escape($required)) {
