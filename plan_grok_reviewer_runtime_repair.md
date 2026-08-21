@@ -10,10 +10,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 121/121 |
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
-| 5 | Exact incident correlation | ⬜ open | shared evidence plan/tests |
+| 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 25 incident tests |
 | 6 | Live qualification and landing | ⬜ open | remote SHA, issue #56 close |
 
-Fresh session starts at Step 1. This is the provider-facing companion to the more
+Fresh session starts at Step 6. This is the provider-facing companion to the more
 detailed existing `plan_grok-review-concurrency-cancellation-observability.md`;
 that plan remains the authoritative engineering detail where it is stricter.
 

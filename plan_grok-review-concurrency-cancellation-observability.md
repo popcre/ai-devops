@@ -14,7 +14,7 @@ Planning handoff: [`HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair
 
 ## STATUS
 
-Read this table first. A fresh session starts at Step 1. Every row is open because this file specifies the repair; it does not claim the repair has been implemented.
+Read this table first. A fresh session starts at Step 7; source repairs are integrated locally, while installation, live qualification, push, and issue closure remain.
 
 | # | Step | Status | Evidence required before marking done |
 |---|---|---|---|
@@ -23,7 +23,7 @@ Read this table first. A fresh session starts at Step 1. Every row is open becau
 | 3 | Make active work visible across clones and callers | ✅ complete locally | `list_shows_active_reviews_across_clones_and_callers` and owner-state fixture pass |
 | 4 | Make interruption and deletion tell the truth about the remote turn | ✅ complete locally | Signal fixture preserves a `remote-uncertain` paid-work block; active deletion refusal remains implemented |
 | 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Heartbeat and terminal-result fixtures pass; full Grok review suite passes 121/121 |
-| 6 | Correlate reviewer-issue evidence to the affected run | ⬜ open | `tests/test-ai-reviewer-issue.sh` proves an explicitly named Grok run wins over an unrelated newer record and empty/missing evidence is labelled honestly |
+| 6 | Correlate reviewer-issue evidence to the affected run | ✅ complete locally | 25 incident tests prove exact metadata-owned reports/logs win; similar names and missing identity capture nothing |
 | 7 | Update user guidance, install, and run offline verification | 🟨 source complete | Skill guidance and five offline suites pass; installed hash verification remains after merge |
 | 8 | Run bounded live qualification and independent exact-head review | ⬜ open | Redacted live evidence plus an exact-head independent review with no unresolved Critical/High/Medium finding |
 | 9 | Commit, push, verify GitHub, close #56, and retire this plan/handoff | ⬜ open | Remote `main` SHA, GitHub issue closure comment linking verification evidence, plan status fully current, and this handoff removed only after completion |
