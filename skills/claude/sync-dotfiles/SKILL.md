@@ -26,9 +26,8 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 
 | Thing | Direction | Mechanism |
 |---|---|---|
-| Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-install-skills` |
-| Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine (seeded only if absent; never clobbers local edits) | `bin/ai-install-skills` |
-| New standing rules added to those templates | repo → machine, **by hand, step 4** — no script does this | you, appending the missing section |
+| Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
+| Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
@@ -164,23 +163,29 @@ clone + `./install.sh` (Ubuntu) first.
    printed reassuring "expected" skips and returned success while memory never
    moved in either direction. If either fails, STOP and report the failure —
    never call the sync successful.
-4. **Install skills + instructions:** `bin/ai-install-skills`. Refreshes
-   `~/.claude/skills` (+ `~/.codex/skills`) and seeds global instructions
-   **only if absent** — if `CLAUDE.md`/`AGENTS.md` differ it prints a diff hint
-   and does NOT overwrite. Relay that hint if shown.
-5. **Carry across any standing rule the local file is missing.** This step exists
-   because step 4 never overwrites: skills propagate automatically, but a NEW
-   STANDING RULE added to `templates/system/CLAUDE-global.md` reaches a machine
-   only if someone carries it. Without this, a rule Albert set once is silently
-   absent on every other machine — he believes it's everywhere; it isn't.
-   Diff the template against the live file
-   (`diff ~/.claude/CLAUDE.md templates/system/CLAUDE-global.md`, and the Codex
-   pair). For each **rule section present in the template but absent locally**,
-   append it verbatim (config edits are append-only — never rewrite or reorder
-   the local file, which carries this machine's own atlas section and hand
-   edits). Report what you appended. Leave machine-specific local content alone;
-   you are only adding missing rules, never reconciling wording.
-5b. **Ensure the required Claude tool permissions:** `bin/ai-claude-permissions`.
+4. **Install skills and adopt both global instruction bodies:** run
+   `bin/ai-adopt-globals`. It saves each original, refreshes both skill trees,
+   replaces the shared Claude/Codex instruction bodies, restores the detected
+   machine section, and proves both the body and restored section by comparison.
+   A nonzero result means the sync is incomplete; do not fall back to
+   `ai-install-skills`, append rules by hand, or report success. The installer
+   contains a one-time bridge so a machine still running the previous version of
+   this skill performs the adoption during its first post-pull sync.
+
+   **Then PROVE it landed**, because exit 0 means the files are right on disk, not
+   that anything read them. Pick a distinctive phrase from a rule you expect and
+   check both live files. Confirm the phrase is CURRENTLY in the template first
+   (globals get condensed over time, and a stale probe string fails for the wrong
+   reason). Example:
+
+   ```bash
+   grep -c "Move values only through pipes" ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
+   ```
+
+   Both must return 1. If either returns 0, the adoption did not take — say so
+   and STOP; do not report the sync successful.
+
+5. **Ensure the required Claude tool permissions:** `bin/ai-claude-permissions`.
    Merges every entry in `config/claude-permissions.allow` into the USER-level
    `~/.claude/settings.json`, so it covers every project on the machine. It is
    idempotent, strictly additive (never removes an entry, never touches `deny`

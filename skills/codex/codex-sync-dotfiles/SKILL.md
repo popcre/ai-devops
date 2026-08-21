@@ -26,8 +26,8 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 
 | Thing | Direction | Mechanism |
 |---|---|---|
-| Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-install-skills` |
-| Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine (never clobbers local edits) | `bin/ai-install-skills` |
+| Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
+| Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
@@ -102,20 +102,27 @@ clone + `./install.sh` on Ubuntu).
    script now exits non-zero — that is a real failure, not "expected". It means
    the resolved Claude home is not the one Claude Code uses. Do not report the
    sync as successful; report the failure.**
-4. `bin/ai-install-skills` — refresh Codex (`~/.codex/skills`) + Claude skills and
-   global instructions; never clobbers local edits (prints a diff hint instead —
-   relay it).
-4b. **Carry across any standing rule the local instruction file is missing.**
-   Step 4 deliberately never overwrites `~/.codex/AGENTS.md` (it holds this
-   machine's own atlas section and hand edits), so a NEW STANDING RULE added to
-   `templates/system/AGENTS-global-codex.md` reaches this machine only if you
-   carry it. Without this step a rule Albert set once is silently absent here
-   while he believes it is everywhere. Diff
-   `~/.codex/AGENTS.md` against `templates/system/AGENTS-global-codex.md`; for
-   each rule section present in the template but absent locally, append it
-   verbatim (append-only — never rewrite or reorder the local file). Report what
-   you appended. This mirrors step 4 of the Claude `sync-dotfiles` skill.
-4c. `bin/ai-claude-permissions` — merge the permissions in
+4. **Install skills and adopt both global instruction bodies:** run
+   `bin/ai-adopt-globals`. It saves each original, refreshes both skill trees,
+   replaces the shared Claude/Codex instruction bodies, restores the detected
+   machine section, and proves both the body and restored section by comparison.
+   A nonzero result means the sync is incomplete; do not fall back to
+   `ai-install-skills`, append rules by hand, or report success. The installer
+   contains a one-time bridge so a machine still running the previous version of
+   this skill performs the adoption during its first post-pull sync.
+
+   **Then PROVE it landed** — exit 0 means the files are correct on disk, not that
+   anything read them. Check a distinctive phrase from a rule you expect in both
+   live files, e.g.:
+
+   ```bash
+   grep -c "Move values only through pipes" ~/.codex/AGENTS.md ~/.claude/CLAUDE.md
+   ```
+
+   Both must return 1. If either returns 0, adoption did not take — say so and
+   STOP; do not report the sync successful.
+
+4b. `bin/ai-claude-permissions` — merge the permissions in
    `config/claude-permissions.allow` into the user-level `~/.claude/settings.json`,
    covering every project on the machine. Run it here too even though this is the
    Codex skill: the gap is per-MACHINE, not per-agent, and Albert expects one

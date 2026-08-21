@@ -86,18 +86,17 @@ point at the same address: **`http://<removed-protected-address>:8787`**.
 ### Workflow A — Claude running **on the VPS** (remote/SSH mode)
 
 "Claude for Windows connects via SSH to the Claude CLI running on the hetz VPS."
-That CLI runs as the **`ai`** user. The redirect is set in **two** places, and
-both matter:
-
-```jsonc
-// /home/ai/.claude/settings.json  — the reliable one
-"env": { "ANTHROPIC_BASE_URL": "http://<removed-protected-address>:8787" }
-```
+That CLI runs as the **`ai`** user. The redirect is the `export` in
+`/home/ai/.bashrc`, placed **above the non-interactive guard**:
 
 ```bash
 # /home/ai/.bashrc  — ABOVE the non-interactive guard (see warning below)
 export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787
 ```
+
+> A `settings.json` `env` block is **not** a second source and never was — see
+> the measurement in Workflow B below. `ai-headroom on` / `off` manage this
+> `export` line and delete any stale `settings.json` entry they find.
 
 > 🚨 **The non-interactive-shell trap (found 2026-08-21).** `~/.bashrc` opens
 > with the stock Debian guard `case $- in *i*) ;; *) return;; esac`. A Claude
@@ -108,7 +107,8 @@ export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787
 > sessions launched from a real interactive terminal were ever compressed;
 > `savings_events.jsonl` shows exactly that pattern (7 scattered days in a
 > month, nothing between). The export is now above the guard, and
-> `settings.json` carries it too so it no longer depends on shell type at all.
+> (An earlier fix also added it to `settings.json` "for safety" — that entry is
+> inert and has since been removed; see the measurement in Workflow B.)
 >
 > Verify after any change to either file:
 >
@@ -162,8 +162,8 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 | Machine | Wired? | Where |
 |---|---|---|
 | hetz VPS `ai` user (Workflow A) | ✅ yes | `/home/ai/.bashrc` |
-| **AL8960OFC** (office Windows, Workflow B) | ✅ yes | `~/.claude/settings.json` — **needs a Claude Desktop restart to activate** |
-| Other 2 local Windows machines | ❌ not yet | add the same `env` block to their `~/.claude/settings.json` to include them |
+| **AL8960OFC** (office Windows, Workflow B) | ❓ recheck | was wired via `settings.json`, which is INERT — treat as NOT wired until `ai-headroom status` says otherwise |
+| Other Windows machines | ❌ not yet | run `ai-headroom on` on each (sets the persistent USER environment variable — a `settings.json` block does nothing) |
 
 ## 5. What was done on 2026-07-14 (incident + fix)
 
@@ -189,7 +189,9 @@ window on 2026-07-07 and nothing since.
 5. **Hardened boot ordering** (`After=/Wants=network-online.target
    tailscaled.service`) so a VPS reboot cannot restart the crash loop by binding
    before Tailscale is up.
-6. Wired the office Windows machine (Workflow B) via `settings.json`.
+6. Wired the office Windows machine (Workflow B) via `settings.json` — **which
+   we now know does nothing**; that machine was never actually proxied. See
+   Workflow B.
 7. Repointed the VPS `ai` user (Workflow A) and the `ssh vps2` tunnel from the
    now-dead `127.0.0.1:8787` to `<removed-protected-address>:8787`.
 
@@ -228,9 +230,9 @@ sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 
 | Machine | Wired? | Evidence |
 |---|---|---|
-| hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `~/.claude/settings.json` `env` block + `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
-| **edge-dev** (Workflow B) | ✅ yes (wired 2026-08-21) | `env` block added to `~/.claude/settings.json`; was previously unwired and bypassing the proxy |
-| AL8960OFC, other Windows boxes | ❓ unverified since 2026-07-14 | re-check each machine's `~/.claude/settings.json` |
+| hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
+| **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
+| AL8960OFC, other Windows boxes | ❓ assume NOT wired | they were only ever wired via the inert `settings.json`. Run `ai-headroom status` on each; wire with `ai-headroom on`. |
 
 The ground truth for total spend is always the Anthropic Console / Claude usage
 screen — Headroom's own ledger only counts what actually flowed through it.
@@ -255,7 +257,7 @@ screen — Headroom's own ledger only counts what actually flowed through it.
 
   `off` takes about ten seconds, plus a full quit-and-reopen of Claude. `on`
   refuses to run if the proxy is not answering, so it cannot strand you. Every
-  change backs up `settings.json` first. Works on Windows (Git Bash) and Ubuntu.
+  change backs up the file it touches first. Works on Windows (Git Bash) and Ubuntu.
 
   **How it reaches every machine:** `bin/ai-headroom` is registered in
   `config/machine-tools.tsv`, so `bin/install-machine-tools.ps1` (Windows) /
@@ -268,13 +270,10 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   bash /c/repos/ai-devops/bin/ai-headroom off
   ```
 
-  On the VPS the redirect lives in **two** places — `/home/ai/.claude/settings.json`
-  and an `export` line in `/home/ai/.bashrc`. `ai-headroom` handles both: `off`
-  removes the JSON key **and** comments out the shell export, and `status`
-  reports each source on its own line. An earlier version edited only the JSON,
-  so `off` there printed "Claude goes straight to Anthropic" while the shell
-  export kept redirecting every new session — an escape hatch that lied. If you
-  ever edit by hand, you must do both.
+  On the VPS the switch is the `export` line in `/home/ai/.bashrc`; on Windows
+  it is the persistent USER environment variable. `ai-headroom` manages whichever
+  applies, deletes any stale `settings.json` entry, and warns when the shell you
+  are standing in has drifted from the persistent setting.
 - **Extra hop / latency.** Local-Windows requests now go
   laptop → VPS → Anthropic instead of straight to Anthropic.
 - **Unofficial posture.** Routing a Claude *subscription* through a modifying
@@ -289,13 +288,20 @@ screen — Headroom's own ledger only counts what actually flowed through it.
 
 ## 8. How to turn it OFF / revert
 
-**Per machine (Workflow B):** run `ai-headroom off`,
-then fully quit and reopen Claude Desktop. (Manually: remove the
-`"env": { "ANTHROPIC_BASE_URL": ... }` block from that machine's
-`~/.claude/settings.json`.) Claude goes straight back to Anthropic.
+**Per machine (Workflow B):** run `ai-headroom off`, then fully quit and reopen
+Claude.
 
-**VPS `ai` user (Workflow A):** comment out / remove the `export
-ANTHROPIC_BASE_URL=...` line in `/home/ai/.bashrc`.
+Manually, if the command is unavailable — note that **removing the
+`settings.json` block does nothing**, because that block was never the switch:
+
+```powershell
+[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL',$null,'User')
+```
+
+Then open a **new** terminal (existing ones keep the old value) and restart Claude.
+
+**VPS `ai` user (Workflow A):** run `ai-headroom off`, or comment out the
+`export ANTHROPIC_BASE_URL=...` line in `/home/ai/.bashrc` by hand.
 
 **Stop the proxy entirely on the VPS:**
 
@@ -328,7 +334,7 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
-| Off switch (VPS `ai`) | remove `env` from `/home/ai/.claude/settings.json` **and** the `.bashrc` export |
+| Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
 
 ---
 

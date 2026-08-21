@@ -46,6 +46,64 @@ the standard.
   value-safety rules (3–5 below) have nothing to bite on, and every field can be
   plaintext `text` rather than `concealed`.
 
+## Moving a secret VALUE safely
+
+The global rule says values move only through pipes or protected files. This is
+the operational detail behind it — read it before you touch a live credential.
+
+**The failure this prevents.** A secret has leaked the moment it reaches
+anywhere a human or a log can read it: a chat transcript, terminal scrollback,
+an error message, a process list. On 2026-08-21 a live 1Password
+service-account token was leaked into a chat transcript *minutes after it was
+created to replace an earlier leak*, forcing a second rotation in one session.
+Both leaks had the identical cause: the value sat in a command-line argument,
+and a parse error echoed the whole command back.
+
+**Allowed transports**
+
+```bash
+# pipe it — the value never becomes an argument
+op read "op://vibe_coding/<item>/<field>" | ssh host 'umask 077; cat > /path/file'
+```
+
+- `op run --env-file …`, `op://` references, and the 1Password MCP `op_run` tool
+  with `op://` values in `env` (protected injection — the tool redacts them).
+- Write it straight into a `0600` file, then have the consumer read that file.
+
+**Forbidden — each of these has leaked a real credential**
+
+- ANY command-line argument: after a remote command string, in `--flag=value`,
+  or as a `VAR=value cmd` prefix. On a parse error, a wrong argument position, or
+  a non-zero exit, the shell echoes the whole command — permanently.
+- Asking Albert to paste a secret into chat. Ask him to save it in 1Password and
+  name the item; read it from there.
+- `--reveal` into a terminal, or `echo`/`cat`/`grep` "just to check it looks
+  right".
+- Running any of this under `set -x`, a verbose/debug HTTP mode, or through a
+  consumer that echoes stdin. A pipe is not safe if something downstream prints.
+
+**Verify by fingerprint, never by printing**
+
+```bash
+printf '%s' "$value" | sha256sum | cut -c1-16
+```
+
+Use it to answer "is this the same token?", "did the write take?", "which of the
+four service-account tokens is this?" — without the value ever being displayed.
+
+**Containment is not remediation.** Removing a secret from one file does not
+invalidate copies already taken. Before reporting a leak handled, sweep the whole
+machine — `.bak-*` files, shell history, config files and their auto-backups,
+setup scripts, archives — and say plainly that only rotation retires an exposed
+value. Search by pattern and report PATHS ONLY; never print a matched line:
+
+```bash
+grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
+```
+
+Rotation itself still needs Albert's approval. Report the compromise, ask, and
+rotate only once he says yes.
+
 ## Hard rules
 
 1. **Vault is always `vibe_coding`** — the only vault the service account can

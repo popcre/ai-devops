@@ -221,13 +221,64 @@ bashrc_state() { # -> "on <url>" | "off <url>" | "none"
 bashrc_set() { # bashrc_set on|off
   local want="$1" state backup
   state="$(bashrc_state)"
-  case "$state" in
-    none) return 0 ;;
-    "$want "*) return 0 ;;
-  esac
+
+  # No line at all + we want it ON => ADD it. The previous version returned
+  # success here and printed "Proxy ON" while changing nothing, so a fresh
+  # Ubuntu machine silently kept talking straight to Anthropic. An action that
+  # reports success must have acted.
+  if [ "$state" = none ]; then
+    [ "$want" = on ] || return 0
+    # Windows: the registry variable is the switch. Do NOT also plant an export
+    # in Git Bash's .bashrc -- it would only cover shells started from Git Bash,
+    # and leaves a second source to forget about later.
+    is_windows && return 0
+    [ -f "$BASHRC" ] || { : > "$BASHRC"; }
+    backup="$BASHRC.bak-$(date +%Y%m%d-%H%M%S)-$$"
+    cp "$BASHRC" "$backup"; chmod 600 "$backup" 2>/dev/null || true
+    printf 'Backup: %s
+' "$backup"
+    # It MUST go above the stock Debian non-interactive guard. Claude Code SSH
+    # sessions run non-interactive shells; anything below the guard never runs,
+    # which is exactly how this proxy sat unused for nine days.
+    if grep -qE '^[[:space:]]*\*\)[[:space:]]*return;;' "$BASHRC" 2>/dev/null        || grep -qE '^case \$- in' "$BASHRC" 2>/dev/null; then
+      "$PY" - "$BASHRC" "$PROXY_URL" <<'PY' || die "ai-headroom: failed to edit $BASHRC. Unchanged; backup above."
+import io, os, sys
+p, url = sys.argv[1], sys.argv[2]
+NL = chr(10)
+lines = io.open(p, encoding="utf-8", errors="surrogateescape").read().split(NL)
+block = [
+  "# Headroom token-compression proxy (managed by ai-headroom).",
+  "# MUST stay above the non-interactive guard: Claude Code SSH sessions run a",
+  "# NON-interactive shell and never reach anything below it.",
+  "export ANTHROPIC_BASE_URL=" + url,
+  "",
+]
+idx = next((i for i, l in enumerate(lines) if l.startswith("case $- in")), 0)
+lines[idx:idx] = block
+tmp = p + ".tmp"
+io.open(tmp, "w", encoding="utf-8", errors="surrogateescape", newline=NL).write(NL.join(lines))
+os.chmod(tmp, 0o600)
+os.replace(tmp, p)
+PY
+    else
+      printf '# Headroom token-compression proxy (managed by ai-headroom).
+export ANTHROPIC_BASE_URL=%s
+' "$PROXY_URL" >> "$BASHRC"
+    fi
+    bash -n "$BASHRC" || die "ai-headroom: the edit left $BASHRC invalid. Restore: cp '$backup' '$BASHRC'"
+    [ "$(bashrc_state)" = "on $PROXY_URL" ] || die "ai-headroom: added the export to $BASHRC but cannot read it back. Restore: cp '$backup' '$BASHRC'"
+    prune_backups "$BASHRC"
+    printf 'Shell startup export added to %s
+' "$BASHRC"
+    return 0
+  fi
+
+  case "$state" in "$want "*) return 0 ;; esac
+
   backup="$BASHRC.bak-$(date +%Y%m%d-%H%M%S)-$$"
-  cp "$BASHRC" "$backup"
-  printf 'Backup: %s\n' "$backup"
+  cp "$BASHRC" "$backup"; chmod 600 "$backup" 2>/dev/null || true
+  printf 'Backup: %s
+' "$backup"
   if [ "$want" = off ]; then
     sed -i "s|^[[:space:]]*export[[:space:]]\{1,\}ANTHROPIC_BASE_URL=|${DISABLED_TAG}export ANTHROPIC_BASE_URL=|" "$BASHRC"
   else
@@ -235,8 +286,14 @@ bashrc_set() { # bashrc_set on|off
   fi
   bash -n "$BASHRC" || die "ai-headroom: the edit left $BASHRC syntactically invalid.
 Restore it with:  cp '$backup' '$BASHRC'"
+  # Read back: never report a change we cannot see.
+  case "$(bashrc_state)" in
+    "$want "*) : ;;
+    *) die "ai-headroom: edited $BASHRC but it is still not '$want'. Restore: cp '$backup' '$BASHRC'" ;;
+  esac
   prune_backups "$BASHRC"
-  printf 'Shell startup export in %s: %s\n' "$BASHRC" "$want"
+  printf 'Shell startup export in %s: %s
+' "$BASHRC" "$want"
 }
 
 # ---------------------------------------------------------------------------
@@ -263,10 +320,25 @@ case "$action" in
       off\ *) printf 'Shell startup (.bashrc): disabled by ai-headroom
 ' ;;
     esac
-    cur="$(json_url)"
+    cur="$(json_url)" || die "ai-headroom: could not read $SETTINGS."
     if [ -n "$cur" ]; then
       printf 'settings.json          : has %s -- IGNORED by Claude, run "ai-headroom on" or "off" to remove it
 ' "$cur"
+    fi
+    # The persistent setting is what NEW processes inherit -- but this very shell
+    # may already carry a different value, and anything launched from it inherits
+    # THAT. Codex flagged this: status could say "direct" while the terminal the
+    # user relaunches Claude from still exports the proxy. Show both.
+    eff="${ANTHROPIC_BASE_URL:-}"
+    persisted="${wv:-}"
+    if [ -z "$persisted" ] && [ "${brc%% *}" = on ]; then persisted="${brc#on }"; fi
+    if [ "$eff" != "$persisted" ]; then
+      printf 'THIS shell inherits    : %s
+' "${eff:-(not set)}"
+      printf '  ^ differs from the persistent setting above. Anything launched from THIS
+'
+      printf '    shell inherits this value. Open a NEW terminal to pick up the change.
+'
     fi
     if [ "$HAVE_CURL" != 1 ]; then
       printf 'Proxy health           : UNKNOWN (curl not on PATH, cannot check)
@@ -293,7 +365,11 @@ still works without curl.)"
 Turning it on now would leave Claude unable to connect at all."
     winenv_set "$PROXY_URL"
     bashrc_set on
-    [ -n "$(json_url)" ] && json_set ""   # drop the inert, misleading entry
+    # Capture first: a `die` inside $( ) only kills the subshell, so
+    # `[ -n "$(json_url)" ]` silently swallowed a fatal read error and the branch
+    # went on to print success. Assign, check status, then act.
+    stale="$(json_url)" || die "ai-headroom: could not read $SETTINGS; refusing to claim success."
+    [ -n "$stale" ] && json_set ""   # drop the inert, misleading entry
     printf 'Proxy ON  -> %s
 ' "$PROXY_URL"
     printf 'Now fully quit Claude (tray icon -> Quit) and reopen it. Already-running
@@ -304,7 +380,8 @@ Turning it on now would leave Claude unable to connect at all."
   off)
     winenv_set ""
     bashrc_set off
-    [ -n "$(json_url)" ] && json_set ""
+    stale="$(json_url)" || die "ai-headroom: could not read $SETTINGS; refusing to claim success."
+    [ -n "$stale" ] && json_set ""
     printf 'Proxy OFF -> Claude goes straight to Anthropic.
 '
     printf 'Now fully quit Claude (tray icon -> Quit) and reopen it. Already-running
