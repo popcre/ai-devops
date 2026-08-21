@@ -86,12 +86,38 @@ point at the same address: **`http://<removed-protected-address>:8787`**.
 ### Workflow A — Claude running **on the VPS** (remote/SSH mode)
 
 "Claude for Windows connects via SSH to the Claude CLI running on the hetz VPS."
-That CLI runs as the **`ai`** user, whose shell exports the proxy address:
+That CLI runs as the **`ai`** user. The redirect is set in **two** places, and
+both matter:
+
+```jsonc
+// /home/ai/.claude/settings.json  — the reliable one
+"env": { "ANTHROPIC_BASE_URL": "http://<removed-protected-address>:8787" }
+```
 
 ```bash
-# /home/ai/.bashrc  (line ~138)
+# /home/ai/.bashrc  — ABOVE the non-interactive guard (see warning below)
 export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787
 ```
+
+> 🚨 **The non-interactive-shell trap (found 2026-08-21).** `~/.bashrc` opens
+> with the stock Debian guard `case $- in *i*) ;; *) return;; esac`. A Claude
+> Code SSH session runs a **non-interactive** shell, so it hits that `return`
+> and every export below it is skipped. The proxy export used to sit at line
+> ~138, far below the guard — so VPS sessions started from Claude Code silently
+> went straight to Anthropic while everyone believed they were proxied. Only
+> sessions launched from a real interactive terminal were ever compressed;
+> `savings_events.jsonl` shows exactly that pattern (7 scattered days in a
+> month, nothing between). The export is now above the guard, and
+> `settings.json` carries it too so it no longer depends on shell type at all.
+>
+> Verify after any change to either file:
+>
+> ```bash
+> ssh vps2-direct 'echo $ANTHROPIC_BASE_URL'   # non-interactive; must NOT be empty
+> ```
+>
+> This is the same trap that bit the 1Password service-account token on
+> 2026-07-23. Anything an AI session needs must live above that guard.
 
 The VPS reaches its own Tailscale IP locally, so this needs no tunnel. This is
 the workflow that produced the only real savings we have so far (2026-07-07).
@@ -185,8 +211,8 @@ sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 
 | Machine | Wired? | Evidence |
 |---|---|---|
-| hetz VPS `ai` user (Workflow A) | ✅ yes | `export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787` at `/home/ai/.bashrc:138` |
-| **edge-dev** (Workflow B) | ❌ **no** | no `env` block in `~/.claude/settings.json`; sessions resolve `ANTHROPIC_BASE_URL=https://api.anthropic.com` and bypass the proxy |
+| hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `~/.claude/settings.json` `env` block + `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
+| **edge-dev** (Workflow B) | ✅ yes (wired 2026-08-21) | `env` block added to `~/.claude/settings.json`; was previously unwired and bypassing the proxy |
 | AL8960OFC, other Windows boxes | ❓ unverified since 2026-07-14 | re-check each machine's `~/.claude/settings.json` |
 
 The ground truth for total spend is always the Anthropic Console / Claude usage
@@ -239,3 +265,22 @@ systemctl disable headroom.service     # also prevent it starting on boot
 | Service control | `systemctl {status,restart,stop} headroom.service` |
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
 | Off switch (this machine) | delete `env` block in `~/.claude/settings.json` + restart Claude Desktop |
+
+---
+
+## 10. Does this work for ChatGPT / Codex?
+
+**Yes — Headroom 0.30.0 has an OpenAI/Codex pipeline**, separate from the
+Anthropic one. `headroom proxy --help` exposes
+`--disable-kompress-openai / --enable-kompress-openai` ("OpenAI/Codex pipeline
+only"), `--openai-api-url` (`OPENAI_TARGET_API_URL`) for the upstream target,
+and Codex wire logging to `~/.headroom/logs/codex_wire`.
+
+**But we have never used it.** Every one of the 433 recorded compression events
+is `"client":"claude-code"` — zero Codex traffic, lifetime. So the capability is
+documented by the vendor and present in our build, and **unproven here**.
+
+Wiring Codex would mean pointing its API base at the proxy the same way Claude's
+is pointed. Treat it as a fresh experiment with its own measurement, not as
+something already known to work — and note that Codex sign-in flows are fussier
+about a rewritten base URL than Claude's are.
