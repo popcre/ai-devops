@@ -18,8 +18,10 @@ blobs *before* they are sent upstream, and forwards everything else untouched.
 Goal: **fewer input tokens per request → lower Claude token usage.**
 
 - Vendor claim: 15–20% fewer tokens for coding agents (60–95% for raw JSON).
-- **Our measured reality so far: 0.27%** (see §6). Payoff is **unproven** on our
-  workload — this is being run as a measured experiment, not a proven win.
+- **Our measured reality: 13.2%** on the last real session (2026-08-12), and
+  ~5.7% lifetime across 845 requests (see §6). The old "0.27%" figure was
+  measured BEFORE the 2026-07-14 crash-loop fix and is obsolete — do not quote
+  it. On our workload the payoff now looks close to the vendor claim.
 - Installed version: **0.30.0** (pipx, Python).
 
 > ⚖️ **Standing decision: if it is not clearly worth it, we pull it.** This is a
@@ -161,14 +163,31 @@ sudo -u ai /home/ai/.local/bin/headroom perf        # savings report
 sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 ```
 
-**Lifetime numbers at fix time (2026-07-14):**
+**Numbers as of 2026-08-21** (superseding the pre-fix 2026-07-14 reading of
+50 requests / 0.27%, which was taken while the proxy was crash-looping):
 
 | Metric | Value |
 |---|---|
-| Requests handled | 50 |
-| Tokens saved | 594 of 217,845 input tokens (**0.27%**) |
-| $ saved | ~$0.003 |
-| Last real activity | 2026-07-07 |
+| Requests handled (lifetime) | 845 |
+| Tokens saved (lifetime) | 1,997,341 of 35,298,425 input tokens (**~5.7%**) |
+| $ saved (lifetime) | ~$9.99 |
+| Last real session (2026-08-12) | 872,525 saved of 5,727,745 (**13.22%**), ~$4.36 |
+| Last real activity | **2026-08-12** |
+
+> ⚠️ **Traffic, not health, is the thing to check.** On 2026-08-21 the service
+> was `active`, `enabled`, 16 days uptime, `NRestarts=0`, `/health` green — and
+> had carried **zero** traffic for nine days, because only Workflow A (Claude
+> running on the VPS itself) is still wired. A green health check proves nothing
+> about whether anything is being saved. Always read `last_activity_at` in
+> `proxy_savings.json`.
+
+### Which machines are wired (re-checked 2026-08-21)
+
+| Machine | Wired? | Evidence |
+|---|---|---|
+| hetz VPS `ai` user (Workflow A) | ✅ yes | `export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787` at `/home/ai/.bashrc:138` |
+| **edge-dev** (Workflow B) | ❌ **no** | no `env` block in `~/.claude/settings.json`; sessions resolve `ANTHROPIC_BASE_URL=https://api.anthropic.com` and bypass the proxy |
+| AL8960OFC, other Windows boxes | ❓ unverified since 2026-07-14 | re-check each machine's `~/.claude/settings.json` |
 
 The ground truth for total spend is always the Anthropic Console / Claude usage
 screen — Headroom's own ledger only counts what actually flowed through it.
@@ -184,8 +203,11 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   third-party proxy is not an Anthropic-sanctioned path. It works technically and
   did before, but carries some non-zero breakage/account risk. Albert's account,
   Albert's call.
-- **Unproven savings** (0.27% so far) — the whole reason for the "pull it if not
-  worth it" stance above.
+- **Savings now look real** (13.2% on the last measured session) but the sample
+  is small, and the "pull it if it is not worth it" stance above still stands.
+- **Silent disuse is the real failure mode**, not crashes. Nothing alerts when a
+  machine stops routing through the proxy — it just quietly saves nothing while
+  looking perfectly healthy. See the warning in §6.
 
 ## 8. How to turn it OFF / revert
 
