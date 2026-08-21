@@ -21,6 +21,8 @@ sessions remain limited to the current checkout. Equivalent GitHub HTTPS, SSH,
 case, `.git`, and local-clone origins share one paid-work lock. If a local wrapper
 is interrupted, do not start another review: provider cancellation is unconfirmed
 and the retained lock deliberately blocks another charge until a human reconciles it.
+The configured wait ceiling also stops a hung local Grok process; because that
+still does not prove remote cancellation, the same paid-work block remains.
 `delete` refuses an active session and never deletes Grok's provider-side history.
 Long turns print elapsed-time heartbeats; these prove only that the local wrapper is
 still waiting, not that the provider is active.

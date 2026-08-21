@@ -6,10 +6,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (34 cases) |
+| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (37 cases) |
 | 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
-| 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback and concurrent reply fixtures |
-| 4 | Review completion/governance contract | ✅ complete | `--review` verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |
+| 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback, concurrent reply, bounded provider-call, and signal-owned child fixtures |
+| 4 | Review completion/governance contract | ✅ complete | `--review` refuses a missing Git commit before provider contact; verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |
 | 5 | Land and install | 🟨 integrated locally | combined branch is rebased on current GitHub `main`; exact-head approval, push, and permitted installation remain |
 
 Fresh session starts at Step 5.
@@ -41,9 +41,11 @@ provider API redesign, credential rotation, model selection, other wrappers.
 ## 5. Current state of the code
 
 The source now validates session names and containment, locks each conversation,
-publishes history and reviewer metadata atomically, and leaves failed provider
-turns out of durable history. The hostile traversal, link, concurrency, failed-call,
-and publication-failure tests pass. The STATUS table above is authoritative;
+owns and bounds the provider request before unlocking, publishes history and
+reviewer metadata atomically, refuses formal reviews without an exact Git commit,
+and leaves failed provider turns out of durable history. The hostile traversal,
+link, concurrency, interruption, missing-commit, failed-call, and publication-
+failure tests pass. The STATUS table above is authoritative;
 GitHub landing and permitted installation remain.
 
 ## 6. Key findings and root cause

@@ -133,11 +133,23 @@ echo wait > "$TMP/mode"
 LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
 check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
 check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq '[0-9]+s.*alive'"
-sleep 3
+sleep 5
 touch "$TMP/release-grok"
 wait "$FIRST_PID"
-check "slow_turn_emits_truthful_bounded_heartbeat" "grep -q 'does not prove provider activity' '$TMP/first.err'"
+check "slow_turn_emits_truthful_bounded_heartbeats" "test \"\$(grep -c 'does not prove provider activity' '$TMP/first.err')\" -ge 2"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
+
+# The configured wait ceiling must also bound a Grok process that never exits.
+# A timed-out paid turn remains blocked because local process death does not
+# prove that the provider stopped billing or working.
+rm -f "$TMP/release-grok"; echo hold > "$TMP/mode"
+TIMEOUT_START="$(date +%s)"
+TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"; TIMED_OUT_RC=$?
+TIMEOUT_ELAPSED=$(( $(date +%s) - TIMEOUT_START ))
+TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && test '$TIMEOUT_ELAPSED' -lt 12"
+check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
+rm -rf "$TIMEOUT_LOCK"
 
 LOCK_EQ="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16).lock.d"
 mkdir -p "$LOCK_EQ"; printf '99999999\n' > "$LOCK_EQ/pid"; printf 'stale\n' > "$LOCK_EQ/label"

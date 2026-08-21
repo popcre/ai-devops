@@ -68,11 +68,14 @@ file by hand to work around that protection.
 Each successful turn commits the user message and DeepSeek reply together. If
 the provider fails or a review has no usable verdict, the stored conversation
 does not advance. Replies to one session are serialized, so never bypass the
-wrapper to edit its JSON transcript.
+wrapper to edit its JSON transcript. Provider calls have connection and total
+time limits. On interruption, the wrapper stops and waits for its owned request
+before releasing the session lock, so a second turn cannot overlap it.
 
 For a formal review, add `--review` to `send` or `reply`. That mode requires a
 literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes a
-metadata sidecar bound to the session and exact Git HEAD. A nonzero result is
+metadata sidecar bound to the session and exact Git HEAD. It refuses before
+provider contact when no Git commit can be resolved. A nonzero result is
 incomplete evidence, never approval. Set `AI_DEEPSEEK_CALLER` to the client
 running the review (`codex` or `claude`) so later incident evidence can match the
 exact caller instead of recording it as `unknown`.

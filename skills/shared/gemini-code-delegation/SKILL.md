@@ -16,5 +16,6 @@ AI_GEMINI_CALLER=codex ai-gemini doctor
 
 Until qualification finishes, stop after `doctor` and choose another governed
 reviewer. An empty answer, wrong model or conversation, changed protected file,
-stale checkout, interruption, or missing durable report is always a failed
-review. Gemini remains review-only even after eventual qualification.
+committed or uncommitted source drift, interruption, or missing durable report
+is always a failed review. Gemini remains review-only even after eventual
+qualification.

@@ -42,6 +42,8 @@ MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
 BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
 LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
 CALLER="${AI_DEEPSEEK_CALLER:-unknown}"
+CONNECT_TIMEOUT="${AI_DEEPSEEK_CONNECT_TIMEOUT:-15}"
+CALL_TIMEOUT="${AI_DEEPSEEK_CALL_TIMEOUT:-300}"
 
 usage() {
   cat <<'EOF'
@@ -160,6 +162,7 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; REVIEW_HEAD=""
 release_lock() {
   [ -n "$LOCK_DIR" ] || return 0
   [ -f "$LOCK_DIR/owner" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null)" = "$LOCK_TOKEN" ] || return 0
@@ -169,6 +172,13 @@ release_lock() {
 on_lock_signal() { # SIGNAL_EXIT_CODE
   local code="$1"
   trap - EXIT INT TERM
+  if [ -n "$ACTIVE_API_PID" ]; then
+    kill -TERM "$ACTIVE_API_PID" 2>/dev/null || true
+    wait "$ACTIVE_API_PID" 2>/dev/null || true
+    ACTIVE_API_PID=""
+  fi
+  [ -z "$ACTIVE_API_TMP" ] || rm -f $ACTIVE_API_TMP
+  ACTIVE_API_TMP=""
   [ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock
   exit "$code"
 }
@@ -201,33 +211,55 @@ PY
 }
 
 call_api() {
-  # $1 = path to a JSON file containing the messages array
-  local msgs_file="$1" req_file resp_file http_code rc
-  req_file="$(mktemp)"; resp_file="$(mktemp)"
+  # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
+  # signal cannot release the conversation lock while the request still runs.
+  local msgs_file="$1" reply_file="$2" req_file resp_file status_file http_code rc
+  req_file="$(mktemp)"; resp_file="$(mktemp)"; status_file="$(mktemp)"
+  ACTIVE_API_TMP="$req_file $resp_file $status_file"
   MODEL="$MODEL" "$PYTHON" - "$msgs_file" >"$req_file" <<'PY'
 import json, os, sys
 messages = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({"model": os.environ["MODEL"], "messages": messages, "stream": False}))
 PY
-  http_code="$(curl -sS -o "$resp_file" -w '%{http_code}' \
+  curl -sS -o "$resp_file" -w '%{http_code}' \
+    --connect-timeout "$CONNECT_TIMEOUT" --max-time "$CALL_TIMEOUT" \
     "$BASE_URL/chat/completions" \
     -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
     -H "Content-Type: application/json" \
-    -d @"$req_file")"
+    -d @"$req_file" >"$status_file" &
+  ACTIVE_API_PID=$!
+  rc=0; wait "$ACTIVE_API_PID" || rc=$?
+  ACTIVE_API_PID=""
+  http_code="$(cat "$status_file" 2>/dev/null || true)"
+  if [ "$rc" -ne 0 ]; then
+    echo "Error: DeepSeek API request failed or exceeded ${CALL_TIMEOUT}s." >&2
+    rm -f "$req_file" "$resp_file" "$status_file"
+    ACTIVE_API_TMP=""
+    return 1
+  fi
   if [ "$http_code" != "200" ]; then
     echo "Error: DeepSeek API returned HTTP $http_code:" >&2
     cat "$resp_file" >&2
-    rm -f "$req_file" "$resp_file"
+    rm -f "$req_file" "$resp_file" "$status_file"
+    ACTIVE_API_TMP=""
     return 1
   fi
   "$PYTHON" -c '
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 print(data["choices"][0]["message"]["content"])
-' "$resp_file"
+' "$resp_file" >"$reply_file"
   rc=$?
-  rm -f "$req_file" "$resp_file"
+  rm -f "$req_file" "$resp_file" "$status_file"
+  ACTIVE_API_TMP=""
   return $rc
+}
+
+require_review_head() {
+  local head
+  head="$(git -C "$REPO_ROOT" rev-parse --verify HEAD^{commit} 2>/dev/null || true)"
+  [ -n "$head" ] || { echo "Error: --review requires a Git repository with an exact commit." >&2; return 1; }
+  printf '%s' "$head"
 }
 
 build_candidate() {
@@ -258,7 +290,8 @@ PY
 write_review_metadata() { # id verdict
   local id="$1" verdict="$2" meta tmp head repo
   meta="$(session_path "$id" .meta.json)" || return 1
-  tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="${REVIEW_HEAD:-}"
+  [ -n "$head" ] || { rm -f "$tmp"; return 1; }
   REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" "$PYTHON" - "$tmp" <<'PY'
 import json, os, sys
 json.dump({"schema_version":1,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"status":"complete"},open(sys.argv[1],"w",encoding="utf-8"),indent=2)
@@ -311,6 +344,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
       esac
     done
     [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]' >&2; exit 2; }
+    [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
@@ -319,9 +353,10 @@ End the response with a literal ## Verdict heading followed on the next line by 
     ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
     while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
     acquire_lock "$F" || exit 1
-    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"
+    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     if [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
-    REPLY="$(call_api "$CANDIDATE")" || { rm -f "$CANDIDATE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
+    REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; conversation was not created." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
@@ -355,6 +390,7 @@ End the response with a literal ## Verdict heading followed on the next line by 
       esac
     done
     [ -n "$ID" ] && [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent reply <session-id> "<message>"' >&2; exit 2; }
+    [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
     MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
@@ -363,9 +399,10 @@ End the response with a literal ## Verdict heading followed on the next line by 
 End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED."
 
     acquire_lock "$F" || exit 1
-    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"
+    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
-    REPLY="$(call_api "$CANDIDATE")" || { rm -f "$CANDIDATE"; echo "Error: provider failed; canonical conversation is unchanged." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; canonical conversation is unchanged." >&2; exit 1; }
+    REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; canonical conversation is unchanged." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"

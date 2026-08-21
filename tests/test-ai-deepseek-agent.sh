@@ -16,11 +16,18 @@ printf '%s\n' "$@" > "$DEEPSEEK_TEST_ARGS"
 STUB
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DEEPSEEK_CURL_ARGS"
 out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;; esac; done
-[ -n "${DEEPSEEK_STUB_DELAY:-}" ] && sleep "$DEEPSEEK_STUB_DELAY"
+[ -z "${DEEPSEEK_STUB_DELAY:-}" ] || {
+  printf '%s\n' "$$" > "$DEEPSEEK_STUB_PID_FILE"
+  trap 'printf terminated > "$DEEPSEEK_STUB_TERM_MARKER"; exit 143' TERM
+  sleep "$DEEPSEEK_STUB_DELAY"
+}
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"stub"}' > "$out"; printf 500; else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
+export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
+: > "$DEEPSEEK_CURL_ARGS"
 echo 'ai-deepseek-agent tests'
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" send test >/dev/null 2>&1
 check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
@@ -30,6 +37,7 @@ run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KE
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "send creates a safe session" "test -n '$SESSION' -a -f '$TMP/repo/.ai/deepseek-sessions/$SESSION.json'"
 check "show reads stored session" "run show '$SESSION' | grep -q answer"
+check "provider calls have connection and total time limits" "grep -q -- '--connect-timeout 15 --max-time 300' '$DEEPSEEK_CURL_ARGS'"
 printf '{"outside":true}\n' > "$TMP/outside.json"; before="$(sha256sum "$TMP/outside.json"|cut -d' ' -f1)"
 for hostile in '..' '../outside' '../../outside' '/tmp/outside' 'C:\outside' 'C:/outside' 'CON' 'con.txt' 'name/part' 'name\part' '.hidden'; do if run show "$hostile" >/dev/null 2>&1 || run reply "$hostile" attack >/dev/null 2>&1; then bad "hostile name rejected: $hostile"; else ok "hostile name rejected: $hostile"; fi; done
 after="$(sha256sum "$TMP/outside.json"|cut -d' ' -f1)"; check "hostile names preserve outside files" "test '$before' = '$after'"
@@ -45,11 +53,18 @@ DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DE
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role)==[\"user\",\"assistant\",\"user\",\"assistant\",\"user\",\"assistant\"]' '$history'"
 history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
+rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
 (cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
-for _ in $(seq 1 100); do [ -d "$history.lock" ] && break; sleep .05; done
+for _ in $(seq 1 100); do [ -d "$history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
 kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
 check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"
+check "interrupted reply stops its provider child before unlocking" "test -f '$DEEPSEEK_STUB_TERM_MARKER' && ! kill -0 '$provider_pid' 2>/dev/null"
 check "interrupted reply releases its owned lock" "test ! -d '$history.lock'"
+mkdir -p "$TMP/not-a-repo"
+calls_before_nonrepo="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+(cd "$TMP/not-a-repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_REPLY=$'## Verdict\nAPPROVE' "$SCRIPT" send no-head --review) >/dev/null 2>&1; nonrepo_rc=$?
+check "formal review refuses a missing Git commit before provider contact" "test '$nonrepo_rc' -ne 0 && test '$calls_before_nonrepo' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 DEEPSEEK_STUB_REPLY='no verdict' run send review-me --review >/dev/null 2>&1; missing_rc=$?
 check "review mode rejects missing verdict" "test '$missing_rc' -ne 0"
 REVIEW_OUT="$(DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send review-me --review)"; REVIEW_ID="$(printf '%s\n' "$REVIEW_OUT"|sed -n 's/^SESSION_ID: //p')"

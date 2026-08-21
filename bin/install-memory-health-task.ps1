@@ -1,4 +1,4 @@
-# install-memory-health-task.ps1 — register the weekly READ-ONLY memory health report.
+# install-memory-health-task.ps1 - register the weekly READ-ONLY memory health report.
 #
 # The task runs bin/ai-memory-health, which never edits or deletes a memory. It writes
 # the report to ~/.config/ai-devops/memory-health-latest.md and, when there is something
@@ -8,7 +8,7 @@
 # tombstones make a deletion propagate to every machine and survive a later pull, so a
 # wrong automated delete is not recoverable. A human approves every change.
 #
-# Requires PowerShell 7 (pwsh). Idempotent — re-running replaces the task.
+# Requires PowerShell 7 (pwsh). Idempotent - re-running replaces the task.
 
 [CmdletBinding()]
 param(
@@ -108,7 +108,7 @@ try {
     -Settings $settings -Principal $principal `
     -Description 'Weekly read-only AI memory health report. Never edits or deletes a memory.' `
     -Force -ErrorAction Stop | Out-Null
-  Ok "Scheduled task '$taskName' — $DayOfWeek at $At."
+  Ok "Scheduled task '$taskName' - $DayOfWeek at $At."
   Ok "Report file: $reportPath"
   Ok "Run it now with:  Start-ScheduledTask -TaskName $taskName"
 } catch {

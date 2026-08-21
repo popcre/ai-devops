@@ -128,5 +128,12 @@ check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' as
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
 check 'delete refuses uncertain evidence' "! (cd '$R7' && '$SCRIPT' delete stale)"
 
+R8="$TMP/repo8"; make_repo "$R8"; new_run "$R8" source-tracked normal >/dev/null; printf changed >> "$R8/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'follow-up refuses uncommitted tracked source drift' "! (cd '$R8' && '$SCRIPT' ask source-tracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+R9="$TMP/repo9"; make_repo "$R9"; new_run "$R9" source-untracked normal >/dev/null; printf new > "$R9/untracked.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'follow-up refuses untracked source drift' "! (cd '$R9' && '$SCRIPT' ask source-untracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+R10="$TMP/repo10"; make_repo "$R10"; new_run "$R10" source-ignored normal >/dev/null; printf ignored > "$R10/.ignored"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'follow-up refuses ignored source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

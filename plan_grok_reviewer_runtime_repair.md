@@ -7,9 +7,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Baseline and upstream identity | ✅ complete locally | `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
-| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 128/128 |
+| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 130/130 |
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
-| 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
+| 4 | Mid-turn progress | ✅ complete locally | two-heartbeat fixture plus a process-level timeout that retains remote uncertainty |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |
 | 6 | Live qualification and landing | ⬜ open | remote SHA, issue #56 close |
 
@@ -49,9 +49,10 @@ mode, provider billing policy.
 
 The source now separates checkout-bound sessions from upstream-wide paid-work
 locks, exposes active work across clones, preserves unconfirmed remote work after
-signals, missing terminal results, or dead local owners, and emits factual bounded
-heartbeats. Offline tests cover normalized clone identity and all three uncertainty
-paths. The status table above is authoritative; live qualification remains open.
+signals, process timeouts, missing terminal results, or dead local owners, and
+emits factual bounded heartbeats. Offline tests cover normalized clone identity,
+two progress updates, a bounded hung local process, and all uncertainty paths. The
+status table above is authoritative; live qualification remains open.
 
 ## 6. Key findings and root cause
 

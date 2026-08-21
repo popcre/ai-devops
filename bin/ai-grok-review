@@ -455,6 +455,19 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   "$grok" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   while kill -0 "$child" 2>/dev/null; do
+    if [ "$waited" -ge "$WAIT_TIMEOUT" ]; then
+      note "  Grok command exceeded the configured ${WAIT_TIMEOUT}s limit; stopping the local process."
+      note "  This does not prove the provider stopped, so paid work remains blocked for reconciliation."
+      kill -TERM "$child" 2>/dev/null || true
+      for _i in 1 2 3 4 5; do
+        kill -0 "$child" 2>/dev/null || break
+        sleep 1
+      done
+      kill -KILL "$child" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+      printf '124'
+      return 0
+    fi
     sleep "$POLL_INTERVAL"
     waited=$((waited + POLL_INTERVAL))
     if [ "$waited" -ge "$next_heartbeat" ]; then
@@ -717,13 +730,17 @@ cmd_new() {
   prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   build_prompt_file "$pf"
   rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns")"
-  if ! await_result "$out" "review '$name'"; then
+  if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     trap - EXIT
     mark_remote_uncertain "$rid_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
-    note "  A first turn that completes but delivers no output has been seen before"
-    note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
+    if [ "$rc" = 124 ]; then
+      note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
+    else
+      note "  A first turn that completes but delivers no output has been seen before"
+      note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
+    fi
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
 
@@ -808,13 +825,15 @@ $REVIEW_HEAD only."
   fi
   build_prompt_file "$pf"
   rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid")"
-  if ! await_result "$out" "review '$name'"; then
+  if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     lock_release "$sess_lock"
     trap - EXIT
     mark_remote_uncertain "$rid_lock"
     note "  grok exit status was $rc - which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
-    if [ ! -s "$out" ]; then
+    if [ "$rc" = 124 ]; then
+      note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
+    elif [ ! -s "$out" ]; then
       note ""
       note "  An empty RESUME is a known 0.2.118 behaviour after a session was cancelled."
       note "  Do not keep retrying this session: start a fresh one with"
