@@ -205,7 +205,7 @@ The Claude MCP servers currently provisioned (from `~/.claude.json`; list them w
 | `synology-monitor` | remote `https://nas-mcp.designflow.app/mcp` | **Bearer token** |
 | `playwright` | local `npx @playwright/mcp` | no |
 | `chrome-devtools` | local `npx chrome-devtools-mcp` | no |
-| `vercel` | remote via `mcp-remote` | no (interactive auth) |
+| `vercel` | not configured in Claude; Codex uses native HTTP | no (interactive auth) |
 | `trigger` | local `npx trigger.dev mcp` | **`TRIGGER_ACCESS_TOKEN`** (admin-level PAT field, rotated 2026-07-26) |
 | `1password` | local `npx @u2giants/1password-mcp` | **`OP_SERVICE_ACCOUNT_TOKEN`** |
 

@@ -136,13 +136,19 @@ if grep -Fq "\$CodexMcpServers['railway']" bin/setup-machine.ps1 &&
    grep -Fq '@railway/cli@latest' bin/reconcile-windows-package-exceptions.ps1; then
   ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
 else bad "Windows setup does not fully manage Railway"; fi
-for server in ag-grid playwright codex-cli synology-monitor devops-mcp vercel railway trigger recall-ai 1password supabase; do
+for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger recall-ai 1password supabase; do
   if grep -Fq "\$McpServers[\"$server\"]" bin/setup-machine.ps1; then
     ok "shared MCP set includes $server"
   else
     bad "shared MCP set is missing $server"
   fi
 done
+if ! grep -Fq '$McpServers["vercel"]' bin/setup-machine.ps1 &&
+   grep -Fq "\$CodexMcpServers['vercel']" bin/setup-machine.ps1; then
+  ok "Vercel is Codex-only and cannot trigger Claude browser-auth loops"
+else
+  bad "Vercel must be absent from Claude and native in Codex"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

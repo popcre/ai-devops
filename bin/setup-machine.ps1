@@ -34,8 +34,8 @@ What it does (idempotent - safe to re-run):
      every machine and a fresh machine matches an established one.
        - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
-       - no secret, plain npx      : playwright, chrome-devtools, ag-grid,
-                                      vercel (browser OAuth)
+       - no secret, plain npx      : playwright, chrome-devtools, ag-grid
+       - Codex-only native HTTP    : vercel (browser OAuth)
        - codex-cli                 : native `codex mcp-server`, absolute exe
      No token is ever written into either config; only URLs and op:// references.
      Servers we do not define (the Windows-MCP extension, anything hand-added)
@@ -378,9 +378,9 @@ $McpServers["1password"] = @{
 }
 
 # playwright / chrome-devtools / ag-grid - plain npx stdio servers, no secret.
-# vercel is remote but authenticates with an interactive OAuth flow that
-# mcp-remote opens in a browser, so it needs no token either - and must NOT go
-# through the remote launcher, which would force a bearer header onto it.
+# Vercel is intentionally absent from Claude. Claude requires the mcp-remote
+# OAuth bridge, whose failed/expired refresh loop repeatedly opens browser login
+# windows. Codex adds Vercel below using its supported native HTTP transport.
 $McpServers["playwright"] = @{
   command = "cmd"
   args = @("/c", "npx", "-y", "@playwright/mcp@latest")
@@ -392,10 +392,6 @@ $McpServers["chrome-devtools"] = @{
 $McpServers["ag-grid"] = @{
   command = "cmd"
   args = @("/c", "npx", "-y", "ag-mcp")
-}
-$McpServers["vercel"] = @{
-  command = "cmd"
-  args = @("/c", "npx", "-y", "mcp-remote@0.1.38", "https://mcp.vercel.com")
 }
 $McpServers["railway"] = @{
   command = "cmd"
@@ -564,6 +560,9 @@ if ($SkipDesktopMcp) {
     # do not define (Windows-MCP extension entries, anything hand-added) are left
     # untouched - this only ever adds or refreshes our own.
     foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
+    # Remove the formerly managed Vercel bridge so upgrades stop its recurring
+    # browser-authentication loop. Preserve every unrelated/hand-added server.
+    $null = $cfg["mcpServers"].Remove("vercel")
     ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
     Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
     Ok "Wired token-free: $McpServerList - no tokens in the file"
@@ -698,6 +697,7 @@ if (Test-Path $ccConfig) {
 if ($null -ne $cc) {
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
   foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
+  $null = $cc["mcpServers"].Remove("vercel")
   ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccConfig -Encoding utf8
   Ok "Claude Code wired token-free: $McpServerList"
 
