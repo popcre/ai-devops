@@ -7,9 +7,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Freeze hostile fixtures and baseline | ✅ complete | `tests/verification/reviewer-shared-integrity/20260821T120657Z/summary.txt` |
-| 2 | Bind packet seal to names and boundaries | ✅ complete | 86 packet tests pass |
+| 2 | Bind packet seal to names and boundaries | ✅ complete | 87 packet tests pass |
 | 3 | Refuse outside-target links in snapshots | ✅ complete | snapshot hostile-link guard and suite |
-| 4 | Correlate incident evidence exactly | ✅ complete | 25 incident tests pass; only paths owned by exact matched metadata are copied |
+| 4 | Correlate incident evidence exactly | ✅ complete | 28 incident tests pass; duplicate exact matches and non-owned paths are refused |
 | 5 | Make freshness fail closed | ✅ complete | 15 scoreboard tests pass; run/session/caller identity is preserved |
 | 6 | Govern every active provider | ✅ complete | 26 preflight tests pass; unsupported doctor contracts stay unknown and Gemini stays quarantined |
 | 7 | Land and install | 🟨 integrated locally | combined branch is rebased on current GitHub `main`; exact-head approval, push, and permitted installation remain |
@@ -45,12 +45,11 @@ profiles, application repos, databases, and production systems.
 
 ## 5. Current state of the code
 
-Packet content-only hashing is at `bin/ai-review-packet:452-475`; untracked copy
-is at `bin/ai-review-sandbox:85-94`; newest-record selection is at
-`bin/ai-reviewer-issue:54-60,119-155`; freshness defaults are at
-`bin/ai-review-scoreboard:39-45`; provider allowlists are at
-`bin/ai-review-preflight:21,140,165` and `bin/ai-review-scoreboard:18,65`.
-Existing offline suites pass their current cases. No audit fix is committed.
+The source now seals packet names, lengths, and contents; rejects snapshot links
+that escape; refuses missing or ambiguous incident identity; treats unknown
+freshness as unusable; and reports unsupported provider health as unknown.
+The status table above is authoritative. GitHub landing and installed-command
+identity are verified by the landing session rather than frozen in this plan.
 
 ## 6. Key findings and root cause
 

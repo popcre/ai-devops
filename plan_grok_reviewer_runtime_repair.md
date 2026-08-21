@@ -7,7 +7,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Baseline and upstream identity | ✅ complete locally | `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
-| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 121/121 |
+| 2 | Cross-clone paid-turn lock/activity | ✅ complete locally | Grok suite 125/125 |
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | bounded factual heartbeat fixture |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 25 incident tests |
@@ -46,10 +46,11 @@ mode, provider billing policy.
 
 ## 5. Current state of the code
 
-Identity/locks are `bin/ai-grok-review:202-248,597-665`; wait is silent at
-`:303-330`; list sees current checkout records at `:730-743`; delete ignores
-remote uncertainty at `:762-767`. Current Grok suite passes 106 existing cases.
-All steps in `plan_grok-review-concurrency-cancellation-observability.md` are open.
+The source now separates checkout-bound sessions from upstream-wide paid-work
+locks, exposes active work across clones, preserves unconfirmed remote work after
+signals, missing terminal results, or dead local owners, and emits factual bounded
+heartbeats. Offline tests cover normalized clone identity and all three uncertainty
+paths. The status table above is authoritative; live qualification remains open.
 
 ## 6. Key findings and root cause
 

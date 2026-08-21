@@ -51,7 +51,7 @@ check "review mode accepts usable verdict" "test -n '$REVIEW_ID'"
 check "review metadata binds exact session/head/caller" "jq -e --arg s '$REVIEW_ID' --arg h \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.provider==\"deepseek\" and .session_id==\$s and .head==\$h and .caller==\"unknown\" and .verdict==\"APPROVE\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json'"
 set +e
 METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
-set +e
+set -e
 check "real metadata publication failure is not masked by cleanup" "test '$METADATA_FAILURE_RC' -ne 0 && ! printf '%s' '$METADATA_FAILURE_OUT' | grep -q '^SESSION_ID:'"
 set +e
 TRANSCRIPT_FAILURE_OUT="$(AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send transcript-failure --review 2>&1)"; TRANSCRIPT_FAILURE_RC=$?

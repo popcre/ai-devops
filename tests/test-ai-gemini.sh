@@ -34,6 +34,7 @@ cat > "$TMP/bin/agy" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "${1:-}" in --version) echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.7-flash-high'; exit;; esac
+printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
 if [[ "$args" == *" /model "* ]]; then
   [ "${MOCK_MODE:-normal}" = mutate-model ] && printf model-changed > dirty.txt
@@ -57,7 +58,8 @@ APPROVE'; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
-export MOCK_COPIES="$TMP/copies" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_GEMINI_CALLER=test
+export MOCK_COPIES="$TMP/copies" MOCK_AGY_CALLS="$TMP/agy-calls" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_GEMINI_CALLER=test
+: > "$MOCK_AGY_CALLS"
 
 make_repo(){ local d="$1" ignored="${2:-yes}"; mkdir -p "$d"; git -C "$d" init -q; git -C "$d" config user.email test@example.com; git -C "$d" config user.name test; printf base > "$d/file.txt"; if [ "$ignored" = yes ]; then printf '.ai/\n.ignored\n' > "$d/.gitignore"; else printf '.ignored\n' > "$d/.gitignore"; fi; git -C "$d" add file.txt .gitignore; git -C "$d" commit -qm base; }
 new_run(){ local repo="$1" name="$2" mode="${3:-normal}"; (cd "$repo" && MOCK_MODE="$mode" "$SCRIPT" new "$name" --prompt review); }
@@ -84,7 +86,13 @@ R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
-check 'duplicate new leaves completed session unchanged' "! new_run '$R4' good normal && test \"\$(jq -r .status \"\$(meta_for good)\")\" = COMPLETE"
+GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
+GOOD_BEFORE="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
+GOOD_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'duplicate new is refused' "! new_run '$R4' good normal"
+GOOD_AFTER="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
+check 'duplicate new preserves metadata report packet and private copy byte-for-byte' "test '$GOOD_BEFORE' = '$GOOD_AFTER'"
+check 'duplicate new never invokes the provider' "test '$GOOD_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 check 'wrong resumed conversation ID is rejected' "! (cd '$R4' && MOCK_MODE=wrongid '$SCRIPT' ask good --prompt follow-up)"
 check 'wrong model is rejected' "! new_run '$R4' wrongmodel wrongmodel"
 printf before-model > "$R4/dirty.txt"

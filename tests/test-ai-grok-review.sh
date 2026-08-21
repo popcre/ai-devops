@@ -133,7 +133,10 @@ check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE'
 LOCK_EQ="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16).lock.d"
 mkdir -p "$LOCK_EQ"; printf '99999999\n' > "$LOCK_EQ/pid"; printf 'stale\n' > "$LOCK_EQ/label"
 echo ok > "$TMP/mode"
-( cd "$CLONE" && bash "$SCRIPT" new reclaimed --prompt x >/dev/null 2>&1 ) && ok "dead_owned_lock_is_reclaimed" || bad "dead_owned_lock_is_reclaimed"
+DEAD="$( cd "$CLONE" && bash "$SCRIPT" new dead-owner --prompt x 2>&1 )"; DEAD_RC=$?
+[ "$DEAD_RC" -ne 0 ] && printf '%s' "$DEAD" | grep -q 'remote completion is unconfirmed' && ok "dead_owner_becomes_remote_uncertain" || bad "dead_owner_becomes_remote_uncertain"
+check "dead_owner_lock_is_preserved" "test -f '$LOCK_EQ/remote-uncertain'"
+rm -rf "$LOCK_EQ"
 mkdir -p "$LOCK_EQ"; printf 'not-a-pid\n' > "$LOCK_EQ/pid"; printf 'malformed\n' > "$LOCK_EQ/label"
 MALFORMED="$( cd "$CLONE" && bash "$SCRIPT" new malformed --prompt x 2>&1 )"; MALFORMED_RC=$?
 [ "$MALFORMED_RC" -ne 0 ] && printf '%s' "$MALFORMED" | grep -q 'malformed lock' && ok "malformed_lock_is_not_reclaimed" || bad "malformed_lock_is_not_reclaimed"
@@ -154,6 +157,15 @@ check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancel
 BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --prompt x 2>&1 )"; BLOCKED_RC=$?
 [ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_duplicate_paid_turn" || bad "remote_uncertainty_blocks_duplicate_paid_turn"
 rm -rf "$LOCK_NOW"
+echo empty > "$TMP/mode"
+UNCONFIRMED="$( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new no-terminal --prompt x 2>&1 )"; UNCONFIRMED_RC=$?
+UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+[ "$UNCONFIRMED_RC" -ne 0 ] && ok "missing_terminal_result_fails" || bad "missing_terminal_result_fails"
+check "missing_terminal_result_retains_uncertainty_lock" "test -f '$UNCERTAIN_LOCK/remote-uncertain'"
+echo ok > "$TMP/mode"
+AFTER_MISSING="$( cd "$CLONE" && bash "$SCRIPT" new after-missing --prompt x 2>&1 )"; AFTER_MISSING_RC=$?
+[ "$AFTER_MISSING_RC" -ne 0 ] && printf '%s' "$AFTER_MISSING" | grep -q 'unconfirmed provider state' && ok "missing_terminal_result_blocks_second_paid_turn" || bad "missing_terminal_result_blocks_second_paid_turn"
+rm -rf "$UNCERTAIN_LOCK"
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }

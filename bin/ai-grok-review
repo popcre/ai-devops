@@ -306,21 +306,14 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE]
     warn "malformed lock $(basename "$dir") blocks paid work; inspect it manually."
     return 1
   fi
-  warn "reclaiming stale lock $(basename "$dir") (owner pid $owner is gone)"
-  rm -rf "$dir"
-  mkdir "$dir" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$dir/pid"
-  printf '%s\n' "$label" > "$dir/label"
-  [ -z "$upstream" ] || {
-    printf '2\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"
-    printf '%s\n' "$CALLER" > "$dir/caller"; printf '%s\n' "$session" > "$dir/session"
-    printf '%s\n' "$source" > "$dir/source"; date -u +%FT%TZ > "$dir/started"
-  }
-  return 0
+  warn "the local owner of $(basename "$dir") is gone, but remote completion is unconfirmed; paid work remains blocked pending manual reconciliation."
+  date -u +%FT%TZ > "$dir/remote-uncertain"
+  return 1
 }
 lock_release() { # only the creating wrapper may release it
   local dir="$1" owner
   [ -d "$dir" ] || return 0
+  [ ! -f "$dir/remote-uncertain" ] || return 0
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
 }
@@ -707,7 +700,9 @@ cmd_new() {
   build_prompt_file "$pf"
   rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns")"
   if ! await_result "$out" "review '$name'"; then
-    note "  grok exit status was $rc — which proves nothing; see the note above."
+    trap - EXIT
+    mark_remote_uncertain "$rid_lock"
+    note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     note "  A first turn that completes but delivers no output has been seen before"
     note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
@@ -792,7 +787,10 @@ $REVIEW_HEAD only."
   build_prompt_file "$pf"
   rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid")"
   if ! await_result "$out" "review '$name'"; then
-    note "  grok exit status was $rc — which proves nothing."
+    lock_release "$sess_lock"
+    trap - EXIT
+    mark_remote_uncertain "$rid_lock"
+    note "  grok exit status was $rc - which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ ! -s "$out" ]; then
       note ""

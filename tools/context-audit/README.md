@@ -46,10 +46,10 @@ warning. Point `--budgets <file>` at a different file to try other numbers.
 
 ## Enforcement checks
 
-- **Safety markers.** Six locked categories (production mutation, shared
+- **Safety markers.** Seven locked categories (production mutation, shared
   database routing, secret handling, destructive actions, Git identity, the
-  GPT-5.6 low/medium limit, and protection of operating-system binaries) must be present in the always-loaded and
-  startup-routed files. A missing category is reported with a plain-English
+  GPT-5.6 low/medium limit, and protection of operating-system binaries) must be
+  present in the always-loaded and startup-routed files. A missing category is reported with a plain-English
   sentence saying what protection was lost.
 - **Cross-client parity.** Rules that must hold for both clients are checked in
   both `CLAUDE-global.md` and `AGENTS-global-codex.md`. A rule present in only

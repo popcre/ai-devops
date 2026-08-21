@@ -136,7 +136,7 @@ pwsh -NoProfile -File tests/test-context-audit.ps1
 ```
 
 `tests/test-context-audit.ps1` also covers the context enforcement checks: each
-of the six locked safety categories failing on its own with a plain-English
+of the seven locked safety categories failing on its own with a plain-English
 reason, cross-client global parity plus its divergence allowlist, duplicated
 startup text between a global and a skill description, and the warning budgets
 in `tools/context-audit/budgets.json`. **Budgets warn and never fail a run**,

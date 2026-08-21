@@ -15,6 +15,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 Fresh session starts at Step 5 and must preserve quarantine. This plan supersedes conflicting current-state
 text in `plan_ai-gemini-wrapper.md`; retain that file as investigation history.
+The write-once `2026-08-21T1233Z` Gemini handoff is a pre-integration snapshot;
+its old checkout and "uncommitted" statements are historical. This STATUS table
+is the current route without rewriting another session's handoff.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
