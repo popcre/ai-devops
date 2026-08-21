@@ -221,14 +221,16 @@ nothing here rewrites a file.
 startup class. Budgets **only warn** — they never change the audit's exit
 status, including under `--strict`.
 
-**These are the FINAL budgets, set at step 10 on 2026-08-14.**
+The original final budgets were set on 2026-08-14. Albert authorized a second
+instruction audit on 2026-08-21, so the startup budgets were ratcheted to the
+new measured sizes after the safety and parity checks passed.
 
-| Budget | Baseline 2026-08-12 | Measured 2026-08-14 | Change | `budget` (warns above) | `target` (next cut) |
+| Budget | Baseline 2026-08-12 | Measured 2026-08-21 | Change | `budget` (warns above) | `target` (next cut) |
 |---|---:|---:|---:|---:|---:|
-| Always-loaded globals | 33,311 bytes | 26,946 | **−19.1%** | 26,946 | 24,500 |
-| Startup-routed repo entry files | 50,729 bytes | 37,088 | **−26.9%** | 37,088 | 35,340 |
-| Claude skill manifest | 21,521 bytes | 22,777 | +5.8% | 22,777 | 20,000 |
-| Codex skill manifest | 14,015 bytes | 14,847 | +5.9% | 14,847 | 13,000 |
+| Always-loaded globals | 33,311 bytes | 13,563 | **−59.3%** | 13,563 | 12,500 |
+| Startup-routed repo entry files | 50,729 bytes | 11,987 | **−76.4%** | 11,987 | 11,000 |
+| Claude skill manifest | 21,521 bytes | 23,709 | +10.2% | 22,777 | 20,000 |
+| Codex skill manifest | 14,015 bytes | 22,526 | +60.7% | 14,847 | 13,000 |
 
 Each `budget` is **the size that was actually running on all three rolled-out
 machines when every safety and routing probe passed** — a measurement, not the
@@ -237,9 +239,30 @@ run. Ratchet `budget` down toward `target` only after a measured reduction has
 landed and its behavior tests still pass. **Never raise a budget to silence a
 warning.**
 
-The two manifests **grew**, and that is not a regression to hide: skills were
-added during this workstream. Their targets are the honest next cut, and the
-lever is skill descriptions, not deletions.
+The two manifests have continued to grow as skills were added; the current
+audit measures 23,709 Claude bytes and 22,526 Codex bytes, so both still warn.
+Their lever is shorter, measured trigger descriptions, not deleting skills.
+
+### Ratchet on 2026-08-21: rare procedures left startup context
+
+Albert asked which text besides the Synology procedure did not deserve to load
+on every task. Both global templates now keep only universal behavior and safety
+gates plus exact triggers for the full procedures. The detailed Shared Database
+workflow, exact production trigger names and incident narrative, DesignFlow
+startup/deploy recipes, reviewer-worktree history, and handoff format moved
+behind their existing skill or document pointers. `AGENTS.md` became a compact
+repository contract and task router; inventories, credential exceptions,
+deployment commands, incident narratives, and provider-specific reviewer rules
+remain in the existing topic documents and wrapper verification headers.
+
+The project `CLAUDE.md` was audited under the same ownership rule. It now holds
+only Claude-specific behavior: ignore-file handling, shared-skill placement,
+commit attribution, and Windows shell choice. Repository facts and procedures
+are owned by `AGENTS.md` and its pointers.
+
+Measured results: globals 36,705 → 13,563 bytes; startup-routed entry files
+45,399 → 11,987 bytes. The strict audit reports no missing safety marker, parity
+mismatch, broken link, installed/source overlap, or global/skill overlap.
 
 **The one sanctioned raise in this file's history** is the always-loaded budget,
 24,713 → 26,946. It is not slippage: commit `df59ffa` added Albert's own

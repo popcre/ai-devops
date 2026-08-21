@@ -227,18 +227,26 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   Tailscale link drops, **Claude stops working entirely** until the redirect is
   removed and Claude is restarted. Three separate things must all stay up.
 
-  The escape hatch is `bin/headroom-toggle.ps1`, installed on each Windows
-  machine:
+  The escape hatch is the **`ai-headroom`** command. It is a normal command on
+  PATH from any folder — no repo path to remember mid-outage:
 
-  ```powershell
-  pwsh bin/headroom-toggle.ps1 status   # what am I using, and is it reachable?
-  pwsh bin/headroom-toggle.ps1 off      # go straight to Anthropic
-  pwsh bin/headroom-toggle.ps1 on       # route through the proxy again
+  ```bash
+  ai-headroom status   # what am I using, and is the proxy answering?
+  ai-headroom off      # go straight to Anthropic
+  ai-headroom on       # route through the proxy again
   ```
 
   `off` takes about ten seconds, plus a full quit-and-reopen of Claude. `on`
   refuses to run if the proxy is not answering, so it cannot strand you. Every
-  change backs up `settings.json` first.
+  change backs up `settings.json` first. Works on Windows (Git Bash) and Ubuntu.
+
+  **How it reaches every machine:** `bin/ai-headroom` is registered in
+  `config/machine-tools.tsv`, so `bin/install-machine-tools.ps1` (Windows) /
+  `bin/install-machine-tools.sh` (Ubuntu) creates the launcher in
+  `~/.local/bin` and puts that directory on PATH. On a machine that has not
+  synced yet, run the `sync-dotfiles` skill — it pulls the repo and reruns the
+  installer. Until then, `bash C:eposi-devopsini-headroom off`
+  works directly from the clone.
 
   The VPS-side equivalent is `/home/ai/.claude/settings.json` plus the
   `.bashrc` export — remove both to go direct there.
@@ -256,7 +264,7 @@ screen — Headroom's own ledger only counts what actually flowed through it.
 
 ## 8. How to turn it OFF / revert
 
-**Per Windows machine (Workflow B):** run `pwsh bin/headroom-toggle.ps1 off`,
+**Per machine (Workflow B):** run `ai-headroom off`,
 then fully quit and reopen Claude Desktop. (Manually: remove the
 `"env": { "ANTHROPIC_BASE_URL": ... }` block from that machine's
 `~/.claude/settings.json`.) Claude goes straight back to Anthropic.
@@ -284,8 +292,8 @@ systemctl disable headroom.service     # also prevent it starting on boot
 | VPS access | `ssh hetzner` (root) or `ssh vps2` (ai) or `devops-mcp` MCP |
 | Service control | `systemctl {status,restart,stop} headroom.service` |
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
-| Off switch (Windows) | `pwsh bin/headroom-toggle.ps1 off` + fully restart Claude |
-| Check what I'm using | `pwsh bin/headroom-toggle.ps1 status` |
+| Off switch (any machine) | `ai-headroom off` + fully restart Claude |
+| Check what I'm using | `ai-headroom status` |
 | Off switch (VPS `ai`) | remove `env` from `/home/ai/.claude/settings.json` **and** the `.bashrc` export |
 
 ---
