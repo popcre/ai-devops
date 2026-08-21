@@ -41,6 +41,7 @@ check "live review packet is never touched" "grep -qx 'live-review-evidence' '$R
 check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
+check "all active providers are registered" "for p in grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
 START=$(date +%s); OUT="$($SCRIPT check kimi "$REPO" 2>&1)"; RC=$?; ELAPSED=$(( $(date +%s) - START ))

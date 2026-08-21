@@ -24,6 +24,11 @@ ai-reviewer-issue record --provider grok \
   --details "The reviewer completed its run but returned neither approval nor rejection. It was the first attempt; no retry has been made."
 ```
 
+When the failed wrapper exposes them, pass `--run-id`, `--session-id`, and
+`--caller`. Evidence is copied only when provider, repository, commit, and these
+join fields match exactly. Missing exact evidence is recorded in
+`missing-evidence.txt`; the recorder never substitutes the newest nearby run.
+
 The title is only an index label. `--details` has no length limit. For longer
 notes, the session can write a file and pass `--details-file <path>`, or pipe
 notes through standard input with `--details-file -`.
@@ -32,10 +37,10 @@ The command automatically captures:
 
 - the repository, branch, current commit, remote, and existing working changes;
 - the computer and shell;
-- the newest structured metadata for that reviewer, with sensitive fields removed;
-- every matching review report, copied in full;
+- exact-run structured metadata, with sensitive fields removed;
+- exact-run matching review reports, copied in full;
 - reviewer log files changed within the previous two days, copied in full;
-- the latest matching scoreboard record;
+- the exact matching scoreboard record;
 - the names and sizes of recent review artifacts; and
 - when supplied, the complete error log and detailed session notes.
 

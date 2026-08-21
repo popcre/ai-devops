@@ -65,7 +65,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 # ONE PACKET PER SESSION, NOT ONE PER DIRECTORY.
 #
@@ -495,14 +495,18 @@ EOF
   printf '%s' "$pkt"
 }
 
-# Hash every file in the packet except the hash file itself, in sorted order, so
-# the digest is reproducible on any machine.
+# Seal the complete inventory, not a concatenation of contents.  Each NUL-safe
+# record carries the relative path, byte length, and file digest, so renames,
+# empty files, and changed file boundaries are all detectable.
 hash_packet() { # hash_packet PACKET_DIR
   local pkt="$1"
-  ( cd "$pkt" && find . -type f ! -name "$HASHFILE" -print0 \
-      | LC_ALL=C sort -z \
-      | xargs -0 cat \
-      | sha256sum | cut -d' ' -f1 )
+  ( cd "$pkt" || exit 1
+    while IFS= read -r -d '' file; do
+      printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
+        "${file#./}" "$(wc -c < "$file" | tr -d ' ')" \
+        "$(sha256sum "$file" | cut -d' ' -f1)"
+    done < <(find . -type f ! -name "$HASHFILE" -print0 | LC_ALL=C sort -z)
+  ) | sha256sum | cut -d' ' -f1
 }
 
 cmd_verify() {

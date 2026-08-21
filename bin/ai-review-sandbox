@@ -83,14 +83,22 @@ remove_sandbox() {
 }
 
 copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-ignored files
-  local src="$1" dst="$2" rel
+  local src="$1" dst="$2" rel resolved src_root
+  src_root="$(canon "$src")"
+  # Validate every link before copying anything. A refusal therefore cannot
+  # leave a half-built snapshot containing material from an outside target.
+  while IFS= read -r -d '' rel; do
+    [ -L "$src/$rel" ] || continue
+    resolved="$(readlink -f "$src/$rel" 2>/dev/null || true)"
+    case "$resolved" in "$src_root"/*) ;; *) die "refusing untracked link outside repository: $rel" ;; esac
+  done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
   while IFS= read -r -d '' rel; do
     [ -n "$rel" ] || continue
     # Evidence packets are session-owned generated state. A fresh snapshot must
     # build its own packet and must never copy another live review's packet.
     case "$rel" in .ai-review*) continue ;; esac
     mkdir -p "$dst/$(dirname "$rel")"
-    cp -p "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
+    cp -Pp "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
   done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
 }
 

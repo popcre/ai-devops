@@ -1,0 +1,22 @@
+Shared reviewer evidence integrity verification
+Date: 2026-08-21 UTC
+
+Hostile cases added:
+- renamed evidence file invalidates packet seal
+- added empty evidence file invalidates packet seal
+- untracked outside-target link is refused where real symlinks are supported
+- unrelated newer reviewer metadata is ignored
+- missing repository/head freshness is unknown and unusable
+- all eight active providers are registered
+
+Passing suites:
+- test-ai-review-packet.sh: 86 passed
+- test-ai-review-sandbox.sh: 48 passed
+- test-ai-reviewer-issue.sh: 19 passed
+- test-ai-review-scoreboard.sh: 12 passed
+- test-ai-review-preflight.sh: 21 passed
+- test-ai-grok-review.sh: 110 passed
+
+Windows note: Git Bash cannot create a real symbolic link on every Windows
+configuration. The hostile-link assertion runs when the fixture is a true link;
+the product guard is platform-independent and remains exercised on Linux.
