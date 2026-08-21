@@ -153,6 +153,12 @@ clone + `./install.sh` on Ubuntu).
    hand-edit it. **Limitation to state plainly:** the SQLite store is machine-local
    and NOT synced by `ai-sync-memory` (which covers Claude's markdown only), so
    durable cross-machine facts belong in Claude's memory or repo docs.
+5c2. `bin/ai-install-memory-hook` — install the memory-index hook (Claude only; it
+   registers a PostToolUse Write|Edit entry in `~/.claude/settings.json`). Idempotent,
+   strictly additive, backs the file up, and refuses if that file does not parse.
+   It catches a memory written without a `MEMORY.md` index line in the same turn —
+   the failure that left 20 of 34 shared-db memories unreachable until 2026-08-21.
+   Run it from a Codex sync too: the machine, not the client, is what is missing it.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
    say so and offer to register it. Never schedule anything that EDITS memory

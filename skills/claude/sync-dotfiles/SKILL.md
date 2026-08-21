@@ -34,6 +34,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
+| Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
 | Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
@@ -230,6 +231,18 @@ clone + `./install.sh` (Ubuntu) first.
    handles Claude's markdown memory only. Facts Codex learns on one computer do
    not reach the others. Durable cross-machine facts still belong in Claude's
    memory files or in the repo's own docs.
+6c2. **Install the memory-index hook:** `bin/ai-install-memory-hook`. Idempotent;
+   prints `OK memory-index hook already registered` when there is nothing to do.
+   It copies the hook to `~/.config/ai-devops/memory-index-hook` and registers a
+   PostToolUse `Write|Edit` entry in the USER-level `~/.claude/settings.json`,
+   strictly additively, backing the file up first and refusing outright if that file
+   does not parse (a broken `settings.json` silently disables EVERY setting in it).
+   **What it prevents:** a memory file that never gets a line in `MEMORY.md` is
+   invisible forever, because only the index is loaded into a session. On 2026-08-21
+   an audit found 20 of 34 shared-db memories and 17 of 28 dflow memories in exactly
+   that state, including owner rulings Albert had made himself. The weekly report
+   detects that after the fact; this hook catches it in the same turn the file is
+   written. Report the verdict out loud.
 6d. **Report the memory-health task, don't assume it:** the weekly read-only audit
    (`bin/ai-memory-health`) is registered by
    `bin/install-memory-health-task.ps1` and is per-machine. Check for it with

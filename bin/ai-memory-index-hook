@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# ai-memory-index-hook — Claude Code PostToolUse hook for Write|Edit.
+#
+# Why this exists: a memory file that is never added to its MEMORY.md index is
+# invisible to every future session. Only the index is loaded into context, so the
+# fact is written, synced to every machine, and never read again. On 2026-08-21 an
+# audit found 20 of 34 shared-db memories and 17 of 28 dflow memories in exactly
+# that state, including owner rulings Albert had made himself.
+#
+# The weekly ai-memory-health report DETECTS that. This hook PREVENTS it, by telling
+# the model in the same turn that it wrote the file.
+#
+# It is deliberately cheap: every Write/Edit runs it, so it exits immediately unless
+# the written path is a memory file. It never edits anything.
+
+set -u
+payload="$(cat 2>/dev/null || true)"
+[[ -n "$payload" ]] || exit 0
+
+file="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_response.filePath // empty' 2>/dev/null || true)"
+[[ -n "$file" ]] || exit 0
+
+case "$file" in
+  */memory/*.md) ;;
+  *) exit 0 ;;
+esac
+
+base="$(basename "$file")"
+[[ "$base" == "MEMORY.md" ]] && exit 0
+
+dir="$(dirname "$file")"
+index="$dir/MEMORY.md"
+
+if [[ ! -f "$index" ]]; then
+  jq -nc --arg m "Memory written to a folder with no MEMORY.md index. Nothing in $dir will ever load into a future session until an index exists. Create MEMORY.md with one line per memory." \
+    '{systemMessage:$m, hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:$m}}'
+  exit 0
+fi
+
+# Only report the file just written; a full-folder sweep belongs in the weekly audit.
+if ! grep -qF "($base)" "$index"; then
+  msg="Memory $base is not in $index. Only the index is loaded into a session, so this fact is currently invisible to every future session and to every other machine. Add a line now: - [Title]($base) — one-line hook."
+  jq -nc --arg m "$msg" \
+    '{systemMessage:$m, hookSpecificOutput:{hookEventName:"PostToolUse", additionalContext:$m}}'
+fi
+
+exit 0

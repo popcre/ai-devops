@@ -14,6 +14,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 claude_home=""
 out=""
 stale_days=180
+index_only=0
+for_cwd=""
+
 
 usage() {
   cat <<'USAGE'
@@ -25,6 +28,13 @@ usage: ai-memory-health [--claude-home DIR] [--repo-root DIR] [--out FILE] [--st
                      checkout this script lives in).
   --out FILE         Also write the report to FILE (parent directory must exist).
   --stale-days N     Flag memories untouched for more than N days (default 180).
+  --index-only       Only check index coverage (memories missing from MEMORY.md,
+                     index lines pointing at missing files, a missing index). Fast
+                     enough to run from a session hook; skips the slower link,
+                     duplicate, size and age checks.
+  --for-cwd DIR      Implies --index-only and audits ONLY the project whose memory
+                     folder corresponds to DIR (the working directory of a session).
+                     Silent and exit 0 when that project has no memory yet.
 USAGE
 }
 
@@ -32,6 +42,8 @@ while (($#)); do
   case "$1" in
     --claude-home) claude_home="$2"; shift 2 ;;
     --repo-root) repo_root="$2"; shift 2 ;;
+    --index-only) index_only=1; shift ;;
+    --for-cwd) for_cwd="$2"; index_only=1; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --stale-days) stale_days="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -72,7 +84,21 @@ head1() { printf '\n## %s\n\n' "$1" >> "$report"; }
 total_files=0
 total_projects=0
 
-for mem in "$projects_dir"/*/memory; do
+project_glob=("$projects_dir"/*/memory)
+if [[ -n "$for_cwd" ]]; then
+  # Claude names a project folder after its absolute path, replacing the drive
+  # colon and every separator with a dash. That is why the drive letter is
+  # followed by two dashes: the colon becomes one and the separator the other.
+  abs="$(cd "$for_cwd" 2>/dev/null && pwd -W 2>/dev/null || (cd "$for_cwd" 2>/dev/null && pwd))"
+  [[ -n "$abs" ]] || exit 0
+  slug="${abs//:/-}"
+  slug="${slug//\\//-}"
+  slug="${slug//\//-}"
+  project_glob=("$projects_dir/$slug/memory")
+  [[ -d "${project_glob[0]}" ]] || exit 0
+fi
+
+for mem in "${project_glob[@]}"; do
   [[ -d "$mem" ]] || continue
   project="$(basename "$(dirname "$mem")")"
   index="$mem/MEMORY.md"
@@ -101,6 +127,12 @@ for mem in "$projects_dir"/*/memory; do
     bytes="$(wc -c < "$index" | tr -d ' ')"
     (( lines > 200 ))   && note "INDEX TOO LONG: $lines lines (limit 200) — it is loaded every session."
     (( bytes > 25600 )) && note "INDEX TOO BIG: $bytes bytes (limit ~25KB) — it is loaded every session."
+  fi
+
+  if (( index_only )); then
+    (( findings == before )) && printf '  - clean
+' >> "$report"
+    continue
   fi
 
   # Cross-links that point at a memory which does not exist.
