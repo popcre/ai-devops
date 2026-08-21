@@ -49,6 +49,42 @@ MAP_FILE="$MEM_REPO/project-map.tsv"
 
 run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
 
+# The public ai-devops repository used to double as the memory hub. That is no
+# longer permitted: memory is private operational state, and a stale scheduled
+# wrapper on an unreachable machine must not be able to publish it. Keep this
+# guard in the child command because old wrappers fetch the current repository
+# before invoking it, so the protection reaches those machines without first
+# replacing their installed launcher.
+public_ai_devops_hub() {
+  local origin
+  origin="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
+  [[ "$origin" =~ github\.com[:/]u2giants/ai-devops(\.git)?$ ]]
+}
+
+# MEMORY.md is a recall index written independently by every machine. During
+# migration, a pull must preserve local-only entries while accepting the hub's
+# entries. Start from the hub index, then append any local link lines it lacks.
+# This compatibility merge is intentionally conservative and can be removed
+# after every scheduled writer is running the private-hub protocol.
+merge_memory_index() {
+  local local_index="$1" hub_index="$2" output="$3" tmp line added=0
+  [[ -f "$local_index" ]] || return 0
+  [[ -f "$hub_index" ]] || { cp -a "$local_index" "$output"; return 0; }
+  tmp="$output.merge.$$"
+  cp -a "$hub_index" "$tmp"
+  while IFS= read -r line; do
+    [[ "$line" == '- ['*']('*')'* ]] || continue
+    if ! grep -Fqx -- "$line" "$tmp"; then
+      if [[ "$added" -eq 0 ]]; then
+        printf '\n## Local entries preserved during migration\n\n' >> "$tmp"
+      fi
+      printf '%s\n' "$line" >> "$tmp"
+      added=$((added+1))
+    fi
+  done < "$local_index"
+  mv -f "$tmp" "$output"
+}
+
 usage() {
   echo "usage: ai-sync-memory {push|pull} [--dry-run]" >&2
   echo "       ai-sync-memory forget <project> <file.md> \"<reason>\"" >&2
@@ -107,6 +143,11 @@ apply_tombstones() {
 
 case "$DIRECTION" in
   push)
+    if public_ai_devops_hub && [[ "${AI_MEMORY_ALLOW_PUBLIC_HUB:-}" != "yes" ]]; then
+      echo "[BLOCKED] Refusing to copy machine memory into the public u2giants/ai-devops repository." >&2
+      echo "[BLOCKED] Configure the governed private memory hub before enabling uploads." >&2
+      exit 0
+    fi
     run mkdir -p "$MEM_REPO"
     n=0
     for md in "$CLAUDE_HOME"/projects/*/memory; do
@@ -182,7 +223,16 @@ case "$DIRECTION" in
         slug="$(basename "$(dirname "$md")")"
         if [[ "$(canonical "$slug")" == "$proj" ]]; then
           run mkdir -p "$md"
+          local_index=""
+          if [[ "$DRY_RUN" != "--dry-run" && -f "$md/MEMORY.md" ]]; then
+            local_index="$(mktemp)"
+            cp -a "$md/MEMORY.md" "$local_index"
+          fi
           run cp -a "$pd." "$md/"
+          if [[ -n "$local_index" ]]; then
+            merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md"
+            rm -f "$local_index"
+          fi
           # This is what makes a deletion actually propagate: the hub's
           # tombstones remove the file from this machine too.
           apply_tombstones "$md" "$md/$FORGET_NAME" "$slug"
