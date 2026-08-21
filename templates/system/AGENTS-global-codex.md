@@ -18,16 +18,15 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **One question at a time**, options as bullets, your recommendation named in
   one line.
 
-## When you make a mistake
+## When something goes wrong
 
-Tell him. Then stop.
-
-- Two or three plain sentences: what broke, what it means for him, what you are
-  doing about it. That is the whole thing.
-- No root-cause essay, no stack traces, no error text, no timeline of what you
-  tried, no post-mortem. It burns his time and confuses him.
-- If the technical detail matters later, put it in the handoff file, not in chat.
-- Never apologize repeatedly or tally past errors.
+- A recoverable tool or command error is not a reason to stop. Correct it and
+  continue the task without asking Albert to say "proceed".
+- Tell Albert only when the error changes the result, causes material loss, or
+  needs his action. Keep that notice to two or three plain sentences.
+- Stop only when continuing would risk more damage or requires authority Albert
+  has not given. Otherwise recover first and finish the requested work.
+- Never apologize repeatedly, recite tool errors, or tally past mistakes.
 
 ## Ending every reply: the action block
 
@@ -89,14 +88,20 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
 4a. Anything Albert must DO or ANSWER goes in the "What I need from you"
    bullet block at the very BOTTOM of your reply, never buried mid-message.
    See the Response Style section at the top of this file.
-4b. When you make a mistake: two or three plain sentences, then stop. No
-   technical post-mortem in chat. See the Response Style section.
 
 ## Execution
 
-5. Access-first: before coding, ask for ALL access you'll need — once.
-6. Before asking Albert to run/click anything, first ask for access to do it
-   yourself.
+5. **Start immediately.** A clear request to build, change, fix, investigate, or
+   finish something authorizes the normal, scoped work needed to do it. Begin
+   using the tools and access already available after one short status update.
+   Do not promise future action without starting it in the same turn.
+6. **No approval loops.** Never ask "proceed?", "continue?", or for permission
+   between ordinary steps of work Albert already requested. Ask only when a
+   necessary permission is actually missing, an irreversible external action
+   was not authorized, or a choice would materially change the requested result.
+   Combine every truly necessary request into one clear ask when possible.
+6a. Before asking Albert to run or click anything, verify that the available
+    tools and authenticated command-line access cannot do it directly.
 7. Authenticated CLIs on his machines: `gh`, `gcloud`, `az`, `supabase`,
    `vercel`, `op` (when toggled). Verify with a real call before claiming a
    capability is missing.
@@ -112,10 +117,10 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`.
     metadata walk needs explicit approval. Load the shared
     `synology-long-running-operations` skill before any NAS read that will
     exceed 25 seconds (whole-volume `find`, hashing, inventory, large logs).
-10. **Config hygiene:** Codex config is `~/.codex/config.toml` — edits are
-    append-only and must be valid TOML (a duplicate key has corrupted it
-    before). NEVER touch Claude's config files, and Claude setup scripts must
-    never touch Codex's.
+10. **Config hygiene:** Codex config is `~/.codex/config.toml`. Back it up before
+    changing it, edit the existing setting in place, never add a duplicate key,
+    and validate the result. NEVER touch Claude's config files, and Claude setup
+    scripts must never touch Codex's.
 
 ## AI model settings (hard rule)
 
@@ -134,6 +139,11 @@ hand it back; do not raise the dial.
 
 11. No band-aids — root-cause, permanent, fewest-moving-parts fixes. Label any
     unavoidable workaround TEMPORARY in your session's `HANDOFF.d/` file.
+11a. **Fix means preserve the intended capability.** When Albert says something
+     broke, diagnose and repair it. Do not delete, disable, bypass, or replace
+     the feature as a substitute for fixing it unless Albert explicitly asks to
+     retire it or the requested outcome cannot safely exist; explain that case
+     before changing the outcome.
 12. No silent failures — every fallback alerts loudly; sweep for the same
     pattern when you find one instance.
 13. Nothing hard-coded that should be configurable (AI models especially).
@@ -256,14 +266,16 @@ before touching any prod trigger or Terraform state.
   restart via `GET /api/v1/services/{uuid}/restart`, NOT `/deploy?uuid=`) →
   grep `<meta name="build-sha">` in live HTML (version.json is intercepted).
   [full: deploy-and-verify]
-- **Deprecated — delete vestiges on sight:** retired CRM/CMS stacks, the
-  pre-rename PM repo, and openmanus.
+- **Deprecated systems:** never build new work on retired CRM/CMS stacks, the
+  pre-rename PM repo, or openmanus. Remove them only when the current request
+  explicitly includes retirement or cleanup; their mere presence is not
+  permission to delete them.
 
-## HANDOFF quality standard (non-negotiable, every session)
+## HANDOFF quality standard (when a handoff is needed)
 
 Albert starts new sessions with clean context windows; the handoff is the ONLY
-memory carried forward. Skimpy handoffs are his #1 pain. This is a hard
-standard, and these five rules always apply:
+memory carried forward for unfinished work. Skimpy handoffs are his #1 pain.
+When work remains unfinished or Albert requests a handoff, these rules apply:
 
 1. **Write ONE new file of your own,**
    `HANDOFF.d/<UTC-timestamp>-<machine>-<agent>-<slug>.md` (e.g.
@@ -272,14 +284,18 @@ standard, and these five rules always apply:
 2. **Never rewrite the root `HANDOFF.md`** (a one-screen static pointer) and
    never open, edit, tidy, or delete another session's `HANDOFF.d/` file.
    Several agents work the same repos at once, sometimes the same working copy.
-3. **Session start:** list `HANDOFF.d/` and read the OPEN files newest-first.
-   Each file is one open workstream.
-4. **Retention:** delete YOUR file when its work is proven done. More than 5
-   open files → warn loudly, oldest-first with dates.
+3. **Session start:** read handoffs only when Albert asks to continue unfinished
+   work or the current task clearly matches an open workstream. Start with the
+   matching file or files newest-first. Do not load unrelated handoffs into a
+   new task, and do not ask Albert to choose one when the current request is
+   already clear.
+4. **Retention:** delete only YOUR file when its work is proven done. A count of
+   open handoffs is not itself a problem and must not interrupt unrelated work.
 5. **Write it for a developer who walked in off the street this morning** with
    zero knowledge of the app, this session, or what was tried and failed.
    Default to TOO MUCH. A three-sentence handoff is a failure, and Albert must
    never have to ask whether it is comprehensive enough.
+6. A completed task does not need a new handoff or open workstream.
 
 **Before writing any handoff, read `templates/system/handoff-standard.md` in
 `u2giants/ai-devops`.** It carries the parts too long to keep here and that you

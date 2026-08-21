@@ -5,6 +5,21 @@ reducing repeated Claude and Codex context safely. The active implementation and
 decisions remain in
 [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
+## Codex behavior correction on 2026-08-21
+
+Albert reported that Codex had become unusable: it stopped after harmless tool
+errors, asked him to say "proceed" between ordinary steps, promised work without
+starting it, and removed broken capabilities instead of repairing them. The
+always-loaded Codex global contained literal instructions that produced those
+behaviors, including "Tell him. Then stop", access-first permission wording,
+and "delete vestiges on sight".
+
+`templates/system/AGENTS-global-codex.md` now makes the intended behavior
+explicit: start authorized work immediately, do not create approval loops,
+recover from routine errors, preserve the capability when asked to fix it, and
+load only handoffs relevant to the current task. Production, secret, database,
+Git identity, reasoning-effort, and recoverable-deletion protections remain.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at
@@ -103,7 +118,7 @@ The map uses the four loading classes measured by the baseline above:
 | Durable learned facts (cross-session, cross-machine) | `memory/` (per-project `MEMORY.md` plus fact files), synced by `bin/ai-sync-memory` | Claude memory recall; manually when needed | Project-scoped recall; not always loaded globally | Concise facts, not procedures. Memory is "what we learned", not "how to do X". | Referenced by path when a session needs it; never copied into a global. |
 | Non-secret config templates (model commands, server settings) | `config/*.env.example` | `install.sh` and `bin/install-ai-devops-windows.ps1` | Install/update only (seeded to `/etc/ai-devops/*.env` if absent) | Default command strings plus comments | `AGENTS.md` credentials table and `docs/configuration.md`. |
 | Forward work (phases, targets, gates, status) | A `plan_<slug>.md` at repo root | Nobody automatically | Task triggered | Goal, scope, per-step targets, verification gates, status table | `AGENTS.md` doc map or a handoff points to the active plan with a trigger. |
-| Active session state (what this session did, what is next) | `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (one write-once file per session); root `HANDOFF.md` is a static pointer | The next session | Session start reads the OPEN files newest-first | The full nine-section handoff per `templates/system/handoff-standard.md` | Root `HANDOFF.md` pointer plus the "How handoffs work" section of `AGENTS.md`. |
+| Active session state (what this session did, what is next) | `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (one write-once file per unfinished workstream); root `HANDOFF.md` is a static pointer | A later session continuing that work | When the request matches unfinished work, read the matching OPEN files newest-first | The full nine-section handoff per `templates/system/handoff-standard.md` | Root `HANDOFF.md` pointer plus the "How handoffs work" section of `AGENTS.md`. |
 
 ### Decision table: where a new rule or fact goes
 
@@ -426,7 +441,7 @@ safety marker had only ever been satisfied by incidental prose inside the
 doc. No global had ever carried the rule. It is now in both and is a parity rule.
 
 What deliberately stayed always-loaded: the response-style contract, who Albert
-is, the access-first and manual-action rules, secret and 1Password-serialization
+is, the start-immediately and no-approval-loop rules, secret and 1Password-serialization
 rules, the GPT-5.6 low/medium limit, production and shared-cloud read-only
 safety, the shared-database read-open/change-gated split, branch and commit-
 identity gates, the engineering standards, and the session-start routing
