@@ -15,13 +15,23 @@
 # Afterwards: fully quit Claude (tray icon -> Quit) and reopen it. The setting
 # is only read at startup.
 #
-# TWO SOURCES, BOTH HANDLED. On the hetz VPS the redirect lives in BOTH
-# ~/.claude/settings.json AND an "export ANTHROPIC_BASE_URL=" line in ~/.bashrc.
-# An earlier version of this tool edited only the JSON, so "off" on that machine
-# removed one source, printed "Claude goes straight to Anthropic", and left the
-# shell export still redirecting every new session — a lying escape hatch, which
-# is worse than no escape hatch. This version reads and writes both, and status
-# reports each one separately.
+# THE ONLY MECHANISM THAT WORKS IS A REAL ENVIRONMENT VARIABLE.
+# Measured on Claude Code 2.1.234 (2026-08-21): an `"env": {"ANTHROPIC_BASE_URL":
+# …}` block in ~/.claude/settings.json is ACCEPTED, shown by every settings
+# reader, and COMPLETELY IGNORED — a fresh `claude` process sent zero requests to
+# the proxy. The same test with the variable exported in the environment routed
+# immediately (proxy inbound count 352 -> 356). Claude resolves its base URL
+# before settings `env` is applied.
+#
+# So this tool manages the environment variable, per platform:
+#   Windows : the persistent USER environment variable (registry), which every
+#             newly launched Claude inherits.
+#   Linux   : the `export ANTHROPIC_BASE_URL=` line in ~/.bashrc.
+#
+# It also REMOVES any settings.json env entry it finds, because that entry is a
+# false signal: it makes every status display say "routing through the proxy"
+# while nothing is. That mistake cost this project nine days of believing
+# Headroom was in use when it carried no traffic at all.
 #
 # See docs/headroom.md in u2giants/ai-devops for the full picture.
 
@@ -60,7 +70,9 @@ proxy_healthy() {
 }
 
 # ---------------------------------------------------------------------------
-# Source 1: ~/.claude/settings.json
+# ~/.claude/settings.json — INERT. Claude ignores its env block for the base URL
+# (measured, see header). We only ever READ it to warn, and REMOVE it to stop it
+# lying. We never write a value into it.
 # ---------------------------------------------------------------------------
 
 # Any failure here is FATAL, never silent: reporting "off" while the proxy is
@@ -134,6 +146,45 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Windows: the persistent USER environment variable. This is the real switch on
+# Windows — every newly launched Claude inherits it. Changing it does NOT affect
+# already-running processes, hence the "fully quit and reopen" instruction.
+# ---------------------------------------------------------------------------
+
+is_windows() { case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+
+PS=""
+if is_windows; then
+  for c in powershell pwsh; do command -v "$c" >/dev/null 2>&1 && { PS="$c"; break; }; done
+  [ -n "$PS" ] || die "ai-headroom: PowerShell not found on PATH; cannot read or set the
+persistent user environment variable that Claude actually reads on Windows."
+fi
+
+winenv_url() {   # prints the persistent USER value, or nothing
+  is_windows || return 0
+  # Octal codes, not '\r\n': a literal backslash-r here would silently leave the
+  # carriage return in place, and every read-back comparison would then fail
+  # against a value that looks identical when printed.
+  "$PS" -NoProfile -Command "[Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL','User')" 2>/dev/null | tr -d '\015\012'
+}
+
+winenv_set() {   # winenv_set <url|"">  — empty removes the variable
+  is_windows || return 0
+  local want="$1" verify
+  if [ -n "$want" ]; then
+    "$PS" -NoProfile -Command "[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL','$want','User')" >/dev/null 2>&1       || die "ai-headroom: failed to set the user environment variable."
+  else
+    "$PS" -NoProfile -Command "[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL',\$null,'User')" >/dev/null 2>&1       || die "ai-headroom: failed to clear the user environment variable."
+  fi
+  # Never claim success without reading it back.
+  verify="$(winenv_url)"
+  [ "$verify" = "$want" ] || die "ai-headroom: wrote the environment variable but read back '''$verify''' (expected '''$want'''). Nothing is guaranteed; fix it in
+System Properties -> Environment Variables before relying on this."
+  printf 'Windows user environment variable: %s
+' "${want:-cleared}"
+}
+
+# ---------------------------------------------------------------------------
 # Source 2: an "export ANTHROPIC_BASE_URL=" line in ~/.bashrc (the hetz VPS).
 # Absent on the Windows machines, where every function below is a no-op.
 # ---------------------------------------------------------------------------
@@ -182,40 +233,67 @@ Restore it with:  cp '$backup' '$BASHRC'"
 action="${1:-status}"
 case "$action" in
   status)
-    cur="$(json_url)"
-    if [ -n "$cur" ]; then
-      printf 'Claude settings file   : routes through %s\n' "$cur"
-    else
-      printf 'Claude settings file   : DIRECT to Anthropic (no redirect)\n'
+    if is_windows; then
+      wv="$(winenv_url)"
+      if [ -n "$wv" ]; then
+        printf 'Windows user env var   : routes through %s   <- THE REAL SWITCH
+' "$wv"
+      else
+        printf 'Windows user env var   : not set -> DIRECT to Anthropic   <- THE REAL SWITCH
+'
+      fi
     fi
     brc="$(bashrc_state)"
     case "$brc" in
-      none)   printf 'Shell startup (.bashrc): no redirect present\n' ;;
-      on\ *)  printf 'Shell startup (.bashrc): routes through %s\n' "${brc#on }" ;;
-      off\ *) printf 'Shell startup (.bashrc): disabled by ai-headroom\n' ;;
+      none)   is_windows || printf 'Shell startup (.bashrc): no redirect present   <- THE REAL SWITCH
+' ;;
+      on\ *)  printf 'Shell startup (.bashrc): routes through %s   <- THE REAL SWITCH
+' "${brc#on }" ;;
+      off\ *) printf 'Shell startup (.bashrc): disabled by ai-headroom
+' ;;
     esac
+    cur="$(json_url)"
+    if [ -n "$cur" ]; then
+      printf 'settings.json          : has %s -- IGNORED by Claude, run "ai-headroom on" or "off" to remove it
+' "$cur"
+    fi
     if proxy_healthy; then
-      printf 'Proxy health           : reachable and healthy.\n'
+      printf 'Proxy health           : reachable and healthy.
+'
     else
-      printf 'Proxy health           : NOT REACHABLE.\n'
-      if [ -n "$cur" ] || [ "${brc%% *}" = on ]; then
-        printf 'Claude WILL FAIL to connect. Run:  ai-headroom off\n'
+      printf 'Proxy health           : NOT REACHABLE.
+'
+      if [ -n "${wv:-}" ] || [ "${brc%% *}" = on ]; then
+        printf 'Claude WILL FAIL to connect. Run:  ai-headroom off
+'
       fi
     fi
+    printf 'Changes apply only to Claude sessions started AFTER this point.
+'
     ;;
   on)
     proxy_healthy || die "Refusing to enable: the proxy is not answering at $PROXY_URL.
 Turning it on now would leave Claude unable to connect at all."
-    json_set "$PROXY_URL"
+    winenv_set "$PROXY_URL"
     bashrc_set on
-    printf 'Proxy ON  -> %s\n' "$PROXY_URL"
-    printf 'Now fully quit Claude (tray icon -> Quit) and reopen it.\n'
+    [ -n "$(json_url)" ] && json_set ""   # drop the inert, misleading entry
+    printf 'Proxy ON  -> %s
+' "$PROXY_URL"
+    printf 'Now fully quit Claude (tray icon -> Quit) and reopen it. Already-running
+'
+    printf 'sessions keep their old setting until they are restarted.
+'
     ;;
   off)
-    json_set ""
+    winenv_set ""
     bashrc_set off
-    printf 'Proxy OFF -> Claude goes straight to Anthropic.\n'
-    printf 'Now fully quit Claude (tray icon -> Quit) and reopen it.\n'
+    [ -n "$(json_url)" ] && json_set ""
+    printf 'Proxy OFF -> Claude goes straight to Anthropic.
+'
+    printf 'Now fully quit Claude (tray icon -> Quit) and reopen it. Already-running
+'
+    printf 'sessions keep their old setting until they are restarted.
+'
     ;;
   *)
     die "Usage: ai-headroom [status|on|off]"
