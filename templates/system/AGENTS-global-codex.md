@@ -44,9 +44,52 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 
 ## Safety rules that apply everywhere
 
-- **Secrets:** use 1Password vault `vibe_coding`; never expose secrets in chat,
-  files, logs, or commits, and never rotate a credential without approval.
-  Serialize all 1Password access; fetch a shared environment once and reuse it.
+- **Secrets — HOW to move a secret value, not just where it lives.** Use
+  1Password vault `vibe_coding`. Never expose a secret in chat, files, logs, or
+  commits, and never rotate a credential without approval. Serialize all
+  1Password access; fetch a shared environment once and reuse it.
+
+  A secret value has leaked the moment it reaches a place a human or a log can
+  read it. That includes a chat transcript, terminal scrollback, an error
+  message, and a process list. This has gone wrong more than once, always the
+  same way: the value ended up somewhere a command could echo it back.
+
+  **The one rule: a secret value only ever travels through a pipe or a file.
+  Never through a command line, and never through your own message text.**
+
+  ALLOWED
+  - Pipe it: `op read "op://vault/item/field" | ssh host 'cat > /path/file'`
+  - Reference it: `op run --env-file …`, `op://` references, the 1Password MCP
+    `op_run` tool with `op://` values in `env`.
+  - Write it straight to a `0600` file, then have the consumer read that file.
+  - Compare or verify with a fingerprint you can safely print:
+    `printf '%s' "$v" | sha256sum | cut -c1-16` — never print the value itself.
+
+  FORBIDDEN — every one of these has leaked a live credential
+  - Putting the value in ANY command-line argument, including after a remote
+    command string, in `--flag=value`, or in a `VAR=value cmd` prefix. On a
+    parse error, a wrong argument position, or a non-zero exit, the shell or the
+    interpreter echoes the whole command back — and the token is in the
+    transcript for good. (2026-08-21: leaked a brand-new 1Password
+    service-account token this exact way, minutes after it was created,
+    forcing an immediate second rotation.)
+  - Asking the user to paste a secret into chat. Ask them to put it in
+    1Password and tell you the item name; read it from there.
+  - Revealing a secret to see it (`op item get --reveal` printed to stdout, the
+    MCP `item_get` with `reveal: true`) when a fingerprint would answer the
+    question. Reveal only into a pipe, never into the terminal.
+  - `echo`ing, `cat`ing, or `grep`ing a secret to confirm it "looks right", and
+    pasting a value into a scratch file, doc, or commit "temporarily".
+
+  **If you do leak one:** say so immediately and plainly, treat that credential
+  as compromised no matter how briefly it was visible, and get it rotated. Do
+  not quietly continue using it, and do not wait to be asked.
+
+  **Containment is not remediation.** Removing a secret from one file does not
+  invalidate copies already taken. Before reporting a leak handled, search the
+  whole machine for other copies — backups, `.bak-*` files, shell history,
+  config files and their auto-backups, setup scripts — and say plainly that only
+  rotation retires an exposed value.
 - **Destructive actions:** every destructive action must be recoverable before
   it happens. Inspect the exact target and keep a commit, backup, or reviewed
   preview. Never use broad staging or destructive Git commands over unreviewed
