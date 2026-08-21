@@ -317,7 +317,14 @@ End the response with a literal ## Verdict heading followed on the next line by 
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; conversation was not created." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
-    write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
+    if [ "${AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE:-0}" = publish ]; then mkdir -p "$F" || true; fi
+    if ! write_atomic "$F" "$CANDIDATE.final"; then
+      rm -f "$CANDIDATE" "$CANDIDATE.final"
+      release_lock
+      echo "Error: the conversation transcript could not be published; no completion was recorded." >&2
+      exit 1
+    fi
+    rm -f "$CANDIDATE" "$CANDIDATE.final"
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
@@ -354,7 +361,13 @@ End the response with a literal ## Verdict heading followed on the next line by 
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; canonical conversation is unchanged." >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
-    write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
+    if ! write_atomic "$F" "$CANDIDATE.final"; then
+      rm -f "$CANDIDATE" "$CANDIDATE.final"
+      release_lock
+      echo "Error: the conversation transcript could not be published; canonical conversation is unchanged." >&2
+      exit 1
+    fi
+    rm -f "$CANDIDATE" "$CANDIDATE.final"
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2

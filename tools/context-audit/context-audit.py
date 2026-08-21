@@ -30,6 +30,7 @@ SAFETY_MARKERS = {
     "destructive actions": [r"destructive", r"delete|overwrite|recover"],
     "Git identity": [r"GIT_COMMITTER_IDENT|Git identity", r"Albert Hazan|users\.noreply\.github\.com"],
     "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
+    "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting"],
 }
 
 # Plain-English consequence printed when a safety category is missing. The audit
@@ -59,6 +60,10 @@ SAFETY_REASONS = {
         "no always-loaded rule pins GPT-5.6 reasoning to low or medium, so a run "
         "could start at high or none"
     ),
+    "system binaries": (
+        "no always-loaded rule forbids replacing operating-system binaries, so a "
+        "session could damage commands shared by the whole machine"
+    ),
 }
 
 # Rules that must be present in BOTH client globals. Claude and Codex load
@@ -75,6 +80,7 @@ PARITY_RULES = {
     "Synology long-read safety": r"Synology",
     "handoff quality standard": r"HANDOFF",
     "destructive actions recoverable": r"destructive action",
+    "never replace system binaries": r"system binaries|operating-system binaries",
 }
 
 # Client-only text that is allowed to appear in exactly one global. If one of
@@ -93,7 +99,7 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 # Keep in sync with tools/context-audit/budgets.json and the table in
 # docs/context-engineering.md — a budget number lives in exactly three places.
 DEFAULT_BUDGETS = {
-    "alwaysLoadedBytes": {"budget": 13563, "target": 12500},
+    "alwaysLoadedBytes": {"budget": 13871, "target": 12500},
     "startupRoutedBytes": {"budget": 11987, "target": 11000},
     "claudeSkillManifestBytes": {"budget": 22777, "target": 20000},
     "codexSkillManifestBytes": {"budget": 14847, "target": 13000},

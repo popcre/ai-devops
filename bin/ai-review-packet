@@ -505,7 +505,7 @@ hash_packet() { # hash_packet PACKET_DIR
       printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
         "${file#./}" "$(wc -c < "$file" | tr -d ' ')" \
         "$(sha256sum "$file" | cut -d' ' -f1)"
-    done < <(find . -type f ! -name "$HASHFILE" -print0 | LC_ALL=C sort -z)
+    done < <(find . -type f ! -path "./$HASHFILE" -print0 | LC_ALL=C sort -z)
   ) | sha256sum | cut -d' ' -f1
 }
 

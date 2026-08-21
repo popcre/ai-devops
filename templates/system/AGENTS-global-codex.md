@@ -130,6 +130,8 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   visually before reporting completion.
 - GitHub is the source of truth: repository to automated checks to deployment.
   Never live-edit a server.
+- Never replace operating-system binaries. Use project-owned tools or supported
+  package management without overwriting the operating system's commands.
 - Before the first commit in a repository, run `git var GIT_COMMITTER_IDENT`; it
   must show `Albert Hazan <u2giants@users.noreply.github.com>`. Check for other
   sessions' changes before pull, merge, or commit, and stage only owned files.

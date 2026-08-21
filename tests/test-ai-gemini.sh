@@ -84,6 +84,7 @@ R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
+check 'duplicate new leaves completed session unchanged' "! new_run '$R4' good normal && test \"\$(jq -r .status \"\$(meta_for good)\")\" = COMPLETE"
 check 'wrong resumed conversation ID is rejected' "! (cd '$R4' && MOCK_MODE=wrongid '$SCRIPT' ask good --prompt follow-up)"
 check 'wrong model is rejected' "! new_run '$R4' wrongmodel wrongmodel"
 printf before-model > "$R4/dirty.txt"

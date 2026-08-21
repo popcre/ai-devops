@@ -15,6 +15,7 @@ $safetyLines = [ordered]@{
     "destructive actions"     = "Destructive actions such as delete or overwrite must be recoverable."
     "Git identity"            = "Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com."
     "GPT-5.6 effort"          = "GPT-5.6 must use low or medium effort."
+    "system binaries"         = "Never replace operating-system binaries or overwrite system commands."
 }
 
 # Rules that must appear in BOTH client globals, carried separately from the
@@ -229,7 +230,7 @@ try {
             throw "Strict mode did not print a plain reason for the missing '$category' rule."
         }
     }
-    Write-Host "PASS: all six locked safety categories fail individually with a plain-English reason"
+    Write-Host "PASS: all seven locked safety categories fail individually with a plain-English reason"
 
     # ------------------------------------------------------ cross-client parity
     New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("GPT-5.6 effort")

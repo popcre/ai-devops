@@ -69,7 +69,7 @@ The first real-machine report found:
   installers for managed markers, collision refusal, orphan quarantine,
   non-clobbering global installation, and dry-run support. This is text pattern
   matching over both installers, not proof of full behavioral parity;
-- all six required safety categories present;
+- all seven required safety categories present;
 - four installed skill files different from tracked source on `al8960ofc`;
 - both installed global files different from source, as expected because local
   machine facts were appended under the current non-clobber policy.
@@ -227,7 +227,7 @@ new measured sizes after the safety and parity checks passed.
 
 | Budget | Baseline 2026-08-12 | Measured 2026-08-21 | Change | `budget` (warns above) | `target` (next cut) |
 |---|---:|---:|---:|---:|---:|
-| Always-loaded globals | 33,311 bytes | 13,563 | **−59.3%** | 13,563 | 12,500 |
+| Always-loaded globals | 33,311 bytes | 13,871 | **−58.4%** | 13,871 | 12,500 |
 | Startup-routed repo entry files | 50,729 bytes | 11,987 | **−76.4%** | 11,987 | 11,000 |
 | Claude skill manifest | 21,521 bytes | 23,709 | +10.2% | 22,777 | 20,000 |
 | Codex skill manifest | 14,015 bytes | 22,526 | +60.7% | 14,847 | 13,000 |
@@ -260,7 +260,7 @@ only Claude-specific behavior: ignore-file handling, shared-skill placement,
 commit attribution, and Windows shell choice. Repository facts and procedures
 are owned by `AGENTS.md` and its pointers.
 
-Measured results: globals 36,705 → 13,563 bytes; startup-routed entry files
+Measured results: globals 36,705 → 13,871 bytes; startup-routed entry files
 45,399 → 11,987 bytes. The strict audit reports no missing safety marker, parity
 mismatch, broken link, installed/source overlap, or global/skill overlap.
 
@@ -311,22 +311,24 @@ covered by the parity check.
 
 ### Locked safety markers
 
-Six categories must be present in the always-loaded and startup-routed text:
+Seven categories must be present in the always-loaded and startup-routed text:
 production mutation, shared database routing, secret handling, destructive
-actions, Git identity, and the GPT-5.6 low/medium limit. Removing any one of
+actions, Git identity, the GPT-5.6 low/medium limit, and the prohibition on
+replacing operating-system binaries. Removing any one of
 them from a fixture produces a plain-English failure naming that category and
-what protection was lost. `tests/test-context-audit.ps1` proves all six
-independently, and proves that removing one does not disturb the other five.
+what protection was lost. `tests/test-context-audit.ps1` proves all seven
+independently, and proves that removing one does not disturb the other six.
 
 ### Cross-client parity and its divergence allowlist
 
 Claude and Codex load different global files, so identical behavior has to be
-asserted rather than assumed. Eleven rules must appear in both globals: the
+asserted rather than assumed. Twelve rules must appear in both globals: the
 response-style contract, GPT-5.6 low/medium, production infrastructure safety,
 no `terraform apply` against prod, verifying the Git committer identity, secrets
 in 1Password, serialized 1Password access, the shared-database change gate,
 Synology long-read safety, the handoff quality standard, and (added in step 5)
-destructive actions being recoverable.
+destructive actions being recoverable, and operating-system binaries never
+being replaced.
 
 Text that genuinely belongs to one client only lives in a small divergence
 allowlist (each client's own install line, and the Codex edition framing). If an

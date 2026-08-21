@@ -53,6 +53,11 @@ set +e
 METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
 set +e
 check "real metadata publication failure is not masked by cleanup" "test '$METADATA_FAILURE_RC' -ne 0 && ! printf '%s' '$METADATA_FAILURE_OUT' | grep -q '^SESSION_ID:'"
+set +e
+TRANSCRIPT_FAILURE_OUT="$(AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send transcript-failure --review 2>&1)"; TRANSCRIPT_FAILURE_RC=$?
+set -e
+check "real transcript publication failure is not masked by cleanup" "test '$TRANSCRIPT_FAILURE_RC' -ne 0 && ! printf '%s' '$TRANSCRIPT_FAILURE_OUT' | grep -q '^SESSION_ID:'"
+check "transcript failure publishes no completion metadata" "test -z \"\$(find '$TMP/repo/.ai/deepseek-sessions' -type f -name '*.meta.json' -newer '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json' -print -quit)\""
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
