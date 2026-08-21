@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# ai-codex-memories — make sure Codex's own local memory feature is switched on.
+#
+# Codex keeps its memories in ~/.codex/memories_<n>.sqlite, entirely separate from
+# Claude Code's markdown memory under ~/.claude/projects/*/memory. Neither reads the
+# other, and the feature ships OFF by default, so a machine that has never had this
+# run learns nothing across Codex sessions.
+#
+# This is per-MACHINE state that `git pull` cannot deliver, which is why dotfiles
+# sync calls it every run rather than only on a fresh install.
+#
+# It uses Codex's own `codex features enable`, never a hand-edit of config.toml —
+# hand-editing risks duplicate keys and breaks the "Claude scripts must not touch
+# Codex config" rule. A backup is taken before the first change.
+#
+# Exit status: 0 = enabled (or already enabled), 1 = could not enable, 2 = no Codex.
+set -u
+
+check_only=0
+while (($#)); do
+  case "$1" in
+    --check) check_only=1; shift ;;
+    -h|--help) echo "usage: ai-codex-memories [--check]"; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+codex_bin="$(command -v codex 2>/dev/null || true)"
+if [[ -z "$codex_bin" ]]; then
+  for c in "$HOME/.codex/packages/standalone/current/bin/codex" \
+           "$USERPROFILE/.codex/packages/standalone/current/bin/codex" \
+           /usr/local/bin/codex; do
+    [[ -x "$c" ]] && { codex_bin="$c"; break; }
+  done
+fi
+[[ -n "$codex_bin" ]] || { echo "INFO Codex is not installed on this machine — nothing to do."; exit 2; }
+
+state="$("$codex_bin" features list 2>/dev/null | awk '$1=="memories"{print $NF}')"
+if [[ -z "$state" ]]; then
+  echo "ERROR this Codex build does not expose a 'memories' feature flag" >&2
+  exit 1
+fi
+
+if [[ "$state" == "true" ]]; then
+  echo "OK Codex memories already enabled"
+  exit 0
+fi
+
+if (( check_only )); then
+  echo "ERROR Codex memories are disabled — run: ai-codex-memories" >&2
+  exit 1
+fi
+
+cfg="${CODEX_HOME:-$HOME/.codex}/config.toml"
+if [[ -f "$cfg" ]]; then
+  backup="$cfg.bak-$(date +%Y%m%d-%H%M%S)"
+  cp "$cfg" "$backup" || { echo "ERROR could not back up $cfg" >&2; exit 1; }
+  echo "OK backed up $cfg -> $(basename "$backup")"
+fi
+
+if ! "$codex_bin" features enable memories >/dev/null 2>&1; then
+  echo "ERROR 'codex features enable memories' failed" >&2
+  exit 1
+fi
+
+state="$("$codex_bin" features list 2>/dev/null | awk '$1=="memories"{print $NF}')"
+if [[ "$state" == "true" ]]; then
+  echo "OK Codex memories enabled"
+  exit 0
+fi
+
+echo "ERROR Codex memories still report '$state' after enabling" >&2
+exit 1

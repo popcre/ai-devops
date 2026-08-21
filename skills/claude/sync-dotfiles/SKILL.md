@@ -33,6 +33,8 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
+| Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
+| Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
@@ -210,6 +212,32 @@ clone + `./install.sh` (Ubuntu) first.
    every agent — there is nothing per-agent to configure. Relay any warning it
    prints about a repo-local override or a Git Bash `$HOME` that differs from
    the Windows profile.
+6c. **Switch on Codex's own memory:** `bin/ai-codex-memories`. Idempotent; prints
+   `OK Codex memories already enabled` and exits when there is nothing to do, and
+   exits 2 with an informational line on a machine that has no Codex. This is NOT
+   the same store as Claude's: Codex keeps its memories in
+   `~/.codex/memories_<n>.sqlite`, Claude keeps markdown under
+   `~/.claude/projects/*/memory`, and **neither client reads the other's**. Codex
+   ships the feature OFF, so a machine that never had this run learns nothing
+   across Codex sessions — the facts a Codex session establishes die with it.
+   It is per-MACHINE state a `git pull` cannot deliver, which is why it runs every
+   sync and not only on a fresh machine. The script calls Codex's own
+   `codex features enable memories` and backs up `config.toml` first; never
+   hand-edit that file (standing rule 16 — Claude setup scripts must not touch
+   Codex config).
+   **Known limitation, say it out loud rather than implying coverage:** Codex's
+   SQLite memory is machine-local and is NOT synced by `ai-sync-memory`, which
+   handles Claude's markdown memory only. Facts Codex learns on one computer do
+   not reach the others. Durable cross-machine facts still belong in Claude's
+   memory files or in the repo's own docs.
+6d. **Report the memory-health task, don't assume it:** the weekly read-only audit
+   (`bin/ai-memory-health`) is registered by
+   `bin/install-memory-health-task.ps1` and is per-machine. Check for it with
+   `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, say
+   so and offer to register it. Never register an unattended job that EDITS
+   memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
+   survive a later pull, so a wrong automated delete is unrecoverable. The audit
+   reports; a human approves every change.
 7. **Capture local memory** back to the hub: `bin/ai-sync-memory push`.
 8. **Commit + push the hub** if step 3/7 changed anything: `git status` to see
    what changed, then stage `memory/` (and any skill/template edits the user made

@@ -83,7 +83,7 @@ reintroduced.
 | `skills/shared/` | Skills installed for both clients; default location |
 | `skills/claude/`, `skills/codex/` | Genuinely client-specific skills only |
 | `tools/`, `tests/` | Audit/evaluation helpers and dependency-light tests |
-| `memory/` | Secret-free durable facts synchronized across machines |
+| `memory/` | Secret-free durable facts synchronized across machines. `bin/ai-memory-health` is the read-only weekly audit; it never edits or deletes a memory |
 | `transcripts/` | Private submodule; never inspect raw transcript data casually |
 
 Installed Linux commands normally point from `/usr/local/bin/ai-*` to the

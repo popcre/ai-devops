@@ -142,6 +142,22 @@ clone + `./install.sh` on Ubuntu).
    Claude, GLM, Grok and Kimi all use the same `git`, so one setting covers
    every agent. Relay any warning about a repo-local override or a Git Bash
    `$HOME` that differs from the Windows profile.
+5c. `bin/ai-codex-memories` — switch on Codex's own memory feature. Idempotent;
+   prints `OK Codex memories already enabled` when there is nothing to do and
+   exits 2 informationally where Codex is absent. Codex stores memories in
+   `~/.codex/memories_<n>.sqlite`; Claude stores markdown under
+   `~/.claude/projects/*/memory`; **neither reads the other's**. The feature ships
+   OFF, so an un-run machine learns nothing across Codex sessions. Per-MACHINE
+   state that `git pull` cannot deliver, hence every sync. The script uses Codex's
+   own `codex features enable memories` and backs up `config.toml` first — never
+   hand-edit it. **Limitation to state plainly:** the SQLite store is machine-local
+   and NOT synced by `ai-sync-memory` (which covers Claude's markdown only), so
+   durable cross-machine facts belong in Claude's memory or repo docs.
+5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
+   task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
+   say so and offer to register it. Never schedule anything that EDITS memory
+   unattended: tombstoned deletions propagate to every machine and survive a later
+   pull, so a wrong automated delete cannot be undone.
 6. `bin/ai-sync-memory push` — copy local memory back into the hub.
    **Deleting a memory needs `forget`, not `rm`.** Sync copies, never mirrors, so
    a plain delete does not propagate — the next `pull` restores it and any
