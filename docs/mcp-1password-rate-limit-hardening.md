@@ -196,6 +196,19 @@ repo changes are committed and pushed.
 
 ## Known remaining / secondary items
 
+- **Accepted Windows process-command-line exposure (owner decision,
+  2026-08-21):** authenticated remote MCPs currently pass their resolved bearer
+  token to `mcp-remote` through its required `--header` argument. The token is
+  absent from client configuration and disk, but it is visible in the live
+  Windows process command line. Removing that exposure would require a custom
+  proxy, another service/software component, or equivalent ongoing complexity;
+  the owner explicitly rejected adding those moving parts. Leave the launcher
+  architecture unchanged unless the existing clients gain a native supported
+  environment-sourced bearer mechanism. This is an accepted observability risk,
+  not a claim that environment injection has solved it. Diagnostics must never
+  emit raw `Win32_Process.CommandLine` or equivalent process arguments; collect
+  only executable name, PID, and parent PID unless the output is proven
+  secret-free before it enters logs or AI tool output.
 - **Other plaintext secrets in `~/.codex/config.toml`:** the `trigger` and
   `recall-ai` blocks still carry inline tokens (`TRIGGER_ACCESS_TOKEN`,
   recall-ai bearer). Same launcher treatment could remove them; out of scope for
