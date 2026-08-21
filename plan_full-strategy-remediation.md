@@ -7,7 +7,7 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 
 | Step | Work | Status | Date | Evidence / restart point |
 |---|---|---|---|---|
-| 0 | Publish this plan, the corrected audit record, and the linked handoff | 🟨 in progress | 2026-08-21 | This file, linked handoff, issue #62; fresh session starts here until the first plan commit is on `origin/main` |
+| 0 | Publish this plan, the corrected audit record, and the linked handoff | ✅ complete | 2026-08-21 | Commit `0b495562453909bd6da6b64ee845e6d3e4987892` on `origin/main`; issue #62 comment links the immutable plan |
 | 1 | Contain and preserve the live four-machine memory incident | ⬜ open | — | `tests/verification/full-remediation/<UTC>/memory-containment.md` |
 | 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ⬜ open | — | private-hub visibility proof plus `ai-memory-health` artifacts |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ⬜ open | — | replacement `tests/test-ai-memory-sync.sh` and two-machine round-trip evidence |
@@ -26,8 +26,7 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 16 | Install and verify the exact release on every managed machine | ⬜ open | — | per-machine SHA, installer, doctor, and memory-status records |
 | 17 | Obtain independent exact-head approval and close the workstream | ⬜ open | — | review report, final CI run, origin SHA, closed issue #62 |
 
-**Fresh-session start:** Step 0 until the plan commit is verified on `origin/main`;
-after that, always start at the first non-complete row. Before each phase, re-read
+**Fresh-session start:** Step 1. Always start at the first non-complete row. Before each phase, re-read
 all downstream steps for drift and update this table in the same session.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -126,8 +125,8 @@ memory commits. These are active/existing states, not hypothetical lint findings
 ## 5. Current state of the code
 
 - Audit commit `e3330c08d48c0bb012a6eabfdc49ac0113c88fd7` is on `main`.
-- At plan creation, local and remote `main` were synchronized at
-  `3ca5b2b1846fad03e4f0d251e22142ca043dee84`; scheduled memory commits continue
+- The governing plan/audit/handoff were published on `origin/main` in commit
+  `0b495562453909bd6da6b64ee845e6d3e4987892`; scheduled memory commits continue
   to advance `origin/main`, so every phase must fetch and reconcile again.
 - The working tree was clean before plan work. Other sessions own the separate
   Gemini and Grok repair checkouts named in their handoffs; never overwrite them.
