@@ -220,9 +220,28 @@ screen — Headroom's own ledger only counts what actually flowed through it.
 
 ## 7. Known risks / trade-offs
 
-- **Single point of failure.** If the VPS or the proxy is down, any wired Claude
-  cannot connect until the redirect is removed (§8). Watch it for a few days
-  after enabling.
+- **Single point of failure — this is the real cost of using it.** A wired
+  Claude sends 100% of its traffic to the proxy and there is **no automatic
+  fallback**: Claude Code has no "try the proxy, else go direct" behaviour. If
+  the hetz VPS is down, the `headroom` service is stopped, or the machine's
+  Tailscale link drops, **Claude stops working entirely** until the redirect is
+  removed and Claude is restarted. Three separate things must all stay up.
+
+  The escape hatch is `bin/headroom-toggle.ps1`, installed on each Windows
+  machine:
+
+  ```powershell
+  pwsh bin/headroom-toggle.ps1 status   # what am I using, and is it reachable?
+  pwsh bin/headroom-toggle.ps1 off      # go straight to Anthropic
+  pwsh bin/headroom-toggle.ps1 on       # route through the proxy again
+  ```
+
+  `off` takes about ten seconds, plus a full quit-and-reopen of Claude. `on`
+  refuses to run if the proxy is not answering, so it cannot strand you. Every
+  change backs up `settings.json` first.
+
+  The VPS-side equivalent is `/home/ai/.claude/settings.json` plus the
+  `.bashrc` export — remove both to go direct there.
 - **Extra hop / latency.** Local-Windows requests now go
   laptop → VPS → Anthropic instead of straight to Anthropic.
 - **Unofficial posture.** Routing a Claude *subscription* through a modifying
@@ -237,9 +256,10 @@ screen — Headroom's own ledger only counts what actually flowed through it.
 
 ## 8. How to turn it OFF / revert
 
-**Per Windows machine (Workflow B):** remove the `"env": { "ANTHROPIC_BASE_URL":
-... }` block from that machine's `~/.claude/settings.json`, then fully quit and
-reopen Claude Desktop. Claude goes straight back to Anthropic.
+**Per Windows machine (Workflow B):** run `pwsh bin/headroom-toggle.ps1 off`,
+then fully quit and reopen Claude Desktop. (Manually: remove the
+`"env": { "ANTHROPIC_BASE_URL": ... }` block from that machine's
+`~/.claude/settings.json`.) Claude goes straight back to Anthropic.
 
 **VPS `ai` user (Workflow A):** comment out / remove the `export
 ANTHROPIC_BASE_URL=...` line in `/home/ai/.bashrc`.
@@ -264,7 +284,9 @@ systemctl disable headroom.service     # also prevent it starting on boot
 | VPS access | `ssh hetzner` (root) or `ssh vps2` (ai) or `devops-mcp` MCP |
 | Service control | `systemctl {status,restart,stop} headroom.service` |
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
-| Off switch (this machine) | delete `env` block in `~/.claude/settings.json` + restart Claude Desktop |
+| Off switch (Windows) | `pwsh bin/headroom-toggle.ps1 off` + fully restart Claude |
+| Check what I'm using | `pwsh bin/headroom-toggle.ps1 status` |
+| Off switch (VPS `ai`) | remove `env` from `/home/ai/.claude/settings.json` **and** the `.bashrc` export |
 
 ---
 
