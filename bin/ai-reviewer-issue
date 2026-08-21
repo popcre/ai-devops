@@ -10,7 +10,7 @@
 # code or provider sessions.
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISSUE_DIR="${AI_REVIEWER_ISSUE_DIR:-$TOOLKIT_ROOT/.ai/reviewer-issues}"
@@ -24,6 +24,7 @@ usage(){
 Usage:
   ai-reviewer-issue record --provider NAME --summary "title" [--details TEXT | --details-file PATH]
                            [--command TEXT] [--repo PATH] [--error-file PATH]
+                           [--run-id ID] [--session-id ID] [--caller NAME]
   ai-reviewer-issue list
   ai-reviewer-issue show <issue-id>
   ai-reviewer-issue path
@@ -60,6 +61,18 @@ latest_json(){ # latest_json DIRECTORY
   printf '%s' "$latest"
 }
 
+exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER
+  local dir="$1" run="$2" session="$3" repo="$4" head="$5" caller="$6" f
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    jq -e --arg run "$run" --arg session "$session" --arg repo "$repo" --arg head "$head" --arg caller "$caller" '
+      ($run=="" or (.run_id // .job_id // .id // "")==$run) and
+      ($session=="" or (.session_id // .session // .name // "")==$session) and
+      ((.repo // .repository_root // "")==$repo) and (.head // "")==$head and
+      ($caller=="" or (.caller // "")==$caller)' "$f" >/dev/null 2>&1 && { printf '%s' "$f"; return 0; }
+  done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
+}
+
 sanitize_json(){ # sanitize_json SOURCE DESTINATION
   jq 'walk(if type == "object" then
         with_entries(select((.key | ascii_downcase) as $k |
@@ -87,37 +100,42 @@ write_artifact_inventory(){ # write_artifact_inventory REPO DESTINATION
   done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -print0 2>/dev/null)
 }
 
-capture_review_reports(){ # capture_review_reports REPO PROVIDER DEST INVENTORY
-  local repo="$1" provider="$2" dest="$3" inventory="$4" f saved count=0
+capture_review_reports(){ # capture_review_reports REPO PROVIDER JOIN DEST INVENTORY
+  local repo="$1" provider="$2" join="$3" dest="$4" inventory="$5" f saved count=0
   mkdir -p "$dest"
+  [ -n "$join" ] || return 0
   [ -d "$repo/.ai/reviews" ] || return 0
   while IFS= read -r -d '' f; do
     count=$((count + 1)); saved="$(printf '%03d-%s' "$count" "$(basename "$f")")"
     redact_text < "$f" > "$dest/$saved"
     printf '%s\t%s\t%s bytes\n' "$f" "$saved" "$(wc -c < "$f" | tr -d ' ')" >> "$inventory"
-  done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -iname "*${provider}*" -print0 2>/dev/null)
+  done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -iname "*${provider}*${join}*" -print0 2>/dev/null)
 }
 
-capture_provider_logs(){ # capture_provider_logs PROVIDER_DIR DEST INVENTORY
-  local source="$1" dest="$2" inventory="$3" f saved count=0
+capture_provider_logs(){ # capture_provider_logs PROVIDER_DIR JOIN DEST INVENTORY
+  local source="$1" join="$2" dest="$3" inventory="$4" f saved count=0
   mkdir -p "$dest"
+  [ -n "$join" ] || return 0
   [ -d "$source" ] || return 0
   while IFS= read -r -d '' f; do
     count=$((count + 1)); saved="$(printf '%03d-%s' "$count" "$(basename "$f")")"
     redact_text < "$f" > "$dest/$saved"
     printf '%s\t%s\t%s bytes\n' "$f" "$saved" "$(wc -c < "$f" | tr -d ' ')" >> "$inventory"
-  done < <(find "$source" -type f -mtime -2 \( -name '*.log' -o -name '*.jsonl' -o -name '*.out' -o -name '*.err' \) -print0 2>/dev/null)
+  done < <(find "$source" -type f -path "*${join}*" -mtime -2 \( -name '*.log' -o -name '*.jsonl' -o -name '*.out' -o -name '*.err' \) -print0 2>/dev/null)
 }
 
-capture_scoreboard(){ # capture_scoreboard PROVIDER DESTINATION
-  local provider="$1" dest="$2" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
+capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER DESTINATION
+  local provider="$1" repo="$2" head="$3" run="$4" session="$5" caller="$6" dest="$7" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
   [ -f "$ledger" ] || return 0
-  jq -s --arg provider "$provider" '[.[] | select(.provider==$provider)] | last // empty' "$ledger" > "$dest"
+  jq -s --arg provider "$provider" --arg repo "$repo" --arg head "$head" --arg run "$run" --arg session "$session" --arg caller "$caller" \
+    '[.[] | select(.provider==$provider and .repo==$repo and .head==$head and
+      ($run=="" or (.run_id // "")==$run) and ($session=="" or (.session_id // "")==$session) and
+      ($caller=="" or (.caller // "")==$caller))] | last // empty' "$ledger" > "$dest"
   [ -s "$dest" ] || rm -f "$dest"
 }
 
 record_issue(){
-  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" root now stamp host id report_dir
+  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" join="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -128,6 +146,9 @@ record_issue(){
       --command) command_text="${2:-}"; shift 2 ;;
       --repo) repo="${2:-}"; shift 2 ;;
       --error-file) error_file="${2:-}"; shift 2 ;;
+      --run-id) run_id="${2:-}"; shift 2 ;;
+      --session-id) session_id="${2:-}"; shift 2 ;;
+      --caller) caller="${2:-}"; shift 2 ;;
       *) die "unknown option '$1'." ;;
     esac
   done
@@ -147,12 +168,7 @@ record_issue(){
   mkdir -p "$report_dir" || die "cannot create report directory: $report_dir"
   chmod 0700 "$ISSUE_DIR" "$report_dir" 2>/dev/null || true
 
-  metadata_source="$(latest_json "$STATE_BASE/$provider")"
-  if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
-    metadata_copy="$report_dir/reviewer-metadata.redacted.json"
-    sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
-    chmod 0600 "$metadata_copy" 2>/dev/null || true
-  fi
+  join="${run_id:-$session_id}"
 
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"
@@ -160,13 +176,20 @@ record_issue(){
     remote="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
     status_short="$(git -C "$root" status --short --untracked-files=no 2>/dev/null || true)"
   fi
+  metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller" || true)"
+  if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
+    metadata_copy="$report_dir/reviewer-metadata.redacted.json"
+    sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
+    chmod 0600 "$metadata_copy" 2>/dev/null || true
+  fi
 
   write_artifact_inventory "$root" "$report_dir/recent-review-artifacts.txt"
   : > "$report_dir/captured-review-reports.txt"
   : > "$report_dir/captured-provider-logs.txt"
-  capture_review_reports "$root" "$provider" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
-  capture_provider_logs "$STATE_BASE/$provider" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
-  capture_scoreboard "$provider" "$report_dir/latest-scoreboard-entry.json"
+  capture_review_reports "$root" "$provider" "$join" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
+  capture_provider_logs "$STATE_BASE/$provider" "$join" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
+  capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$report_dir/latest-scoreboard-entry.json"
+  if [ -z "$metadata_source" ]; then printf 'No exact reviewer metadata matched provider, repository, head, run/session, and caller.\n' > "$report_dir/missing-evidence.txt"; fi
   if [ -n "$details" ]; then
     printf '%s\n' "$details" | redact_text > "$report_dir/details.redacted.txt"
   elif [ -n "$details_file" ]; then
@@ -186,7 +209,9 @@ record_issue(){
     --arg shell "${SHELL:-unavailable}" --arg metadata_source "$metadata_source" \
     --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
     --arg details_file "$details_file" --arg details "$details" \
-    '{schema_version:2,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
+    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" \
+    '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
+      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
       repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
       machine:{hostname:$host,os:$os,shell:$shell},

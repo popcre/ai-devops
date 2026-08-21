@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Freeze hostile fixtures and baseline | ⬜ open | `tests/verification/reviewer-shared-integrity/<UTC>/` |
-| 2 | Bind packet seal to names and boundaries | ⬜ open | `tests/test-ai-review-packet.sh` |
-| 3 | Refuse outside-target links in snapshots | ⬜ open | `tests/test-ai-review-sandbox.sh` |
-| 4 | Correlate incident evidence exactly | ⬜ open | `tests/test-ai-reviewer-issue.sh` |
-| 5 | Make freshness fail closed | ⬜ open | `tests/test-ai-review-scoreboard.sh` |
-| 6 | Govern every active provider | ⬜ open | preflight/scoreboard provider fixtures |
-| 7 | Land and install | ⬜ open | remote SHA and installed hashes |
+| 1 | Freeze hostile fixtures and baseline | ✅ complete | `tests/verification/reviewer-shared-integrity/20260821T120657Z/summary.txt` |
+| 2 | Bind packet seal to names and boundaries | ✅ complete | 86 packet tests pass |
+| 3 | Refuse outside-target links in snapshots | ✅ complete | snapshot hostile-link guard and suite |
+| 4 | Correlate incident evidence exactly | ✅ complete | 19 incident tests pass |
+| 5 | Make freshness fail closed | ✅ complete | 12 scoreboard tests pass |
+| 6 | Govern every active provider | ✅ complete | 21 preflight tests pass |
+| 7 | Land and install | 🟨 ready for integration | isolated commit must be merged and pushed by parent session |
 
 Fresh session starts at Step 1. Re-read downstream steps after each phase.
 

@@ -41,6 +41,7 @@ git -C "$WT" add -A
 git -C "$WT" commit -qm feature
 echo uncommitted >> "$WT/a.txt"
 echo brand-new > "$WT/c.txt"
+echo outside-secret > "$TMP/outside.txt"
 
 echo '== ai-review-sandbox'
 
@@ -73,6 +74,14 @@ check "sandbox_git_dir_is_inside_the_boundary" \
 check "committed_worktree_content_present"    "grep -q committed-in-worktree '$STAGE/b.txt'"
 check "uncommitted_edits_reproduced"          "grep -q uncommitted '$STAGE/a.txt'"
 check "untracked_files_reproduced"            "grep -q brand-new '$STAGE/c.txt'"
+
+# An untracked link must never import a file outside the repository boundary.
+if ln -s "$TMP/outside.txt" "$WT/outside-link" 2>/dev/null && [ -L "$WT/outside-link" ]; then
+  check "outside_untracked_link_is_refused"     "! '$SCRIPT' ensure '$WT' hostile-link"
+  HOSTILE_STAGE="$("$SCRIPT" path "$WT" hostile-link)"
+  check "outside_link_target_never_copied"      "! grep -Rqs outside-secret '$HOSTILE_STAGE' 2>/dev/null"
+  rm -f "$WT/outside-link"
+fi
 check "head_matches_the_worktree" \
   "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 check "sandbox_is_labelled_for_the_reviewer"  "grep -q 'Review snapshot' '$STAGE/AI-REVIEW-SANDBOX.md'"

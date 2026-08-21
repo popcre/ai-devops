@@ -30,6 +30,10 @@ Severity meanings:
 
 ### 2. Reviewer incident reports can attach another run's evidence
 
+**Repair status (2026-08-21): fixed in the shared evidence repair; exact
+provider/repository/head/run-or-session/caller matching now fails visibly when
+evidence is absent.**
+
 - Files: `bin/ai-reviewer-issue:54-60`, `bin/ai-reviewer-issue:119-155`
 - Confidence: certain; reproduced in both Grok issue-56 evidence packages
 - What happens: the recorder selects the newest provider record instead of the
@@ -156,6 +160,9 @@ Severity meanings:
 
 ### 14. Evidence packet verification does not bind file names or empty files
 
+**Repair status (2026-08-21): fixed in the shared evidence repair; the seal now
+binds every relative name, byte length, and per-file digest.**
+
 - Files: `bin/ai-review-packet:452-475`
 - Confidence: high
 - What happens: the seal hashes concatenated file contents, not each file name
@@ -164,6 +171,9 @@ Severity meanings:
   removed while verification still says the packet is intact.
 
 ### 15. Review snapshots can copy content from outside the repository
+
+**Repair status (2026-08-21): fixed in the shared evidence repair; outside
+untracked links are refused before link content is copied.**
 
 - Files: `bin/ai-review-sandbox:85-94`
 - Confidence: high
@@ -183,6 +193,9 @@ Severity meanings:
   without warning and no freshness check can detect it.
 
 ### 17. The scoreboard can call unknown evidence current
+
+**Repair status (2026-08-21): fixed in the shared evidence repair; freshness is
+now current, stale, or unknown, and unknown verdicts are unusable.**
 
 - Files: `bin/ai-review-scoreboard:39-45`
 - Confidence: high
@@ -251,6 +264,9 @@ Severity meanings:
 - User-visible failure: concurrent reviews can overwrite or mix their reports.
 
 ### 24. Central health and evidence tools cover only three providers
+
+**Repair status (2026-08-21): fixed in the shared evidence repair; all eight
+active providers are registered and unsupported facts remain unknown.**
 
 - Files: `bin/ai-review-preflight:21`, `bin/ai-review-preflight:140`,
   `bin/ai-review-preflight:165`, `bin/ai-review-scoreboard:18`,

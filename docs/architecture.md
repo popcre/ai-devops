@@ -107,6 +107,17 @@ never overwrites them. See [`configuration.md`](configuration.md).
 
 ## Constraints
 
+## Shared reviewer evidence contract
+
+Every active reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex, and
+DeepSeek—is registered with preflight and the scoreboard. Unsupported metadata
+is represented as missing, never invented. Scoreboard evidence is
+`current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
+each relative file name, byte length, and digest. Snapshots refuse untracked
+links that resolve outside the source repository. Incident reports copy only
+evidence joined to the exact provider, repository, commit, run/session, and
+caller.
+
 - Pure Bash + coreutils + `git`, `jq`, `rg`, `gh`, and the `claude`/`codex` CLIs.
 - No network services, no database, no containers.
 - Reviews must never mutate the repo.

@@ -8,7 +8,7 @@
 # assigning the same unhealthy provider again.
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
@@ -18,7 +18,7 @@ die()  { printf 'ai-review-preflight: error: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
-valid_provider() { case "$1" in grok|kimi|glm) return 0 ;; *) return 1 ;; esac; }
+valid_provider() { case "$1" in grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
 
@@ -40,7 +40,7 @@ write_atomic() { # FILE JSON
 
 quarantine() { # PROVIDER CLASS [SECONDS]
   local provider="$1" class="$2" seconds="${3:-$COOLDOWN}" now expires f
-  valid_provider "$provider" || die "unknown provider '$provider' (expected grok, kimi, or glm)."
+  valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
   now="$(now_epoch)"; expires=$((now + seconds)); f="$(provider_file "$provider")"
@@ -89,12 +89,17 @@ provider_wrapper() {
     grok) printf '%s' "${AI_REVIEW_GROK_WRAPPER:-$SCRIPT_DIR/ai-grok-review}" ;;
     kimi) printf '%s' "${AI_REVIEW_KIMI_WRAPPER:-$SCRIPT_DIR/ai-kimi}" ;;
     glm)  printf '%s' "${AI_REVIEW_GLM_WRAPPER:-$SCRIPT_DIR/ai-glm}" ;;
+    muse) printf '%s' "${AI_REVIEW_MUSE_WRAPPER:-$SCRIPT_DIR/ai-muse}" ;;
+    gemini) printf '%s' "${AI_REVIEW_GEMINI_WRAPPER:-$SCRIPT_DIR/ai-gemini}" ;;
+    qwen) printf '%s' "${AI_REVIEW_QWEN_WRAPPER:-$SCRIPT_DIR/ai-qwen}" ;;
+    codex) printf '%s' "${AI_REVIEW_CODEX_WRAPPER:-$SCRIPT_DIR/ai-codex-review}" ;;
+    deepseek) printf '%s' "${AI_REVIEW_DEEPSEEK_WRAPPER:-$SCRIPT_DIR/ai-deepseek-agent}" ;;
   esac
 }
 
 check_provider() { # PROVIDER REPO LIVE BASE
   local provider="$1" repo="$2" live="$3" base="$4" wrapper sandbox packet tag out rc class
-  valid_provider "$provider" || die "unknown provider '$provider' (expected grok, kimi, or glm)."
+  valid_provider "$provider" || die "unknown provider '$provider'."
   [ -d "$repo" ] || die "review directory does not exist: $repo"
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   need jq; need git; need timeout
@@ -137,7 +142,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
 usage() {
   cat <<EOF
 Usage:
-  ai-review-preflight check <grok|kimi|glm> <repo> [--base REF] [--live]
+  ai-review-preflight check <provider> <repo> [--base REF] [--live]
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
   ai-review-preflight clear <provider>
   ai-review-preflight status [provider]
@@ -162,7 +167,7 @@ case "$cmd" in
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(grok kimi glm); fi
+    else providers=(grok kimi glm muse gemini qwen codex deepseek); fi
     for provider in "${providers[@]}"; do
       if active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"; else printf '{"provider":"%s","status":"available"}\n' "$provider"; fi
     done ;;

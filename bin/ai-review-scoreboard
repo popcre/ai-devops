@@ -8,14 +8,14 @@
 # of long waits, missing verdicts, allowance failures, or stale evidence is
 # visible without changing provider selection.
 set -euo pipefail
-VERSION="1.0.0"
+VERSION="1.1.0"
 STATE_DIR="${AI_REVIEW_SCOREBOARD_DIR:-$HOME/.local/state/ai-devops/review-scoreboard}"
 LEDGER="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_DIR/reviews.jsonl}"
 LOCK_WAIT="${AI_REVIEW_SCOREBOARD_LOCK_WAIT:-10}"
 SCOREBOARD_LOCK=""
 
 die(){ printf 'ai-review-scoreboard: error: %s\n' "$*" >&2; exit 1; }
-valid_provider(){ case "$1" in grok|kimi|glm) return 0 ;; *) return 1 ;; esac; }
+valid_provider(){ case "$1" in grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 
 lock_acquire(){
   local lock="$LEDGER.lock" waited=0
@@ -29,7 +29,7 @@ lock_acquire(){
 }
 
 append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
-  local provider="$1" meta="$2" elapsed="$3" verdict="$4" failure="$5" stale="$6" row repo head actual
+  local provider="$1" meta="$2" elapsed="$3" verdict="$4" failure="$5" stale="$6" row repo head actual evidence_state identity dirty expected_dirty
   valid_provider "$provider" || die "unknown provider '$provider'."
   [ -s "$meta" ] && jq -e . "$meta" >/dev/null 2>&1 || die "metadata is not valid JSON: $meta"
   case "$elapsed" in ''|*[!0-9]*) die "elapsed seconds must be a non-negative integer." ;; esac
@@ -37,23 +37,33 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
   repo="$(jq -r '.repo // .repository_root // empty' "$meta")"
   head="$(jq -r '.head // empty' "$meta")"
   if [ "$stale" = auto ]; then
-    stale=false
-    if [ -n "$repo" ] && [ -d "$repo" ] && [ -n "$head" ]; then
+    evidence_state=unknown
+    identity="$(jq -r '.packet_sha256 // .tree_sha256 // empty' "$meta")"
+    if [ -n "$repo" ] && [ -d "$repo" ] && [ -n "$head" ] && [ -n "$identity" ]; then
       actual="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
-      [ "$actual" = "$head" ] || stale=true
+      dirty="$(git -C "$repo" status --porcelain=v1 -z 2>/dev/null | sha256sum | cut -d' ' -f1)"
+      expected_dirty="$(jq -r '.working_tree_sha256 // empty' "$meta")"
+      if [ "$actual" != "$head" ]; then evidence_state=stale
+      elif [ -n "$(git -C "$repo" status --porcelain=v1 2>/dev/null)" ] && [ -z "$expected_dirty" ]; then evidence_state=stale
+      elif [ -n "$expected_dirty" ] && [ "$dirty" != "$expected_dirty" ]; then evidence_state=stale
+      else evidence_state=current; fi
     fi
+  elif [ "$stale" = true ]; then evidence_state=stale
+  else evidence_state=current
   fi
+  [ "$evidence_state" != stale ] || stale=true
+  [ "$evidence_state" = stale ] || stale=false
   row="$(jq -nc --arg timestamp "$(date -u +%FT%TZ)" --arg provider "$provider" \
     --arg repo "$repo" --arg base "$(jq -r '.base // empty' "$meta")" --arg head "$head" \
     --arg packet "$(jq -r '.packet_sha256 // empty' "$meta")" --arg verdict "$verdict" \
-    --arg failure "$failure" --argjson elapsed "$elapsed" --argjson stale "$stale" \
+    --arg failure "$failure" --arg evidence_state "$evidence_state" --argjson elapsed "$elapsed" --argjson stale "$stale" \
     --argjson turns "$(jq '.turns // null' "$meta")" \
     --argjson tokens "$(jq '.total_tokens // .tokens // null' "$meta")" \
     --argjson cost "$(jq '.total_cost_usd // null' "$meta")" \
     '{schema_version:1,timestamp:$timestamp,provider:$provider,repo:$repo,base:$base,head:$head,
       packet_sha256:$packet,elapsed_seconds:$elapsed,turns:$turns,tokens:$tokens,cost_usd:$cost,
       verdict:(if $verdict=="" then null else $verdict end),
-      failure_class:(if $failure=="" then null else $failure end),stale:$stale}')"
+      failure_class:(if $failure=="" then null else $failure end),evidence_state:$evidence_state,stale:$stale}')"
   lock_acquire
   printf '%s\n' "$row" >> "$LEDGER"
   printf '%s\n' "$row"
@@ -62,7 +72,7 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
 usage(){
   cat <<EOF
 Usage:
-  ai-review-scoreboard append <grok|kimi|glm> <metadata.json> --elapsed N [--verdict V] [--failure CLASS] [--stale true|false|auto]
+  ai-review-scoreboard append <provider> <metadata.json> --elapsed N [--verdict V] [--failure CLASS] [--stale true|false|auto]
   ai-review-scoreboard report [ledger.jsonl]
 EOF
 }
@@ -83,8 +93,9 @@ case "$cmd" in
     append_row "$provider" "$meta" "$elapsed" "$verdict" "$failure" "$stale" ;;
   report)
     file="${1:-$LEDGER}"; [ -f "$file" ] || die "ledger not found: $file"
-    jq -s '{reviews:length,usable_verdicts:(map(select(.verdict!=null))|length),
+    jq -s '{reviews:length,usable_verdicts:(map(select(.verdict!=null and .evidence_state=="current"))|length),
       failures:(map(select(.failure_class!=null))|length),stale:(map(select(.stale==true))|length),
+      unknown:(map(select(.evidence_state=="unknown"))|length),
       over_15_minutes:(map(select(.elapsed_seconds>=900))|length),
       by_provider:(group_by(.provider)|map({provider:.[0].provider,reviews:length}))}' "$file" ;;
   --version) printf 'ai-review-scoreboard %s\n' "$VERSION" ;;

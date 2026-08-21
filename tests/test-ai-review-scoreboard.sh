@@ -32,7 +32,12 @@ check "missing Kimi token and cost stay null" "sed -n 2p '$AI_REVIEW_SCOREBOARD_
 check "failure class is recorded" "sed -n 2p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.failure_class==\"allowance-exhausted\"'"
 check "stale evidence is recorded" "sed -n 3p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.stale==true'"
 check "report counts outcomes" "$SCRIPT report | jq -e '.reviews==3 and .usable_verdicts==1 and .failures==2 and .over_15_minutes==1'"
-check "unknown provider is refused" "! $SCRIPT append qwen '$TMP/grok.json' --elapsed 1"
+check "all active providers are accepted" "for p in muse gemini qwen codex deepseek; do $SCRIPT append \"\$p\" '$TMP/grok.json' --elapsed 1 --stale false >/dev/null || exit 1; done"
+printf '{"packet_sha256":"p"}\n' > "$TMP/unknown.json"
+row="$($SCRIPT append qwen "$TMP/unknown.json" --elapsed 1)"
+check "missing repository and head are unknown" "printf '%s' '$row' | jq -e '.evidence_state==\"unknown\" and .stale==false'"
+check "unknown evidence is never usable" "$SCRIPT report | jq -e '.usable_verdicts==1 and .unknown>=1'"
+check "unknown provider is refused" "! $SCRIPT append nope '$TMP/grok.json' --elapsed 1"
 check "invalid elapsed is refused" "! $SCRIPT append grok '$TMP/grok.json' --elapsed nope"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
