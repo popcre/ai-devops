@@ -124,12 +124,29 @@ the workflow that produced the only real savings we have so far (2026-07-07).
 
 ### Workflow B — Claude running **locally on a Windows machine** (clone-and-code mode)
 
-The local Claude is redirected via its Claude Code settings:
+> **`settings.json` DOES NOT WORK for this, and never did.** Measured on Claude
+> Code 2.1.234 (2026-08-21): an `"env": {"ANTHROPIC_BASE_URL": ...}` block in
+> `~/.claude/settings.json` is accepted, displayed by every settings reader, and
+> **completely ignored** -- a fresh `claude` process sent **zero** requests to
+> the proxy. The identical test with the variable in the real environment routed
+> immediately (proxy inbound count 352 -> 356). Claude resolves its base URL
+> before settings `env` is applied.
+>
+> This is why the proxy sat idle for weeks while every status check reported it
+> was in use. A setting that is accepted but ignored is worse than one that
+> errors.
 
-```jsonc
-// C:\Users\<user>\.claude\settings.json
-"env": { "ANTHROPIC_BASE_URL": "http://<removed-protected-address>:8787" }
+The redirect must be a **persistent Windows USER environment variable**:
+
+```powershell
+[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL','http://<removed-protected-address>:8787','User')
 ```
+
+Prefer `ai-headroom on` / `ai-headroom off` over setting it by hand: the tool
+writes the variable, reads it back to prove it took, and deletes the misleading
+`settings.json` entry if one is present. Only Claude sessions started **after**
+the change are affected -- neither mechanism reaches an already-running process,
+so a full quit and reopen is required.
 
 Because the Windows machine is on the tailnet, it reaches the VPS proxy directly
 over Tailscale — **no SSH tunnel required**. The setting takes effect only after
