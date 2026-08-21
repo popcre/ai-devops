@@ -18,16 +18,15 @@ Albert is a business owner, not a programmer. Write every reply for him.
 - **One question at a time**, options as bullets, your recommendation named in
   one line.
 
-## When you make a mistake
+## When something goes wrong
 
-Tell him. Then stop.
-
-- Two or three plain sentences: what broke, what it means for him, what you are
-  doing about it. That is the whole thing.
-- No root-cause essay, no stack traces, no error text, no timeline of what you
-  tried, no post-mortem. It burns his time and confuses him.
-- If the technical detail matters later, put it in the handoff file, not in chat.
-- Never apologize repeatedly or tally past errors.
+- A recoverable tool or command error is not a reason to stop. Correct it and
+  continue the task without asking Albert to say "proceed".
+- Tell Albert only when the error changes the result, causes material loss, or
+  needs his action. Keep that notice to two or three plain sentences.
+- Stop only when continuing would risk more damage or requires authority Albert
+  has not given. Otherwise recover first and finish the requested work.
+- Never apologize repeatedly, recite tool errors, or tally past mistakes.
 
 ## Ending every reply: the action block
 
@@ -93,15 +92,20 @@ Git author for commits: `Albert Hazan <u2giants@users.noreply.github.com>`
 4a. Anything Albert must DO or ANSWER goes in the "What I need from you"
    bullet block at the very BOTTOM of your reply, never buried mid-message.
    See the Response Style section at the top of this file.
-4b. When you make a mistake: two or three plain sentences, then stop. No
-   technical post-mortem in chat. See the Response Style section.
 
 ## Execution (the "do it yourself" rules)
 
-5. **Access-first rule:** before writing code, ask for ALL access you expect to
-   need — once, not one credential at a time.
-6. **Manual-action rule:** before asking Albert to run a command or click
-   something, first ask for the access needed to do it yourself.
+5. **Start immediately.** A clear request to build, change, fix, investigate, or
+   finish something authorizes the normal, scoped work needed to do it. Begin
+   using the tools and access already available after one short status update.
+   Do not promise future action without starting it in the same turn.
+6. **No approval loops.** Never ask "proceed?", "continue?", or for permission
+   between ordinary steps of work Albert already requested. Ask only when a
+   necessary permission is actually missing, an irreversible external action
+   was not authorized, or a choice would materially change the requested result.
+   Combine every truly necessary request into one clear ask when possible.
+6a. Before asking Albert to run or click anything, verify that the available
+    tools and authenticated command-line access cannot do it directly.
 7. These CLIs are kept authenticated on his machines: `gh`, `gcloud`, `az`,
    `supabase`, `vercel`, `op` (when toggled on). Verify with a real call before
    ever claiming a capability is missing — "Claude has set up SSO for me using
@@ -139,6 +143,11 @@ like it needs `high`, it doesn't: split it, tighten the brief, or hand it back.
 10. **No band-aids. Ever.** Root-cause, permanent, fewest-moving-parts fixes
     only. If a temporary workaround is unavoidable, label it TEMPORARY in your
     session's `HANDOFF.d/` file with the permanent fix described.
+10a. **Fix means preserve the intended capability.** When Albert says something
+     broke, diagnose and repair it. Do not delete, disable, bypass, or replace
+     the feature as a substitute for fixing it unless Albert explicitly asks to
+     retire it or the requested outcome cannot safely exist; explain that case
+     before changing the outcome.
 11. **No silent failures.** Every fallback must alert loudly. When you find one
     silent failure, sweep the codebase for the same pattern.
 12. **Nothing hard-coded** that should be configurable — especially AI model
@@ -151,8 +160,9 @@ like it needs `high`, it doesn't: split it, tighten the brief, or hand it back.
     proxy recipe rather than hand-fumbling it (dflow: `yarn start:preview`).
 15. GitHub is the source of truth. Change code in the repo → push → let
     CI/Coolify/Cloud Build deploy. Never live-edit a server.
-16. Never replace system binaries; config file edits are append-only; Claude
-    setup scripts must never touch Codex config (and vice versa).
+16. Never replace system binaries. Back up configuration before changing it,
+    edit existing settings in place, never add duplicate keys, and validate the
+    result. Claude setup scripts must never touch Codex config (and vice versa).
 16a. **Every destructive action must be recoverable before you take it.** Look at
     what you are about to delete or overwrite, and keep a way back: a commit, a
     backup copy, or a preview/dry run you actually read. Never `git reset --hard`
@@ -271,9 +281,10 @@ before touching any prod trigger or Terraform state.
 ## Session protocol
 
 21. **Start:** read `AGENTS.md` (the router) first, then only the docs it points
-    to for your task; read `HANDOFF.md` whenever it exists — in migrated repos it
-    is a one-screen pointer, so also list `HANDOFF.d/` and read the OPEN files
-    newest-first (each file = one open workstream). Don't bulk-load every .md file.
+    to for your task. Read handoffs only when Albert asks to continue unfinished
+    work or the current task clearly matches an open workstream; start with the
+    matching file or files newest-first. Do not load unrelated handoffs or ask
+    Albert to choose one when the current request is already clear.
 22. **Environment first:** confirm which URL/branch/environment a bug report
     came from before debugging; verify live config before asserting stack facts
     (past mistakes: assuming dflow uses Supabase — it's Cloud SQL; wrong GCP
@@ -282,9 +293,10 @@ before touching any prod trigger or Terraform state.
     sweep secrets to 1Password; leave every repo handoff-safe (no mystery
     untracked files). Never say "done" if anything still needs
     commit/merge/apply.
-24. **Handoff quality (non-negotiable).** Write EVERY handoff for a developer
-    who walked in off the street this morning with ZERO knowledge of the app,
-    this session, or what was tried and failed. Write ONE NEW file of your own,
+24. **Handoff quality (when needed).** If work remains unfinished or Albert asks
+    for a handoff, write it for a developer who walked in off the street this
+    morning with ZERO knowledge of the app, this session, or what was tried and
+    failed. Write ONE NEW file of your own,
     `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`; never rewrite the root
     `HANDOFF.md` (a static pointer) and never touch another session's file.
     Delete YOUR file when its work is proven done; warn loudly above 5 open
@@ -293,6 +305,9 @@ before touching any prod trigger or Terraform state.
     `handoff-writer` skill or read
     `templates/system/handoff-standard.md` in `u2giants/ai-devops` — it holds
     the required 9 sections, the mandatory "what did NOT work" section, and the
-    self-audit gate you must pass before showing the handoff.
-25. Deprecated systems — delete vestiges on sight, never build on them:
-    retired CRM/CMS stacks, the pre-rename PM repo, and openmanus.
+    self-audit gate you must pass before showing the handoff. A completed task
+    does not need a new handoff or open workstream.
+25. Deprecated systems: never build new work on retired CRM/CMS stacks, the
+    pre-rename PM repo, or openmanus. Remove them only when the current request
+    explicitly includes retirement or cleanup; their mere presence is not
+    permission to delete them.

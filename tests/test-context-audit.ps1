@@ -352,34 +352,41 @@ owner: claude/fixture-$n
     if ($result.exit -ne 0) { throw "An overlap warning changed the exit status." }
     Write-Host "PASS: global text repeating a skill description is reported as duplicated startup context"
 
-    # --------------------------------------------- Codex autonomy guardrails
+    # ------------------------------------------ client autonomy guardrails
     # These assertions protect the behavior contract Albert corrected after the
-    # old wording made Codex stop on harmless errors, ask for repeated approval,
-    # and remove broken features instead of repairing them.
-    $codexGlobal = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-codex.md") -Raw
-    foreach ($required in @(
-        "Start immediately",
-        "No approval loops",
-        "recover first and finish",
-        "Fix means preserve the intended capability",
-        "Do not load unrelated handoffs",
-        "permission to delete them"
-    )) {
-        if ($codexGlobal -notmatch [regex]::Escape($required)) {
-            throw "The Codex global lost its autonomy rule: $required"
+    # old wording made both clients stop on harmless errors, ask for repeated
+    # approval, and remove broken features instead of repairing them.
+    $clientGlobals = [ordered]@{
+        "Claude" = Get-Content -LiteralPath (Join-Path $repo "templates\system\CLAUDE-global.md") -Raw
+        "Codex" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-codex.md") -Raw
+    }
+    foreach ($client in $clientGlobals.Keys) {
+        foreach ($required in @(
+            "Start immediately",
+            "No approval loops",
+            "recover first and finish",
+            "Fix means preserve the intended capability",
+            "Do not load unrelated handoffs",
+            "permission to delete them"
+        )) {
+            if ($clientGlobals[$client] -notmatch [regex]::Escape($required)) {
+                throw "The $client global lost its autonomy rule: $required"
+            }
+        }
+        foreach ($forbidden in @(
+            "Tell him. Then stop.",
+            "Access-first: before coding",
+            "Access-first rule",
+            "delete vestiges on sight",
+            "read the OPEN files",
+            "More than 5 open files"
+        )) {
+            if ($clientGlobals[$client] -match [regex]::Escape($forbidden)) {
+                throw "The $client global restored a known behavior trap: $forbidden"
+            }
         }
     }
-    foreach ($forbidden in @(
-        "Tell him. Then stop.",
-        "Access-first: before coding",
-        "delete vestiges on sight",
-        "More than 5 open files"
-    )) {
-        if ($codexGlobal -match [regex]::Escape($forbidden)) {
-            throw "The Codex global restored a known behavior trap: $forbidden"
-        }
-    }
-    Write-Host "PASS: Codex starts authorized work, recovers from routine errors, repairs broken capabilities, and ignores unrelated handoffs"
+    Write-Host "PASS: Claude and Codex start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs"
 
     # -------------------------------------------------- Codex trigger-eval runner
     $printed = & python $codexRunner --skill sample --eval-set $budgetFile --print-command

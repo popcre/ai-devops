@@ -5,20 +5,22 @@ reducing repeated Claude and Codex context safely. The active implementation and
 decisions remain in
 [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
-## Codex behavior correction on 2026-08-21
+## Claude and Codex behavior correction on 2026-08-21
 
 Albert reported that Codex had become unusable: it stopped after harmless tool
 errors, asked him to say "proceed" between ordinary steps, promised work without
 starting it, and removed broken capabilities instead of repairing them. The
-always-loaded Codex global contained literal instructions that produced those
+always-loaded Claude and Codex globals contained literal instructions that produced those
 behaviors, including "Tell him. Then stop", access-first permission wording,
 and "delete vestiges on sight".
 
-`templates/system/AGENTS-global-codex.md` now makes the intended behavior
+`templates/system/CLAUDE-global.md` and
+`templates/system/AGENTS-global-codex.md` now make the intended behavior
 explicit: start authorized work immediately, do not create approval loops,
 recover from routine errors, preserve the capability when asked to fix it, and
-load only handoffs relevant to the current task. Production, secret, database,
-Git identity, reasoning-effort, and recoverable-deletion protections remain.
+load only handoffs relevant to the current task. Tests guard both clients
+against restoring the bad wording. Production, secret, database, Git identity,
+reasoning-effort, and recoverable-deletion protections remain.
 
 ## Baseline frozen on 2026-08-12
 
