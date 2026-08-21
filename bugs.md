@@ -1,3 +1,461 @@
+# Repository-wide strategy audit — 2026-08-21
+
+Scope: the complete tracked `ai-devops` toolkit—recovery and machine setup,
+memory, global instructions, skills and trigger quality, the staged AI workflow,
+delegated reviewers, evidence handling, secrets, tests, documentation, and GitHub
+controls. Raw transcript contents and third-party dependency internals were not
+opened.
+
+This is a read-only audit record. No behavior was changed. The older reviewer-only
+audit remains below as historical evidence.
+
+## Overall verdict
+
+The repository has excellent instincts: recoverable installs, 1Password references
+instead of plaintext credentials, private reviewer copies, explicit safety rules,
+incident-driven tests, a clear context ownership model, and unusually careful
+documentation. The problem is execution consistency. Several of the most important
+controls are warnings or instructions rather than enforced gates, and the project has
+invested far more in eight reviewer wrappers than in the core install, memory, test,
+and seven-stage workflow paths.
+
+Current findings: **4 CRITICAL, 14 HIGH, and 10 MEDIUM**.
+
+| Strategy | Verdict | Main reason |
+|---|---|---|
+| Public/private boundary | Critical repair needed | Secret-bearing transcripts are still reachable in public Git history |
+| Cross-machine memory | Critical repair needed | Index entries and failed-push commits can be destroyed automatically |
+| Database safety memory | Critical repair needed | Indexed memory teaches a nonexistent preview database and forbidden migration path |
+| Ubuntu/Windows recovery | High-risk gaps | Multiple required failures can still end in a successful-looking install |
+| Reviewer isolation/evidence | Strong design, incomplete enforcement | Private copies can omit or mix source states; providers implement lifecycle rules differently |
+| Context ownership/routing | Strong foundation | Live context is undercounted, over budget, and installed copies have drifted |
+| Skills and trigger quality | Good measurement method, thin coverage | Only 8 of 58 skills have committed trigger evaluations |
+| Secrets handling | Strong 1Password design | Windows ACL and malformed-config failures do not always fail closed |
+| Test strategy | Many useful tests, no delivery gate | 44 tests exist, but no CI, no single full-suite command, and no protected main branch |
+| Seven-stage AI workflow | Not production-ready | The advertised core is still disconnected v0.1 scaffolding |
+
+Severity meanings:
+
+- **CRITICAL:** current exposure, destructive data loss, or instructions capable of
+  sending work to the wrong production/shared system.
+- **HIGH:** a restore, review, or safety gate can report success without trustworthy
+  evidence, or the documented core strategy does not work end to end.
+- **MEDIUM:** material maintainability, observability, reproducibility, or efficiency
+  weakness that is not presently destructive by itself.
+
+## CRITICAL
+
+### 1. Secret-bearing transcripts are still reachable in the public repository history
+
+- Files: `docs/transcripts.md:3-5`, `AGENTS.md:32`, `.gitignore:78-82`
+- Confidence: certain
+- Evidence: `git rev-list --objects --all` finds **1,464** historical
+  `claude_chats/` / `codex_chats/` blobs totaling about **1.25 GB uncompressed**;
+  `git branch -a --contains 67866c8` includes `main` and `origin/main`. The local pack
+  remains about 424 MB. The docs claim the files were “removed from all history,”
+  but they remain in the ancestry a public clone receives.
+- User-visible impact: old conversations that the incident record says contained live
+  credentials remain downloadable. Rotation reduces credential risk, but does not
+  remove business data, infrastructure details, licensed material, or personal data
+  that may also be present. Fresh restores also download hundreds of megabytes of
+  obsolete history.
+- Required correction: plan a coordinated history rewrite or clean-repository cutover,
+  remove the objects from GitHub caches with GitHub Support where needed, re-point all
+  machines, and verify from a fresh unauthenticated clone before changing the claim in
+  `docs/transcripts.md`. Do not inspect or republish transcript contents during repair.
+
+### 2. Cross-machine memory sync knowingly drops index entries and auto-commits the loss
+
+- Files: `bin/ai-sync-memory:129-146`, `bin/ai-memory-sync:65-105`,
+  `memory/README.md:114-156`
+- Confidence: certain; Git history shows the same index lines being removed and restored
+  by alternating machines
+- What happens: `ai-sync-memory` detects hub index entries missing on the current
+  machine and prints “Pushing will drop them,” then copies the smaller local
+  `MEMORY.md` over the hub anyway. `ai-memory-sync` runs that push before its pull,
+  commits it automatically, and sends it to `main`.
+- User-visible impact: fact files survive but become unreachable to recall. The current
+  tree has **13** fact files not named by their project index, contradicting the rule
+  that an unindexed fact is no memory.
+- Required correction: merge indexes as a union, permit removal only through a durable
+  tombstone, block index shrink before commit, run `ai-memory-health` before every
+  automatic push, and add a real two-machine round-trip test.
+
+### 3. Indexed memory teaches the wrong database and a forbidden migration route
+
+- Files: `memory/dflow/feedback_all_db_work_via_shared_db.md:14-18`,
+  `memory/dflow/MEMORY.md:8`, `memory/dflow-plm/shared-db-canonical-repo.md:10-14`,
+  `memory/dflow_plm/shared-db-canonical-repo.md:10-14`,
+  `skills/codex/codex-shared-db-change/SKILL.md:30-46`
+- Confidence: certain
+- What happens: indexed memory names preview project `<removed-protected-project-ref>`; the
+  current governed skill explicitly says that project does not exist and names
+  `<removed-protected-project-ref>`. Two duplicated memories also authorize app-owned startup
+  schema changes, contradicting the current rule that every structural change starts
+  in `shared-db`.
+- User-visible impact: a future AI session can target the wrong environment or create
+  schema drift while believing it is following durable company memory.
+- Required correction: remove or correct the stale procedure memories immediately,
+  deduplicate the two project folders, keep volatile procedures in the governed skill
+  rather than memory, and validate high-risk project references against one canonical
+  source.
+
+### 4. A failed memory push destroys the local commit it claims to preserve
+
+- Files: `bin/ai-memory-sync:88-105`, `tests/test-ai-memory-sync.sh:1-23`
+- Confidence: certain from the control flow
+- What happens: after three failed pushes or a failed rebase, the script says the commit
+  is kept locally. It then immediately hard-resets the isolated clone to `origin/main`
+  and copies the older hub state back to the live machine. Child push/pull failures are
+  also not consistently checked.
+- User-visible impact: the newest learned facts can be lost precisely when the network
+  or GitHub is unavailable, while the job ends with “Sync complete.”
+- Required correction: never reset or pull unless the push succeeded; preserve the
+  commit, exit nonzero with a visible alert, and add failure-injection tests rather than
+  source-text-only assertions.
+
+## HIGH
+
+### 5. Ubuntu install and update can finish successfully after required stages fail
+
+- Files: `install.sh:17`, `install.sh:70-86`, `install.sh:128-149`,
+  `install.sh:159-178`, `install.sh:203-212`, `update.sh:27-28`
+- Confidence: certain
+- What happens: the installer does not stop on ordinary command failures. Required
+  directory, config, skill, identity, memory, and doctor failures are either unchecked,
+  downgraded to warnings, hidden, or forced to success. `update.sh` trusts that result.
+- User-visible impact: a disaster restore can say “install.sh complete” while the
+  machine is missing configuration, identity protection, skills, memory, secrets, or
+  required health checks.
+- Required correction: use an explicit stage runner; required stages fail the run,
+  optional stages produce named warnings, and the final exit code reflects the summary.
+  Never discard the doctor result.
+
+### 6. Windows setup can continue from stale, dirty, wrong-branch, or failed Git state
+
+- Files: `bin/install-ai-devops-windows.ps1:426-436`,
+  `bin/bootstrap-windows-dev.ps1:56-72`, `docs/windows-winget-configuration.md:59-62`
+- Confidence: certain
+- What happens: one installer does not check native Git exit codes. The main bootstrap
+  preserves a dirty checkout and continues, never validates `origin` or `main`, and can
+  pull whatever upstream the current branch uses.
+- User-visible impact: a machine can be configured from obsolete or unreviewed local
+  code while setup looks successful.
+- Required correction: before any machine change, require a clean checkout, expected
+  origin, `main`, fetched `origin/main`, and exact-head equality—or install from a
+  separately verified snapshot. Check every native command immediately.
+
+### 7. Windows has three conflicting “restore from zero” routes
+
+- Files: `README.md:30-56`, `README.md:195-205`,
+  `docs/restore-from-zero.md:7-23`, `bin/bootstrap-windows-dev.ps1:75-141`
+- Confidence: certain
+- What happens: the top README uses the full bootstrap; a later README section uses the
+  narrower Windows installer; the canonical restore guide uses only `setup-machine.ps1`.
+  Only the bootstrap owns the full WinGet, provider, remote-access, and WSL/Ansible setup.
+- User-visible impact: following two of the three official paths after a dead PC leaves
+  required tools and remote administration incomplete.
+- Required correction: publish one canonical entry point everywhere and label internal
+  component scripts as non-restore commands.
+
+### 8. Critical source-of-truth safeguards have no automatic or server-side gate
+
+- Files: `docs/deployment.md:8-16`, `docs/development.md:86-153`,
+  `docs/critical-incidents.md:193-230`
+- Confidence: certain; GitHub reports no branch protection/rules for `main`
+- What happens: the repo has 44 test files but no GitHub Actions workflow and no single
+  full-suite command. `main` also permits force pushes despite the recorded incident in
+  which a force push silently dropped four commits.
+- User-visible impact: broken recovery/safety code can become source of truth without a
+  repeatable gate, and the exact destructive incident documented here is still allowed
+  by GitHub.
+- Required correction: add an offline Windows/Linux test matrix, one local `test-all`
+  entry point, secret scanning, and a GitHub rule that blocks force-push and branch
+  deletion while retaining the chosen main-only workflow.
+
+### 9. Shared reviewer copies can silently omit part or all of a change
+
+- Files: `bin/ai-review-sandbox:81-102`, `bin/ai-review-sandbox:114-145`,
+  `tests/test-ai-review-sandbox.sh:1-170`
+- Confidence: certain
+- What happens: failed cleanup is tolerated, failed diff generation becomes an empty
+  patch, and failed untracked-file copies are warnings. The reviewer can receive a
+  clean or incomplete copy.
+- User-visible impact: a reviewer can approve work it never saw.
+- Required correction: fail closed on cleanup, diff, and every copy; remove the partial
+  snapshot; and add hostile unreadable, vanishing-file, and path-length tests.
+
+### 10. Reviewer snapshots can combine two source states that never existed together
+
+- Files: `bin/ai-review-sandbox:114-145`, `bin/ai-kimi:1030-1039`,
+  `bin/ai-grok-review:137-170`
+- Confidence: high; changing bytes in an already-modified file leaves short Git status
+  unchanged
+- What happens: HEAD, tracked edits, and untracked files are read separately while other
+  sessions may edit the shared checkout. Existing guards compare status labels, not
+  path/type/content identity.
+- User-visible impact: evidence and verdict can be attributed to a tree that was never
+  a real version of the work.
+- Required correction: compute a NUL-safe whole-source digest before and after snapshot
+  creation, retry once, and otherwise stop. Store that digest in every review record.
+
+### 11. Codex review is neither enforced read-only nor trustworthy on failure
+
+- Files: `bin/ai-codex-review:26-30`, `bin/ai-codex-review:61-85`,
+  `bin/ai-codex-review:138-159`, `plan_codex_reviewer_trust_repair.md:7-12`
+- Confidence: certain
+- What happens: it runs in the live repo without an enforced read-only sandbox, omits
+  untracked files, and turns missing CLI/nonzero provider results into an exit-zero
+  report. Same-second runs share a filename.
+- User-visible impact: it can change the work or certify a review that failed or skipped
+  the main new files.
+- Required correction: route Codex through the same private-copy, sealed-packet,
+  enforced read-only, exact-verdict, unique atomic-report lifecycle as trusted reviewers.
+
+### 12. Reviewer identity, freshness, and paid-run rules still diverge by provider
+
+- Files: `bin/ai-qwen:901-979`, `bin/ai-kimi:354-360`,
+  `bin/ai-kimi:1014-1019`, `plan_qwen_reviewer_evidence_repair.md:7-12`,
+  `plan_kimi_reviewer_completion_repair.md:7-12`
+- Confidence: high
+- What happens: Qwen resumes old reasoning after refreshing to new code without binding
+  head/tree/packet identity. Kimi’s repository-wide paid-run lock includes physical
+  checkout path, so two clones of one upstream can run twice. Kimi also remains correctly
+  quarantined because live completion is not proven.
+- User-visible impact: conclusions cross code versions and duplicate paid work can run.
+- Required correction: one upstream identity, one evidence-generation identity, and one
+  lock/state schema for every provider.
+
+### 13. Central reviewer governance exists but wrappers do not use it automatically
+
+- Files: `bin/ai-review-preflight:121-150`, `bin/ai-review-scoreboard:75-103`,
+  `bin/ai-reviewer-issue:71-85`, `bin/ai-reviewer-issue:116-150`
+- Confidence: certain
+- What happens: provider wrappers do not consult the shared quarantine before contact or
+  automatically append terminal outcomes. The scoreboard cannot represent normal dirty
+  reviews reliably, and incident matching ignores provider-specific session fields.
+- User-visible impact: quarantined providers can be retried, the performance ledger is
+  partial, and failure packages can omit the exact run they were meant to preserve.
+- Required correction: a shared lifecycle core must own preflight, normalized upstream
+  identity, source digest, locks, in-progress/terminal state, report publication,
+  scoreboard append, and incident join fields. Provider adapters should only contact the
+  provider and parse its completion.
+
+### 14. The advertised seven-stage pipeline is disconnected and uses unsafe defaults
+
+- Files: `skills/claude/ai-development-pipeline/SKILL.md:12-17`,
+  `skills/claude/ai-development-pipeline/SKILL.md:32-50`, `bin/ai-run-task:39-68`,
+  `bin/ai-codex-review:78-85`, `config/models.env.example:25-39`
+- Confidence: certain
+- What happens: Opus review stages call the Codex reviewer; `ai-run-task` writes a
+  run-specific plan location that `ai-codex-review` never searches; orchestration and
+  tests do not exist; and fresh Codex command examples omit the required explicit
+  low/medium reasoning setting.
+- User-visible impact: the repository’s headline workflow can review “no plan,” use the
+  wrong reviewer, or start Codex with an unsafe unset effort.
+- Required correction: either finish and test an artifact-linked end-to-end pipeline or
+  demote it from the core strategy. Use role-based command names and keep model/version
+  mapping in one config file with enforced safe effort/sandbox defaults.
+
+### 15. The Claude transcript backup skill can route transcripts back into the public repo
+
+- Files: `skills/claude/claude-transcript-backup/SKILL.md:1-10`,
+  `skills/claude/claude-transcript-backup/SKILL.md:34-49`, `docs/transcripts.md:15-19`
+- Confidence: certain
+- What happens: text before YAML frontmatter can prevent skill registration. The body
+  says the private transcript repo is mandatory, then step 2 instructs cloning public
+  `ai-devops` and copying into its retired `claude_chats/` path.
+- User-visible impact: the exact credential exposure this repo previously suffered can
+  recur.
+- Required correction: put valid frontmatter first, target only the private submodule/
+  repository, test the destination guard, and refuse every public repo target.
+
+### 16. Context reporting understates what sessions actually load and allows measured debt to grow
+
+- Files: `tools/context-audit/context-audit.py:304-340`,
+  `tools/context-audit/context-audit.py:584-592`, `tools/context-audit/budgets.json:19-22`,
+  `docs/development.md:138-144`
+- Confidence: certain from a live strict audit
+- Evidence: templates total 13,813 bytes, while installed globals total 44,700 bytes.
+  The audit reports drift but does not count installed bytes. It also currently warns on
+  three budgets: startup router +474 bytes, Claude manifest +932, Codex manifest +7,679.
+- User-visible impact: the headline savings describe source templates rather than the
+  real startup payload, and Codex spends roughly 5,600 estimated tokens just learning
+  which skills exist.
+- Required correction: report and budget installed effective context when homes are
+  supplied; introduce a ratchet that blocks new growth while grandfathering current
+  debt; and shorten long descriptions only after trigger tests prove no regression.
+
+### 17. Windows credential/config failures do not consistently fail closed
+
+- Files: `bin/setup-machine.ps1:256-262`, `bin/setup-machine.ps1:474-483`,
+  `bin/setup-machine.ps1:557-568`
+- Confidence: high
+- What happens: token/private-key ACL failures are warnings and setup can still claim
+  user-only access. Unreadable Claude Desktop JSON is backed up, replaced with `{}`, and
+  rewritten, removing unrelated live settings.
+- User-visible impact: sensitive files can retain broad inherited access and a malformed
+  config can silently erase preferences/extensions.
+- Required correction: write to a temporary file, harden and verify access, publish
+  atomically only on success, and leave malformed live JSON untouched with an exact
+  recovery path.
+
+### 18. Public-repo documentation still exposes avoidable operational topology
+
+- Files: `README.md:99-111`, `docs/config-inventory.md:180-197`,
+  `docs/headroom.md:41-73`, `config/ssh-config.template:1-190`
+- Confidence: certain; GitHub reports the repo is PUBLIC while README line 101 says it
+  is safe to keep private
+- What happens: the public toolkit also stores company hostnames, public/Tailscale IPs,
+  ports, user names, project identifiers, and recovery topology. These are not passwords,
+  but they provide reconnaissance and make accidental confidential additions more likely.
+- User-visible impact: unnecessary business/infrastructure detail is permanently public.
+- Required correction: split the reusable public engine from a private machine inventory
+  or generate the inventory at install from protected 1Password/private-repo data. Keep
+  the public repository safe even when a future contributor misunderstands `.gitignore`.
+
+## MEDIUM
+
+### 19. Restore output is not reproducible across time
+
+- Files: `.config/configuration.winget:4-64`, `bin/setup-machine.ps1:335-390`,
+  `README.md:39-42`, `docs/windows-winget-configuration.md:11-16`
+- Confidence: high
+- What happens: Windows packages have no versions, several tools/MCPs resolve `latest`,
+  and the complete Windows process has not passed the documented two clean-machine/
+  idempotency runs.
+- Improvement: pin security-sensitive runtimes, schedule deliberate upgrade tests, and
+  keep disposable Windows plus Ubuntu restore smoke-test evidence.
+
+### 20. Machine-local configuration is preserved but neither migrated nor backed up
+
+- Files: `docs/configuration.md:14-16`, `docs/configuration.md:86-90`,
+  `docs/config-inventory.md:63`, `docs/restore-from-zero.md:89-92`
+- Confidence: high
+- What happens: existing config never receives new required keys, and a dead machine’s
+  last working command settings are reconstructed manually. Doctor proves file presence,
+  not schema or command capability.
+- Improvement: use a versioned, secret-free merge format and protected per-machine
+  overlays; doctor should validate schema, safe Codex effort, and real command ability.
+
+### 21. Uninstall is incomplete and its destructive options have no recovery gate
+
+- Files: `uninstall.sh:40-76`, compared with installed state at `install.sh:118-198`
+- Confidence: high
+- What happens: uninstall removes only current symlinks, leaving managed skills, globals,
+  launchers, memory automation, permissions, and services. `--purge` and `--remove-repo`
+  recursively delete without a preview, archive, or confirmation.
+- Improvement: drive uninstall from a managed-artifact manifest; add `--dry-run`, a
+  timestamped config archive, exact ownership checks, and complete/minimal modes.
+
+### 22. Trigger-quality tests cover too little of the skill catalog
+
+- Files: `tools/skill-trigger-eval/README.md:44-49`,
+  `docs/skill-trigger-eval.md:149-182`, `skills/shared/shared-db-handover/SKILL.md:1-4`
+- Confidence: certain
+- Evidence: 8 committed eval sets for 58 tracked skill bodies (13.8%). High-risk and
+  very long descriptions—including transcript, sync, closeout, pipeline, and many
+  reviewer/scraper skills—have no committed trigger set.
+- Improvement: require evals for high-risk or long descriptions and every description
+  edit; measure more than one day and on both Windows/Linux where tools differ.
+
+### 23. Context work routes through a closed 104 KB plan and stale copied measurements
+
+- Files: `AGENTS.md:48`, `docs/context-engineering.md:218-244`,
+  `docs/context-engineering.md:479-490`, `plan_context-engineering-consolidation.md:3-25`
+- Confidence: high
+- What happens: a context-placement task is told to read both a 40 KB topic doc and a
+  closed 104 KB implementation plan. Current measured numbers differ from copied prose,
+  and one canonical path is visibly corrupted.
+- Improvement: route to a compact current specification, archive the closed narrative,
+  and generate measurement tables from the audit’s JSON instead of copying them into
+  JSON, Python defaults, plans, and prose.
+
+### 24. Generic branch guidance contradicts this repository’s main-only policy
+
+- Files: `AGENTS.md:17-23`, `bin/ai-workspace-status:92-107`,
+  `skills/claude/ai-development-pipeline/SKILL.md:52-62`
+- Confidence: certain
+- What happens: the workspace tool and pipeline tell the user to create a feature branch
+  whenever on main, while this repository explicitly requires direct work on main.
+  Workspace “sync” also uses cached upstream refs without fetching.
+- Improvement: read a small repository policy contract, report the correct branch rule,
+  and distinguish “local tracking data” from a freshly fetched remote comparison.
+
+### 25. Reviewer availability and incident capture still have provider-specific blind spots
+
+- Files: `bin/ai-review-preflight:137-150`,
+  `bin/ai-muse:93-99`, `bin/ai-muse:136-177`, `bin/ai-glm:1568-1604`,
+  `bin/ai-reviewer-issue:116-205`
+- Confidence: high
+- What happens: Muse’s “live” doctor does not contact the provider, Muse rejects valid
+  repos with tracked historic reviews and writes no state until after a long call, GLM
+  start can report before health, and Kimi’s canonical out-of-repo failure artifact is
+  excluded from incident capture.
+- Improvement: keep these adapters advisory until the shared lifecycle exposes honest
+  health, in-progress state, and exact bounded evidence roots.
+
+### 26. Codex cannot consume the repository’s portable memory strategy automatically
+
+- Files: `memory/README.md:158-176`, `docs/context-engineering.md:112-122`
+- Confidence: certain
+- What happens: Markdown facts are the cross-machine owner for Claude, while Codex’s
+  memory is separate machine-local SQLite and must not be synced. No Codex trigger routes
+  normal work through the portable Markdown facts.
+- Improvement: add a client-neutral read-only fact search/index command and a Codex skill
+  trigger; do not sync or rewrite Codex’s live SQLite store.
+
+### 27. The doctor checks presence more often than real capability
+
+- Files: `bin/ai-devops:14-23`, `bin/ai-devops:218-245`,
+  `docs/restore-from-zero.md:81-92`
+- Confidence: high
+- What happens: doctor checks that config files and a short, outdated companion-script
+  list exist, but not their schema, source commit, installed-skill/global drift, most
+  provider tools, or whether configured stage commands work. Its fixed version remains
+  `0.1.0` despite major evolution.
+- Improvement: report exact Git SHA, validate every managed artifact against that SHA,
+  run bounded capability probes, and give one machine-compliance result.
+
+### 28. Node/npm installation depends on an unrelated package being missing
+
+- Files: `install.sh:41-59`, `docs/deployment.md:32-47`
+- Confidence: certain
+- What happens: Node/npm installation sits inside the block that runs only when another
+  base dependency is missing, while the missing list never checks Node/npm.
+- User-visible impact: setup can skip Node entirely and later fail when Node-based MCPs
+  launch.
+- Improvement: test/install Node independently and verify `node`, `npm`, and `npx` before
+  wiring Node-based tools.
+
+## Recommended repair sequence
+
+1. **Contain exposure and destructive memory behavior:** public history, stale database
+   memories, index union, and failed-push preservation.
+2. **Make restore honest:** Ubuntu required-stage exits, Windows verified source, one
+   restore entry point, ACL/config fail-closed behavior, and stronger doctor checks.
+3. **Add enforcement:** one offline test command, Windows/Linux CI, no-force-push GitHub
+   rule, and restore smoke tests.
+4. **Consolidate reviewer infrastructure:** one shared lifecycle core; keep only fully
+   qualified reviewers as approval gates and label the rest advisory/quarantined.
+5. **Choose the core workflow:** finish the seven-stage artifact pipeline or retire its
+   headline status. Stop adding reviewer variants until this decision is complete.
+6. **Pay down context and portability debt:** measure installed context, reconcile globals,
+   expand trigger tests, shrink descriptions, and expose portable facts to Codex.
+
+## Strategies worth preserving
+
+- The one-rule/one-owner context map and task-triggered routing model.
+- Recoverable skill install, backup, quarantine, and global-adoption behavior.
+- 1Password references and token-free committed configuration.
+- Real capability probes, especially the Codex write probe, rather than version checks.
+- Review snapshots, sealed evidence packets, and fail-closed verdict intent—after the
+  copy/freshness gaps above are fixed.
+- Memory deletion tombstones and read-only health/index-hook philosophy.
+- Incident narratives that explain why guardrails exist.
+
+---
+
 # Reviewer system audit — 2026-08-20
 
 Scope: every current reviewer wrapper and the shared packet, snapshot, preflight,
