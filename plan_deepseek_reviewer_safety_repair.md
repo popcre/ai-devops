@@ -6,7 +6,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (32 cases) |
+| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (34 cases) |
 | 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
 | 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback and concurrent reply fixtures |
 | 4 | Review completion/governance contract | ✅ complete | `--review` verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |

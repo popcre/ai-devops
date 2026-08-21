@@ -4,6 +4,13 @@ Scope: every current reviewer wrapper and the shared packet, snapshot, preflight
 scoreboard, and incident-recording helpers. This is a read-only audit report; no
 reviewer behavior was changed.
 
+## Status of this dated audit
+
+The finding bodies below preserve what the 2026-08-20 audit observed. They are
+historical evidence, not current operating instructions. A bold **Repair status**
+notice directly under a finding overrides its original text. Current source and
+the linked repair plan's STATUS table are authoritative.
+
 Severity meanings:
 
 - **CRITICAL:** can expose or overwrite files outside the intended boundary, or
@@ -16,6 +23,9 @@ Severity meanings:
 ## CRITICAL
 
 ### 1. DeepSeek session names can escape their storage folder
+
+**Repair status (2026-08-21): fixed; names and resolved paths are contained,
+linked storage is refused, and hostile path/link tests pass.**
 
 - Files: `bin/ai-deepseek-agent:177-180`, `bin/ai-deepseek-agent:217-233`
 - Confidence: high
@@ -47,6 +57,10 @@ evidence is absent.**
 
 ### 3. Gemini's read-only proof can miss real writes
 
+**Repair status (2026-08-21): source repaired with whole-copy, protected-source,
+and outside-sentinel identity checks. Gemini remains quarantined until live
+hostile qualification passes on Windows and Ubuntu.**
+
 - Files: `bin/ai-gemini:21-26`
 - Confidence: high
 - What happens: it compares only the short Git status text before and after a
@@ -60,6 +74,9 @@ evidence is absent.**
 
 ### 4. Gemini can report success when no report was saved
 
+**Repair status (2026-08-21): source repaired; report publication is atomic and
+failure leaves recovery-required evidence. Gemini remains quarantined.**
+
 - Files: `bin/ai-gemini:35-37`
 - Confidence: high; matches the bare-PASS/empty-report trial evidence
 - What happens: an unsafe or unwritable report destination returns success, and
@@ -69,6 +86,9 @@ evidence is absent.**
 - Existing tracker: issue #38.
 
 ### 5. Gemini can accept the wrong resumed conversation
+
+**Repair status (2026-08-21): source repaired; conversation, frozen model, and
+between-turn private-copy identity must all match. Gemini remains quarantined.**
 
 - Files: `bin/ai-gemini:24`, `bin/ai-gemini:37`
 - Confidence: high
@@ -80,6 +100,9 @@ evidence is absent.**
 
 ### 6. Gemini has no in-progress record, lock, or failed-run recovery
 
+**Repair status (2026-08-21): source repaired with pre-call state, repository and
+session locks, and preserved recovery evidence. Gemini remains quarantined.**
+
 - Files: `bin/ai-gemini:36-39`
 - Confidence: high
 - What happens: state is written only after the paid provider call. Concurrent
@@ -90,6 +113,9 @@ evidence is absent.**
 - Existing tracker: issue #38.
 
 ### 7. Grok's one-paid-review rule fails across clones
+
+**Repair status (2026-08-21): fixed; normalized upstream locking spans clones,
+and legacy checkout-keyed locks block mixed-version rollout calls.**
 
 - Files: `bin/ai-grok-review:202-206`, `bin/ai-grok-review:597-604`,
   `bin/ai-grok-review:658-665`
@@ -209,6 +235,9 @@ now current, stale, or unknown, and unknown verdicts are unusable.**
 
 ### 18. Grok interruption and deletion do not tell the truth about remote work
 
+**Repair status (2026-08-21): fixed; unconfirmed remote work retains a paid-work
+block, including dead-owner and uncertainty-marker failure paths.**
+
 - Files: `bin/ai-grok-review:604`, `bin/ai-grok-review:665`,
   `bin/ai-grok-review:762-767`
 - Confidence: high
@@ -219,6 +248,9 @@ now current, stale, or unknown, and unknown verdicts are unusable.**
 - Existing tracker: issue #56.
 
 ### 19. Grok has no useful live progress or cross-clone activity view
+
+**Repair status (2026-08-21): fixed; factual heartbeats and cross-clone activity
+include elapsed time without claiming provider health.**
 
 - Files: `bin/ai-grok-review:303-330`, `bin/ai-grok-review:730-743`
 - Confidence: certain
@@ -247,6 +279,9 @@ now current, stale, or unknown, and unknown verdicts are unusable.**
   for later continuation.
 
 ### 22. DeepSeek can corrupt conversation history on failure or concurrency
+
+**Repair status (2026-08-21): fixed; turns are locked and published atomically,
+failed or interrupted replies do not advance durable history.**
 
 - Files: `bin/ai-deepseek-agent:146-157`, `bin/ai-deepseek-agent:231-232`
 - Confidence: high
@@ -279,6 +314,9 @@ active providers are registered and unsupported facts remain unknown.**
 
 ### 25. Gemini's plan, standing instruction, and actual code contradict each other
 
+**Repair status (2026-08-21): reconciled; the wrapper exists but is explicitly
+quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
+
 - Files: `plan_ai-gemini-wrapper.md:13-26`,
   `plan_ai-gemini-wrapper.md:116-128`, `AGENTS.md:69`, `bin/ai-gemini`
 - Confidence: high
@@ -299,9 +337,9 @@ active providers are registered and unsupported facts remain unknown.**
 - User-visible failure: a mistyped job name produces a raw parser/file error
   instead of saying that the job does not exist and how to list valid jobs.
 
-## What the passing tests do and do not prove
+## What the passing tests did and did not prove at audit time
 
-The current offline tests verify many important safety rules and the corrected
+The audit-time offline tests verified many important safety rules and the corrected
 Windows run passed the shared packet, snapshot, preflight, scoreboard, incident,
 and Grok suites encountered during this audit. However, the findings above are
 mostly missing-test cases: clone equivalence, hostile links, filename-bound
@@ -309,7 +347,10 @@ packet seals, already-dirty Gemini files, wrong conversation identifiers,
 DeepSeek path traversal, Codex command failure, and cross-version Qwen resume.
 Passing the existing suite therefore does not contradict these findings.
 
-## Recommended repair order
+## Historical recommended repair order
+
+This was the 2026-08-20 repair order. Use each finding's Repair status and its
+current plan before acting; do not treat this list as the present work queue.
 
 1. Stop offering Gemini, Codex review, DeepSeek, and Qwen as approval-capable
    reviewers until their HIGH findings are fixed and tested.

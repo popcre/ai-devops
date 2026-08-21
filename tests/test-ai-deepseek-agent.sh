@@ -44,6 +44,12 @@ check "provider failure leaves history unchanged" "test '$history_before' = \"\$
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role)==[\"user\",\"assistant\",\"user\",\"assistant\",\"user\",\"assistant\"]' '$history'"
+history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
+(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
+for _ in $(seq 1 100); do [ -d "$history.lock" ] && break; sleep .05; done
+kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
+check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+check "interrupted reply releases its owned lock" "test ! -d '$history.lock'"
 DEEPSEEK_STUB_REPLY='no verdict' run send review-me --review >/dev/null 2>&1; missing_rc=$?
 check "review mode rejects missing verdict" "test '$missing_rc' -ne 0"
 REVIEW_OUT="$(DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send review-me --review)"; REVIEW_ID="$(printf '%s\n' "$REVIEW_OUT"|sed -n 's/^SESSION_ID: //p')"

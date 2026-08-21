@@ -166,6 +166,12 @@ release_lock() {
   rm -f "$LOCK_DIR/owner"; rmdir "$LOCK_DIR" 2>/dev/null || true
   LOCK_DIR=""; LOCK_TOKEN=""
 }
+on_lock_signal() { # SIGNAL_EXIT_CODE
+  local code="$1"
+  trap - EXIT INT TERM
+  [ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock
+  exit "$code"
+}
 acquire_lock() { # transcript path
   local target="$1" waited=0
   LOCK_DIR="$target.lock"; LOCK_TOKEN="$$-$(date +%s)-$RANDOM"
@@ -175,7 +181,9 @@ acquire_lock() { # transcript path
   done
   printf '%s\n' "$LOCK_TOKEN" > "$LOCK_DIR/owner"
   LOCK_OWNER_PID="$BASHPID"
-  trap '[ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock' EXIT INT TERM
+  trap '[ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock' EXIT
+  trap 'on_lock_signal 130' INT
+  trap 'on_lock_signal 143' TERM
 }
 
 write_atomic() { # destination source-json
