@@ -90,11 +90,28 @@ tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
 }
+# The report destination must be proven safe for THIS run's new report, not for
+# the directory as a whole. A repository may legitimately TRACK older report
+# files as named exceptions -- `u2giants/shared-db` keeps 25 that are cited by
+# path from a migration header and four permanent documents, and untracking them
+# is refused there by tools/gitignore-tracked-contradiction.test.mjs. Asserting
+# that the whole directory was untracked made Muse unusable in exactly that
+# repository while `ai-muse doctor` reported every check PASS (shared-db#1351).
+#
+# What actually has to hold is narrower and stronger: the exact paths this run
+# is about to write must be Git-ignored and must not already be tracked. The
+# probe therefore uses the real filename shapes produced by report() and
+# preserve_failure(), so a `!` re-inclusion rule that would drag a NEW report
+# back into the index is still caught.
 ensure_report_destination(){
-  local root="$1" dir="$root/.ai/reviews" tracked
+  local root="$1" name="$2" dir stamp rel
+  dir="$root/.ai/reviews"
   [ ! -L "$root/.ai" ] && [ ! -L "$dir" ] || die 'refusing Muse reports: .ai or .ai/reviews is a linked path.'
-  git -C "$root" check-ignore -q .ai/reviews/ai-muse-probe || die 'refusing Muse reports: .ai/reviews must be Git-ignored.'
-  tracked="$(git -C "$root" ls-files '.ai/reviews/*')"; [ -z "$tracked" ] || die 'refusing Muse reports: .ai/reviews contains tracked files.'
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
+  for rel in ".ai/reviews/muse-$name-$stamp.md" ".ai/reviews/muse-$name-incomplete-$stamp.md"; do
+    git -C "$root" check-ignore -q "$rel" || die "refusing Muse reports: $rel must be Git-ignored."
+    if git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then die "refusing Muse reports: $rel is already tracked."; fi
+  done
   mkdir -p "$dir" || die "could not create Muse report directory: $dir"
   [ ! -L "$dir" ] || die 'refusing Muse reports: .ai/reviews became a linked path.'
 }
@@ -136,7 +153,7 @@ report(){
 cmd_new(){
   local name="$1"; shift; local root rid meta prompt out rep before after tmp
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
-  root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: ai-muse ask $name"; ensure_report_destination "$root"
+  root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: ai-muse ask $name"; ensure_report_destination "$root" "$name"
   prompt="$(read_prompt "$@")"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; if ! run_turn "$REVIEW_DIR" "$prompt" "$out"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.
@@ -147,7 +164,7 @@ cmd_new(){
 }
 cmd_ask(){
   local name="$1"; shift; local root rid meta sid status prompt out rep tmp before after
-  name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."; ensure_report_destination "$root"
+  name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."; ensure_report_destination "$root" "$name"
   status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = active ] || die "session '$name' requires reconciliation ($status). Inspect: ai-muse transcript $name ; then run: ai-muse reconcile $name"
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="turn_in_progress"|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi

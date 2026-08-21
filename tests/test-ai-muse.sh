@@ -33,7 +33,9 @@ check 'installed profile must exactly match its trusted source' "grep -q 'cmp -s
 check '1Password reads use one global credential lock' "grep -q 'credential.lock.d' '$SCRIPT' && grep -q 'release_credential_lock' '$SCRIPT'"
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
-check 'report destination is proven ignored and unlinked' "grep -q 'check-ignore -q .ai/reviews/ai-muse-probe' '$SCRIPT' && grep -q 'contains tracked files' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'report destination probes the paths this run will write' "grep -q 'muse-.name-.stamp.md' '$SCRIPT' && grep -q 'muse-.name-incomplete-.stamp.md' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'report destination derives its directory outside the local declaration' "! grep -Eq 'local root=.*dir=' '$SCRIPT'"
+check 'report destination no longer asserts the whole directory is untracked' "! grep -q 'contains tracked files' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO"
@@ -139,6 +141,25 @@ git -C "$REPO" checkout -q -- a.txt
 check 'compatibility review rejects a stopped answer without verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=narration '$SCRIPT' review '$REPO' test\""
 check 'compatibility review rejects a verdict before the final line' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE\\nqualification' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: APPROVE'"
+
+# shared-db#1351: `.ai/reviews` there permanently TRACKS 25 review reports as
+# named .gitignore exceptions, cited by path from a migration header and four
+# permanent documents. That is a legitimate repository state and must not stop
+# Muse from writing a NEW report, which .gitignore still covers.
+git -C "$REPO" add -f .ai/reviews/muse-debate-*.md
+git -C "$REPO" -c user.name=Test -c user.email=t@example.com commit -qm 'track a review report as a named exception'
+check 'a tracked prior report does not block a new Muse turn' "cd '$REPO' && eval \"$ENV '$SCRIPT' new named-exception --prompt test\" | grep -q '^first'"
+check 'the tracked prior report is left tracked and unmodified' "test -z \"\$(git -C '$REPO' status --porcelain -- '.ai/reviews/muse-debate-*.md')\""
+
+# The narrower probe must still fail closed: a rule that would re-include a NEW
+# report is exactly what the old blanket assertion was guarding against.
+cp "$REPO/.gitignore" "$TMP/gitignore.bak"
+printf '.ai/*\n!.ai/reviews/\n!.ai/reviews/muse-*\n' > "$REPO/.gitignore"
+check 'a gitignore rule that would commit the new report is refused' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new reincluded --prompt test\""
+REINCLUDED_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new reincluded2 --prompt test" 2>&1 || true)"
+check 'the refusal names the unignored report path' "printf '%s' \"\$REINCLUDED_OUT\" | grep -q 'muse-reincluded2-.*must be Git-ignored'"
+cp "$TMP/gitignore.bak" "$REPO/.gitignore"
+
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
