@@ -54,17 +54,25 @@ for c in python3 python py; do
   command -v "$c" >/dev/null 2>&1 || continue
   if "$c" -c 'import json,sys' >/dev/null 2>&1; then PY="$c"; break; fi
 done
-[ -n "$PY" ] || die "ai-headroom: no working Python found (tried python3, python, py).
-A Python is required to edit $SETTINGS without corrupting it.
-Manual fallback -- edit that file, delete the ANTHROPIC_BASE_URL line, restart Claude."
+# Python is needed ONLY to read/clean the inert settings.json entry -- never to
+# flip the actual switch. `off` must survive a machine where Python is broken or
+# missing; that is precisely when someone needs the escape hatch. A missing
+# Python degrades to a warning, never a refusal.
+HAVE_PY=1
+[ -n "$PY" ] || HAVE_PY=0
 
-command -v curl >/dev/null 2>&1 || die "ai-headroom: curl not found on PATH.
-It is required to check whether the proxy is answering."
+# curl is needed only to CHECK reachability (status, and the safety gate on `on`).
+# `off` must never depend on it: the escape hatch has to work on a broken machine,
+# and refusing to run because a health-check tool is missing would strand the user
+# in exactly the situation this command exists for.
+HAVE_CURL=1
+command -v curl >/dev/null 2>&1 || HAVE_CURL=0
 
 # Reachability. Tolerates whitespace and key-order changes in the health JSON
 # rather than matching one exact byte sequence. Non-2xx or timeout counts as down.
 proxy_healthy() {
   local body
+  [ "$HAVE_CURL" = 1 ] || return 1
   body="$(curl -fsS -m 6 "$PROXY_URL/health" 2>/dev/null)" || return 1
   printf '%s' "$body" | tr -d ' \t\r\n' | grep -q '"status":"healthy"'
 }
@@ -78,7 +86,8 @@ proxy_healthy() {
 # Any failure here is FATAL, never silent: reporting "off" while the proxy is
 # actually on would send you hunting the wrong problem.
 json_url() {
-  [ -f "$SETTINGS" ] || die "ai-headroom: not found: $SETTINGS"
+  [ "$HAVE_PY" = 1 ] || return 0
+  [ -f "$SETTINGS" ] || return 0
   "$PY" - "$SETTINGS" <<'PY' || die "ai-headroom: could not read $SETTINGS (see error above)."
 import io, json, sys
 # utf-8-sig transparently tolerates a BOM; an explicit encoding stops the
@@ -101,7 +110,9 @@ prune_backups() { # prune_backups <path-prefix>
 
 json_set() { # json_set <url|"">  — empty removes the key
   local want="$1" backup
-  [ -f "$SETTINGS" ] || die "ai-headroom: not found: $SETTINGS"
+  [ "$HAVE_PY" = 1 ] || { printf 'NOTE: no working Python, so I could not clean the (inert) settings.json entry.
+'; return 0; }
+  [ -f "$SETTINGS" ] || return 0
   # The pid is in the backup name so two invocations in the same second cannot
   # overwrite each other's only recovery copy.
   backup="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)-$$"
@@ -257,7 +268,10 @@ case "$action" in
       printf 'settings.json          : has %s -- IGNORED by Claude, run "ai-headroom on" or "off" to remove it
 ' "$cur"
     fi
-    if proxy_healthy; then
+    if [ "$HAVE_CURL" != 1 ]; then
+      printf 'Proxy health           : UNKNOWN (curl not on PATH, cannot check)
+'
+    elif proxy_healthy; then
       printf 'Proxy health           : reachable and healthy.
 '
     else
@@ -272,6 +286,9 @@ case "$action" in
 '
     ;;
   on)
+    [ "$HAVE_CURL" = 1 ] || die "ai-headroom: curl not found on PATH, so I cannot verify the
+proxy is answering before pointing Claude at it. Refusing to guess. (\`ai-headroom off\`
+still works without curl.)"
     proxy_healthy || die "Refusing to enable: the proxy is not answering at $PROXY_URL.
 Turning it on now would leave Claude unable to connect at all."
     winenv_set "$PROXY_URL"
