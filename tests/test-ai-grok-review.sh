@@ -71,6 +71,7 @@ case "$mode" in
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
+  waitlong)  sleep 20; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
 esac
 exit 0
 STUBEOF
@@ -103,7 +104,9 @@ echo ok > "$TMP/mode"
 # 16 ------------------------------------------------------------------------
 echo "== shared_upstream_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
-echo wait > "$TMP/mode"
+# Keep this first review alive while Windows creates two more repositories and
+# snapshots. Six seconds proved timing-sensitive on a busy machine.
+echo waitlong > "$TMP/mode"
 export AI_GROK_HEARTBEAT_INTERVAL=2
 ( cd "$REPO" && bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
 for _i in 1 2 3 4 5; do
