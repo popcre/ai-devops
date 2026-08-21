@@ -5,7 +5,16 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 target="$tmp/bin"
 bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >/dev/null
 bash "$repo/bin/ai-machine-tools-doctor" --platform ubuntu --target-dir "$target" | grep -q 'OK local AI command'
-for n in ai-grok-review ai-grok-implement ai-gemini ai-kimi ai-qwen ai-deepseek-agent ai-glm; do [[ -e "$target/$n" ]]; done
+for n in ai-grok-review ai-grok-implement ai-gemini ai-kimi ai-qwen ai-deepseek-agent ai-glm ai-headroom; do [[ -e "$target/$n" ]]; done
+# Every bash+cmd tool must be EXECUTABLE in git. The Ubuntu installer only
+# symlinks and prints "OK installed", so a 100644 source installs "successfully"
+# and then dies with Permission denied on first use. ai-headroom shipped that
+# way once (chmod +x on Windows never reaches the git index).
+while IFS=$'	' read -r name source form _rest; do
+  [[ -z "$name" || "$name" == \#* || "$form" != "bash+cmd" ]] && continue
+  mode="$(git -C "$repo" ls-files -s -- "$source" | awk '{print $1}')"
+  [[ "$mode" == "100755" ]] || { echo "NOT EXECUTABLE in git: $source (mode $mode)" >&2; exit 1; }
+done < "$repo/config/machine-tools.tsv"
 bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >/dev/null
 rm "$target/ai-kimi"
 if bash "$repo/bin/ai-machine-tools-doctor" --platform ubuntu --target-dir "$target" >"$tmp/out" 2>&1; then exit 1; fi

@@ -15,18 +15,28 @@
 # Afterwards: fully quit Claude (tray icon -> Quit) and reopen it. The setting
 # is only read at startup.
 #
+# TWO SOURCES, BOTH HANDLED. On the hetz VPS the redirect lives in BOTH
+# ~/.claude/settings.json AND an "export ANTHROPIC_BASE_URL=" line in ~/.bashrc.
+# An earlier version of this tool edited only the JSON, so "off" on that machine
+# removed one source, printed "Claude goes straight to Anthropic", and left the
+# shell export still redirecting every new session — a lying escape hatch, which
+# is worse than no escape hatch. This version reads and writes both, and status
+# reports each one separately.
+#
 # See docs/headroom.md in u2giants/ai-devops for the full picture.
 
 set -euo pipefail
 
 PROXY_URL="http://<removed-protected-address>:8787"
 SETTINGS="$HOME/.claude/settings.json"
+BASHRC="$HOME/.bashrc"
+KEEP_BACKUPS=10
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
 
-# Pick a Python that actually RUNS. On Windows, `python3` is usually a Microsoft
+# Pick a Python that actually RUNS. On Windows, python3 is usually a Microsoft
 # Store placeholder that is present on PATH, prints "Python was not found", and
-# exits nonzero. Probing with `command -v` alone finds that stub and every later
+# exits nonzero. Probing with "command -v" alone finds that stub and every later
 # call fails silently -- which once made this script report "proxy off" while the
 # proxy was on. Never probe by existence; probe by execution.
 PY=""
@@ -38,73 +48,172 @@ done
 A Python is required to edit $SETTINGS without corrupting it.
 Manual fallback -- edit that file, delete the ANTHROPIC_BASE_URL line, restart Claude."
 
+command -v curl >/dev/null 2>&1 || die "ai-headroom: curl not found on PATH.
+It is required to check whether the proxy is answering."
+
+# Reachability. Tolerates whitespace and key-order changes in the health JSON
+# rather than matching one exact byte sequence. Non-2xx or timeout counts as down.
 proxy_healthy() {
-  curl -fsS -m 6 "$PROXY_URL/health" 2>/dev/null | grep -q '"status":"healthy"'
+  local body
+  body="$(curl -fsS -m 6 "$PROXY_URL/health" 2>/dev/null)" || return 1
+  printf '%s' "$body" | tr -d ' \t\r\n' | grep -q '"status":"healthy"'
 }
 
-# Reads the current setting. Any failure here is FATAL, never silent: reporting
-# "off" while the proxy is actually on would send you hunting the wrong problem.
-current_url() {
+# ---------------------------------------------------------------------------
+# Source 1: ~/.claude/settings.json
+# ---------------------------------------------------------------------------
+
+# Any failure here is FATAL, never silent: reporting "off" while the proxy is
+# actually on would send you hunting the wrong problem.
+json_url() {
   [ -f "$SETTINGS" ] || die "ai-headroom: not found: $SETTINGS"
   "$PY" - "$SETTINGS" <<'PY' || die "ai-headroom: could not read $SETTINGS (see error above)."
-import json,sys
-d=json.load(open(sys.argv[1]))
-v=(d.get("env") or {}).get("ANTHROPIC_BASE_URL")
-if v: print(v)
+import io, json, sys
+# utf-8-sig transparently tolerates a BOM; an explicit encoding stops the
+# Windows locale default from mangling non-ASCII values.
+with io.open(sys.argv[1], encoding="utf-8-sig") as fh:
+    d = json.load(fh)
+v = (d.get("env") or {}).get("ANTHROPIC_BASE_URL")
+if v:
+    print(v)
 PY
 }
 
-set_url() {  # set_url <url|"">  — empty removes the key
+prune_backups() { # prune_backups <path-prefix>
+  local prefix="$1" old
+  ls -1t "$prefix".bak-* 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | while IFS= read -r old; do
+    rm -f "$old"
+  done
+  return 0
+}
+
+json_set() { # json_set <url|"">  — empty removes the key
   local want="$1" backup
   [ -f "$SETTINGS" ] || die "ai-headroom: not found: $SETTINGS"
-  backup="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
+  # The pid is in the backup name so two invocations in the same second cannot
+  # overwrite each other's only recovery copy.
+  backup="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)-$$"
   cp "$SETTINGS" "$backup"
-  "$PY" - "$SETTINGS" "$want" <<'PY'
-import json,sys
-p,want=sys.argv[1],sys.argv[2]
-d=json.load(open(p))
-env=d.get("env")
-if not isinstance(env,dict): env={}
-if want:
-    env["ANTHROPIC_BASE_URL"]=want
-else:
-    env.pop("ANTHROPIC_BASE_URL",None)
-if env: d["env"]=env
-else: d.pop("env",None)
-json.dump(d,open(p,"w"),indent=2)
-PY
   printf 'Backup: %s\n' "$backup"
+  "$PY" - "$SETTINGS" "$want" <<'PY' || die "ai-headroom: failed to update $SETTINGS. It is UNCHANGED; backup path printed above."
+import io, json, os, sys, tempfile
+p, want = sys.argv[1], sys.argv[2]
+with io.open(p, encoding="utf-8-sig") as fh:
+    d = json.load(fh)
+env = d.get("env")
+if not isinstance(env, dict):
+    env = {}
+if want:
+    env["ANTHROPIC_BASE_URL"] = want
+else:
+    env.pop("ANTHROPIC_BASE_URL", None)
+if env:
+    d["env"] = env
+else:
+    d.pop("env", None)
+# Write a temp file in the same directory, then atomically replace. A crash, a
+# full disk, or a concurrent reader can never observe a truncated settings file:
+# either the old one is there or the new one is, never half of one.
+dirn = os.path.dirname(os.path.abspath(p)) or "."
+fd, tmp = tempfile.mkstemp(dir=dirn, prefix=".ai-headroom-", suffix=".json")
+try:
+    with io.open(fd, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, p)
+except BaseException:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise
+PY
+  prune_backups "$SETTINGS"
 }
+
+# ---------------------------------------------------------------------------
+# Source 2: an "export ANTHROPIC_BASE_URL=" line in ~/.bashrc (the hetz VPS).
+# Absent on the Windows machines, where every function below is a no-op.
+# ---------------------------------------------------------------------------
+
+DISABLED_TAG='#ai-headroom-off# '   # no regex metacharacters: [ ] would form a character class
+
+bashrc_state() { # -> "on <url>" | "off <url>" | "none"
+  [ -f "$BASHRC" ] || { printf 'none\n'; return 0; }
+  local live disabled
+  live="$(grep -oE '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=[^[:space:]]+' "$BASHRC" 2>/dev/null | tail -1 || true)"
+  if [ -n "$live" ]; then
+    printf 'on %s\n' "${live#*=}"
+    return 0
+  fi
+  disabled="$(grep -oE "^${DISABLED_TAG}export[[:space:]]+ANTHROPIC_BASE_URL=[^[:space:]]+" "$BASHRC" 2>/dev/null | tail -1 || true)"
+  if [ -n "$disabled" ]; then
+    printf 'off %s\n' "${disabled#*=}"
+    return 0
+  fi
+  printf 'none\n'
+}
+
+bashrc_set() { # bashrc_set on|off
+  local want="$1" state backup
+  state="$(bashrc_state)"
+  case "$state" in
+    none) return 0 ;;
+    "$want "*) return 0 ;;
+  esac
+  backup="$BASHRC.bak-$(date +%Y%m%d-%H%M%S)-$$"
+  cp "$BASHRC" "$backup"
+  printf 'Backup: %s\n' "$backup"
+  if [ "$want" = off ]; then
+    sed -i "s|^[[:space:]]*export[[:space:]]\{1,\}ANTHROPIC_BASE_URL=|${DISABLED_TAG}export ANTHROPIC_BASE_URL=|" "$BASHRC"
+  else
+    sed -i "s|^[[:space:]]*${DISABLED_TAG}export[[:space:]]\{1,\}ANTHROPIC_BASE_URL=|export ANTHROPIC_BASE_URL=|" "$BASHRC"
+  fi
+  bash -n "$BASHRC" || die "ai-headroom: the edit left $BASHRC syntactically invalid.
+Restore it with:  cp '$backup' '$BASHRC'"
+  prune_backups "$BASHRC"
+  printf 'Shell startup export in %s: %s\n' "$BASHRC" "$want"
+}
+
+# ---------------------------------------------------------------------------
 
 action="${1:-status}"
 case "$action" in
   status)
-    cur="$(current_url)"
+    cur="$(json_url)"
     if [ -n "$cur" ]; then
-      printf 'Claude on this machine routes through: %s\n' "$cur"
+      printf 'Claude settings file   : routes through %s\n' "$cur"
     else
-      printf 'Claude on this machine goes DIRECT to Anthropic (proxy off).\n'
+      printf 'Claude settings file   : DIRECT to Anthropic (no redirect)\n'
     fi
+    brc="$(bashrc_state)"
+    case "$brc" in
+      none)   printf 'Shell startup (.bashrc): no redirect present\n' ;;
+      on\ *)  printf 'Shell startup (.bashrc): routes through %s\n' "${brc#on }" ;;
+      off\ *) printf 'Shell startup (.bashrc): disabled by ai-headroom\n' ;;
+    esac
     if proxy_healthy; then
-      printf 'Proxy health: reachable and healthy.\n'
+      printf 'Proxy health           : reachable and healthy.\n'
     else
-      printf 'Proxy health: NOT REACHABLE.\n'
-      if [ -n "$cur" ]; then
+      printf 'Proxy health           : NOT REACHABLE.\n'
+      if [ -n "$cur" ] || [ "${brc%% *}" = on ]; then
         printf 'Claude WILL FAIL to connect. Run:  ai-headroom off\n'
       fi
     fi
     ;;
   on)
-    if ! proxy_healthy; then
-      die "Refusing to enable: the proxy is not answering at $PROXY_URL.
+    proxy_healthy || die "Refusing to enable: the proxy is not answering at $PROXY_URL.
 Turning it on now would leave Claude unable to connect at all."
-    fi
-    set_url "$PROXY_URL"
+    json_set "$PROXY_URL"
+    bashrc_set on
     printf 'Proxy ON  -> %s\n' "$PROXY_URL"
     printf 'Now fully quit Claude (tray icon -> Quit) and reopen it.\n'
     ;;
   off)
-    set_url ""
+    json_set ""
+    bashrc_set off
     printf 'Proxy OFF -> Claude goes straight to Anthropic.\n'
     printf 'Now fully quit Claude (tray icon -> Quit) and reopen it.\n'
     ;;

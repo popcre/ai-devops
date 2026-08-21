@@ -243,13 +243,21 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   **How it reaches every machine:** `bin/ai-headroom` is registered in
   `config/machine-tools.tsv`, so `bin/install-machine-tools.ps1` (Windows) /
   `bin/install-machine-tools.sh` (Ubuntu) creates the launcher in
-  `~/.local/bin` and puts that directory on PATH. On a machine that has not
-  synced yet, run the `sync-dotfiles` skill — it pulls the repo and reruns the
-  installer. Until then, `bash C:eposi-devopsini-headroom off`
-  works directly from the clone.
+  `~/.local/bin` on Windows, `/usr/local/bin` on Ubuntu, and puts it on PATH.
+  On a machine that has not synced yet, run the `sync-dotfiles` skill — it
+  pulls the repo and reruns the installer. Until then, run it from the clone:
 
-  The VPS-side equivalent is `/home/ai/.claude/settings.json` plus the
-  `.bashrc` export — remove both to go direct there.
+  ```bash
+  bash /c/repos/ai-devops/bin/ai-headroom off
+  ```
+
+  On the VPS the redirect lives in **two** places — `/home/ai/.claude/settings.json`
+  and an `export` line in `/home/ai/.bashrc`. `ai-headroom` handles both: `off`
+  removes the JSON key **and** comments out the shell export, and `status`
+  reports each source on its own line. An earlier version edited only the JSON,
+  so `off` there printed "Claude goes straight to Anthropic" while the shell
+  export kept redirecting every new session — an escape hatch that lied. If you
+  ever edit by hand, you must do both.
 - **Extra hop / latency.** Local-Windows requests now go
   laptop → VPS → Anthropic instead of straight to Anthropic.
 - **Unofficial posture.** Routing a Claude *subscription* through a modifying
@@ -280,8 +288,17 @@ systemctl stop headroom.service
 systemctl disable headroom.service     # also prevent it starting on boot
 ```
 
-**Remove it completely:** the above, plus `pipx uninstall headroom-ai` as the
-`ai` user and `rm -rf /home/ai/.headroom /etc/systemd/system/headroom.service`.
+**Remove it completely.** `/home/ai/.headroom` holds the entire savings ledger
+and proxy logs — the only record of whether this experiment paid off. Archive it
+before deleting, so a later "was Headroom worth it?" question is still answerable:
+
+```bash
+tar czf /home/ai/headroom-final-$(date +%Y%m%d).tar.gz /home/ai/.headroom
+cp /etc/systemd/system/headroom.service /home/ai/headroom.service.bak
+```
+
+Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
+`rm -rf /home/ai/.headroom /etc/systemd/system/headroom.service`.
 
 ## 9. Quick reference
 
