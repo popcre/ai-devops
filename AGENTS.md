@@ -44,6 +44,7 @@ The full recovery procedure is in
 
 | Current task | Read first | Important boundary |
 |---|---|---|
+| Implement the 2026-08-21 full repository audit | [`plan_full-strategy-remediation.md`](plan_full-strategy-remediation.md) STATUS, [`bugs.md`](bugs.md) current audit | Incident-first; preserve capabilities; all 30 findings must reach production evidence |
 | Quick orientation | `README.md`, this file | Do not load deep docs without a task reason |
 | Reduce instruction size or decide where a rule belongs | [`docs/context-engineering.md`](docs/context-engineering.md), [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) status | Globals contain only universal rules; procedures belong in skills/docs |
 | Change a standing Claude/Codex behavior rule | Both files under `templates/system/*global*.md`, [`templates/system/machine-atlas.md`](templates/system/machine-atlas.md), affected shared skill | Keep shared behavior aligned across clients; install with `bin/ai-adopt-globals` |

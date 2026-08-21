@@ -1,5 +1,12 @@
 # Repository-wide strategy audit — 2026-08-21
 
+> **Implementation route:** the Codex/Claude Opus 5 debate corrected and expanded
+> this audit to 30 findings. Execute only through
+> [`plan_full-strategy-remediation.md`](plan_full-strategy-remediation.md); its
+> STATUS table is authoritative while remediation is active. Step 0 updates the
+> detailed severities, counts, measurements, and remedies below before behavioral
+> changes begin.
+
 Scope: the complete tracked `ai-devops` toolkit—recovery and machine setup,
 memory, global instructions, skills and trigger quality, the staged AI workflow,
 delegated reviewers, evidence handling, secrets, tests, documentation, and GitHub
@@ -19,20 +26,24 @@ controls are warnings or instructions rather than enforced gates, and the projec
 invested far more in eight reviewer wrappers than in the core install, memory, test,
 and seven-stage workflow paths.
 
-Current findings: **4 CRITICAL, 14 HIGH, and 10 MEDIUM**.
+Current findings after the independent Claude Opus 5 challenge and three-round
+debate: **3 CRITICAL, 14 HIGH, and 13 MEDIUM** (30 total). The two new HIGH
+findings are unattended AI-to-public memory publishing and shipped model config
+that removes an explicit Codex reasoning safeguard.
 
 | Strategy | Verdict | Main reason |
 |---|---|---|
 | Public/private boundary | Critical repair needed | Secret-bearing transcripts are still reachable in public Git history |
-| Cross-machine memory | Critical repair needed | Index entries and failed-push commits can be destroyed automatically |
-| Database safety memory | Critical repair needed | Indexed memory teaches a nonexistent preview database and forbidden migration path |
+| Cross-machine memory | Active critical incident | Four machines are deleting/restoring safety-index entries about every 30 minutes; failed-push commits can also be destroyed |
+| Database safety memory | High-risk repair needed | Indexed memory teaches a nonexistent preview database and forbidden migration path, but no wrong write is proven |
 | Ubuntu/Windows recovery | High-risk gaps | Multiple required failures can still end in a successful-looking install |
 | Reviewer isolation/evidence | Strong design, incomplete enforcement | Private copies can omit or mix source states; providers implement lifecycle rules differently |
-| Context ownership/routing | Strong foundation | Live context is undercounted, over budget, and installed copies have drifted |
+| Context ownership/routing | Strong foundation, medium measurement debt | Live context is undercounted and installed copies can drift; the corrected installed total is 21,808 bytes on the audit machine |
 | Skills and trigger quality | Good measurement method, thin coverage | Only 8 of 58 skills have committed trigger evaluations |
 | Secrets handling | Strong 1Password design | Windows ACL and malformed-config failures do not always fail closed |
-| Test strategy | Many useful tests, no delivery gate | 44 tests exist, but no CI, no single full-suite command, and no protected main branch |
+| Test strategy | Many useful tests, no delivery gate | Tests exist, but no CI, no single full-suite command, and no protected main branch |
 | Seven-stage AI workflow | Not production-ready | The advertised core is still disconnected v0.1 scaffolding |
+| Automatic memory publishing | High-risk active path | Scheduled jobs publish AI-authored facts to this public repository without human review |
 
 Severity meanings:
 
@@ -43,9 +54,17 @@ Severity meanings:
 - **MEDIUM:** material maintainability, observability, reproducibility, or efficiency
   weakness that is not presently destructive by itself.
 
-## CRITICAL
+## Detailed findings
+
+The following dividers preserve the original audit grouping for traceability.
+The explicit **Current severity** line in each finding is authoritative after the
+Claude Opus 5 debate.
+
+## Originally rated CRITICAL
 
 ### 1. Secret-bearing transcripts are still reachable in the public repository history
+
+- **Current severity: CRITICAL**
 
 - Files: `docs/transcripts.md:3-5`, `AGENTS.md:32`, `.gitignore:78-82`
 - Confidence: certain
@@ -66,22 +85,30 @@ Severity meanings:
 
 ### 2. Cross-machine memory sync knowingly drops index entries and auto-commits the loss
 
+- **Current severity: CRITICAL — active incident and operational priority #1**
+
 - Files: `bin/ai-sync-memory:129-146`, `bin/ai-memory-sync:65-105`,
   `memory/README.md:114-156`
 - Confidence: certain; Git history shows the same index lines being removed and restored
-  by alternating machines
+  by four alternating machines (`albt16`, `edge-dev`, `al8960ofc`, and `hetz`) at
+  roughly 30-minute cadence through 2026-08-21
 - What happens: `ai-sync-memory` detects hub index entries missing on the current
   machine and prints “Pushing will drop them,” then copies the smaller local
   `MEMORY.md` over the hub anyway. `ai-memory-sync` runs that push before its pull,
   commits it automatically, and sends it to `main`.
-- User-visible impact: fact files survive but become unreachable to recall. The current
-  tree has **13** fact files not named by their project index, contradicting the rule
-  that an unindexed fact is no memory.
+- User-visible impact: fact files survive but become unreachable to recall. The loop
+  periodically removes the index section containing 1Password and secret-handling
+  safety facts, so this is a periodically disarmed safety control, not ordinary cleanup.
+  The orphan count changed from **13** to **14** during the audit, further proving the
+  state is actively drifting.
 - Required correction: merge indexes as a union, permit removal only through a durable
   tombstone, block index shrink before commit, run `ai-memory-health` before every
   automatic push, and add a real two-machine round-trip test.
 
 ### 3. Indexed memory teaches the wrong database and a forbidden migration route
+
+- **Current severity: HIGH** — the instruction is dangerous and certain, but a wrong
+  production write was not proven to have occurred
 
 - Files: `memory/dflow/feedback_all_db_work_via_shared_db.md:14-18`,
   `memory/dflow/MEMORY.md:8`, `memory/dflow-plm/shared-db-canonical-repo.md:10-14`,
@@ -102,6 +129,10 @@ Severity meanings:
 
 ### 4. A failed memory push destroys the local commit it claims to preserve
 
+- **Current severity: CRITICAL** — the active index oscillation continuously creates
+  the push/rebase-conflict precondition, and the failure path is automatic,
+  irreversible, and falsely reports success
+
 - Files: `bin/ai-memory-sync:88-105`, `tests/test-ai-memory-sync.sh:1-23`
 - Confidence: certain from the control flow
 - What happens: after three failed pushes or a failed rebase, the script says the commit
@@ -114,9 +145,11 @@ Severity meanings:
   commit, exit nonzero with a visible alert, and add failure-injection tests rather than
   source-text-only assertions.
 
-## HIGH
+## Originally rated HIGH
 
 ### 5. Ubuntu install and update can finish successfully after required stages fail
+
+- **Current severity: HIGH**
 
 - Files: `install.sh:17`, `install.sh:70-86`, `install.sh:128-149`,
   `install.sh:159-178`, `install.sh:203-212`, `update.sh:27-28`
@@ -133,6 +166,8 @@ Severity meanings:
 
 ### 6. Windows setup can continue from stale, dirty, wrong-branch, or failed Git state
 
+- **Current severity: HIGH**
+
 - Files: `bin/install-ai-devops-windows.ps1:426-436`,
   `bin/bootstrap-windows-dev.ps1:56-72`, `docs/windows-winget-configuration.md:59-62`
 - Confidence: certain
@@ -147,6 +182,8 @@ Severity meanings:
 
 ### 7. Windows has three conflicting “restore from zero” routes
 
+- **Current severity: HIGH**
+
 - Files: `README.md:30-56`, `README.md:195-205`,
   `docs/restore-from-zero.md:7-23`, `bin/bootstrap-windows-dev.ps1:75-141`
 - Confidence: certain
@@ -160,6 +197,8 @@ Severity meanings:
 
 ### 8. Critical source-of-truth safeguards have no automatic or server-side gate
 
+- **Current severity: HIGH**
+
 - Files: `docs/deployment.md:8-16`, `docs/development.md:86-153`,
   `docs/critical-incidents.md:193-230`
 - Confidence: certain; GitHub reports no branch protection/rules for `main`
@@ -170,22 +209,30 @@ Severity meanings:
   repeatable gate, and the exact destructive incident documented here is still allowed
   by GitHub.
 - Required correction: add an offline Windows/Linux test matrix, one local `test-all`
-  entry point, secret scanning, and a GitHub rule that blocks force-push and branch
-  deletion while retaining the chosen main-only workflow.
+  entry point, and a GitHub rule that blocks force-push and branch deletion while
+  retaining the chosen main-only workflow. GitHub secret scanning and push protection
+  are already enabled; do not duplicate them.
 
 ### 9. Shared reviewer copies can silently omit part or all of a change
+
+- **Current severity: HIGH**
 
 - Files: `bin/ai-review-sandbox:81-102`, `bin/ai-review-sandbox:114-145`,
   `tests/test-ai-review-sandbox.sh:1-170`
 - Confidence: certain
-- What happens: failed cleanup is tolerated, failed diff generation becomes an empty
-  patch, and failed untracked-file copies are warnings. The reviewer can receive a
-  clean or incomplete copy.
+- What happens: failed diff generation becomes an empty patch and failed untracked-file
+  copies are warnings. The reviewer can receive a clean or incomplete copy. Stale
+  cleanup alone is not fail-open because the following clone into a nonempty directory
+  fails; that part of the original wording was withdrawn.
 - User-visible impact: a reviewer can approve work it never saw.
-- Required correction: fail closed on cleanup, diff, and every copy; remove the partial
-  snapshot; and add hostile unreadable, vanishing-file, and path-length tests.
+- Required correction: fail closed on diff generation and every copy, remove every
+  partial snapshot on failure, and add hostile unreadable, vanishing-file, and
+  path-length tests.
 
 ### 10. Reviewer snapshots can combine two source states that never existed together
+
+- **Current severity: MEDIUM** — the mechanism is real, but `git apply` stops the
+  largest race variant and no occurrence was proven
 
 - Files: `bin/ai-review-sandbox:114-145`, `bin/ai-kimi:1030-1039`,
   `bin/ai-grok-review:137-170`
@@ -201,6 +248,8 @@ Severity meanings:
 
 ### 11. Codex review is neither enforced read-only nor trustworthy on failure
 
+- **Current severity: HIGH**
+
 - Files: `bin/ai-codex-review:26-30`, `bin/ai-codex-review:61-85`,
   `bin/ai-codex-review:138-159`, `plan_codex_reviewer_trust_repair.md:7-12`
 - Confidence: certain
@@ -213,6 +262,8 @@ Severity meanings:
   enforced read-only, exact-verdict, unique atomic-report lifecycle as trusted reviewers.
 
 ### 12. Reviewer identity, freshness, and paid-run rules still diverge by provider
+
+- **Current severity: HIGH**
 
 - Files: `bin/ai-qwen:901-979`, `bin/ai-kimi:354-360`,
   `bin/ai-kimi:1014-1019`, `plan_qwen_reviewer_evidence_repair.md:7-12`,
@@ -228,6 +279,8 @@ Severity meanings:
 
 ### 13. Central reviewer governance exists but wrappers do not use it automatically
 
+- **Current severity: HIGH**
+
 - Files: `bin/ai-review-preflight:121-150`, `bin/ai-review-scoreboard:75-103`,
   `bin/ai-reviewer-issue:71-85`, `bin/ai-reviewer-issue:116-150`
 - Confidence: certain
@@ -242,6 +295,8 @@ Severity meanings:
   provider and parse its completion.
 
 ### 14. The advertised seven-stage pipeline is disconnected and uses unsafe defaults
+
+- **Current severity: HIGH**
 
 - Files: `skills/claude/ai-development-pipeline/SKILL.md:12-17`,
   `skills/claude/ai-development-pipeline/SKILL.md:32-50`, `bin/ai-run-task:39-68`,
@@ -259,6 +314,8 @@ Severity meanings:
 
 ### 15. The Claude transcript backup skill can route transcripts back into the public repo
 
+- **Current severity: HIGH**
+
 - Files: `skills/claude/claude-transcript-backup/SKILL.md:1-10`,
   `skills/claude/claude-transcript-backup/SKILL.md:34-49`, `docs/transcripts.md:15-19`
 - Confidence: certain
@@ -272,11 +329,16 @@ Severity meanings:
 
 ### 16. Context reporting understates what sessions actually load and allows measured debt to grow
 
+- **Current severity: MEDIUM**
+
 - Files: `tools/context-audit/context-audit.py:304-340`,
   `tools/context-audit/context-audit.py:584-592`, `tools/context-audit/budgets.json:19-22`,
   `docs/development.md:138-144`
-- Confidence: certain from a live strict audit
-- Evidence: templates total 13,813 bytes, while installed globals total 44,700 bytes.
+- Confidence: certain from a live strict audit; the original installed-byte total was
+  incorrect and has been withdrawn
+- Evidence: templates total 13,813 bytes, while the two installed globals total
+  **21,808 bytes** on the audit machine (`~/.claude/CLAUDE.md` 11,709 plus
+  `~/.codex/AGENTS.md` 10,099).
   The audit reports drift but does not count installed bytes. It also currently warns on
   three budgets: startup router +474 bytes, Claude manifest +932, Codex manifest +7,679.
 - User-visible impact: the headline savings describe source templates rather than the
@@ -287,6 +349,8 @@ Severity meanings:
   debt; and shorten long descriptions only after trigger tests prove no regression.
 
 ### 17. Windows credential/config failures do not consistently fail closed
+
+- **Current severity: HIGH**
 
 - Files: `bin/setup-machine.ps1:256-262`, `bin/setup-machine.ps1:474-483`,
   `bin/setup-machine.ps1:557-568`
@@ -302,6 +366,9 @@ Severity meanings:
 
 ### 18. Public-repo documentation still exposes avoidable operational topology
 
+- **Current severity: MEDIUM** — the values aid reconnaissance but do not grant access;
+  the false statement about removed transcript history remains CRITICAL under finding 1
+
 - Files: `README.md:99-111`, `docs/config-inventory.md:180-197`,
   `docs/headroom.md:41-73`, `config/ssh-config.template:1-190`
 - Confidence: certain; GitHub reports the repo is PUBLIC while README line 101 says it
@@ -314,9 +381,11 @@ Severity meanings:
   or generate the inventory at install from protected 1Password/private-repo data. Keep
   the public repository safe even when a future contributor misunderstands `.gitignore`.
 
-## MEDIUM
+## Originally rated MEDIUM
 
 ### 19. Restore output is not reproducible across time
+
+- **Current severity: MEDIUM**
 
 - Files: `.config/configuration.winget:4-64`, `bin/setup-machine.ps1:335-390`,
   `README.md:39-42`, `docs/windows-winget-configuration.md:11-16`
@@ -329,6 +398,8 @@ Severity meanings:
 
 ### 20. Machine-local configuration is preserved but neither migrated nor backed up
 
+- **Current severity: MEDIUM**
+
 - Files: `docs/configuration.md:14-16`, `docs/configuration.md:86-90`,
   `docs/config-inventory.md:63`, `docs/restore-from-zero.md:89-92`
 - Confidence: high
@@ -340,6 +411,8 @@ Severity meanings:
 
 ### 21. Uninstall is incomplete and its destructive options have no recovery gate
 
+- **Current severity: MEDIUM**
+
 - Files: `uninstall.sh:40-76`, compared with installed state at `install.sh:118-198`
 - Confidence: high
 - What happens: uninstall removes only current symlinks, leaving managed skills, globals,
@@ -349,6 +422,8 @@ Severity meanings:
   timestamped config archive, exact ownership checks, and complete/minimal modes.
 
 ### 22. Trigger-quality tests cover too little of the skill catalog
+
+- **Current severity: MEDIUM**
 
 - Files: `tools/skill-trigger-eval/README.md:44-49`,
   `docs/skill-trigger-eval.md:149-182`, `skills/shared/shared-db-handover/SKILL.md:1-4`
@@ -360,6 +435,8 @@ Severity meanings:
   edit; measure more than one day and on both Windows/Linux where tools differ.
 
 ### 23. Context work routes through a closed 104 KB plan and stale copied measurements
+
+- **Current severity: MEDIUM**
 
 - Files: `AGENTS.md:48`, `docs/context-engineering.md:218-244`,
   `docs/context-engineering.md:479-490`, `plan_context-engineering-consolidation.md:3-25`
@@ -373,6 +450,8 @@ Severity meanings:
 
 ### 24. Generic branch guidance contradicts this repository’s main-only policy
 
+- **Current severity: MEDIUM**
+
 - Files: `AGENTS.md:17-23`, `bin/ai-workspace-status:92-107`,
   `skills/claude/ai-development-pipeline/SKILL.md:52-62`
 - Confidence: certain
@@ -383,6 +462,8 @@ Severity meanings:
   and distinguish “local tracking data” from a freshly fetched remote comparison.
 
 ### 25. Reviewer availability and incident capture still have provider-specific blind spots
+
+- **Current severity: MEDIUM**
 
 - Files: `bin/ai-review-preflight:137-150`,
   `bin/ai-muse:93-99`, `bin/ai-muse:136-177`, `bin/ai-glm:1568-1604`,
@@ -397,6 +478,8 @@ Severity meanings:
 
 ### 26. Codex cannot consume the repository’s portable memory strategy automatically
 
+- **Current severity: MEDIUM**
+
 - Files: `memory/README.md:158-176`, `docs/context-engineering.md:112-122`
 - Confidence: certain
 - What happens: Markdown facts are the cross-machine owner for Claude, while Codex’s
@@ -406,6 +489,8 @@ Severity meanings:
   trigger; do not sync or rewrite Codex’s live SQLite store.
 
 ### 27. The doctor checks presence more often than real capability
+
+- **Current severity: MEDIUM**
 
 - Files: `bin/ai-devops:14-23`, `bin/ai-devops:218-245`,
   `docs/restore-from-zero.md:81-92`
@@ -419,6 +504,8 @@ Severity meanings:
 
 ### 28. Node/npm installation depends on an unrelated package being missing
 
+- **Current severity: MEDIUM**
+
 - Files: `install.sh:41-59`, `docs/deployment.md:32-47`
 - Confidence: certain
 - What happens: Node/npm installation sits inside the block that runs only when another
@@ -428,20 +515,61 @@ Severity meanings:
 - Improvement: test/install Node independently and verify `node`, `npm`, and `npx` before
   wiring Node-based tools.
 
+### 29. Unattended jobs publish AI-authored memory to a public repository
+
+- **Current severity: HIGH — active path requiring immediate containment**
+- Files: `bin/ai-memory-sync`, `install.sh`, the Windows memory task installer,
+  `memory/README.md`
+- Confidence: certain from Git history and current scheduled-job design
+- What happens: four machines automatically commit AI-authored Markdown facts to this
+  public repository. The only content gate is a narrow credential-pattern scan; it
+  cannot recognize customer names, internal URLs, schema details, or new secret formats.
+  Metadata proves scheduled sync commits introduced 131 fact files without human review.
+- User-visible impact: private business or infrastructure facts can become permanently
+  public even when they do not resemble a token. No credential has been proven to have
+  leaked through this specific route, so the finding is HIGH rather than CRITICAL.
+- Required correction: halt the jobs, move portable memory to a private authenticated
+  hub, keep content scanning as defense in depth, make every blocked/failed publication
+  visible, and prove the public repo can no longer be an automatic destination.
+
+### 30. Shipped model configuration removes the Codex reviewer’s explicit reasoning safeguard
+
+- **Current severity: HIGH**
+- Files: `bin/ai-codex-review:25-33`, `config/models.env.example:35`,
+  `install.sh:82-86`
+- Confidence: certain from default/config precedence
+- What happens: the wrapper deliberately supplies an explicit safe Codex reasoning
+  effort, then sources `models.env`; the shipped example overrides `CODEX_CMD` with a
+  command that omits the effort setting. Installing the example therefore strips the
+  guardrail even if the seven-stage pipeline is later demoted or replaced.
+- User-visible impact: installed review runs can start with an unset/forbidden effort
+  while appearing to use the wrapper's safe default.
+- Required correction: preserve explicit allowed reasoning and sandbox settings through
+  install/config migration, validate the effective command, and add a live/header test
+  so a shipped example cannot silently weaken the in-script default.
+
 ## Recommended repair sequence
 
-1. **Contain exposure and destructive memory behavior:** public history, stale database
-   memories, index union, and failed-push preservation.
-2. **Make restore honest:** Ubuntu required-stage exits, Windows verified source, one
-   restore entry point, ACL/config fail-closed behavior, and stronger doctor checks.
-3. **Add enforcement:** one offline test command, Windows/Linux CI, no-force-push GitHub
-   rule, and restore smoke tests.
-4. **Consolidate reviewer infrastructure:** one shared lifecycle core; keep only fully
-   qualified reviewers as approval gates and label the rest advisory/quarantined.
-5. **Choose the core workflow:** finish the seven-stage artifact pipeline or retire its
-   headline status. Stop adding reviewer variants until this decision is complete.
-6. **Pay down context and portability debt:** measure installed context, reconcile globals,
-   expand trigger tests, shrink descriptions, and expose portable facts to Codex.
+1. **Treat memory as a live incident:** halt all automatic writers, preserve every
+   machine's state, move the hub private, rebuild the union, and repair failed-push
+   preservation before resuming one machine at a time.
+2. **Correct immediate dangerous instructions:** stale database memories, transcript
+   routing, and shipped unsafe model defaults.
+3. **Make restore honest:** Ubuntu required-stage exits, Windows verified source, one
+   restore entry point, ACL/config fail-closed behavior, migrations, uninstall recovery,
+   and capability-based doctor checks.
+4. **Add enforcement:** one offline test command, Windows/Linux CI, a no-force/no-delete
+   GitHub rule after the coordinated rewrite, and clean-machine restore smoke tests.
+5. **Consolidate reviewer infrastructure:** one shared lifecycle; Claude Opus 5 and Codex
+   are the supported approval adapters; preserve other providers as advisory/quarantined
+   until the same hostile qualification passes.
+6. **Finish the core workflow:** complete and test the seven-stage artifact pipeline end
+   to end; do not delete the intended capability as a substitute for repair.
+7. **Repair privacy and history:** split private topology, close every transcript/public
+   memory path, and perform a recoverable coordinated history rewrite.
+8. **Pay down context and portability debt:** measure installed context correctly,
+   compact routing, expand trigger tests, and expose private portable facts read-only to
+   Codex.
 
 ## Strategies worth preserving
 
