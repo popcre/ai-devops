@@ -28,7 +28,10 @@ grep -q 'install-machine-tools.ps1' "$repo/bin/setup-machine.ps1"
 grep -q "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." "$repo/bin/ai-install-skills"
 for skill in "$repo/skills/claude/sync-dotfiles/SKILL.md" "$repo/skills/codex/codex-sync-dotfiles/SKILL.md"; do
   grep -q 'ai-machine-tools-doctor' "$skill"; grep -q 'install-machine-tools' "$skill"
+  grep -q 'bin/ai-adopt-globals' "$skill"
+  ! grep -q 'fall back to appending' "$skill"
 done
+grep -q 'First-sync bridge: adopting current global instructions safely.' "$repo/bin/ai-install-skills"
 grep -q 'would reconcile and verify local AI command launchers' "$repo/bin/ai-install-skills"
 grep -q 'if \$DRY_RUN; then' "$repo/bin/ai-install-skills"
 for forbidden in 'op-service-account' 'mcp-launch' 'ai-sync-memory' 'apt-get' 'ai-glm doctor'; do

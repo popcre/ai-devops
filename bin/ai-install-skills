@@ -108,6 +108,27 @@ while (($#)); do
   shift
 done
 
+# One-time first-sync bridge for the global-adoption rollout. A sync session
+# loads its installed skill BEFORE `git pull`, so the first run after this
+# change may still follow the old procedure and call only ai-install-skills.
+# Detect that exact old->new transition before the skill copy overwrites the
+# evidence. At the end of this run, invoke the guarded adopter, which backs up
+# both globals, preserves machine sections, and verifies the installed bodies.
+# Once either current sync skill is installed this bridge becomes a no-op.
+SYNC_GLOBALS_BOOTSTRAP=false
+if ! $ADOPT_GLOBALS; then
+  while IFS='|' read -r source installed; do
+    if [[ -f "$source" && -f "$installed" ]] &&
+       grep -Fq 'bin/ai-adopt-globals' "$source" &&
+       ! grep -Fq 'bin/ai-adopt-globals' "$installed"; then
+      SYNC_GLOBALS_BOOTSTRAP=true
+    fi
+  done <<EOF
+$REPO_ROOT/skills/claude/sync-dotfiles/SKILL.md|$CLAUDE_HOME/skills/sync-dotfiles/SKILL.md
+$REPO_ROOT/skills/codex/codex-sync-dotfiles/SKILL.md|$CODEX_HOME/skills/codex-sync-dotfiles/SKILL.md
+EOF
+fi
+
 run() { if $DRY_RUN; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; else "$@"; fi }
 
 MARKER=".ai-devops-managed"
@@ -534,6 +555,16 @@ else
   if ! bash "$REPO_ROOT/bin/ai-machine-tools-doctor"; then
     echo "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." >&2
     exit 1
+  fi
+fi
+
+if $SYNC_GLOBALS_BOOTSTRAP; then
+  if $DRY_RUN; then
+    echo "[dry-run] first-sync bridge would run bin/ai-adopt-globals; no globals changed."
+  else
+    echo
+    echo "First-sync bridge: adopting current global instructions safely."
+    bash "$REPO_ROOT/bin/ai-adopt-globals"
   fi
 fi
 

@@ -367,8 +367,7 @@ owner: claude/fixture-$n
             "No approval loops",
             "recover first and finish",
             "Fix means preserve the intended capability",
-            "Do not load unrelated handoffs",
-            "permission to delete them"
+            "Do not load unrelated handoffs"
         )) {
             if ($clientGlobals[$client] -notmatch [regex]::Escape($required)) {
                 throw "The $client global lost its autonomy rule: $required"

@@ -75,8 +75,10 @@ triggered** — audited 2026-07-16:
   machine. `crontab -l` and `systemctl list-timers` on `hetz` show nothing
   skill-related.
 - A machine only updates when someone says **"sync my dotfiles"** (the
-  `sync-dotfiles` skill: `git pull --ff-only` → `bin/ai-install-skills`) or runs
-  the installer by hand.
+  `sync-dotfiles` skill: `git pull --ff-only` → `bin/ai-adopt-globals`) or runs
+  the guarded adopter by hand. The adopter refreshes skills through
+  `ai-install-skills`, replaces the shared instruction bodies, preserves each
+  detected machine section, and verifies both pieces before succeeding.
 - **Machines drift silently.** On 2026-07-16 `hetz`'s `/worksp/ai-devops` was **4
   commits behind** `origin/main` and its skills had last been installed
   **2026-07-09** — it was missing `secrets-to-1password` and `sync-dotfiles`
@@ -156,7 +158,7 @@ Shared/client name collisions fail before anything is copied.
 
 ## Maintenance
 
-When a standing rule changes (new quirk discovered, infra migrated, a rule
-proves wrong), update the skill or atlas here and re-run `ai-install-skills`
-on each machine — treat this repo as the single source of truth for AI
-behavior, exactly like the rest of the toolkit.
+When a standing rule changes, update the repo template and run "sync my
+dotfiles" on each machine. That sync uses `ai-adopt-globals`; do not use the
+seed-only installer or append the changed rule manually. Distribution remains
+pull-based: one machine's sync does not contact the others.

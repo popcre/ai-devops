@@ -28,6 +28,11 @@ repo vs topic doc vs skill vs memory vs plan vs handoff), read the context
 ownership map in
 [`context-engineering.md`](context-engineering.md) before adding it here.
 
+"Sync my dotfiles" runs `bin/ai-adopt-globals`, not the seed-only installer.
+It refreshes both clients' skills and replaces each shared global body while
+preserving and verifying the machine-specific section. It updates only the
+machine where the sync is run; distribution is not a broadcast.
+
 ## What replaces what
 
 | You used to type | Now say |

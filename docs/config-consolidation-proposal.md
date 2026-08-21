@@ -53,7 +53,8 @@ never-clobber semantics. Do not revisit chezmoi.
 | Docs | this file + `config-inventory.md` + AGENTS.md rows | done |
 
 **What "sync my dotfiles" does now:** pull ai-devops → `ai-sync-memory pull` →
-`ai-install-skills` → `ai-gcloud-dflow` → `ai-sync-memory push` → commit+push.
+`ai-adopt-globals` (which refreshes skills and safely replaces both shared
+instruction bodies) → `ai-gcloud-dflow` → `ai-sync-memory push` → commit+push.
 Directions: skills/instructions are repo→machine (repo is source of truth);
 memory is two-way (git-merged); gcloud is apply-only. Full procedure in the
 skill file.
