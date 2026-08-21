@@ -16,6 +16,15 @@ ai-grok-review list | show <name> | transcript <name> | delete <name>
 ai-grok-review doctor
 ```
 
+`list` shows paid Grok work across every clone on the computer, while completed
+sessions remain limited to the current checkout. Equivalent GitHub HTTPS, SSH,
+case, `.git`, and local-clone origins share one paid-work lock. If a local wrapper
+is interrupted, do not start another review: provider cancellation is unconfirmed
+and the retained lock deliberately blocks another charge until a human reconciles it.
+`delete` refuses an active session and never deletes Grok's provider-side history.
+Long turns print elapsed-time heartbeats; these prove only that the local wrapper is
+still waiting, not that the provider is active.
+
 The wrapper owns the model pin, the read-only permission set, the turn bound, the
 completion rule, the session bookkeeping, and the cost reporting. Every one of those
 exists because getting it wrong cost real money: on 2026-08-05 a hand-composed Grok

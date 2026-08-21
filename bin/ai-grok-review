@@ -70,6 +70,7 @@ GROK_PERMS=(--permission-mode default --allow Read --allow Grep
 DEFAULT_MAX_TURNS="${AI_GROK_MAX_TURNS:-20}"
 WAIT_TIMEOUT="${AI_GROK_WAIT_TIMEOUT:-900}"
 POLL_INTERVAL="${AI_GROK_POLL_INTERVAL:-5}"
+HEARTBEAT_INTERVAL="${AI_GROK_HEARTBEAT_INTERVAL:-60}"
 
 die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
@@ -218,6 +219,46 @@ repo_id() {
 }
 repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 
+# The checkout-bound repo_id above deliberately remains the session identity.
+# Paid work needs a second identity shared by every clone of one upstream.
+normalize_remote() { # normalize_remote REMOTE -> canonical network identity
+  local remote="$1" host path
+  remote="${remote%/}"
+  case "$remote" in
+    git@*:* ) host="${remote#git@}"; host="${host%%:*}"; path="${remote#*:}" ;;
+    ssh://*|https://*|http://*|git://*)
+      host="${remote#*://}"; host="${host#*@}"; path="${host#*/}"; host="${host%%/*}"; host="${host%:22}"; host="${host%:443}" ;;
+    *) return 1 ;;
+  esac
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  path="${path#/}"; path="${path%/}"; path="${path%.git}"
+  [ -n "$host" ] && [ -n "$path" ] || return 1
+  case "$host/$path" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  printf '%s/%s' "$host" "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
+}
+
+upstream_identity() { # upstream_identity ROOT [DEPTH] [VISITED]
+  local root="$1" depth="${2:-0}" visited="${3:-}" remote target physical
+  [ "$depth" -lt 5 ] || return 1
+  physical="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
+  case "|$visited|" in *"|$physical|"*) return 1 ;; esac
+  remote="$(repo_remote "$physical")"; [ -n "$remote" ] || return 1
+  if normalize_remote "$remote"; then return 0; fi
+  case "$remote" in
+    /*|[A-Za-z]:[\\/]*|.*) target="$remote" ;;
+    *) target="$physical/$remote" ;;
+  esac
+  git -C "$target" rev-parse --git-dir >/dev/null 2>&1 || return 1
+  upstream_identity "$target" $((depth + 1)) "$visited|$physical"
+}
+
+review_lock_id() { printf '%s' "$1" | sha256sum | cut -c1-16; }
+require_upstream_identity() {
+  local identity
+  identity="$(upstream_identity "$1")" || die "cannot identify this repository's shared upstream. Set origin to an unambiguous network repository; no paid Grok call was started."
+  printf '%s' "$identity"
+}
+
 valid_name() {
   case "$1" in
     ''|*[!A-Za-z0-9._-]*) return 1 ;;
@@ -237,26 +278,58 @@ repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
 # Portable mutex: `flock` does not exist in Git Bash, so this is an atomic mkdir
 # plus a pid file. A lock whose owning process is gone is reclaimed, so a
 # crashed run never wedges a repo or a session permanently.
-lock_acquire() { # lock_acquire DIR LABEL
-  local dir="$1" label="$2" owner
+lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE]
+  local dir="$1" label="$2" upstream="${3:-}" session="${4:-}" source="${5:-}" owner
   mkdir -p "$(dirname "$dir")"
   if mkdir "$dir" 2>/dev/null; then
     printf '%s\n' "$$" > "$dir/pid"
     printf '%s\n' "$label" > "$dir/label"
+    [ -z "$upstream" ] || {
+      printf '2\n' > "$dir/schema"
+      printf '%s\n' "$upstream" > "$dir/upstream"
+      printf '%s\n' "$CALLER" > "$dir/caller"
+      printf '%s\n' "$session" > "$dir/session"
+      printf '%s\n' "$source" > "$dir/source"
+      date -u +%FT%TZ > "$dir/started"
+    }
     return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -f "$dir/remote-uncertain" ]; then
+    warn "an interrupted Grok turn has unconfirmed provider state; paid work remains blocked. Inspect $(basename "$dir") before reconciling it manually."
+    return 1
+  fi
   if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
     return 1
   fi
-  warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
+  if [ -z "$owner" ] || ! [[ "$owner" =~ ^[0-9]+$ ]]; then
+    warn "malformed lock $(basename "$dir") blocks paid work; inspect it manually."
+    return 1
+  fi
+  warn "reclaiming stale lock $(basename "$dir") (owner pid $owner is gone)"
   rm -rf "$dir"
   mkdir "$dir" 2>/dev/null || return 1
   printf '%s\n' "$$" > "$dir/pid"
   printf '%s\n' "$label" > "$dir/label"
+  [ -z "$upstream" ] || {
+    printf '2\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"
+    printf '%s\n' "$CALLER" > "$dir/caller"; printf '%s\n' "$session" > "$dir/session"
+    printf '%s\n' "$source" > "$dir/source"; date -u +%FT%TZ > "$dir/started"
+  }
   return 0
 }
-lock_release() { rm -rf "$1" 2>/dev/null || true; }
+lock_release() { # only the creating wrapper may release it
+  local dir="$1" owner
+  [ -d "$dir" ] || return 0
+  owner="$(cat "$dir/pid" 2>/dev/null || true)"
+  [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
+}
+mark_remote_uncertain() { # retain paid-work lock after local interruption
+  local dir="$1"
+  [ -d "$dir" ] || return 0
+  [ "$(cat "$dir/pid" 2>/dev/null || true)" = "$$" ] || return 0
+  date -u +%FT%TZ > "$dir/remote-uncertain"
+}
 
 lock_info() { # lock_info DIR -> "label (pid, Ns ago)"
   local dir="$1" label pid age started now
@@ -312,7 +385,7 @@ find_meta() {
 # that were `cancelled` and for one whose output never reached its caller.
 # ---------------------------------------------------------------------------
 await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
-  local f="$1" label="$2" waited=0 empty_checks=0 saw_proc=0
+  local f="$1" label="$2" waited=0 empty_checks=0 saw_proc=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   while [ "$waited" -lt "$WAIT_TIMEOUT" ]; do
     if [ -s "$f" ] && jq -e 'has("stopReason")' "$f" >/dev/null 2>&1; then
       return 0
@@ -342,8 +415,10 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
     fi
     sleep "$POLL_INTERVAL"
     waited=$((waited + POLL_INTERVAL))
-    if [ $((waited % 60)) -eq 0 ]; then
-      note "  … $label still running (${waited}s; Grok has not written a terminal result yet)"
+    if [ "$waited" -ge "$next_heartbeat" ]; then
+      bytes="$(wc -c < "$f" 2>/dev/null || echo 0)"
+      note "  … $label: ${waited}s elapsed; local wrapper is waiting for terminal Grok result (${bytes} output bytes). This does not prove provider activity."
+      next_heartbeat=$((next_heartbeat + HEARTBEAT_INTERVAL))
     fi
   done
   note ""
@@ -367,8 +442,18 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   set +e
-  "$grok" "${args[@]}" > "$out" 2>"$out.err"
-  local rc=$?
+  "$grok" "${args[@]}" > "$out" 2>"$out.err" &
+  local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
+  while kill -0 "$child" 2>/dev/null; do
+    sleep "$POLL_INTERVAL"
+    waited=$((waited + POLL_INTERVAL))
+    if [ "$waited" -ge "$next_heartbeat" ]; then
+      bytes="$(wc -c < "$out" 2>/dev/null || echo 0)"
+      note "  … Grok command: ${waited}s elapsed; local process is running and terminal result is pending (${bytes} output bytes). This does not prove provider activity."
+      next_heartbeat=$((next_heartbeat + HEARTBEAT_INTERVAL))
+    fi
+  done
+  wait "$child"; rc=$?
   set -e
   # rc is recorded, never trusted: exit 0 with an empty file is the normal
   # appearance of the early-return bug.
@@ -598,21 +683,22 @@ cmd_doctor() {
 }
 
 cmd_new() {
-  local name="$1" repo rid meta pf out rid_lock sid rc turns
+  local name="$1" repo rid upstream lockid meta pf out rid_lock sid rc turns
   valid_name "$name" || die "invalid session name '$name' (use letters, digits, . _ -)"
-  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
   meta="$(meta_path "$rid" "$name")"
   [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-grok-review ask $name"
 
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
-  rid_lock="$(repolock_path "$rid")"
-  if ! lock_acquire "$rid_lock" "new:$name"; then
+  rid_lock="$(repolock_path "$lockid")"
+  if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo"; then
     die "another Grok review is already running in this repository: $(lock_info "$rid_lock").
   Do NOT start a second one — concurrent reviews are billed in full and were the most
   expensive part of the 2026-08-05 incident. Wait for it, or continue it with 'ask'."
   fi
   # shellcheck disable=SC2064
-  trap "lock_release '$rid_lock'" EXIT INT TERM
+  trap "lock_release '$rid_lock'" EXIT
+  trap "trap - EXIT; warn 'local wrapper stopped; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'; mark_remote_uncertain '$rid_lock'; exit 130" INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
 
@@ -651,8 +737,8 @@ cmd_new() {
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta pf out sid rc turns sess_lock rid_lock boundary
-  repo="$(repo_root)"; rid="$(repo_id "$repo")"
+  local name="$1" repo rid upstream lockid meta pf out sid rc turns sess_lock rid_lock boundary
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .grok_session_id "$meta")"
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
@@ -666,14 +752,15 @@ cmd_ask() {
   Continuing would silently discard the provider cache. Start a new session instead."
 
   sess_lock="$(lock_path "$rid" "$name")"
-  rid_lock="$(repolock_path "$rid")"
+  rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
-  if ! lock_acquire "$rid_lock" "ask:$name"; then
+  if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo"; then
     lock_release "$sess_lock"
     die "another Grok review is running in this repository: $(lock_info "$rid_lock")"
   fi
   # shellcheck disable=SC2064
-  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT INT TERM
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
+  trap "trap - EXIT; warn 'local wrapper stopped; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'; lock_release '$sess_lock'; mark_remote_uncertain '$rid_lock'; exit 130" INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
 
@@ -751,8 +838,23 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
 }
 
 cmd_list() {
-  local rid dir f
+  local rid dir f lock upstream session caller source pid started state
   rid="$(repo_id "$(repo_root)")"
+  printf '%s\n' 'ACTIVE PAID GROK REVIEWS (all repositories on this computer)'
+  printf '%-34s %-24s %-8s %-7s %-20s %s\n' REPOSITORY SESSION CALLER PID STARTED SOURCE
+  for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
+    [ -d "$lock" ] || continue
+    upstream="$(cat "$lock/upstream" 2>/dev/null || true)"; session="$(cat "$lock/session" 2>/dev/null || true)"
+    caller="$(cat "$lock/caller" 2>/dev/null || true)"; source="$(cat "$lock/source" 2>/dev/null || true)"
+    pid="$(cat "$lock/pid" 2>/dev/null || true)"; started="$(cat "$lock/started" 2>/dev/null || true)"
+    if [ -z "$upstream" ] || [ -z "$session" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+      warn "malformed active lock $(basename "$lock") is blocking paid work"
+      continue
+    fi
+    kill -0 "$pid" 2>/dev/null && state=alive || state=stopped
+    printf '%-34s %-24s %-8s %-7s %-20s %s (%s)\n' "$upstream" "$session" "$caller" "$pid" "$started" "$source" "$state"
+  done
+  printf '\n%s\n' 'COMPLETED SESSIONS (this checkout)'
   dir="$STATE_DIR/sessions/$rid"
   printf '%-24s %-8s %-38s %6s %10s %9s  %s\n' NAME CALLER SESSION TURNS TOKENS COST STOP
   [ -d "$dir" ] || return 0
@@ -783,11 +885,18 @@ cmd_transcript() {
 }
 
 cmd_delete() {
-  local rid meta; rid="$(repo_id "$(repo_root)")"
-  meta="$(find_meta "$rid" "$1")"
+  local rid meta name="$1" lock session caller source; rid="$(repo_id "$(repo_root)")"
+  for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
+    [ -d "$lock" ] || continue
+    session="$(cat "$lock/session" 2>/dev/null || true)"; caller="$(cat "$lock/caller" 2>/dev/null || true)"; source="$(cat "$lock/source" 2>/dev/null || true)"
+    if [ "$session" = "$name" ] && [ "$caller" = "$CALLER" ] && [ "$(cd "$source" 2>/dev/null && pwd -P || printf '%s' "$source")" = "$(cd "$(repo_root)" && pwd -P)" ]; then
+      die "session '$name' is active. Local deletion is refused because provider cancellation is not confirmed; the remote turn may still run and bill."
+    fi
+  done
+  meta="$(find_meta "$rid" "$name")"
   rm -f "$meta"
-  release_boundary "$(repo_root)" "grok-$1"   # disposable snapshot, never outlives its session
-  note "deleted local session record '$1' (Grok's own session history is untouched)."
+  release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
+  note "deleted local session record '$name' (Grok provider history is untouched)."
 }
 
 # ---------------------------------------------------------------------------

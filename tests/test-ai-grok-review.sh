@@ -39,6 +39,7 @@ printf '.ai/\n' > "$REPO/.gitignore"
 echo hi > "$REPO/a.txt"
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm init
+git -C "$REPO" remote add origin https://github.com/Example/Reviewer-Fixture.git
 
 # --- stub grok ----------------------------------------------------------------
 # Records its argv to $TMP/argv.txt and emits whatever $TMP/mode says.
@@ -69,6 +70,7 @@ case "$mode" in
              # this is the early-return bug, reproduced.
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
+  wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
 esac
 exit 0
 STUBEOF
@@ -96,6 +98,62 @@ cat > "$TMP/endturn.json" <<'EOF'
 {"text":"## Verdict\nAPPROVE","sessionId":"s-endturn","stopReason":"EndTurn","num_turns":1,
  "usage":{"cache_read_input_tokens":10},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0.01}
 EOF
+echo ok > "$TMP/mode"
+
+# 16 ------------------------------------------------------------------------
+echo "== shared_upstream_lock_visibility_and_truthful_interrupt =="
+CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
+echo wait > "$TMP/mode"
+export AI_GROK_HEARTBEAT_INTERVAL=2
+( cd "$REPO" && bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
+for _i in 1 2 3 4 5; do
+  [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && break
+  sleep 1
+done
+SECOND="$( cd "$CLONE" && bash "$SCRIPT" new other-clone --prompt x 2>&1 )"; SECOND_RC=$?
+[ "$SECOND_RC" -ne 0 ] && ok "equivalent_github_clones_share_one_paid_review_lock" || bad "equivalent_github_clones_share_one_paid_review_lock"
+SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
+git -C "$SSH_CLONE" remote set-url origin git@GitHub.com:EXAMPLE/Reviewer-Fixture.git
+SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new ssh-spelling --prompt x 2>&1 )"; SSH_RC=$?
+[ "$SSH_RC" -ne 0 ] && printf '%s' "$SSH_BLOCKED" | grep -q 'already running' && ok "https_ssh_dotgit_and_case_normalize_to_one_upstream" || bad "https_ssh_dotgit_and_case_normalize_to_one_upstream"
+OTHER="$TMP/unrelated"; mkdir -p "$OTHER"; git -C "$OTHER" init -q
+git -C "$OTHER" config user.email t@example.com; git -C "$OTHER" config user.name T
+printf '.ai/\n' > "$OTHER/.gitignore"; echo x > "$OTHER/x"; git -C "$OTHER" add -A; git -C "$OTHER" commit -qm i
+git -C "$OTHER" remote add origin https://github.com/example/unrelated.git
+echo ok > "$TMP/mode"
+( cd "$OTHER" && bash "$SCRIPT" new unrelated --prompt x >/dev/null 2>&1 ) && ok "unrelated_upstreams_do_not_block_each_other" || bad "unrelated_upstreams_do_not_block_each_other"
+echo wait > "$TMP/mode"
+LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
+check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
+check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'alive'"
+wait "$FIRST_PID"
+check "slow_turn_emits_truthful_bounded_heartbeat" "grep -q 'does not prove provider activity' '$TMP/first.err'"
+check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
+
+LOCK_EQ="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16).lock.d"
+mkdir -p "$LOCK_EQ"; printf '99999999\n' > "$LOCK_EQ/pid"; printf 'stale\n' > "$LOCK_EQ/label"
+echo ok > "$TMP/mode"
+( cd "$CLONE" && bash "$SCRIPT" new reclaimed --prompt x >/dev/null 2>&1 ) && ok "dead_owned_lock_is_reclaimed" || bad "dead_owned_lock_is_reclaimed"
+mkdir -p "$LOCK_EQ"; printf 'not-a-pid\n' > "$LOCK_EQ/pid"; printf 'malformed\n' > "$LOCK_EQ/label"
+MALFORMED="$( cd "$CLONE" && bash "$SCRIPT" new malformed --prompt x 2>&1 )"; MALFORMED_RC=$?
+[ "$MALFORMED_RC" -ne 0 ] && printf '%s' "$MALFORMED" | grep -q 'malformed lock' && ok "malformed_lock_is_not_reclaimed" || bad "malformed_lock_is_not_reclaimed"
+rm -rf "$LOCK_EQ"
+echo wait > "$TMP/mode"
+
+# A locally interrupted wrapper must not claim or assume that the paid remote
+# turn stopped. Its retained uncertainty marker blocks another paid call.
+( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
+for _i in 1 2 3 4 5; do
+  LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+  [ -n "$LOCK_NOW" ] && break
+  sleep 1
+done
+kill -TERM "$INT_PID" 2>/dev/null || true
+wait "$INT_PID" 2>/dev/null || true
+check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"
+BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --prompt x 2>&1 )"; BLOCKED_RC=$?
+[ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_duplicate_paid_turn" || bad "remote_uncertainty_blocks_duplicate_paid_turn"
+rm -rf "$LOCK_NOW"
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
@@ -260,9 +318,12 @@ echo "== duplicate_new_is_refused (per-repo in-flight lock) =="
 # on Windows is a C:/… path and not the mktemp path in $REPO.
 RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
 RREMOTE="$(git -C "$RROOT" config --get remote.origin.url 2>/dev/null || echo '')"
-RID_NEW="$(printf '%s\n%s' "$(cd "$RROOT" && pwd -P)" "$RREMOTE" | sha256sum | cut -c1-12)"
+RID_NEW="$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16)"
 LOCKDIR="$AI_GROK_STATE_DIR/locks/repo--$RID_NEW.lock.d"
 mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:other\n' > "$LOCKDIR/label"
+printf '2\n' > "$LOCKDIR/schema"; printf 'github.com/example/reviewer-fixture\n' > "$LOCKDIR/upstream"
+printf 'other\n' > "$LOCKDIR/session"; printf 'codex\n' > "$LOCKDIR/caller"
+printf '%s\n' "$RROOT" > "$LOCKDIR/source"; date -u +%FT%TZ > "$LOCKDIR/started"
 OUT="$(run new t9 --prompt x 2>&1)"; RC=$?
 rm -rf "$LOCKDIR"
 [ $RC -ne 0 ] && ok "a second concurrent review is refused" || bad "a second concurrent review is refused"
@@ -274,6 +335,7 @@ check "review file written when .ai is ignored" "ls '$REPO'/.ai/reviews/grok-t1-
 REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
 git -C "$REPO2" config user.email t@example.com; git -C "$REPO2" config user.name T
 echo x > "$REPO2/f"; git -C "$REPO2" add -A; git -C "$REPO2" commit -qm i
+git -C "$REPO2" remote add origin https://github.com/Example/Unsafe-Fixture.git
 ERR="$( cd "$REPO2" && bash "$SCRIPT" new t10 --prompt x 2>&1 >/dev/null )"
 check "refuses to write into a repo that would commit it" "printf '%s' \"\$ERR\" | grep -qi 'not git-ignored'"
 check "and writes no file there" "! ls '$REPO2'/.ai/reviews/*.md 2>/dev/null"

@@ -18,13 +18,13 @@ Read this table first. A fresh session starts at Step 1. Every row is open becau
 
 | # | Step | Status | Evidence required before marking done |
 |---|---|---|---|
-| 1 | Reconcile GitHub `main`, preserve concurrent work, and record the baseline | ⬜ open | Base commit plus baseline output from `bash tests/test-ai-grok-review.sh` and `bash tests/test-ai-reviewer-issue.sh` saved under a new dated `tests/verification/grok-review-issue-56/` folder |
-| 2 | Replace checkout-path locking with normalized upstream-repository locking | ⬜ open | New clone-equivalence, URL-normalization, stale-lock, and unrelated-repository tests in `tests/test-ai-grok-review.sh` |
-| 3 | Make active work visible across clones and callers | ⬜ open | `list` fixture proves active label, caller, source checkout, process id, and start time are visible from a second clone |
-| 4 | Make interruption and deletion tell the truth about the remote turn | ⬜ open | Signal/delete tests prove no claim of remote cancellation is made unless the installed Grok interface actually confirms it |
-| 5 | Add useful mid-turn progress without weakening terminal completion | ⬜ open | Slow-turn fixture emits bounded elapsed/progress lines before terminal JSON; the existing early-return regression remains green |
+| 1 | Reconcile GitHub `main`, preserve concurrent work, and record the baseline | ✅ complete locally | Base `50fde79`; offline results recorded in `tests/verification/grok-review-issue-56/2026-08-21-offline.md` |
+| 2 | Replace checkout-path locking with normalized upstream-repository locking | ✅ complete locally | Clone, HTTPS/SSH/case/`.git`, local-origin, unrelated-repository, and uncertainty-block tests in `tests/test-ai-grok-review.sh` |
+| 3 | Make active work visible across clones and callers | ✅ complete locally | `list_shows_active_reviews_across_clones_and_callers` and owner-state fixture pass |
+| 4 | Make interruption and deletion tell the truth about the remote turn | ✅ complete locally | Signal fixture preserves a `remote-uncertain` paid-work block; active deletion refusal remains implemented |
+| 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Heartbeat and terminal-result fixtures pass; full Grok review suite passes 121/121 |
 | 6 | Correlate reviewer-issue evidence to the affected run | ⬜ open | `tests/test-ai-reviewer-issue.sh` proves an explicitly named Grok run wins over an unrelated newer record and empty/missing evidence is labelled honestly |
-| 7 | Update user guidance, install, and run offline verification | ⬜ open | Syntax checks, named test suites, source/install hash comparison, and dated verification record |
+| 7 | Update user guidance, install, and run offline verification | 🟨 source complete | Skill guidance and five offline suites pass; installed hash verification remains after merge |
 | 8 | Run bounded live qualification and independent exact-head review | ⬜ open | Redacted live evidence plus an exact-head independent review with no unresolved Critical/High/Medium finding |
 | 9 | Commit, push, verify GitHub, close #56, and retire this plan/handoff | ⬜ open | Remote `main` SHA, GitHub issue closure comment linking verification evidence, plan status fully current, and this handoff removed only after completion |
 
