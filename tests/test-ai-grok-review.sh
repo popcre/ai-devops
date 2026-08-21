@@ -71,7 +71,11 @@ case "$mode" in
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
-  waitlong)  sleep 20; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
+  hold)      for _i in $(seq 1 60); do
+               [ -f "$TMPDIR_FOR_TEST/release-grok" ] && break
+               sleep 1
+             done
+             cat "$TMPDIR_FOR_TEST/fixture.json" ;;
 esac
 exit 0
 STUBEOF
@@ -104,9 +108,9 @@ echo ok > "$TMP/mode"
 # 16 ------------------------------------------------------------------------
 echo "== shared_upstream_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
-# Keep this first review alive while Windows creates two more repositories and
-# snapshots. Six seconds proved timing-sensitive on a busy machine.
-echo waitlong > "$TMP/mode"
+# Keep this first review alive until this test explicitly releases it. A fixed
+# sleep made the assertions depend on how quickly Windows created repositories.
+echo hold > "$TMP/mode"
 export AI_GROK_HEARTBEAT_INTERVAL=2
 ( cd "$REPO" && bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
 for _i in 1 2 3 4 5; do
@@ -129,6 +133,8 @@ echo wait > "$TMP/mode"
 LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
 check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
 check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq '[0-9]+s.*alive'"
+sleep 3
+touch "$TMP/release-grok"
 wait "$FIRST_PID"
 check "slow_turn_emits_truthful_bounded_heartbeat" "grep -q 'does not prove provider activity' '$TMP/first.err'"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
