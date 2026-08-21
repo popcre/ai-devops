@@ -96,8 +96,14 @@ the `vibe_coding` vault.
 ## DeepSeek: text-and-file debate transport
 
 `ai-deepseek-agent` is the supported DeepSeek transport. It preserves a
-multi-turn thread by resending conversation history and can attach explicitly
-named files. It does not give DeepSeek general repository access. The proposed
+multi-turn thread by resending conversation history, but advances the stored
+conversation only after the provider returns successfully: a turn is locked,
+then the user and assistant messages are replaced atomically as one update.
+Session names and resolved storage paths are contained under the repository's
+private `.ai/deepseek-sessions/` folder. Formal `--review` turns additionally
+require a usable verdict and save exact-session/exact-HEAD metadata. It can
+attach explicitly named files, but does not give DeepSeek general repository
+access. The proposed
 Codex custom-provider profile was cancelled on 2026-08-10: Codex 0.145.0 accepts
 only the Responses API wire format for custom providers, while DeepSeek's
 documented tool-calling surface is Chat Completions. No safe common wire format

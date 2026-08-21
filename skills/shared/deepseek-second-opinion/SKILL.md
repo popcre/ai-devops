@@ -60,6 +60,21 @@ ai-deepseek-agent reply <session-id> "<your rebuttal or follow-up>"
 ai-deepseek-agent show <session-id>
 ```
 
+Session IDs are deliberately restricted to letters, numbers, dots, dashes, and
+underscores. The wrapper rejects hidden names, path separators, Windows device
+names, linked session files, and linked session storage. Do not rename a session
+file by hand to work around that protection.
+
+Each successful turn commits the user message and DeepSeek reply together. If
+the provider fails or a review has no usable verdict, the stored conversation
+does not advance. Replies to one session are serialized, so never bypass the
+wrapper to edit its JSON transcript.
+
+For a formal review, add `--review` to `send` or `reply`. That mode requires a
+literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes a
+metadata sidecar bound to the session and exact Git HEAD. A nonzero result is
+incomplete evidence, never approval.
+
 `--file FILE` appends a file's contents to the message -- use it to attach a
 diff, a plan document, a config file, a log excerpt, whatever DeepSeek needs
 to see, instead of inlining a huge blob on the command line.
