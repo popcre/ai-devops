@@ -73,7 +73,9 @@ wrapper to edit its JSON transcript.
 For a formal review, add `--review` to `send` or `reply`. That mode requires a
 literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes a
 metadata sidecar bound to the session and exact Git HEAD. A nonzero result is
-incomplete evidence, never approval.
+incomplete evidence, never approval. Set `AI_DEEPSEEK_CALLER` to the client
+running the review (`codex` or `claude`) so later incident evidence can match the
+exact caller instead of recording it as `unknown`.
 
 `--file FILE` appends a file's contents to the message -- use it to attach a
 diff, a plan document, a config file, a log excerpt, whatever DeepSeek needs

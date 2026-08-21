@@ -48,6 +48,13 @@ canonical_dir(){
   (cd "$1" && pwd -P)
 }
 
+boundary_dir(){
+  local p
+  [ -d "$1" ] || return 1
+  if p="$(cd "$1" && pwd -W 2>/dev/null)"; then printf '%s' "${p,,}"
+  else (cd "$1" && pwd -P); fi
+}
+
 repo_root(){
   git -C "$1" rev-parse --show-toplevel 2>/dev/null || canonical_dir "$1"
 }
@@ -101,28 +108,31 @@ write_artifact_inventory(){ # write_artifact_inventory REPO DESTINATION
   done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -print0 2>/dev/null)
 }
 
-capture_review_reports(){ # capture_review_reports REPO PROVIDER JOIN DEST INVENTORY
-  local repo="$1" provider="$2" join="$3" dest="$4" inventory="$5" f saved count=0
+capture_exact_files(){ # capture_exact_files METADATA KIND ALLOWED_ROOT DEST INVENTORY
+  local metadata="$1" kind="$2" allowed="$3" dest="$4" inventory="$5" f candidate resolved allowed_root candidate_dir saved count=0 filter
   mkdir -p "$dest"
-  [ -n "$join" ] || return 0
-  [ -d "$repo/.ai/reviews" ] || return 0
-  while IFS= read -r -d '' f; do
+  [ -s "$metadata" ] && [ -d "$allowed" ] || return 0
+  allowed_root="$(boundary_dir "$allowed")" || return 0
+  if [ "$kind" = report ]; then
+    filter='[.report_path?,.last_report?,.review_report?,.artifact_paths.repository?,.artifact_paths.canonical?]'
+  else
+    filter='[.log_path?,.stream_path?,.output_path?,.error_path?,.artifact_paths.stream?,.artifact_paths.log?]'
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      [A-Za-z]:[\\/]*) if command -v cygpath >/dev/null 2>&1; then candidate="$(cygpath -u "$f")"; else candidate="$f"; fi ;;
+      /*) candidate="$f" ;;
+      *) candidate="$allowed/$f" ;;
+    esac
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    candidate_dir="$(boundary_dir "$(dirname "$candidate")")" || continue
+    resolved="$candidate_dir/$(basename "$candidate")"
+    case "$resolved" in "$allowed_root"/*) ;; *) continue ;; esac
     count=$((count + 1)); saved="$(printf '%03d-%s' "$count" "$(basename "$f")")"
-    redact_text < "$f" > "$dest/$saved"
-    printf '%s\t%s\t%s bytes\n' "$f" "$saved" "$(wc -c < "$f" | tr -d ' ')" >> "$inventory"
-  done < <(find "$repo/.ai/reviews" -maxdepth 1 -type f -iname "*${provider}*${join}*" -print0 2>/dev/null)
-}
-
-capture_provider_logs(){ # capture_provider_logs PROVIDER_DIR JOIN DEST INVENTORY
-  local source="$1" join="$2" dest="$3" inventory="$4" f saved count=0
-  mkdir -p "$dest"
-  [ -n "$join" ] || return 0
-  [ -d "$source" ] || return 0
-  while IFS= read -r -d '' f; do
-    count=$((count + 1)); saved="$(printf '%03d-%s' "$count" "$(basename "$f")")"
-    redact_text < "$f" > "$dest/$saved"
-    printf '%s\t%s\t%s bytes\n' "$f" "$saved" "$(wc -c < "$f" | tr -d ' ')" >> "$inventory"
-  done < <(find "$source" -type f -path "*${join}*" -mtime -2 \( -name '*.log' -o -name '*.jsonl' -o -name '*.out' -o -name '*.err' \) -print0 2>/dev/null)
+    redact_text < "$resolved" > "$dest/$saved"
+    printf '%s\t%s\t%s bytes\n' "$resolved" "$saved" "$(wc -c < "$resolved" | tr -d ' ')" >> "$inventory"
+  done < <(jq -r "$filter | .[] | select(type==\"string\" and length>0)" "$metadata" 2>/dev/null)
 }
 
 capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER DESTINATION
@@ -137,7 +147,7 @@ capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER
 }
 
 record_issue(){
-  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" join="" root now stamp host id report_dir
+  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -170,10 +180,6 @@ record_issue(){
   mkdir -p "$report_dir" || die "cannot create report directory: $report_dir"
   chmod 0700 "$ISSUE_DIR" "$report_dir" 2>/dev/null || true
 
-  if { [ -n "$run_id" ] || [ -n "$session_id" ]; } && [ -n "$caller" ]; then
-    join="${run_id:-$session_id}"
-  fi
-
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     branch="$(git -C "$root" branch --show-current 2>/dev/null || true)"
     head="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
@@ -190,8 +196,8 @@ record_issue(){
   write_artifact_inventory "$root" "$report_dir/recent-review-artifacts.txt"
   : > "$report_dir/captured-review-reports.txt"
   : > "$report_dir/captured-provider-logs.txt"
-  capture_review_reports "$root" "$provider" "$join" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
-  capture_provider_logs "$STATE_BASE/$provider" "$join" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
+  capture_exact_files "$metadata_source" report "$root" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
+  capture_exact_files "$metadata_source" log "$STATE_BASE/$provider" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
   capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$report_dir/latest-scoreboard-entry.json"
   if [ -z "$metadata_source" ]; then printf 'No exact reviewer metadata matched provider, repository, head, run/session, and caller.\n' > "$report_dir/missing-evidence.txt"; fi
   if [ -n "$details" ]; then

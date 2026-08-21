@@ -29,13 +29,16 @@ lock_acquire(){
 }
 
 append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
-  local provider="$1" meta="$2" elapsed="$3" verdict="$4" failure="$5" stale="$6" row repo head actual evidence_state identity dirty expected_dirty
+  local provider="$1" meta="$2" elapsed="$3" verdict="$4" failure="$5" stale="$6" row repo head actual evidence_state identity dirty expected_dirty run_id session_id caller
   valid_provider "$provider" || die "unknown provider '$provider'."
   [ -s "$meta" ] && jq -e . "$meta" >/dev/null 2>&1 || die "metadata is not valid JSON: $meta"
   case "$elapsed" in ''|*[!0-9]*) die "elapsed seconds must be a non-negative integer." ;; esac
   case "$stale" in true|false|auto) ;; *) die "stale must be true, false, or auto." ;; esac
   repo="$(jq -r '.repo // .repository_root // empty' "$meta")"
   head="$(jq -r '.head // empty' "$meta")"
+  run_id="$(jq -r '.run_id // .job_id // empty' "$meta")"
+  session_id="$(jq -r '.session_id // .name // .grok_session_id // .opencode_session_id // .kimi_session_id // .qwen_session_id // .conversation_id // empty' "$meta")"
+  caller="$(jq -r '.caller // empty' "$meta")"
   if [ "$stale" != true ]; then
     evidence_state=unknown
     identity="$(jq -r '.packet_sha256 // .tree_sha256 // empty' "$meta")"
@@ -55,11 +58,12 @@ append_row(){ # PROVIDER META ELAPSED VERDICT FAILURE STALE
   row="$(jq -nc --arg timestamp "$(date -u +%FT%TZ)" --arg provider "$provider" \
     --arg repo "$repo" --arg base "$(jq -r '.base // empty' "$meta")" --arg head "$head" \
     --arg packet "$(jq -r '.packet_sha256 // empty' "$meta")" --arg verdict "$verdict" \
-    --arg failure "$failure" --arg evidence_state "$evidence_state" --argjson elapsed "$elapsed" --argjson stale "$stale" \
+    --arg failure "$failure" --arg evidence_state "$evidence_state" --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --argjson elapsed "$elapsed" --argjson stale "$stale" \
     --argjson turns "$(jq '.turns // null' "$meta")" \
     --argjson tokens "$(jq '.total_tokens // .tokens // null' "$meta")" \
     --argjson cost "$(jq '.total_cost_usd // null' "$meta")" \
     '{schema_version:1,timestamp:$timestamp,provider:$provider,repo:$repo,base:$base,head:$head,
+      run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),
       packet_sha256:$packet,elapsed_seconds:$elapsed,turns:$turns,tokens:$tokens,cost_usd:$cost,
       verdict:(if $verdict=="" then null else $verdict end),
       failure_class:(if $failure=="" then null else $failure end),evidence_state:$evidence_state,stale:$stale}')"

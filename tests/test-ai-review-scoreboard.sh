@@ -20,7 +20,7 @@ git -C "$TMP/repo" commit -qm base
 HEAD_SHA="$(git -C "$TMP/repo" rev-parse HEAD)"
 
 cat > "$TMP/grok.json" <<EOF
-{"repo":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p1","turns":7,"total_tokens":300000,"total_cost_usd":0.05}
+{"repo":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p1","name":"review-a","caller":"codex","turns":7,"total_tokens":300000,"total_cost_usd":0.05}
 EOF
 cat > "$TMP/kimi.json" <<EOF
 {"repo":"$TMP/repo","base":"$HEAD_SHA","head":"$HEAD_SHA","packet_sha256":"p2","turns":1}
@@ -36,6 +36,7 @@ $SCRIPT append glm "$TMP/glm.json" --elapsed 901 --failure empty-assistant-turns
 check "three rows are appended" "test \"\$(wc -l < '$AI_REVIEW_SCOREBOARD_FILE')\" -eq 3"
 check "every row is valid JSON" "jq -e . '$AI_REVIEW_SCOREBOARD_FILE' >/dev/null"
 check "Grok metrics are preserved" "sed -n 1p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.turns==7 and .tokens==300000 and .cost_usd==0.05'"
+check "correlation identity is preserved" "sed -n 1p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.session_id==\"review-a\" and .caller==\"codex\"'"
 check "missing Kimi token and cost stay null" "sed -n 2p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.tokens==null and .cost_usd==null'"
 check "failure class is recorded" "sed -n 2p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.failure_class==\"allowance-exhausted\"'"
 check "stale evidence is recorded" "sed -n 3p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.stale==true'"

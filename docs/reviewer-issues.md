@@ -38,8 +38,8 @@ The command automatically captures:
 - the repository, branch, current commit, remote, and existing working changes;
 - the computer and shell;
 - exact-run structured metadata, with sensitive fields removed;
-- exact-run matching review reports, copied in full;
-- reviewer log files changed within the previous two days, copied in full;
+- exact report paths owned by the matched metadata, copied in full;
+- exact log paths owned by the matched metadata, copied in full;
 - the exact matching scoreboard record;
 - the names and sizes of recent review artifacts; and
 - when supplied, the complete error log and detailed session notes.

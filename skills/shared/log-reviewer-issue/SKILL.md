@@ -17,9 +17,14 @@ diagnose the failure first.
    - exact reviewer command when known;
    - detailed symptoms, expected result, attempts, timing, and unusual behavior;
    - repository root; and
+   - the exact run ID or session name and caller (`codex` or `claude`) when the
+     failed wrapper exposed them; and
    - an existing error-log path when one is known.
 2. Run `ai-reviewer-issue record` with `--provider`, `--summary`, `--details`,
    `--command`, and `--repo`. Add `--error-file` only for a real known file.
+   Add `--run-id` or `--session-id` together with `--caller` whenever those
+   exact values are known. Without them, the recorder deliberately captures no
+   nearby provider evidence instead of guessing.
    Details must be comprehensive; `--summary` is only the short index title.
 3. If the command is not on PATH, locate the installed launcher or the canonical
    ai-devops checkout and invoke its `bin/ai-reviewer-issue`. Do not claim the

@@ -48,11 +48,11 @@ DEEPSEEK_STUB_REPLY='no verdict' run send review-me --review >/dev/null 2>&1; mi
 check "review mode rejects missing verdict" "test '$missing_rc' -ne 0"
 REVIEW_OUT="$(DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send review-me --review)"; REVIEW_ID="$(printf '%s\n' "$REVIEW_OUT"|sed -n 's/^SESSION_ID: //p')"
 check "review mode accepts usable verdict" "test -n '$REVIEW_ID'"
-check "review metadata binds exact session/head" "jq -e --arg s '$REVIEW_ID' --arg h \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.provider==\"deepseek\" and .session_id==\$s and .head==\$h and .verdict==\"APPROVE\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json'"
+check "review metadata binds exact session/head/caller" "jq -e --arg s '$REVIEW_ID' --arg h \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.provider==\"deepseek\" and .session_id==\$s and .head==\$h and .caller==\"unknown\" and .verdict==\"APPROVE\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json'"
 set +e
-METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=1 DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
+METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
 set +e
-check "review fails closed when metadata cannot be published" "test '$METADATA_FAILURE_RC' -ne 0 && ! printf '%s' '$METADATA_FAILURE_OUT' | grep -q '^SESSION_ID:'"
+check "real metadata publication failure is not masked by cleanup" "test '$METADATA_FAILURE_RC' -ne 0 && ! printf '%s' '$METADATA_FAILURE_OUT' | grep -q '^SESSION_ID:'"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
