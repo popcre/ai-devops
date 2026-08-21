@@ -6,11 +6,11 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Hostile path and concurrency fixtures | ⬜ open | `tests/test-ai-deepseek-agent.sh` |
-| 2 | Contained session identity | ⬜ open | traversal fixtures |
-| 3 | Atomic locked conversation commits | ⬜ open | failure/concurrency fixtures |
-| 4 | Review completion/governance contract | ⬜ open | verdict/preflight/scoreboard fixtures |
-| 5 | Land and install | ⬜ open | remote SHA and installed hash |
+| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (29 cases) |
+| 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
+| 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback and concurrent reply fixtures |
+| 4 | Review completion/governance contract | 🟨 provider complete; shared integration pending | `--review` verdict + exact session/HEAD sidecar complete; shared preflight/scoreboard allowlists are owned by `plan_reviewer_shared_evidence_integrity.md` |
+| 5 | Land and install | 🟨 delegated handoff pending | isolated commit and tests will be handed to the parent session; that session owns merge, push, install, and exact-head review |
 
 Fresh session starts at Step 1.
 

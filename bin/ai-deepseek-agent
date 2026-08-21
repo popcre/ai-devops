@@ -10,7 +10,7 @@
 # a JSON transcript file and resends it each time).
 #
 # Usage:
-#   ai-deepseek-agent send "<message>" [--file FILE] [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"]
+#   ai-deepseek-agent send "<message>" [--file FILE] [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"] [--review]
 #       Start a NEW conversation. Prints:
 #         SESSION_ID: <id>
 #         <DeepSeek's reply>
@@ -40,11 +40,12 @@ TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
 MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
 BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  ai-deepseek-agent send "<message>" [--file FILE] [--model MODEL] [--system "<prompt>"]
+  ai-deepseek-agent send "<message>" [--file FILE] [--model MODEL] [--system "<prompt>"] [--review]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
 
   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]
@@ -59,6 +60,9 @@ Usage:
 A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
 same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
+
+--review requires a final ## Verdict heading and APPROVE, REJECT, or BLOCKED.
+It writes a metadata sidecar bound to this repository's exact HEAD commit.
 EOF
 }
 
@@ -109,9 +113,83 @@ else
   REPO_ROOT="$PWD"
 fi
 SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
-mkdir -p "$SESS_DIR"
+EXPECTED_SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
+mkdir -p "$EXPECTED_SESS_DIR"
 
-new_id() { date +%Y%m%d-%H%M%S; }
+# Refuse a linked storage folder. Otherwise even a perfectly validated name can
+# read outside this repository through a directory link chosen by the caller.
+SESS_DIR="$($PYTHON - "$EXPECTED_SESS_DIR" <<'PY'
+import os, sys
+p = os.path.abspath(sys.argv[1])
+r = os.path.realpath(p)
+if os.path.normcase(p) != os.path.normcase(r):
+    raise SystemExit("Error: DeepSeek session storage must not be a symlink: " + p)
+print(r)
+PY
+)" || exit 1
+
+new_id() { printf '%s-%s' "$(date +%Y%m%d-%H%M%S)" "$$"; }
+
+valid_name() {
+  local id="$1" stem
+  [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+  [[ "$id" != .* ]] || return 1
+  stem="${id%%.*}"; stem="${stem^^}"
+  case "$stem" in CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]) return 1 ;; esac
+}
+
+session_path() { # ID [suffix]
+  local id="$1" suffix="${2:-.json}" candidate
+  valid_name "$id" || { echo "Error: invalid session id: $id" >&2; return 1; }
+  candidate="$($PYTHON - "$SESS_DIR" "$id$suffix" <<'PY'
+import os, sys
+base=os.path.realpath(sys.argv[1])
+candidate=os.path.join(base,sys.argv[2])
+resolved=os.path.realpath(candidate)
+try: inside=os.path.commonpath([base,resolved]) == base
+except ValueError: inside=False
+if not inside: raise SystemExit("Error: session path escapes private storage.")
+print(candidate)
+PY
+)" || return 1
+  # Existing links are rejected even when their destination happens to remain
+  # inside the store. Session identity must name a regular owned file.
+  [ ! -L "$candidate" ] || { echo "Error: session file must not be a symlink: $id" >&2; return 1; }
+  printf '%s' "$candidate"
+}
+
+LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
+release_lock() {
+  [ -n "$LOCK_DIR" ] || return 0
+  [ -f "$LOCK_DIR/owner" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null)" = "$LOCK_TOKEN" ] || return 0
+  rm -f "$LOCK_DIR/owner"; rmdir "$LOCK_DIR" 2>/dev/null || true
+  LOCK_DIR=""; LOCK_TOKEN=""
+}
+acquire_lock() { # transcript path
+  local target="$1" waited=0
+  LOCK_DIR="$target.lock"; LOCK_TOKEN="$$-$(date +%s)-$RANDOM"
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    [ "$waited" -lt "$LOCK_WAIT" ] || { LOCK_DIR=""; echo "Error: session is busy." >&2; return 1; }
+    sleep 1; waited=$((waited + 1))
+  done
+  printf '%s\n' "$LOCK_TOKEN" > "$LOCK_DIR/owner"
+  LOCK_OWNER_PID="$BASHPID"
+  trap '[ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock' EXIT INT TERM
+}
+
+write_atomic() { # destination source-json
+  "$PYTHON" - "$1" "$2" <<'PY'
+import os, shutil, sys, tempfile
+dest, src = sys.argv[1:]
+fd, tmp = tempfile.mkstemp(prefix=".deepseek.", dir=os.path.dirname(dest))
+try:
+    with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+        shutil.copyfileobj(inp, out); out.flush(); os.fsync(out.fileno())
+    os.replace(tmp, dest)
+finally:
+    if os.path.exists(tmp): os.unlink(tmp)
+PY
+}
 
 call_api() {
   # $1 = path to a JSON file containing the messages array
@@ -143,18 +221,40 @@ print(data["choices"][0]["message"]["content"])
   return $rc
 }
 
-append_and_save() {
-  # $1 = transcript file, $2 = role, $3 = content
-  "$PYTHON" - "$1" "$2" "$3" <<'PY'
+build_candidate() {
+  # $1 = current transcript or empty, $2 = output, remaining role/content pairs
+  "$PYTHON" - "$@" <<'PY'
 import json, sys
-path, role, content = sys.argv[1], sys.argv[2], sys.argv[3]
+path, out, *items = sys.argv[1:]
 try:
     messages = json.load(open(path, encoding="utf-8"))
-except FileNotFoundError:
+except (FileNotFoundError, IsADirectoryError):
     messages = []
-messages.append({"role": role, "content": content})
-json.dump(messages, open(path, "w", encoding="utf-8"), indent=2)
+if len(items) % 2: raise SystemExit("invalid role/content pairs")
+for role, content in zip(items[0::2], items[1::2]): messages.append({"role":role,"content":content})
+with open(out, "w", encoding="utf-8") as f: json.dump(messages, f, indent=2)
 PY
+}
+
+review_verdict() {
+  "$PYTHON" - "$1" <<'PY'
+import re, sys
+text=sys.argv[1].replace("\r\n","\n")
+m=re.search(r'(?:^|\n)## Verdict[ \t]*\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*(?:\n|$)', text)
+if not m: raise SystemExit(1)
+print(m.group(1))
+PY
+}
+
+write_review_metadata() { # id verdict
+  local id="$1" verdict="$2" meta tmp head repo
+  meta="$(session_path "$id" .meta.json)" || return 1
+  tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" "$PYTHON" - "$tmp" <<'PY'
+import json, os, sys
+json.dump({"schema_version":1,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"verdict":os.environ["VERDICT"],"status":"complete"},open(sys.argv[1],"w",encoding="utf-8"),indent=2)
+PY
+  write_atomic "$meta" "$tmp"; rm -f "$tmp"
 }
 
 with_file_appended() {
@@ -170,13 +270,14 @@ with_file_appended() {
 
 case "$SUBCMD" in
   list)
-    ls -1t "$SESS_DIR" 2>/dev/null | sed 's/\.json$//'
+    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' -printf '%T@ %f\n' 2>/dev/null \
+      | sort -rn | sed -E 's/^[^ ]+ //; s/\.json$//'
     ;;
 
   show)
     ID="${1:-}"
     [ -n "$ID" ] || { echo "Usage: ai-deepseek-agent show <session-id>" >&2; exit 2; }
-    F="$SESS_DIR/$ID.json"
+    F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
     "$PYTHON" -c '
 import json, sys
@@ -188,27 +289,34 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
     ;;
 
   send)
-    MSG=""; FILE=""; SYSTEM=""
+    MSG=""; FILE=""; SYSTEM=""; REVIEW=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --file) FILE="${2:-}"; shift 2 ;;
         --model) MODEL="${2:-}"; shift 2 ;;
         --system) SYSTEM="${2:-}"; shift 2 ;;
+        --review) REVIEW=1; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
     [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]' >&2; exit 2; }
     MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+    [ "$REVIEW" = 0 ] || MSG="$MSG
 
-    ID="$(new_id)"
-    F="$SESS_DIR/$ID.json"
-    while [ -f "$F" ]; do ID="${ID}-$$"; F="$SESS_DIR/$ID.json"; done
-    echo "[]" > "$F"
-    [ -n "$SYSTEM" ] && append_and_save "$F" "system" "$SYSTEM"
-    append_and_save "$F" "user" "$MSG"
+End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED."
 
-    REPLY="$(call_api "$F")" || exit 1
-    append_and_save "$F" "assistant" "$REPLY"
+    ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
+    while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
+    acquire_lock "$F" || exit 1
+    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"
+    if [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
+    REPLY="$(call_api "$CANDIDATE")" || { rm -f "$CANDIDATE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
+    VERDICT=""
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; conversation was not created." >&2; exit 1; }; fi
+    build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
+    write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
+    [ "$REVIEW" = 0 ] || write_review_metadata "$ID" "$VERDICT"
+    release_lock
     echo "SESSION_ID: $ID"
     echo
     echo "$REPLY"
@@ -216,21 +324,32 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
 
   reply)
     ID="${1:-}"; shift || true
-    MSG=""; FILE=""
+    MSG=""; FILE=""; REVIEW=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --file) FILE="${2:-}"; shift 2 ;;
+        --review) REVIEW=1; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
     [ -n "$ID" ] && [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent reply <session-id> "<message>"' >&2; exit 2; }
-    F="$SESS_DIR/$ID.json"
+    F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
     MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+    [ "$REVIEW" = 0 ] || MSG="$MSG
 
-    append_and_save "$F" "user" "$MSG"
-    REPLY="$(call_api "$F")" || exit 1
-    append_and_save "$F" "assistant" "$REPLY"
+End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED."
+
+    acquire_lock "$F" || exit 1
+    CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"
+    build_candidate "$F" "$CANDIDATE" user "$MSG"
+    REPLY="$(call_api "$CANDIDATE")" || { rm -f "$CANDIDATE"; echo "Error: provider failed; canonical conversation is unchanged." >&2; exit 1; }
+    VERDICT=""
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; canonical conversation is unchanged." >&2; exit 1; }; fi
+    build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
+    write_atomic "$F" "$CANDIDATE.final"; rm -f "$CANDIDATE" "$CANDIDATE.final"
+    [ "$REVIEW" = 0 ] || write_review_metadata "$ID" "$VERDICT"
+    release_lock
     echo "$REPLY"
     ;;
 esac
