@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# ai-memory-health — READ-ONLY audit of Claude Code auto-memory across every project
+# on this machine, plus the cross-machine hub state.
+#
+# It NEVER edits, deletes, or syncs anything. It reports what a human (or the
+# consolidate-memory skill) should look at. This is deliberate: a memory deletion
+# propagates to every machine through ai-sync-memory's tombstones and cannot be
+# undone by a later pull, so unattended pruning is not an acceptable design.
+#
+# Exit status: 0 = nothing to act on, 1 = findings to review, 2 = usage/setup error.
+set -u
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+claude_home=""
+out=""
+stale_days=180
+
+usage() {
+  cat <<'USAGE'
+usage: ai-memory-health [--claude-home DIR] [--repo-root DIR] [--out FILE] [--stale-days N]
+
+  --claude-home DIR  Claude home to audit (default: $USERPROFILE/.claude on Windows,
+                     $HOME/.claude elsewhere).
+  --repo-root DIR    ai-devops checkout whose hub sync state is reported (default: the
+                     checkout this script lives in).
+  --out FILE         Also write the report to FILE (parent directory must exist).
+  --stale-days N     Flag memories untouched for more than N days (default 180).
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --claude-home) claude_home="$2"; shift 2 ;;
+    --repo-root) repo_root="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    --stale-days) stale_days="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$claude_home" ]]; then
+  case "${OSTYPE:-}" in
+    msys*|cygwin*)
+      profile="${USERPROFILE:-}"
+      [[ -n "$profile" ]] || { echo "ERROR USERPROFILE is unset" >&2; exit 2; }
+      command -v cygpath >/dev/null 2>&1 && profile="$(cygpath -u "$profile")"
+      claude_home="$profile/.claude" ;;
+    *) claude_home="$HOME/.claude" ;;
+  esac
+fi
+
+projects_dir="$claude_home/projects"
+[[ -d "$projects_dir" ]] || { echo "ERROR no Claude projects directory at $projects_dir" >&2; exit 2; }
+
+findings=0
+report="$(mktemp)"
+trap 'rm -f "$report"' EXIT
+
+note()  { printf '  - %s\n' "$1" >> "$report"; findings=$((findings + 1)); }
+head1() { printf '\n## %s\n\n' "$1" >> "$report"; }
+
+{
+  printf '# Memory health report\n\n'
+  printf 'Machine: %s\n' "$(hostname)"
+  printf 'Claude home: %s\n' "$claude_home"
+  printf 'Generated: %s\n' "$(date -u '+%Y-%m-%dT%H:%MZ')"
+  printf '\nThis report changes nothing. To act on it, open a Claude Code session in the\n'
+  printf 'affected project and say "consolidate my memory".\n'
+} > "$report"
+
+total_files=0
+total_projects=0
+
+for mem in "$projects_dir"/*/memory; do
+  [[ -d "$mem" ]] || continue
+  project="$(basename "$(dirname "$mem")")"
+  index="$mem/MEMORY.md"
+  files=()
+  while IFS= read -r f; do files+=("$f"); done < <(find "$mem" -maxdepth 1 -name '*.md' ! -name 'MEMORY.md' -printf '%f\n' 2>/dev/null | sort)
+  ((${#files[@]} == 0)) && continue
+  total_projects=$((total_projects + 1))
+  total_files=$((total_files + ${#files[@]}))
+
+  head1 "$project (${#files[@]} memories)"
+  before=$findings
+
+  if [[ ! -f "$index" ]]; then
+    note "NO INDEX: MEMORY.md is missing, so none of these ${#files[@]} memories load into a session."
+  else
+    # Memories that exist but are not in the index are invisible to future sessions.
+    for f in "${files[@]}"; do
+      grep -qF "($f)" "$index" || note "NOT IN INDEX: $f — a future session will never see it."
+    done
+    # Index lines pointing at files that no longer exist.
+    while IFS= read -r target; do
+      [[ -f "$mem/$target" ]] || note "BROKEN INDEX LINE: MEMORY.md points at missing $target."
+    done < <(grep -oE '\]\([A-Za-z0-9._-]+\.md\)' "$index" 2>/dev/null | sed 's/^](//; s/)$//' | sort -u)
+
+    lines="$(wc -l < "$index" | tr -d ' ')"
+    bytes="$(wc -c < "$index" | tr -d ' ')"
+    (( lines > 200 ))   && note "INDEX TOO LONG: $lines lines (limit 200) — it is loaded every session."
+    (( bytes > 25600 )) && note "INDEX TOO BIG: $bytes bytes (limit ~25KB) — it is loaded every session."
+  fi
+
+  # Cross-links that point at a memory which does not exist.
+  while IFS= read -r link; do
+    [[ -f "$mem/$link.md" ]] || note "DANGLING LINK: [[$link]] has no matching memory file."
+  done < <(grep -rhoE '\[\[[A-Za-z0-9._-]+\]\]' "$mem" 2>/dev/null | tr -d '[]' | sort -u)
+
+  # Structural hygiene.
+  for f in "${files[@]}"; do
+    head -1 "$mem/$f" | grep -q '^---$' || note "NO FRONTMATTER: $f — type and description are missing."
+    (( $(wc -c < "$mem/$f") > 8192 )) && note "OVERSIZED: $f is $(wc -c < "$mem/$f") bytes; one memory should hold one fact."
+  done
+
+  # Possible duplicates: two memories whose descriptions share a lot of wording.
+  while IFS= read -r dup; do
+    note "POSSIBLE DUPLICATE: $dup"
+  done < <(
+    for f in "${files[@]}"; do
+      d="$(sed -n 's/^description:[[:space:]]*//p' "$mem/$f" | head -1 | tr -d '"' | tr 'A-Z' 'a-z')"
+      [[ -n "$d" ]] && printf '%s\t%s\n' "$f" "$d"
+    done | awk -F'\t' '
+      { file[NR]=$1; desc[NR]=$2; n=NR }
+      END {
+        for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) {
+          split(desc[i],a," "); split(desc[j],b," "); shared=0; total=0
+          for (k in a) if (length(a[k])>5) { total++; for (m in b) if (a[k]==b[m]) { shared++; break } }
+          if (total>=4 && shared/total>=0.5) printf "%s and %s describe overlapping facts\n", file[i], file[j]
+        }
+      }')
+
+  # Age. Not a reason to delete — a reason to check the fact still holds.
+  while IFS= read -r f; do
+    note "UNTOUCHED >${stale_days}d: $f — confirm it is still true."
+  done < <(find "$mem" -maxdepth 1 -name '*.md' ! -name 'MEMORY.md' -mtime "+$stale_days" -printf '%f\n' 2>/dev/null | sort)
+
+  (( findings == before )) && printf '  - clean\n' >> "$report"
+done
+
+head1 "Cross-machine sync"
+if [[ -d "$repo_root/memory" ]]; then
+  if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+    behind="$(git -C "$repo_root" rev-list --count HEAD..@{u} 2>/dev/null || echo '?')"
+    dirty="$(git -C "$repo_root" status --porcelain -- memory 2>/dev/null | wc -l | tr -d ' ')"
+    printf '  - hub: %s\n' "$repo_root" >> "$report"
+    [[ "$behind" != "0" && "$behind" != "?" ]] && note "HUB BEHIND: $behind commit(s) unpulled — run \"sync my dotfiles\"."
+    (( dirty > 0 )) && note "UNPUSHED MEMORY: $dirty change(s) staged or untracked under memory/ — run \"sync my dotfiles\"."
+    [[ "$behind" == "0" && "$dirty" == "0" ]] && printf '  - in step with the hub\n' >> "$report"
+  fi
+else
+  printf '  - no hub memory directory at %s/memory\n' "$repo_root" >> "$report"
+fi
+
+{
+  printf '\n## Summary\n\n'
+  printf '  - %s project(s), %s memory file(s)\n' "$total_projects" "$total_files"
+  printf '  - %s finding(s) to review\n' "$findings"
+  if (( findings > 0 )); then
+    printf '\nNothing was changed. Open Claude Code in the affected project and say\n'
+    printf '"consolidate my memory" to act on any of the above.\n'
+  fi
+} >> "$report"
+
+cat "$report"
+if [[ -n "$out" ]]; then cp "$report" "$out"; fi
+(( findings > 0 )) && exit 1
+exit 0
