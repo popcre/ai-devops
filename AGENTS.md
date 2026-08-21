@@ -83,7 +83,7 @@ reintroduced.
 | `skills/shared/` | Skills installed for both clients; default location |
 | `skills/claude/`, `skills/codex/` | Genuinely client-specific skills only |
 | `tools/`, `tests/` | Audit/evaluation helpers and dependency-light tests |
-| `memory/` | Secret-free durable facts synchronized across machines. `bin/ai-memory-health` is the read-only weekly audit; it never edits or deletes a memory |
+| `memory/` | Secret-free durable facts synced across machines. **Only `MEMORY.md` is loaded into a session — an unindexed fact file is no memory at all.** `bin/ai-memory-health` audits that (read-only, never edits or deletes); `bin/ai-memory-index-hook` prevents it at write time. Codex's memory is a SEPARATE machine-local store. See [`memory/README.md`](memory/README.md) |
 | `transcripts/` | Private submodule; never inspect raw transcript data casually |
 
 Installed Linux commands normally point from `/usr/local/bin/ai-*` to the
