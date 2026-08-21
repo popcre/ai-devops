@@ -15,7 +15,7 @@ Final integrated passing suites:
 - test-ai-reviewer-issue.sh: 28 passed
 - test-ai-review-scoreboard.sh: 15 passed
 - test-ai-review-preflight.sh: 26 passed
-- test-ai-grok-review.sh: 130 passed
+- test-ai-grok-review.sh: 131 passed
 - test-ai-deepseek-agent.sh: 37 passed
 - test-ai-gemini.sh: 36 passed
 - test-ai-kimi.sh: 173 passed

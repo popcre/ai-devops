@@ -71,7 +71,8 @@ case "$mode" in
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
-  hold)      for _i in $(seq 1 60); do
+  hold)      touch "$TMPDIR_FOR_TEST/hold-started"
+             for _i in $(seq 1 60); do
                [ -f "$TMPDIR_FOR_TEST/release-grok" ] && break
                sleep 1
              done
@@ -113,10 +114,11 @@ CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 echo hold > "$TMP/mode"
 export AI_GROK_HEARTBEAT_INTERVAL=2
 ( cd "$REPO" && bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
-for _i in 1 2 3 4 5; do
-  [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && break
+for _i in $(seq 1 60); do
+  [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
+check "slow_fixture_reached_the_provider_before_mode_changes" "test -f '$TMP/hold-started'"
 SECOND="$( cd "$CLONE" && bash "$SCRIPT" new other-clone --prompt x 2>&1 )"; SECOND_RC=$?
 [ "$SECOND_RC" -ne 0 ] && ok "equivalent_github_clones_share_one_paid_review_lock" || bad "equivalent_github_clones_share_one_paid_review_lock"
 SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
