@@ -6,14 +6,14 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Reconcile contradictory plan/docs and quarantine | ⬜ open | updated router/status |
-| 2 | Hostile write and conversation fixtures | ⬜ open | `tests/test-ai-gemini.sh` |
-| 3 | Durable locked lifecycle | ⬜ open | state/recovery fixtures |
-| 4 | Exact completion and report contract | ⬜ open | verdict/report fixtures |
-| 5 | Cross-platform live qualification | ⬜ open | `docs/verification/ai-gemini/<UTC>/` |
-| 6 | Land, install, and close issue #38 | ⬜ open | remote SHA/installed hashes |
+| 1 | Reconcile contradictory plan/docs and quarantine | ✅ done 2026-08-21 | `AGENTS.md`, `plan_ai-gemini-wrapper.md`, `skills/shared/gemini-code-delegation/SKILL.md` |
+| 2 | Hostile write and conversation fixtures | ✅ done 2026-08-21 | `bash tests/test-ai-gemini.sh` covers dirty/ignored/outside/model-call writes and wrong conversation |
+| 3 | Durable locked lifecycle | ✅ done 2026-08-21 | `bin/ai-gemini`; interruption, concurrent follow-up/delete, and recovery-state cases in `tests/test-ai-gemini.sh` |
+| 4 | Exact completion and report contract | ✅ done 2026-08-21 | empty/wrong-model/unsafe-report/stale-head cases in `tests/test-ai-gemini.sh` |
+| 5 | Cross-platform live qualification | ⛔ blocked | No live Windows or Ubuntu hostile evidence; quarantine remains mandatory |
+| 6 | Land, install, and close issue #38 | 🟨 partial | Local scoped commit only; parent session owns integration/push; install and issue close forbidden until Step 5 |
 
-Fresh session starts at Step 1. This plan supersedes conflicting current-state
+Fresh session starts at Step 5 and must preserve quarantine. This plan supersedes conflicting current-state
 text in `plan_ai-gemini-wrapper.md`; retain that file as investigation history.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -46,11 +46,13 @@ permission bypass flags, other providers, databases/production.
 
 ## 5. Current state of the code
 
-`tree_state()`/`call()` are `bin/ai-gemini:21-26`; `verify()` checks only nonempty
-identity/verdict at `:24`; `report()` returns success on refusal at `:35`; new/ask
-write state after provider work at `:36-37`. Existing `tests/test-ai-gemini.sh`
-passes 17 current cases but not these hostile cases. `plan_ai-gemini-wrapper.md`
-STATUS and current-state sections disagree, as does `AGENTS.md` routing.
+As of 2026-08-21, `bin/ai-gemini` records state before provider contact, uses
+repository/session locks, inventories the disposable copy and protected source
+before and after both review and model-verification calls, matches resumed
+conversation IDs, and treats report failure as fatal. The offline hostile suite
+passes. Live containment is still unproven on Windows and Ubuntu, so the command
+and shared skill remain explicitly quarantined. `plan_ai-gemini-wrapper.md` is
+retained as dated investigation history and points here for current status.
 
 ## 6. Key findings and root cause
 

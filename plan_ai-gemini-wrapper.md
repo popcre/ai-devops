@@ -14,16 +14,16 @@ Read this table first. Do not re-derive or re-plan completed work. Whoever execu
 |---|---|---|---|
 | 1 | Freeze and measure the Antigravity CLI contract | ✅ complete | Contract fixtures and report exist. Albert directed a best-available implementation using a disposable review copy, `--sandbox`, and before/after copy verification rather than waiting for a separate permissions-profile selector. |
 | 2 | Prove a real read-only boundary on Windows and Ubuntu | ⬜ open | Hostile-write canary reports under `docs/verification/ai-gemini/`; every forbidden target remains byte-identical |
-| 3 | Build named, resumable `ai-gemini` review sessions | ⬜ open | `bin/ai-gemini`; offline wrapper suite passes |
+| 3 | Build named, resumable `ai-gemini` review sessions | ✅ complete, quarantined | `bin/ai-gemini`; `bash tests/test-ai-gemini.sh` |
 | 4 | Integrate evidence packets, exact-head checks, preflight, quarantine, and scoreboard | ⬜ open | Updated wrapper/helper fixtures and passing helper suites |
 | 5 | Install and diagnose Antigravity and `ai-gemini` consistently on Windows and Ubuntu | ⬜ open | Installer/doctor tests plus redacted installed-machine doctor output |
 | 6 | Add the shared Gemini delegation skill | ⬜ open | Trigger evaluation artifact and installed-skill verification |
 | 7 | Update permanent documentation and routing | ⬜ open | Router, architecture, setup, configuration, deployment, and README links all resolve |
-| 8 | Complete the offline failure and regression suite | ⬜ open | Exact test commands in §10 pass with zero failures |
+| 8 | Complete the offline failure and regression suite | 🟨 partial | Core hostile lifecycle cases pass in `bash tests/test-ai-gemini.sh`; broader shared suites and live qualification remain open |
 | 9 | Run paid live qualification on Windows and Ubuntu | ⬜ open | Redacted live reports proving model, resume, read-only, quota, completion, and linked-worktree behavior |
 | 10 | Independent review, landing, installation, and issue close | ⬜ open | Exact-head review report, commit SHA on `origin/main`, installed proof, and closed issue #38 |
 
-**Fresh-session starting point:** Step 2. The best-available boundary is a disposable remote-less review copy plus `--sandbox` and byte-for-byte copy-state verification. It is not a claim that `--mode plan` alone prevents writes.
+**Fresh-session starting point:** use [`plan_gemini_reviewer_safety_repair.md`](plan_gemini_reviewer_safety_repair.md), which supersedes this plan's current-state text. The wrapper exists but remains quarantined. The best-available boundary is a disposable remote-less review copy plus `--sandbox` and byte-for-byte copy-state verification. It is not a claim that `--mode plan` alone prevents writes.
 
 **Natural context cuts:** after Steps 2, 5, and 9. At each cut, use the `fresh-session` skill, update this STATUS table, and re-read every downstream step before continuing.
 
@@ -113,7 +113,15 @@ The durable spike record is [`docs/ai-gemini-wrapper-investigation.md`](docs/ai-
 - The installer added `%LOCALAPPDATA%\agy\bin` to the user PATH, but the already-running Codex process did not inherit the new PATH. Tests had to use the absolute executable until a new process was opened.
 - Antigravity state and OAuth are under `%USERPROFILE%\.gemini`; these files are machine-local and must never be printed, copied, or committed.
 
-### Not started
+### Superseded current-state record
+
+The statements below describe the 2026-08-18 planning baseline and are retained
+as investigation history. They are no longer current. `bin/ai-gemini`, its
+shared skill, fixtures, and installer entries now exist, but Gemini remains
+quarantined pending the live gates in
+[`plan_gemini_reviewer_safety_repair.md`](plan_gemini_reviewer_safety_repair.md).
+
+### Not started at the 2026-08-18 baseline
 
 - No `bin/ai-gemini`, Gemini test suite, shared skill, installer catalog row, preflight provider, scoreboard normalization, configuration entry, or permanent wrapper documentation exists.
 - No supported isolated Antigravity configuration-home mechanism has yet been proven.
