@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
@@ -34,7 +34,7 @@ protect_windows_path(){
 }
 secure_review_directory(){ chmod 700 "$1" 2>/dev/null && protect_windows_path "$1" directory; }
 usage(){ cat <<'EOF'
-Usage: ai-codex-review <plan-review|diff-review|security-review|visual-review|final-check>
+Usage: ai-codex-review <plan-review|diff-review|security-review|visual-review|final-check> [--tests <command>]
        ai-codex-review doctor
 
 The review runs in a complete disposable snapshot under Codex's read-only
@@ -78,6 +78,18 @@ case "$MODE" in
   ''|-h|--help|help) usage; exit 0;;
   *) usage >&2; exit 2;;
 esac
+
+shift
+TESTS_COMMAND=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --tests)
+      [ -z "$TESTS_COMMAND" ] || die '--tests may be supplied only once.'
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die '--tests requires a non-empty command.'
+      TESTS_COMMAND="$2"; shift 2;;
+    *) die "unknown option: $1";;
+  esac
+done
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
 REPO_ROOT="$(git rev-parse --show-toplevel)"; cd "$REPO_ROOT"
@@ -169,7 +181,9 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
-PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)" \
+PACKET_ARGS=(build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)
+[ -z "$TESTS_COMMAND" ] || PACKET_ARGS+=(--tests "$TESTS_COMMAND")
+PACKET_DIR="$($PACKET "${PACKET_ARGS[@]}")" \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact review evidence.'; }
 "$PACKET" verify "$PACKET_DIR" >/dev/null \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
