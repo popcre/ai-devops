@@ -91,12 +91,16 @@ if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "Bash s
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
+set +e
 out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
   "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -SkipGitInstall 2>&1)"
+cross_rc=$?
+set -e
+if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"

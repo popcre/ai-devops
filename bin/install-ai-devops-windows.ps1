@@ -188,18 +188,29 @@ function Get-TreeHashes {
 
     $map = @{}
     if (-not (Test-Path -LiteralPath $Dir)) { return $map }
-    # Use one FileSystemInfo spelling for both the root and its children. Git
-    # Bash can hand PowerShell an 8.3 path (for example RUNNER~1), while
-    # Resolve-Path may expand only the root to its long spelling. Substring
-    # arithmetic across those two spellings produced nonexistent relative keys
-    # and falsely classified every installed file as a local edit.
-    $root = Get-Item -LiteralPath $Dir -Force
-    Get-ChildItem -LiteralPath $root.FullName -Recurse -Force -File |
-        Where-Object { $_.Name -ne $script:ManagedMarker } |
-        ForEach-Object {
-            $rel = $_.FullName.Substring($root.FullName.TrimEnd('\').Length + 1).Replace('\', '/')
-            $map[$rel] = Get-Sha256 $_.FullName
+    # Carry the relative path while walking instead of subtracting one absolute
+    # path string from another. Git Bash can expose the same directory as both
+    # RUNNER~1 and runneradmin on a hosted Windows runner; PowerShell 5.1 may
+    # preserve the short spelling for the root but return long spellings for
+    # children. Text subtraction across those aliases is never reliable.
+    function Add-TreeHashes {
+        param([string]$CurrentDir, [string]$Prefix)
+
+        Get-ChildItem -LiteralPath $CurrentDir -Force | ForEach-Object {
+            $relative = "$Prefix$($_.Name)"
+            if ($_.PSIsContainer) {
+                # Match the Bash installer's `find` without -L. PowerShell 5.1
+                # can follow junctions during -Recurse, but installation must
+                # never escape the governed source tree or enter a link loop.
+                if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+                    Add-TreeHashes -CurrentDir $_.FullName -Prefix "$relative/"
+                }
+            } elseif ($_.Name -ne $script:ManagedMarker) {
+                $map[$relative] = Get-Sha256 $_.FullName
+            }
         }
+    }
+    Add-TreeHashes -CurrentDir $Dir -Prefix ""
     return $map
 }
 

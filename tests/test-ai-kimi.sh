@@ -160,13 +160,13 @@ check "recovery hashes and restores a proven complete artifact" "run status dura
 ALT="$TMP/alternate-checkout"; mkdir -p "$ALT"; git -C "$ALT" init -q; git -C "$ALT" remote add origin https://example.invalid/test/repo.git
 check "job remains retrievable from another clone of the same remote" "cd '$ALT' && bash '$SCRIPT' result durable | grep -q APPROVE"
 check "fallback retrieval never crosses caller identities" "cd '$ALT' && AI_KIMI_CALLER=codex bash '$SCRIPT' result durable >/dev/null 2>&1; test \$? -ne 0"
-UNSAFE_DIR="$(dirname "$DURABLE_META")/../claude--recover-unsafe"; mkdir -p "$UNSAFE_DIR"; cp "$(jq -r .artifact_paths.stream "$DURABLE_META")" "$UNSAFE_DIR/stream.jsonl"; : > "$UNSAFE_DIR/stream.jsonl.err"
-UNSAFE_DIR="$(cd "$UNSAFE_DIR" && pwd -P)"
-# Recovery is performed by this Bash wrapper, so keep its native absolute path.
-# Converting through cygpath can introduce an 8.3 spelling such as RUNNER~1 on
-# hosted Windows runners and needlessly makes the fixture depend on path aliases.
-UNSAFE_JSON_DIR="$UNSAFE_DIR"
-jq --arg stream "$UNSAFE_JSON_DIR/stream.jsonl" --arg log "$UNSAFE_JSON_DIR/worker.log" --arg canonical "$UNSAFE_JSON_DIR/review-recovery.md" '.name="recover-unsafe"|.job_id="recover-unsafe"|.phase="failed"|.terminal_reason="readonly-tree-changed"|.artifact_kind=null|.artifact_sha256=null|.artifact_paths.stream=$stream|.artifact_paths.log=$log|.artifact_paths.canonical=$canonical|.artifact_paths.repository=null' "$DURABLE_META" > "$UNSAFE_DIR/job.json"
+UNSAFE_DIR="$(dirname "$(dirname "$DURABLE_META")")/claude--recover-unsafe"; mkdir -p "$UNSAFE_DIR"; cp "$(jq -r .artifact_paths.stream "$DURABLE_META")" "$UNSAFE_DIR/stream.jsonl"; : > "$UNSAFE_DIR/stream.jsonl.err"
+# Derive the fixture from the wrapper-owned metadata path and keep that exact
+# spelling. On hosted Windows, `pwd -P` physically expands Git Bash's /tmp mount
+# from RUNNER~1 to runneradmin while the wrapper-owned path correctly retains
+# /tmp. Mixing those aliases manufactures an unsafe destination the wrapper
+# would never create and tests path spelling instead of the recovery invariant.
+jq --arg stream "$UNSAFE_DIR/stream.jsonl" --arg log "$UNSAFE_DIR/worker.log" --arg canonical "$UNSAFE_DIR/review-recovery.md" '.name="recover-unsafe"|.job_id="recover-unsafe"|.phase="failed"|.terminal_reason="readonly-tree-changed"|.artifact_kind=null|.artifact_sha256=null|.artifact_paths.stream=$stream|.artifact_paths.log=$log|.artifact_paths.canonical=$canonical|.artifact_paths.repository=null' "$DURABLE_META" > "$UNSAFE_DIR/job.json"
 run recover recover-unsafe >/dev/null 2>&1 || true
 check "recovery cannot approve a worker-classified safety failure" "run status recover-unsafe | jq -e '.phase==\"recovery-required\" and .artifact_kind==\"incomplete\" and .terminal_reason!=\"session.resume_hint\"'"
 echo usagepartial > "$TMP/mode"
