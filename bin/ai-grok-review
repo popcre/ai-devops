@@ -46,6 +46,10 @@
 #   `grok export` exists and exports a session transcript as Markdown, so
 #     `transcript` is implementable after all (the plan had dropped it).
 #   `--prompt-file` exists, so a large brief never goes through argv/ARG_MAX.
+#   Re-verified 2026-08-22 on Windows against Grok 1.0.5 (5115b46bc9):
+#     `inspect --json`, `--no-subagents`, `--disallowed-tools`, `--deny`,
+#     `GROK_HOME`, and every GROK_CLAUDE_*/GROK_CURSOR_* compatibility cell
+#     used below are accepted. The live isolated doctor returned terminal JSON.
 #   NOTE: the early-return bug did NOT reproduce on a small 33s prompt — the
 #     file was complete when the command returned. The wait loop is harmless
 #     when the bug is absent (first poll succeeds) and load-bearing when it is
@@ -65,12 +69,33 @@ CALLER="${AI_GROK_CALLER:-claude}"
 # has been observed using web_fetch during a purely local repository review.
 GROK_MODEL="${AI_GROK_MODEL:-grok-4.6}"
 GROK_PERMS=(--permission-mode default --allow Read --allow Grep
-            --deny Edit --deny Bash --disable-web-search --no-memory)
+            --deny Edit --deny Bash --deny 'MCPTool(*)'
+            --disallowed-tools search_tool,use_tool,Agent --no-subagents
+            --disable-web-search --no-memory)
+# Grok otherwise imports Claude/Cursor extensions from the operator's home.
+# Those MCP servers and hooks can start processes before the model turn even
+# though the review's tool allowlist is read-only. Keep reviewer launches
+# isolated without changing the operator's normal interactive Grok settings.
+GROK_ISOLATION_ENV=(
+  GROK_CLAUDE_SKILLS_ENABLED=false GROK_CLAUDE_RULES_ENABLED=false
+  GROK_CLAUDE_AGENTS_ENABLED=false GROK_CLAUDE_MCPS_ENABLED=false
+  GROK_CLAUDE_HOOKS_ENABLED=false GROK_CLAUDE_SESSIONS_ENABLED=false
+  GROK_CURSOR_SKILLS_ENABLED=false GROK_CURSOR_RULES_ENABLED=false
+  GROK_CURSOR_AGENTS_ENABLED=false GROK_CURSOR_MCPS_ENABLED=false
+  GROK_CURSOR_HOOKS_ENABLED=false GROK_CURSOR_SESSIONS_ENABLED=false
+  GROK_CODEX_SESSIONS_ENABLED=false
+)
 
 DEFAULT_MAX_TURNS="${AI_GROK_MAX_TURNS:-20}"
 WAIT_TIMEOUT="${AI_GROK_WAIT_TIMEOUT:-900}"
+ISOLATION_TIMEOUT="${AI_GROK_ISOLATION_TIMEOUT:-30}"
 POLL_INTERVAL="${AI_GROK_POLL_INTERVAL:-5}"
 HEARTBEAT_INTERVAL="${AI_GROK_HEARTBEAT_INTERVAL:-60}"
+RUN_TURN_RC=0
+ACTIVE_GROK_CHILD=''
+ACTIVE_ISOLATED_CWD=''
+ACTIVE_PAID_LOCK=''
+ACTIVE_SESSION_LOCK=''
 
 die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
@@ -341,6 +366,53 @@ mark_remote_uncertain() { # retain paid-work lock after local interruption
   date -u +%FT%TZ > "$dir/remote-uncertain"
 }
 
+session_lock_acquire() { # local-only serialization; paid uncertainty is owned by the repository lock
+  local dir="$1" label="$2" owner quarantine moved_owner
+  mkdir -p "$(dirname "$dir")"
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+  fi
+  owner="$(cat "$dir/pid" 2>/dev/null || true)"
+  [[ "$owner" =~ ^[0-9]+$ ]] || { warn "malformed session lock $(basename "$dir") blocks this session."; return 1; }
+  kill -0 "$owner" 2>/dev/null && return 1
+  quarantine="$dir.stale.$$.$RANDOM"
+  mv "$dir" "$quarantine" 2>/dev/null || return 1
+  moved_owner="$(cat "$quarantine/pid" 2>/dev/null || true)"
+  if [ "$moved_owner" != "$owner" ] || kill -0 "$moved_owner" 2>/dev/null; then
+    [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
+    warn "session lock ownership changed during recovery: $(basename "$dir")"
+    return 1
+  fi
+  rm -rf -- "$quarantine"
+  mkdir "$dir" 2>/dev/null || return 1
+  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"
+  warn "reclaimed a stale local-only session lock from process $owner"
+}
+
+clear_active_grok() {
+  [ -z "$ACTIVE_ISOLATED_CWD" ] || rmdir "$ACTIVE_ISOLATED_CWD" 2>/dev/null || true
+  ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''
+}
+
+stop_active_grok_tree() {
+  local child="$ACTIVE_GROK_CHILD" i
+  [ -n "$child" ] || return 0
+  kill -TERM "$child" 2>/dev/null || true
+  for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
+  kill -KILL "$child" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+  clear_active_grok
+}
+
+on_paid_signal() {
+  trap - EXIT INT TERM
+  stop_active_grok_tree
+  warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
+  [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
+  [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK"
+  exit 130
+}
+
 lock_info() { # lock_info DIR -> "label (pid, Ns ago)"
   local dir="$1" label pid age started now
   label="$(cat "$dir/label" 2>/dev/null || echo unknown)"
@@ -437,6 +509,7 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
   note "  diagnose    : tail -20 ~/.grok/logs/unified.jsonl"
   note "  processes   : $(grok_procs | tr '\n' ' ')"
   note "  Raise the ceiling with AI_GROK_WAIT_TIMEOUT=<seconds> if the run is genuinely long."
+  stop_active_grok_tree
   return 1
 }
 
@@ -445,27 +518,106 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 # ---------------------------------------------------------------------------
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
-  local grok; grok="$(resolve_grok)"
-  local args=(--cwd "$repo" --model "$GROK_MODEL" --prompt-file "$pf"
+  local grok supervisor python_bin; local -a grok_command; grok="$(resolve_grok)"
+  supervisor="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
+  if [ ! -x "$supervisor" ]; then
+    # Ubuntu installs this wrapper as a symlink into /usr/local/bin. Resolve
+    # that link back to the repository so the internal Python helper beside
+    # the real wrapper cannot be omitted from an otherwise valid install.
+    local real_self; real_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+    [ -z "$real_self" ] || supervisor="$(dirname "$real_self")/ai-process-supervisor"
+  fi
+  [ -x "$supervisor" ] || supervisor="$(command -v ai-process-supervisor 2>/dev/null || true)"
+  [ -n "$supervisor" ] && [ -x "$supervisor" ] || die 'ai-process-supervisor is missing; refusing paid work without process-tree ownership.'
+  for python_bin in python3 python; do
+    command -v "$python_bin" >/dev/null 2>&1 || continue
+    "$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 && break
+  done
+  [ -n "${python_bin:-}" ] && "$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 \
+    || die 'Python 3.10 or newer is required for safe Grok process-tree supervision.'
+  grok_command=("$grok")
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) [ ! -f "${grok}.exe" ] || { grok="${grok}.exe"; grok_command=("$grok"); } ;;
+  esac
+  case "$(uname -s 2>/dev/null || true):${grok,,}" in
+    MINGW*:*.exe|MINGW*:*.com|MINGW*:*.bat|MINGW*:*.cmd|MSYS*:*.exe|MSYS*:*.com|MSYS*:*.bat|MSYS*:*.cmd|CYGWIN*:*.exe|CYGWIN*:*.com|CYGWIN*:*.bat|CYGWIN*:*.cmd) ;;
+    MINGW*:*|MSYS*:*|CYGWIN*:*) grok_command=(bash "$grok") ;;
+  esac
+  local isolated_home="$STATE_DIR/isolated-home" auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
+  if [ -f "$auth_source" ]; then
+    if [ ! -L "$isolated_home/auth.json" ] || [ ! "$auth_source" -ef "$isolated_home/auth.json" ]; then
+      rm -f -- "$isolated_home/auth.json"
+      ln -s "$auth_source" "$isolated_home/auth.json" 2>/dev/null || true
+      # Default Git Bash can implement `ln -s` as a byte copy. Reject that
+      # shape and use a same-volume hard link so there is still one credential
+      # inode, not a stale second secret. Linux keeps the real symlink.
+      if [ ! -L "$isolated_home/auth.json" ]; then
+        rm -f -- "$isolated_home/auth.json"
+        ln "$auth_source" "$isolated_home/auth.json" 2>/dev/null || true
+      fi
+    fi
+    [ "$auth_source" -ef "$isolated_home/auth.json" ] \
+      || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
+  else
+    rm -f -- "$isolated_home/auth.json"
+  fi
+  ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
+  local inspect inspect_rc=0 inspect_waited=0; inspect="$(mktemp)"
+  GROK_HOME="$isolated_home" env "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- \
+    "${grok_command[@]}" --cwd "$ACTIVE_ISOLATED_CWD" inspect --json > "$inspect" 2>"$inspect.err" &
+  ACTIVE_GROK_CHILD=$!
+  while kill -0 "$ACTIVE_GROK_CHILD" 2>/dev/null; do
+    if [ "$inspect_waited" -ge "$ISOLATION_TIMEOUT" ]; then
+      stop_active_grok_tree
+      rm -f "$inspect" "$inspect.err"
+      die "Grok isolation inspection exceeded ${ISOLATION_TIMEOUT}s and its process tree was terminated; refusing paid reviewer work."
+    fi
+    sleep 1; inspect_waited=$((inspect_waited + 1))
+  done
+  set +e; wait "$ACTIVE_GROK_CHILD"; inspect_rc=$?; set -e
+  ACTIVE_GROK_CHILD=''
+  if [ "$inspect_rc" -ne 0 ] || ! jq -e '
+      (.mcpServers | type) == "array" and
+      (.hooks | type) == "array" and
+      (.plugins | type) == "array" and
+      (.externalCompat.cells | type) == "array" and
+      ([.mcpServers[]? | select((.compatibilityStatus // "enabled") != "disabled")] | length) == 0 and
+      ([.hooks[]? as $hook | select(
+        (($hook.compatibilityStatus // "") != "disabled") and
+        ((
+          (($hook.source.path // "") | test("[\\\\/]\\.claude([\\\\/]|$)"; "i")) and
+          ([.externalCompat.cells[] | select(.vendor == "claude" and .surface == "hooks" and .enabled == false)] | length) == 0
+        ) or (
+          (($hook.source.path // "") | test("[\\\\/]\\.cursor([\\\\/]|$)"; "i")) and
+          ([.externalCompat.cells[] | select(.vendor == "cursor" and .surface == "hooks" and .enabled == false)] | length) == 0
+        ) or (
+          (($hook.source.path // "") | test("[\\\\/]\\.claude([\\\\/]|$)|[\\\\/]\\.cursor([\\\\/]|$)"; "i")) | not
+        ))
+      )] | length) == 0 and
+      (.plugins | length) == 0 and
+      ([.externalCompat.cells[]? | select(.enabled == true)] | length) == 0
+    ' "$inspect" >/dev/null 2>&1; then
+    rm -f "$inspect" "$inspect.err"; clear_active_grok
+    die 'Grok isolation inspection found an enabled MCP, hook, plugin, or compatibility import; refusing paid reviewer work.'
+  fi
+  rm -f "$inspect" "$inspect.err"
+  local args=(--cwd "$ACTIVE_ISOLATED_CWD" --model "$GROK_MODEL" --prompt-file "$pf"
               --max-turns "$turns" "${GROK_PERMS[@]}" --output-format json)
   [ -n "$sid" ] && args+=(--resume "$sid")
 
   : > "$out"
   set +e
-  "$grok" "${args[@]}" > "$out" 2>"$out.err" &
+  GROK_HOME="$isolated_home" env "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
+  ACTIVE_GROK_CHILD="$child"
   while kill -0 "$child" 2>/dev/null; do
     if [ "$waited" -ge "$WAIT_TIMEOUT" ]; then
       note "  Grok command exceeded the configured ${WAIT_TIMEOUT}s limit; stopping the local process."
       note "  This does not prove the provider stopped, so paid work remains blocked for reconciliation."
-      kill -TERM "$child" 2>/dev/null || true
-      for _i in 1 2 3 4 5; do
-        kill -0 "$child" 2>/dev/null || break
-        sleep 1
-      done
-      kill -KILL "$child" 2>/dev/null || true
-      wait "$child" 2>/dev/null || true
-      printf '124'
+      stop_active_grok_tree
+      RUN_TURN_RC=124
+      set -e
       return 0
     fi
     sleep "$POLL_INTERVAL"
@@ -477,10 +629,13 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
     fi
   done
   wait "$child"; rc=$?
+  # The supervisor's exit proves its entire owned process tree is gone. Disarm
+  # the PID immediately so a later timeout/signal cannot target a reused PID.
+  ACTIVE_GROK_CHILD=''
   set -e
   # rc is recorded, never trusted: exit 0 with an empty file is the normal
   # appearance of the early-return bug.
-  printf '%s' "$rc"
+  RUN_TURN_RC="$rc"
 }
 
 # The frozen prefix, minus --max-turns, for the stability assertion. --max-turns
@@ -567,7 +722,8 @@ Do not put the verdict anywhere else."
 
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
   local dest="$1"
-  printf '%s' "${PACKET_PREAMBLE//.ai-review/$PACKET_REL}" > "$dest"
+  printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\n---\n\n' \
+    "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" "$REVIEW_DIR" "$PACKET_REL" > "$dest"
   dest="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
     [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
@@ -666,7 +822,7 @@ EOF
 }
 
 cmd_doctor() {
-  local live=0 grok rc=0
+  local live=0 grok rc=0 repo upstream lockid live_lock
   [ "${1:-}" = "--live" ] && live=1
   need jq
   grok="$(resolve_grok)"
@@ -676,6 +832,7 @@ cmd_doctor() {
   echo "state dir     : $STATE_DIR"
   echo "model         : $GROK_MODEL"
   echo "permissions   : ${GROK_PERMS[*]}"
+  echo "isolation     : verified before every paid turn (neutral cwd; MCPs, hooks, plugins, compat imports, MCP meta-tools, and subagents disabled)"
   echo "max turns     : $DEFAULT_MAX_TURNS   wait timeout: ${WAIT_TIMEOUT}s"
   echo
   # Auth: `grok doctor` is a TERMINAL diagnostic and has reported "not
@@ -691,15 +848,23 @@ cmd_doctor() {
     rc=1
   fi
   if [ "$live" = 1 ]; then
+    repo="$(repo_root)"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"; live_lock="$(repolock_path "$lockid")"
+    legacy_paid_lock_guard "$live_lock" || die 'legacy Grok work may still be running; refusing a concurrent billable doctor.'
+    lock_acquire "$live_lock" doctor-live "$upstream" doctor-live "$repo" || die "another Grok review is already running in this repository: $(lock_info "$live_lock")"
+    ACTIVE_PAID_LOCK="$live_lock"; ACTIVE_SESSION_LOCK=''
+    trap "lock_release '$live_lock'" EXIT
+    trap 'on_paid_signal' INT TERM
     echo -n "live probe    : "
     local tmp; tmp="$(mktemp)"
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
-    run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 >/dev/null || true
-    if jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
+    run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
+    if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
       echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(jq -r '.total_cost_usd // 0' "$tmp"))"
+      lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
     else
-      echo "FAILED — no terminal JSON"; rc=1
+      echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
     fi
+    clear_active_grok
     rm -f "$tmp" "$tmp.prompt" "$tmp.err" 2>/dev/null || true
   fi
   return $rc
@@ -722,15 +887,17 @@ cmd_new() {
   fi
   # shellcheck disable=SC2064
   trap "lock_release '$rid_lock'" EXIT
-  trap "trap - EXIT; warn 'local wrapper stopped; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'; mark_remote_uncertain '$rid_lock'; exit 130" INT TERM
+  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK=''
+  trap 'on_paid_signal' INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
 
   note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
   prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   build_prompt_file "$pf"
-  rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns")"
+  run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
+    stop_active_grok_tree
     trap - EXIT
     mark_remote_uncertain "$rid_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
@@ -783,7 +950,7 @@ cmd_ask() {
 
   sess_lock="$(lock_path "$rid" "$name")"
   rid_lock="$(repolock_path "$lockid")"
-  lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  session_lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
   if ! legacy_paid_lock_guard "$rid_lock"; then
     lock_release "$sess_lock"
     die "legacy Grok work may still be running; refusing a duplicate paid review."
@@ -794,7 +961,8 @@ cmd_ask() {
   fi
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
-  trap "trap - EXIT; warn 'local wrapper stopped; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'; lock_release '$sess_lock'; mark_remote_uncertain '$rid_lock'; exit 130" INT TERM
+  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
+  trap 'on_paid_signal' INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
 
@@ -824,8 +992,9 @@ rebuilt for the new head; treat any verdict from this session as applying to
 $REVIEW_HEAD only."
   fi
   build_prompt_file "$pf"
-  rc="$(run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid")"
+  run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
+    stop_active_grok_tree
     lock_release "$sess_lock"
     trap - EXIT
     mark_remote_uncertain "$rid_lock"
@@ -864,6 +1033,7 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
   local repo="$1" name="$2" out="$3" turns="$4" path
   report_usage "$out"
   if ! handle_stop_reason "$out" "$name" "$turns"; then
+    clear_active_grok
     return 1
   fi
   path="$(write_review_file "$repo" "$name" "$out")"
@@ -873,13 +1043,14 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     extract_answer "$out"
   fi
   [ -n "$path" ] && note "review saved: $path"
+  clear_active_grok
   return 0
 }
 
 cmd_list() {
   local rid dir f lock upstream session caller source pid started state started_epoch now elapsed
   rid="$(repo_id "$(repo_root)")"
-  printf '%s\n' 'ACTIVE PAID GROK REVIEWS (all repositories on this computer)'
+  printf '%s\n' 'ACTIVE PAID GROK REVIEWS (all repositories for this OS account)'
   printf '%-34s %-24s %-8s %-7s %-20s %-9s %s\n' REPOSITORY SESSION CALLER PID STARTED ELAPSED SOURCE
   for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
     [ -d "$lock" ] || continue
@@ -923,7 +1094,7 @@ cmd_transcript() {
   rid="$(repo_id "$(repo_root)")"
   sid="$(jq -r .grok_session_id "$(find_meta "$rid" "$1")")"
   grok="$(resolve_grok)"
-  "$grok" export "$sid" 2>/dev/null \
+  GROK_HOME="$STATE_DIR/isolated-home" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
     || die "'grok export $sid' failed. Verify the subcommand with: grok export --help"
 }
 

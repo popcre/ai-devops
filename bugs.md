@@ -713,6 +713,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
 
 ### 8. Kimi has the same clone-based duplicate-run weakness
 
+**Repair status (2026-08-22): fixed in source; normalized upstream locking is
+covered by equivalent-remote and cross-clone fixtures, and the live issue #46
+review completed. Exact-head landing and installed verification remain.**
+
 - Files: `bin/ai-kimi:349-353`, `bin/ai-kimi:1012-1014`
 - Confidence: high
 - What happens: Kimi also includes the physical checkout path in the identity
@@ -722,6 +726,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
 - Tracker gap: this is not covered by the current issue-46 closeout plan.
 
 ### 9. Kimi is still unavailable as a trusted live reviewer
+
+**Repair status (2026-08-22): fixed in source and requalified live; the wrapper
+returned a terminal `session.resume_hint` review for open issue #46 and preserved
+the complete report. Exact-head landing and installed verification remain.**
 
 - Files: `plan_kimi-review-failure-recovery.md:11-18`
 - Confidence: certain from repeated installed live probes
@@ -733,6 +741,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
 
 ### 10. Muse rejects valid repositories containing historic review reports
 
+**Repair status (2026-08-22): fixed in source; Muse accepts deliberate tracked
+history while still proving the exact new destination, and a Windows review of
+open issue #51 completed. Ubuntu installed verification remains.**
+
 - Files: `bin/ai-muse:96-97`
 - Confidence: high; reproduced in shared-db
 - What happens: Muse rejects the repository when any file under `.ai/reviews/`
@@ -741,6 +753,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
 - Existing tracker: issues #45 and #51.
 
 ### 11. Muse leaves no visible state during a long provider call
+
+**Repair status (2026-08-22): fixed in source; durable pre-call state, factual
+heartbeats, interruption recovery, and exact publication are covered by the
+105-case hostile suite. Windows live review passed; Ubuntu remains.**
 
 - Files: `bin/ai-muse:139-146`
 - Confidence: high; reproduced in two 17-minute stalls
@@ -753,6 +769,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
 
 ### 12. Codex reports success even when the review command failed
 
+**Repair status (2026-08-22): fixed and live-proven; provider failure, timeout,
+empty output, missing verdict, stale source, and publication failures are
+nonzero, while a real review of open issue #13 returned a truthful REJECT.**
+
 - Files: `bin/ai-codex-review:138-159`
 - Confidence: high
 - What happens: command failure or a missing output artifact adds a warning but
@@ -761,6 +781,10 @@ and legacy checkout-keyed locks block mixed-version rollout calls.**
   independent review.
 
 ### 13. Codex omits all brand-new files from its review
+
+**Repair status (2026-08-22): fixed and live-proven; the digest-bound private
+snapshot includes text and binary untracked files, with hostile fixtures in the
+Codex reviewer suite.**
 
 - Files: `bin/ai-codex-review:69-73`
 - Confidence: high
@@ -794,6 +818,11 @@ untracked links are refused before link content is copied.**
   snapshot claim false.
 
 ### 16. Qwen can silently continue a review against a different code version
+
+**Repair status (2026-08-22): fixed in source and proven offline; exact
+head/tree/packet/model identity blocks committed, dirty, untracked, and packet
+drift before provider contact. Live qualification is intentionally skipped
+under the owner's exhausted-credit exception, so Qwen remains quarantined.**
 
 - Files: `bin/ai-qwen:894-899`, `bin/ai-qwen:949`
 - Confidence: high
@@ -847,6 +876,10 @@ include elapsed time without claiming provider health.**
 
 ### 20. GLM says the service started before it is ready
 
+**Repair status (2026-08-22): fixed in source; start and restart share a bounded
+readiness gate, with already-healthy and deadline fixtures in the 244-case GLM
+suite. Final installed open-issue proof remains.**
+
 - Files: `bin/ai-glm:1551`, `bin/ai-glm:1582`
 - Confidence: high
 - What happens: `start` reports success immediately; only `restart` waits for a
@@ -855,6 +888,10 @@ include elapsed time without claiming provider health.**
   seconds even though the start command reported success.
 
 ### 21. Muse assigns omitted callers to Codex
+
+**Repair status (2026-08-22): fixed in source; caller identity is mandatory and
+the shared skill supplies the real client explicitly. Omitted and mismatched
+caller fixtures fail closed.**
 
 - Files: `bin/ai-muse:11`, `skills/shared/ask-muse/SKILL.md:31-33`
 - Confidence: high; reproduced in a Claude-launched run
@@ -876,6 +913,9 @@ failed or interrupted replies do not advance durable history.**
   leaves a dangling turn that is sent again later.
 
 ### 23. Codex review files can collide within the same second
+
+**Repair status (2026-08-22): fixed; collision-resistant names and exclusive
+atomic publication are covered by concurrent-report fixtures.**
 
 - Files: `bin/ai-codex-review:66-67`
 - Confidence: high
@@ -915,6 +955,9 @@ quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
 
 ### 26. Kimi missing-job commands return raw file errors
 
+**Repair status (2026-08-22): fixed; status, logs, result, and wait all return
+the same friendly missing-job guidance, with regression fixtures.**
+
 - Files: `bin/ai-kimi:1059-1070`, `bin/ai-kimi:1111-1112`
 - Confidence: high
 - What happens: `status` and `logs` do not perform the friendly existence check
@@ -924,13 +967,12 @@ quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
 
 ## What the passing tests did and did not prove at audit time
 
-The audit-time offline tests verified many important safety rules and the corrected
-Windows run passed the shared packet, snapshot, preflight, scoreboard, incident,
-and Grok suites encountered during this audit. However, the findings above are
-mostly missing-test cases: clone equivalence, hostile links, filename-bound
-packet seals, already-dirty Gemini files, wrong conversation identifiers,
-DeepSeek path traversal, Codex command failure, and cross-version Qwen resume.
-Passing the existing suite therefore does not contradict these findings.
+The audit-time paragraph below is historical. As of 2026-08-22 the repository-wide
+offline run passes all 51 Bash groups and all 16 PowerShell groups with zero
+failures, including the hostile cases that were missing during the audit. Live
+provider and installed-host evidence is tracked by each repair plan. Qwen's live
+gate is deliberately excluded under the owner's exhausted-credit exception and
+therefore remains quarantined.
 
 ## Historical recommended repair order
 

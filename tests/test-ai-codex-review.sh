@@ -50,6 +50,10 @@ export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 echo '== ai-codex-review'
 check "doctor_proves_readonly_and_reasoning" "cd '$R' && '$SCRIPT' doctor | grep -q 'sandbox=read-only reasoning=explicit'"
+if command -v cygpath >/dev/null 2>&1; then
+  TEST_ROOT_WINDOWS="$(cygpath -w "$TMP")"
+  check "doctor_normalizes_equivalent_Windows_test_paths" "cd '$R' && AI_CODEX_REVIEW_TEST_DIR='$TEST_ROOT_WINDOWS' '$SCRIPT' doctor | grep -q 'sandbox=read-only reasoning=explicit'"
+fi
 check "models_configuration_is_parsed_as_data" "test ! -e '$TMP/models-executed'"
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"

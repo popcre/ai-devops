@@ -55,6 +55,12 @@ validate_command(){
   case "${CODEX_ARGS[8]}" in model_reasoning_effort=low|model_reasoning_effort=medium) ;; *) die 'CODEX_CMD must explicitly pin model_reasoning_effort=low or medium.';; esac
   if [ -n "${AI_CODEX_REVIEW_TEST_DIR:-}" ]; then
     physical="$(readlink -f "${CODEX_ARGS[0]}" 2>/dev/null || true)"; test_root="$(cd "$AI_CODEX_REVIEW_TEST_DIR" 2>/dev/null && pwd -P || true)"
+    # Git Bash can spell the same Windows path as either D:/... or /d/....
+    # Normalize both sides before enforcing the test-only executable boundary.
+    if command -v cygpath >/dev/null 2>&1; then
+      physical="$(cygpath -u "$physical" 2>/dev/null || printf '%s' "$physical")"
+      test_root="$(cygpath -u "$test_root" 2>/dev/null || printf '%s' "$test_root")"
+    fi
     case "$physical" in "$test_root"/*) ;; *) die 'test Codex executable escaped AI_CODEX_REVIEW_TEST_DIR.';; esac
   else
     case "${CODEX_ARGS[0]}" in codex|codex.exe) ;; *) die 'production CODEX_CMD must invoke the governed codex executable directly.';; esac

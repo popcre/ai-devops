@@ -16,7 +16,7 @@ ai-grok-review list | show <name> | transcript <name> | delete <name>
 ai-grok-review doctor
 ```
 
-`list` shows paid Grok work across every clone on the computer, while completed
+`list` shows paid Grok work across every clone owned by the current reviewer OS account, while completed
 sessions remain limited to the current checkout. Equivalent GitHub HTTPS, SSH,
 case, `.git`, and local-clone origins share one paid-work lock. If a local wrapper
 is interrupted, do not start another review: provider cancellation is unconfirmed
@@ -26,6 +26,14 @@ still does not prove remote cancellation, the same paid-work block remains.
 `delete` refuses an active session and never deletes Grok's provider-side history.
 Long turns print elapsed-time heartbeats; these prove only that the local wrapper is
 still waiting, not that the provider is active.
+
+Every paid turn runs from a neutral directory with Grok's native, project,
+plugin, Claude, Cursor, and standard `.mcp.json` discovery excluded. The wrapper
+also denies MCP meta-tools and subagents, verifies discovery before spending,
+and terminates the tracked local process tree on interruption or timeout. The
+supervisor waits for every descendant, not only the launcher. If Grok leaves a
+long-lived descendant after producing output, the turn therefore fails closed
+and retains the paid-work block instead of accepting an unowned process.
 
 The wrapper owns the model pin, the read-only permission set, the turn bound, the
 completion rule, the session bookkeeping, and the cost reporting. Every one of those

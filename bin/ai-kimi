@@ -598,6 +598,12 @@ ACTIVE_JOB_META=""
 ACTIVE_CANCEL_FILE=""
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
+  RUN_TURN_PID=""; RUN_TURN_TIMED_OUT=0; RUN_TURN_CANCELLED=0; RUN_TURN_STARTUP_FAILED=0
+  if [ ! -s "$pf" ]; then
+    : > "$out"; printf '%s\n' 'private prompt is missing or empty; provider was not contacted' > "$out.err"
+    RUN_TURN_RC=1; RUN_TURN_STARTUP_FAILED=1
+    return 0
+  fi
   local kimi; kimi="$(resolve_kimi)"
   local args=(-m "$KIMI_MODEL" --output-format stream-json)
   if [ -n "$sid" ]; then
@@ -636,9 +642,6 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     ( cd "$repo" && KIMI_CODE_HOME="$KIMI_HOME" exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
   fi
   RUN_TURN_PID=$!
-  RUN_TURN_TIMED_OUT=0
-  RUN_TURN_CANCELLED=0
-  RUN_TURN_STARTUP_FAILED=0
   local elapsed=0 last_size=0 size=0
   while kill -0 "$RUN_TURN_PID" 2>/dev/null; do
     if { [ -n "$ACTIVE_CANCEL_FILE" ] && [ -f "$ACTIVE_CANCEL_FILE" ]; } \
@@ -901,6 +904,7 @@ mirror_review_artifact() { # META CANONICAL
 
 finalize_review_artifact() { # META STREAM KIND REASON
   local meta="$1" stream="$2" kind="$3" reason="$4"
+  [ "${AI_KIMI_TEST_FAIL_ARTIFACT:-0}" != 1 ] || return 1
   render_review_artifact "$meta" "$stream" "$kind" "$reason" || return 1
   mirror_review_artifact "$meta" "$FINAL_CANONICAL" || warn "repository mirror failed; canonical review kept at $FINAL_CANONICAL"
   return 0
@@ -985,6 +989,10 @@ launch_review_worker() { # JOB-DIR PROMPT-FILE
   printf '%s' "$pid"
 }
 
+cleanup_review_transients() { # JOB-DIR PROMPT-FILE
+  rm -f -- "$2" "$1/launch-worker.ps1" "$1/launch-bootstrap.ps1" 2>/dev/null || true
+}
+
 review_worker() { # JOB-DIR PROMPT-FILE
   local dir="$1" pf="$2" meta out repo workdir repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase
   meta="$dir/job.json"; [ -f "$meta" ] || exit 2
@@ -992,7 +1000,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
   workdir="$(jq -r '.review_workspace // .repo' "$meta")"
   repo_lock="$(jq -r '.repo_lock // ""' "$meta")"
   if [ -n "$repo_lock" ] && [ -d "$repo_lock" ]; then printf '%s\n' "$$" > "$repo_lock/pid"; fi
-  trap "lock_release '$repo_lock'" EXIT
+  # The worker owns these transients after startup acknowledgement. Keep their
+  # cleanup in the emergency EXIT path as well as each explicit terminal path.
+  trap 'cleanup_review_transients "$dir" "$pf"; lock_release "$repo_lock"' EXIT
   sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2
@@ -1007,6 +1017,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="cancelled-by-user"|.exit_code=$rc|.updated=$u' || exit 2
     finalize_review_artifact "$meta" "$out" incomplete cancelled-by-user || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="cancelled"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
+    cleanup_review_transients "$dir" "$pf"
     exit 1
   fi
   if has_resume_hint "$out"; then
@@ -1020,6 +1031,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
       write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
       finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
       write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="failed"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
+      cleanup_review_transients "$dir" "$pf"
       exit 1
     fi
     [ "$source_before" = "$(tree_state "$repo")" ] || stale=true
@@ -1027,7 +1039,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="session.resume_hint"|.exit_code=$rc|.updated=$u' || exit 2
     finalize_review_artifact "$meta" "$out" complete session.resume_hint || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --argjson stale "$stale" '.phase="completed"|.kimi_session_id=$sid|.updated=$u|.source_checkout_changed=$stale|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="complete"|.artifact_sha256=$h' || exit 2
-    rm -f "$pf" "$dir/launch-worker.ps1" "$dir/launch-bootstrap.ps1" 2>/dev/null || true
+    cleanup_review_transients "$dir" "$pf"
     exit 0
   fi
   reason="provider-process-failed"
@@ -1041,7 +1053,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
   finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg phase "$terminal_phase" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase=$phase|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
-  rm -f "$pf" "$dir/launch-worker.ps1" "$dir/launch-bootstrap.ps1" 2>/dev/null || true
+  cleanup_review_transients "$dir" "$pf"
   exit 1
 }
 
@@ -1077,15 +1089,21 @@ start_review_job() { # NAME [CONTINUE]
     die "source-checkout-changed while the private review snapshot was being prepared; retry from a stable checkout."
   fi
   prep_seconds="$(( $(date +%s) - prep_started ))"
-  pf="$(mktemp "$STATE_DIR/.kimi-prompt.XXXXXX")"; chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
+  pf="$(mktemp "$STATE_DIR/.kimi-prompt.XXXXXX")"
+  # From this point until a worker is proven started, every shell error must
+  # remove the private prompt and fixed-name launchers as well as the repo lock.
+  # The worker takes ownership only after the startup acknowledgement below.
+  trap "cleanup_review_transients '$dir' '$pf'; lock_release '$repo_lock'" EXIT
+  chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
   create_review_job "$name" "$repo" "$rid" review "$sid" "$pf"
   write_job_state "$dir/job.json" --arg workspace "$REVIEW_DIR" --arg lock "$repo_lock" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg packet "$PACKET_HASH" --arg kind "$OPT_REVIEW_KIND" --argjson prep "$prep_seconds" --argjson snapshot "$REVIEW_SNAPSHOT_SECONDS" --argjson packet_seconds "$REVIEW_PACKET_SECONDS" --argjson tests "$REVIEW_TEST_SECONDS" '.review_workspace=$workspace|.repo_lock=$lock|.base=$base|.head=$head|.packet_sha256=$packet|.review_kind=$kind|.timing={snapshot_seconds:$snapshot,test_seconds:$tests,packet_seconds:$packet_seconds,pre_provider_seconds:$prep,provider_seconds:null,model_steps:"unavailable"}'
   if ! pid="$(launch_review_worker "$dir" "$pf")"; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
+    cleanup_review_transients "$dir" "$pf"
     die "could not start durable Kimi worker"
   fi
-  [ -n "$pid" ] || { lock_release "$repo_lock"; write_job_state "$dir/job.json" '.phase="failed"|.terminal_reason="worker-start-failed"'; die "could not start durable Kimi worker"; }
+  [ -n "$pid" ] || { lock_release "$repo_lock"; write_job_state "$dir/job.json" '.phase="failed"|.terminal_reason="worker-start-failed"'; cleanup_review_transients "$dir" "$pf"; die "could not start durable Kimi worker"; }
   while [ "$startup_waited" -lt "$STARTUP_TIMEOUT" ]; do
     phase="$(jq -r .phase "$dir/job.json")"
     [ "$phase" != preflight ] && break
@@ -1094,6 +1112,10 @@ start_review_job() { # NAME [CONTINUE]
   if [ "${phase:-preflight}" = preflight ]; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
+    # The detached bootstrap exceeded the bounded acknowledgement window.
+    # Removing its exact prompt makes an abnormally late worker fail closed
+    # before contacting Kimi; run_turn refuses a missing or empty prompt.
+    cleanup_review_transients "$dir" "$pf"
     die "detached worker did not acknowledge startup within ${STARTUP_TIMEOUT}s"
   fi
   trap - EXIT

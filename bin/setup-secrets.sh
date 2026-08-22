@@ -463,8 +463,7 @@ if not block:
     cfg.pop("mcpServers", None)               # don't leave an empty block
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
-    fh.write("
-")
+    fh.write("\n")
 print("  ok removed from settings.json (ignored there): " + ", ".join(sorted(removed)))
 print(f"  ok backup: {path}.aidevops.mcpclean.bak")
 PY2

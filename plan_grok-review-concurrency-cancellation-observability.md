@@ -27,10 +27,10 @@ govern. In particular, a dead local owner never proves remote paid work stopped.
 | 2 | Replace checkout-path locking with normalized upstream-repository locking | ✅ complete locally | Clone, HTTPS/SSH/case/`.git`, local-origin, unrelated-repository, and uncertainty-block tests in `tests/test-ai-grok-review.sh` |
 | 3 | Make active work visible across clones and callers | ✅ complete locally | `list_shows_active_reviews_across_clones_and_callers` and owner-state fixture pass |
 | 4 | Make interruption and deletion tell the truth about the remote turn | ✅ complete locally | Signal fixture preserves a `remote-uncertain` paid-work block; active deletion refusal remains implemented |
-| 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Provider-start synchronization, two-heartbeat, bounded hung-process timeout, elapsed activity, marker-write-failure, and legacy-rollout fixtures pass; full Grok review suite passes 131/131 |
+| 5 | Add useful mid-turn progress without weakening terminal completion | ✅ complete locally | Provider-start synchronization, two-heartbeat, bounded hung-process and inspect-process-tree timeouts, elapsed activity, marker-write-failure, schema-drift, enabled-hook, launcher-orphan, stale-supervisor-PID disarming, live-doctor cleanup, installed-symlink helper resolution, fail-fast restoration, POSIX escalation ordering, transcript-home, and legacy-rollout fixtures pass; `bash tests/test-ai-grok-review.sh` passes 150/150 |
 | 6 | Correlate reviewer-issue evidence to the affected run | ✅ complete locally | 28 incident tests prove exact metadata-owned reports/logs win; similar names, duplicate matches, and missing identity capture nothing |
-| 7 | Update user guidance, install, and run offline verification | 🟨 source complete | Skill guidance and five offline suites pass; installed hash verification remains after merge |
-| 8 | Run bounded live qualification and independent exact-head review | ⬜ open | Redacted live evidence plus an exact-head independent review with no unresolved Critical/High/Medium finding |
+| 7 | Update user guidance, install, and run offline verification | 🟨 source complete | Skill guidance and the 150-test hostile suite pass on 2026-08-22; repository-wide and installed hash verification remain after merge |
+| 8 | Run bounded live qualification and independent exact-head review | 🟨 in progress | Windows `doctor --live` passed through neutral-cwd discovery and the process supervisor at $0.00379406; real issue #61 packet review completed. Final exact-head review after commit remains. |
 | 9 | Commit, push, verify GitHub, close #56, and retire this plan/handoff | ⬜ open | Remote `main` SHA, GitHub issue closure comment linking verification evidence, plan status fully current, and this handoff removed only after completion |
 
 ### End-of-phase rule
@@ -199,7 +199,7 @@ The current `--output-format json` writes its useful fields only at the end. A t
 
 ### Locked decisions — do not relitigate
 
-- **2026-08-20:** one paid Grok turn per normalized upstream repository per machine, regardless of clone, worktree, caller, or session name.
+- **2026-08-20, clarified 2026-08-22:** one paid Grok turn per normalized upstream repository per reviewer OS account, regardless of clone, worktree, caller, or session name. Production reviewer work runs only under its designated account (`ai` on Ubuntu and Albert's account on Windows); cross-account machine-wide locking is not claimed.
 - Preserve checkout-bound session/snapshot identity separately from repository-wide cost-lock identity.
 - Remote identity normalization must cover the common GitHub HTTPS/SSH forms and local clones that point at a repository with its own upstream.
 - Unknown or ambiguous upstream identity fails closed for `new`/`ask`; it never falls back silently to clone-path serialization.

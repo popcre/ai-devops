@@ -54,6 +54,9 @@ esac
 case "$mode" in
   ok)      cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   nohint)  printf '{"role":"assistant","content":"partial answer"}\n' ;;   # no terminal record
+  badverdict)
+    printf '{"role":"assistant","content":"analysis without a governed verdict"}\n'
+    printf '{"role":"meta","type":"session.resume_hint","session_id":"session_35e1a0a2-139f-4095-afdd-fce90a32ed2d","command":"kimi -r session_35e1a0a2"}\n' ;;
   directoryerror) printf 'Session was created under a different directory\n' >&2; exit 7 ;;
   empty)   : ;;
   writes)  cat "$TMPDIR_FOR_TEST/fixture.jsonl"; echo tampered >> a.txt ;;
@@ -190,9 +193,28 @@ else
 fi
 CANCEL_SIDECAR="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--durable-cancel/cancel.request' -print -quit)"
 check "durable cancel keeps an atomic sidecar signal" "test -n '$CANCEL_SIDECAR' && test -f '$CANCEL_SIDECAR'"
+check "cancelled review removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$CANCEL_SIDECAR')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
+echo badverdict > "$TMP/mode"
+run start verdict-defect --prompt review >/dev/null
+run wait verdict-defect >/dev/null 2>&1 || true
+VERDICT_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--verdict-defect/job.json' -print -quit)"
+check "answer defect is typed and removes its private prompt and launchers" "jq -e '.phase==\"failed\" and .terminal_reason==\"missing-verdict\"' '$VERDICT_META' && ! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$VERDICT_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
+echo ok > "$TMP/mode"
 OUT="$(AI_KIMI_TEST_FAIL_WORKER_START=1 run start worker-start-failure --prompt review 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "detached launch failure refuses immediately" || bad "detached launch failure refuses immediately"
 check "detached launch failure is durable and typed" "run status worker-start-failure | jq -e '.phase == \"failed\" and .terminal_reason == \"worker-start-failed\"'"
+WORKER_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--worker-start-failure/job.json' -print -quit)"
+check "detached launch failure removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$WORKER_FAIL_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
+check "pre-worker shell errors are covered by the transient cleanup trap" "grep -A6 'pf=.*mktemp.*.kimi-prompt' '$SCRIPT' | grep -q 'trap.*cleanup_review_transients'"
+OUT="$(run start missing-prompt-file --prompt-file "$TMP/not-present" 2>&1)"; RC=$?
+check "prompt-build failure is nonzero and removes its private prompt" "test '$RC' -ne 0 && ! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q ."
+check "late worker refuses a removed prompt before provider resolution" "sed -n '/^run_turn()/,/resolve_kimi/p' '$SCRIPT' | grep -q '\[ ! -s \"\$pf\" \]'"
+echo ok > "$TMP/mode"
+AI_KIMI_TEST_FAIL_ARTIFACT=1 run start artifact-finalization-failure --prompt review >/dev/null
+AI_KIMI_WAIT_TIMEOUT=30 run wait artifact-finalization-failure >/dev/null 2>&1 || true
+ARTIFACT_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--artifact-finalization-failure/job.json' -print -quit)"
+check "worker-level artifact failure remains recovery-required" "jq -e '.phase==\"recovery-required\" and .terminal_reason==\"artifact-write-failed\"' '$ARTIFACT_FAIL_META'"
+check "worker emergency exit removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$ARTIFACT_FAIL_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
 echo directoryerror > "$TMP/mode"
 run start directory-mismatch --prompt review >/dev/null
 run wait directory-mismatch >/dev/null 2>&1 || true

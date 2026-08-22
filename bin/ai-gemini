@@ -22,7 +22,7 @@ root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repos
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
 meta(){ printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$1"; }
-agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
+agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 require_local_runtime(){ local a; a="$(agy)"; "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }

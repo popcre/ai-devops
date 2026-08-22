@@ -95,8 +95,9 @@ and [`docs/architecture.md`](docs/architecture.md).
 - Keep PowerShell compatible and correctly formatted; run Bash tests through Git
   Bash on Windows.
 - UI changes require visual verification. This repository itself has no UI.
-- Installation is the deployment mechanism. There is no container, package
-  registry, hosted service, GitHub Actions workflow, or application database.
+- Installation is the deployment mechanism. The GitHub `verify` workflow checks
+  toolkit source, but there is no container, package registry, hosted service,
+  application deployment workflow, or application database.
 
 ## Handoffs and completion
 

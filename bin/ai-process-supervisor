@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Run one command as an owned process tree and wait for every descendant.
+
+Windows uses a kill-on-close Job Object. POSIX uses a new process group. The
+supervisor intentionally stays alive after the direct child exits while any
+descendant remains, so a launcher cannot orphan paid reviewer work.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def die(message: str) -> "None":
+    print(f"ai-process-supervisor: error: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def posix_main(command: list[str]) -> int:
+    child = subprocess.Popen(command, start_new_session=True)
+    pgid = child.pid
+    stopped_by = 0
+
+    def stop(signum: int, _frame: object) -> None:
+        nonlocal stopped_by
+        stopped_by = signum
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    direct_rc: int | None = None
+    deadline: float | None = None
+    while True:
+        if direct_rc is None:
+            direct_rc = child.poll()
+        try:
+            os.killpg(pgid, 0)
+            group_alive = True
+        except ProcessLookupError:
+            group_alive = False
+        except PermissionError:
+            group_alive = True
+        if direct_rc is not None and not group_alive:
+            return 128 + stopped_by if stopped_by else direct_rc
+        if stopped_by:
+            # Finish group escalation before the shell wrapper's five-second
+            # fallback can hard-kill this supervisor and orphan the group.
+            deadline = deadline or time.monotonic() + 3
+            if time.monotonic() >= deadline:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        time.sleep(0.1)
+
+
+def windows_main(command: list[str]) -> int:
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        die(f"CreateJobObjectW failed ({ctypes.get_last_error()})")
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimits),
+            ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    class Accounting(ctypes.Structure):
+        _fields_ = [
+            ("TotalUserTime", ctypes.c_longlong),
+            ("TotalKernelTime", ctypes.c_longlong),
+            ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+            ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+            ("TotalPageFaultCount", wintypes.DWORD),
+            ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("TotalTerminatedProcesses", wintypes.DWORD),
+        ]
+
+    limits = ExtendedLimits()
+    limits.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        kernel32.CloseHandle(job)
+        die(f"SetInformationJobObject failed ({ctypes.get_last_error()})")
+
+    child = subprocess.Popen(
+        command,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004,  # CREATE_SUSPENDED
+    )
+    if not kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(child._handle)):
+        child.terminate()
+        kernel32.CloseHandle(job)
+        die(f"AssignProcessToJobObject failed ({ctypes.get_last_error()})")
+    if ctypes.WinDLL("ntdll").NtResumeProcess(wintypes.HANDLE(child._handle)) != 0:
+        kernel32.TerminateJobObject(job, 1)
+        kernel32.CloseHandle(job)
+        die("NtResumeProcess failed")
+
+    stopped_by = 0
+
+    def stop(signum: int, _frame: object) -> None:
+        nonlocal stopped_by
+        stopped_by = signum
+        kernel32.TerminateJobObject(job, 128 + signum)
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    direct_rc: int | None = None
+    while True:
+        if direct_rc is None:
+            direct_rc = child.poll()
+        accounting = Accounting()
+        if not kernel32.QueryInformationJobObject(job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
+            kernel32.TerminateJobObject(job, 1)
+            kernel32.CloseHandle(job)
+            die(f"QueryInformationJobObject failed ({ctypes.get_last_error()})")
+        if direct_rc is not None and accounting.ActiveProcesses == 0:
+            kernel32.CloseHandle(job)
+            return 128 + stopped_by if stopped_by else direct_rc
+        time.sleep(0.1)
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args and args[0] == "--":
+        args = args[1:]
+    if not args:
+        die("usage: ai-process-supervisor -- COMMAND [ARG ...]")
+    try:
+        return windows_main(args) if os.name == "nt" else posix_main(args)
+    except FileNotFoundError as exc:
+        die(f"command not found: {exc.filename}")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -73,6 +73,11 @@ echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.7-flash-high\"' '$FIXTURES/model-mismatch.json'"
 check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.1'"
+mkdir -p "$TMP/fallback-home/.local/bin"
+cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
+FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
+set +e; FALLBACK_OUT="$(HOME="$TMP/fallback-home" AI_GEMINI_BIN= PATH="$FALLBACK_PATH" "$SCRIPT" doctor 2>&1)"; FALLBACK_RC=$?; set -e
+check 'doctor finds the official Linux per-user installation outside PATH' "test '$FALLBACK_RC' -eq 3 && printf '%s' '$FALLBACK_OUT' | grep -q 'agy=1.1.14'"
 set +e; DOCTOR_OUT="$("$SCRIPT" doctor 2>&1)"; DOCTOR_RC=$?; set -e
 check 'doctor keeps Gemini quarantined pending live proof' "test '$DOCTOR_RC' -ne 0 && printf '%s' '$DOCTOR_OUT' | grep -q '^QUARANTINED'"
 check 'normal operation cannot bypass quarantine' "! '$SCRIPT' new blocked --prompt review"

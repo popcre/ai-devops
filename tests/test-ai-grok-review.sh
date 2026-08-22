@@ -25,6 +25,7 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 export AI_GROK_STATE_DIR="$TMP/state"
+export AI_GROK_AUTH_HOME="$TMP/no-auth"
 export AI_GROK_CALLER="claude"
 export AI_GROK_POLL_INTERVAL=1
 export AI_GROK_WAIT_TIMEOUT=15
@@ -47,6 +48,16 @@ STUB="$TMP/bin"; mkdir -p "$STUB"
 cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
+printf '%s|%s|%s|%s\n' "${GROK_CLAUDE_MCPS_ENABLED:-}" "${GROK_CLAUDE_HOOKS_ENABLED:-}" "${GROK_CURSOR_MCPS_ENABLED:-}" "${GROK_CODEX_SESSIONS_ENABLED:-}" >> "$TMPDIR_FOR_TEST/isolation.txt"
+if printf '%s\n' "$@" | grep -qx inspect; then
+  case "${AI_GROK_TEST_INSPECT_MODE:-ok}" in
+    badshape) printf '%s\n' '{}' ;;
+    enabledhook) printf '%s\n' '{"mcpServers":[],"hooks":[{"source":{"path":"/home/test/.claude"}}],"plugins":[],"externalCompat":{"cells":[{"vendor":"claude","surface":"hooks","enabled":true}]}}' ;;
+    inspecthang) printf '%s\n' "${BASHPID:-$$}" > "$TMPDIR_FOR_TEST/inspect-hang-pid"; while :; do sleep 1; done ;;
+    *) printf '%s\n' '{"mcpServers":[{"name":"ambient","compatibilityStatus":"disabled"}],"hooks":[{"source":{"path":"/home/test/.claude"}}],"plugins":[],"externalCompat":{"cells":[{"vendor":"claude","surface":"hooks","enabled":false}]}}' ;;
+  esac
+  exit 0
+fi
 # Keep a copy of the prompt: the wrapper deletes it, and the tests need to
 # assert what the reviewer was actually told.
 for _i in $(seq 1 $#); do :; done
@@ -59,7 +70,7 @@ mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "grok 0.2.118 (stub)"; exit 0 ;;
   models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.6"; exit 0 ;;
-  export)    echo "# transcript stub"; exit 0 ;;
+  export)    printf '%s\n' "$GROK_HOME" > "$TMPDIR_FOR_TEST/export-home"; echo "# transcript stub"; exit 0 ;;
 esac
 case "$mode" in
   ok)        cat "$TMPDIR_FOR_TEST/fixture.json" ;;
@@ -72,11 +83,18 @@ case "$mode" in
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
   hold)      touch "$TMPDIR_FOR_TEST/hold-started"
+             printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
+             trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
              for _i in $(seq 1 60); do
                [ -f "$TMPDIR_FOR_TEST/release-grok" ] && break
                sleep 1
              done
              cat "$TMPDIR_FOR_TEST/fixture.json" ;;
+  orphan)    ( trap 'printf terminated > "$TMPDIR_FOR_TEST/orphan-terminated"; exit 143' TERM
+               printf '%s\n' "${BASHPID:-$$}" > "$TMPDIR_FOR_TEST/orphan-pid"
+               while :; do sleep 1; done ) &
+             sleep 1
+             exit 0 ;;
 esac
 exit 0
 STUBEOF
@@ -124,6 +142,8 @@ done
 check "slow_fixture_reached_the_provider_before_mode_changes" "test -f '$TMP/hold-started'"
 SECOND="$( cd "$CLONE" && bash "$SCRIPT" new other-clone --prompt x 2>&1 )"; SECOND_RC=$?
 [ "$SECOND_RC" -ne 0 ] && ok "equivalent_github_clones_share_one_paid_review_lock" || bad "equivalent_github_clones_share_one_paid_review_lock"
+DOCTOR_BLOCKED="$( cd "$REPO" && bash "$SCRIPT" doctor --live 2>&1 )"; DOCTOR_BLOCKED_RC=$?
+check "live doctor shares the repository paid-work lock" "test '$DOCTOR_BLOCKED_RC' -ne 0 && printf '%s' \"$DOCTOR_BLOCKED\" | grep -q 'already running'"
 SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
 git -C "$SSH_CLONE" remote set-url origin git@GitHub.com:EXAMPLE/Reviewer-Fixture.git
 SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new ssh-spelling --prompt x 2>&1 )"; SSH_RC=$?
@@ -155,6 +175,15 @@ TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -
 check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && test '$TIMEOUT_ELAPSED' -lt 12"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
 rm -rf "$TIMEOUT_LOCK"
+
+# The launcher may exit before the worker. The terminal-result timeout must
+# still terminate the worker captured from the launcher's process tree.
+rm -f "$TMP/orphan-pid" "$TMP/orphan-terminated"; echo orphan > "$TMP/mode"
+ORPHANED="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new orphan-timeout --prompt x 2>&1 )"; ORPHANED_RC=$?
+ORPHAN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+check "launcher_exit_timeout_kills_the_tracked_orphan_worker" "test '$ORPHANED_RC' -ne 0 && test -s '$TMP/orphan-pid' && ! kill -0 \"\$(cat '$TMP/orphan-pid')\" 2>/dev/null"
+check "orphan_timeout_remains_fail_closed_for_remote_work" "test -f '$ORPHAN_LOCK/remote-uncertain'"
+rm -rf "$ORPHAN_LOCK"
 
 LOCK_EQ="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16).lock.d"
 mkdir -p "$LOCK_EQ"; printf '99999999\n' > "$LOCK_EQ/pid"; printf 'stale\n' > "$LOCK_EQ/label"
@@ -192,6 +221,7 @@ check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"
+check "directed signal terminates and reaps the owned local Grok child" "test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
 BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --prompt x 2>&1 )"; BLOCKED_RC=$?
 [ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_duplicate_paid_turn" || bad "remote_uncertainty_blocks_duplicate_paid_turn"
 rm -rf "$LOCK_NOW"
@@ -265,6 +295,16 @@ check "new denies Edit"                   "grep -q -- '--deny Edit' '$TMP/argv.t
 check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.txt'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
+check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
+check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
+check "review disables subagents"          "grep -q -- '--no-subagents' '$TMP/argv.txt'"
+check "review runs from a neutral non-repository cwd" "! grep -q -- '--cwd $REPO' '$TMP/argv.txt'"
+BAD_SHAPE="$(AI_GROK_TEST_INSPECT_MODE=badshape run new inspect-schema-drift --prompt x 2>&1)"; BAD_SHAPE_RC=$?
+check "isolation inspection fails closed on schema drift" "test '$BAD_SHAPE_RC' -ne 0 && printf '%s' \"$BAD_SHAPE\" | grep -q 'isolation inspection'"
+BAD_HOOK="$(AI_GROK_TEST_INSPECT_MODE=enabledhook run new inspect-enabled-hook --prompt x 2>&1)"; BAD_HOOK_RC=$?
+check "isolation inspection rejects an enabled compatibility hook" "test '$BAD_HOOK_RC' -ne 0 && printf '%s' \"$BAD_HOOK\" | grep -q 'isolation inspection'"
+INSPECT_HANG="$(AI_GROK_TEST_INSPECT_MODE=inspecthang AI_GROK_ISOLATION_TIMEOUT=2 run new inspect-hang --prompt x 2>&1)"; INSPECT_HANG_RC=$?
+check "hung isolation inspection is bounded and its process tree is terminated" "test '$INSPECT_HANG_RC' -ne 0 && grep -q 'process tree was terminated' <<<\"$INSPECT_HANG\" && test -s '$TMP/inspect-hang-pid' && ! kill -0 \"\$(cat '$TMP/inspect-hang-pid')\" 2>/dev/null"
 check "never uses permission-mode auto"   "! grep -q -- '--permission-mode auto' '$TMP/argv.txt'"
 check "never allows Bash"                 "! grep -q -- '--allow Bash' '$TMP/argv.txt'"
 check "never uses --always-approve"       "! grep -q -- '--always-approve' '$TMP/argv.txt'"
@@ -289,7 +329,7 @@ echo "== prefix_stable_across_turns =="
 # must be identical between new and ask. --max-turns is a runtime bound (D13).
 : > "$TMP/argv.txt"
 run new t3 --prompt x --max-turns 5 >/dev/null 2>&1
-norm() { sed 's/--max-turns [0-9]*//; s/--resume [^ ]*//; s/--prompt-file [^ ]*//' "$1" | tr -s ' ' | sed 's/^ *//; s/ *$//'; }
+norm() { grep -- '--model ' "$1" | tail -1 | sed 's/--cwd [^ ]*//; s/--max-turns [0-9]*//; s/--resume [^ ]*//; s/--prompt-file [^ ]*//' | tr -s ' ' | sed 's/^ *//; s/ *$//'; }
 NEWARGS="$(norm "$TMP/argv.txt")"
 : > "$TMP/argv.txt"
 run ask t3 --prompt y --max-turns 30 >/dev/null 2>&1
@@ -408,6 +448,17 @@ check "list shows a session"       "run list | grep -q t1"
 check "list shows cumulative cost" "run list | grep -q '0.24'"
 check "show emits json"            "run show t1 | jq -e .grok_session_id"
 check "transcript works"           "run transcript t1 | grep -q transcript"
+check "transcript reads the isolated reviewer session home" "grep -qx '$AI_GROK_STATE_DIR/isolated-home' '$TMP/export-home'"
+check "a reaped supervisor PID is disarmed before later failure handling" "sed -n '/local child=/,/^frozen_prefix()/p' '$SCRIPT' | grep -q \"ACTIVE_GROK_CHILD=''\""
+check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()/,/^cmd_new()/p' '$SCRIPT' | grep -q 'clear_active_grok'"
+check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
+check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
+check "POSIX supervisor escalates before the wrapper fallback" "grep -q 'time.monotonic() + 3' '$REPO_ROOT/bin/ai-process-supervisor'"
+run new stale-session --prompt x >/dev/null 2>&1
+STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_RID="$(basename "$(dirname "$STALE_META")")"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/$STALE_RID--claude--stale-session.lock.d"
+mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid"; printf 'ask:stale-session\n' > "$STALE_SESSION_LOCK/label"
+run ask stale-session --prompt x > "$TMP/stale-session.out" 2>&1; STALE_ASK_RC=$?
+check "dead local-only session lock is safely reclaimed without inventing paid uncertainty" "test '$STALE_ASK_RC' -eq 0 && grep -q 'reclaimed a stale local-only session lock' '$TMP/stale-session.out' && test ! -e '$STALE_SESSION_LOCK'"
 check "delete removes the record"  "run delete t1 && ! run show t1"
 
 # 15 ------------------------------------------------------------------------
@@ -453,7 +504,8 @@ git -C "$REPO" worktree add -q -b wt-branch "$WT" >/dev/null 2>&1
 echo only-in-worktree > "$WT/wt-only.txt"
 : > "$TMP/argv.txt"
 ( cd "$WT" && bash "$SCRIPT" new wtreview --prompt "review this" ) >/dev/null 2>&1
-HANDED="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+WT_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*wtreview.json' | head -1)"
+HANDED="$(jq -r .review_dir "$WT_META")"
 check "worktree run hands over a directory"      "test -n '$HANDED'"
 check "handed directory is not the raw worktree" "[ \"\$(cd '$HANDED' && pwd -P)\" != \"\$(cd '$WT' && pwd -P)\" ]"
 check "handed directory owns its git control files" \
@@ -466,8 +518,8 @@ check "delete removes the snapshot" \
 # another session's commit moves the tree underneath the reviewer (issue #53).
 : > "$TMP/argv.txt"
 run new plainreview --prompt "review this" >/dev/null 2>&1
-PLAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
 PLAIN_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*plainreview.json' | head -1)"
+PLAIN="$(jq -r .review_dir "$PLAIN_META")"
 check "ordinary clone is reviewed in a private copy" \
   "[ \"\$(cd '$PLAIN' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check "ordinary-clone copy owns its git controls" "test -d '$PLAIN/.git'"
@@ -475,7 +527,7 @@ check "ordinary-clone session records its fixed directory" \
   "[ \"\$(jq -r .review_dir '$PLAIN_META')\" = '$PLAIN' ]"
 : > "$TMP/argv.txt"
 run ask plainreview --prompt "continue" >/dev/null 2>&1
-PLAIN_AGAIN="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+PLAIN_AGAIN="$(jq -r .review_dir "$PLAIN_META")"
 check "ordinary-clone continuation reuses the recorded copy" "[ '$PLAIN_AGAIN' = '$PLAIN' ]"
 
 echo "== evidence packet (issue #34, step 3) =="
@@ -486,7 +538,8 @@ echo "== evidence packet (issue #34, step 3) =="
 echo second > "$REPO/b.txt"; git -C "$REPO" add -A; git -C "$REPO" commit -qm second
 run new packetreview --prompt "review this" >/dev/null 2>&1
 PF="$(grep -o -- '--prompt-file [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
-PACKET_REVIEW_DIR="$(grep -o -- '--cwd [^ ]*' "$TMP/argv.txt" | tail -1 | cut -d' ' -f2)"
+PACKET_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*packetreview.json' | head -1)"
+PACKET_REVIEW_DIR="$(jq -r .review_dir "$PACKET_META")"
 check "packet is built in the review directory" "test -s '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview/MANIFEST.md'"
 check "packet carries the real head sha" \
   "grep -qF \"\$(git -C '$REPO' rev-parse HEAD)\" '$PACKET_REVIEW_DIR/.ai-review-grok-packetreview/MANIFEST.md'"

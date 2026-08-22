@@ -14,8 +14,8 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 | 4. Preserve failed partial reviews without turning them into verdicts | ✅ complete | 2026-08-20 | Incomplete artifacts state `NO VERDICT` and commands remain nonzero |
 | 5. Present exact typed failures and preserve diagnostic evidence | ✅ complete | 2026-08-20 | Typed guidance plus raw stream/stderr paths in the artifact |
 | 6. Make temporary-copy provenance and retrieval unambiguous | ✅ complete | 2026-08-20 | Artifact records launch repository, reviewed head, private canonical path, and optional mirror |
-| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-20 | Kimi 173/173, Grok 106/106, Qwen 23/23, Gemini 17/17 |
-| 8. Requalify Kimi live, independently review the exact head, and land | 🟨 blocked by provider allowance | 2026-08-20 | Implementation is merged at `82c8376`; Grok 4.6 approved exact implementation head `05c1228`. On 2026-08-20, installed `ai-kimi doctor --live` passed auth, profile, state, provider, and safe-write checks but Kimi again returned no `session.resume_hint`. Quarantine and issue #46 remain open until the bounded authenticated canaries pass. |
+| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-22 | `bash tests/test-ai-kimi.sh` passed 197/197 after parent/worker cleanup, prompt-build failure cleanup, and late-worker no-contact repairs; the repository-wide suite is rerun at the final head in Step 8. |
+| 8. Requalify Kimi live, independently review the exact head, and land | 🟨 in progress | 2026-08-22 | `ai-kimi doctor --live` passed and named issue #46 returned a complete `session.resume_hint` artifact at `.ai/reviews/kimi-issue-46-production-proof-20260822T193848Z-4055091.md`. Kimi confirmed the cleanup code has no Critical/High/Medium defect; final exact-head independent review, push, install, and installed canaries remain. |
 
 **Fresh-session starting point:** Step 1. Read the entire plan before editing. The
 checkout had concurrent uncommitted changes to `bin/ai-kimi` and
