@@ -681,8 +681,20 @@ verify_returned_model() { # verify_returned_model STREAM
 # Defence in depth: excluded tools are the guarantee. Hash the complete tracked
 # diff and every untracked file so a review cannot hide a content change inside
 # a path that was already dirty before it started.
+reject_special_untracked() {
+  local repo="$1"
+  find "$repo" -xdev -path "$repo/.git" -prune -o \
+    ! -type f ! -type d ! -type l -print0 \
+    | while IFS= read -r -d '' special; do
+        local rel="${special#"$repo"/}"
+        git -C "$repo" check-ignore -q -- "$rel" 2>/dev/null && continue
+        printf 'ai-qwen: refusing special untracked evidence: %s\n' "$rel" >&2
+        return 1
+      done
+}
 tree_state() {
   local repo="$1"
+  reject_special_untracked "$repo" || return 1
   {
     git -C "$repo" diff --binary HEAD 2>/dev/null
     git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null \
