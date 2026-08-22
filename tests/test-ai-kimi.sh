@@ -167,6 +167,7 @@ UNSAFE_DIR="$(dirname "$(dirname "$DURABLE_META")")/claude--recover-unsafe"; mkd
 # /tmp. Mixing those aliases manufactures an unsafe destination the wrapper
 # would never create and tests path spelling instead of the recovery invariant.
 jq --arg stream "$UNSAFE_DIR/stream.jsonl" --arg log "$UNSAFE_DIR/worker.log" --arg canonical "$UNSAFE_DIR/review-recovery.md" '.name="recover-unsafe"|.job_id="recover-unsafe"|.phase="failed"|.terminal_reason="readonly-tree-changed"|.artifact_kind=null|.artifact_sha256=null|.artifact_paths.stream=$stream|.artifact_paths.log=$log|.artifact_paths.canonical=$canonical|.artifact_paths.repository=null' "$DURABLE_META" > "$UNSAFE_DIR/job.json"
+cp "$CANONICAL" "$UNSAFE_DIR/review-recovery.md"
 run recover recover-unsafe >/dev/null 2>&1 || true
 check "recovery cannot approve a worker-classified safety failure" "run status recover-unsafe | jq -e '.phase==\"recovery-required\" and .artifact_kind==\"incomplete\" and .terminal_reason!=\"session.resume_hint\"'"
 echo usagepartial > "$TMP/mode"
@@ -255,6 +256,12 @@ run ask r1 --prompt "follow up" >/dev/null 2>&1
 check "ask resumes with -r"          "grep -q -- '-r session_35e1a0a2' '$TMP/argv.txt'"
 # --agent-file cannot be combined with a resume; passing it would hard-error.
 check "ask does NOT pass --agent-file" "! grep -q -- '--agent-file' '$TMP/argv.txt'"
+CALLS_BEFORE_ORIGIN_CHANGE="$(wc -l < "$TMP/argv.txt")"
+git -C "$REPO" remote set-url origin https://example.invalid/other/repo.git
+OUT="$(run ask r1 --prompt 'must stay on original upstream' 2>&1)"; RC=$?
+[ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_ORIGIN_CHANGE" = "$(wc -l < "$TMP/argv.txt")" ] && ok "origin changes cannot move a persistent review to a different paid lock" || bad "origin changes cannot move a persistent review to a different paid lock"
+check "origin mismatch explains safe recovery" "grep -q 'belongs to a different shared upstream.*Restore its original origin' '$SCRIPT'"
+git -C "$REPO" remote set-url origin https://example.invalid/test/repo.git
 
 echo "== caller separation =="
 ( cd "$REPO" && AI_KIMI_CALLER=codex bash "$SCRIPT" new r1 --prompt "codex copy" ) >/dev/null 2>&1
@@ -542,19 +549,44 @@ check "the text above the verdict is still emitted" "printf '%s' \"\$BODY\" | gr
 
 
 echo "== duplicate run refused (per-repo lock) =="
-RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
-RREMOTE="$(git -C "$RROOT" config --get remote.origin.url 2>/dev/null || echo '')"
-RID_NEW="$(printf '%s' "${RREMOTE%.git}" | sha256sum | cut -c1-12)"
-LOCK="$AI_KIMI_STATE_DIR/locks/repo--$RID_NEW.lock.d"
+UPSTREAM_ID='example.invalid/test/repo'
+LOCK_ID="$(printf '%s' "$UPSTREAM_ID" | sha256sum | cut -c1-16)"
+LOCK="$AI_KIMI_STATE_DIR/locks/repo--$LOCK_ID.lock.d"
 mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "new:other" > "$LOCK/label"
 OUT="$(run new r8 --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ $RC -ne 0 ] && ok "a second concurrent run is refused" || bad "a second concurrent run is refused"
 check "refusal names the active run" "printf '%s' \"\$OUT\" | grep -q 'already active'"
-ALT_LOCK="$TMP/lock-clone"; git clone -q "$REPO" "$ALT_LOCK"; git -C "$ALT_LOCK" remote set-url origin "$RREMOTE"
-mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "new:other-clone" > "$LOCK/label"
-set +e; ALT_LOCK_OUT="$(cd "$ALT_LOCK" && AI_KIMI_CALLER=claude bash "$SCRIPT" new r8-clone --prompt x 2>&1)"; ALT_LOCK_RC=$?; set -e; rm -rf "$LOCK"
-[ "$ALT_LOCK_RC" -ne 0 ] && ok "a second clone of one upstream shares the paid-run lock" || bad "a second clone of one upstream shares the paid-run lock"
-check "cross-clone refusal names the active run" "printf '%s' \"\$ALT_LOCK_OUT\" | grep -q 'already active'"
+CLONE="$TMP/equivalent-clone"; mkdir -p "$CLONE"; git -C "$CLONE" init -q; git -C "$CLONE" config user.name T; git -C "$CLONE" config user.email t@example.com
+git -C "$CLONE" remote add origin git@example.invalid:test/repo.git; printf 'x\n' > "$CLONE/a"; git -C "$CLONE" add a; git -C "$CLONE" commit -qm init
+mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:other-clone" > "$LOCK/label"
+OUT="$(cd "$CLONE" && bash "$SCRIPT" new clone-lock --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+[ $RC -ne 0 ] && ok "equivalent HTTPS and SSH remotes share one paid-review lock" || bad "equivalent HTTPS and SSH remotes share one paid-review lock"
+CASE_CLONE="$TMP/case-suffix-clone"; mkdir -p "$CASE_CLONE"; git -C "$CASE_CLONE" init -q; git -C "$CASE_CLONE" config user.name T; git -C "$CASE_CLONE" config user.email t@example.com; git -C "$CASE_CLONE" remote add origin https://EXAMPLE.INVALID/test/repo.GIT; printf x > "$CASE_CLONE/a"; git -C "$CASE_CLONE" add a; git -C "$CASE_CLONE" commit -qm init
+mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:case-suffix" > "$LOCK/label"; OUT="$(cd "$CASE_CLONE" && bash "$SCRIPT" new case-suffix --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+[ "$RC" -ne 0 ] && ok "remote .git suffix normalization is case-insensitive" || bad "remote .git suffix normalization is case-insensitive"
+USER_CLONE="$TMP/arbitrary-ssh-user"; mkdir -p "$USER_CLONE"; git -C "$USER_CLONE" init -q; git -C "$USER_CLONE" config user.name T; git -C "$USER_CLONE" config user.email t@example.com; git -C "$USER_CLONE" remote add origin deploy@example.invalid:test/repo.git; printf x > "$USER_CLONE/a"; git -C "$USER_CLONE" add a; git -C "$USER_CLONE" commit -qm init
+mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:ssh-user" > "$LOCK/label"; OUT="$(cd "$USER_CLONE" && bash "$SCRIPT" new ssh-user --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+[ "$RC" -ne 0 ] && ok "SCP-style remotes accept arbitrary valid SSH usernames" || bad "SCP-style remotes accept arbitrary valid SSH usernames"
+AUTH_CLONE="$TMP/authenticated-https"; mkdir -p "$AUTH_CLONE"; git -C "$AUTH_CLONE" init -q; git -C "$AUTH_CLONE" config user.name T; git -C "$AUTH_CLONE" config user.email t@example.com; git -C "$AUTH_CLONE" remote add origin https://user@example.invalid/test/repo.git; printf x > "$AUTH_CLONE/a"; git -C "$AUTH_CLONE" add a; git -C "$AUTH_CLONE" commit -qm init
+mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:authenticated-https" > "$LOCK/label"; OUT="$(cd "$AUTH_CLONE" && bash "$SCRIPT" new authenticated-https --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+[ "$RC" -ne 0 ] && ok "authenticated HTTPS remotes share the canonical paid-review lock" || bad "authenticated HTTPS remotes share the canonical paid-review lock"
+CALLS_BEFORE_PATH_CASE="$(wc -l < "$TMP/argv.txt")"; git -C "$REPO" remote set-url origin https://example.invalid/TEST/REPO.git
+OUT="$(run ask r1 --prompt 'path case must remain distinct' 2>&1)"; RC=$?
+[ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_PATH_CASE" = "$(wc -l < "$TMP/argv.txt")" ] && ok "case-distinct repository paths cannot share a persistent review" || bad "case-distinct repository paths cannot share a persistent review"
+git -C "$REPO" remote set-url origin https://example.invalid/test/repo.git
+CHAIN="$TMP/origin-chain"; UP="$CHAIN/upstream"; MID="$CHAIN/nested/middle"; DOWN="$CHAIN/downstream"; mkdir -p "$UP" "$MID" "$DOWN"
+for d in "$UP" "$MID" "$DOWN"; do git -C "$d" init -q; git -C "$d" config user.name T; git -C "$d" config user.email t@example.com; printf x > "$d/file"; git -C "$d" add file; git -C "$d" commit -qm init; done
+git -C "$UP" remote add origin https://example.invalid/chained/upstream.git
+git -C "$MID" remote add origin ../../upstream
+git -C "$DOWN" remote add origin ../nested/middle
+OUT="$(cd "$DOWN" && bash "$SCRIPT" new relative-origin --prompt x 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && ok "chained relative local origins resolve from each owning repository" || { printf '  diagnostic: %s\n' "$OUT"; bad "chained relative local origins resolve from each owning repository"; }
+for cmd in status logs result wait; do
+  OUT="$(run "$cmd" definitely-missing 2>&1)"; RC=$?
+  [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "no durable job 'definitely-missing' for caller 'claude'" \
+    && ok "$cmd gives one friendly missing-job error" || bad "$cmd gives one friendly missing-job error"
+  printf '%s' "$OUT" | grep -Eqi 'jq:|Could not open file|No such file' && bad "$cmd hides raw parser/file errors" || ok "$cmd hides raw parser/file errors"
+done
 
 echo "== bookkeeping and doctor =="
 check "list shows the session"   "run list | grep -q r1"

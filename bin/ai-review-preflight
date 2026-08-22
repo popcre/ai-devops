@@ -20,11 +20,40 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 
 valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
+qualification_file() { printf '%s/%s-live-qualified.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
+qwen_live_qualified() {
+  local file wrapper expected actual expected_runtime actual_runtime expected_preloader actual_preloader
+  file="$(qualification_file qwen)"; [ -f "$file" ] || return 1
+  wrapper="$(provider_wrapper qwen)"; [ -f "$wrapper" ] || return 1
+  expected="$(jq -r '.wrapper_sha256 // empty' "$file" 2>/dev/null)"
+  expected_runtime="$(jq -r '.runtime_sha256 // empty' "$file" 2>/dev/null)"
+  expected_preloader="$(jq -r '.preloader_sha256 // empty' "$file" 2>/dev/null)"
+  actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
+  actual_runtime="$(qwen_runtime_sha "$wrapper" || true)"
+  actual_preloader="$(qwen_preloader_sha "$wrapper" || true)"
+  [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ -n "$expected_runtime" ] && [ "$expected_runtime" = "$actual_runtime" ] && [ -n "$expected_preloader" ] && [ "$expected_preloader" = "$actual_preloader" ]
+}
+qwen_runtime_sha() { # WRAPPER [DOCTOR_OUTPUT]
+  local wrapper="$1" out="${2:-}" value count
+  [ -n "$out" ] || out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>/dev/null)" || return 1
+  count="$(printf '%s\n' "$out" | grep -Ec '^qwen runtime sha256:[[:space:]]*[0-9a-f]{64}$' || true)"
+  [ "$count" -eq 1 ] || return 1
+  value="$(printf '%s\n' "$out" | sed -n 's/^qwen runtime sha256:[[:space:]]*\([0-9a-f]\{64\}\)$/\1/p')"
+  [ -n "$value" ] || return 1; printf '%s' "$value"
+}
+qwen_preloader_sha() { # WRAPPER [DOCTOR_OUTPUT]
+  local wrapper="$1" out="${2:-}" value count
+  [ -n "$out" ] || out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>/dev/null)" || return 1
+  count="$(printf '%s\n' "$out" | grep -Ec '^qwen preloader sha256:[[:space:]]*[0-9a-f]{64}$' || true)"
+  [ "$count" -eq 1 ] || return 1
+  value="$(printf '%s\n' "$out" | sed -n 's/^qwen preloader sha256:[[:space:]]*\([0-9a-f]\{64\}\)$/\1/p')"
+  [ -n "$value" ] || return 1; printf '%s' "$value"
+}
 static_status() {
   case "$1" in
     gemini) printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
-    deepseek) printf '{"provider":"%s","status":"unknown","failure_class":"doctor-unsupported"}\n' "$1"; return 0 ;;
+    qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -105,6 +134,18 @@ provider_wrapper() {
   esac
 }
 
+qualify_qwen() {
+  local wrapper out rc sha runtime_sha preloader_sha now file
+  wrapper="$(provider_wrapper qwen)"; [ -x "$wrapper" ] || die "Qwen wrapper is not executable: $wrapper"
+  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; set -e
+  [ "$rc" = 0 ] || { printf 'ai-review-preflight: Qwen live qualification failed; quarantine remains.\n%s\n' "$out" >&2; return 1; }
+  runtime_sha="$(qwen_runtime_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact installed runtime hash; quarantine remains.\n' >&2; return 1; }
+  preloader_sha="$(qwen_preloader_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact credential-preloader hash; quarantine remains.\n' >&2; return 1; }
+  sha="$(sha256sum "$wrapper" | awk '{print $1}')"; now="$(now_epoch)"; file="$(qualification_file qwen)"
+  write_atomic "$file" "$(jq -nc --arg provider qwen --arg sha "$sha" --arg runtime "$runtime_sha" --arg preloader "$preloader_sha" --argjson at "$now" '{version:3,provider:$provider,wrapper_sha256:$sha,runtime_sha256:$runtime,preloader_sha256:$preloader,qualified_epoch:$at}')"
+  note "ai-review-preflight: Qwen live qualification recorded for wrapper $sha, runtime $runtime_sha, and credential preloader $preloader_sha."
+}
+
 check_provider() { # PROVIDER REPO LIVE BASE
   local provider="$1" repo="$2" live="$3" base="$4" wrapper sandbox packet tag out rc class
   valid_provider "$provider" || die "unknown provider '$provider'."
@@ -117,7 +158,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   if static_status "$provider" >/dev/null; then
     static_status "$provider" >&2
-    case "$provider" in gemini) return 3 ;; *) return 4 ;; esac
+    case "$provider" in gemini|qwen) return 3 ;; *) return 4 ;; esac
   fi
 
   git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
@@ -135,7 +176,10 @@ check_provider() { # PROVIDER REPO LIVE BASE
   "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
   wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
   set +e
-  if [ "$live" = 1 ] && [ "$provider" != glm ]; then
+  if [ "$provider" = muse ]; then
+    if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
+  elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
     out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
   else
     out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
@@ -157,6 +201,7 @@ Usage:
   ai-review-preflight check <provider> <repo> [--base REF] [--live]
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
   ai-review-preflight clear <provider>
+  ai-review-preflight qualify qwen
   ai-review-preflight status [provider]
   ai-review-preflight explain <failure-class>
 EOF
@@ -176,6 +221,9 @@ case "$cmd" in
   clear)
     provider="${1:-}"; valid_provider "$provider" || die "unknown provider '$provider'."
     rm -f "$(provider_file "$provider")"; note "ai-review-preflight: cleared $provider quarantine." ;;
+  qualify)
+    [ "${1:-}" = qwen ] && [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify qwen'
+    qualify_qwen ;;
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")

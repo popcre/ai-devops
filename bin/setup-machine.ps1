@@ -695,7 +695,7 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
   }
 } else {
   Warn "Qwen Code CLI not found; the qwen-code skill is installed, but local Qwen jobs will not run."
-  Warn "  Install the official Qwen Code CLI, complete its OAuth flow, then run: ai-qwen doctor --live"
+  Warn "  Install the official Qwen Code CLI, configure Alibaba Coding Plan authentication, then run: ai-qwen doctor --live"
 }
 
 # --------------------------------------------------------------------------
@@ -879,7 +879,7 @@ if (Test-Path -LiteralPath $glmSetup) {
     if (Test-Path -LiteralPath $museSetup) {
       & $gitBash -lc "'$museSetup'"
       if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
-      Ok "Muse persistent protected conversations are installed: ai-muse doctor"
+      Ok "Muse persistent protected conversations are installed: `$env:AI_MUSE_CALLER='codex'; ai-muse doctor"
     }
   } catch {
     # Loud, not silent: say what broke and what still works.

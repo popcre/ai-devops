@@ -6,7 +6,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` (37 cases) |
+| 1 | Hostile path and concurrency fixtures | ✅ complete | `tests/test-ai-deepseek-agent.sh` 51/51, including trusted 1Password executable resolution, a pinned official provider endpoint, bounded timing validation, a one-reference re-exec behind an empty-environment boundary, an end-to-end inherited-descriptor credential handoff that keeps the key out of process arguments, a non-exported provider key absent from child environments, and a bearer header streamed without command-line or temporary-file exposure |
 | 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
 | 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback, concurrent reply, bounded provider-call, and signal-owned child fixtures |
 | 4 | Review completion/governance contract | ✅ complete | `--review` refuses a missing Git commit before provider contact; verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |

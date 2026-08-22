@@ -113,7 +113,10 @@ CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 # sleep made the assertions depend on how quickly Windows created repositories.
 echo hold > "$TMP/mode"
 export AI_GROK_HEARTBEAT_INTERVAL=2
-( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=90 bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
+# This turn is released explicitly below. Give only this test-owned process a
+# wide ceiling so slow Windows clone/setup work cannot turn the fixture into an
+# unintended timeout and leave a false remote-uncertain lock.
+( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
 for _i in $(seq 1 60); do
   [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1

@@ -24,6 +24,7 @@ mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
 echo "== static checks =="
 check "ai-glm is executable"                "test -x '$AI_GLM'"
 check "ai-glm parses"                       "bash -n '$AI_GLM'"
+check "GLM password is streamed to curl instead of exposed in argv" "grep -q 'curl_auth_config | curl --config -' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM'"
 check "setup-opencode-glm.sh parses"        "bash -n '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "retired launcher is gone"            "test ! -e '$REPO_ROOT/bin/ai-glm-agent'"
 check "retired launcher not on PATH"        "! command -v ai-glm-agent"
@@ -115,6 +116,8 @@ check "non-git directory rejected"          "! ( cd '$TMP' && '$AI_GLM' new prob
 check "empty prompt rejected"               "! ( cd '$TMP/repoA' && printf '' | '$AI_GLM' new probe ) >/dev/null 2>&1"
 check "missing prompt file rejected"        "! ( cd '$TMP/repoA' && '$AI_GLM' new probe --prompt-file /nope ) >/dev/null 2>&1"
 check "list works with no sessions"         "'$AI_GLM' list >/dev/null 2>&1"
+check "nonnumeric server-start timeout is rejected" "! AI_GLM_SERVER_START_TIMEOUT=nope '$AI_GLM' --help"
+check "zero server-start timeout is rejected" "! AI_GLM_SERVER_START_TIMEOUT=0 '$AI_GLM' --help"
 
 echo "== caller separation =="
 mkdir -p "$AI_GLM_STATE_DIR/sessions/$idA"
@@ -157,6 +160,33 @@ check "doctor exits nonzero on a bare machine"       "! ( HOME='$BARE' AI_DEVOPS
 check "doctor prints no stray error lines"           "! printf '%s' \"\$dout\" | grep -q 'ai-glm: error:'"
 check "doctor knows Windows from Linux"              "grep -q 'IS_WINDOWS' '$AI_GLM'"
 check "server control works on Windows"              "grep -q 'schtasks' '$AI_GLM'"
+READY_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=3 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=0; n=0
+  systemctl(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 3 ]; }
+  cmd_server start' 2>&1)"; READY_RC=$?
+[ "$READY_RC" -eq 0 ] && printf '%s' "$READY_OUT" | grep -q 'started and healthy' && ok "Linux start waits through delayed readiness" || bad "Linux start waits through delayed readiness"
+NEVER_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=0
+  systemctl(){ [ "${1:-}" != --user ] || return 0; }; sleep(){ :; }; server_up(){ return 1; }
+  cmd_server start' 2>&1)"; NEVER_RC=$?
+[ "$NEVER_RC" -ne 0 ] && printf '%s' "$NEVER_OUT" | grep -q 'did not become healthy' && printf '%s' "$NEVER_OUT" | grep -q 'ai-glm server start' && ok "Linux start fails bounded with recovery guidance" || bad "Linux start fails bounded with recovery guidance"
+BLOCK_START="$(date +%s)"
+BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=0
+  server_up(){ sleep "${1:-30}"; return 1; }
+  wait_for_server_health blocked-health' 2>&1)"; BLOCK_RC=$?; BLOCK_ELAPSED=$(( $(date +%s) - BLOCK_START ))
+[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt 5 ] && printf '%s' "$BLOCK_OUT" | grep -q 'within 2s' && ok "blocking health probes obey the real startup deadline" || bad "blocking health probes obey the real startup deadline"
+BLOCK_START="$(date +%s)"
+BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=0
+  server_up(){ sleep "${1:-30}"; return 1; }; systemctl(){ :; }
+  cmd_server start' 2>&1)"; BLOCK_RC=$?; BLOCK_ELAPSED=$(( $(date +%s) - BLOCK_START ))
+[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt 5 ] && printf '%s' "$BLOCK_OUT" | grep -q 'within 2s' && ok "complete start operation shares one startup deadline" || bad "complete start operation shares one startup deadline"
+WIN_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=1; n=0
+  schtasks(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 2 ]; }
+  cmd_server start' 2>&1)"; WIN_RC=$?
+[ "$WIN_RC" -eq 0 ] && printf '%s' "$WIN_OUT" | grep -q 'started and healthy' && ok "Windows start waits for health" || bad "Windows start waits for health"
 
 echo "== platform-correct doctor checks =="
 # `stat -c %a` reports a synthesised mode on NTFS regardless of the ACL, so the 0600

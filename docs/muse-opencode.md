@@ -8,20 +8,20 @@ an exact session ID and survives separate command calls.
 ## Commands
 
 ```bash
-ai-muse doctor
-ai-muse new architecture-debate --prompt-file brief.md
-ai-muse ask architecture-debate --prompt-file follow-up.md
-ai-muse list
-ai-muse show architecture-debate
-ai-muse transcript architecture-debate
-ai-muse reconcile architecture-debate
-ai-muse delete architecture-debate
+AI_MUSE_CALLER=codex ai-muse doctor
+AI_MUSE_CALLER=codex ai-muse new architecture-debate --prompt-file brief.md
+AI_MUSE_CALLER=codex ai-muse ask architecture-debate --prompt-file follow-up.md
+AI_MUSE_CALLER=codex ai-muse list
+AI_MUSE_CALLER=codex ai-muse show architecture-debate
+AI_MUSE_CALLER=codex ai-muse transcript architecture-debate
+AI_MUSE_CALLER=codex ai-muse reconcile architecture-debate
+AI_MUSE_CALLER=codex ai-muse delete architecture-debate
 ```
 
 `new` records the exact OpenCode session ID. `ask` must resume that same ID and fails
 if OpenCode returns another one. Sessions are separated by repository, caller, and
 name. Codex uses `AI_MUSE_CALLER=codex`; Claude uses `AI_MUSE_CALLER=claude`.
-If a provider turn or local check leaves the outcome uncertain, `ask` stops. Inspect
+Replace `codex` with `claude` when Claude owns the conversation. If a provider turn or local check leaves the outcome uncertain, `ask` stops. Inspect
 the transcript, then run `reconcile` only when you deliberately accept that recorded
 state and want to continue the same conversation.
 

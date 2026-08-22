@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Baseline shared-db and stalled-turn fixtures | ⬜ open | `tests/test-ai-muse.sh` |
-| 2 | Exact report-destination safety | ⬜ open | tracked-history fixture |
-| 3 | Pre-provider durable state/progress | ⬜ open | interruption/slow-turn fixtures |
-| 4 | Caller identity and central governance | ⬜ open | caller/preflight/scoreboard fixtures |
-| 5 | Windows/Ubuntu qualification and landing | ⬜ open | verification bundle/remote SHA |
+| 1 | Baseline shared-db and stalled-turn fixtures | ✅ complete | `tests/test-ai-muse.sh` 105/105, including an exact FINDINGS/NO FINDINGS verdict vocabulary, private report storage with per-run Windows ACL enforcement, exclusive non-following staging reservation, no-clobber publication, caller-correct shared guidance, a bounded provider-contacting live doctor, a private file-to-child credential handoff with process-chain inspection proving the key stays out of arguments and the heartbeat parent, a minimal provider-child environment with no writable report descriptor, descriptor-bound pre-turn report staging, pre/post-open substitution refusal, pre- and post-delay destination validation, exact-identity cleanup, pre-state heartbeat validation, child-reaping HUP handling, and late-publication interruption coverage |
+| 2 | Exact report-destination safety | ✅ complete | tracked-history and exact-destination fixtures |
+| 3 | Pre-provider durable state/progress | ✅ complete | interruption, slow-turn, heartbeat, and uncertainty fixtures |
+| 4 | Caller identity and central governance | ✅ complete | caller, preflight, and scoreboard fixtures |
+| 5 | Windows/Ubuntu qualification and landing | 🟨 pending exact-head approval | installed open-issue evidence and remote SHA |
 
-Fresh session starts at Step 1. Reconcile with `plan_muse-opencode-harness.md` and
+Current work starts at Step 5. Reconcile with `plan_muse-opencode-harness.md` and
 issues #40/#45/#51; this plan governs the audit defects.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -123,4 +123,3 @@ is not. Rollback by commit and quarantine.
 2. Yes—Sections 6–8 preserve why broad-history rejection/server fallback fail.
 3. Yes—Section 1 makes availability, visibility and caller ownership decisive.
 All checklist items pass.
-

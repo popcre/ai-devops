@@ -352,27 +352,50 @@ documents directly from this private workspace.
 PACKET_PREAMBLE="$DIFF_PACKET_PREAMBLE"
 
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
-normalize_remote() {
-  local value="$1" rest host path scheme
-  value="${value%/}"; value="${value%.git}"
-  case "$value" in
-    git@*:* ) host="${value#git@}"; host="${host%%:*}"; path="${value#*:}"; printf 'https://%s/%s' "${host,,}" "$path" ;;
-    ssh://git@* ) value="${value#ssh://git@}"; host="${value%%/*}"; path="${value#*/}"; printf 'https://%s/%s' "${host,,}" "$path" ;;
-    http://*|https://* )
-      value="$(printf '%s' "$value" | sed -E 's#^(https?://)[^/@]+@#\1#')"
-      scheme="${value%%://*}"; rest="${value#*://}"; host="${rest%%/*}"; path="${rest#*/}"
-      printf '%s://%s/%s' "$scheme" "${host,,}" "$path" ;;
-    * ) printf '%s' "$value" ;;
-  esac
-}
 repo_id() {
-  local root="$1" remote identity
+  local root="$1" remote
   root="$(cd "$root" && pwd -P)"
   remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
-  if [ -n "$remote" ]; then identity="$(normalize_remote "$remote")"; else identity="file://$root"; fi
-  printf '%s' "$(printf '%s' "$identity" | sha256sum | cut -c1-12)"
+  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
 }
 repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
+
+# Session identity remains checkout-bound because Kimi resumes inside one stable
+# private workspace. Paid review serialization uses a separate upstream identity
+# so two clones of the same network repository cannot start duplicate work.
+normalize_remote() { # normalize_remote REMOTE
+  local remote="$1" host path
+  remote="${remote%/}"
+  case "$remote" in
+    ssh://*|https://*|http://*|git://*)
+      host="${remote#*://}"; host="${host#*@}"; path="${host#*/}"; host="${host%%/*}"; host="${host%:22}"; host="${host%:443}" ;;
+    *@*:* ) host="${remote#*@}"; host="${host%%:*}"; path="${remote#*:}" ;;
+    *) return 1 ;;
+  esac
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  path="${path#/}"; path="${path%/}"
+  case "${path,,}" in *.git) path="${path:0:${#path}-4}" ;; esac
+  [ -n "$host" ] && [ -n "$path" ] || return 1
+  case "$host/$path" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  printf '%s/%s' "$host" "$path"
+}
+upstream_identity() {
+  local root="$1" depth="${2:-0}" visited="${3:-}" remote target physical
+  [ "$depth" -lt 5 ] || return 1
+  physical="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
+  case "|$visited|" in *"|$physical|"*) return 1 ;; esac
+  remote="$(repo_remote "$physical")"; [ -n "$remote" ] || return 1
+  if normalize_remote "$remote"; then return 0; fi
+  case "$remote" in /*|[A-Za-z]:[\\/]*) target="$remote" ;; *) target="$physical/$remote" ;; esac
+  git -C "$target" rev-parse --git-dir >/dev/null 2>&1 || return 1
+  upstream_identity "$target" $((depth + 1)) "$visited|$physical"
+}
+review_lock_id() { printf '%s' "$1" | sha256sum | cut -c1-16; }
+require_upstream_identity() {
+  local identity
+  identity="$(upstream_identity "$1")" || die "cannot identify this repository's shared upstream. Set origin to an unambiguous network repository; no paid Kimi review was started."
+  printf '%s' "$identity"
+}
 valid_name() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
 
 meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
@@ -1023,13 +1046,14 @@ review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 start_review_job() { # NAME [CONTINUE]
-  local name="$1" cont="${2:-0}" repo rid existing sid pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase
+  local name="$1" cont="${2:-0}" repo rid upstream lockid existing sid pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; dir="$(job_dir "$rid" "$name")"
   if [ -f "$dir/job.json" ] && ! job_is_terminal "$dir/job.json"; then
     jq -r '.job_id' "$dir/job.json"; return 0
   fi
-  repo_lock="$(repolock_path "$rid")"
+  upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
+  repo_lock="$(repolock_path "$lockid")"
   lock_acquire "$repo_lock" "review:$name" || die "another Kimi run is already active in this repository: $(lock_info "$repo_lock")"
   trap "lock_release '$repo_lock'" EXIT
   sid=""
@@ -1089,6 +1113,12 @@ job_for_name() {
   done < <(find "$STATE_DIR/jobs" -type f -name job.json -print 2>/dev/null)
   [ -n "$found" ] && printf '%s' "$found" || printf '%s' "$fallback"
 }
+require_job_for_name() {
+  local meta
+  meta="$(job_for_name "$1")"
+  [ -f "$meta" ] || die "no durable job '$1' for caller '$CALLER' in this repository. Start it with: ai-kimi start $1 --prompt-file <brief>"
+  printf '%s' "$meta"
+}
 terminal_guidance() {
   case "$1" in
     usage-limit) note "ai-kimi: Kimi refused the run because the account usage limit was reached. The incomplete artifact preserves any partial answer; retry after quota is available." ;;
@@ -1117,7 +1147,7 @@ display_review_job() { # META
 }
 cmd_wait_job() { # NAME
   local meta out waited=0 phase size
-  meta="$(job_for_name "$1")"; [ -f "$meta" ] || die "no durable job '$1'. Start it first."
+  meta="$(require_job_for_name "$1")"
   out="$(jq -r .artifact_paths.stream "$meta")"
   while ! job_is_terminal "$meta"; do
     sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))
@@ -1128,12 +1158,12 @@ cmd_wait_job() { # NAME
   terminal_guidance "$(jq -r '.terminal_reason // "failed"' "$meta")" "$1"
   return 1
 }
-cmd_status_job() { jq '{job_id,phase,created,updated,terminal_reason,exit_code,worker_pid,kimi_child_pid,last_output_size,review_kind,timing,source_checkout_changed,artifact_kind,artifact_sha256,artifact_paths}' "$(job_for_name "$1")"; }
-cmd_logs_job() { local f; f="$(jq -r .artifact_paths.log "$(job_for_name "$1")")"; tail -100 "$f" 2>/dev/null || true; }
-cmd_result_job() { local meta; meta="$(job_for_name "$1")"; job_is_terminal "$meta" || die "job '$1' is still running."; display_review_job "$meta" && return 0; terminal_guidance "$(jq -r '.terminal_reason // "failed"' "$meta")" "$1"; return 1; }
+cmd_status_job() { local meta; meta="$(require_job_for_name "$1")" || return 1; jq '{job_id,phase,created,updated,terminal_reason,exit_code,worker_pid,kimi_child_pid,last_output_size,review_kind,timing,source_checkout_changed,artifact_kind,artifact_sha256,artifact_paths}' "$meta"; }
+cmd_logs_job() { local meta f; meta="$(require_job_for_name "$1")" || return 1; f="$(jq -r .artifact_paths.log "$meta")"; [ -f "$f" ] || die "durable job '$1' has no readable log artifact."; tail -100 "$f"; }
+cmd_result_job() { local meta; meta="$(require_job_for_name "$1")"; job_is_terminal "$meta" || die "job '$1' is still running."; display_review_job "$meta" && return 0; terminal_guidance "$(jq -r '.terminal_reason // "failed"' "$meta")" "$1"; return 1; }
 cmd_cancel_job() {
   local meta request waited=0
-  meta="$(job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }
+  meta="$(require_job_for_name "$1")"; job_is_terminal "$meta" && { jq . "$meta"; return 0; }
   request="$(jq -r .cancel_request "$meta")"
   printf '%s\n' "$(date -u +%FT%TZ)" > "$request.tmp"
   mv "$request.tmp" "$request"
@@ -1145,29 +1175,24 @@ cmd_cancel_job() {
   jq . "$meta"
 }
 cmd_recover_job() {
-  local meta out reason artifact defect kind phase prior_reason safety_failure=0
-  meta="$(job_for_name "$1")"; out="$(jq -r .artifact_paths.stream "$meta")"
+  local meta out reason artifact defect kind phase prior_reason
+  meta="$(require_job_for_name "$1")"; out="$(jq -r .artifact_paths.stream "$meta")"
   prior_reason="$(jq -r '.terminal_reason // ""' "$meta")"
-  case "$prior_reason" in
-    readonly-tree-changed|directory-mismatch|worker-start-failed) safety_failure=1 ;;
-  esac
   artifact="$(jq -r '.artifact_paths.canonical // ""' "$meta")"
   if [ -f "$artifact" ]; then
     kind="$(jq -r '.artifact_kind // ""' "$meta")"
-    if [ "$safety_failure" -eq 0 ] && [ -z "$kind" ] && has_resume_hint "$out" && [ -z "$(review_answer_defect "$out")" ] && grep -q '^# Kimi review' "$artifact"; then kind=complete; phase=completed
+    if [ "$prior_reason" != session.resume_hint ]; then kind=incomplete; phase=recovery-required
+    elif [ -z "$kind" ] && has_resume_hint "$out" && [ -z "$(review_answer_defect "$out")" ] && grep -q '^# Kimi review' "$artifact"; then kind=complete; phase=completed
     else kind="${kind:-incomplete}"; phase="$(jq -r .phase "$meta")"; [ "$phase" = completed ] || phase=recovery-required
     fi
     write_job_state "$meta" --arg h "$(sha256_file "$artifact")" --arg k "$kind" --arg p "$phase" '.artifact_sha256=$h|.artifact_kind=$k|.phase=$p'
     jq . "$meta"; [ "$kind" = complete ] && return 0 || return 1
   fi
-  reason="worker-ended-without-terminal-proof"
-  if [ "$safety_failure" -eq 1 ]; then reason="$prior_reason"
-  elif has_resume_hint "$out"; then reason="terminal-stream-needs-worker-finalization"
-  fi
+  reason="worker-ended-without-terminal-proof"; has_resume_hint "$out" && reason="terminal-stream-needs-worker-finalization"
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" '.phase="recovery-required"|.terminal_reason=$r|.exit_code=(.exit_code // 1)|.updated=$u'
   kind=incomplete; phase=recovery-required
   defect="$(review_answer_defect "$out")"
-  if [ "$safety_failure" -eq 0 ] && [ "$prior_reason" = session.resume_hint ] && has_resume_hint "$out" && [ -z "$defect" ]; then kind=complete; phase=completed; reason=session.resume_hint; fi
+  if [ "$prior_reason" = session.resume_hint ] && has_resume_hint "$out" && [ -z "$defect" ]; then kind=complete; phase=completed; reason=session.resume_hint; fi
   finalize_review_artifact "$meta" "$out" "$kind" "$reason" || die "recovery could not write the permanent artifact; raw stream kept at $out"
   write_job_state "$meta" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --arg k "$kind" --arg p "$phase" --arg r "$reason" '.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind=$k|.artifact_sha256=$h|.phase=$p|.terminal_reason=$r'
   jq . "$meta"; [ "$kind" = complete ]
@@ -1534,14 +1559,19 @@ lifecycle_cancel() {
 }
 
 start_session() { # start_session NAME MODE
-  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner=""
+  local name="$1" mode="$2" repo rid lockid upstream="" meta pf out rid_lock sid rc before after wt="" base="" owner=""
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(meta_path "$rid" "$name")"
   [ "$mode" = implement ] && meta="$(impl_meta_path "$rid" "$name")"
   [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-kimi ask $name"
 
-  rid_lock="$(repolock_path "$rid")"
+  lockid="$rid"
+  if [ "$mode" = review ]; then
+    upstream="$(require_upstream_identity "$repo")"
+    lockid="$(review_lock_id "$upstream")"
+  fi
+  rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$rid_lock" "$mode:$name" || die "another Kimi run is already active in this repository: $(lock_info "$rid_lock").
   Do not start a second one; wait for it, or continue it with 'ask'."
   LIFECYCLE_LOCK="$rid_lock"
@@ -1604,11 +1634,11 @@ start_session() { # start_session NAME MODE
 
   if [ "$mode" = review ]; then
     write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
-    --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" \
+    --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg upstream "$upstream" \
     --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     '{kimi_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
-      model:$model, created:$created, updated:$created, turns:$turns,
+      model:$model, upstream_identity:$upstream, created:$created, updated:$created, turns:$turns,
       base:$base, head:$head, packet_sha256:$pkthash}')"
   fi
 
@@ -1641,13 +1671,18 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode prev_head
+  local name="$1" repo rid lockid meta sid pf out rc before after sess_lock rid_lock mode prev_head stored_upstream current_upstream
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
   if [ "$mode" = implement ]; then rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return; fi
 
-  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
+  stored_upstream="$(jq -r '.upstream_identity // empty' "$meta")"
+  [ -n "$stored_upstream" ] || die "review session '$name' predates durable upstream binding and cannot be resumed safely. Start a new named Kimi review."
+  current_upstream="$(require_upstream_identity "$repo")"
+  [ "$current_upstream" = "$stored_upstream" ] || die "review session '$name' belongs to a different shared upstream. Restore its original origin or start a new named Kimi review; no provider call was made."
+  lockid="$(review_lock_id "$stored_upstream")"
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
   if ! lock_acquire "$rid_lock" "ask:$name"; then
     lock_release "$sess_lock"; die "another Kimi run is active in this repository: $(lock_info "$rid_lock")"

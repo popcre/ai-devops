@@ -223,6 +223,12 @@ job never started; check `ai-glm list` and `ai-glm show <name>`.
 
 ### Diagnosing
 
+`ai-glm server start` and `ai-glm server restart` return success only after the
+authenticated HTTP health endpoint answers. Both Windows Task Scheduler and
+Linux systemd launch are followed by the same bounded readiness check. A launch
+that never becomes healthy exits nonzero, prints current service/task evidence,
+and names `ai-glm server start` as the retry command.
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | `server is not answering` | Service down or failed | `ai-glm server start`; `journalctl --user -u opencode-glm -n 50` |

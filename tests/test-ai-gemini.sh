@@ -47,7 +47,11 @@ case "${MOCK_MODE:-normal}" in
  mutate-dirty) printf changed-again > dirty.txt ;;
  mutate-ignored) printf changed > .ignored ;;
  mutate-outside) printf changed > "$MOCK_SENTINEL" ;;
+ mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
+ mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
+ mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
  sleep) sleep 30 ;;
+ reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
 esac
 cid=conv-good
@@ -68,10 +72,12 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.7-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.0'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.1'"
 set +e; DOCTOR_OUT="$("$SCRIPT" doctor 2>&1)"; DOCTOR_RC=$?; set -e
 check 'doctor keeps Gemini quarantined pending live proof' "test '$DOCTOR_RC' -ne 0 && printf '%s' '$DOCTOR_OUT' | grep -q '^QUARANTINED'"
 check 'normal operation cannot bypass quarantine' "! '$SCRIPT' new blocked --prompt review"
+check 'quarantine exposes only the governed live qualification path without overstating denied-tool proof' "grep -q 'qualify-live' '$SCRIPT' && grep -q 'outside sentinel changed during live qualification' '$SCRIPT' && grep -q 'mutation-request=no-change' '$SCRIPT' && ! grep -q 'hostile-write=no-change' '$SCRIPT'"
+check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
 sed 's/^QUARANTINED=1$/QUARANTINED=0/' "$SCRIPT" > "$TMP/bin/ai-gemini-test"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
@@ -84,6 +90,12 @@ R2="$TMP/repo2"; make_repo "$R2"; printf prior > "$R2/.ignored"
 check 'ignored-file mutation is rejected' "! new_run '$R2' ignored mutate-ignored"
 R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$SENT"; export MOCK_SENTINEL="$SENT"
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
+R3B="$TMP/repo3b"; make_repo "$R3B"; export MOCK_PROTECTED="$R3B"
+check 'same-turn protected tracked-source mutation is rejected' "! new_run '$R3B' protected mutate-protected"
+R3C="$TMP/repo3c"; make_repo "$R3C"; export MOCK_PROTECTED="$R3C"
+check 'same-turn protected ignored-file mutation is rejected' "! new_run '$R3C' protected-ignored mutate-protected-ignored"
+R3D="$TMP/repo3d"; make_repo "$R3D"; mkdir -p "$R3D/.ai/reviews"; printf tracked > "$R3D/.ai/reviews/tracked.md"; git -C "$R3D" add -f .ai/reviews/tracked.md; git -C "$R3D" commit -qm tracked-runtime; export MOCK_PROTECTED="$R3D"
+check 'tracked files inside runtime directories remain protected' "! new_run '$R3D' protected-tracked-runtime mutate-protected-tracked-runtime"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
@@ -107,11 +119,26 @@ printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
 check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
+BAD_META="$(meta_for badverdict)"
+check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
+if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
+check 'preserved failure evidence uses a private Windows ACL' "icacls \"\$(cygpath -w \"\$(jq -r .failure_artifact '$BAD_META')\")\" | grep -Fqi \"$USERNAME:(F)\""
+else
+  check 'preserved failure evidence is private' "test \"\$(stat -c %a \"\$(jq -r .failure_artifact '$BAD_META')\")\" = 600"
+fi
+mkdir -p "$TMP/fail-bin"; printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/fail-bin/chmod"; /usr/bin/chmod +x "$TMP/fail-bin/chmod"
+FAILURE_FILES_BEFORE="$(find "$TMP/state/failures" -type f 2>/dev/null | wc -l)"
+check 'privacy-control failure rejects output without leaving a readable artifact' "! PATH='$TMP/fail-bin:$PATH' new_run '$R4' privacy-fail badverdict; meta=\$(meta_for privacy-fail); test \"\$(jq -r '.failure_artifact // empty' \"\$meta\")\" = '' && test '$FAILURE_FILES_BEFORE' -eq \"\$(find '$TMP/state/failures' -type f 2>/dev/null | wc -l)\""
 
 echo '== lifecycle, concurrency, report, and head gates'
 R5="$TMP/repo5"; make_repo "$R5" no
 check 'unsafe report destination makes the review fail' "! new_run '$R5' report normal"
 check 'report failure remains recovery-required' "test \"\$(jq -r .status \"\$(meta_for report)\")\" = RECOVERY_REQUIRED"
+R5B="$TMP/repo5b"; make_repo "$R5B"; R5B_ID="$(printf '%s\n%s' "$(cd "$R5B" && pwd -P)" "$(git -C "$R5B" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/repo-$R5B_ID"; printf '99999999\n' > "$TMP/state/locks/repo-$R5B_ID/owner"
+check 'dead local lock owner is safely reclaimed' "new_run '$R5B' stale-owner normal"
+R5C="$TMP/repo5c"; make_repo "$R5C"; R5C_ID="$(printf '%s\n%s' "$(cd "$R5C" && pwd -P)" "$(git -C "$R5C" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/repo-$R5C_ID"; printf '99999999\n' > "$TMP/state/locks/repo-$R5C_ID/owner"
+(new_run "$R5C" reclaim-a reclaim-slow >/dev/null 2>&1) & RECLAIM_A=$!; (new_run "$R5C" reclaim-b reclaim-slow >/dev/null 2>&1) & RECLAIM_B=$!; RA=0; RB=0; wait "$RECLAIM_A" || RA=$?; wait "$RECLAIM_B" || RB=$?
+check 'concurrent stale-lock reclaimers cannot both enter a review' "test \$(( (RA == 0) + (RB == 0) )) -eq 1"
 R6="$TMP/repo6"; make_repo "$R6"
 (cd "$R6" && exec env MOCK_MODE=sleep "$SCRIPT" new concurrent --prompt wait) >/dev/null 2>&1 & RUNPID=$!
 for _ in $(seq 1 100); do [ -n "$(meta_for concurrent 2>/dev/null || true)" ] && break; sleep .05; done
@@ -133,7 +160,11 @@ check 'follow-up refuses uncommitted tracked source drift' "! (cd '$R8' && '$SCR
 R9="$TMP/repo9"; make_repo "$R9"; new_run "$R9" source-untracked normal >/dev/null; printf new > "$R9/untracked.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'follow-up refuses untracked source drift' "! (cd '$R9' && '$SCRIPT' ask source-untracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 R10="$TMP/repo10"; make_repo "$R10"; new_run "$R10" source-ignored normal >/dev/null; printf ignored > "$R10/.ignored"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
-check 'follow-up refuses ignored source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+check 'follow-up refuses ignored protected-source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+R11="$TMP/repo11"; make_repo "$R11"; new_run "$R11" source-runtime normal >/dev/null; mkdir -p "$R11/.ai/reviews" "$R11/.ai/test-runs" "$R11/.ai/qwen-test.123"; printf report > "$R11/.ai/reviews/other-review.md"; printf log > "$R11/.ai/test-runs/test.log"; printf runtime > "$R11/.ai/qwen-test.123/state"
+check 'wrapper-owned .ai runtime evidence does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
+SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'initialized gitlink content drift is fingerprinted before provider contact' "! (cd '$SUBPARENT' && '$SCRIPT' ask source-gitlink --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

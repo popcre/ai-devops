@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Cross-version continuation fixtures | ✅ complete | `tests/test-ai-qwen.sh` (37 cases) |
-| 2 | Bind session to exact evidence | ✅ complete | base/head/source/packet/generation metadata and sealed packet fixtures |
-| 3 | Explicit refresh/restart behavior | ✅ complete | committed, dirty, untracked, and legacy identity drift stop before provider contact |
-| 4 | Shared governance integration | 🟨 partial | packet/source identity complete; provider-neutral preflight/terminal accounting remains |
-| 5 | Live qualification and landing | ⬜ open | verification bundle/remote SHA |
+| 1 | Cross-version continuation fixtures | ✅ complete | `tests/test-ai-qwen.sh` 90/90 plus shared preflight coverage, including a strict single final APPROVE/REJECT/BLOCKED verdict with hostile invalid/duplicate/trailing fixtures, no raw-JSON bypass, and visibly incomplete rejected artifacts; live qualification bound to the wrapper, the repository-owned credential preloader, and a content fingerprint of the full installed bin/lib/embedded-node runtime; trusted production executable resolution; pre-provider durable state under untrappable termination; governed-auth enforcement; service-token child scoping; per-run private Windows state enforcement; private self-deleting handoff-to-memory isolation that keeps the real key out of process arguments and Qwen/tool-child OS environments; handoff cleanup; hostile shell-startup-hook exclusion; full isolated implementation tools plus behaviorally proven installed child-process scrubbing in depth; linked/FIFO evidence refusal; recovery-required new/follow-up evidence; interrupted follow-up and credential-reference cleanup; initial/follow-up evidence-preparation drift refusal; and same-turn committed/dirty/untracked source-drift rejection tested offline |
+| 2 | Bind session to exact evidence | ✅ complete | head/tree/packet/model and prompt fixtures |
+| 3 | Explicit refresh/restart behavior | ✅ complete | committed/dirty/untracked/packet-drift fixtures |
+| 4 | Shared governance integration | ✅ complete | preflight/scoreboard fixtures and isolated credential boundary |
+| 5 | Live qualification and landing | 🟨 live skipped by owner | Qwen credits exhausted; offline proof complete, remote SHA pending |
 
-Fresh session starts at Step 4.
+Current work starts at Step 5; do not spend Qwen credits until the owner restores them.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -41,12 +41,10 @@ changes, broad permissions, other providers.
 
 ## 5. Current state of the code
 
-Review creation now builds and verifies a sealed packet, records base, head,
-whole-source digest, packet hash, and generation, and points Qwen at the manifest.
-An unchanged continuation rebuilds exact evidence and advances its named
-generation. Any committed, dirty, untracked, or legacy identity drift stops
-before provider contact. Provider-neutral preflight/terminal accounting and live
-qualification remain.
+`start_session()` writes conversation/workspace metadata but not exact review
+identity. `cmd_ask()` obtains the current boundary, which can refresh a linked
+worktree snapshot. Existing Qwen suite passed 23 cases during the Kimi landing;
+none covers code changing between new and ask. No fix is committed.
 
 ## 6. Key findings and root cause
 
@@ -118,4 +116,3 @@ guidance; never infer. Rollback by commit/quarantine.
 2. Yes—Sections 6–8 preserve why HEAD-only/silent refresh/legacy inference fail.
 3. Yes—Section 1 makes exact evidence continuity the overriding decision rule.
 All checklist items pass.
-

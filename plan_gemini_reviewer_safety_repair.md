@@ -7,10 +7,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | Step | Work | Status | Evidence |
 |---|---|---|---|
 | 1 | Reconcile contradictory plan/docs and quarantine | ✅ done 2026-08-21 | `AGENTS.md`, `plan_ai-gemini-wrapper.md`, `skills/shared/gemini-code-delegation/SKILL.md` |
-| 2 | Hostile write and conversation fixtures | ✅ done 2026-08-21 | 36 tests cover dirty/ignored/outside/model-call writes, wrong conversation, model drift, private-copy tampering, and tracked/untracked/ignored source drift between turns |
+| 2 | Hostile write and conversation fixtures | ✅ done 2026-08-21 | 48 tests cover dirty/ignored/outside/model-call writes, wrong conversation, model drift, gitlinks, atomic stale-lock reclamation, private-copy tampering, private failure evidence, and protected tracked files inside runtime directories |
 | 3 | Durable locked lifecycle | ✅ done 2026-08-21 | `bin/ai-gemini`; locks precede snapshot/state creation; concurrent-new, interruption, follow-up/delete, and recovery cases pass |
 | 4 | Exact completion and report contract | ✅ done 2026-08-21 | empty/wrong-model/unsafe-report/stale-head cases in `tests/test-ai-gemini.sh` |
-| 5 | Cross-platform live qualification | ⛔ blocked | No live Windows or Ubuntu hostile evidence; quarantine remains mandatory |
+| 5 | Cross-platform live qualification | 🟨 Windows partial | Windows exact-resume, mutation-request/no-change, outside-sentinel, model, and durable-report proof passed 2026-08-21. Deterministic hostile mutation detection is offline-proven; the live result does not claim the model attempted a denied tool call. Ubuntu remains, so quarantine remains mandatory. |
 | 6 | Land, install, and close issue #38 | 🟨 partial | Integrated locally on current GitHub `main`; exact-head approval and push remain. Install and issue close stay forbidden until Step 5. |
 
 Fresh session starts at Step 5 and must preserve quarantine. This plan supersedes conflicting current-state

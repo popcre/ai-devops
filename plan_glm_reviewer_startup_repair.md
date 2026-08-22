@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Start-vs-health failure fixtures | ✅ complete | delayed, never-ready, launch-failure, already-healthy, and restart fixtures |
-| 2 | Make start wait for readiness | ✅ complete | shared bounded `wait_for_server_health` on Windows and Ubuntu |
-| 3 | Align diagnostics/docs | ✅ complete | failure prints task/service state and exact doctor/status recovery |
-| 4 | Live Windows/Ubuntu qualification | ⬜ open | verification bundle |
-| 5 | Land and install | 🟨 integrated locally | focused suite passes; live proof, exact-head review, push, and installed hashes remain |
+| 1 | Start-vs-health failure fixtures | ✅ complete | `tests/test-ai-glm.sh` 244/244 plus Windows structural tests, including already-healthy no-relaunch behavior, one shared deadline for the preliminary probe and startup, and streamed local-service authentication that never exposes the password in process arguments |
+| 2 | Make start wait for readiness | ✅ complete | bounded Windows/Linux health fixtures |
+| 3 | Align diagnostics/docs | ✅ complete | doctor/start artifacts and `docs/glm-opencode.md` |
+| 4 | Live Windows/Ubuntu qualification | 🟨 pending installed revision | real open-issue review evidence |
+| 5 | Land and install | 🟨 pending exact-head approval | remote SHA/installed hashes |
 
-Fresh session starts at Step 4. Preserve completed reliability work in
+Current work starts at Step 4. Preserve completed reliability work in
 `plan_glm-service-reliability.md` and all 33 hard-won constraints in
 `docs/glm-opencode.md` §5.
 
@@ -44,10 +44,10 @@ permissions, service supervision redesign, secret launcher, other reviewers.
 
 ## 5. Current state of the code
 
-The 2026-08-09 reliability plan remains preserved. Direct start and restart now
-share one bounded readiness contract on Windows and Ubuntu, with delayed,
-never-ready, already-healthy, launch-failure, and restart fixtures. Live
-two-platform qualification and landing remain.
+The 2026-08-09 reliability plan is complete: supervision/retry/restart/doctor
+were proven. Only direct `start` returns before readiness. `tests/test-ai-glm.sh`
+and `tests/test-windows-scripts.sh` protect many measured constraints; no test
+requires start to be healthy before success. No fix is committed.
 
 ## 6. Key findings and root cause
 
@@ -123,4 +123,3 @@ Rollback by commit, preserving prior supervisor.
 2. Yes—Sections 6–8 preserve completed reliability constraints and rejected redesigns.
 3. Yes—Section 1 makes “usable when start returns” the governing outcome.
 All checklist items pass.
-

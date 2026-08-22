@@ -90,6 +90,16 @@ Qwen's sandbox, runs with bounded turns/tool calls/time, exports a binary patch
 under the Git-ignored `.ai/reviews/`, and removes the worktree. It never applies
 the patch to the live checkout.
 
+Implementation keeps Qwen's complete read, write, edit, and shell capability.
+The real Coding Plan key crosses one mode-0600 file inside Qwen's private runtime
+directory into a repository-owned Node preloader. The preloader reads and deletes
+that file before Qwen application code starts. Qwen can read the key directly
+from an in-memory, non-enumerable `process.env` view, but it never enters Qwen's
+operating-system environment. Shell/tool children therefore cannot
+inherit it. The provider installer also behaviorally verifies Qwen's own child
+sanitizer as defense in depth. Qwen edits and tests only in the isolated tree;
+the calling AI still inspects the exported patch and reruns required tests.
+
 Inspect and apply an accepted patch yourself:
 
 ```bash
@@ -122,8 +132,24 @@ remain bounded by the wrapper wall time.
 
 ## Verify the installation and every result
 
-Run `ai-qwen doctor --live` after installation or a Qwen version change. A version
-string is not enough. The live proof must return the terminal success record.
+Run the repository-owned provider CLI installer after installation or a Qwen
+version change; it backs up and reapplies the child-process credential hardening.
+Then run `ai-qwen doctor --live`. A version string is not enough. The live proof
+must return the terminal success record. Finally run
+`ai-review-preflight qualify qwen`; it repeats the live check and records the
+exact wrapper hash. Any wrapper change automatically restores quarantine.
+
+Provider turns extract only the `BAILIAN_CODING_PLAN_API_KEY` 1Password
+reference from managed `~/.config/ai-devops/mcp.env`, resolve it through a
+single-variable temporary environment file, and pass the real value through one
+private, self-deleting handoff file to the repository-owned Node preloader. Qwen itself
+launches in an explicit allowlisted OS environment with no provider key and
+`QWEN_HOME` as its only home directory.
+The wrapper uses the international Coding Plan endpoint with the supported
+`qwen3-coder-plus` model. Never paste the key into Qwen
+settings, prompts, command arguments, or logs. If the managed reference is
+missing, repair the ai-devops machine installation instead of configuring an
+unmanaged plaintext key.
 
 For every review or implementation:
 

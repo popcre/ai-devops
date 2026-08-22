@@ -10,31 +10,40 @@ Use `ai-muse` only. Do not call OpenCode, the Meta API, or 1Password directly.
 Muse uses named persistent conversations in a disposable, self-contained copy of the
 target repository. It has no write or shell tools. No other model is used if Muse fails.
 
-First check the runner:
+First select the actual current client. Never reuse the other client's value:
 
 ```bash
-ai-muse doctor
+# Use exactly one of these in the current shell.
+export AI_MUSE_CALLER=codex   # Codex only
+export AI_MUSE_CALLER=claude  # Claude only
+```
+
+Then check the runner:
+
+```bash
+AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse doctor
 ```
 
 Start once from the repository root:
 
 ```bash
-ai-muse new <stable-name> --prompt-file <brief-file>
+AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse new <stable-name> --prompt-file <brief-file>
 ```
 
 Continue the exact conversation for objections, rebuttals, or new evidence:
 
 ```bash
-ai-muse ask <stable-name> --prompt-file <follow-up-file>
+AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse ask <stable-name> --prompt-file <follow-up-file>
 ```
 
-Codex is the default caller. In Bash, Claude uses `AI_MUSE_CALLER=claude ai-muse ...`.
-In PowerShell, use `$env:AI_MUSE_CALLER='claude'` before `ai-muse ...`. Never create a replacement
+Caller identity is mandatory. In Bash, use `AI_MUSE_CALLER=codex ai-muse ...` or
+`AI_MUSE_CALLER=claude ai-muse ...`. In PowerShell, set `$env:AI_MUSE_CALLER` to
+`codex` or `claude` before `ai-muse ...`. Never create a replacement
 session when the named one can be continued. Read the report path printed after each
-turn; use `ai-muse transcript <stable-name>` for the full conversation.
+turn; use `AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse transcript <stable-name>` for the full conversation.
 
 If `ask` says reconciliation is required, inspect that transcript first, then run
-`ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
+`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
 provider state. Never bypass or silently replace an uncertain session.
 
 For a code review, tell Muse to read the manifest in its evidence packet first.

@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Add normalized upstream lock | ⬜ open | clone fixtures in `tests/test-ai-kimi.sh` |
-| 2 | Improve missing-job errors | ⬜ open | status/logs fixtures |
-| 3 | Wait for and re-prove live completion | ⬜ blocked | issue #46 live artifact |
-| 4 | Run installed canary matrix | ⬜ blocked on Step 3 | `tests/verification/kimi/<UTC>/` |
-| 5 | Land/unquarantine/close #46 | ⬜ open | remote SHA and issue close |
+| 1 | Add normalized upstream lock | ✅ complete | equivalent HTTPS/SSH/authenticated-HTTPS/arbitrary-user/case-insensitive suffix and chained relative-origin fixtures, case-sensitive repository paths, plus persistent-session upstream binding; `tests/test-ai-kimi.sh` 189/189 |
+| 2 | Improve missing-job errors | ✅ complete | status/logs/result/wait fixtures |
+| 3 | Wait for and re-prove live completion | 🟨 pending installed revision | issue #46 live artifact |
+| 4 | Run installed canary matrix | 🟨 pending Step 3 | installed verification evidence |
+| 5 | Land/unquarantine/close #46 | 🟨 pending exact-head approval | remote SHA and issue close |
 
-Fresh session starts at Step 1. The merged artifact-recovery work remains governed
+Current work starts at Step 3. The merged artifact-recovery work remains governed
 by `plan_kimi-review-failure-recovery.md`; do not redo its completed Steps 1–7.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -116,4 +116,3 @@ and blocked rather than infer success. Rollback by commit and quarantine.
 2. Yes—Sections 6–8 preserve why auth/text/exit are insufficient and spending rule.
 3. Yes—Section 1 makes one paid run plus proven completion the governing goal.
 All checklist items pass.
-

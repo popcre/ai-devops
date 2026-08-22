@@ -68,9 +68,9 @@ tools run via git-bash on Windows).
 | **Railway CLI + hosted MCP** | Manages Railway projects from the terminal and gives Claude/Codex OAuth-based Railway tools at `https://mcp.railway.com` | ✅ Windows bootstrap installs `@railway/cli`; `bin/setup-machine.ps1` adds Railway to the shared MCP set and gives Codex Railway's authenticated CLI proxy | No repo secret — CLI and MCP use Railway's interactive login/OAuth |
 | **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine. Windows setup installs `ai-kimi` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash | No repo secret — Kimi carries its own interactive login |
 | **Grok Build CLI** (`grok`) | Optional xAI coding-agent target used by the shared `grok-cli` skill | ⚠️ Skill is synced by `ai-devops`; this machine's native install, docs, config, sessions, and login live under `%USERPROFILE%\.grok`; `%USERPROFILE%\.grok\bin` is on User PATH. Windows setup also installs `ai-grok-review` and `ai-grok-implement` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash, so neither wrapper depends on the repo `bin/` being on PATH | No repo secret — never read or sync machine-local `.grok/auth.json` |
-| **Qwen Code CLI** (`qwen`) | Optional Qwen coding-agent target used by the shared `qwen-code` skill | ⚠️ The CLI and OAuth login remain per-machine. `ai-qwen` is repo-owned and installed on Windows for PowerShell and Git Bash and on Ubuntu as a normal command. It provides exact named sessions, read-only reviews, bounded runs, and sandboxed disposable-worktree implementation | No repo secret. Qwen stores its own login and project-scoped sessions under `~/.qwen` |
+| **Qwen Code CLI** (`qwen`) | Qwen coding-agent target used by the shared `qwen-code` skill | ⚠️ The repo-owned wrapper, governed 1Password path, isolation, exact named sessions, model pin, and offline safety suite are configured. Write turns retain the full shell/write/edit toolset inside Qwen's sandbox and a disposable worktree. The real provider key crosses one mode-0600 handoff inside Qwen's private runtime directory into a repository-owned Node preloader; the file is deleted before application code starts, the key is available only through Qwen's direct non-enumerable in-memory lookup, and it is absent from Qwen/tool-child OS environments. After every install or upgrade, the repo installer also backs up, patches, and behaviorally proves Qwen's child sanitizer as defense in depth. Live qualification remains blocked because the account has no Qwen credits, so shared preflight quarantines Qwen until `ai-review-preflight qualify qwen` succeeds; that durable proof is bound to the exact wrapper hash and invalidates automatically after a change | Coding Plan key stays in 1Password; only its `op://` reference is distributed. Qwen sessions stay under a private-permission `~/.qwen` |
 | **GLM sessions** (`ai-glm`) | Named, persistent GLM-5.3 sessions on a loopback-only OpenCode server; read-only reviews and worktree-isolated implementation | ✅ repo-owned client, pinned OpenCode, canonical agents, systemd user service, `ai-glm doctor` | Z.ai key stays in 1Password; only an `op://` reference is distributed |
-| **Muse conversations** (`ai-muse`) | Named, persistent Muse Spark 1.2 Contributor reviews and debates in a disposable self-contained copy | ✅ repo-owned direct-session runner, exact session resume, pinned OpenCode, evidence packet, `ai-muse doctor` | Meta key is read from the `vibe_coding` 1Password item at turn time; persistence uses the exact session ID and needs no long-running Muse service |
+| **Muse conversations** (`ai-muse`) | Named, persistent Muse Spark 1.2 Contributor reviews and debates in a disposable self-contained copy | ✅ repo-owned direct-session runner, exact session resume, pinned OpenCode, evidence packet, `AI_MUSE_CALLER=codex ai-muse doctor` | Meta key is read from the `vibe_coding` 1Password item at turn time; persistence uses the exact session ID and needs no long-running Muse service |
 | **DeepSeek debates** (`ai-deepseek-agent`) | Bounded text-and-file debates used by the shared `deepseek-second-opinion` skill | ✅ repo-owned wrapper and skill; each turn resends the stored conversation | DeepSeek key stays in 1Password; only its `op://` reference is distributed |
 
 The completed reconciliation plan is [`plan_sync-machine-wrapper-reconciliation.md`](../plan_sync-machine-wrapper-reconciliation.md). The command catalog now covers Grok, Kimi, Qwen, GLM, and DeepSeek launchers.
@@ -239,9 +239,10 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   If auth fails, run `kimi login` and complete the device flow once; do not
   attempt to automate authentication inside a delegated coding prompt.
 - **Qwen Code CLI** — the skill and `ai-qwen` wrapper are repo-owned. Install the
-  official CLI, complete its OAuth flow once, then prove the full path with
-  `ai-qwen doctor --live`. A version check alone does not prove model access or
-  the terminal-result contract.
+  official CLI and the managed central reference file; the wrapper resolves the
+  existing Coding Plan key from 1Password at provider-call time. Prove the full
+  path with `ai-qwen doctor --live`. A version check alone does not prove model
+  access or the terminal-result contract.
 - **Installing the three vendor CLIs (Grok, Kimi, Qwen)** — repo-owned, per
   machine, per user:
   - Windows: `bin/install-windows-ai-provider-clis.ps1` (run by
@@ -253,7 +254,10 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
   the script refuses to run as root for that reason. Qwen deliberately uses the
   vendor standalone installer rather than npm, because the npm package needs
   Node 22+ and hetz ships Node 20. **Login stays interactive and manual on every
-  platform** — never automate it inside a delegated coding prompt.
+  platform** — never automate it inside a delegated coding prompt. Windows
+  downloads are executed only after their exact SHA-256 matches a reviewed pin
+  in the installer; an upstream script change fails closed until that pin is
+  deliberately reviewed and updated.
   Each vendor installer edits a shell rc file to put its own directory on PATH,
   and that is unreliable — on hetz all three CLIs were installed and working
   while `kimi` never reached PATH at all. The script therefore links every

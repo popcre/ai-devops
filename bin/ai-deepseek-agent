@@ -39,7 +39,8 @@ CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
 MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
-BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+BASE_URL='https://api.deepseek.com'
+[ -z "${DEEPSEEK_BASE_URL:-}" ] || [ "$DEEPSEEK_BASE_URL" = "$BASE_URL" ] || { echo 'Error: DEEPSEEK_BASE_URL cannot override the pinned official DeepSeek endpoint.' >&2; exit 1; }
 LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
 CALLER="${AI_DEEPSEEK_CALLER:-unknown}"
 CONNECT_TIMEOUT="${AI_DEEPSEEK_CONNECT_TIMEOUT:-15}"
@@ -60,6 +61,9 @@ Usage:
   ai-deepseek-agent list
       List open session ids for this repo, newest first.
 
+  ai-deepseek-agent doctor [--live]
+      Validate the governed runtime; --live makes one bounded provider probe.
+
 A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
 same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
@@ -73,32 +77,66 @@ SUBCMD="${1:-}"
 [ -n "$SUBCMD" ] && shift || true
 
 case "$SUBCMD" in
-  send|reply|show|list) ;;
+  send|reply|show|list|doctor) ;;
   ""|-h|--help|help) usage; exit 0 ;;
   *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
 
-# --- Resolve DEEPSEEK_API_KEY from 1Password if not already in the environment ---
-if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "reply" ]; }; then
+# --- Resolve only DEEPSEEK_API_KEY, then cross an explicit clean environment. ---
+DEEPSEEK_CREDENTIAL_BOUNDARY='
+keep_key="${DEEPSEEK_API_KEY:-}"; script="$1"; shift
+unset DEEPSEEK_API_KEY
+exec 9<<<"$keep_key"
+keep_key=""
+clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT; do
+  [ -z "${!name:-}" ] || clean+=("$name=${!name}")
+done
+exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
+'
+if [ -n "${AI_DEEPSEEK_SECRET_FD:-}" ]; then
+  case "$AI_DEEPSEEK_SECRET_FD" in ''|*[!0-9]*) echo 'Error: invalid managed DeepSeek credential descriptor.' >&2; exit 1;; esac
+  IFS= read -r DEEPSEEK_API_KEY <&"$AI_DEEPSEEK_SECRET_FD" || { echo 'Error: managed DeepSeek credential handoff was empty.' >&2; exit 1; }
+  eval "exec ${AI_DEEPSEEK_SECRET_FD}<&-"
+  unset AI_DEEPSEEK_SECRET_FD
+fi
+if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "reply" ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; }; then
   if [ -n "${AI_DEEPSEEK_REEXEC:-}" ]; then
     echo "Error: DEEPSEEK_API_KEY resolved EMPTY from $MCP_ENV after 'op run'." >&2
     echo "       Check the DEEPSEEK_API_KEY reference in config/mcp.env.example." >&2
     exit 1
   fi
-  command -v op >/dev/null 2>&1 || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
+  OP_BIN="$(command -v op 2>/dev/null || true)"; [ -n "$OP_BIN" ] || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
+  OP_PHYSICAL="$(readlink -f "$OP_BIN" 2>/dev/null || true)"
+  if [ -n "${AI_DEEPSEEK_TEST_DIR:-}" ]; then case "$OP_PHYSICAL" in "$AI_DEEPSEEK_TEST_DIR"/*) ;; *) echo 'Error: test 1Password executable escaped its fixture directory.' >&2; exit 1;; esac
+  elif [ -n "${LOCALAPPDATA:-}" ]; then case "$OP_PHYSICAL" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) echo 'Error: 1Password CLI is not the expected WinGet installation.' >&2; exit 1;; esac
+  else [ "$OP_PHYSICAL" = /usr/bin/op ] || { echo 'Error: 1Password CLI is not the trusted system installation.' >&2; exit 1; }; fi
+  OP_BIN="$OP_PHYSICAL"
+  case "$OP_BIN" in /*) ;; *) echo 'Error: resolved 1Password executable path must be absolute.' >&2; exit 1;; esac
   [ -s "$TOKEN_FILE" ] || { echo "Error: missing 1Password service-account token file: $TOKEN_FILE" >&2; exit 1; }
   [ -f "$MCP_ENV" ] || { echo "Error: missing managed 1Password reference file: $MCP_ENV" >&2; exit 1; }
-  export OP_SERVICE_ACCOUNT_TOKEN AI_DEEPSEEK_REEXEC=1
-  OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
+  [ "$(grep -c '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" 2>/dev/null || true)" = 1 ] || { echo 'Error: managed DeepSeek configuration must contain exactly one 1Password reference.' >&2; exit 1; }
+  DEEPSEEK_REF_FILE="$(mktemp)" || exit 1; chmod 600 "$DEEPSEEK_REF_FILE" 2>/dev/null || true
+  grep '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" > "$DEEPSEEK_REF_FILE" || { rm -f "$DEEPSEEK_REF_FILE"; exit 1; }
+  OP_SERVICE_TOKEN="$(<"$TOKEN_FILE")"
   # Windows cannot execute an extensionless Bash script directly through
   # `op run`. Re-enter through this exact Git Bash interpreter. Do not use a
   # bare `bash`: Windows PATH may resolve that name to WSL instead.
   if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
-    BASH_EXE="$(cygpath -w "$(command -v bash)")"
-    exec op run --env-file "$MCP_ENV" -- "$BASH_EXE" "$0" "$SUBCMD" "$@"
+    BASH_EXE="$(cygpath -w /usr/bin/bash)"
+  else
+    BASH_EXE=/usr/bin/bash
   fi
-  exec op run --env-file "$MCP_ENV" -- "$0" "$SUBCMD" "$@"
+  set +e
+  ( export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"; exec /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@" )
+  REEXEC_RC=$?; set -e; rm -f "$DEEPSEEK_REF_FILE"; exit "$REEXEC_RC"
 fi
+
+# The re-exec environment delivers the key once. Capture it in this shell and
+# immediately remove the exported copy before Python, Git, curl, or any other
+# child can start. Only shell-built header bytes use this non-exported value.
+DEEPSEEK_PROVIDER_KEY="${DEEPSEEK_API_KEY:-}"
+unset DEEPSEEK_API_KEY
 
 command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }
 
@@ -109,19 +147,22 @@ elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
   PYTHON=python
 fi
 [ -n "$PYTHON" ] || { echo "Error: Python is required." >&2; exit 1; }
+case "$CONNECT_TIMEOUT" in ''|0|*[!0-9]*) echo 'Error: AI_DEEPSEEK_CONNECT_TIMEOUT must be a positive whole number of seconds.' >&2; exit 2;; esac
+case "$CALL_TIMEOUT" in ''|0|*[!0-9]*) echo 'Error: AI_DEEPSEEK_CALL_TIMEOUT must be a positive whole number of seconds.' >&2; exit 2;; esac
 
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  REPO_ROOT="$(git rev-parse --show-toplevel)"
-else
-  REPO_ROOT="$PWD"
-fi
-SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
-EXPECTED_SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
-mkdir -p "$EXPECTED_SESS_DIR"
+REPO_ROOT=""; SESS_DIR=""; EXPECTED_SESS_DIR=""
+if [ "$SUBCMD" != doctor ]; then
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+  else
+    REPO_ROOT="$PWD"
+  fi
+  EXPECTED_SESS_DIR="$REPO_ROOT/.ai/deepseek-sessions"
+  mkdir -p "$EXPECTED_SESS_DIR"
 
-# Refuse a linked storage folder. Otherwise even a perfectly validated name can
-# read outside this repository through a directory link chosen by the caller.
-SESS_DIR="$($PYTHON - "$EXPECTED_SESS_DIR" <<'PY'
+  # Refuse a linked storage folder. Otherwise even a perfectly validated name can
+  # read outside this repository through a directory link chosen by the caller.
+  SESS_DIR="$($PYTHON - "$EXPECTED_SESS_DIR" <<'PY'
 import os, sys
 p = os.path.abspath(sys.argv[1])
 r = os.path.realpath(p)
@@ -130,6 +171,7 @@ if os.path.normcase(p) != os.path.normcase(r):
 print(r)
 PY
 )" || exit 1
+fi
 
 new_id() { printf '%s-%s' "$(date +%Y%m%d-%H%M%S)" "$$"; }
 
@@ -221,11 +263,10 @@ import json, os, sys
 messages = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({"model": os.environ["MODEL"], "messages": messages, "stream": False}))
 PY
-  curl -sS -o "$resp_file" -w '%{http_code}' \
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | curl -sS -o "$resp_file" -w '%{http_code}' \
     --connect-timeout "$CONNECT_TIMEOUT" --max-time "$CALL_TIMEOUT" \
     "$BASE_URL/chat/completions" \
-    -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
-    -H "Content-Type: application/json" \
+    -H @- \
     -d @"$req_file" >"$status_file" &
   ACTIVE_API_PID=$!
   rc=0; wait "$ACTIVE_API_PID" || rc=$?
@@ -313,6 +354,24 @@ with_file_appended() {
 }
 
 case "$SUBCMD" in
+  doctor)
+    LIVE=0
+    case "${1:-}" in '') ;; --live) LIVE=1;; *) echo "Error: unknown doctor option: $1" >&2; exit 2;; esac
+    [ "$#" -le 1 ] || { echo 'Usage: ai-deepseek-agent doctor [--live]' >&2; exit 2; }
+    CREDENTIAL_READY=0
+    if [ -n "$DEEPSEEK_PROVIDER_KEY" ]; then CREDENTIAL_READY=1
+    elif command -v op >/dev/null 2>&1 && [ -s "$TOKEN_FILE" ] && [ -f "$MCP_ENV" ] \
+      && [ "$(grep -c '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" 2>/dev/null || true)" = 1 ]; then CREDENTIAL_READY=1; fi
+    [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek credential plumbing is unavailable (no key and no governed 1Password reference).' >&2; exit 1; }
+    printf 'PASS  curl available\nPASS  Python available (%s)\nPASS  bounded provider timeout (%ss)\n' "$PYTHON" "$CALL_TIMEOUT"
+    if [ "$LIVE" -eq 1 ]; then
+      MSGS="$(mktemp)"; REPLY_FILE="$(mktemp)"
+      printf '[{"role":"user","content":"Reply exactly DEEPSEEK_REVIEWER_HEALTHY"}]\n' > "$MSGS"
+      call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; exit 1; }
+      grep -qx 'DEEPSEEK_REVIEWER_HEALTHY' "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; echo 'Error: DeepSeek live probe returned unexpected text.' >&2; exit 1; }
+      rm -f "$MSGS" "$REPLY_FILE"; printf 'PASS  live provider response\n'
+    fi
+    ;;
   list)
     find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' -printf '%T@ %f\n' 2>/dev/null \
       | sort -rn | sed -E 's/^[^ ]+ //; s/\.json$//'

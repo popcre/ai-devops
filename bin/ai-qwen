@@ -33,8 +33,11 @@
 #   Reviews use `--safe-mode --approval-mode plan --exclude-tools
 #     shell,write,edit` and a post-run tree-state check. Implementation uses
 #     `--safe-mode --sandbox --approval-mode yolo` only inside the wrapper-owned
-#     disposable worktree. Qwen itself warns that yolo without sandbox executes
-#     at process privilege; therefore implement mode refuses to omit sandbox.
+#     disposable worktree. The installed Qwen bundle is additionally hardened
+#     so its common child-process sanitizer removes the Coding Plan credential
+#     before shell, MCP, discovered-tool, or hook children start. Qwen itself
+#     warns that yolo without sandbox executes at process privilege; therefore
+#     implement mode refuses to omit sandbox or the installed sanitizer patch.
 #   Qwen's own `--worktree` is not used. The wrapper owns base selection,
 #     locking, cumulative binary patches, interrupted-work recovery, and cleanup.
 #   Installed help and source confirmed all flags above in 0.21.11. A real model
@@ -43,40 +46,149 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 VERSION="0.1.0"
 
 STATE_DIR="${AI_QWEN_STATE_DIR:-$HOME/.local/state/ai-devops/qwen}"
 CALLER="${AI_QWEN_CALLER:-claude}"
-QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max-preview}"
+QWEN_MODEL="${AI_QWEN_MODEL:-qwen3-coder-plus}"
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
+QWEN_CODING_PLAN_BASE_URL="${AI_QWEN_CODING_PLAN_BASE_URL:-https://coding-intl.dashscope.aliyuncs.com/v1}"
+QWEN_HOME_DIR="${AI_QWEN_HOME:-${QWEN_HOME:-$HOME/.qwen}}"
+if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
+  QWEN_BASH_BIN="${AI_QWEN_BASH_BIN:-/usr/bin/bash}"; QWEN_ENV_BIN="${AI_QWEN_ENV_BIN:-/usr/bin/env}"
+else
+  [ -z "${AI_QWEN_BASH_BIN:-}" ] && [ -z "${AI_QWEN_ENV_BIN:-}" ] && [ -z "${AI_QWEN_BIN:-}" ] && [ -z "${AI_QWEN_OP_BIN:-}" ] \
+    || { printf 'ai-qwen: error: executable overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
+  QWEN_BASH_BIN=/usr/bin/bash; QWEN_ENV_BIN=/usr/bin/env
+fi
 MAX_TURNS="${AI_QWEN_MAX_TURNS:-30}"
 MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
 MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
 
 WAIT_TIMEOUT="${AI_QWEN_WAIT_TIMEOUT:-900}"
 POLL_INTERVAL="${AI_QWEN_POLL_INTERVAL:-5}"
+QWEN_CREDENTIAL_BOUNDARY='
+keep_qwen_key="${BAILIAN_CODING_PLAN_API_KEY:-}"
+allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bin="$6"; preload="$7"; secret_file="$8"; shift 8
+clean_env=("$env_bin" -i "PATH=${PATH:-}" "HOME=$qwen_home" "USERPROFILE=$qwen_home" "QWEN_HOME=$qwen_home"
+  "APPDATA=$qwen_home/appdata" "LOCALAPPDATA=$qwen_home/localappdata" "TEMP=$qwen_home/tmp" "TMP=$qwen_home/tmp" "TMPDIR=$qwen_home/tmp")
+for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM; do
+  [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
+done
+if [ "$allow_key" = 1 ]; then
+  [ -n "$keep_qwen_key" ] && [ -f "$preload" ] && [ -f "$secret_file" ] || exit 86
+  printf "%s\n" "$keep_qwen_key" > "$secret_file" || exit 87
+  unset BAILIAN_CODING_PLAN_API_KEY keep_qwen_key
+  clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=$preload" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
+fi
+[ -z "${AI_QWEN_TEST_DIR:-}" ] || clean_env+=("AI_QWEN_TEST_DIR=$AI_QWEN_TEST_DIR")
+exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c '\''exec "$@"'\'' qwen-clean "$@"
+'
 
 die()  { printf 'ai-qwen: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-qwen: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+protect_windows_path(){
+  local path="$1" kind="${2:-file}" ps helper
+  [ -n "${SYSTEMROOT:-}" ] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 1
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+  helper="$SCRIPT_DIR/windows-private-file.ps1"; [ -f "$helper" ] || return 1
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$path")" AI_DEVOPS_PRIVATE_KIND="$kind" \
+    "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }' >/dev/null
+}
+qwen_local() { # qwen_local BINARY ARGS... -- local-only command under the same environment boundary
+  local qwen="$1"; shift
+  "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 0 '' '' "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" /nonexistent /nonexistent "$qwen" "$@"
+}
+
+assert_qwen_child_env_hardened() {
+  local root="${AI_QWEN_SANITIZER_ROOT:-}" node verify_tool
+  if [ -z "$root" ]; then
+    if [ -n "${LOCALAPPDATA:-}" ] && [ -d "$LOCALAPPDATA/qwen-code/qwen-code/lib/chunks" ]; then
+      root="$LOCALAPPDATA/qwen-code/qwen-code"
+    else
+      root="$HOME/.local/lib/qwen-code"
+    fi
+  fi
+  [ -d "$root/lib/chunks" ] || return 1
+  if [ -x "$root/node/bin/node" ]; then node="$root/node/bin/node"
+  elif [ -x "$root/node/node.exe" ]; then node="$root/node/node.exe"
+  else return 1; fi
+  verify_tool="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/verify-qwen-child-env-sanitizer.mjs"
+  [ -f "$verify_tool" ] && "$node" "$verify_tool" "$root" >/dev/null 2>&1
+}
+
+qwen_runtime_root() {
+  local root="${AI_QWEN_SANITIZER_ROOT:-}"
+  if [ -z "$root" ]; then
+    if [ -n "${LOCALAPPDATA:-}" ] && [ -d "$LOCALAPPDATA/qwen-code/qwen-code/lib/chunks" ]; then root="$LOCALAPPDATA/qwen-code/qwen-code"
+    else root="$HOME/.local/lib/qwen-code"; fi
+  fi
+  [ -d "$root/bin" ] && [ -d "$root/lib/chunks" ] || return 1
+  printf '%s' "$root"
+}
+
+qwen_runtime_sha256() {
+  local root file rel hash node=""
+  root="$(qwen_runtime_root)" || return 1
+  if [ -x "$root/node/bin/node" ]; then node="$root/node/bin/node"
+  elif [ -x "$root/node/node.exe" ]; then node="$root/node/node.exe"
+  else return 1; fi
+  {
+    while IFS= read -r -d '' file; do rel="${file#"$root"/}"; hash="$(sha256_file "$file")" || exit 1; printf '%s  %s\n' "$hash" "$rel"; done < <(find "$root/bin" "$root/lib" -type f -print0 | sort -z)
+    printf '%s  %s\n' "$(sha256_file "$node")" "${node#"$root"/}"
+  } | sha256sum | awk '{print $1}'
+}
+
+qwen_preloader_sha256() {
+  local source_root preload
+  source_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." 2>/dev/null && pwd)" || return 1
+  preload="$source_root/tools/qwen-provider-env-preload.cjs"
+  [ -f "$preload" ] && [ ! -L "$preload" ] || return 1
+  sha256_file "$preload"
+}
+
+secure_qwen_home() {
+  mkdir -p "$QWEN_HOME_DIR" "$QWEN_HOME_DIR/appdata" "$QWEN_HOME_DIR/localappdata" "$QWEN_HOME_DIR/tmp" || return 1
+  chmod 700 "$QWEN_HOME_DIR" "$QWEN_HOME_DIR/appdata" "$QWEN_HOME_DIR/localappdata" "$QWEN_HOME_DIR/tmp" 2>/dev/null || return 1
+  protect_windows_path "$QWEN_HOME_DIR" directory || return 1
+  printf 'private home enforced by ai-qwen\n' > "$QWEN_HOME_DIR/.ai-devops-private-home-v1" || return 1
+  chmod 600 "$QWEN_HOME_DIR/.ai-devops-private-home-v1" 2>/dev/null || return 1
+}
 
 # ---------------------------------------------------------------------------
 # Binary resolution covers the official standalone locations and npm installs.
 # ---------------------------------------------------------------------------
+usable_qwen_bin() {
+  [ -x "$1" ] || { case "${1,,}" in *.cmd|*.bat) [ -f "$1" ] ;; *) return 1 ;; esac; }
+}
 resolve_qwen() {
   if [ -n "${AI_QWEN_BIN:-}" ]; then
-    [ -x "$AI_QWEN_BIN" ] || die "AI_QWEN_BIN=$AI_QWEN_BIN is not executable."
+    usable_qwen_bin "$AI_QWEN_BIN" || die "AI_QWEN_BIN=$AI_QWEN_BIN is not executable."
     printf '%s' "$AI_QWEN_BIN"; return 0
   fi
-  local c
-  for c in "$(command -v qwen 2>/dev/null || true)" \
+  local c physical
+  for c in \
            "${LOCALAPPDATA:-}/qwen-code/bin/qwen.exe" \
            "${LOCALAPPDATA:-}/qwen-code/bin/qwen.cmd" \
            "$HOME/.local/bin/qwen" \
            /home/ai/.local/bin/qwen \
            /usr/local/bin/qwen; do
-    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+    [ -n "$c" ] && usable_qwen_bin "$c" || continue
+    physical="$(readlink -f "$c" 2>/dev/null || true)"
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+      case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/qwen-code/bin/qwen.cmd|"$(cygpath -u "$LOCALAPPDATA")"/qwen-code/qwen-code/bin/qwen|"$(cygpath -u "$LOCALAPPDATA")"/qwen-code/qwen-code/bin/qwen.cmd) ;;
+        *) continue;; esac
+    else
+      case "$physical" in "$HOME/.local/bin/qwen"|"$HOME/.local/lib/qwen-code/bin/qwen"|/home/ai/.local/bin/qwen|/home/ai/.local/lib/qwen-code/bin/qwen) ;; *) continue;; esac
+    fi
+    printf '%s' "$c"; return 0
   done
   die "qwen binary not found. Set AI_QWEN_BIN, or install Qwen Code. Looked on PATH, the official standalone locations, and /usr/local/bin."
 }
@@ -105,8 +217,6 @@ repo_root() {
 # clones, so the live checkout cannot move underneath a running session.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
-PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
-[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
   "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
@@ -114,6 +224,33 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
   "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+}
+
+resolve_trusted_op() {
+  local candidate physical
+  if [ -n "${AI_QWEN_TEST_DIR:-}" ] && [ -n "${AI_QWEN_OP_BIN:-}" ]; then candidate="$AI_QWEN_OP_BIN"
+  else candidate="$(command -v op 2>/dev/null || true)"; fi
+  [ -n "$candidate" ] || return 1; physical="$(readlink -f "$candidate" 2>/dev/null || true)"
+  if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then case "$physical" in "$AI_QWEN_TEST_DIR"/*) ;; *) return 1;; esac
+  elif [ -n "${LOCALAPPDATA:-}" ]; then case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) return 1;; esac
+  else [ "$physical" = /usr/bin/op ] || return 1; fi
+  [ -f "$physical" ] && [ -x "$physical" ] && printf '%s' "$physical"
+}
+PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
+[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
+REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""; WORKING_TREE_HASH=""; PACKET_REL=""
+prepare_review_identity() { # SOURCE REVIEW_DIR TAG
+  local source="$1" dir="$2" tag="$3" packet
+  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH."
+  packet="$($PACKET_BIN build "$dir" "$tag")"
+  $PACKET_BIN verify "$packet" >/dev/null || die "review evidence packet failed verification."
+  PACKET_REL="$(basename "$packet")"
+  REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]*\)`.*/\1/p' "$packet/MANIFEST.md" | head -1)"
+  REVIEW_HEAD="$(git -C "$source" rev-parse HEAD)"
+  PACKET_HASH="$(cat "$packet/MANIFEST.sha256")"
+  WORKING_TREE_HASH="$(tree_state "$source")"
+  [ -n "$REVIEW_BASE" ] && [ -n "$REVIEW_HEAD" ] && [ -n "$PACKET_HASH" ] && [ -n "$WORKING_TREE_HASH" ] \
+    || die "could not bind Qwen review to exact source evidence."
 }
 refresh_review_boundary() { # refresh_review_boundary ROOT TAG RECORDED
   local root="$1" tag="$2" recorded="$3" refreshed
@@ -124,19 +261,6 @@ refresh_review_boundary() { # refresh_review_boundary ROOT TAG RECORDED
   [ "$(cd "$refreshed" && pwd -P)" = "$(cd "$recorded" && pwd -P)" ] || \
     die "review session is bound to $recorded but its private snapshot now resolves to $refreshed. Refusing to split one conversation across two directories."
   printf '%s' "$recorded"
-}
-prepare_review_evidence() { # WORKDIR TAG PROMPT_FILE
-  local workdir="$1" tag="$2" prompt="$3"
-  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; a Qwen review without exact evidence is forbidden."
-  REVIEW_PACKET_DIR="$($PACKET_BIN build "$workdir" "$tag" --decision "$(cat "$prompt")" --class medium)" \
-    || die "could not build Qwen review evidence."
-  "$PACKET_BIN" verify "$REVIEW_PACKET_DIR" >/dev/null || die "Qwen review evidence failed verification."
-  REVIEW_PACKET_SHA="$(cat "$REVIEW_PACKET_DIR/MANIFEST.sha256")"
-  REVIEW_SOURCE_SHA="$(sed -n 's/^source_digest=//p' "$workdir/.ai-review-sandbox")"
-  REVIEW_HEAD_SHA="$(git -C "$workdir" rev-parse HEAD)"
-  REVIEW_BASE_SHA="$(sed -n 's/^| \*\*base\*\* | `\([^`]*\)`.*/\1/p' "$REVIEW_PACKET_DIR/MANIFEST.md")"
-  [ -n "$REVIEW_SOURCE_SHA" ] && [ -n "$REVIEW_BASE_SHA" ] || die "Qwen evidence is missing source or base identity."
-  printf '\n\nRead `%s/MANIFEST.md` first. It is the sealed evidence for this exact source generation.\n' "$REVIEW_PACKET_DIR" >> "$prompt"
 }
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
@@ -349,9 +473,18 @@ mark_impl_recovery_required() { # META TERMINAL
 # ---------------------------------------------------------------------------
 RUN_TURN_RC=unavailable
 RUN_TURN_PID=""
+RUN_TURN_ENV_FILE=""
+PLAIN_REVIEW_META=""
+PLAIN_REVIEW_OUT=""
+cleanup_run_turn_env() {
+  [ -z "${RUN_TURN_SECRET_FILE:-}" ] || rm -f -- "$RUN_TURN_SECRET_FILE" 2>/dev/null || true
+  RUN_TURN_SECRET_FILE=""
+  [ -z "$RUN_TURN_ENV_FILE" ] || rm -f -- "$RUN_TURN_ENV_FILE" 2>/dev/null || true
+  RUN_TURN_ENV_FILE=""
+}
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
-  local qwen; qwen="$(resolve_qwen)"
+  local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload; qwen="$(resolve_qwen)"
   local args=(--model "$QWEN_MODEL" --output-format stream-json --safe-mode
     --max-session-turns "$MAX_TURNS" --max-wall-time "$MAX_WALL_TIME"
     --max-tool-calls "$MAX_TOOL_CALLS" --max-subagent-depth 1)
@@ -359,17 +492,48 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   if [ "$mode" = review ]; then
     args+=(--approval-mode plan --exclude-tools shell,write,edit)
   elif [ "$mode" = implement ]; then
+    # Preserve the complete implementation toolset, including shell and tests.
+    # The installer-patched common child sanitizer strips the provider key from
+    # every agent-controlled child process before this mode is allowed to run.
+    assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before implementation."
     args+=(--sandbox --approval-mode yolo)
   fi
   # Current Qwen supports stdin, keeping the brief out of the process list.
 
+  [ -x "$QWEN_BASH_BIN" ] && [ -x "$QWEN_ENV_BIN" ] || die "trusted absolute Bash/env executables are required: $QWEN_BASH_BIN and $QWEN_ENV_BIN"
+  case "$QWEN_BASH_BIN:$QWEN_ENV_BIN" in /*:/*) ;; *) die 'trusted Bash/env executable paths must be absolute.' ;; esac
+  secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before credential resolution.'
   : > "$out"
+  [ "$QWEN_CODING_PLAN_BASE_URL" = 'https://coding-intl.dashscope.aliyuncs.com/v1' ] || die 'Qwen Coding Plan endpoint must be the pinned international Alibaba endpoint.'
+  preload="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/qwen-provider-env-preload.cjs"
+  [ -f "$preload" ] || die 'repository-owned Qwen secret-environment preloader is missing.'
+  RUN_TURN_SECRET_FILE="$(mktemp "$QWEN_HOME_DIR/tmp/.qwen-secret.XXXXXX")" || die 'could not reserve private Qwen secret handoff.'
+  chmod 600 "$RUN_TURN_SECRET_FILE" 2>/dev/null || die 'could not protect private Qwen secret handoff.'
+  protect_windows_path "$RUN_TURN_SECRET_FILE" file || die 'could not enforce private Qwen secret-handoff ACL.'
   set +e
-  ( cd "$repo" && exec "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  [ -f "$MCP_ENV" ] && credential_count="$(grep -c '^BAILIAN_CODING_PLAN_API_KEY=' "$MCP_ENV" 2>/dev/null || true)"
+  if [ "$credential_count" = 1 ] && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$MCP_ENV"; then
+    op_bin="$(resolve_trusted_op 2>/dev/null || true)"
+    [ -n "$op_bin" ] && [ -x "$op_bin" ] || die "1Password CLI is required to resolve the managed Qwen Coding Plan credential."
+    local op_service_token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$op_service_token" ] || [ ! -s "$TOKEN_FILE" ] || op_service_token="$(<"$TOKEN_FILE")"
+    credential_ref="$(sed -n 's/^BAILIAN_CODING_PLAN_API_KEY=//p' "$MCP_ENV" | tail -1)"
+    case "$credential_ref" in op://*) ;; *) die "managed Qwen credential is not a 1Password reference." ;; esac
+    qwen_env="$(mktemp)"; RUN_TURN_ENV_FILE="$qwen_env"; printf 'BAILIAN_CODING_PLAN_API_KEY=%s\n' "$credential_ref" > "$qwen_env"; chmod 600 "$qwen_env" 2>/dev/null || true
+    # op run inherits its own environment. Remove shell startup hooks before
+    # launching either op or its Bash child, then the boundary removes every
+    # credential-shaped variable except Qwen's key before exec.
+    case "$op_bin" in /*) ;; *) die 'resolved 1Password executable path must be absolute.' ;; esac
+    ( [ -z "$op_service_token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$op_service_token"; cd "$repo" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$op_bin" run --env-file "$qwen_env" -- "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  else
+    die "governed Qwen authentication is unavailable. $MCP_ENV must contain exactly one BAILIAN_CODING_PLAN_API_KEY=op:// reference; no provider call was made."
+  fi
   RUN_TURN_PID=$!
   wait "$RUN_TURN_PID"
   RUN_TURN_RC=$?
   RUN_TURN_PID=""
+  cleanup_run_turn_env
+  [ -z "${AI_QWEN_TEST_POST_TURN_ENV_FILE:-}" ] || env | sort > "$AI_QWEN_TEST_POST_TURN_ENV_FILE"
   set -e
   return 0
 }
@@ -400,9 +564,22 @@ stop_run_turn() {
     set +e; wait "$pid" 2>/dev/null; set -e
     RUN_TURN_PID=""
   fi
+  cleanup_run_turn_env
 }
 
-cancel_plain_turn() { stop_run_turn; exit 130; }
+record_existing_review_recovery() { # META OUT REASON
+  local meta="$1" out="$2" reason="$3" pending
+  pending="${meta%.json}.pending.jsonl"
+  cp "$out" "$pending" 2>/dev/null || : > "$pending"
+  chmod 600 "$pending" 2>/dev/null || true
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .updated=$u' "$meta")"
+}
+cancel_plain_turn() {
+  stop_run_turn
+  [ -z "$PLAIN_REVIEW_META" ] || record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" interrupted-provider-turn || true
+  exit 130
+}
+trap cleanup_run_turn_env EXIT
 
 # ---------------------------------------------------------------------------
 # THE REVIEW-OUTPUT CONTRACT (shared-db issue #1220)
@@ -440,13 +617,19 @@ cancel_plain_turn() { stop_run_turn; exit 130; }
 ANSWER_DEFECT=""
 
 extract_answer() { # extract_answer FILE
-  local text
+  local text verdict_count terminal
   ANSWER_DEFECT=""
-  text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed '/^$/d')"
+  text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed 's/\r$//' | sed '/^$/d')"
   if [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
     ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
-  elif ! printf '%s' "$text" | grep -qF '## Verdict'; then
-    ANSWER_DEFECT="the answer carries no '## Verdict' heading, so no verdict was reached"
+  else
+    verdict_count="$(printf '%s\n' "$text" | grep -Ec '^## Verdict[[:space:]]*$' || true)"
+    terminal="$(printf '%s\n' "$text" | sed '/^[[:space:]]*$/d' | tail -n 2)"
+    if [ "$verdict_count" -ne 1 ]; then
+      ANSWER_DEFECT="the answer must contain exactly one standalone '## Verdict' heading (found $verdict_count)"
+    elif ! printf '%s\n' "$terminal" | grep -Eq '^## Verdict[[:space:]]*$' || ! printf '%s\n' "$terminal" | tail -n 1 | grep -Eq '^(APPROVE|REJECT|BLOCKED)$'; then
+      ANSWER_DEFECT="the final two nonblank lines must be '## Verdict' and exactly APPROVE, REJECT, or BLOCKED"
+    fi
   fi
   # ALWAYS the whole body. Findings routinely sit ABOVE the verdict heading, and
   # printing only the tail is how a complete review became a two-line APPROVE.
@@ -466,20 +649,33 @@ report_answer_defect() { # report_answer_defect NAME STREAM_PATH
 PROMPT_FOOTER="
 
 ---
-Formatting requirement: structure your reply so the final answer is last, under a
-literal '## Verdict' heading. Put any narration above it."
+Formatting requirement: put all findings and narration first. The final two
+nonblank lines must be the heading followed by exactly one word: APPROVE,
+REJECT, or BLOCKED. Example:
+## Verdict
+APPROVE
+Do not use any other verdict heading or put text after the verdict word."
 
 build_prompt_file() {
-  local dest="$1"
+  local dest="$1" body="$1.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
     [ -f "$OPT_PROMPT_FILE" ] || die "prompt file not found: $OPT_PROMPT_FILE"
-    cat "$OPT_PROMPT_FILE" > "$dest"
-  elif [ -n "${OPT_PROMPT:-}" ]; then printf '%s\n' "$OPT_PROMPT" > "$dest"
-  elif [ ! -t 0 ]; then cat > "$dest"
+    cat "$OPT_PROMPT_FILE" > "$body"
+  elif [ -n "${OPT_PROMPT:-}" ]; then printf '%s\n' "$OPT_PROMPT" > "$body"
+  elif [ ! -t 0 ]; then cat > "$body"
   else die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
   fi
-  [ -s "$dest" ] || die "the prompt is empty."
+  [ -s "$body" ] || die "the prompt is empty."
+  if [ -n "$PACKET_REL" ]; then
+    printf 'Read %s/MANIFEST.md first and verify its sealed evidence before judging the code.\n\n' "$PACKET_REL" > "$dest"
+    cat "$body" >> "$dest"; rm -f "$body"
+  else mv -f "$body" "$dest"; fi
   printf '%s' "$PROMPT_FOOTER" >> "$dest"
+}
+
+verify_returned_model() { # verify_returned_model STREAM
+  local returned; returned="$(model_from "$1")"
+  [ "$returned" = "$QWEN_MODEL" ] || die "Qwen returned model '${returned:-unavailable}'; expected the pinned model $QWEN_MODEL."
 }
 
 # Defence in depth: excluded tools are the guarantee. Hash the complete tracked
@@ -491,8 +687,18 @@ tree_state() {
     git -C "$repo" diff --binary HEAD 2>/dev/null
     git -C "$repo" ls-files -z --others --exclude-standard 2>/dev/null \
       | while IFS= read -r -d '' f; do
-          printf 'UNTRACKED %s\n' "$f"
-          sha256sum "$repo/$f" 2>/dev/null || return 1
+          local fd before after path_state hash
+          [ ! -L "$repo/$f" ] && [ -f "$repo/$f" ] || { printf 'ai-qwen: refusing linked or non-regular untracked evidence: %s\n' "$f" >&2; return 1; }
+          exec {fd}<"$repo/$f" || { printf 'ai-qwen: could not bind untracked evidence: %s\n' "$f" >&2; return 1; }
+          before="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"
+          path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"
+          case "$before" in 'regular file:'*':1:'*) ;; *) exec {fd}<&-; printf 'ai-qwen: refusing untracked evidence without one regular-file identity: %s\n' "$f" >&2; return 1;; esac
+          [ "$before" = "$path_state" ] && [ ! -L "$repo/$f" ] || { exec {fd}<&-; printf 'ai-qwen: untracked evidence identity changed before hashing: %s\n' "$f" >&2; return 1; }
+          hash="$(sha256sum <&$fd | awk '{print $1}')" || { exec {fd}<&-; return 1; }
+          after="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"; path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"
+          exec {fd}<&-
+          [ "$before" = "$after" ] && [ "$before" = "$path_state" ] && [ ! -L "$repo/$f" ] || { printf 'ai-qwen: untracked evidence changed during hashing: %s\n' "$f" >&2; return 1; }
+          printf 'UNTRACKED %q %s\n' "$f" "$hash"
         done
   } | sha256sum | awk '{print $1}'
 }
@@ -508,15 +714,19 @@ reviews_dir() {
     && printf '%s/.ai/reviews' "$repo" || printf ''
 }
 write_review_file() {
-  local repo="$1" name="$2" f="$3" dir ts out base
-  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="qwen-${name}-${ts}.md"; dir="$(reviews_dir "$repo" "$base")"
+  local repo="$1" name="$2" f="$3" status="${4:-accepted}" dir ts out base
+  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if [ "$status" = accepted ]; then base="qwen-${name}-${ts}.md"; else base="qwen-${name}-incomplete-${ts}.md"; fi
+  dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
     return 0
   fi
   mkdir -p "$dir"; out="$dir/$base"
   {
-    echo "# Qwen review — $name"; echo
+    if [ "$status" = accepted ]; then echo "# Qwen review — $name"; else echo "# Qwen incomplete review — $name"; fi
+    echo
+    [ "$status" = accepted ] || { echo "- Status: \`NOT ACCEPTED — invalid or missing terminal verdict\`"; echo; }
     echo "- Repo: \`$repo\`"
     echo "- Branch: \`$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')\`"
     echo "- Session: \`$(session_id_from "$f")\`"
@@ -586,19 +796,42 @@ doctor_worktrees() {
 }
 
 cmd_doctor() {
-  local live=0 qwen rc=0
+  local live=0 qwen rc=0 runtime_sha="" preloader_sha=""
   [ "${1:-}" = "--live" ] && live=1
   need jq; qwen="$(resolve_qwen)"
   echo "qwen binary   : $qwen"
-  echo "qwen version  : $("$qwen" --version 2>&1 | head -1)"
+  echo "qwen version  : $(qwen_local "$qwen" --version 2>&1 | head -1)"
+  if runtime_sha="$(qwen_runtime_sha256)" && [ -n "$runtime_sha" ]; then
+    echo "qwen runtime sha256: $runtime_sha"
+  else
+    echo "qwen runtime sha256: UNAVAILABLE"
+    rc=1
+  fi
+  if preloader_sha="$(qwen_preloader_sha256)" && [ -n "$preloader_sha" ]; then
+    echo "qwen preloader sha256: $preloader_sha"
+  else
+    echo "qwen preloader sha256: UNAVAILABLE"
+    rc=1
+  fi
   echo "caller        : $CALLER"
   echo "state dir     : $STATE_DIR"
   echo "model pin     : $QWEN_MODEL"
+  if [ -f "$MCP_ENV" ] && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$MCP_ENV"; then
+    echo "credential    : managed 1Password reference"
+    echo "endpoint      : $QWEN_CODING_PLAN_BASE_URL"
+  else
+    echo "credential    : provider-managed or unavailable"
+  fi
   echo "read-only     : safe mode + plan mode + shell/write/edit excluded"
-  echo "implement     : Qwen sandbox + disposable Git worktree"
+  if assert_qwen_child_env_hardened 2>/dev/null; then
+    echo "child secrets : HARDENED (Coding Plan key stripped from Qwen tool children)"
+  else
+    echo "child secrets : FAILED — rerun the repository-owned provider CLI installer"; rc=1
+  fi
+  echo "implement     : full Qwen tools + sandbox + disposable Git worktree"
   echo "budgets       : turns=$MAX_TURNS tools=$MAX_TOOL_CALLS wall=$MAX_WALL_TIME"
   echo
-  if "$qwen" sessions list --json --limit 1 >/dev/null 2>&1; then
+  if qwen_local "$qwen" sessions list --json --limit 1 >/dev/null 2>&1; then
     echo "session store : OK"
   else
     echo "session store : FAILED"; rc=1
@@ -607,7 +840,7 @@ cmd_doctor() {
     local tmp; tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
     echo -n "live probe    : "
     run_turn "$(pwd)" "$tmp" "$tmp.p" review >/dev/null || true
-    if has_result "$tmp"; then echo "OK"; else echo "FAILED — no terminal success result (authentication, model, or sandbox may need attention)"; rc=1; fi
+    if has_result "$tmp" && verify_returned_model "$tmp"; then echo "OK"; else echo "FAILED — terminal success and exact pinned model were not both proven"; rc=1; fi
     rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
   fi
   doctor_worktrees
@@ -634,6 +867,21 @@ LIFECYCLE_ARTIFACT_DURABLE=0
 LIFECYCLE_PRESERVE=0
 LIFECYCLE_RID=""
 LIFECYCLE_META=""
+LIFECYCLE_REVIEW_DIR=""
+
+record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
+  local meta="$1" repo="$2" name="$3" review_dir="$4" out="$5" reason="$6" pending sid now
+  mkdir -p "$(dirname "$meta")"
+  pending="${meta%.json}.pending.jsonl"; sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable; now="$(date -u +%FT%TZ)"
+  cp "$out" "$pending" 2>/dev/null || : > "$pending"
+  chmod 600 "$pending" 2>/dev/null || true
+  write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
+    --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg review_dir "$review_dir" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" \
+    --arg packet "$PACKET_HASH" --arg tree "$WORKING_TREE_HASH" --arg pending "$pending" --arg reason "$reason" --arg now "$now" \
+    '{qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"review",status:"recovery-required",model:$model,
+      review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,
+      recovery_stream:$pending,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
+}
 LIFECYCLE_SID=""
 LIFECYCLE_PRIOR_TREE=""
 
@@ -834,8 +1082,9 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
 
 lifecycle_exit_trap() {
   local original=$? final
-  trap - EXIT INT TERM
+  trap - EXIT HUP INT TERM
   set +e
+  cleanup_run_turn_env
   lifecycle_finalize "$original"; final=$?
   exit "$final"
 }
@@ -844,11 +1093,14 @@ lifecycle_cancel() {
   LIFECYCLE_STATE=cancelled
   LIFECYCLE_COMMAND_RC=130
   stop_run_turn
+  if [ "$LIFECYCLE_MODE" = review ] && [ -n "$LIFECYCLE_META" ]; then
+    record_new_review_recovery "$LIFECYCLE_META" "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_REVIEW_DIR" "$LIFECYCLE_OUT" interrupted-provider-turn || true
+  fi
   exit 130
 }
 
 start_session() { # start_session NAME MODE
-  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner="" review_tag=""
+  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner="" source_head_before="" source_tree_before=""
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(meta_path "$rid" "$name")"
@@ -860,7 +1112,7 @@ start_session() { # start_session NAME MODE
   Do not start a second one; wait for it, or continue it with 'ask'."
   LIFECYCLE_LOCK="$rid_lock"
   trap lifecycle_exit_trap EXIT
-  trap lifecycle_cancel INT TERM
+  trap lifecycle_cancel HUP INT TERM
   LIFECYCLE_ACTIVE=1; LIFECYCLE_MODE="$mode"; LIFECYCLE_STATE=failed
   LIFECYCLE_NAME="$name"; LIFECYCLE_REPO="$repo"; LIFECYCLE_WT=""
   LIFECYCLE_OWNER=""; LIFECYCLE_BASE=""; LIFECYCLE_PF=""; LIFECYCLE_OUT=""
@@ -869,7 +1121,18 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_PRIOR_TREE=""
 
   local workdir="$repo"
-  [ "$mode" = implement ] || workdir="$(review_boundary "$repo" "qwen-$name")"
+  if [ "$mode" != implement ]; then
+    source_head_before="$(git -C "$repo" rev-parse HEAD)"
+    source_tree_before="$(tree_state "$repo")"
+    [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
+    [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_SNAPSHOT_DELAY"
+    workdir="$(review_boundary "$repo" "qwen-$name")"
+    LIFECYCLE_REVIEW_DIR="$workdir"
+    prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+    if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
+      die "the source repository changed while Qwen evidence was being prepared; no provider call was made. Start a new named Qwen review."
+    fi
+  fi
   if [ "$mode" = implement ]; then
     base="$(git -C "$repo" rev-parse HEAD)"
     wt="$(workspace_path "$rid" "$name")"
@@ -889,19 +1152,27 @@ start_session() { # start_session NAME MODE
   pf="$(mktemp)"; LIFECYCLE_PF="$pf"
   out="$(mktemp)"; LIFECYCLE_OUT="$out"
   build_prompt_file "$pf"
-  if [ "$mode" = review ]; then
-    review_tag="qwen-$name"; prepare_review_evidence "$workdir" "$review_tag" "$pf"
-  fi
   before="$(tree_state "$workdir")"
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
+  if [ "$mode" = review ]; then
+    LIFECYCLE_META="$meta"
+    record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" turn_in_progress
+    write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
+  fi
   run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
   LIFECYCLE_COMMAND_RC="$rc"
+  [ "$mode" != review ] || record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" provider_turn_pending_local_validation
   if ! await_result "$out" "$mode '$name'"; then
     LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
     note "  qwen exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     exit 1
+  fi
+  verify_returned_model "$out"
+
+  if [ "$mode" = review ] && { [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; }; then
+    die "the source repository changed during the Qwen turn; the stale response was rejected. Start a new named Qwen review."
   fi
 
   sid="$(session_id_from "$out")"
@@ -916,20 +1187,13 @@ start_session() { # start_session NAME MODE
   Inspect: git -C $repo status"
   fi
 
-  if [ "$mode" = review ]; then
-    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
-    --arg caller "$CALLER" --arg mode "$mode" --arg model "$QWEN_MODEL" --arg review_dir "$workdir" \
-    --arg base "$REVIEW_BASE_SHA" --arg head "$REVIEW_HEAD_SHA" --arg source "$REVIEW_SOURCE_SHA" --arg packet "$REVIEW_PACKET_SHA" --arg packet_dir "$REVIEW_PACKET_DIR" \
-    --arg created "$(date -u +%FT%TZ)" --argjson turns 1 --argjson generation 1 \
-    '{qwen_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
-      model:$model, review_dir:$review_dir,base_sha:$base,head:$head,source_digest:$source,
-      packet_sha256:$packet,packet_dir:$packet_dir,generation:$generation,
-      created:$created, updated:$created, turns:$turns}')"
-  fi
-
   # #1220: keep the lifecycle bookkeeping, THEN fail. Aborting on the spot would
   # skip lifecycle_finalize and lose the run's own record of what happened.
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
+  if [ "$mode" = review ] && [ "${FINISH_RC:-0}" = 0 ]; then
+    rm -f "$(jq -r '.recovery_stream // empty' "$meta")"
+    write_meta "$meta" "$(jq --arg sid "$sid" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=1' "$meta")"
+  fi
   lifecycle_finalize 0
   [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
 }
@@ -956,11 +1220,24 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode workdir current_source current_head returned
+  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode workdir current_head current_tree expected_head expected_tree expected_packet source_head_before source_tree_before status pending
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .qwen_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
   if [ "$mode" = implement ]; then rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return; fi
+  status="$(jq -r '.status // "active"' "$meta")"
+  [ "$status" = active ] || die "review session '$name' requires recovery ($status) because its provider conversation may have advanced beyond accepted evidence. Inspect the recorded recovery_stream, then delete and start a new named Qwen review."
+
+  expected_head="$(jq -r '.head // empty' "$meta")"; expected_tree="$(jq -r '.working_tree_sha256 // empty' "$meta")"; expected_packet="$(jq -r '.packet_sha256 // empty' "$meta")"
+  [ -n "$expected_head" ] && [ -n "$expected_tree" ] && [ -n "$expected_packet" ] \
+    || die "review session '$name' predates exact evidence binding and cannot be resumed safely. Start a new named Qwen review."
+  current_head="$(git -C "$repo" rev-parse HEAD)"; current_tree="$(tree_state "$repo")"
+  if [ "$current_head" != "$expected_head" ] || [ "$current_tree" != "$expected_tree" ]; then
+    die "review session '$name' is bound to different code evidence.
+  reviewed HEAD: $expected_head
+  current HEAD : $current_head
+The committed, dirty, or untracked source state changed. Start a new named Qwen review; no provider call was made."
+  fi
 
   sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
@@ -969,9 +1246,9 @@ cmd_ask() {
   fi
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
-  trap cancel_plain_turn INT TERM
+  trap cancel_plain_turn HUP INT TERM
 
-  pf="$(mktemp)"; out="$(mktemp)"; build_prompt_file "$pf"
+  pf="$(mktemp)"; out="$(mktemp)"
   note "Qwen '$name' continuing session $sid…"
   workdir="$(jq -r '.review_dir // empty' "$meta")"
   if [ -z "$workdir" ]; then
@@ -983,31 +1260,42 @@ cmd_ask() {
     write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$workdir" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
-  jq -e '(.base_sha|type=="string") and (.head|type=="string") and (.source_digest|type=="string") and (.packet_sha256|type=="string") and (.generation|type=="number")' "$meta" >/dev/null 2>&1 \
-    || die "review session '$name' predates exact evidence identity. Start a new named review; this conversation cannot produce another verdict."
-  current_source="$($SANDBOX_BIN digest "$repo")"; current_head="$(git -C "$repo" rev-parse HEAD)"
-  [ "$current_source" = "$(jq -r .source_digest "$meta")" ] && [ "$current_head" = "$(jq -r .head "$meta")" ] \
-    || die "review session '$name' is stale because committed, dirty, or untracked source changed. Start a new named review; no Qwen turn was started."
+  source_head_before="$current_head"; source_tree_before="$current_tree"
   workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
-  prepare_review_evidence "$workdir" "qwen-$name" "$pf"
+  [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
+  [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY"
+  prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+  [ "$source_head_before" = "$(git -C "$repo" rev-parse HEAD)" ] && [ "$source_tree_before" = "$(tree_state "$repo")" ] \
+    || die "the source repository changed while rebuilding the sealed Qwen evidence; no provider call was made. Start a new named Qwen review."
+  [ "$REVIEW_HEAD" = "$expected_head" ] && [ "$WORKING_TREE_HASH" = "$expected_tree" ] && [ "$PACKET_HASH" = "$expected_packet" ] \
+    || die "review session '$name' no longer reproduces its exact sealed evidence; no provider call was made. Start a new named Qwen review."
+  build_prompt_file "$pf"
   before="$(tree_state "$workdir")"
+  PLAIN_REVIEW_META="$meta"; PLAIN_REVIEW_OUT="$out"
+  record_existing_review_recovery "$meta" "$out" turn_in_progress
+  write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  pending="${meta%.json}.pending.jsonl"
+  record_existing_review_recovery "$meta" "$out" provider_turn_pending_local_validation
   if ! await_result "$out" "'$name'"; then
     note "  qwen exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
+  verify_returned_model "$out"
+  if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
+    die "the source repository changed during the Qwen turn; the stale response was rejected. Start a new named Qwen review."
+  fi
   after="$(tree_state "$workdir")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
     die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
   fi
-  returned="$(session_id_from "$out")"
-  [ "$returned" = "$sid" ] || die "Qwen returned session '$returned' instead of '$sid'; response rejected."
-  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg packet "$REVIEW_PACKET_SHA" --arg packet_dir "$REVIEW_PACKET_DIR" \
-    '.updated=$u | .turns=(.turns+1) | .generation=(.generation+1) | .packet_sha256=$packet | .packet_dir=$packet_dir' "$meta")"
   FINISH_RC=0
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$FINISH_RC" = 0 ]; then
+    rm -f "$pending"
+    write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=(.turns+1)' "$meta")"
+    PLAIN_REVIEW_META=""; PLAIN_REVIEW_OUT=""
     rm -f "$pf" "$out" "$out.err"
   else
     # #1220: report_answer_defect just named "$out" as the place the review body
@@ -1064,6 +1352,7 @@ continue_implementation() { # NAME RID META [RESET]
   if ! await_result "$out" "implementation continuation '$name'"; then
     LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"; exit 1
   fi
+  verify_returned_model "$out"
   if [ "$reset" = 1 ]; then LIFECYCLE_SID="$(session_id_from "$out")"
   else [ "$(session_id_from "$out")" = "$sid" ] || die "Qwen returned a different session id; refusing to advance canonical state."; fi
   # #1220: on the IMPLEMENT path the deliverable is the patch, so a missing verdict
@@ -1075,10 +1364,11 @@ continue_implementation() { # NAME RID META [RESET]
 }
 
 finish_turn() {
-  local repo="$1" name="$2" out="$3" path rc=0
+  local repo="$1" name="$2" out="$3" path rc=0 artifact_status=accepted
   ANSWER_DEFECT=""
-  if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
-  path="$(write_review_file "$repo" "$name" "$out")"
+  if [ "${OPT_JSON:-0}" = 1 ]; then extract_answer "$out" >/dev/null; cat "$out"; else extract_answer "$out"; fi
+  [ -z "$ANSWER_DEFECT" ] || artifact_status=incomplete
+  path="$(write_review_file "$repo" "$name" "$out" "$artifact_status")"
   [ -n "$path" ] && note "saved: $path"
   jq -r 'select(.type=="result") | "usage: input=\(.usage.input_tokens // "?") output=\(.usage.output_tokens // "?") turns=\(.num_turns // "?")"' "$out" 2>/dev/null | tail -1 >&2
   note "model: requested=$QWEN_MODEL returned=$(model_from "$out")"
@@ -1137,7 +1427,7 @@ cmd_transcript() {
   base="qwen-$1-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"; dir="$(reviews_dir "$repo" "$base")"; [ -n "$dir" ] || die "cannot export: exact destination is not safely git-ignored."
   mkdir -p "$dir"; out="$dir/$base"; tmp="$out.partial"
   [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
-  source="$("$qwen" sessions list --json --limit 1000 2>/dev/null | jq -r --arg sid "$sid" 'select(.sessionId==$sid)|.filePath' | tail -1)"
+  source="$(qwen_local "$qwen" sessions list --json --limit 1000 2>/dev/null | jq -r --arg sid "$sid" 'select(.sessionId==$sid)|.filePath' | tail -1)"
   [ -n "$source" ] || die "Qwen session $sid was not found in its project-scoped store."
   if command -v cygpath >/dev/null 2>&1 && printf '%s' "$source" | grep -Eq '^[A-Za-z]:|\\'; then source="$(cygpath -u "$source")"; fi
   [ -f "$source" ] || die "Qwen session file is missing: $source"

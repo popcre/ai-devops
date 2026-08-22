@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ai-codex-review — fail-closed, read-only Codex review of an exact source state.
 set -euo pipefail
+umask 077
 
 VERSION="2.0.0"
 MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
@@ -10,9 +11,28 @@ PACKET="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
 LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$SCRIPT_DIR/ai-review-lifecycle}"
 CALLER="${AI_CODEX_REVIEW_CALLER:-codex}"
 CODEX_CMD='codex exec -m gpt-5.6-sol --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'
-[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+REVIEW_TIMEOUT="${AI_CODEX_REVIEW_TIMEOUT:-1800}"
 
 die(){ printf 'ai-codex-review: error: %s\n' "$*" >&2; exit 1; }
+load_codex_command(){
+  local count line
+  [ -f "$MODELS_ENV" ] || return 0
+  count="$(grep -c '^CODEX_CMD=' "$MODELS_ENV" 2>/dev/null || true)"; [ "$count" -le 1 ] || die "duplicate CODEX_CMD entries in $MODELS_ENV"
+  [ "$count" = 1 ] || return 0
+  line="$(grep '^CODEX_CMD=' "$MODELS_ENV")"
+  case "$line" in CODEX_CMD=\'*\') CODEX_CMD="${line#CODEX_CMD=\'}"; CODEX_CMD="${CODEX_CMD%\'}";; *) die "CODEX_CMD in $MODELS_ENV must be one single-quoted data value.";; esac
+  case "$CODEX_CMD" in *\'*) die "CODEX_CMD in $MODELS_ENV contains an embedded quote.";; esac
+}
+protect_windows_path(){
+  local path="$1" kind="${2:-file}" ps helper
+  [ -n "${SYSTEMROOT:-}" ] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 1
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+  helper="$SCRIPT_DIR/windows-private-file.ps1"; [ -f "$helper" ] || return 1
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$path")" AI_DEVOPS_PRIVATE_KIND="$kind" \
+    "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }' >/dev/null
+}
+secure_review_directory(){ chmod 700 "$1" 2>/dev/null && protect_windows_path "$1" directory; }
 usage(){ cat <<'EOF'
 Usage: ai-codex-review <plan-review|diff-review|security-review|visual-review|final-check>
        ai-codex-review doctor
@@ -24,14 +44,23 @@ EOF
 }
 
 validate_command(){
-  case " $CODEX_CMD " in *' --sandbox read-only '*) ;; *) die 'CODEX_CMD must explicitly contain --sandbox read-only.';; esac
-  case " $CODEX_CMD " in *' -m gpt-5.6-sol '*|*' --model gpt-5.6-sol '*) ;; *) die 'CODEX_CMD must explicitly pin gpt-5.6-sol.';; esac
-  printf '%s' "$CODEX_CMD" | grep -Eq 'model_reasoning_effort=(low|medium)([^A-Za-z]|$)' \
-    || die 'CODEX_CMD must explicitly pin model_reasoning_effort=low or medium.'
-  case "$CODEX_CMD" in *dangerously-bypass*|*sandbox=workspace-write*|*'--sandbox workspace-write'*|*'--sandbox danger-full-access'*) die 'CODEX_CMD requests a writable or bypassed sandbox.';; esac
+  local physical test_root
+  case "$REVIEW_TIMEOUT" in ''|0|*[!0-9]*) die 'AI_CODEX_REVIEW_TIMEOUT must be a positive whole number of seconds.';; esac
+  load_codex_command
   read -r -a CODEX_ARGS <<< "$CODEX_CMD"
-  [ "${#CODEX_ARGS[@]}" -ge 2 ] || die 'CODEX_CMD is incomplete.'
+  [ "${#CODEX_ARGS[@]}" -eq 9 ] || die 'CODEX_CMD must be the exact governed Codex review command.'
+  [ "${CODEX_ARGS[1]}" = exec ] && [ "${CODEX_ARGS[2]}" = -m ] && [ "${CODEX_ARGS[3]}" = gpt-5.6-sol ] \
+    && [ "${CODEX_ARGS[4]}" = --skip-git-repo-check ] && [ "${CODEX_ARGS[5]}" = --sandbox ] && [ "${CODEX_ARGS[6]}" = read-only ] && [ "${CODEX_ARGS[7]}" = -c ] \
+    || die 'CODEX_CMD must preserve the exact model and read-only sandbox argument order.'
+  case "${CODEX_ARGS[8]}" in model_reasoning_effort=low|model_reasoning_effort=medium) ;; *) die 'CODEX_CMD must explicitly pin model_reasoning_effort=low or medium.';; esac
+  if [ -n "${AI_CODEX_REVIEW_TEST_DIR:-}" ]; then
+    physical="$(readlink -f "${CODEX_ARGS[0]}" 2>/dev/null || true)"; test_root="$(cd "$AI_CODEX_REVIEW_TEST_DIR" 2>/dev/null && pwd -P || true)"
+    case "$physical" in "$test_root"/*) ;; *) die 'test Codex executable escaped AI_CODEX_REVIEW_TEST_DIR.';; esac
+  else
+    case "${CODEX_ARGS[0]}" in codex|codex.exe) ;; *) die 'production CODEX_CMD must invoke the governed codex executable directly.';; esac
+  fi
   command -v "${CODEX_ARGS[0]}" >/dev/null 2>&1 || die "Codex command not found: ${CODEX_ARGS[0]}"
+  command -v timeout >/dev/null 2>&1 || die 'timeout is required for bounded Codex reviews.'
 }
 
 doctor(){
@@ -44,7 +73,7 @@ doctor(){
 
 MODE="${1:-}"
 case "$MODE" in
-  doctor) doctor; exit 0;;
+  doctor) shift; [ "$#" -eq 0 ] || die 'usage: ai-codex-review doctor'; doctor; exit 0;;
   plan-review|diff-review|security-review|visual-review|final-check) ;;
   ''|-h|--help|help) usage; exit 0;;
   *) usage >&2; exit 2;;
@@ -59,18 +88,66 @@ REPORT_DIR="$REPO_ROOT/.ai/reviews"
 git check-ignore -q .ai/reviews/ai-codex-review-probe \
   || die '.ai/reviews must be Git-ignored before a review can write there.'
 mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
-[ -z "$(git ls-files '.ai/reviews/*')" ] || die '.ai/reviews contains tracked files.'
+secure_review_directory "$REPORT_DIR" || die 'could not enforce private review storage.'
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"
+OUT="$REPORT_DIR/codex-${MODE}-${RUN_ID}.md"; OUT_REL="${OUT#"$REPO_ROOT"/}"
+git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is not Git-ignored: $OUT_REL"
+! git ls-files --error-unmatch -- "$OUT_REL" >/dev/null 2>&1 || die "exact report destination is tracked: $OUT_REL"
+[ ! -e "$OUT" ] && [ ! -L "$OUT" ] || die "unique report collision: $OUT"
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
-STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_REPORT=""
+STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
+  [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
   [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
   "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+
+preserve_failure_diagnostic(){ # FAILURE_CLASS
+  local failure="$1" path tmp
+  [ -n "$TMP_ERR" ] && [ -f "$TMP_ERR" ] || return 1
+  path="$REPORT_DIR/codex-${MODE}-failed-${RUN_ID}.log"
+  [ ! -e "$path" ] && [ ! -L "$path" ] || return 1
+  git check-ignore --no-index -q -- "${path#"$REPO_ROOT"/}" || return 1
+  tmp="$(mktemp "$REPORT_DIR/.codex-failure.XXXXXX")" || return 1
+  {
+    printf 'Codex review failure\nrun: %s\nmode: %s\nfailure: %s\nhead: %s\n\nSanitized provider diagnostics (last 32768 bytes):\n' "$RUN_ID" "$MODE" "$failure" "$(jq -r '.head // "unknown"' "$STATE" 2>/dev/null || printf unknown)"
+    tail -c 32768 "$TMP_ERR" | sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file && mv "$tmp" "$path" && protect_windows_path "$path" file || { rm -f "$tmp"; return 1; }
+  FAILURE_REPORT="$path"; printf '%s' "$path"
+}
+
+stop_provider_tree(){ # TIMEOUT_PID
+  local pid="$1" i
+  [ -n "$pid" ] || return 0
+  # GNU timeout owns a separate process group unless --foreground is used.
+  # Signal that whole group so the CLI and any subprocess it is currently
+  # waiting on cannot survive an interrupted wrapper.
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  for i in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep .1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+
+interrupt_review(){
+  trap - HUP INT TERM
+  stop_provider_tree "$PROVIDER_PID"
+  PROVIDER_PID=""
+  local elapsed=$(( $(date +%s) - STARTED )) report=""
+  report="$(preserve_failure_diagnostic interrupted || true)"
+  if [ -n "$STATE" ] && [ -f "$STATE" ] && [ "$(jq -r '.status // ""' "$STATE" 2>/dev/null || true)" = running ]; then
+    if [ -n "$report" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$elapsed" --failure interrupted --report "$report" >/dev/null 2>&1 || true
+    else "$LIFECYCLE" fail --state "$STATE" --elapsed "$elapsed" --failure interrupted >/dev/null 2>&1 || true; fi
+  fi
+  exit 130
+}
+trap interrupt_review HUP INT TERM
 
 STATE="$($LIFECYCLE begin --provider codex --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" \
   || die 'provider preflight failed; no review was assigned.'
@@ -112,15 +189,19 @@ allowed word exactly as follows:
 APPROVE|REJECT|BLOCKED"
 
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
+TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
+chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
 set +e
-printf '%s\n' "$PROMPT" | "${CODEX_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2>&1
-PROVIDER_RC=$?
+printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 
 if [ "$PROVIDER_RC" -ne 0 ]; then
-  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true
-  die "Codex exited nonzero ($PROVIDER_RC); no successful report was published."
+  FAILURE_REPORT="$(preserve_failure_diagnostic provider-failed || true)"
+  if [ -n "$FAILURE_REPORT" ]; then "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$FAILURE_REPORT" >/dev/null 2>&1 || true
+  else "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; fi
+  die "Codex exited nonzero ($PROVIDER_RC); no successful report was published. Diagnostic: ${FAILURE_REPORT:-unavailable}"
 fi
 EXPECTED_DIGEST="$(sed -n 's/^source_digest=//p' "$REVIEW_DIR/.ai-review-sandbox")"
 ACTUAL_DIGEST="$($SANDBOX digest "$REVIEW_DIR")" \
@@ -128,11 +209,12 @@ ACTUAL_DIGEST="$($SANDBOX digest "$REVIEW_DIR")" \
 [ -n "$EXPECTED_DIGEST" ] && [ "$EXPECTED_DIGEST" = "$ACTUAL_DIGEST" ] \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure reviewer-write-detected >/dev/null 2>&1 || true; die 'Codex changed its read-only snapshot; response rejected.'; }
 [ -s "$TMP_OUT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure empty-response >/dev/null 2>&1 || true; die 'Codex returned an empty response.'; }
-VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_OUT")"
-case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict >/dev/null 2>&1 || true; die 'Codex returned no valid ## Verdict.';; esac
+FINAL_TWO="$(tr -d '\r' < "$TMP_OUT" | sed '/^[[:space:]]*$/d' | tail -n 2)"; HEADING_COUNT="$(grep -c '^## Verdict\r\{0,1\}$' "$TMP_OUT" || true)"
+case "$FINAL_TWO" in $'## Verdict\nAPPROVE') VERDICT=APPROVE;; $'## Verdict\nREJECT') VERDICT=REJECT;; $'## Verdict\nBLOCKED') VERDICT=BLOCKED;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict >/dev/null 2>&1 || true; die 'Codex verdict must be the one final two-line section.';; esac
+[ "$HEADING_COUNT" -eq 1 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict >/dev/null 2>&1 || true; die 'Codex returned multiple verdict sections.'; }
 
-OUT="$REPORT_DIR/codex-${MODE}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
 TMP_REPORT="$(mktemp "$REPORT_DIR/.codex-report.XXXXXX")"
+chmod 600 "$TMP_REPORT" 2>/dev/null || die 'could not protect temporary report output.'
 {
   printf '# Codex review — %s\n\n' "$MODE"
   printf '| field | value |\n|---|---|\n'
@@ -142,6 +224,8 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.codex-report.XXXXXX")"
 } > "$TMP_REPORT"
 [ -s "$TMP_REPORT" ] || die 'report assembly produced an empty file.'
 mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
+chmod 600 "$OUT" 2>/dev/null || die 'could not protect the completed report.'
+protect_windows_path "$OUT" file || die 'could not enforce the completed report Windows ACL.'
 
 FINAL_STATE=""
 if ! FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")"; then

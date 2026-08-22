@@ -40,11 +40,11 @@ Options:
   --allow-root   Permit running as root (installs into /root; rarely correct).
   -h, --help     Show this help.
 
-After install, each provider needs ONE interactive login, which this script
+After install, each provider needs ONE authentication setup, which this script
 deliberately does not automate:
   grok            # then follow the sign-in prompt
   kimi login
-  qwen            # then complete the OAuth flow
+  qwen            # then configure Alibaba Coding Plan authentication
 USAGE
 }
 
@@ -120,6 +120,31 @@ link_into_local_bin() {
   echo "     linked $dst -> $real"
 }
 
+harden_qwen_child_env() {
+  local root="${AI_QWEN_SANITIZER_ROOT:-$HOME/.local/lib/qwen-code}" candidate="" count=0 tmp backup_dir node verify_tool
+  [ -d "$root/lib/chunks" ] || { echo "ERROR qwen: installed bundle directory is missing: $root/lib/chunks" >&2; return 1; }
+  while IFS= read -r file; do
+    grep -q 'function sanitizeChildEnv' "$file" || continue
+    candidate="$file"; count=$((count+1))
+  done < <(grep -l 'var INTERNAL_SECRET_ENV_VARS' "$root"/lib/chunks/*.js 2>/dev/null || true)
+  [ "$count" = 1 ] || { echo "ERROR qwen: expected exactly one child-environment sanitizer bundle under $root; found $count" >&2; return 1; }
+  if ! grep -q '"BAILIAN_CODING_PLAN_API_KEY"' "$candidate"; then
+    backup_dir="$HOME/.local/state/ai-devops/qwen/vendor-backups"
+    mkdir -p "$backup_dir"
+    cp -p "$candidate" "$backup_dir/$(basename "$candidate").$(date -u +%Y%m%dT%H%M%SZ).bak" || return 1
+    tmp="$(mktemp "${candidate}.harden.XXXXXX")" || return 1
+    if ! awk '!done && /var INTERNAL_SECRET_ENV_VARS = \[/ { print; print "  \"BAILIAN_CODING_PLAN_API_KEY\","; done=1; next } { print } END { if (!done) exit 42 }' "$candidate" > "$tmp"; then
+      rm -f "$tmp"; echo "ERROR qwen: could not patch the known child-environment sanitizer" >&2; return 1
+    fi
+    chmod --reference="$candidate" "$tmp" 2>/dev/null || true
+    mv "$tmp" "$candidate"
+  fi
+  if [ -x "$root/node/bin/node" ]; then node="$root/node/bin/node"; elif [ -x "$root/node/node.exe" ]; then node="$root/node/node.exe"; else echo "ERROR qwen: bundled Node runtime is missing" >&2; return 1; fi
+  verify_tool="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/verify-qwen-child-env-sanitizer.mjs"
+  [ -f "$verify_tool" ] && "$node" "$verify_tool" "$root" >/dev/null || { echo "ERROR qwen: child-environment sanitizer failed its behavioral proof" >&2; return 1; }
+  echo "OK   qwen child-process sanitizer now strips the Coding Plan credential"
+}
+
 failed=0
 installed_any=0
 needs_path=()
@@ -133,6 +158,7 @@ for entry in "${PROVIDERS[@]}"; do
     # Still repair reachability: "installed but not on PATH" is the exact state
     # that makes the doctor report the provider unavailable.
     ((DRY_RUN)) || link_into_local_bin "$cmd" "$existing"
+    if [ "$name" = qwen ] && ((DRY_RUN == 0)); then harden_qwen_child_env || failed=1; fi
     continue
   fi
 
@@ -165,6 +191,7 @@ for entry in "${PROVIDERS[@]}"; do
     echo "OK   $name installed ($resolved)"
     installed_any=1
     link_into_local_bin "$cmd" "$resolved"
+    if [ "$name" = qwen ]; then harden_qwen_child_env || failed=1; fi
     command -v "$cmd" >/dev/null 2>&1 || needs_path+=("$LOCAL_BIN")
   else
     echo "ERROR $name: installer finished but neither '$cmd' on PATH nor \$HOME/$home_rel exists" >&2
@@ -184,7 +211,7 @@ if ((installed_any)) && ((DRY_RUN == 0)); then
   echo "NEXT sign in once per provider (interactive, deliberately not automated):"
   echo "  grok            # follow the sign-in prompt"
   echo "  kimi login"
-  echo "  qwen            # complete the OAuth flow"
+  echo "  qwen            # configure Alibaba Coding Plan authentication"
   echo "Then prove the full path:  ai-qwen doctor --live"
 fi
 

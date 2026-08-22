@@ -11,7 +11,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 3 | Refuse outside-target links in snapshots | ✅ complete | snapshot hostile-link guard and suite |
 | 4 | Correlate incident evidence exactly | ✅ complete | 28 incident tests pass; duplicate exact matches and non-owned paths are refused |
 | 5 | Make freshness fail closed | ✅ complete | 15 scoreboard tests pass; run/session/caller identity is preserved |
-| 6 | Govern every active provider | ✅ complete | 26 preflight tests pass; unsupported doctor contracts stay unknown and Gemini stays quarantined |
+| 6 | Govern every active provider | ✅ complete | 35 preflight tests pass; explicit doctor/caller contracts are enforced, Gemini stays quarantined, and Qwen qualification is bound to both the exact wrapper revision and installed runtime hash |
 | 7 | Land and install | 🟨 integrated locally | combined branch is rebased on current GitHub `main`; exact-head approval, push, and permitted installation remain |
 
 Fresh session starts at Step 7. Re-read downstream steps after each phase.

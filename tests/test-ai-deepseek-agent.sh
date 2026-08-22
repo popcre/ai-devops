@@ -5,18 +5,21 @@ PASS=0; FAIL=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
 git -C "$TMP/repo" init -q; git -C "$TMP/repo" config user.email test@example.com; git -C "$TMP/repo" config user.name Test
 printf 'test\n' > "$TMP/repo/tracked"; git -C "$TMP/repo" add tracked; git -C "$TMP/repo" commit -qm init
 printf 'placeholder-token\n' > "$TMP/home/.config/ai-devops/op-service-account"
-printf 'DEEPSEEK_API_KEY=op://example\n' > "$TMP/home/.config/ai-devops/mcp.env"
+printf 'DEEPSEEK_API_KEY=op://example\nUNRELATED_SECRET=op://must-not-resolve\n' > "$TMP/home/.config/ai-devops/mcp.env"
 cat > "$TMP/bin/op" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$DEEPSEEK_TEST_ARGS"
+while [ "$#" -gt 0 ]; do case "$1" in --env-file) cp "$2" "$DEEPSEEK_TEST_ENV_FILE"; break;; *) shift;; esac; done
 STUB
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DEEPSEEK_CURL_ARGS"
+env | sort > "$DEEPSEEK_CURL_ENV"
 out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;; esac; done
 [ -z "${DEEPSEEK_STUB_DELAY:-}" ] || {
   printf '%s\n' "$$" > "$DEEPSEEK_STUB_PID_FILE"
@@ -26,18 +29,36 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;;
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"stub"}' > "$out"; printf 500; else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
-export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
+export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
 : > "$DEEPSEEK_CURL_ARGS"
 echo 'ai-deepseek-agent tests'
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" send test >/dev/null 2>&1
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test >/dev/null 2>&1
 check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
+mkdir -p "$TMP/untrusted-test-root"
+check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' bash '$SCRIPT' send trust-check"
+OP_ARGS_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
+check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
+check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
+FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
+check "managed descriptor handoff delivers the key without exporting it to curl" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'live provider response' && ! grep -q '^DEEPSEEK_API_KEY=' '$DEEPSEEK_CURL_ENV'"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
+DOCTOR_STATE_BEFORE="$(git -C "$TMP/repo" status --porcelain=v1 --untracked-files=all)"
+check "offline doctor succeeds without provider contact" "run doctor | grep -q 'bounded provider timeout'"
+check "offline doctor leaves the repository byte state unchanged" "test '$DOCTOR_STATE_BEFORE' = \"\$(git -C '$TMP/repo' status --porcelain=v1 --untracked-files=all)\" && test ! -e '$TMP/repo/.ai/deepseek-sessions'"
+check "live doctor proves exact provider response" "DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY run doctor --live | grep -q 'live provider response'"
+check "live doctor leaves the repository byte state unchanged" "test '$DOCTOR_STATE_BEFORE' = \"\$(git -C '$TMP/repo' status --porcelain=v1 --untracked-files=all)\" && test ! -e '$TMP/repo/.ai/deepseek-sessions'"
+check "doctor rejects unknown options" "! run doctor --unknown"
+check "zero provider timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CALL_TIMEOUT=0 run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "nonnumeric connect timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CONNECT_TIMEOUT=nope run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "send creates a safe session" "test -n '$SESSION' -a -f '$TMP/repo/.ai/deepseek-sessions/$SESSION.json'"
 check "show reads stored session" "run show '$SESSION' | grep -q answer"
 check "provider calls have connection and total time limits" "grep -q -- '--connect-timeout 15 --max-time 300' '$DEEPSEEK_CURL_ARGS'"
+check "provider key never appears in curl process arguments or a temporary header file" "! grep -q 'Bearer test' '$DEEPSEEK_CURL_ARGS' && grep -q -- '-H @-' '$DEEPSEEK_CURL_ARGS' && ! grep -q 'header_file' '$SCRIPT'"
+check "provider key is removed from child-process environments" "! grep -q '^DEEPSEEK_API_KEY=' '$DEEPSEEK_CURL_ENV' && grep -q 'unset DEEPSEEK_API_KEY' '$SCRIPT'"
 printf '{"outside":true}\n' > "$TMP/outside.json"; before="$(sha256sum "$TMP/outside.json"|cut -d' ' -f1)"
 for hostile in '..' '../outside' '../../outside' '/tmp/outside' 'C:\outside' 'C:/outside' 'CON' 'con.txt' 'name/part' 'name\part' '.hidden'; do if run show "$hostile" >/dev/null 2>&1 || run reply "$hostile" attack >/dev/null 2>&1; then bad "hostile name rejected: $hostile"; else ok "hostile name rejected: $hostile"; fi; done
 after="$(sha256sum "$TMP/outside.json"|cut -d' ' -f1)"; check "hostile names preserve outside files" "test '$before' = '$after'"

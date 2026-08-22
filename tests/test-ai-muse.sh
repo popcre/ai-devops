@@ -16,11 +16,11 @@ check 'ask resumes exact session' "grep -q -- '--session \"\$sid\"' '$SCRIPT'"
 check 'same named session is locked across turns' "grep -q 'lock_session \"\$rid\" \"\$name\"' '$SCRIPT'"
 check 'failed lock acquisition cannot remove its owner' "grep -q 'LOCK=\"\$candidate\"' '$SCRIPT'"
 check 'caller names are path-safe' "grep -q 'name_ok \"\$CALLER\"' '$SCRIPT'"
-check 'credentialed commands never guess their caller' "grep -q 'AI_MUSE_CALLER must be set explicitly' '$SCRIPT'"
 check 'completion requires stop' "grep -q '\[ \"\$FINISH\" != stop \]' '$SCRIPT'"
 check 'source state is checked after every turn' "test \"\$(grep -c 'stale response rejected' '$SCRIPT')\" -eq 2"
 check 'temporary files use a securely created directory' "grep -q 'mktemp -d' '$SCRIPT' && grep -q 'trap cleanup EXIT' '$SCRIPT'"
 check 'report writes fail closed' "grep -q 'could not write Muse report' '$SCRIPT'"
+check 'one held-open report staging file is reserved before provider contact and revalidated' "grep -q 'reserve_report_staging' '$SCRIPT' && grep -q 'finish_report_staging' '$SCRIPT' && grep -q 'exec {PUBLISH_FD}' '$SCRIPT' && test \"\$(grep -c 'reserve_report_staging \"\$root\"; before=' '$SCRIPT')\" -eq 2"
 check 'delete takes the same session lock' "grep -q 'cmd_delete.*lock_session' '$SCRIPT'"
 check 'compatibility review still requires a verdict' "grep -q 'REQUIRE_VERDICT=1' '$SCRIPT'"
 check 'review uses a disposable copy' "grep -q 'ensure-copy' '$SCRIPT'"
@@ -30,13 +30,19 @@ check 'local runtime failure is distinct' "grep -q 'local_dependency_unavailable
 check 'config pins exact protected provider and model' "jq -e '.model==\"meta-model-api/muse-spark-1.2-contributor\" and .small_model==.model and .share==\"disabled\" and .autoupdate==false and .provider[\"meta-model-api\"].options.baseURL==\"https://api.meta.ai/v1\" and .provider[\"meta-model-api\"].options.apiKey==\"{env:MODEL_API_KEY}\"' '$ROOT/config/opencode-muse/opencode.json'"
 check 'runtime revalidates protected configuration' "grep -q 'Muse protection configuration changed' '$SCRIPT'"
 check 'doctor validates the full protected configuration' "grep -q 'trusted provider configuration is installed byte-for-byte' '$SCRIPT'"
+check 'live doctor requires an exact bounded provider response' "grep -q 'MUSE_REVIEWER_HEALTHY' '$SCRIPT' && grep -q 'AI_MUSE_DOCTOR_TIMEOUT' '$SCRIPT'"
 check 'installed profile must exactly match its trusted source' "grep -q 'cmp -s.*config/opencode-muse/agent/muse-review.md' '$SCRIPT'"
 check '1Password reads use one global credential lock' "grep -q 'credential.lock.d' '$SCRIPT' && grep -q 'release_credential_lock' '$SCRIPT'"
+check 'Muse key reaches the provider through a private handoff, never argv or the heartbeat parent' "grep -q 'unset MODEL_API_KEY' '$SCRIPT' && grep -q 'internal credential-boundary failure: Muse key reached the heartbeat parent' '$SCRIPT' && grep -q 'AI_MUSE_SECRET_FILE=\$key_file' '$SCRIPT' && ! grep -q '\"MODEL_API_KEY=\$provider_key\"' '$SCRIPT' && grep -q 'env_bin.*-i' '$SCRIPT'"
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
-check 'report destination is proven ignored, unique, and unlinked' "grep -q 'check-ignore -q .ai/reviews/ai-muse-probe' '$SCRIPT' && grep -q 'refusing to replace a tracked Muse report' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
+check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
+check 'report destination is proven exact, ignored, untracked and unlinked' "grep -q 'exact destination is not Git-ignored' '$SCRIPT' && grep -q 'exact destination is tracked' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$dir/.ai-devops-private-reviews-v1\" ]' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_MUSE_TEST_DIR="$TMP"
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO"
 git -C "$REPO" init -q; git -C "$REPO" config user.name Test; git -C "$REPO" config user.email t@example.com
 printf '.ai/\n' > "$REPO/.gitignore"; printf 'marker\n' > "$REPO/a.txt"; git -C "$REPO" add .gitignore a.txt; git -C "$REPO" commit -qm init
@@ -44,6 +50,7 @@ VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
 BIN="$HOME_FIX/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin"; mkdir -p "$BIN" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent" "$TMP/bin"
 cp "$ROOT/config/opencode-muse/opencode.json" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json"
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
+mkdir -p "$REPO/.ai/reviews"; printf 'historic\n' > "$REPO/.ai/reviews/historic.md"; git -C "$REPO" add -f .ai/reviews/historic.md; git -C "$REPO" commit -qm 'tracked historic review'
 cat > "$TMP/bin/op" <<'EOF'
 #!/usr/bin/env bash
 printf fake-key
@@ -53,10 +60,22 @@ cat > "$BIN/opencode.exe" <<'EOF'
 case "${1:-}" in
   --version) echo 1.18.12;;
   run)
+    [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
+    if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
+      { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
+    fi
+    if [ -n "${MUSE_STUB_FD_LEAK_FILE:-}" ]; then
+      for fd_path in /proc/$$/fd/*; do case "$(readlink "$fd_path" 2>/dev/null || true)" in *.muse-stage.*) printf leaked > "$MUSE_STUB_FD_LEAK_FILE";; esac; done
+    fi
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
-    [ "${MUSE_STUB_MODE:-}" = slow ] && sleep 2
+    [ "${MUSE_STUB_MODE:-}" = slow ] && { [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"; trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM; sleep "${MUSE_STUB_DELAY:-2}"; }
+    if [ -n "${MUSE_STUB_SWAP_REVIEWS:-}" ]; then
+      mv "$MUSE_STUB_SWAP_REVIEWS" "$MUSE_STUB_SWAP_REVIEWS.safe"
+      ln -s "$MUSE_STUB_OUTSIDE" "$MUSE_STUB_SWAP_REVIEWS" || { mv "$MUSE_STUB_SWAP_REVIEWS.safe" "$MUSE_STUB_SWAP_REVIEWS"; exit 71; }
+      printf done > "$MUSE_STUB_SWAP_DONE"
+    fi
     sid=ses_new; prior=''
     while [ $# -gt 0 ]; do [ "$1" = --session ] && { sid="$2"; prior=1; shift 2; continue; }; shift; done
     [ "${MUSE_STUB_MODE:-}" = wrongsid ] && sid=ses_wrong
@@ -73,7 +92,86 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
-ENV="HOME='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex"
+ENV="HOME='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+mkdir -p "$TMP/link-probe-target"
+if ln -s "$TMP/link-probe-target" "$TMP/link-probe" 2>/dev/null; then
+  rm -rf -- "$TMP/link-probe"; OUTSIDE_REPORTS="$TMP/outside-reports"; mkdir -p "$OUTSIDE_REPORTS"; printf safe > "$OUTSIDE_REPORTS/sentinel"
+  check 'destination replacement rejects publication, cleans moved staging, and never writes outside' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_SWAP_REVIEWS='$REPO/.ai/reviews' MUSE_STUB_OUTSIDE='$OUTSIDE_REPORTS' MUSE_STUB_SWAP_DONE='$TMP/swap-done' '$SCRIPT' new report-race --prompt test\"; test -f '$TMP/swap-done'; grep -qx safe '$OUTSIDE_REPORTS/sentinel'; test \"\$(find '$OUTSIDE_REPORTS' -type f | wc -l)\" -eq 1; test -z \"\$(find '$REPO/.ai/reviews.safe' -name '.muse-stage.*' -print -quit 2>/dev/null)\""
+  if [ -e "$REPO/.ai/reviews.safe" ]; then rm -rf -- "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews.safe" "$REPO/.ai/reviews"; fi
+else
+  ok 'destination replacement race fixture unavailable on this host'
+fi
+check 'offline doctor does not contact the provider' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' '$SCRIPT' doctor\" && test ! -e '$TMP/doctor-called'"
+check 'live doctor contacts Muse and proves its exact response' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" | grep -q 'live provider response' && test -e '$TMP/doctor-called'"
+export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
+check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
+check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"
+unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
+check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""
+rm -f "$TMP/muse-post-open"; (cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_OPEN_MARKER="$TMP/muse-post-open" AI_MUSE_TEST_POST_OPEN_DELAY=3 "$SCRIPT" new post-open-swap --prompt test >/dev/null 2>&1) & MUSE_POST_OPEN_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-post-open" ] && break; sleep .1; done
+MUSE_POST_OPEN="$(cat "$TMP/muse-post-open" 2>/dev/null || true)"; if [ -n "$MUSE_POST_OPEN" ]; then mv "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held"; printf attacker-preserved > "$MUSE_POST_OPEN"; fi
+MUSE_POST_OPEN_RC=0; wait "$MUSE_POST_OPEN_PID" || MUSE_POST_OPEN_RC=$?
+check 'post-open staging substitution is rejected against the held descriptor' "test '$MUSE_POST_OPEN_RC' -ne 0 && grep -qx attacker-preserved '$MUSE_POST_OPEN' && test ! -e '$MUSE_POST_OPEN.held'"
+rm -f -- "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held" "$TMP/muse-pre-open"; printf 'must-not-truncate\n' > "$TMP/muse-pre-open-target"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_OPEN_MARKER="$TMP/muse-pre-open" AI_MUSE_TEST_PRE_OPEN_DELAY=3 "$SCRIPT" new pre-open-substitution --prompt test >/dev/null 2>&1) & MUSE_PRE_OPEN_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-pre-open" ] && break; sleep .1; done
+MUSE_PRE_OPEN="$(cat "$TMP/muse-pre-open" 2>/dev/null || true)"
+if [ -n "$MUSE_PRE_OPEN" ]; then MSYS=winsymlinks:nativestrict ln -s "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN" 2>/dev/null || cp "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN"; fi
+MUSE_PRE_OPEN_RC=0; wait "$MUSE_PRE_OPEN_PID" || MUSE_PRE_OPEN_RC=$?
+check 'exclusive pre-open staging reservation rejects an attacker path without truncation' "test '$MUSE_PRE_OPEN_RC' -ne 0 && grep -qx must-not-truncate '$TMP/muse-pre-open-target'"
+rm -f -- "$MUSE_PRE_OPEN"
+rm -f -- "$MUSE_POST_OPEN"
+POST_LOG="$TMP/post-process.log"; (cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_PROCESS_MARKER="$TMP/post-process-reached" AI_MUSE_TEST_POST_PROCESS_DELAY=20 "$SCRIPT" new post-process-interrupt --prompt test >"$POST_LOG" 2>&1) & POST_PID=$!
+for _ in $(seq 1 300); do [ -f "$TMP/post-process-reached" ] && break; sleep .1; done
+POST_META="$(find "$TMP/state" -name 'codex--post-process-interrupt.json' -type f -print -quit)"
+kill -TERM "$POST_PID" 2>/dev/null || true; wait "$POST_PID" 2>/dev/null || true
+check 'interrupt after provider exit but before classification marks outcome uncertain' "test -f '$POST_META' && jq -e '.status==\"provider_outcome_uncertain\"' '$POST_META'"
+rm -f "$TMP/muse-child-pid" "$TMP/muse-child-stopped"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-child-pid" ] && break; sleep .1; done
+MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
+MUSE_HUP_META="$(find "$TMP/state" -name 'codex--hup-turn.json' -type f -print -quit)"
+check 'HUP stops and waits for the provider child before releasing an uncertain session' "test -f '$TMP/muse-child-stopped' && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_HUP_META'"
+rm -f "$TMP/muse-publish-target"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-publish-target" ] && break; sleep .1; done
+MUSE_TARGET="$(cat "$TMP/muse-publish-target" 2>/dev/null || true)"; printf owner-target > "$MUSE_TARGET"; MUSE_TARGET_RC=0; wait "$MUSE_TARGET_PID" || MUSE_TARGET_RC=$?
+check 'exact Muse report target creation is refused without overwrite' "test '$MUSE_TARGET_RC' -ne 0 && grep -qx owner-target '$MUSE_TARGET'"
+rm -f "$TMP/muse-late-target"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-late-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=20 "$SCRIPT" new late-interrupt --prompt test >/dev/null 2>&1) & MUSE_LATE_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-late-target" ] && break; sleep .1; done
+MUSE_LATE_TARGET="$(cat "$TMP/muse-late-target" 2>/dev/null || true)"; kill -TERM "$MUSE_LATE_PID" 2>/dev/null || true; wait "$MUSE_LATE_PID" 2>/dev/null || true
+MUSE_LATE_META="$(find "$TMP/state" -name 'codex--late-interrupt.json' -type f -print -quit)"
+check 'interruption during final publication keeps session uncertain and publishes no report' "jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_LATE_META' && test -n '$MUSE_LATE_TARGET' && test ! -e '$MUSE_LATE_TARGET'"
+OUTSIDE_FINAL="$TMP/outside-final"; mkdir -p "$OUTSIDE_FINAL"; printf safe > "$OUTSIDE_FINAL/sentinel"; rm -f "$TMP/muse-final-swap-target"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-final-swap-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new final-dir-swap --prompt test >/dev/null 2>&1) & MUSE_FINAL_SWAP_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-final-swap-target" ] && break; sleep .1; done
+if mv "$REPO/.ai/reviews" "$REPO/.ai/reviews.final-safe" 2>/dev/null && ln -s "$OUTSIDE_FINAL" "$REPO/.ai/reviews" 2>/dev/null; then
+  MUSE_FINAL_SWAP_RC=0; wait "$MUSE_FINAL_SWAP_PID" || MUSE_FINAL_SWAP_RC=$?
+  check 'late report-directory replacement is rejected without outside publication' "test '$MUSE_FINAL_SWAP_RC' -ne 0 && grep -qx safe '$OUTSIDE_FINAL/sentinel' && test \"\$(find '$OUTSIDE_FINAL' -type f | wc -l)\" -eq 1"
+  rm -f "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews.final-safe" "$REPO/.ai/reviews"
+else
+  ok 'late report-directory replacement fixture unavailable on this host'
+  wait "$MUSE_FINAL_SWAP_PID" 2>/dev/null || true
+  [ ! -e "$REPO/.ai/reviews.final-safe" ] || { rm -f "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews.final-safe" "$REPO/.ai/reviews"; }
+fi
+rm -f "$TMP/muse-staging-path" "$TMP/muse-staging-target"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_STAGING_MARKER="$TMP/muse-staging-path" AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-staging-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new staging-replacement --prompt test >/dev/null 2>&1) & MUSE_STAGING_PID=$!
+for _ in $(seq 1 300); do [ -s "$TMP/muse-staging-path" ] && [ -s "$TMP/muse-staging-target" ] && break; sleep .1; done
+MUSE_STAGING="$(cat "$TMP/muse-staging-path" 2>/dev/null || true)"; MUSE_STAGING_TARGET="$(cat "$TMP/muse-staging-target" 2>/dev/null || true)"
+if [ -n "$MUSE_STAGING" ] && mv "$MUSE_STAGING" "$MUSE_STAGING.held" 2>/dev/null; then printf attacker > "$MUSE_STAGING"; fi
+MUSE_DECOY="$REPO/.ai/decoy/$(basename "$MUSE_STAGING")"; mkdir -p "$(dirname "$MUSE_DECOY")"; printf preserve-me > "$MUSE_DECOY"
+MUSE_STAGING_RC=0; wait "$MUSE_STAGING_PID" || MUSE_STAGING_RC=$?
+check 'staging-file replacement is rejected and cannot publish attacker bytes' "test '$MUSE_STAGING_RC' -ne 0 && test -n '$MUSE_STAGING_TARGET' && test ! -e '$MUSE_STAGING_TARGET'"
+check 'cleanup preserves a same-basename file it does not own' "grep -qx preserve-me '$MUSE_DECOY'"
+check 'cleanup finds and removes its moved reserved inode under a different basename' "test ! -e '$MUSE_STAGING.held'"
+rm -f -- "$MUSE_STAGING" "$MUSE_STAGING.held"
+rm -rf -- "$REPO/.ai/decoy"
+check 'doctor rejects unknown options' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' doctor --unknown\""
+check 'zero heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
 check 'hostile installed profile is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile --prompt test\""
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
@@ -82,17 +180,25 @@ check 'hostile provider package is rejected before a turn' "cd '$REPO' && ! eval
 cp "$ROOT/config/opencode-muse/opencode.json" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json"
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
 NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
+check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/state/credential.lock.d'"
 check 'new returns first response' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
+check 'provider child never inherits the writable report descriptor' "test ! -e '$TMP/provider-fd-leak'"
 META="$(find "$TMP/state" -name 'codex--debate.json' -type f)"
 check 'new stores exact session id' "jq -e '.session_id==\"ses_new\" and .name==\"debate\"' '$META'"
-check 'state was created before the provider turn' "grep -q 'status:\"turn_in_progress\"' '$SCRIPT'"
+rm -f "$TMP/heartbeat-ask-called"
+check 'invalid heartbeat leaves an existing session active without provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-ask-called' '$SCRIPT' ask debate --prompt invalid\"; test ! -e '$TMP/heartbeat-ask-called'; jq -e '.status==\"active\"' '$META'"
 ASK_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' ask debate --prompt followup" 2>&1)"
 check 'ask resumes and returns remembered response' "printf '%s' \"\$ASK_OUT\" | grep -q '^remembered'"
 check 'list shows named session' "cd '$REPO' && eval \"$ENV '$SCRIPT' list\" | grep -q debate"
 check 'show returns stored identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show debate\" | jq -e '.session_id==\"ses_new\"'"
 check 'transcript exports exact session' "cd '$REPO' && eval \"$ENV '$SCRIPT' transcript debate\" | jq -e '.sessionID==\"ses_new\"'"
 check 'reports are written for both turns' "test \"\$(find '$REPO/.ai/reviews' -name 'muse-debate-*.md' | wc -l)\" -ge 2"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  check 'Muse report storage has a private Windows ACL' "! icacls.exe \"\$(cygpath -w '$REPO/.ai/reviews')\" | grep -Ei 'BUILTIN\\\\Users|Authenticated Users|Everyone'"
+else
+  check 'Muse report storage is mode 0700' "test \"\$(stat -c %a '$REPO/.ai/reviews')\" = 700"
+fi
 check 'reports bind the exact reviewed code' "grep -Rq 'reviewed commit.*[0-9a-f]' '$REPO/.ai/reviews' && grep -Rq 'evidence fingerprint' '$REPO/.ai/reviews'"
 STALE_ASK_OUT="$(cd "$REPO" && eval "$ENV MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' ask debate --prompt changed" 2>&1 || true)"
 check 'source changes reject an advanced follow-up' "printf '%s' \"\$STALE_ASK_OUT\" | grep -q 'advanced session was preserved'"
@@ -121,11 +227,17 @@ check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
 check 'missing completion is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=nostop '$SCRIPT' new nostop --prompt test\""
 check 'provider timeout is rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_TIMEOUT=1 MUSE_STUB_MODE=slow '$SCRIPT' new timeout --prompt test\""
+SLOW_LOG="$TMP/slow.log"; SLOW_PROVIDER_PID="$TMP/slow-provider.pid"; (cd "$REPO" && eval "$ENV AI_MUSE_HEARTBEAT_INTERVAL=1 MUSE_STUB_MODE=slow MUSE_STUB_DELAY=8 MUSE_STUB_PID_FILE='$SLOW_PROVIDER_PID' '$SCRIPT' new visible-slow --prompt test" >"$SLOW_LOG" 2>&1) & SLOW_PID=$!
+for _ in $(seq 1 300); do [ -s "$SLOW_PROVIDER_PID" ] && break; sleep .1; done
+SLOW_META=""; for _ in $(seq 1 50); do SLOW_META="$(find "$TMP/state" -name 'codex--visible-slow.json' -type f -print -quit)"; [ -n "$SLOW_META" ] && jq -e '.status=="turn_in_progress" and (.worker_pid|type)=="number" and (.last_heartbeat_at|length)>0' "$SLOW_META" >/dev/null 2>&1 && break; sleep .1; done
+check 'slow turn publishes durable in-progress state before completion' "test -f '$SLOW_META' && jq -e '.status==\"turn_in_progress\" and (.worker_pid|type)==\"number\" and (.last_heartbeat_at|length)>0' '$SLOW_META'"
+wait "$SLOW_PID"
+check 'slow turn emits bounded progress' "grep -q 'Muse turn active:' '$SLOW_LOG'"
 check 'failed provider turns preserve incomplete evidence' "test \"\$(find '$REPO/.ai/reviews' -name 'muse-*-incomplete-*.md' | wc -l)\" -ge 4"
 check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask stale --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$STALE_META'"
 check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'wrong resumed session is rejected with evidence' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask stale --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\"' '$STALE_META'"
+check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask stale --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$STALE_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask stale --prompt mixed\""
 check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask stale --prompt mixed\""
 RETRY_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new retry-delete --prompt test" 2>&1)"; RETRY_META="$(find "$TMP/state" -name 'codex--retry-delete.json' -type f)"; RETRY_TMP="${RETRY_META}.tmp"; jq '.status="provider_deleted"' "$RETRY_META" > "$RETRY_TMP"; mv "$RETRY_TMP" "$RETRY_META"
@@ -135,14 +247,14 @@ check 'unconfirmed provider deletion preserves recovery record' "cd '$REPO' && !
 RECON_DELETE_TMP="${FAIL_DELETE_META}.tmp"; jq '.status="provider_deleted"' "$FAIL_DELETE_META" > "$RECON_DELETE_TMP"; mv "$RECON_DELETE_TMP" "$FAIL_DELETE_META"
 check 'deleted provider session cannot be reconciled' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile fail-delete\""
 check 'incomplete reports omit raw provider bodies' "! grep -Rq 'Structured output\|Error output' '$REPO/.ai/reviews'"
-printf 'PIPE-COMPAT\n' | (cd "$REPO" && eval "$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO'") >/dev/null 2>&1
+printf 'PIPE-COMPAT\n' | (cd "$REPO" && eval "$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO'") >/dev/null 2>&1
 check 'compatibility review reads piped requests' "grep -Rlq 'PIPE-COMPAT' '$REPO/.ai/reviews'"
 git -C "$REPO" checkout -q -- a.txt
 check 'compatibility review rejects a stopped answer without verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=narration '$SCRIPT' review '$REPO' test\""
-check 'compatibility review rejects a verdict before the final line' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE\\nqualification' '$SCRIPT' review '$REPO' test\""
-check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: APPROVE'"
-printf 'historic\n' > "$REPO/.ai/reviews/historic.md"; git -C "$REPO" add -f .ai/reviews/historic.md; git -C "$REPO" commit -qm historic
-check 'tracked historic reports do not block a new unique report' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' historic\" | grep -q 'VERDICT: APPROVE'"
+check 'compatibility review rejects a verdict before the final line' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS\\nqualification' '$SCRIPT' review '$REPO' test\""
+check 'compatibility review rejects an undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: UNKNOWN' '$SCRIPT' review '$REPO' test\""
+check 'compatibility review rejects a legacy undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\""
+check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

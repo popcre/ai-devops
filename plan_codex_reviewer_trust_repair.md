@@ -6,7 +6,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Baseline failure fixtures | ✅ complete | `tests/test-ai-codex-review.sh` (22 cases) |
+| 1 | Baseline failure fixtures | ✅ complete | `tests/test-ai-codex-review.sh` (34 cases), including strict terminal verdict parsing, separation and sanitized preservation of CLI diagnostics, bounded provider execution, signal-safe provider reaping and lifecycle finalization, data-only command configuration, exact ignored destinations, and private Windows ACL verification |
 | 2 | Complete change capture | ✅ complete | text/binary untracked files are present in the digest-bound private snapshot |
 | 3 | Fail-closed completion | ✅ complete | provider, empty, missing-verdict, snapshot-write, and stale-source fixtures |
 | 4 | Collision-proof artifacts and shared governance | ✅ complete | concurrent atomic reports plus preflight/lifecycle/scoreboard evidence |
@@ -43,7 +43,7 @@ The wrapper now creates a complete disposable snapshot, seals a source-bound
 packet, enforces Codex's read-only sandbox and allowed reasoning, rejects any
 snapshot/source mutation, requires an exact verdict, publishes a unique atomic
 report, and completes provider-neutral lifecycle and scoreboard accounting.
-The dedicated 22-case hostile suite is the current evidence.
+The dedicated 34-case hostile suite is the current evidence.
 
 ## 6. Key findings and root cause
 

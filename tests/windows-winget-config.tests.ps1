@@ -52,7 +52,7 @@ Assert ($machineSetupText -match "https://mcp\.railway\.com") 'machine setup mus
 Assert ($machineSetupText -match "args = @\('mcp', 'proxy'\)") 'Codex must use Railway CLI authenticated proxy'
 Assert ($machineSetupText -match '(?s)reconciling Railway CLI via npm.*npm\.cmd install --global ''@railway/cli@5\.43\.1''') 'direct machine setup must reconcile the pinned Railway CLI on every run'
 Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must be shared with Claude consumers'
-Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok and Kimi CLIs'
+Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok, Kimi, and Qwen CLIs'
 Assert ($bootstrapText -match 'configure-windows-bootstrap-access\.ps1') 'bootstrap must own first-connection Tailscale/OpenSSH setup'
 Assert ($bootstrapText -match 'configure-wsl-ansible-controller\.ps1') 'bootstrap must own WSL Ansible controller setup'
 Assert ($machineSetupText -match 'ai-private-config') 'machine setup must synchronize protected configuration'

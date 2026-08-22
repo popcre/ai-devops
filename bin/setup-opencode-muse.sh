@@ -17,4 +17,4 @@ mkdir -p "$CFG/opencode-xdg/opencode/agent"
 cp "$ROOT/config/opencode-muse/opencode.json" "$CFG/opencode-xdg/opencode/opencode.json"
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$CFG/opencode-xdg/opencode/agent/muse-review.md"
 chmod 700 "$CFG" "$CFG/opencode-xdg" 2>/dev/null || true
-echo "Muse persistent conversation profile installed. Check: ai-muse doctor"
+echo "Muse persistent conversation profile installed. Check: AI_MUSE_CALLER=codex ai-muse doctor"

@@ -68,12 +68,14 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 CALLER="${AI_GLM_CALLER:-claude}"
 TIMEOUT="${AI_GLM_TIMEOUT:-1800}"        # seconds to wait for one GLM turn
 LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
+SERVER_START_TIMEOUT="${AI_GLM_SERVER_START_TIMEOUT:-30}"
 POLL_SECS=5
 JSON_OUT=0
 
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
 note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
+case "$SERVER_START_TIMEOUT" in ''|0|*[!0-9]*) die 'AI_GLM_SERVER_START_TIMEOUT must be a positive whole number of seconds.' ;; esac
 
 local_service_fatal() {
   printf '%s\n' \
@@ -104,22 +106,28 @@ server_pw() {
   [ -s "$PW_FILE" ] || return 1
   tr -d '\r\n' < "$PW_FILE"
 }
+curl_auth_config() {
+  local pw user auth
+  pw="$(server_pw || true)"; user="${OPENCODE_SERVER_USERNAME:-opencode}"
+  case "$user$pw" in *$'\n'*|*$'\r'*) return 1;; esac
+  auth="$user:$pw"; auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
+  printf 'user = "%s"\n' "$auth"
+}
 api() { # api METHOD PATH [JSON_BODY_FILE]
-  local method="$1" path="$2" body="${3:-}" pw
-  pw="$(server_pw || true)"
+  local method="$1" path="$2" body="${3:-}"
   if [ -n "$body" ]; then
-    curl -sS -m 120 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" \
+    curl_auth_config | curl --config - -sS -m 120 \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
   else
-    curl -sS -m 120 -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path"
+    curl_auth_config | curl --config - -sS -m 120 -X "$method" "$BASE$path"
   fi
 }
-api_code() { # api_code METHOD PATH -> HTTP status only
-  local pw; pw="$(server_pw || true)"
-  curl -sS -m 30 -o /dev/null -w '%{http_code}' \
-    -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$1" "$BASE$2" 2>/dev/null || echo 000
+api_code() { # api_code METHOD PATH [MAX_SECONDS] -> HTTP status only
+  local max_seconds="${3:-30}"
+  curl_auth_config | curl --config - -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
+    -X "$1" "$BASE$2" 2>/dev/null || echo 000
 }
-server_up() { [ "$(api_code GET /global/health)" = "200" ]; }
+server_up() { [ "$(api_code GET /global/health "${1:-30}")" = "200" ]; }
 require_server() {
   if [ ! -s "$PW_FILE" ]; then
     die "local_dependency_unavailable: GLM is not set up on this machine (no $PW_FILE). This is not a provider or model fault.
@@ -1565,37 +1573,41 @@ reconcile_implementation_records() {
   return "$rc"
 }
 
-server_start_diagnostics() {
-  if [ "$IS_WINDOWS" = 1 ]; then
-    schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
-  else
-    systemctl --user status opencode-glm.service --no-pager 2>&1 | tail -20 >&2 || true
-  fi
-}
-
-wait_for_server_health() { # LABEL
-  local label="$1" waited=0 timeout="${AI_GLM_SERVER_READY_TIMEOUT:-30}" interval="${AI_GLM_SERVER_READY_INTERVAL:-1}"
-  case "$timeout" in ''|*[!0-9]*) die "AI_GLM_SERVER_READY_TIMEOUT must be a positive integer.";; esac
-  case "$interval" in ''|*[!0-9]*) die "AI_GLM_SERVER_READY_INTERVAL must be a positive integer.";; esac
-  [ "$timeout" -gt 0 ] || die "AI_GLM_SERVER_READY_TIMEOUT must be greater than zero."
-  [ "$interval" -gt 0 ] || die "AI_GLM_SERVER_READY_INTERVAL must be greater than zero."
-  until server_up; do
-    if [ "$waited" -ge "$timeout" ]; then
-      warn "$label did not become healthy within ${timeout} seconds."
-      server_start_diagnostics
+wait_for_server_health() { # LABEL [ABSOLUTE_DEADLINE]
+  local label="$1" deadline="${2:-}" now remaining
+  [ -n "$deadline" ] || deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
+  while :; do
+    now="$(date +%s)"; remaining=$((deadline - now))
+    if [ "$remaining" -le 0 ]; then
+      printf 'ai-glm: %s was launched but did not become healthy within %ss.\n' "$label" "$SERVER_START_TIMEOUT" >&2
+      if [ "$IS_WINDOWS" = 1 ]; then
+        schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
+        printf 'Inspect: %s/.local/state/ai-devops/opencode-glm/server.log\nRetry: ai-glm server start\n' "$HOME" >&2
+      else
+        systemctl --user status opencode-glm.service --no-pager 2>/dev/null | tail -20 >&2 || true
+        printf 'Inspect: journalctl --user -u opencode-glm -n 50\nRetry: ai-glm server start\n' >&2
+      fi
       return 1
     fi
-    sleep "$interval"; waited=$((waited + interval))
+    server_up "$remaining" && break
+    now="$(date +%s)"; [ "$now" -ge "$deadline" ] || sleep 1
   done
+  note "$label and healthy"
 }
 
 cmd_server() {
+  local action="${1:-status}" start_deadline=""
+  if [ "$action" = start ]; then
+    start_deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
+    if server_up "$SERVER_START_TIMEOUT"; then
+      note "already healthy"
+      return 0
+    fi
+  fi
   if [ "$IS_WINDOWS" = 1 ]; then
-    case "${1:-status}" in
-      start)   if server_up; then note "already healthy"; return; fi
-               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not start AiDevOps-OpenCodeGlm"
-               wait_for_server_health "AiDevOps-OpenCodeGlm" || die "task started but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
-               note "started and healthy" ;;
+    case "$action" in
+      start)   schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not start AiDevOps-OpenCodeGlm. Inspect the scheduled task, then retry: ai-glm server start"
+               wait_for_server_health "started" "$start_deadline" ;;
       stop)    schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "stopped" ;;
       restart) schtasks //End //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 || true
                local waited=0
@@ -1613,23 +1625,19 @@ cmd_server() {
                  sleep 1; waited=$((waited + 1))
                done
                schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not restart AiDevOps-OpenCodeGlm"
-               wait_for_server_health "AiDevOps-OpenCodeGlm restart" || die "task restarted but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
-               note "restarted and healthy" ;;
+               wait_for_server_health "restarted" ;;
       status)  schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20
                printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)" ;;
       *) die "usage: ai-glm server start|stop|restart|status" ;;
     esac
     return
   fi
-  case "${1:-status}" in
-    start)   if server_up; then note "already healthy"; return; fi
-             systemctl --user start opencode-glm.service || die "could not start opencode-glm.service"
-             wait_for_server_health "opencode-glm.service" || die "service started but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
-             note "started and healthy" ;;
+  case "$action" in
+    start)   systemctl --user start opencode-glm.service || die "could not start opencode-glm.service. Inspect: systemctl --user status opencode-glm.service"
+             wait_for_server_health "started" "$start_deadline" ;;
     stop)    systemctl --user stop opencode-glm.service;    note "stopped" ;;
-    restart) systemctl --user restart opencode-glm.service || die "could not restart opencode-glm.service"
-             wait_for_server_health "opencode-glm.service restart" || die "service restarted but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
-             note "restarted and healthy" ;;
+    restart) systemctl --user restart opencode-glm.service || die "could not restart opencode-glm.service. Inspect: systemctl --user status opencode-glm.service"
+             wait_for_server_health "restarted" ;;
     status)
       systemctl --user status opencode-glm.service --no-pager || true
       printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)"
