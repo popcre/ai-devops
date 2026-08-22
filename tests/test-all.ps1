@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $bash = if ($IsWindows) { 'C:\Program Files\Git\bin\bash.exe' } else { (Get-Command bash).Source }
+$pwsh = (Get-Command pwsh).Source
 $failures = 0
 
 Write-Host '===== COMPLETE OFFLINE BASH SUITE ====='
@@ -11,7 +12,7 @@ $tests = @(Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter 'test-*.ps1' |
   Where-Object Name -ne 'test-all.ps1' | Sort-Object Name)
 foreach ($test in $tests) {
   Write-Host "`n===== POWERSHELL $($test.Name) ====="
-  try { & $test.FullName; if ($LASTEXITCODE -ne 0) { $failures++ } }
+  try { & $pwsh -NoProfile -File $test.FullName; if ($LASTEXITCODE -ne 0) { $failures++ } }
   catch { Write-Error $_; $failures++ }
 }
 Write-Host "`nOFFLINE COMPLETE SUMMARY bash=1 powershell=$($tests.Count) failures=$failures"

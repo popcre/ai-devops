@@ -4,8 +4,8 @@ Tracking issue: [u2giants/ai-devops#56](https://github.com/u2giants/ai-devops/is
 
 Incident evidence:
 
-- [`.ai/reviewer-issues/20260820T173149Z-edge-dev-grok-889837`](.ai/reviewer-issues/20260820T173149Z-edge-dev-grok-889837) — clones bypassed the paid-review lock.
-- [`.ai/reviewer-issues/20260820T172906Z-edge-dev-grok-888349`](.ai/reviewer-issues/20260820T172906Z-edge-dev-grok-888349) — no progress was visible during a long turn.
+- Local-only evidence `.ai/reviewer-issues/20260820T173149Z-edge-dev-grok-889837` — clones bypassed the paid-review lock.
+- Local-only evidence `.ai/reviewer-issues/20260820T172906Z-edge-dev-grok-888349` — no progress was visible during a long turn.
 - [`docs/reviewer-result-delivery-defects-2026-08-20.md`](docs/reviewer-result-delivery-defects-2026-08-20.md) — the same-day cross-reviewer context.
 
 Planning handoff: [`HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair-plan.md`](HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair-plan.md)

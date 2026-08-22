@@ -62,7 +62,7 @@ check_file() {
 }
 
 check_install_state() {
-  local current installed schema expected_schema type path source expected actual drift=0
+  local current installed schema manifest_schema expected_schema type path source expected actual drift=0
   current="$(git -C "$AI_DEVOPS_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
   [ "$current" != unknown ] && c_ok "repo source SHA $current" || { c_fail 'repo source SHA unavailable'; FAILED=1; }
   if [ -f "$AI_DEVOPS_ETC/config-state.json" ]; then
@@ -74,6 +74,13 @@ check_install_state() {
   if [ -f "$AI_DEVOPS_ETC/install-manifest.tsv" ]; then
     installed="$(awk -F '\t' '$1=="meta"&&$2=="source_sha"{print $3;exit}' "$AI_DEVOPS_ETC/install-manifest.tsv")"
     if [ "$installed" = "$current" ]; then c_ok "installed source SHA matches repo ($installed)"; else c_fail "installed source $installed differs from repo $current"; FAILED=1; fi
+    manifest_schema="$(awk -F '\t' '$1=="meta"&&$2=="config_schema"{print $3;exit}' "$AI_DEVOPS_ETC/install-manifest.tsv")"
+    if [ "$manifest_schema" = "$schema" ] && [ "$manifest_schema" = "$expected_schema" ]; then
+      c_ok "install manifest config schema matches migration state ($manifest_schema)"
+    else
+      c_fail "install manifest config schema ${manifest_schema:-missing} differs from migration state ${schema:-missing} and expected ${expected_schema:-missing}"
+      FAILED=1
+    fi
     while IFS=$'\t' read -r type path source expected; do
       case "$type" in
         symlink)

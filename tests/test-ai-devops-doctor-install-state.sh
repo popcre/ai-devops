@@ -6,11 +6,12 @@ mkdir -p "$TMP/etc"
 cp "$ROOT/config/models.env.example" "$TMP/etc/models.env"
 cp "$ROOT/config/server.env.example" "$TMP/etc/server.env"
 sha="$(git -C "$ROOT" rev-parse HEAD)"
-jq -n --arg sha "$sha" '{schema:1,source_sha:$sha,applied_at:"test"}' > "$TMP/etc/config-state.json"
+schema="$(jq -r '.version' "$ROOT/config/config-schema.json")"
+jq -n --arg sha "$sha" --argjson schema "$schema" '{schema:$schema,source_sha:$sha,applied_at:"test"}' > "$TMP/etc/config-state.json"
 hash="$(sha256sum "$TMP/etc/models.env" | cut -d' ' -f1)"
 {
   printf 'meta\tsource_sha\t%s\t-\n' "$sha"
-  printf 'meta\tconfig_schema\t1\t-\n'
+  printf 'meta\tconfig_schema\t%s\t-\n' "$schema"
   printf 'config\t%s\tmanaged\t%s\n' "$TMP/etc/models.env" "$hash"
 } > "$TMP/etc/install-manifest.tsv"
 
@@ -23,6 +24,11 @@ check_install_state >/dev/null
 sed -i 's/^meta\tsource_sha\t.*/meta\tsource_sha\twrong\t-/' "$TMP/etc/install-manifest.tsv"
 FAILED=0; check_install_state >/dev/null
 [ "$FAILED" -eq 1 ] || { echo 'FAIL: installed source mismatch passed doctor'; exit 1; }
+
+sed -i "s/^meta\tconfig_schema\t.*/meta\tconfig_schema\t$((schema + 1))\t-/" "$TMP/etc/install-manifest.tsv"
+sed -i "s/^meta\tsource_sha\t.*/meta\tsource_sha\t$sha\t-/" "$TMP/etc/install-manifest.tsv"
+FAILED=0; check_install_state >/dev/null
+[ "$FAILED" -eq 1 ] || { echo 'FAIL: install manifest schema mismatch passed doctor'; exit 1; }
 
 grep -q 'check_required npx' "$ROOT/bin/ai-devops" || { echo 'FAIL: npx is not required'; exit 1; }
 for provider in grok kimi glm muse gemini qwen codex deepseek; do
