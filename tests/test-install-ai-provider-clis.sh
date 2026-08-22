@@ -109,6 +109,8 @@ grep -q 'downloaded installer was empty' "$script"
 # --- qwen must NOT be installed via npm ------------------------------------
 # hetz runs Node 20; the npm package needs Node 22+ and yields a broken command.
 ! grep -q '@qwen-code/qwen-code' "$script"
+grep -q 'declaration=.*sed -n' "$script"
+grep -q '<<<"\$declaration"' "$script"
 
 # --- install paths match what the vendor installers actually use -----------
 grep -q '\.grok/bin/grok' "$script"

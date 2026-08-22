@@ -26,7 +26,9 @@ function Set-QwenChildEnvironmentHardening {
   if ($candidates.Count -ne 1) { throw "Expected exactly one Qwen child-environment sanitizer bundle under $chunkRoot; found $($candidates.Count)." }
   $path = $candidates[0].FullName
   $content = Get-Content -Raw -LiteralPath $path
-  if (-not $content.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) {
+  $declaration = [regex]::Match($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+  if (-not $declaration.Success) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+  if (-not $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) {
     $needle = 'var INTERNAL_SECRET_ENV_VARS = ['
     $replacement = "$needle`n  `"BAILIAN_CODING_PLAN_API_KEY`","
     $index = $content.IndexOf($needle, [StringComparison]::Ordinal)

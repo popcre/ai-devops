@@ -128,7 +128,10 @@ harden_qwen_child_env() {
     candidate="$file"; count=$((count+1))
   done < <(grep -l 'var INTERNAL_SECRET_ENV_VARS' "$root"/lib/chunks/*.js 2>/dev/null || true)
   [ "$count" = 1 ] || { echo "ERROR qwen: expected exactly one child-environment sanitizer bundle under $root; found $count" >&2; return 1; }
-  if ! grep -q '"BAILIAN_CODING_PLAN_API_KEY"' "$candidate"; then
+  local declaration
+  declaration="$(sed -n '/var INTERNAL_SECRET_ENV_VARS[[:space:]]*=[[:space:]]*\[/,/^[[:space:]]*\];/p' "$candidate")"
+  [[ -n "$declaration" ]] || die 'the known Qwen sanitizer declaration was not found; refusing an unverified patch'
+  if ! grep -q '"BAILIAN_CODING_PLAN_API_KEY"' <<<"$declaration"; then
     backup_dir="$HOME/.local/state/ai-devops/qwen/vendor-backups"
     mkdir -p "$backup_dir"
     cp -p "$candidate" "$backup_dir/$(basename "$candidate").$(date -u +%Y%m%dT%H%M%SZ).bak" || return 1
