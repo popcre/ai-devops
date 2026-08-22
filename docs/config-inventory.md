@@ -49,7 +49,8 @@ tools run via git-bash on Windows).
 
 | Location | What it holds | Synced across machines by | Secrets? |
 |---|---|---|---|
-| **`ai-devops` repo** (git; ~1.5 GB incl. chat archives) | Skills → `~/.claude/skills`; global instructions → `~/.claude/CLAUDE.md`; Codex global instructions; workflow model config templates; Claude/Codex chat archives; now also `memory/` | ✅ git + `install.sh` / `bin/install-ai-devops-windows.ps1` / `bin/ai-install-skills` | No (secret-free by policy) |
+| **Public `ai-devops` repo** | Reusable skills, global templates, workflow configuration, installers, and the secret-free portable-memory schema/tooling | ✅ git + canonical installer | No; operational facts and transcripts are forbidden |
+| **Private `ai-devops-memory` repo** | Portable Claude Markdown facts and complete per-project indexes | ✅ transactional `bin/ai-memory-sync` | No credentials; private operational facts only |
 | **Dropbox `\vibe coding\ssh keys\`** | `master_setupsshwindows.ps1` → writes `~/.ssh/config` (all host aliases) + the `916-alien` private key + optional cloudflared | ⚠️ manual script | **Yes — plaintext private key** |
 | **Dropbox `\vibe coding\…MCP servers\`** | `setup-claude-mcps.ps1` / `setup-codex-mcps.ps1` → write MCP server entries into Claude/Codex config | ⚠️ manual scripts | **Yes — embed tokens** |
 | **`~/.claude.json`** | Claude Code's local MCP server list. **This is the only file Claude Code reads MCP servers from** — an `mcpServers` block in `~/.claude/settings.json` is silently ignored (fixed 2026-08-20; before that both setup scripts wrote to the wrong file, so machines had zero working servers while looking configured). | ✅ `bin/setup-machine.ps1` (Windows), `bin/setup-secrets.sh` (Ubuntu) | No — only `op://` references and launcher paths |
@@ -57,7 +58,7 @@ tools run via git-bash on Windows).
 | **Claude Desktop config** | Claude Desktop settings + local MCP servers | ✅ `bin/setup-machine.ps1` manages the full MCP set; `bin/configure-claude-desktop-chrome-devtools.ps1` safely installs or repairs only Chrome DevTools MCP | Existing settings and hand-added extensions are preserved; a backup is written before changes |
 | **`~/.codex/config.toml`** | Codex prefs + machine-specific runtime paths + MCP server list | ✅ new configs seed from `config/codex-portable.toml`; `bin/configure-codex-mcps.ps1` then reconciles the complete repo-owned MCP set from `setup-machine.ps1`, while preserving unrelated machine settings and tool approval guards | Machine-specific paths/plugins remain local; managed MCP blocks are token-free |
 | **MCP secret launcher** (`~/.config/ai-devops/mcp-launch.cmd` + `mcp-remote-launch.cmd` → `bin/mcp-secret-launch.ps1`) | Injects `op://` secrets into MCP servers via **one single-flight refresh + 15-min DPAPI cache** (`mcp-secrets.dpapi.json`), not a per-launch `op run`. Caps the shared service account to ≤1 refresh/15 min/machine | ✅ `bin/setup-machine.ps1` writes the `.cmd`s; `bin/mcp-secret-launch.ps1` is repo-owned | No secret on disk except the user-only `op-service-account` token file; cache is DPAPI-encrypted. See [mcp-1password-rate-limit-hardening.md](mcp-1password-rate-limit-hardening.md) |
-| **`~/.claude/projects/*/memory/`** | Auto-memory (per-project `MEMORY.md` + fact files) | ✅ **now** via `bin/ai-sync-memory` → `ai-devops/memory/` (was: nothing) | No (policy) |
+| **`~/.claude/projects/*/memory/`** | Auto-memory (per-project `MEMORY.md` + fact files) | ✅ `bin/ai-memory-sync` ↔ private `u2giants/ai-devops-memory` | No credentials; automated push proves private visibility first |
 | **gcloud config** (`%APPDATA%\gcloud` / `~/.config/gcloud`) | Default project/region for `gcloud` | ⚠️ per-machine; set by `bin/ai-gcloud-dflow` | Contains auth tokens — never git-sync the dir |
 | **1Password `vibe_coding` vault** | The actual secrets (tokens, keys, DB creds, logins) | ✅ centralized (the one thing done right) | **Yes — the source of truth** |
 | **`/etc/ai-devops/*.env`** (Ubuntu) | Real workflow model commands + paths | ❌ machine-local by design (never committed) | Non-secret command strings |
@@ -163,8 +164,10 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   Installed **only if absent** — never clobbers local edits.
 - **Workflow config:** `config/*.env.example` seeds `/etc/ai-devops/` without
   overwriting existing machine-local values.
-- **Memory (new this session):** `memory/<project>/` holds synced auto-memory;
-  see [`../memory/README.md`](../memory/README.md).
+- **Portable-memory tooling:** public `memory/` contains only the architecture
+  pointer and secret-free project mapping. Operational `memory/<project>/`
+  directories live only in the private memory repository; see
+  [`../memory/README.md`](../memory/README.md).
 - **Chat archives:** `claude_chats/` (~662 MB) + `codex_chats/` (~398 MB) —
   transcript backups. Large, may contain secrets, excluded from AI context via
   `.claudeignore`/`.cursorignore`. Never load them.
@@ -236,10 +239,10 @@ portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
 `[desktop]` prefs). **Do not sync wholesale.**
 
 ### 6. Gaps
-- **Memory** — was synced by nothing; **now** handled by `bin/ai-sync-memory`
-  (this session). The remaining wrinkle: per-machine path slugs
-  (`C--repos-dflow` vs `D--repos-dflow`) — canonicalized to one key. See
-  `memory/README.md`.
+- **Memory** — handled by `bin/ai-memory-sync` as a private, lossless Git
+  transaction. Per-machine path slugs are canonicalized to one project key;
+  indexes are unioned, only tombstones delete, and a rejected push preserves
+  the exact commit for retry. See `memory/README.md`.
 - **Kimi Code CLI** — the skill is now repo-owned under `skills/shared/` and
   installs into both Claude and Codex/ChatGPT. The CLI binary and login remain
   machine-local: verify with `kimi --version` and `kimi -p "reply with OK"`.
@@ -332,9 +335,9 @@ consolidation plan pulls all secrets from 1Password at install time so nothing
 secret is ever committed.
 
 ## Decision log
-- **2026-07-10:** reject chezmoi (duplicates ai-devops; 1.5 GB clone as subfolder).
-  Memory → straight into `ai-devops/memory/`. Phase 2 secrets → scoped
-  `vibe_coding` 1Password service account (SSH key included). Ship Phase 1 only.
+- **2026-08-21:** keep reusable configuration in public `ai-devops`, but move
+  operational portable memory to private `u2giants/ai-devops-memory`. Automated
+  writers must prove private visibility and pass health/content gates before push.
 
 ## See also
 - [`config-consolidation-proposal.md`](config-consolidation-proposal.md) — the phased migration plan.

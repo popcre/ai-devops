@@ -43,6 +43,22 @@ for how to adapt the exact flags to your installed CLIs (they may differ).
 | `DEFAULT_MAIN_BRANCH` | `ai-workspace-status` | `main` | Branch name used for the "on main" safety warning |
 | `OWNER_NAME` | final-review prompt | `Albert` | Name used in plain-English summaries |
 
+## Private portable-memory settings
+
+`bin/ai-memory-sync` has safe built-in defaults and accepts these process-level
+overrides for controlled tests or machine migration. They are not secrets.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `AI_MEMORY_REMOTE` | Canonical private Git remote | `https://github.com/u2giants/ai-devops-memory.git` |
+| `AI_MEMORY_HUB` | Isolated private clone | `~/.cache/ai-devops-memory-private` |
+| `AI_MEMORY_LOG` | Append-only status log | `~/.cache/ai-memory-sync.log` |
+
+Production runs reject any remote other than the canonical private repository
+and use GitHub's API to prove `private=true` before copying machine memory. Test
+flags are accepted only by the behavioral fixture and must never appear in
+machine configuration.
+
 ## Feature flags
 
 None. There are no feature flags in this toolkit.

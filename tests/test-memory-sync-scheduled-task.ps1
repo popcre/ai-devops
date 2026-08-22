@@ -11,9 +11,12 @@ function Assert([bool]$Condition, [string]$Message) {
 Assert ($setup -match 'ai-memory-sync-hidden\.vbs') 'setup must create the hidden launcher'
 Assert ($setup -match 'wscript\.exe') 'scheduled task must use the windowless script host'
 Assert ($setup -match 'shell\.Run[\s\S]*, 0, True') 'launcher must hide the window and wait for completion'
+Assert ($setup -match 'WScript\.Quit exitCode') 'launcher must return the sync exit status to Task Scheduler'
 Assert ($setup -match 'ExecutionTimeLimit \(New-TimeSpan -Minutes 15\)') 'task must stop stalled runs after 15 minutes'
 Assert ($setup -match 'MultipleInstances IgnoreNew') 'task must prevent overlapping sync runs'
 Assert ($setup -match 'Register-ScheduledTask -TaskName "ai-memory-sync"') 'setup must register the managed task'
+Assert ($setup -match 'if \(\$EnableMemorySyncSchedule\)') 'schedule registration must require explicit qualification opt-in'
+Assert ($setup -match 'Disable-ScheduledTask -TaskName "ai-memory-sync"') 'default setup must preserve incident containment'
 Assert ($setup -notmatch 'schtasks /Create /TN "ai-memory-sync"') 'setup must not restore the visible bash task'
 
 $tokens = $null

@@ -1,23 +1,114 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$ROOT/bin/ai-memory-sync"
-
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-grep -Fq 'git clone -q -c core.longpaths=true' "$SCRIPT" ||
-  fail "new clones do not enable long paths before checkout"
+REMOTE="$TMP/private.git"
+SEED="$TMP/seed"
+HOME_A="$TMP/home-a"
+CLAUDE_A="$TMP/claude-a"
+HUB_A="$TMP/hub-a"
+LOG_A="$TMP/a.log"
 
-grep -Fq 'git -C "$HUB" config core.longpaths true' "$SCRIPT" ||
-  fail "existing clones do not enable long paths before reset"
+git init -q --bare "$REMOTE"
+git init -q "$SEED"
+git -C "$SEED" config user.name test
+git -C "$SEED" config user.email test@example.invalid
+mkdir -p "$SEED/memory/sample"
+cat > "$SEED/memory/sample/MEMORY.md" <<'EOF'
+# Memory index - sample
 
-grep -Fq 'reset -q --hard origin/main || { log "reset failed;' "$SCRIPT" ||
-  fail "initial reset failure is not fatal"
+- [hub](hub.md) - hub fact.
+EOF
+printf 'hub fact\n' > "$SEED/memory/sample/hub.md"
+git -C "$SEED" add memory
+git -C "$SEED" commit -qm seed
+git -C "$SEED" branch -M main
+git -C "$SEED" remote add origin "$REMOTE"
+git -C "$SEED" push -q -u origin main
+git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
 
-grep -Fq 'reset -q --hard origin/main || { log "final reset failed;' "$SCRIPT" ||
-  fail "final reset failure is not fatal"
+mkdir -p "$CLAUDE_A/projects/C--repos-sample/memory" "$HOME_A"
+cat > "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md" <<'EOF'
+# Memory index - sample
 
-bash -n "$SCRIPT" || fail "ai-memory-sync has invalid Bash syntax"
+- [local](local.md) - local fact.
+EOF
+printf 'local fact\n' > "$CLAUDE_A/projects/C--repos-sample/memory/local.md"
 
-echo "PASS: ai-memory-sync long-path and reset-failure guards"
+sync_a() {
+  HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
+  AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+  AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
+  AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
+    bash "$ROOT/bin/ai-memory-sync" "$@"
+}
+
+sync_a sync >/dev/null
+INDEX="$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md"
+grep -Fq '(hub.md)' "$INDEX" || fail "machine did not receive hub index entry"
+grep -Fq '(local.md)' "$INDEX" || fail "machine lost local index entry"
+git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(hub.md)' || fail "hub entry vanished"
+git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(local.md)' || fail "local entry did not reach hub"
+
+# Offline fetch is a visible failure and leaves the only local fact untouched.
+printf 'offline fact\n' > "$CLAUDE_A/projects/C--repos-sample/memory/offline.md"
+printf '%s\n' '- [offline](offline.md) - must survive fetch failure.' >> "$INDEX"
+mv "$REMOTE" "$REMOTE.offline"
+set +e
+sync_a sync >/dev/null 2>&1
+offline_status=$?
+set -e
+mv "$REMOTE.offline" "$REMOTE"
+[[ "$offline_status" -ne 0 ]] || fail "offline fetch returned success"
+[[ -f "$CLAUDE_A/projects/C--repos-sample/memory/offline.md" ]] || fail "offline failure lost the only copy"
+
+# A server rejection preserves the committed tree and does not perform a later
+# reset/pull. The following run retries that exact commit successfully.
+mkdir -p "$REMOTE/hooks"
+cat > "$REMOTE/hooks/pre-receive" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$REMOTE/hooks/pre-receive"
+set +e
+sync_a sync >/dev/null 2>&1
+reject_status=$?
+set -e
+[[ "$reject_status" -ne 0 ]] || fail "rejected push returned success"
+[[ "$(git -C "$HUB_A" rev-list --count origin/main..HEAD)" -eq 1 ]] || fail "rejected commit was not preserved"
+git --git-dir="$REMOTE" show main:memory/sample/offline.md >/dev/null 2>&1 && fail "rejected fact reached remote"
+rm -f "$REMOTE/hooks/pre-receive"
+sync_a sync >/dev/null
+git --git-dir="$REMOTE" show main:memory/sample/offline.md >/dev/null || fail "preserved commit was not retried"
+
+# Same-name conflicts retain both byte-distinct facts; an orphan is indexed
+# automatically; a tombstone is the only operation that deletes across copies.
+printf 'machine version\n' > "$CLAUDE_A/projects/C--repos-sample/memory/hub.md"
+printf 'orphan fact\n' > "$CLAUDE_A/projects/C--repos-sample/memory/orphan.md"
+sync_a sync >/dev/null
+remote_files="$(git --git-dir="$REMOTE" ls-tree --name-only main:memory/sample)"
+[[ "$remote_files" == *"hub.md"* && "$remote_files" == *"hub--"* ]] || fail "same-name conflict was overwritten"
+git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(orphan.md)' || fail "orphan was not indexed"
+
+printf 'local.md\t2026-08-21\ttest deletion\n' > "$CLAUDE_A/projects/C--repos-sample/memory/.forgotten"
+rm -f "$CLAUDE_A/projects/C--repos-sample/memory/local.md"
+sync_a sync >/dev/null
+git --git-dir="$REMOTE" show main:memory/sample/local.md >/dev/null 2>&1 && fail "tombstoned fact survived in hub"
+[[ ! -e "$CLAUDE_A/projects/C--repos-sample/memory/local.md" ]] || fail "tombstoned fact survived locally"
+
+# Lock contention fails closed without touching either side.
+mkdir "$HUB_A.lock"
+set +e
+sync_a sync >/dev/null 2>&1
+lock_status=$?
+set -e
+rmdir "$HUB_A.lock"
+[[ "$lock_status" -ne 0 ]] || fail "duplicate lock returned success"
+
+bash -n "$ROOT/bin/ai-memory-sync"
+bash -n "$ROOT/bin/ai-sync-memory"
+echo "PASS: private memory sync converges losslessly and preserves every failure state"

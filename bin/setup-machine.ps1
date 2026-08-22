@@ -57,6 +57,9 @@ Flags:
                        Claude Desktop config.
   -SkipRailwayCliReconcile
                        Internal bootstrap flag; Railway was already reconciled.
+  -EnableMemorySyncSchedule
+                       Opt in to the private-memory task after qualification.
+                       The default is disabled during incident remediation.
   -RepoPath <path>     Where ai-devops lives (default: $HOME\repos\ai-devops).
 #>
 
@@ -65,6 +68,7 @@ param(
   [string]$Token = "",
   [switch]$SkipDesktopMcp,
   [switch]$SkipRailwayCliReconcile,
+  [switch]$EnableMemorySyncSchedule,
   [string]$RepoPath = "",
   [string]$SupabaseProjectRef = "<removed-protected-project-ref>"
 )
@@ -729,17 +733,18 @@ if ($null -ne $cc) {
 # --------------------------------------------------------------------------
 # 8. Memory auto-sync - keep Claude memories in sync across machines
 # --------------------------------------------------------------------------
-# ai-memory-sync is a bash script (isolated clone + secret gate); run it through
-# Git bash on a 30-minute schedule. Seeds once now, then a Scheduled Task keeps
-# it going.
-Step "Memory auto-sync (every 30 min)"
+# ai-memory-sync owns a private clone, privacy proof, union, health gate, and
+# commit. Seed incoming facts now, but keep unattended publishing disabled until
+# qualification explicitly opts in with -EnableMemorySyncSchedule.
+Step "Private memory sync"
 $gitBash = "C:\Program Files\Git\bin\bash.exe"
 if (Test-Path $gitBash) {
   # Windows path -> Git-bash POSIX path: C:\a\b -> /c/a/b
   $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\\','/')
   $syncScript = "$posix/bin/ai-memory-sync"
-  # Seed once now.
-  & $gitBash -lc "'$syncScript' pull" 2>$null
+  # Seed once now and fail visibly if the private hub cannot be verified.
+  & $gitBash -lc "'$syncScript' pull"
+  if ($LASTEXITCODE -ne 0) { throw "Private memory pull failed; schedule remains disabled." }
 
   # Task Scheduler launching bash.exe directly opens Windows Terminal whenever
   # the task runs.  Use the GUI-based Windows Script Host as a silent shim so
@@ -753,11 +758,13 @@ if (Test-Path $gitBash) {
   $escapedSync = $syncScript.Replace('"', '""')
   $launcherBody = @"
 Set shell = CreateObject("WScript.Shell")
-shell.Run """$escapedBash"" -lc ""'$escapedSync' >/dev/null 2>&1""", 0, True
+exitCode = shell.Run("""$escapedBash"" -lc ""'$escapedSync' sync""", 0, True)
+WScript.Quit exitCode
 "@
   Set-Content -LiteralPath $taskLauncher -Value $launcherBody -Encoding ascii
 
-  try {
+  if ($EnableMemorySyncSchedule) {
+    try {
     $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\wscript.exe" `
       -Argument "//B //NoLogo `"$taskLauncher`""
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(30) `
@@ -770,9 +777,17 @@ shell.Run """$escapedBash"" -lc ""'$escapedSync' >/dev/null 2>&1""", 0, True
       -Settings $settings -Principal $principal -Description "Silent AI memory sync every 30 minutes" `
       -Force -ErrorAction Stop | Out-Null
     Ok "Scheduled task 'ai-memory-sync' every 30 min (hidden; 15 min limit)"
-  } catch {
-    Warn "Could not create the scheduled task: $($_.Exception.Message)"
-    Warn "  Run '$syncScript' from Git bash to sync manually."
+    } catch {
+      throw "Could not create the private memory scheduled task: $($_.Exception.Message)"
+    }
+  } else {
+    $existingMemoryTask = Get-ScheduledTask -TaskName "ai-memory-sync" -ErrorAction SilentlyContinue
+    if ($existingMemoryTask) {
+      Disable-ScheduledTask -TaskName "ai-memory-sync" -ErrorAction Stop | Out-Null
+      Ok "Scheduled task 'ai-memory-sync' remains disabled pending rollout qualification"
+    } else {
+      Ok "Private memory schedule not enabled (opt in with -EnableMemorySyncSchedule after qualification)"
+    }
   }
 } else {
   Warn "Git bash not found (install Git) - memory sync not scheduled."

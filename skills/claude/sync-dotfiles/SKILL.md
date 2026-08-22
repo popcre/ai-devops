@@ -1,12 +1,13 @@
 ---
 name: sync-dotfiles
-description: Sync this machine's AI config with the ai-devops hub. Use when the user says "sync my dotfiles", "sync my config", "pull the latest skills/instructions", or "push my dotfiles". Pulls latest skills + global instructions + memory from ai-devops and installs them, sets the dflow gcloud defaults, and pushes local memory changes back. No chezmoi — ai-devops is the single hub.
+description: Sync this machine's public ai-devops configuration and its separate private portable-memory hub. Use when the user says "sync my dotfiles", "sync my config", "pull the latest skills/instructions", or "push my dotfiles". Installs current skills and globals, verifies machine wiring, and transactionally unions private memory without publishing facts.
 ---
 
 # sync-dotfiles
 
-One phrase keeps every machine's AI config in step with the `ai-devops` hub
-(GitHub `u2giants/ai-devops`): skills, global instructions, memory, gcloud
+One phrase keeps every machine's public AI configuration in step with
+`u2giants/ai-devops` and portable Markdown memory in the separate private
+`u2giants/ai-devops-memory` hub: skills, global instructions, memory, gcloud
 defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 `ai-devops/docs/config-consolidation-proposal.md`, shipped 2026-07-14).
 
@@ -29,7 +30,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
-| Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
+| Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
@@ -154,7 +155,7 @@ clone + `./install.sh` (Ubuntu) first.
    it, the setup script installs the new build and doctor verifies the running server
    matches. That is why this step runs on every sync and not only on a fresh machine.
 
-3. **Lay down memory** from the hub: `bin/ai-sync-memory pull`. Only projects
+3. **Lay down memory** from the private hub: `bin/ai-memory-sync pull`. Only projects
    that already exist locally are updated, so a skip for a project this machine
    doesn't have is normal. **A skip for EVERY project is not** — nor is `push`
    reporting `0 project memory folder(s)`. Both now exit non-zero, because they
@@ -256,19 +257,20 @@ clone + `./install.sh` (Ubuntu) first.
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
    reports; a human approves every change.
-7. **Capture local memory** back to the hub: `bin/ai-sync-memory push`.
-8. **Commit + push the hub** if step 3/7 changed anything: `git status` to see
-   what changed, then stage `memory/` (and any skill/template edits the user made
-   intentionally), commit with the `Co-Authored-By: Claude Opus 4.8` trailer and
-   the noreply author email (`u2giants@users.noreply.github.com`), then
-   `git push`. If nothing changed, say so.
+7. **Capture and publish local memory transactionally:** `bin/ai-memory-sync sync`.
+   This command alone owns the private clone, privacy proof, union, health gate,
+   commit, push, retry state, and success message. Never stage memory in the
+   public `ai-devops` checkout and never hand-compose a memory commit.
+8. **Verify public separation:** `git status --short -- memory/` in `ai-devops`
+   must show no operational fact change. Only `memory/README.md` and the
+   secret-free mapping/schema belong in this public repository.
 9. **Report** in plain English: what was pulled, **the Phase 2 wiring verdict from
    step 2** (either "already current" or exactly what was installed), which memory
    projects changed, whether a commit/push happened (with SHA), and any manual step
    left (Claude Desktop restart). Never imply SSH/MCP live anywhere but this repo.
 
 ## Preview mode
-If the user wants a dry run first: `bin/ai-sync-memory {push,pull} --dry-run` and
+If the user wants a dry run first: `bin/ai-memory-sync --dry-run` and
 `bin/ai-gcloud-dflow --dry-run` print what they'd do without changing anything.
 
 ## Safety
@@ -276,7 +278,7 @@ If the user wants a dry run first: `bin/ai-sync-memory {push,pull} --dry-run` an
   so a plain delete does not propagate: the next `pull` restores the file from
   the hub and any machine still holding it re-pushes it. A memory you removed
   *because it was wrong* comes back. Use
-  `bin/ai-sync-memory forget <project> <file.md> "<reason>"` — it records a
+  `bin/ai-memory-sync forget <project> <file.md> "<reason>"` — it records a
   tombstone in `memory/<project>/.forgotten`, so every machine drops the file on
   its next pull and no stale machine can resurrect it. A reason is mandatory
   (without it the fact just gets re-learned later). Then remove the file's line
@@ -291,7 +293,8 @@ If the user wants a dry run first: `bin/ai-sync-memory {push,pull} --dry-run` an
 - Skills flow repo→machine only. A skill edited locally in `~/.claude/skills` is
   NOT captured back; real skill changes belong in `ai-devops/skills/` (edit there,
   then this skill installs them).
-- Don't force-pull or reset the hub to resolve a conflict — surface it instead.
+- Do not manipulate the private clone to resolve a failure. `ai-memory-sync`
+  preserves the exact rejected commit and retries it on the next run.
 
 ## Related
 `ai-devops/docs/config-inventory.md` (the full config map),

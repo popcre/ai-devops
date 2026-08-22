@@ -31,8 +31,12 @@ printf 'local fact\n' > "$LOCAL/projects/C--repos-ai-devops/memory/local.md"
 git -C "$FIXTURE" init -q
 git -C "$FIXTURE" remote add origin https://github.com/u2giants/ai-devops.git
 
+set +e
 push_output="$(CLAUDE_HOME="$LOCAL" bash "$FIXTURE/bin/ai-sync-memory" push 2>&1)"
+push_status=$?
+set -e
 [[ "$push_output" == *"[BLOCKED]"* ]] || fail "public-hub push was not visibly blocked"
+[[ "$push_status" -ne 0 ]] || fail "public-hub push returned success"
 [[ ! -e "$FIXTURE/memory/ai-devops/local.md" ]] || fail "public-hub push copied a private fact"
 grep -Fq '[Hub entry](hub.md)' "$FIXTURE/memory/ai-devops/MEMORY.md" ||
   fail "public-hub push modified the hub index"

@@ -43,9 +43,10 @@ else
   BASE_HOME="$HOME"
 fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MEM_REPO="$REPO_ROOT/memory"
-MAP_FILE="$MEM_REPO/project-map.tsv"
+TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB_ROOT="${AI_MEMORY_HUB_ROOT:-$TOOL_ROOT}"
+MEM_REPO="$HUB_ROOT/memory"
+MAP_FILE="$TOOL_ROOT/memory/project-map.tsv"
 
 run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@"; fi }
 
@@ -57,7 +58,7 @@ run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@";
 # replacing their installed launcher.
 public_ai_devops_hub() {
   local origin
-  origin="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
+  origin="$(git -C "$HUB_ROOT" config --get remote.origin.url 2>/dev/null || true)"
   [[ "$origin" =~ github\.com[:/]u2giants/ai-devops(\.git)?$ ]]
 }
 
@@ -83,6 +84,53 @@ merge_memory_index() {
     fi
   done < "$local_index"
   mv -f "$tmp" "$output"
+}
+
+copy_fact_union() {
+  local source="$1" destination="$2" label="$3" file target base extension safe candidate suffix
+  safe="$(printf '%s' "$label" | sed 's/[^A-Za-z0-9._-]/-/g')"
+  for file in "$source"/* "$source"/.[!.]*; do
+    [[ -f "$file" ]] || continue
+    base="$(basename "$file")"
+    [[ "$base" == "MEMORY.md" || "$base" == "$FORGET_NAME" ]] && continue
+    target="$destination/$base"
+    if [[ ! -e "$target" ]]; then
+      run cp -a "$file" "$target"
+    elif ! cmp -s "$file" "$target"; then
+      extension="${base##*.}"
+      if [[ "$extension" == "$base" ]]; then extension=""; else extension=".$extension"; fi
+      base="${base%$extension}"
+      candidate="$destination/$base--$safe$extension"
+      suffix=2
+      while [[ -e "$candidate" ]] && ! cmp -s "$file" "$candidate"; do
+        candidate="$destination/$base--$safe-$suffix$extension"
+        suffix=$((suffix+1))
+      done
+      [[ -e "$candidate" ]] || run cp -a "$file" "$candidate"
+    fi
+  done
+}
+
+ensure_index_coverage() {
+  local directory="$1" label="$2" index file base added=0
+  index="$directory/MEMORY.md"
+  if [[ ! -f "$index" ]]; then
+    run bash -c 'printf "# Memory index - %s\n\n" "$1" > "$2"' _ "$label" "$index"
+  fi
+  for file in "$directory"/*.md; do
+    [[ -f "$file" ]] || continue
+    base="$(basename "$file")"
+    [[ "$base" == "MEMORY.md" ]] && continue
+    if ! grep -Fq "($base)" "$index"; then
+      if [[ "$DRY_RUN" == "--dry-run" ]]; then
+        echo "[dry-run] index $label/$base"
+      else
+        if [[ "$added" -eq 0 ]]; then printf '\n## Recovered union entries\n\n' >> "$index"; fi
+        printf -- '- [%s](%s) - Portable fact preserved by lossless sync.\n' "${base%.md}" "$base" >> "$index"
+      fi
+      added=$((added+1))
+    fi
+  done
 }
 
 usage() {
@@ -132,21 +180,29 @@ tombstoned_names() {
 
 # Delete tombstoned files from a directory.
 apply_tombstones() {
-  local dir="$1" forget="$2" label="$3" name
+  local dir="$1" forget="$2" label="$3" name index tmp
   [[ -f "$forget" ]] || return 0
   while IFS= read -r name; do
-    [[ -n "$name" && -e "$dir/$name" ]] || continue
-    run rm -f "$dir/$name"
-    echo "  forget  $label/$name  (tombstoned)"
+    [[ -n "$name" ]] || continue
+    if [[ -e "$dir/$name" ]]; then
+      run rm -f "$dir/$name"
+      echo "  forget  $label/$name  (tombstoned)"
+    fi
+    index="$dir/MEMORY.md"
+    if [[ -f "$index" && "$DRY_RUN" != "--dry-run" ]]; then
+      tmp="$index.tombstone.$$"
+      awk -v needle="($name)" 'index($0, needle) == 0' "$index" > "$tmp"
+      mv -f "$tmp" "$index"
+    fi
   done < <(tombstoned_names "$forget")
 }
 
 case "$DIRECTION" in
   push)
-    if public_ai_devops_hub && [[ "${AI_MEMORY_ALLOW_PUBLIC_HUB:-}" != "yes" ]]; then
+    if public_ai_devops_hub; then
       echo "[BLOCKED] Refusing to copy machine memory into the public u2giants/ai-devops repository." >&2
       echo "[BLOCKED] Configure the governed private memory hub before enabling uploads." >&2
-      exit 0
+      exit 1
     fi
     run mkdir -p "$MEM_REPO"
     n=0
@@ -156,6 +212,11 @@ case "$DIRECTION" in
       proj="$(canonical "$slug")"
       dest="$MEM_REPO/$proj"
       run mkdir -p "$dest"
+      hub_index=""
+      if [[ "$DRY_RUN" != "--dry-run" && -f "$dest/MEMORY.md" ]]; then
+        hub_index="$(mktemp)"
+        cp -a "$dest/MEMORY.md" "$hub_index"
+      fi
       # Union the two tombstone lists BEFORE copying, so neither side loses a
       # deletion: the machine may have forgotten something the hub hasn't, and
       # a stale machine must not overwrite the hub's newer list.
@@ -167,27 +228,17 @@ case "$DIRECTION" in
           | awk 'NF && !seen[$0]++' > "$dest/$FORGET_NAME.tmp" || true
         mv -f "$dest/$FORGET_NAME.tmp" "$dest/$FORGET_NAME"
       fi
-      # MEMORY.md is an INDEX every machine rewrites, so a plain copy is
-      # last-push-wins. Observed live 2026-07-26: another machine pushed its
-      # older index and silently dropped 5 entries from the hub — the memory
-      # files survived, but nothing referenced them, so recall would never find
-      # them. Warn BEFORE the copy; never block (the machine's index is usually
-      # the newer one), but make a shrink impossible to miss.
-      if [[ -f "$dest/MEMORY.md" && -f "$md/MEMORY.md" ]]; then
-        lost="$(comm -23 \
-          <(grep -o '^- \[[^]]*\]([^)]*)' "$dest/MEMORY.md" 2>/dev/null | sort) \
-          <(grep -o '^- \[[^]]*\]([^)]*)' "$md/MEMORY.md"   2>/dev/null | sort) || true)"
-        if [[ -n "$lost" ]]; then
-          echo "[WARN] memory/$proj/MEMORY.md: this machine's index is MISSING entries the hub has:" >&2
-          printf '%s\n' "$lost" | sed 's/^/         /' >&2
-          echo "[WARN] Pushing will drop them. Merge the missing lines into $md/MEMORY.md" >&2
-          echo "[WARN] BEFORE committing, or those memories become unreachable by recall." >&2
-        fi
+      # MEMORY.md is union-merged below. An older machine can add entries but
+      # cannot shrink the hub index; only an explicit tombstone removes one.
+      copy_fact_union "$md" "$dest" "$(hostname)"
+      if [[ -n "$hub_index" ]]; then
+        merge_memory_index "$hub_index" "$md/MEMORY.md" "$dest/MEMORY.md"
+        rm -f "$hub_index"
       fi
-      run cp -a "$md/." "$dest/"
       # Re-apply after the copy: the machine may still hold a file the hub has
       # tombstoned, and cp would have silently resurrected it in the hub.
       apply_tombstones "$dest" "$dest/$FORGET_NAME" "memory/$proj"
+      ensure_index_coverage "$dest" "$proj"
       # A file in the hub but not on this machine is EITHER a deletion nobody
       # recorded, OR memory from another machine this one has never pulled.
       # Those are indistinguishable, so never delete — surface it and let a
@@ -228,7 +279,12 @@ case "$DIRECTION" in
             local_index="$(mktemp)"
             cp -a "$md/MEMORY.md" "$local_index"
           fi
-          run cp -a "$pd." "$md/"
+          if [[ -f "$pd/$FORGET_NAME" || -f "$md/$FORGET_NAME" ]] && [[ "$DRY_RUN" != "--dry-run" ]]; then
+            { cat "$md/$FORGET_NAME" 2>/dev/null; cat "$pd/$FORGET_NAME" 2>/dev/null; } \
+              | awk 'NF && !seen[$0]++' > "$md/$FORGET_NAME.tmp" || true
+            mv -f "$md/$FORGET_NAME.tmp" "$md/$FORGET_NAME"
+          fi
+          copy_fact_union "$pd" "$md" "hub"
           if [[ -n "$local_index" ]]; then
             merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md"
             rm -f "$local_index"
@@ -236,6 +292,7 @@ case "$DIRECTION" in
           # This is what makes a deletion actually propagate: the hub's
           # tombstones remove the file from this machine too.
           apply_tombstones "$md" "$md/$FORGET_NAME" "$slug"
+          ensure_index_coverage "$md" "$slug"
           echo "  pull  memory/$proj  ->  $slug"
           matched=1
         fi

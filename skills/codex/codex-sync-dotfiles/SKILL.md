@@ -1,12 +1,13 @@
 ---
 name: codex-sync-dotfiles
-description: Sync this machine's AI config with the ai-devops hub (Codex edition). Use when the user says "sync my dotfiles", "sync my config", "pull the latest skills/instructions", or "push my dotfiles". Pulls latest skills + global instructions + memory from ai-devops and installs them, sets the dflow gcloud defaults, and pushes local memory back. ai-devops is the single hub — no chezmoi.
+description: Sync this machine's public ai-devops configuration and its separate private portable-memory hub (Codex edition). Use for "sync my dotfiles", "sync my config", skills, globals, or memory. Installs current configuration and transactionally unions private memory without publishing facts.
 ---
 
 # codex-sync-dotfiles
 
 Codex twin of the Claude `sync-dotfiles` skill. Keeps this machine's AI config in
-step with the `ai-devops` hub (GitHub `u2giants/ai-devops`): skills, global
+step with the public `u2giants/ai-devops` configuration hub and the separate
+private `u2giants/ai-devops-memory` portable-memory hub: skills, global
 instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 `ai-devops/docs/config-consolidation-proposal.md`, shipped 2026-07-14).
 
@@ -28,7 +29,7 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 |---|---|---|
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
-| Auto-memory | machine ↔ repo (two-way, git-merged) | `bin/ai-sync-memory` |
+| Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -96,7 +97,7 @@ clone + `./install.sh` on Ubuntu).
      unavailable until the token is in place. Never skip silently.
    `config/opencode/version` pins OpenCode, so a pull that bumps it is installed here.
 
-3. `bin/ai-sync-memory pull` — lay hub memory onto this machine (only existing
+3. `bin/ai-memory-sync pull` — lay private hub memory onto this machine (only existing
    local projects update; a skip for a project this machine doesn't have is
    normal). **But if EVERY project skips, or `push` reports 0 folders, the
    script now exits non-zero — that is a real failure, not "expected". It means
@@ -171,33 +172,36 @@ clone + `./install.sh` on Ubuntu).
    say so and offer to register it. Never schedule anything that EDITS memory
    unattended: tombstoned deletions propagate to every machine and survive a later
    pull, so a wrong automated delete cannot be undone.
-6. `bin/ai-sync-memory push` — copy local memory back into the hub.
+6. `bin/ai-memory-sync sync` — union local memory into the private hub and pull
+   the verified union back. This command owns privacy verification, health,
+   commit, push, and recovery; never stage memory in public `ai-devops`.
    **Deleting a memory needs `forget`, not `rm`.** Sync copies, never mirrors, so
    a plain delete does not propagate — the next `pull` restores it and any
    machine still holding it re-pushes it, making a WRONG memory immortal. Use
-   `bin/ai-sync-memory forget <project> <file.md> "<reason>"` (reason mandatory);
+   `bin/ai-memory-sync forget <project> <file.md> "<reason>"` (reason mandatory);
    it tombstones the file in `memory/<project>/.forgotten` so every machine drops
    it on its next pull and no stale machine resurrects it. Then remove its line
    from that project's `MEMORY.md`. The `note ... in the hub but not on this
    machine` line is NOT proof of a deletion — it is equally memory from a machine
    you never pulled; never delete on that basis alone.
-7. Commit + push `ai-devops` if memory (or intentional skill edits) changed. Use
-   the noreply email (`u2giants@users.noreply.github.com`); keep the repo
-   secret-free. If nothing changed, say so.
+7. Verify `git status --short -- memory/` in public `ai-devops` shows no
+   operational fact change. Commit only intentional public tooling or skill
+   edits there; private memory commits are exclusively `ai-memory-sync`'s job.
 8. Report plainly: what synced, **the step-2 Phase 2 wiring verdict** (either
    "already current" or exactly what was installed), which memory projects changed,
    whether a push happened (SHA), and any manual step left (Claude Desktop restart).
    Never imply SSH/MCP live anywhere but this repo.
 
 ## Preview mode
-`bin/ai-sync-memory {push,pull} --dry-run` and `bin/ai-gcloud-dflow --dry-run`
+`bin/ai-memory-sync --dry-run` and `bin/ai-gcloud-dflow --dry-run`
 show what would happen without changing anything.
 
 ## Safety
 - Never commit a secret; memory is secret-free by policy. Flag and STOP if a
   memory file holds a credential (it belongs in the `vibe_coding` 1Password vault).
 - Skills flow repo→machine only; edit real skills in `ai-devops/skills/`.
-- Don't force-pull/reset the hub to resolve a conflict — surface it.
+- Do not manipulate the private clone after a failure; the transaction preserves
+  and retries the exact rejected commit.
 
 ## Related
 `ai-devops/docs/config-inventory.md`, `docs/config-consolidation-proposal.md`

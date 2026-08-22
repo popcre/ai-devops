@@ -245,7 +245,8 @@ on Windows should support paths longer than 260 characters.
 
 Actually:
 `bin/ai-memory-sync` works in a separate clone at
-`~/.cache/ai-devops-memory`. Git settings stored in the main checkout do not
+`~/.cache/ai-devops-memory-private`. The clone targets only the private
+`u2giants/ai-devops-memory` repository. Git settings stored in the public checkout do not
 apply there. Claude local-agent transcripts can produce paths over 400
 characters. New hub clones therefore pass `-c core.longpaths=true` to
 `git clone` before checkout, and existing hub clones set the same local config
