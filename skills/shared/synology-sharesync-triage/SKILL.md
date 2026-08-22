@@ -1,6 +1,6 @@
 ---
 name: synology-sharesync-triage
-description: Diagnose and repair Synology Drive ShareSync stalls, repeated single-file syncing, destination-side basis-file corruption, connection-26 flaps, and hidden queue jams across source and destination NASes. Use when a share looks stuck, a file is missing on a replica, ShareSync shows syncing one file for a long time, or the user wants proof of root cause and a targeted fix.
+description: Diagnose and repair Synology Drive ShareSync stalls, repeated-file loops, basis-file corruption, connection-26 flaps, and queue jams. Use when a share is stuck, a replica misses a file, or ShareSync keeps syncing one file.
 ---
 
 # Synology ShareSync Triage

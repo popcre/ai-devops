@@ -8,11 +8,8 @@
 
 set -uo pipefail
 
-# Load server.env for DEFAULT_MAIN_BRANCH if present (non-fatal).
-SERVER_ENV="/etc/ai-devops/server.env"
-DEFAULT_MAIN_BRANCH="main"
-# shellcheck source=/dev/null
-[ -f "$SERVER_ENV" ] && . "$SERVER_ENV" 2>/dev/null || true
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+POLICY_BIN="${AI_REPO_POLICY_BIN:-$ROOT/bin/ai-repo-policy}"
 
 c_head() { printf '\033[1m%s\033[0m\n' "$1"; }
 c_warn() { printf '\033[33m⚠  %s\033[0m\n' "$1"; }
@@ -24,6 +21,10 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+POLICY="$($POLICY_BIN)"
+REPOSITORY="$(jq -r .repository <<<"$POLICY")"
+WORKFLOW="$(jq -r .workflow <<<"$POLICY")"
+DEFAULT_MAIN_BRANCH="$(jq -r .main_branch <<<"$POLICY")"
 
 # True once the repo has at least one commit (avoids noisy errors on fresh repos).
 HAS_COMMITS=0
@@ -31,7 +32,9 @@ git rev-parse --verify -q HEAD >/dev/null 2>&1 && HAS_COMMITS=1
 
 c_head "Workspace status"
 echo "Repo path : $REPO_ROOT"
+echo "Repository: $REPOSITORY"
 echo "Branch    : $BRANCH"
+echo "Workflow  : $WORKFLOW"
 
 # Dirty / clean
 if [ -n "$(git status --porcelain)" ]; then
@@ -57,6 +60,11 @@ if [ -n "$UNTRACKED" ]; then echo "$UNTRACKED"; else echo "  (none)"; fi
 # Ahead / behind origin
 echo
 c_head "Sync with origin"
+FETCHED=0
+if git remote get-url origin >/dev/null 2>&1; then
+  if git fetch --quiet origin "$DEFAULT_MAIN_BRANCH"; then FETCHED=1
+  else c_warn "Origin fetch failed; remote counts below are not current."; fi
+fi
 UPSTREAM=""
 [ "$HAS_COMMITS" -eq 1 ] && UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
 if [ -n "$UPSTREAM" ]; then
@@ -95,8 +103,14 @@ fi
 
 # Warnings
 echo
-if [ "$BRANCH" = "$DEFAULT_MAIN_BRANCH" ] || [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  c_warn "You are on '$BRANCH' — create a feature branch before making changes."
+if [ "$WORKFLOW" = "main-only" ]; then
+  if [ "$BRANCH" = "$DEFAULT_MAIN_BRANCH" ]; then
+    echo "Branch policy: correct — this repository works directly on '$DEFAULT_MAIN_BRANCH'."
+  else
+    c_warn "This is a main-only repository; return to '$DEFAULT_MAIN_BRANCH' before changing it."
+  fi
+elif [ "$BRANCH" = "$DEFAULT_MAIN_BRANCH" ]; then
+  c_warn "This repository requires a working branch and pull request; do not change '$DEFAULT_MAIN_BRANCH' directly."
 fi
 if [ "$DIRTY" -eq 1 ]; then
   c_warn "Working tree is DIRTY — commit, stash, or discard before switching context."

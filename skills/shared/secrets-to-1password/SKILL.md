@@ -1,6 +1,6 @@
 ---
 name: secrets-to-1password
-description: Store anything in the vibe_coding 1Password vault with a descriptive title, searchable tags, and notes detailed enough for a future AI session that has never seen the entry to find it, know what it is for, and use it without asking a single question. Use for EVERY create or update in the 1Password MCP (`note_create`, `password_create`, `item_edit`) — whether it is a secret (credential, token, API key, password, connection string, SSH key, login) or a plain non-secret information/config/reference note. Use whenever the user says "secrets sweep", "any secrets not in 1password?", "put this in 1Password", "save this key", "store these credentials", "add this note to the vault", "update that entry"; whenever a credential appears mid-session that isn't stored yet; whenever you're about to write a secret into a .env, doc, or scratch file instead; and as the secrets step of wrap-up and session-docs-update.
+description: Store or update secrets and reference notes in Albert's vibe_coding 1Password vault with durable titles, tags, and context. Use for every 1Password create/edit, "secrets sweep", "put this in 1Password", saving credentials or keys, or before writing a secret to a file.
 ---
 
 # secrets-to-1password
@@ -170,7 +170,8 @@ words a future session would actually search: the service, the app, and the
 environment. "Which one is this?" should never survive reading the title.
 
 Good, from the vault:
-- `Supabase DB Direct URL - The Oracle (CURRENT PROD, theoracle, <removed-protected-project-ref>)`
+- `Supabase DB Direct URL - The Oracle (CURRENT PROD, theoracle)`; resolve its
+  project ref with `ai-private-config value supabase_oracle_prod_ref` when needed.
 - `Designflow - Azure Graph client secret (AZURE_CLIENT_SECRET)`
 - `logo.dev publishable token - popcrm-web`
 - Info entry: `Hetz server layout - which apps run where (Coolify vs Ansible)`

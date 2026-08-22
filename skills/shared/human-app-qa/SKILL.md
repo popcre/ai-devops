@@ -1,6 +1,6 @@
 ---
 name: human-app-qa
-description: Explore a web application's frontend like a real customer, poke at workflows and edge cases, judge usability, and report evidence-backed behavior problems without reviewing or changing code. Use for human-style QA, exploratory testing, user-journey testing, usability testing, visual checks, "use the app," "click everywhere," "poke and prod," or requests to find frontend problems with Chrome DevTools MCP.
+description: Explore a web frontend like a real customer and report evidence-backed behavior or usability problems without reviewing code. Use for human QA, exploratory or journey testing, visual checks, "use the app", "click everywhere", or "poke and prod".
 ---
 
 # Human App QA

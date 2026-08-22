@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "minimum_positive_cases": 5,
+  "minimum_negative_cases": 5,
+  "repeated_run_minimum": 3,
+  "platforms": ["windows", "linux"],
+  "protected_skills": [
+    "cleanup-worktree",
+    "close-old-session",
+    "codex-portable-facts",
+    "codex-shared-db-change",
+    "deepseek-second-opinion",
+    "fresh-session",
+    "grok-cli",
+    "handoff-writer",
+    "kimi-code-delegation",
+    "repo-bug-audit",
+    "secrets-to-1password",
+    "shared-db-change",
+    "shared-db-handover",
+    "shared-db-orchestrator",
+    "synology-long-running-operations"
+  ]
+}

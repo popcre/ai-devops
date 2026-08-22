@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open and run the single orchestrator for u2giants/shared-db, coordinate concurrent structural database work, or route a requested shared-database structure change into the governed issue workflow. Use for shared-db sessions, migrations, schema changes, preview or production promotion, database-change handovers, multiple database agents, or requests to coordinate parallel database work. Reading schema and ordinary application-owned row writes do not trigger this skill; outside-sourced writes into curated Master Data do.
+description: Open or run the single u2giants/shared-db orchestrator and route structural database work through its governed issues. Use for shared-db sessions, migrations, schema changes, promotion, database handovers, parallel database agents, or curated Master Data loads.
 ---
 
 # Shared DB Orchestrator

@@ -469,7 +469,7 @@ install_global() {
     run mkdir -p "$(dirname "$dst")"
     run cp "$src" "$dst"
     echo "Installed $label -> $dst"
-    echo "NOTE: append this machine's section from templates/system/machine-atlas.md"
+    echo "NOTE: append this machine's section from: ai-private-config path machine_atlas"
   elif cmp -s "$src" "$dst"; then
     echo "$label already up to date."
   elif $ADOPT_GLOBALS; then

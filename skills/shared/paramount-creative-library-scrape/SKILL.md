@@ -1,6 +1,6 @@
 ---
 name: paramount-creative-library-scrape
-description: Safely inspect, reconcile, or capture licensed Paramount Creative Library metadata for Properties, Franchises, Collections/style guides, Characters, assets, and their source IDs and relationships. Use when asked to scrape, refresh, research, validate, map, or load Paramount portal data from stillsarchive.paramount.com, or when database design depends on Paramount's field names, numeric character/property IDs, asset IDs, pagination, or many-to-many links.
+description: Inspect, reconcile, or capture Paramount Creative Library metadata. Use for Paramount portal scraping, refresh, validation, properties, franchises, collections, style guides, characters, asset IDs, pagination, source relationships, or database mapping.
 ---
 
 # Paramount Creative Library scrape

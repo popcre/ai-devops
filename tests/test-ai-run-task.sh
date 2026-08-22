@@ -18,6 +18,8 @@ echo '== ai-run-task'
 RUN="$(cd "$R" && "$SCRIPT" start 'Build the exact requested feature')"; MAN="$RUN/manifest.json"
 check 'start creates a seven-stage ready manifest' "jq -e '.status==\"ready\" and (.stages|length)==7' '$MAN'"
 check 'roles pin Codex work and Claude Opus 5 review' "jq -e '[.stages[].role]|index(\"codex-implementer\")!=null and index(\"claude-opus-5-reviewer\")!=null' '$MAN'"
+START_BRANCH="$(git -C "$R" branch --show-current)"
+check 'manifest records repository workflow policy' "jq -e --arg branch '$START_BRANCH' '.repository_identity==\"local/repo\" and .repository_workflow==\"feature-branch-pr\" and .starting_branch==\$branch' '$MAN'"
 RESULT="$(cd "$R" && "$SCRIPT" run "$RUN")"
 check 'all seven stages complete' "jq -e '.status==\"completed\" and all(.stages[];.status==\"completed\")' '$MAN'"
 check 'every stage ran exactly once' "[ \"\$(wc -l < '$TMP/calls' | tr -d ' ')\" = 7 ]"

@@ -19,12 +19,10 @@ Assert (Test-Path $config) 'configuration.winget is missing'
 Assert (Test-Path $knownHostsTemplate) 'managed SSH known-hosts template is missing'
 Assert (Test-Path $knownHostsSync) 'managed SSH known-hosts sync script is missing'
 $knownHostsText = Get-Content -Raw $knownHostsTemplate
-Assert ($knownHostsText -match '100\.92\.1\.120,seafile-br\.coho-banded\.ts\.net') 'managed SSH known-hosts template must pin Seafile over Tailscale'
-Assert ($knownHostsText -match 'github\.com ssh-ed25519') 'managed SSH known-hosts template must pin GitHub'
-Assert ($knownHostsText -match '100\.107\.131\.35,edgesynology1\.coho-banded\.ts\.net') 'managed SSH known-hosts template must pin Edge Synology 1'
-Assert ($knownHostsText -match '100\.110\.219\.31,916\.coho-banded\.ts\.net') 'managed SSH known-hosts template must pin Windows 916'
+Assert ($knownHostsText -match 'ai-private-config path ssh_known_hosts') 'public known-hosts file must point to protected configuration'
+Assert ($knownHostsText -notmatch 'ssh-(ed25519|rsa)') 'public known-hosts file must not contain host keys'
 $sshConfigTemplate = Get-Content -Raw (Join-Path $root 'config\ssh-config.template')
-Assert ($sshConfigTemplate -match 'Host seafile ssh-seafile\.designflow\.app') 'managed SSH config must route the Seafile public hostname through its trusted tailnet address'
+Assert ($sshConfigTemplate -match 'ai-private-config path ssh_config') 'public SSH config must point to protected configuration'
 $yaml = Get-Content -Raw $config
 Assert ($yaml -match 'configurationVersion:\s+0\.2\.0') 'configuration must declare the supported WinGet DSC schema version'
 Assert ($yaml -match 'Microsoft\.WinGet\.DSC/WinGetPackage') 'configuration must use WinGet DSC package resources'
@@ -57,7 +55,8 @@ Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must 
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok and Kimi CLIs'
 Assert ($bootstrapText -match 'configure-windows-bootstrap-access\.ps1') 'bootstrap must own first-connection Tailscale/OpenSSH setup'
 Assert ($bootstrapText -match 'configure-wsl-ansible-controller\.ps1') 'bootstrap must own WSL Ansible controller setup'
-Assert ($machineSetupText -match 'ssh-known-hosts\.template') 'machine setup must install managed SSH server keys'
+Assert ($machineSetupText -match 'ai-private-config') 'machine setup must synchronize protected configuration'
+Assert ($machineSetupText -match 'path ssh_known_hosts') 'machine setup must resolve protected SSH server keys'
 $knownHostsSyncText = Get-Content -Raw $knownHostsSync
 Assert ($knownHostsSyncText -match 'ssh-keygen -R') 'SSH known-hosts sync must safely replace a changed managed SSH key'
 $syncTestRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-known-hosts-" + [guid]::NewGuid().ToString('N'))

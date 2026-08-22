@@ -1,0 +1,12 @@
+[
+  {"query":"ask DeepSeek whether it agrees with this diagnosis","should_trigger":true},
+  {"query":"run the migration plan by DeepSeek and debate objections","should_trigger":true},
+  {"query":"what does DeepSeek think about this diff?","should_trigger":true},
+  {"query":"use ai-deepseek-agent for a second opinion","should_trigger":true},
+  {"query":"talk to DeepSeek about this configuration and push back if needed","should_trigger":true},
+  {"query":"ask Grok to review this diff","should_trigger":false},
+  {"query":"use Qwen Code for a second opinion","should_trigger":false},
+  {"query":"review this diagnosis yourself","should_trigger":false},
+  {"query":"implement the requested fix without another model","should_trigger":false},
+  {"query":"what DeepSeek model versions exist?","should_trigger":false}
+]

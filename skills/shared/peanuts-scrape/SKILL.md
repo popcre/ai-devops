@@ -1,6 +1,6 @@
 ---
 name: peanuts-scrape
-description: Capture, refresh, validate, or interpret Peanuts / Snoopy licensed source data from the Peanuts Asset Library (peanuts.enterprise.app.tenovos.io, a Tenovos DAM). Use when asked to scrape, re-scrape, inspect, reconcile, or load Peanuts art programs, style guides, characters, initiatives, or asset metadata; when a question depends on Tenovos field names, the Art Program / Style Guide / Character Name vocabularies, the AppSync GraphQL API, or asset IDs; or when deciding which Peanuts relationships are licensor-asserted versus inferred.
+description: Capture, refresh, validate, or interpret Peanuts and Snoopy source data from the Tenovos Asset Library. Use for Peanuts art programs, style guides, characters, initiatives, asset metadata, Tenovos fields, AppSync IDs, or asserted relationships.
 ---
 
 # Peanuts Asset Library (Tenovos DAM) scrape

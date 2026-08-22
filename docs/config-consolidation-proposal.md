@@ -164,7 +164,7 @@ these tokens against the API, never with the CLI subcommand.
 instructions + gcloud + memory) from ai-devops alone, all secrets sourced from
 1Password, nothing secret committed. **MET on t16 (2026-07-15) and al8960ofc
 (2026-07-26).** Note `al8960ofc` and the machine HANDOFF calls **"4837"** are the
-SAME box (§0.2/§8: `AL8960OFC` / <removed-protected-address>) — do not chase it as a separate
+SAME box (§0.2/§8: `AL8960OFC` / <protected-dev-address>) — do not chase it as a separate
 target. Machines still to adopt: **916** (powered off until ~2026-07-28), any dflow
 box that is not t16/al8960ofc, and the Ubuntu servers beyond `hetz` — each needs
 `git pull` + `bin/setup-machine.ps1` (Windows) or `bin/setup-secrets.sh` (Ubuntu).

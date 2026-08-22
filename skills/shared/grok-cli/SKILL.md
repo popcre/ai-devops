@@ -1,6 +1,6 @@
 ---
 name: grok-cli
-description: Use xAI's Grok CLI (`grok`, branded Grok Build) as an independent coding agent via the `ai-grok-review` wrapper — read-only reviews, repository analysis, second opinions, session continuation, and the explicit implementation path. Use when the user says "use Grok", "ask Grok", "run this by Grok", "Grok CLI", "Grok Build", requests a Grok second opinion, asks where Grok is installed, or explicitly delegates coding work to Grok.
+description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, or delegated Grok coding.
 ---
 
 # Grok CLI

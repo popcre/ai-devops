@@ -114,9 +114,9 @@ Claude Opus 5 debate.
   `memory/dflow-plm/shared-db-canonical-repo.md`, and the duplicate `dflow_plm`
   namespace. The governed shared-database skill remains the live authority.
 - Confidence: certain
-- What happens: indexed memory names preview project `<removed-protected-project-ref>`; the
+- What happens: indexed memory names preview project `<protected-retired-preview-ref>`; the
   current governed skill explicitly says that project does not exist and names
-  `<removed-protected-project-ref>`. Two duplicated memories also authorize app-owned startup
+  `<protected-shared-preview-ref>`. Two duplicated memories also authorize app-owned startup
   schema changes, contradicting the current rule that every structural change starts
   in `shared-db`.
 - User-visible impact: a future AI session can target the wrong environment or create

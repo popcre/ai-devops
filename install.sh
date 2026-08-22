@@ -222,6 +222,10 @@ if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
 fi
 run_stage required "Claude and Codex skills" "$REPO_ROOT/bin/ai-install-skills"
 
+# Machine topology and provider identifiers are restored from the protected
+# configuration repository before any generated config consumes them.
+run_stage required "Protected machine configuration" "$REPO_ROOT/bin/ai-private-config" sync
+
 # --------------------------------------------------------------------------
 # 4.6 Git commit identity. Without a global identity Git does not stop — it
 #     silently invents one from the OS account and stamps it on every commit.

@@ -1,0 +1,12 @@
+[
+  {"query":"stop work on shared-db and hand everything to the orchestrator","should_trigger":true},
+  {"query":"wrap up this shared Supabase schema session","should_trigger":true},
+  {"query":"you are not the coordinator; transfer your database work","should_trigger":true},
+  {"query":"write the two-part handoff for the shared-db agents","should_trigger":true},
+  {"query":"fresh session for the database orchestrator","should_trigger":true},
+  {"query":"wrap up this frontend-only session","should_trigger":false},
+  {"query":"create a new shared database column","should_trigger":false},
+  {"query":"inspect the Supabase schema read-only","should_trigger":false},
+  {"query":"open the shared-db orchestrator","should_trigger":false},
+  {"query":"write a generic project handoff","should_trigger":false}
+]

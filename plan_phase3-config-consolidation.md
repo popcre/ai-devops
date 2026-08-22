@@ -70,10 +70,10 @@ not scaffold them.
     (lands as `root`; the repo is `ai:ai` at `/worksp/ai-devops`, so use
     `sudo -u ai -H bash -lc '…'` or installs silently target `/root`).
   - `al8960ofc` — Windows 11 dev box, user `ahazan2` (domain `IML\ahazan2`),
-    Tailscale `<removed-protected-address>`. **This box is the same machine HANDOFF sometimes
+    Tailscale `<protected-dev-address>`. **This box is the same machine HANDOFF sometimes
     calls "4837"** — one machine, two names. Do not chase it as two targets.
   - `t16` (`albt16`) — Windows 11 dev box.
-  - `916` (`916-alien`, `<removed-protected-address>`) — Windows 11 dev box, **powered off until
+  - `916` (`916-alien`, `<protected-dev-peer-address>`) — Windows 11 dev box, **powered off until
     roughly 2026-07-28**.
   - Other Ubuntu servers: `seafile`, `comp`, `backupwiz`, `auth`.
 - **Two client tools are configured by this repo:** Claude (Claude Code CLI, Claude

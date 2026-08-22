@@ -1,0 +1,12 @@
+[
+  {"query":"what did we learn last time about the status 000 GLM failure on another machine?","should_trigger":true},
+  {"query":"search our portable memory for the known fix to this ai-devops installer problem","should_trigger":true},
+  {"query":"do we have a remembered cross-machine fact about the 916 Codex path?","should_trigger":true},
+  {"query":"look up the earlier project decision in Albert's private memory hub","should_trigger":true},
+  {"query":"use ai-facts to find what we previously learned about this provider","should_trigger":true},
+  {"query":"read the current repository README and summarize it","should_trigger":false},
+  {"query":"search this source tree for every reference to ai-glm","should_trigger":false},
+  {"query":"update Codex memory with this new fact","should_trigger":false},
+  {"query":"open the raw transcript archive and find a password","should_trigger":false},
+  {"query":"what files changed in the current git diff?","should_trigger":false}
+]

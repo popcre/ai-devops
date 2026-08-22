@@ -1,0 +1,12 @@
+[
+  {"query":"fresh session?","should_trigger":true},
+  {"query":"should the next phase use a new context window?","should_trigger":true},
+  {"query":"is context getting full enough to hand this to a new agent?","should_trigger":true},
+  {"query":"decide whether we continue here or cut over between plan phases","should_trigger":true},
+  {"query":"verify the handoff covers every remaining phase before a new session","should_trigger":true},
+  {"query":"write the handoff document now","should_trigger":false},
+  {"query":"wrap up this session","should_trigger":false},
+  {"query":"continue to the next small step","should_trigger":false},
+  {"query":"start a brand-new software application","should_trigger":false},
+  {"query":"summarize our current token usage","should_trigger":false}
+]

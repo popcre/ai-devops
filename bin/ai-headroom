@@ -37,7 +37,10 @@
 
 set -euo pipefail
 
-PROXY_URL="http://<removed-protected-address>:8787"
+PROXY_URL="${AI_HEADROOM_PROXY_URL:-}"
+if [ -z "$PROXY_URL" ] && [ -x "$(dirname "$0")/ai-private-config" ]; then
+  PROXY_URL="$("$(dirname "$0")/ai-private-config" value headroom_proxy_url 2>/dev/null || true)"
+fi
 SETTINGS="$HOME/.claude/settings.json"
 BASHRC="$HOME/.bashrc"
 KEEP_BACKUPS=10
@@ -72,6 +75,7 @@ command -v curl >/dev/null 2>&1 || HAVE_CURL=0
 # rather than matching one exact byte sequence. Non-2xx or timeout counts as down.
 proxy_healthy() {
   local body
+  [ -n "$PROXY_URL" ] || return 1
   [ "$HAVE_CURL" = 1 ] || return 1
   body="$(curl -fsS -m 6 "$PROXY_URL/health" 2>/dev/null)" || return 1
   printf '%s' "$body" | tr -d ' \t\r\n' | grep -q '"status":"healthy"'
@@ -358,6 +362,7 @@ case "$action" in
 '
     ;;
   on)
+    [ -n "$PROXY_URL" ] || die "ai-headroom: protected proxy topology is unavailable; run: ai-private-config sync"
     [ "$HAVE_CURL" = 1 ] || die "ai-headroom: curl not found on PATH, so I cannot verify the
 proxy is answering before pointing Claude at it. Refusing to guess. (\`ai-headroom off\`
 still works without curl.)"

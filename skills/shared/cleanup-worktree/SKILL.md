@@ -1,15 +1,6 @@
 ---
 name: cleanup-worktree
-description: >-
-  Safely audit, recover, reconcile, and remove stale Git worktrees and temporary
-  repository copies created by Codex, Claude, their desktop apps, CLIs, or
-  delegated coding agents. Use when Git says a branch is already used by another
-  worktree, a branch switch fails because of a path under C:\tmp or another
-  unexpected directory, the user asks to clean worktrees or AI housekeeping, or
-  old .claude/worktrees, Codex worktrees, detached review checkouts, audit clones,
-  and temp repos may be abandoned. Works on Windows PowerShell/Git Bash, WSL,
-  Linux, and macOS. Never treats age or an ended chat as proof that work is safe
-  to delete.
+description: Safely audit, recover, reconcile, or remove stale Git worktrees and temporary AI checkouts. Use for worktree cleanup, AI housekeeping, branches already used by another worktree, abandoned review clones, or unexpected C:\tmp worktrees. Never treats age as proof that deletion is safe.
 ---
 
 # Cleanup Worktree

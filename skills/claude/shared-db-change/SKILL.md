@@ -9,8 +9,13 @@ description: >-
 
 # shared-db-change
 
+Concrete project identifiers are protected configuration. Resolve them with
+`ai-private-config value supabase_shared_prod_ref` and
+`ai-private-config value supabase_shared_preview_ref`; never copy a value into
+this public skill. Prove the live link immediately before every write.
+
 `u2giants/shared-db` is the canonical repo for the shared supabase.com backend
-(project `<removed-protected-project-ref>`) used by CRM / DAM / PM-PIM / PLM. Albert had to
+(project `<protected-shared-prod-ref>`) used by CRM / DAM / PM-PIM / PLM. Albert had to
 say "pull the repo again and re-read the .md files to see the proper way to make
 db changes" in at least three separate sessions — this skill is that protocol.
 
@@ -153,14 +158,14 @@ the correct route. A predecessor's repository is context, not routing proof.
    PR (all app repos are main-only). Claude merges the shared-db PR itself once
    checks pass — Albert cannot.
 5. **Correct project refs** (never mix):
-   - shared backend **PRODUCTION**: `<removed-protected-project-ref>`
-   - shared backend **PREVIEW**: `<removed-protected-project-ref>` (Supabase branch
+   - shared backend **PRODUCTION**: `<protected-shared-prod-ref>`
+   - shared backend **PREVIEW**: `<protected-shared-preview-ref>` (Supabase branch
      `shared-db-schema-rehearsal` — it is a *branch*, so it does **not** appear in
      `supabase projects list`; that absence proves nothing). *(Added 2026-08-09:
      this list previously omitted preview entirely.)*
-   - popdam prod: `<removed-protected-project-ref>`
-   - SynoMon: `<removed-protected-project-ref>` (migrated to Virginia: `<removed-protected-project-ref>`)
-   - oracle: `<removed-protected-project-ref>`
+   - popdam prod: `<protected-popdam-ref>`
+   - SynoMon: `<protected-retired-synomon-ref>` (migrated to Virginia: `<protected-synomon-ref>`)
+   - oracle: `<protected-oracle-ref>`
 
    **Prove the target before every write** (`AGENTS.md` §4.2, an owner ruling):
    immediately before any statement that writes, changes or removes data, schema

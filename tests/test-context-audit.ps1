@@ -338,6 +338,30 @@ try {
     }
     Write-Host "PASS: exceeded budgets warn with a plain reason and never fail the run"
 
+    # ------------------------------------------- effective installed globals
+    New-AuditFixture -Path $fixture
+    $installedClaude = Join-Path $root "installed-claude"
+    $installedCodex = Join-Path $root "installed-codex"
+    New-Item -ItemType Directory -Force -Path $installedClaude,$installedCodex | Out-Null
+    Write-Utf8 (Join-Path $installedClaude "CLAUDE.md") ("C" * 11709)
+    Write-Utf8 (Join-Path $installedCodex "AGENTS.md") ("D" * 10099)
+    $installedJson = Join-Path $root "installed-globals.json"
+    & python $tool --root $fixture --json $installedJson --claude-home $installedClaude `
+        --codex-home $installedCodex --generated-at "fixture-time"
+    if ($LASTEXITCODE -ne 0) { throw "Effective installed-global audit failed." }
+    $installedReport = Get-Content -LiteralPath $installedJson -Raw | ConvertFrom-Json
+    if (-not $installedReport.effectiveInstalledGlobals.complete -or
+        $installedReport.effectiveInstalledGlobals.bytes -ne 21808) {
+        throw "Installed globals were not measured as the exact effective 21,808-byte baseline."
+    }
+    $installedBudget = $installedReport.budgets.entries |
+        Where-Object { $_.name -eq "effectiveInstalledGlobalBytes" }
+    if (-not $installedBudget -or $installedBudget.status -ne "ok" -or
+        $installedBudget.budgetBytes -ne 21808) {
+        throw "Effective installed globals were not checked against their own ratchet."
+    }
+    Write-Host "PASS: effective installed globals include preserved machine sections and have a separate ratchet"
+
     # ------------------------------------------------------- open handoff count
     # Every file in HANDOFF.d/ means an OPEN workstream. Retention used to depend
     # on someone remembering at the end of a long session, and it silently grew

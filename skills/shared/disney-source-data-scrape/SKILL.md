@@ -1,6 +1,6 @@
 ---
 name: disney-source-data-scrape
-description: Safely capture, resume, validate, reconcile, or load authorized Disney source data from OPA (opa.disney.com) and DCP Vault (dcpvault.disney.com), including OPA Properties and Characters, DCP portal tiles, style guides, assets, paths, source IDs, relationships, checkpoint recovery, and guarded Supabase landing. Use for Disney scrape, refresh, database-load, output-shape, identifier, completeness, or relationship questions involving either portal.
+description: Capture, resume, validate, reconcile, or load authorized Disney OPA and DCP Vault data. Use for Disney properties, characters, style guides, assets, source IDs, relationships, checkpoints, scraping, refreshes, completeness, output shape, or guarded database landing.
 ---
 
 # Disney source-data scrape
@@ -177,7 +177,8 @@ function names; never invent those names from this public skill.
 
 Before every data write:
 
-1. Prove the target is production project ref `<removed-protected-project-ref>`, project name `popdam`.
+1. Resolve the expected ref with `ai-private-config value supabase_shared_prod_ref`,
+   then prove the connected production target matches it and the project name is `popdam`.
 2. Read the relevant live function signatures. Do not bypass guarded begin/load/finalize functions with direct table writes.
 3. Get the Supabase access token from 1Password vault `vibe_coding`, item `Supabase CLI Personal Access Token`, field `SUPABASE_ACCESS_TOKEN`. Never print or persist it.
 4. Set `DISNEY_SOURCE_COMMIT` to the full 40-character commit SHA holding the private source output.

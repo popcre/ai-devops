@@ -64,8 +64,12 @@ VAULT="vibe_coding"
 CLAUDE_MCP_CONFIG="${CLAUDE_MCP_CONFIG:-${CLAUDE_SETTINGS:-$HOME/.claude.json}}"
 # Stale mcpServers keys from the pre-2026-08-20 layout get removed from here.
 CLAUDE_SETTINGS_LEGACY="$HOME/.claude/settings.json"
-# The one shared POP production project. Overridable, never hard-coded downstream.
-SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF:-<removed-protected-project-ref>}"
+# The shared project reference is protected topology. An explicit environment
+# override remains available for isolated recovery and test environments.
+if [ -z "${SUPABASE_PROJECT_REF:-}" ]; then
+  "$REPO_ROOT/bin/ai-private-config" sync >/dev/null
+  SUPABASE_PROJECT_REF="$("$REPO_ROOT/bin/ai-private-config" value supabase_project_ref)"
+fi
 
 DRY_RUN=0
 DO_LEGACY=1

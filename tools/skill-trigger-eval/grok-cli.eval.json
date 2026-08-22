@@ -1,0 +1,12 @@
+[
+  {"query":"ask Grok to review this repository","should_trigger":true},
+  {"query":"run this plan by Grok Build","should_trigger":true},
+  {"query":"use the Grok CLI for a second opinion","should_trigger":true},
+  {"query":"have Grok continue its prior review session","should_trigger":true},
+  {"query":"explicitly delegate this isolated implementation to Grok","should_trigger":true},
+  {"query":"ask Qwen to review this repository","should_trigger":false},
+  {"query":"use Kimi Code for the implementation","should_trigger":false},
+  {"query":"review the diff yourself","should_trigger":false},
+  {"query":"what is xAI as a company?","should_trigger":false},
+  {"query":"install a generic command-line tool","should_trigger":false}
+]

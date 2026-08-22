@@ -776,7 +776,7 @@ be weakened or deleted by a later session:
 - **Machines:** `t16` (this Windows box; PowerShell 7 primary, Git Bash
   available at `C:\Program Files\Git\usr\bin\`) and `hetz` (Ubuntu VPS).
 - **SSH to the VPS:** alias **`vps`** (also `coolify`, `hetzner`) — user `root`,
-  key `~/.ssh/916-alien`, host `<removed-protected-address>` with a Cloudflare-tunnel fallback.
+  key `~/.ssh/916-alien`, host `<protected-vps-address>` with a Cloudflare-tunnel fallback.
   **The alias `hetz` does not exist in `~/.ssh/config`** — using it fails with a
   host-key error, which is easy to misread as a permissions problem. Reach user
   `ai` via `ssh vps 'su - ai -c "…"'`; direct `ai@` key auth is not set up.

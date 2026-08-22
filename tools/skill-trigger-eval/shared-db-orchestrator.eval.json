@@ -1,0 +1,12 @@
+[
+  {"query":"open the single shared-db orchestrator","should_trigger":true},
+  {"query":"coordinate parallel agents for these database migrations","should_trigger":true},
+  {"query":"route this schema change through the governed shared-db issues","should_trigger":true},
+  {"query":"promote the shared database changes through preview and production","should_trigger":true},
+  {"query":"coordinate a curated Master Data bulk load","should_trigger":true},
+  {"query":"inspect the shared schema read-only","should_trigger":false},
+  {"query":"write ordinary application rows to its own table","should_trigger":false},
+  {"query":"hand an existing database session over","should_trigger":false},
+  {"query":"change a local SQLite schema","should_trigger":false},
+  {"query":"fix a frontend component","should_trigger":false}
+]

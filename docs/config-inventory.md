@@ -180,23 +180,11 @@ Windows-only, admin PowerShell, idempotent. It:
 - Writes the **`916-alien` OpenSSH private key** in plaintext if missing.
 - Optionally installs `cloudflared` (SSH fallback via Cloudflare tunnel when
   Tailscale is unavailable).
-- Upserts these **SSH host alias blocks** into `~/.ssh/config` (Tailscale
-  preferred, Cloudflare/public fallback via a `Match ... !exec ping` trick):
-
-  | Alias(es) | Target | User | Notes |
-  |---|---|---|---|
-  | `github.com` | GitHub | git | uses its OWN key `~/.ssh/id_ed25519` (not 916-alien) |
-  | `coolify` / `vps` / `hetzner` | Hetzner VPS `<removed-protected-address>` | root | Coolify host; CF fallback `ssh-coolify.designflow.app` |
-  | `vps2` | same Hetzner box | ai | `LocalForward 8787 <removed-protected-address>:8787` — optional Headroom tunnel fallback; see [`headroom.md`](headroom.md) |
-  | `edgesynology1` / `edge1` | NAS `<removed-protected-address>` | ahazan | LAN preferred, Tailscale `<removed-protected-address>` fallback |
-  | `edgesynology2` / `edge2` | NAS `<removed-protected-address>` port 1904 | ahazan | port 22 blocks command exec |
-  | `backupwiz` / `wiz` | DigitalOcean `<removed-protected-address>` | root | CF fallback `ssh-backupwiz.designflow.app` |
-  | `vpn` / `amnezia` | AmneziaWG `<removed-protected-address>` | root | |
-  | `comp` / `hostdare` | Hostdare `<removed-protected-address>` | root | CF fallback `ssh-comp.designflow.app` |
-  | `seafile` + raw `<removed-protected-address>` | Linode Seafile | ai | raw-IP block lets Codex use the key automatically |
-  | `auth` / `authentik` | `<removed-protected-address>` | root | public fallback `<removed-protected-address>` port 1904 |
-
-  All except `github.com` use `~/.ssh/916-alien`.
+- Restores the complete SSH alias and verified-host-key set from the protected
+  configuration repository. Inspect the canonical source with
+  `ai-private-config path ssh_config` and
+  `ai-private-config path ssh_known_hosts`. Concrete machine topology does not
+  belong in this public inventory.
 
 ### 3. Dropbox MCP setup (`setup-claude-mcps.ps1` / `setup-codex-mcps.ps1`)
 Generate the MCP server blocks in Claude/Codex config, embedding auth tokens.

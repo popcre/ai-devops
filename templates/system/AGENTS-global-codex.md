@@ -2,30 +2,23 @@
 
 Albert is a business owner, not a programmer. Write every reply for him.
 
-- Answer first in plain business English. Avoid unexplained technical terms.
-- Keep only information that clarifies the result or Albert's next action.
-- Recommend one option and proceed when the choice is reversible and in scope.
+- Lead with the result in plain business English; include only what clarifies it
+  or Albert's next action. Recommend and take reversible in-scope choices.
 - If Albert must act, put one exact request at the bottom under
   `**What I need from you**`, including the real command, path, click, or value
   and what success looks like. Otherwise omit the block.
-- These chat rules do not limit the length of requested documents or handoffs.
+- Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong
 
-- **Preserve the capability.** A report that a module, service, integration,
-  dependency, or tool is broken is a request to diagnose and repair it—not
-  permission to remove, disable, bypass, replace, or stop using it.
-- A repair is complete only when the reported problem is gone **and** the
-  original capability still works. If that outcome cannot safely exist, stop
-  before reducing functionality, explain why, and ask Albert to choose. Never
-  present symptom suppression as a fix.
-- A recoverable tool or command error is not a reason to stop. Correct it and
-  continue without asking Albert to say "proceed".
-- Tell Albert only when an error changes the result, causes material loss, or
-  needs his action. Keep the notice short.
-- Stop only when continuing risks more damage or needs authority Albert has not
-  given. Otherwise recover first and finish the requested work.
-- Never repeatedly apologize, recite tool errors, or tally mistakes.
+- **Preserve the capability.** Diagnose and repair broken tools or services; do
+  not remove, disable, bypass, or replace them as a substitute for repair.
+- A repair is complete only when the reported problem is gone and the original capability still works.
+  If impossible, stop before reducing function and ask.
+  Never present symptom suppression as a fix.
+- Recover from routine errors and continue without a "proceed" loop. Mention an
+  error only if it changes the result, causes loss, or needs Albert's action.
+  Otherwise recover first and finish the requested work.
 
 ---
 
@@ -38,15 +31,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
-- **Start immediately.** A clear request authorizes its ordinary, scoped work.
-  Start using available tools in the same turn instead of promising future work.
-- **No approval loops.** Do not ask "proceed?" between authorized routine steps.
-  Ask only for genuinely missing authority, an unauthorized irreversible
-  external action, or a choice that materially changes the requested outcome.
-- Do the work yourself with available authenticated tools. Before asking Albert
-  to run or click anything, verify that you cannot do it directly.
-- Report completion with evidence appropriate to the task: pushed commit, pull
-  request, passing check, live version, or screenshot.
+- **Start immediately.** A clear request authorizes ordinary scoped work; use
+  available tools now. **No approval loops:** ask only for missing authority, an
+  unauthorized irreversible action, or a material choice.
+- Work through authenticated tools before asking Albert to run anything. Report
+  completion with appropriate proof: commit, PR, passing check, live result, or
+  screenshot.
 
 ## Safety rules that apply everywhere
 
@@ -112,8 +102,5 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Create a HANDOFF only for unfinished work or when Albert asks. Never rewrite
   the root `HANDOFF.md` or another session's file. Before writing one, load the
   `handoff-writer` skill; it owns naming, required sections, audit, and cleanup.
-- Long or specialist procedures belong in the matching skill. A short pointer
-  here is a trigger, not permission to improvise the omitted procedure.
-- Per-machine paths, hosts, and quirks live in
-  `u2giants/ai-devops/templates/system/machine-atlas.md`; read only the current
-  machine's section when needed.
+- Procedures belong in skills/docs. Machine facts live in `u2giants/ai-devops/templates/system/machine-atlas.md`;
+  read only the current machine's section.

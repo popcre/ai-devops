@@ -1,6 +1,6 @@
 ---
 name: handoff-writer
-description: Write a fresh-developer-grade handoff as one write-once file under HANDOFF.d/, or judge whether an existing handoff is comprehensive enough. Use when the user says "put that plan in handoff.md", "write a handoff", "give me a detailed prompt for the new chat", or asks whether the handoff is thorough, detailed, or comprehensive enough for a fresh developer to pick up and not skip a beat. The handoff must pass the concrete self-audit before it is shown. Do not trigger on a bare "wrap up"; the active client's closeout skill owns that phrase. Shared by Claude and Codex.
+description: Write or audit a fresh-developer-grade, write-once HANDOFF.d file. Use for "write a handoff", "put that plan in handoff.md", "prompt for the new chat", or checking whether a handoff is comprehensive. Bare "wrap up" belongs to closeout.
 ---
 
 # handoff-writer

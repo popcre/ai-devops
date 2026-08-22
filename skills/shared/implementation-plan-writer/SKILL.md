@@ -1,6 +1,6 @@
 ---
 name: implementation-plan-writer
-description: "Write (or judge) an implementation plan that a BRAND-NEW AI session with zero context can execute perfectly. Use when the user says 'write an implementation plan', 'write the plan for this feature/fix', 'plan how we will build X', 'put the plan in PLAN.md / IMPLEMENTATION-PLAN.md', 'give another session a plan to implement this', or asks whether an existing plan is detailed/comprehensive enough for a fresh implementing session. The plan is a handoff plus a build spec: it must carry the ultimate goal, all background, every constraint and nuance, and per-step verification. This skill is self-contained and must pass the self-audit gate BELOW before the plan is shown."
+description: Write or audit an implementation plan that a brand-new AI session can execute without chat context. Use for "write an implementation plan", "plan this feature/fix", PLAN.md, giving another session a build plan, or checking whether a plan is detailed enough.
 ---
 
 # implementation-plan-writer

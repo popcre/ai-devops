@@ -1,6 +1,6 @@
 ---
 name: pop-business-rules
-description: Find, explain, add, change, reconcile, or audit POP Creations business rules through the companywide Business Logic Library. Use for business meaning, authority, workflows, statuses, approvals, pricing, taxonomy, identities, or application behavior that may embody a business rule. Do not use for programming logic, lint rules, deployment policy, or generic documentation edits.
+description: Find, explain, change, reconcile, or audit POP Creations rules through the Business Logic Library. Use for business meaning, authority, workflows, statuses, approvals, pricing, taxonomy, identities, or app behavior—not programming or deployment rules.
 ---
 
 # POP Business Rules

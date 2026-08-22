@@ -1,17 +1,6 @@
 ---
 name: close-old-session
-description: >-
-  Safely pick up an abandoned or stale AI session — one that's hours, days, or
-  weeks old — where this session's in-context memory of "what still needs doing"
-  can no longer be trusted because other sessions ran in the meantime. Use when
-  the user says "this chat is a week old", "is there anything to update in the
-  .md files?", "should I merge / commit this?", "did we ever finish this?", "I
-  abandoned this session", "picking this back up", or otherwise resumes a session
-  after a gap AND asks whether pending doc/merge/commit work still stands. The
-  ONE job it adds: verify against ground truth (git + current .md files + code)
-  that each pending item wasn't already done or superseded by intervening
-  sessions BEFORE acting — then delegate the actual doc/ship work to
-  session-docs-update, wrap-up, or dflow-ship.
+description: Safely resume an old or abandoned AI session after other work may have intervened. Use for "this chat is a week old", "did we finish this?", "picking this back up", or stale merge, commit, and documentation questions. Rechecks current Git, code, and docs before acting.
 ---
 
 # close-old-session

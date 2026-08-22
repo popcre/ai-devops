@@ -38,17 +38,20 @@ cd /worksp/ai-devops
 3. Seeds `/etc/ai-devops/models.env` and `server.env` from the examples **only if
    absent**, then runs the versioned merge-based config migrator (never
    overwrites user values).
-4. Symlinks executable Unix entrypoints in `bin/` into `/usr/local/bin/`.
+4. Authenticates and fast-forwards the private protected-configuration checkout,
+   then resolves SSH topology and provider identifiers through
+   `ai-private-config`.
+5. Symlinks executable Unix entrypoints in `bin/` into `/usr/local/bin/`.
    Windows-only `.ps1`/`.bat` files are not chmodded or linked, so an update
    leaves the Git checkout clean.
-5. Runs the canonical `ai-install-skills` installer so client-specific and shared
+6. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects
    the Z.ai Coding Plan key from 1Password and proves a real GLM-5.3 OpenCode
    agent call; non-interactive updates reuse the existing protected bootstrap
    file automatically and never change normal Claude/Codex authentication.
-6. Runs `ai-devops doctor`.
-7. Records exact source, config schema, owned symlinks, config files, managed
+7. Runs `ai-devops doctor`.
+8. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 
 Recovery-critical WinGet, npm/MCP, and model versions are governed by

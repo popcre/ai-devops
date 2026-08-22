@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Resolve the repository's branch workflow from one versioned contract.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+POLICY_FILE="${AI_REPO_POLICY_FILE:-$ROOT/config/repository-policy.json}"
+die(){ printf 'ai-repo-policy: error: %s\n' "$*" >&2; exit 1; }
+[ -f "$POLICY_FILE" ] || die "policy file not found: $POLICY_FILE"
+jq -e '.schema_version == 1 and (.rules|type=="array")' "$POLICY_FILE" >/dev/null || die 'invalid policy contract.'
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must run inside a Git repository.'
+
+remote="$(git remote get-url origin 2>/dev/null || true)"
+case "$remote" in
+  http://*|https://*|ssh://*|git@*)
+    identity="$(printf '%s' "$remote" | sed -E \
+      -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' \
+      -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##' -e 's#^/+##')";;
+  *) identity="local/$(basename "${remote%.git}")";;
+esac
+[ "$identity" != "local/" ] || identity="local/$(basename "$(git rev-parse --show-toplevel)")"
+
+workflow="$(jq -r '.default.workflow' "$POLICY_FILE")"
+main_branch="$(jq -r '.default.main_branch' "$POLICY_FILE")"
+while IFS=$'\t' read -r pattern rule_workflow rule_main; do
+  pattern="${pattern%$'\r'}"; rule_workflow="${rule_workflow%$'\r'}"; rule_main="${rule_main%$'\r'}"
+  case "$identity" in $pattern) workflow="$rule_workflow"; main_branch="$rule_main"; break;; esac
+done < <(jq -r '.rules[]|[.match,.workflow,.main_branch]|@tsv' "$POLICY_FILE")
+case "$workflow" in main-only|feature-branch-pr|sandbox-pr) ;; *) die "unsupported workflow in policy: $workflow";; esac
+
+jq -nc --arg repository "$identity" --arg workflow "$workflow" --arg main "$main_branch" \
+  --arg file "$POLICY_FILE" '{schema_version:1,repository:$repository,workflow:$workflow,main_branch:$main,policy_file:$file}'

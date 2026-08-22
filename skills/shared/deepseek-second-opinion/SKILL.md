@@ -1,16 +1,6 @@
 ---
 name: deepseek-second-opinion
-description: >-
-  Have a genuine back-and-forth conversation with DeepSeek about a plan,
-  design, diagnosis, diff, environment/config question, or anything else --
-  not a one-shot canned review. Claude commits to its own position first,
-  sends the material to DeepSeek, reports what DeepSeek says, states whether
-  Claude agrees, and when it disagrees, argues the point back to DeepSeek
-  across further turns. Use when the user says "run this by deepseek", "ask
-  deepseek", "what does deepseek think", "debate this with deepseek", "see if
-  deepseek agrees", or "talk to deepseek about this". Works identically in
-  Claude Code (Windows Desktop and Ubuntu CLI) and Codex (Windows and Ubuntu
-  CLI) via the shared ai-deepseek-agent command.
+description: Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
 ---
 
 # deepseek-second-opinion

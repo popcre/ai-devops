@@ -1,0 +1,12 @@
+[
+  {"query":"Git says this branch is already checked out in another worktree; safely clean it up","should_trigger":true},
+  {"query":"audit all abandoned Codex worktrees before removing anything","should_trigger":true},
+  {"query":"do AI housekeeping on the stale review clones under C:\\tmp","should_trigger":true},
+  {"query":"reconcile Claude and Codex worktrees and preserve unique changes","should_trigger":true},
+  {"query":"remove the old detached review checkout only if it is recoverable","should_trigger":true},
+  {"query":"delete this ordinary generated build folder","should_trigger":false},
+  {"query":"switch the current branch to main","should_trigger":false},
+  {"query":"show git status in this repository","should_trigger":false},
+  {"query":"clean npm cache files","should_trigger":false},
+  {"query":"archive this completed Codex task","should_trigger":false}
+]

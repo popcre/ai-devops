@@ -115,10 +115,11 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 # Keep in sync with tools/context-audit/budgets.json and the table in
 # docs/context-engineering.md — a budget number lives in exactly three places.
 DEFAULT_BUDGETS = {
-    "alwaysLoadedBytes": {"budget": 13871, "target": 12500},
-    "startupRoutedBytes": {"budget": 11987, "target": 11000},
-    "claudeSkillManifestBytes": {"budget": 22777, "target": 20000},
-    "codexSkillManifestBytes": {"budget": 14847, "target": 13000},
+    "alwaysLoadedBytes": {"budget": 12449, "target": 12000},
+    "startupRoutedBytes": {"budget": 10945, "target": 10500},
+    "claudeSkillManifestBytes": {"budget": 15293, "target": 14500},
+    "codexSkillManifestBytes": {"budget": 12904, "target": 12500},
+    "effectiveInstalledGlobalBytes": {"budget": 21808, "target": 20500},
 }
 
 BUDGET_LABELS = {
@@ -126,6 +127,7 @@ BUDGET_LABELS = {
     "startupRoutedBytes": "startup-routed repo entry files",
     "claudeSkillManifestBytes": "Claude skill name and description manifest",
     "codexSkillManifestBytes": "Codex skill name and description manifest",
+    "effectiveInstalledGlobalBytes": "effective installed Claude and Codex globals",
 }
 
 SHINGLE_WORDS = 10
@@ -354,6 +356,32 @@ def installed_drift(root: Path, skill_records: list[dict], claude_home: Path | N
                 drift.append({"kind": "global", "client": client, "name": filename,
                               "state": drift_state(source_bytes, installed_bytes)})
     return drift
+
+
+def effective_installed_globals(claude_home: Path | None, codex_home: Path | None) -> dict:
+    """Measure what the clients actually load, including preserved machine sections."""
+    requested = claude_home is not None or codex_home is not None
+    entries = []
+    for client, home, filename in (
+        ("claude", claude_home, "CLAUDE.md"),
+        ("codex", codex_home, "AGENTS.md"),
+    ):
+        if home is None:
+            continue
+        path = home / filename
+        entries.append({
+            "client": client,
+            "path": str(path),
+            "present": path.is_file(),
+            "bytes": path.stat().st_size if path.is_file() else 0,
+        })
+    complete = len(entries) == 2 and all(item["present"] for item in entries)
+    return {
+        "requested": requested,
+        "complete": complete,
+        "files": entries,
+        "bytes": sum(item["bytes"] for item in entries) if complete else None,
+    }
 
 
 def installer_capabilities(root: Path) -> dict:
@@ -598,12 +626,15 @@ def run(args: argparse.Namespace) -> dict:
     for item in files + skill_records:
         class_bytes[item["classification"]] += item["bytes"]
     budgets, budget_source = load_budgets(args.budgets)
+    effective_globals = effective_installed_globals(args.claude_home, args.codex_home)
     measured = {
         "alwaysLoadedBytes": class_bytes["always-loaded"],
         "startupRoutedBytes": class_bytes["startup-routed"],
         "claudeSkillManifestBytes": manifest_report["claude"]["bytes"],
         "codexSkillManifestBytes": manifest_report["codex"]["bytes"],
     }
+    if effective_globals["bytes"] is not None:
+        measured["effectiveInstalledGlobalBytes"] = effective_globals["bytes"]
     budget_section = budget_report(budgets, measured)
     budget_section["source"] = budget_source
 
@@ -636,6 +667,7 @@ def run(args: argparse.Namespace) -> dict:
         "brokenLinks": link_issues(root, markdown_paths + [root / "plan_context-engineering-consolidation.md", root / "HANDOFF.md"]),
         "openHandoffs": open_handoffs(root),
         "installedDrift": installed_drift(root, skill_records, args.claude_home, args.codex_home),
+        "effectiveInstalledGlobals": effective_globals,
         "installerCapabilities": installer_capabilities(root),
         "safetyMarkers": safety,
         "safetyMarkerIssues": safety_issues,
@@ -661,6 +693,13 @@ def summary(report: dict) -> str:
     for client in ("claude", "codex"):
         item = report["skillManifest"][client]
         lines.append(f"{client} skill manifest: {item['skills']} skills, {item['bytes']} bytes, about {item['estimatedTokens']} tokens")
+    effective = report["effectiveInstalledGlobals"]
+    if effective["requested"]:
+        if effective["complete"]:
+            lines.append(f"effective installed globals: 2 files, {effective['bytes']} bytes, about {(effective['bytes'] + 3) // 4} tokens")
+        else:
+            missing = ", ".join(item["client"] for item in effective["files"] if not item["present"])
+            lines.append(f"effective installed globals: incomplete (missing: {missing or 'one client home was not supplied'})")
     lines.extend([
         f"duplicate skill names: {len(report['duplicateSkillNames'])}",
         f"duplicate paragraphs: {len(report['duplicateParagraphs'])}",

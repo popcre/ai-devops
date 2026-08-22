@@ -1,0 +1,12 @@
+[
+  {"query":"ask Kimi Code to review this diff","should_trigger":true},
+  {"query":"use ai-kimi for a repository analysis","should_trigger":true},
+  {"query":"resume the prior Kimi session","should_trigger":true},
+  {"query":"delegate an isolated implementation to Kimi","should_trigger":true},
+  {"query":"verify the changes Kimi authored","should_trigger":true},
+  {"query":"ask Grok to review this diff","should_trigger":false},
+  {"query":"use Qwen Code for the implementation","should_trigger":false},
+  {"query":"review the repository yourself","should_trigger":false},
+  {"query":"what does the Japanese word kimi mean?","should_trigger":false},
+  {"query":"continue the current Codex task","should_trigger":false}
+]

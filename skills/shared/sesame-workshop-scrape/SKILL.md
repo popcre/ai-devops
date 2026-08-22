@@ -1,6 +1,6 @@
 ---
 name: sesame-workshop-scrape
-description: Capture, refresh, validate, or interpret Sesame Street / Sesame Workshop licensed source data from the "TheLetterA" licensee portal (sesameworkshop.netx.net, a NetX DAM). Use when asked to scrape, re-scrape, inspect, reconcile, or load Sesame Workshop brands, characters, style guides, art styles, or asset metadata; when a question depends on NetX field names, the Brand/Character/Style Guide fields, category IDs, or asset IDs; or when deciding which Sesame relationships are licensor-asserted versus inferred.
+description: Capture, refresh, validate, or interpret Sesame Workshop source data from the NetX TheLetterA portal. Use for Sesame brands, characters, style guides, art styles, asset metadata, NetX fields, category or asset IDs, and asserted relationships.
 ---
 
 # Sesame Workshop "TheLetterA" portal

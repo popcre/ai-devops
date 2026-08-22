@@ -62,14 +62,16 @@ open PRs = `<list>`.
 
 ## 6. Hard limits (non-negotiable)
 
-- **No production.** Production is `<removed-protected-project-ref>`. You do not write to it,
+- **No production.** Resolve production with `ai-private-config value supabase_shared_prod_ref`.
+  You do not write to it,
   promote to it, or run DDL against it. Ever.
 - **Do not use the Supabase MCP server.** It may be bound to production and takes
   no project parameter. Use the Supabase CLI (or WSL `psql`). If you must read
   through MCP for some reason, call `get_project_url` FIRST and quote the ref in
   your report.
 - **Before every preview push**, confirm `cat supabase/.temp/project-ref` reads
-  `<removed-protected-project-ref>`. Every push, not once per session.
+  the value from `ai-private-config value supabase_shared_preview_ref`. Every
+  push, not once per session.
 - **Never `supabase db push --include-all`** against the full repo migration set.
   (Only ever inside a verified bounded temp checkout — see `AGENTS.md` §5.1.)
 - **Dry-run and report before any preview push.** Post the dry-run output and wait

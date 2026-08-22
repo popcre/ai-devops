@@ -34,7 +34,7 @@ check `git remote -v`.
    - **QUIRK-1:** poppim-web (and any Coolify *service*, vs *application*) must be
      restarted via `GET /api/v1/services/{uuid}/restart`. The
      `/api/v1/deploy?uuid=` endpoint silently no-ops for services.
-   - Coolify API: `http://<removed-protected-address>:8000` / https://coolify.designflow.app;
+   - Coolify API: use the authenticated `https://coolify.designflow.app` endpoint;
      token in 1Password (`vibe_coding`).
 5. **Verify the live SHA.**
    - **QUIRK-2:** don't fetch `version.json` — Caddy/Traefik `try_files`

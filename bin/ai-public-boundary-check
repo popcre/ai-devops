@@ -19,5 +19,30 @@ pattern='(ops_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_
 if git -C "$root" grep -IlE "$pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-build-private-memory-hub.ps1' | grep -q .; then
   echo 'BOUNDARY FAIL: credential-shaped tracked content found' >&2; failed=1
 fi
+
+# Private/RFC1918 and carrier-grade/Tailscale addresses identify Albert's
+# topology even though they are not credentials. The documented network range
+# itself is harmless and is the one deliberate exception.
+topology_ip_pattern='(100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})'
+topology_matches="$(git -C "$root" grep -nIE "$topology_ip_pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' 2>/dev/null | grep -vE '100\.64\.0\.0/(10|255\.192\.0\.0)' || true)"
+if [ -n "$topology_matches" ]; then
+  echo 'BOUNDARY FAIL: protected private-network topology found' >&2; failed=1
+fi
+
+# A public endpoint address is also topology when it appears in a host/URL/IP
+# assignment. Domain-based product endpoints remain allowed.
+public_ip_context='(HostName|public IP|Tailscale IP|PROXY_URL=|https?://)[^[:space:]]*([0-9]{1,3}\.){3}[0-9]{1,3}'
+public_ip_matches="$(git -C "$root" grep -nIE "$public_ip_context" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' 2>/dev/null | grep -vF '127.0.0.1' || true)"
+if [ -n "$public_ip_matches" ]; then
+  echo 'BOUNDARY FAIL: protected endpoint address found' >&2; failed=1
+fi
+
+# Supabase project references are stable infrastructure identifiers. One
+# application field name happens to share the same shape and is explicitly not
+# a project identifier.
+project_matches="$(git -C "$root" grep -nIE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' 2>/dev/null | grep -vF 'wilassetcatfranchise' || true)"
+if [ -n "$project_matches" ]; then
+  echo 'BOUNDARY FAIL: protected project-shaped identifier found' >&2; failed=1
+fi
 [ "$failed" -eq 0 ] || exit 1
-echo 'PASS: public path and credential boundary'
+echo 'PASS: public path, credential, and topology boundary'

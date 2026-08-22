@@ -47,7 +47,7 @@ The full recovery procedure is in
 |---|---|---|
 | Implement the 2026-08-21 full repository audit | [`plan_full-strategy-remediation.md`](plan_full-strategy-remediation.md) STATUS, [`bugs.md`](bugs.md) current audit | Incident-first; preserve capabilities; all 30 findings must reach production evidence |
 | Quick orientation | `README.md`, this file | Do not load deep docs without a task reason |
-| Reduce instruction size or decide where a rule belongs | [`docs/context-engineering.md`](docs/context-engineering.md), [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) status | Globals contain only universal rules; procedures belong in skills/docs |
+| Context size, ownership, routing, or trigger quality | [`docs/context-spec.md`](docs/context-spec.md), [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) STATUS | Globals contain only universal rules; measurements come from audit JSON |
 | Change a standing Claude/Codex behavior rule | Both files under `templates/system/*global*.md`, [`templates/system/machine-atlas.md`](templates/system/machine-atlas.md), affected shared skill | Keep shared behavior aligned across clients; install with `bin/ai-adopt-globals` |
 | Change a `bin/` tool or workflow | [`docs/architecture.md`](docs/architecture.md), [`docs/development.md`](docs/development.md), the tool's verification header and tests | Do not simplify a measured guardrail without reading its reason |
 | Install, update, uninstall, or restore | [`docs/deployment.md`](docs/deployment.md), [`docs/restore-from-zero.md`](docs/restore-from-zero.md), affected lifecycle scripts | Preserve machine-local configuration |
@@ -68,24 +68,17 @@ The full recovery procedure is in
 | Transcript backup or analysis | Matching transcript skill and its routed docs | Do not open raw archives unless the task explicitly requires their contents |
 | Documentation-only cleanup | `README.md` and affected docs | Do not touch source code except to verify accuracy |
 
-Provider-specific plans and historical investigations deliberately live outside
-this startup file. Begin with `bugs.md` and the affected wrapper's verification
-header; they route to the current plan and record the failures that must not be
-reintroduced.
-
 ## Repository map
 
 | Path | Purpose |
 |---|---|
 | `bin/` | Installed `ai-*` command-line tools |
-| `config/*.env.example` | Non-secret machine configuration templates |
-| `templates/prompts/` | Workflow-stage prompts |
-| `templates/repo-docs/` | Documentation added to onboarded application repos |
-| `templates/system/` | Claude/Codex global templates and machine atlas |
-| `skills/shared/` | Skills installed for both clients; default location |
-| `skills/claude/`, `skills/codex/` | Genuinely client-specific skills only |
-| `tools/`, `tests/` | Audit/evaluation helpers and dependency-light tests |
-| `memory/` | Secret-free durable facts synced across machines. **Only `MEMORY.md` is loaded into a session — an unindexed fact file is no memory at all.** `bin/ai-memory-health` audits that (read-only, never edits or deletes); `bin/ai-memory-index-hook` prevents it at write time. Codex's memory is a SEPARATE machine-local store. See [`memory/README.md`](memory/README.md) |
+| `config/` | Secret-free schemas, templates, policies, and version pins |
+| `templates/` | Prompts, repo-doc additions, globals, and a protected-atlas pointer |
+| `skills/shared/` | Skills installed for both clients; the default location |
+| `skills/claude/`, `skills/codex/` | Genuinely client-specific skills |
+| `tools/`, `tests/` | Audits, evaluations, and offline verification |
+| `memory/` | Public memory guard only; portable facts live in the private hub. See [`memory/README.md`](memory/README.md) |
 | `transcripts/` | Private submodule; never inspect raw transcript data casually |
 
 Installed Linux commands normally point from `/usr/local/bin/ai-*` to the
@@ -96,35 +89,14 @@ and [`docs/architecture.md`](docs/architecture.md).
 
 ## Editing and verification
 
-- Search before opening many files. Read the affected script's verification
-  header before changing behavior that looks redundant or unusually strict.
-- Use `apply_patch` for hand-written source and documentation edits. Preserve
-  unrelated changes in a dirty checkout.
-- Add or update tests for changed behavior. Run the focused tests first, then the
-  suites required by [`docs/development.md`](docs/development.md).
-- PowerShell source must retain the repository's compatibility and text-format
-  requirements; Bash tests run through Git Bash on Windows.
+- Search first and read affected verification headers before changing unusual
+  guardrails. Use `apply_patch`, preserve unrelated work, and test changed behavior
+  per [`docs/development.md`](docs/development.md).
+- Keep PowerShell compatible and correctly formatted; run Bash tests through Git
+  Bash on Windows.
 - UI changes require visual verification. This repository itself has no UI.
 - Installation is the deployment mechanism. There is no container, package
   registry, hosted service, GitHub Actions workflow, or application database.
-
-## Instructions that are intentionally elsewhere
-
-Do not copy these procedures back into this always-loaded router:
-
-- Synology long-running reads → `synology-long-running-operations`
-- Shared Database changes → the shared-db skills and `u2giants/shared-db`
-- DesignFlow branch/start rules → `codex-dflow-plm` and its routed docs
-- Reviewer/provider restrictions → wrapper headers, provider skills, and plans
-- Full handoff format → `handoff-writer` and `handoff-standard.md`
-- Production Cloud Build incident details →
-  `docs/cloud-build-prod-trigger-incident-2026-07-20.md`
-- Machine paths and host quirks → `templates/system/machine-atlas.md`
-- Credential reference exceptions and launcher details →
-  `docs/onboarding-secrets.md` and `docs/config-inventory.md`
-- Deployment commands and rollback → `docs/deployment.md`
-- Historical failure narratives → `docs/critical-incidents.md` and
-  `docs/design-decisions.md`
 
 ## Handoffs and completion
 

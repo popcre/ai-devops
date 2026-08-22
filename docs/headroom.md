@@ -36,14 +36,22 @@ Everything Headroom is on the **hetz VPS** (the Hetzner box that also runs
 Coolify). Nothing is installed on any Windows machine — the Windows machines only
 *point at* it.
 
+Concrete addresses are protected. Resolve the reviewed endpoint when following
+this guide:
+
+```bash
+HEADROOM_URL="$(ai-private-config value headroom_proxy_url)"
+HEADROOM_HOST="${HEADROOM_URL#http://}"; HEADROOM_HOST="${HEADROOM_HOST%%:*}"
+```
+
 | Thing | Value |
 |---|---|
-| Host | hetz VPS — Tailscale name `hetz`, Tailscale IP `<removed-protected-address>`, public IP `<removed-protected-address>` |
+| Host | hetz VPS; concrete addresses are in the protected machine atlas |
 | Install method | `pipx`, under Linux user **`ai`** |
 | Binary | `/home/ai/.local/bin/headroom` |
 | Data / logs dir | `/home/ai/.headroom/` |
 | systemd unit | `/etc/systemd/system/headroom.service` |
-| Listen address | **`<removed-protected-address>:8787`** — the **private Tailscale interface only** |
+| Listen address | **`$HEADROOM_HOST:8787`** — the **private Tailscale interface only** |
 
 ### The service
 
@@ -54,7 +62,7 @@ After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service      # waits for Tailscale on boot
 [Service]
 User=ai
-ExecStart=/home/ai/.local/bin/headroom proxy --port 8787 --host <removed-protected-address>
+ExecStart=/home/ai/.local/bin/headroom proxy --port 8787 --host $HEADROOM_HOST
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/ai/.headroom/logs/proxy.log
@@ -64,7 +72,7 @@ StandardError=append:/home/ai/.headroom/logs/proxy.log
 Health check (from any machine on the tailnet, or the VPS itself):
 
 ```bash
-curl -s http://<removed-protected-address>:8787/health      # -> {"status":"healthy","ready":true,...}
+curl -s "$HEADROOM_URL/health"      # -> {"status":"healthy","ready":true,...}
 ```
 
 ## 3. Security posture (important)
@@ -81,7 +89,7 @@ curl -s http://<removed-protected-address>:8787/health      # -> {"status":"heal
 ## 4. How each workflow routes through it
 
 There are two ways Albert codes, and each reaches Headroom differently. Both now
-point at the same address: **`http://<removed-protected-address>:8787`**.
+point at the same protected address, **`$HEADROOM_URL`**.
 
 ### Workflow A — Claude running **on the VPS** (remote/SSH mode)
 
@@ -91,7 +99,7 @@ That CLI runs as the **`ai`** user. The redirect is the `export` in
 
 ```bash
 # /home/ai/.bashrc  — ABOVE the non-interactive guard (see warning below)
-export ANTHROPIC_BASE_URL=http://<removed-protected-address>:8787
+export ANTHROPIC_BASE_URL="$HEADROOM_URL"
 ```
 
 > A `settings.json` `env` block is **not** a second source and never was — see
@@ -139,7 +147,8 @@ the workflow that produced the only real savings we have so far (2026-07-07).
 The redirect must be a **persistent Windows USER environment variable**:
 
 ```powershell
-[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL','http://<removed-protected-address>:8787','User')
+$headroomUrl = & ai-private-config value headroom_proxy_url
+[Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL',$headroomUrl,'User')
 ```
 
 Prefer `ai-headroom on` / `ai-headroom off` over setting it by hand: the tool
@@ -153,7 +162,7 @@ over Tailscale — **no SSH tunnel required**. The setting takes effect only aft
 **Claude Desktop is fully quit and reopened** (tray icon → Quit).
 
 > **Optional fallback (SSH tunnel).** The `ssh vps2` host entry also carries
-> `LocalForward 8787 <removed-protected-address>:8787`. If Tailscale-direct is ever undesirable,
+> the protected SSH template's Headroom forward. If Tailscale-direct is ever undesirable,
 > a local Claude can instead use `http://localhost:8787` while an `ssh vps2`
 > session is open. This is a fallback, not the primary path.
 
@@ -184,7 +193,7 @@ window on 2026-07-07 and nothing since.
 2. Killed the orphan hand-started proxy (`pid 133277`) and 7 stray
    `headroom mcp serve` leftovers.
 3. Removed stale lock files (`.beacon_lock_8787`, `.rtk_poll_lock`).
-4. Re-bound the proxy to the **private Tailscale IP** (`--host <removed-protected-address>`) so
+4. Re-bound the proxy to the **private Tailscale address** (`--host "$HEADROOM_HOST"`) so
    it is reachable by our machines but never the public internet.
 5. **Hardened boot ordering** (`After=/Wants=network-online.target
    tailscaled.service`) so a VPS reboot cannot restart the crash loop by binding
@@ -193,7 +202,7 @@ window on 2026-07-07 and nothing since.
    we now know does nothing**; that machine was never actually proxied. See
    Workflow B.
 7. Repointed the VPS `ai` user (Workflow A) and the `ssh vps2` tunnel from the
-   now-dead `127.0.0.1:8787` to `<removed-protected-address>:8787`.
+   now-dead loopback endpoint to the protected Tailscale endpoint.
 
 Result: one healthy proxy, both workflows routed, reboot-safe, private-only.
 
@@ -327,8 +336,8 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 
 | Item | Value |
 |---|---|
-| Proxy URL (all clients) | `http://<removed-protected-address>:8787` |
-| Health endpoint | `http://<removed-protected-address>:8787/health` |
+| Proxy URL (all clients) | `ai-private-config value headroom_proxy_url` |
+| Health endpoint | the protected proxy URL plus `/health` |
 | VPS access | `ssh hetzner` (root) or `ssh vps2` (ai) or `devops-mcp` MCP |
 | Service control | `systemctl {status,restart,stop} headroom.service` |
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |

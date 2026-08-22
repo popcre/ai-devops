@@ -1,6 +1,6 @@
 ---
 name: nbcu-creative-assets-scrape
-description: Capture NBCU Creative Asset Factory metadata, and download NBCU style-guide assets to Albert's server, for authorized Properties, IP Families, Characters, style guides, assets, file names, source IDs, and explicit relationships. Use when asked to scrape, refresh, inspect, validate, reconcile, or map NBCU, Universal, DreamWorks, Illumination, or NBCUniversal licensed source data from creativeassets.nbcuni.com, including Product Submissions and asset-search work, and when asked to download or pull an NBCU style guide, trend guide, design guide, or its art files to a local folder, the NAS, or an SMB share.
+description: Capture NBCU Creative Asset Factory metadata or download authorized style-guide art. Use for NBCU, Universal, DreamWorks, or Illumination portal scraping, refresh, validation, source IDs, relationships, Product Submissions, asset search, or style-guide downloads.
 ---
 
 # NBCU Creative Asset Factory scrape
@@ -240,7 +240,8 @@ file name, and delete the duplicate.
 Verify every file by magic bytes before filing it: `49 49 2a 00` for TIFF, `%PDF` for PDF. A login
 or error page can otherwise be filed as if it were art.
 
-Destination convention on the style-guide NAS (`\\<removed-protected-address>\styleguides`):
+Resolve the destination with `ai-private-config value styleguides_unc`; never
+copy the protected NAS address into this public skill. Destination convention:
 
 ```text
 NBC UNIVERSAL/<Property>/<Year>/<Guide type>/<Guide name>/

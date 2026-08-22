@@ -452,7 +452,7 @@ Decide by looking, in this order:
 1. `git log --oneline --diff-filter=D -- HANDOFF.d/ | head` and read the deleted
    `2026-08-10T1138Z-albt16-codex-916-rollout.md` out of git history.
 2. If the `916` rollout is still genuinely blocked (last measured: host
-   `<removed-protected-address>:22` refused a connection on 2026-08-12), rewrite the sentence
+   `<protected-dev-peer-address>:22` refused a connection on 2026-08-12), rewrite the sentence
    to carry the fact inline — machine `916`, powered off, what is waiting on it —
    rather than pointing at a file.
 3. If it is finished, say so and drop the pointer.
@@ -932,7 +932,7 @@ weaken them.
 1. **O1-O4 in §8** are the implementer's calls; record the decision in this file
    when you make it.
 2. **Does the `916` machine rollout still matter?** Step 2 forces an answer.
-   Last measured 2026-08-12: `<removed-protected-address>:22` refused a connection.
+   Last measured 2026-08-12: `<protected-dev-peer-address>:22` refused a connection.
 3. **What are the 15 `refs/codex/turn-diffs/checkpoints/*` refs, and who owns
    them?** Nobody knows. The tool reports them; deciding their fate is future
    work, deliberately not in this plan. Criterion for acting: identify which tool

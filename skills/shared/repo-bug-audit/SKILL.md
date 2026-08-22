@@ -1,6 +1,6 @@
 ---
 name: repo-bug-audit
-description: Whole-codebase quality audit across one or many repos. Use when the user says "read the entire codebase and tell me if you find any bugs, inefficient code, or poorly written code", asks to audit the codebase, or requests an AI-implementation audit (context/prompt-caching correctness). Uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex.
+description: Audit an entire codebase for bugs, inefficient or poor code, and AI implementation problems. Use for "read the entire codebase", "audit the repo", broad quality reviews, or context and prompt-caching correctness. Writes bugs.md.
 ---
 
 # repo-bug-audit

@@ -1,6 +1,6 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or STOP any session working in `u2giants/shared-db` or on the shared Supabase database — whether or not that session is the orchestrator. TWO paths. (A) You are NOT the orchestrator — trigger on "stop work and hand over", "stop what you are doing on shared-db", "transfer your work to the orchestrator", "hand your work to the orchestrator", "hand your work to the orchestrator", "hand this off to the orchestrator", "hand your work to the coordinator", "hand this off to the coordinator", "you are not the coordinator", "there is already a coordinator" (COORDINATOR is the older word for the ORCHESTRATOR role, still used in older issues and in git history, and must trigger this skill too), "you are not the orchestrator", "another session is coordinating this", "there is already a orchestrator", "write your handover into COORDINATOR_INTAKE", or "fill in the intake template" — then stop all work and open a GitHub issue on `u2giants/shared-db` (the `COORDINATOR_INTAKE.md` file was retired on 2026-08-07). (B) You ARE the orchestrator — trigger on "hand this over", "hand this session over", "hand it to a new session", "wrap up", "wrap up this session", "close this out", "close out the session", "end of session", "we're done here", "write the handoff", "write the handoff for what the subagents did", "I'm out of context", "context window is full", "fresh session", or "give the next session a prompt" — then write the two-halves handoff. Applies whenever the work involved a database or schema change, a migration, RLS, a view, RPC, trigger, seed, a preview or production promotion, a cross-app data contract, the shared-db repo, or any dispatched sub-agents/worktrees. A orchestrator handoff has TWO halves — coordination state AND a separate block per sub-agent — and one missing the second half is incomplete no matter how long it is, so prefer this skill over the generic `wrap-up` / `handoff-writer` whenever sub-agents or the shared database were involved. Pair with `shared-db-orchestrator`, which is how a orchestrator session is opened and run.
+description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Use for orchestrator/coordinator transfer, database handoff, "wrap up" after schema work, fresh-session transfer, or dispatched database agents. Non-orchestrators stop and route work; orchestrators write coordination plus per-agent handoff state.
 ---
 
 # shared-db-handover
@@ -100,7 +100,7 @@ this repo nothing for them. Two things still do trigger a handover:
 - **any bulk or ad-hoc load of outside-sourced content into curated Master Data**
   (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`,
   `*_ext`) — the §6.4 carve-out, unchanged; and
-- **any data you wrote to preview `<removed-protected-project-ref>` while running as, or dispatched
+- **any data you wrote to the protected shared preview project while running as, or dispatched
   by, the orchestrator** — point 3 below. Preview is a shared rehearsal environment, so
   the disclosure is about not poisoning the next rehearsal, not about permission.
 
@@ -110,7 +110,7 @@ Your block must cover, at minimum:
    what asked for it.
 2. **What you actually DID** — commits with SHAs, branch names, PR numbers and
    their current states. Not intentions; actions.
-3. **Anything applied to preview `<removed-protected-project-ref>`** — **migrations AND
+3. **Anything applied to the protected shared preview project** — **migrations AND
    data rows.** Data writes count and are the thing sessions routinely forget to
    mention. Preview holds a full production data clone and is shared; an
    unannounced write there is how the next rehearsal gets a false result.

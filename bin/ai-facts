@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Read-only search over the protected portable Markdown memory hub.
+set -euo pipefail
+die(){ printf 'ai-facts: error: %s\n' "$*" >&2; exit 1; }
+default_root(){
+  if [ -n "${AI_DEVOPS_MEMORY_HOME:-}" ]; then printf '%s' "$AI_DEVOPS_MEMORY_HOME"; return; fi
+  if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    printf '%s/.local/share/ai-devops-memory' "$(cygpath -u "$USERPROFILE")"
+  else printf '%s/.local/share/ai-devops-memory' "${HOME:?HOME is unavailable}"; fi
+}
+ROOT="$(default_root)"
+[ -d "$ROOT" ] || die "private memory hub not found: $ROOT (run ai-sync-memory first)."
+ROOT="$(cd "$ROOT" && pwd -P)"
+if [ "${AI_FACTS_ALLOW_FIXTURE:-0}" != 1 ]; then
+  remote="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  identity="$(printf '%s' "$remote" | sed -E -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##')"
+  [ "$identity" = "u2giants/ai-devops-memory" ] || die 'refusing a memory root that is not the canonical private hub.'
+fi
+
+case "${1:-}" in
+  index)
+    [ "$#" -eq 1 ] || die 'index accepts no extra arguments.'
+    files="$(rg --files "$ROOT" -g '*.md' -g '!.git/**' | wc -l | tr -d ' ')"
+    bytes="$(rg --files "$ROOT" -g '*.md' -g '!.git/**' -0 | xargs -0 wc -c 2>/dev/null | tail -1 | awk '{print $1}')"
+    jq -nc --arg root "$ROOT" --argjson files "${files:-0}" --argjson bytes "${bytes:-0}" \
+      '{schema_version:1,root:$root,markdown_files:$files,markdown_bytes:$bytes,mode:"read-only"}'
+    ;;
+  search)
+    shift; json=0; limit=50
+    if [ "${1:-}" = --json ]; then json=1; shift; fi
+    [ "$#" -ge 1 ] || die 'search text is required.'
+    query="$*"; [ "${#query}" -le 200 ] || die 'search text is too long.'
+    if [ "$json" -eq 1 ]; then
+      raw="$(cd "$ROOT" && rg --json -i -F -m "$limit" -g '*.md' -g '!.git/**' -- "$query" . 2>/dev/null || {
+        rc=$?; [ "$rc" -eq 1 ] || exit "$rc"
+      })"
+      printf '%s' "$raw" | jq -s '[.[]|select(.type=="match")|{path:(.data.path.text|gsub("\\\\";"/")|sub("^\\./";"")),line:.data.line_number,text:(.data.lines.text|rtrimstr("\n")|rtrimstr("\r"))}]'
+    else
+      (cd "$ROOT" && rg -n -i -F -m "$limit" -g '*.md' -g '!.git/**' -- "$query" .) || {
+        rc=$?; [ "$rc" -eq 1 ] || exit "$rc"
+      }
+    fi
+    ;;
+  -h|--help|help|'') printf '%s\n' 'Usage: ai-facts index' '       ai-facts search [--json] <text>';;
+  *) die "unknown command: $1";;
+esac

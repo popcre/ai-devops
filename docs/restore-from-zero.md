@@ -1,8 +1,10 @@
 # Restore From Zero
 
 How to rebuild this AI coding workflow on a new Windows 11 computer or Ubuntu
-server. The repository is the only setup source. Secrets are restored at runtime
-from 1Password vault `vibe_coding`; secret values never belong in Git.
+server. This public repository is the setup engine; the private
+`u2giants/ai-devops-private-config` repository supplies machine topology and
+provider identifiers. Secrets are restored at runtime from 1Password vault
+`vibe_coding`; secret values never belong in Git.
 
 ## Windows 11
 
@@ -53,8 +55,8 @@ cd /worksp/ai-devops
 
 ### 4. Authenticate GitHub CLI
 
-The private memory hub is part of a complete restore, so authenticate before
-installing:
+The private configuration and memory hubs are part of a complete restore, so
+authenticate before installing:
 
 ```bash
 gh auth login
@@ -66,7 +68,8 @@ gh auth login
 ./install.sh --require-secrets
 ```
 
-This installs base dependencies, creates `/etc/ai-devops` and
+This installs base dependencies, synchronizes and validates the protected
+configuration repository, creates `/etc/ai-devops` and
 `/var/log/ai-devops`, seeds `models.env` / `server.env` (without overwriting any
 existing real config), installs skills, calls `bin/setup-secrets.sh` for the
 1Password-backed MCP wiring, symlinks the `bin/` tools into `/usr/local/bin`,

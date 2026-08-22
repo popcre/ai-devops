@@ -1,6 +1,6 @@
 ---
 name: synology-long-running-operations
-description: Run non-destructive Synology NAS operations that are expected to exceed the Synology Monitor MCP run_command 25-second budget without weakening its safety timeout. Use for whole-volume or large-subtree find scans, inventories, hashing, audits, large log processing, or any safe NAS read that timed out or predictably will time out; use managed SSH only when no native NAS background-job capability exists.
+description: Run non-destructive Synology NAS reads that exceed the 25-second MCP budget without weakening its timeout. Use for whole-volume scans, large inventories, hashing, audits, log processing, or any safe NAS read that timed out or will run long.
 ---
 
 # Synology Long-Running Operations

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "default": {
+    "workflow": "feature-branch-pr",
+    "main_branch": "main"
+  },
+  "rules": [
+    {
+      "match": "popcre/designflow-*",
+      "workflow": "sandbox-pr",
+      "main_branch": "develop"
+    },
+    {
+      "match": "u2giants/shared-db",
+      "workflow": "feature-branch-pr",
+      "main_branch": "main"
+    },
+    {
+      "match": "u2giants/ansible",
+      "workflow": "feature-branch-pr",
+      "main_branch": "main"
+    },
+    {
+      "match": "u2giants/*",
+      "workflow": "main-only",
+      "main_branch": "main"
+    }
+  ]
+}

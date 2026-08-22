@@ -61,6 +61,8 @@ Flags:
                        Opt in to the private-memory task after qualification.
                        The default is disabled during incident remediation.
   -RepoPath <path>     Where ai-devops lives (default: $HOME\repos\ai-devops).
+  -PrivateConfigRoot <path>
+                       Override the protected configuration checkout location.
 #>
 
 [CmdletBinding()]
@@ -70,7 +72,8 @@ param(
   [switch]$SkipRailwayCliReconcile,
   [switch]$EnableMemorySyncSchedule,
   [string]$RepoPath = "",
-  [string]$SupabaseProjectRef = "<removed-protected-project-ref>"
+  [string]$SupabaseProjectRef = "",
+  [string]$PrivateConfigRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,7 +123,7 @@ if ([string]::IsNullOrWhiteSpace($RepoPath)) {
   if (Test-Path -LiteralPath (Join-Path $selfRepo "config\mcp.env.example")) {
     $RepoPath = $selfRepo
   } else {
-    $RepoPath = "C:\repos\ai-devops"
+    throw "Could not resolve the ai-devops checkout from $PSCommandPath; pass -RepoPath explicitly."
   }
 }
 
@@ -165,12 +168,34 @@ function Ensure-Winget($id, $name){
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Ensure-Winget "Git.Git" "Git" }
 if (Get-Command git -ErrorAction SilentlyContinue) { Ok "git" } else { throw "git is required." }
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Ensure-Winget "GitHub.cli" "GitHub CLI" }
+if (Get-Command gh -ErrorAction SilentlyContinue) { Ok "gh" } else { throw "GitHub CLI is required for protected configuration." }
 
 if (-not (Get-Command op -ErrorAction SilentlyContinue)) { Ensure-Winget "AgileBits.1Password.CLI" "1Password CLI" }
 if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$null)" } else { throw "The 1Password CLI (op) is required." }
 
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
 if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
+
+# Concrete machine topology and provider identifiers live in a separate private
+# repository. Sync it before any generated configuration consumes those values.
+Step "Protected machine configuration"
+$gitBash = "C:\Program Files\Git\bin\bash.exe"
+if (-not (Test-Path -LiteralPath $gitBash)) { throw "Git Bash is required at $gitBash." }
+$privateConfigTool = Join-Path $RepoPath "bin\ai-private-config"
+if (-not (Test-Path -LiteralPath $privateConfigTool)) { throw "Missing protected-configuration helper: $privateConfigTool" }
+if (-not [string]::IsNullOrWhiteSpace($PrivateConfigRoot)) { $env:AI_PRIVATE_CONFIG_HOME = $PrivateConfigRoot }
+$privateRootOutput = & $gitBash $privateConfigTool sync
+if ($LASTEXITCODE -ne 0) { throw "Protected configuration sync failed." }
+Ok "protected configuration synchronized"
+if ([string]::IsNullOrWhiteSpace($SupabaseProjectRef)) {
+  $SupabaseProjectRef = (& $gitBash $privateConfigTool value supabase_project_ref | Select-Object -Last 1).Trim()
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($SupabaseProjectRef)) { throw "Protected Supabase project reference is unavailable." }
+}
+$sshTmpl = (& $gitBash $privateConfigTool path ssh_config | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sshTmpl)) { throw "Protected SSH configuration is unavailable." }
+$knownHostsTmpl = (& $gitBash $privateConfigTool path ssh_known_hosts | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $knownHostsTmpl)) { throw "Protected SSH host keys are unavailable." }
 
 # Railway's official MCP is bundled into its CLI. Reconcile the current official
 # npm package even when setup-machine.ps1 is run directly. npm install is
@@ -495,7 +520,6 @@ if ($LASTEXITCODE -eq 0 -and $priv) {
 # OpenSSH uses the first value it finds for each setting, so placing this Include
 # last allowed stale blocks left by the old Dropbox script to override it.
 Step "SSH config (host aliases: vps, vps2, coolify, seafile, ...)"
-$sshTmpl   = Join-Path $RepoPath "config\ssh-config.template"
 $aidevConf = Join-Path $sshDir "ai-devops.conf"
 $mainConf  = Join-Path $sshDir "config"
 if (Test-Path $sshTmpl) {
@@ -530,7 +554,6 @@ if (Test-Path $sshTmpl) {
 # connect without an interactive trust prompt.  A changed entry is recoverable:
 # preserve the complete prior file before replacing only the managed host entry.
 Step "SSH known hosts (verified server keys)"
-$knownHostsTmpl = Join-Path $RepoPath "config\ssh-known-hosts.template"
 $knownHosts = Join-Path $sshDir "known_hosts"
 $knownHostsSync = Join-Path $RepoPath "bin\sync-ssh-known-hosts.ps1"
 if ((Test-Path $knownHostsTmpl) -and (Test-Path $knownHostsSync)) {
@@ -734,7 +757,6 @@ if ($ccResult.Backup) {
 # commit. Seed incoming facts now, but keep unattended publishing disabled until
 # qualification explicitly opts in with -EnableMemorySyncSchedule.
 Step "Private memory sync"
-$gitBash = "C:\Program Files\Git\bin\bash.exe"
 if (Test-Path $gitBash) {
   # Windows path -> Git-bash POSIX path: C:\a\b -> /c/a/b
   $posix = "/" + ($RepoPath.Substring(0,1).ToLower()) + ($RepoPath.Substring(2) -replace '\\','/')

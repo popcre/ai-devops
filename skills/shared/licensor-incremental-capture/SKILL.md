@@ -1,6 +1,6 @@
 ---
 name: licensor-incremental-capture
-description: Re-scrape a licensor portal and capture only what changed since the last run - new, edited, and withdrawn properties, style guides, characters, assets and file names. Use for any refresh, re-scrape, update, delta, incremental, or "what's new since last time" request against NBCU, Disney OPA, Disney DCP Vault, Paramount, Peanuts, Sesame Workshop, Strawberry Shortcake/WildBrain, Warner STARLABS or any other licensor portal, and whenever deciding how a capture records its bookmark, manifest, or run state so the next run can pick up where it left off.
+description: Re-scrape a licensor portal and capture only new, changed, or withdrawn records. Use for refresh, re-scrape, delta, incremental, "what changed", or bookmark, manifest, and run-state design across any licensed-content portal.
 ---
 
 # Licensor incremental capture

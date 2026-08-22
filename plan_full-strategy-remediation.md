@@ -19,10 +19,10 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 9 | Make shared reviewer snapshots and lifecycle fail closed | ✅ complete | 2026-08-22 | digest-bound atomic snapshots, packet, lifecycle, preflight, scoreboard, incident join, and hostile fixtures pass |
 | 10 | Finish provider-specific reviewer repairs and qualification | 🟨 verifying | 2026-08-22 | all provider source contracts repaired; Claude Opus 5 and Codex GPT-5.6-sol live access proven; advisory providers cannot satisfy approval |
 | 11 | Finish the seven-stage workflow with two supported approval paths | 🟨 verifying | 2026-08-22 | manifest-driven pipeline, exact artifact chaining, supported-provider gate, and resume/stale-source tests pass; live scratch run pending |
-| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟦 in progress | 2026-08-22 | governed WinGet/npm/MCP/model catalog and drift test pass; live two-run reports pending |
-| 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ⬜ open | — | strict context audit, trigger matrix, policy tests, `ai-facts` tests |
-| 14 | Remove public topology and close every transcript-ingestion path | ⬜ open | — | public-tree scan and transcript destination hostile tests |
-| 15 | Purge exposed Git history through a recoverable coordinated rewrite | ⬜ open | — | protected backup location, rewrite map, unauthenticated fresh-clone scan |
+| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟨 verifying | 2026-08-22 | governed WinGet/npm/MCP/model catalog and drift test pass; live two-run reports pending |
+| 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ✅ complete | 2026-08-22 | strict audit measures 21,808 installed-global bytes with no safety/parity failure; protected trigger matrix 31/0, repository policy 6/0, portable facts 8/0 and a live known-fact retrieval |
+| 14 | Remove public topology and close every transcript-ingestion path | ✅ complete | 2026-08-22 | protected config head `032919f15dd363567c9c1812cacb5ebe3428ee59`; hostile public-boundary/private-config/transcript-destination suites pass; setup resolves protected inputs |
+| 15 | Purge exposed Git history through a recoverable coordinated rewrite | 🟦 in progress | 2026-08-22 | current public tree is clean; next gate is protected backup, disposable rewrite, force update, ruleset, and unauthenticated clone scan |
 | 16 | Install and verify the exact release on every managed machine | ⬜ open | — | per-machine SHA, installer, doctor, and memory-status records |
 | 17 | Obtain independent exact-head approval and close the workstream | ⬜ open | — | review report, final CI run, origin SHA, closed issue #62 |
 

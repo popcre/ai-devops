@@ -1,15 +1,6 @@
 ---
 name: fresh-session
-description: >-
-  "Fresh session?" — decide whether the work should cut over to a NEW AI session
-  with a clean context window between phases/steps of a plan, and if so, verify
-  the handoff is airtight for a fresh agent. Use when the user asks "fresh
-  session?", "should this be a new session?", "new context window?", "is the
-  context window getting full?", "hand this phase over to a new agent", or is
-  between phases of a multi-phase plan and wondering whether to continue here or
-  cut over. Owns the go/no-go decision and whole-plan (all remaining phases)
-  comprehensiveness scope; delegates the actual handoff document to
-  handoff-writer instead of duplicating it.
+description: Decide whether work should move to a new AI session and verify the handoff covers every remaining phase. Use for "fresh session?", "new context window?", "is context getting full?", or handing the next phase to a new agent.
 ---
 
 # fresh-session

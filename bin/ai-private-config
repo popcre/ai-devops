@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Resolve protected machine topology without publishing it in ai-devops.
+set -euo pipefail
+REPOSITORY="u2giants/ai-devops-private-config"
+die(){ printf 'ai-private-config: error: %s\n' "$*" >&2; exit 1; }
+default_root(){
+  if [ -n "${AI_PRIVATE_CONFIG_HOME:-}" ]; then printf '%s' "$AI_PRIVATE_CONFIG_HOME"; return; fi
+  if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    printf '%s/.local/share/ai-devops-private-config' "$(cygpath -u "$USERPROFILE")"
+  else printf '%s/.local/share/ai-devops-private-config' "${HOME:?HOME unavailable}"; fi
+}
+ROOT="$(default_root)"; MANIFEST="$ROOT/manifest.json"
+validate(){
+  [ -d "$ROOT/.git" ] && [ -f "$MANIFEST" ] || die "protected configuration is not installed at $ROOT; run: ai-private-config sync"
+  remote="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  identity="$(printf '%s' "$remote" | sed -E -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##')"
+  if [ "${AI_PRIVATE_CONFIG_ALLOW_FIXTURE:-0}" != 1 ]; then
+    [ "$identity" = "$REPOSITORY" ] || die 'protected configuration has the wrong upstream.'
+  fi
+  jq -e --arg repo "$REPOSITORY" '.schema_version==1 and .repository==$repo and (.files|type=="object")' "$MANIFEST" >/dev/null || die 'protected manifest is invalid.'
+}
+resolve_path(){
+  local key="$1" relative canon base
+  relative="$(jq -er --arg key "$key" '.files[$key]' "$MANIFEST")" || die "unknown protected file key: $key"
+  case "$relative" in /*|*..*) die 'unsafe protected file path.';; esac
+  [ -f "$ROOT/$relative" ] || die "protected file is missing: $relative"
+  canon="$(cd "$(dirname "$ROOT/$relative")" && pwd -P)/$(basename "$relative")"; base="$(cd "$ROOT" && pwd -P)"
+  case "$canon" in "$base"/*) printf '%s\n' "$canon";; *) die 'protected file escapes its repository.';; esac
+}
+case "${1:-}" in
+  sync)
+    [ "$#" -eq 1 ] || die 'sync accepts no extra arguments.'
+    if [ ! -d "$ROOT/.git" ]; then
+      command -v gh >/dev/null || die 'GitHub CLI is required.'; gh auth status >/dev/null 2>&1 || die 'GitHub CLI is not authenticated.'
+      mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null
+    else
+      validate; [ -z "$(git -C "$ROOT" status --porcelain)" ] || die 'protected configuration checkout is dirty.'
+      [ "$(git -C "$ROOT" branch --show-current)" = main ] || die 'protected configuration must be on main.'
+      git -C "$ROOT" fetch --quiet origin main
+      git -C "$ROOT" merge --ff-only --quiet origin/main
+    fi
+    validate; printf '%s\n' "$ROOT";;
+  path) [ "$#" -eq 2 ] || die 'path requires one manifest key.'; validate; resolve_path "$2";;
+  value) [ "$#" -eq 2 ] || die 'value requires one manifest key.'; validate; jq -er --arg key "$2" '.values[$key]' "$MANIFEST";;
+  doctor) validate; jq -nc --arg root "$ROOT" --arg head "$(git -C "$ROOT" rev-parse HEAD)" '{status:"PASS",repository:"u2giants/ai-devops-private-config",root:$root,head:$head}' ;;
+  -h|--help|help|'') printf '%s\n' 'Usage: ai-private-config sync|doctor' '       ai-private-config path <key>' '       ai-private-config value <key>';;
+  *) die "unknown command: $1";;
+esac

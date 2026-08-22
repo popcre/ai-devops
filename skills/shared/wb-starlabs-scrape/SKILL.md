@@ -1,6 +1,6 @@
 ---
 name: wb-starlabs-scrape
-description: Safely capture Warner Bros. STARLABS portal source data, especially the direct Franchise/Property-to-Character lists on the Product submission page and style-guide/file metadata from Art Assets. Use when asked to scrape, refresh, inspect, validate, or load Warner STARLABS properties, characters, style guides, or licensed asset records, or when investigating the portal fields and IDs that feed shared-db.
+description: Capture Warner Bros. STARLABS source data. Use for STARLABS scraping, refresh, validation, properties, characters, franchise relationships, Product-submission lists, style guides, Art Assets metadata, portal IDs, or shared-db mapping.
 ---
 
 # WB STARLABS scrape
@@ -134,7 +134,13 @@ Retrieve files one at a time. The bulk/zip download is a separate server-side jo
 
 ### Destination and naming, as the business already stores it
 
-The Warner library lives at `\\<removed-protected-address>\styleguides\WB`. The share is `styleguides` and `WB` is a folder inside it; a request written as `styleguidesWB` is the same place, not a second share, and no share by that name exists. There is also an `oldStyleguides` share, described on the NAS as no longer used: never write into it. Observed structure on 2026-08-18, which new downloads must match rather than invent:
+Resolve the Warner destination with `ai-private-config value wb_styleguides_unc`;
+never copy the protected NAS address into this public skill. The share is
+`styleguides` and `WB` is a folder inside it; a request written as
+`styleguidesWB` is the same place, not a second share, and no share by that name
+exists. There is also an `oldStyleguides` share, described on the NAS as no
+longer used: never write into it. Observed structure on 2026-08-18, which new
+downloads must match rather than invent:
 
 - Level 1 is a Property or brand folder in the licensing team's own wording, not a Warner ID. Some names carry a year or a qualifier, and some carry a leading `_` to sort administrative folders to the end.
 - Level 2 is optional and varies per property: a release-year folder, a numbered ordering prefix, or a category grouping. It exists where a property has many guides and is absent where it has few. Do not add a level that a property does not already use.

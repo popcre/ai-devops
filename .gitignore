@@ -18,6 +18,9 @@ id_ed25519
 !bin/setup-secrets.sh
 !bin/mcp-secret-launch.ps1
 !docs/onboarding-secrets.md
+# These public helpers resolve protected inputs but contain no private values.
+!bin/ai-private-config
+!tests/test-ai-private-config.sh
 
 # Memory notes (memory/**/*.md) document things *about* credentials — incident
 # records, access paths, rotation to-dos — so their filenames routinely contain

@@ -11,6 +11,13 @@ Recovery-critical package, MCP, and model versions are recorded in
 [`config/tool-versions.json`](config/tool-versions.json); restore paths use
 those reviewed pins instead of mutable `latest` releases.
 
+This repository is public. Concrete machine topology, SSH host identities, and
+provider project identifiers live in the private
+`u2giants/ai-devops-private-config` repository and are restored by
+`ai-private-config`; transcripts and portable facts have their own private
+repositories. Historical public commits are being removed as part of the 2026
+strategy remediation, so old clones must be replaced after that rewrite.
+
 > **New here (developer or AI session)?** Read [`AGENTS.md`](AGENTS.md) — it is
 > the canonical operating guide and documentation router. Its **Documentation
 > map** tells you which docs to load for a given task so you don't have to read
@@ -102,7 +109,7 @@ Config lives outside the repo (so it is never committed):
 
 ## What this repo does NOT store
 
-This repo is safe to keep **private** on GitHub. It never stores:
+This repo is deliberately **public** on GitHub. Its current tree never stores:
 
 - `.env` files or any real environment files (only `*.env.example`)
 - API tokens, secrets, passwords
@@ -110,9 +117,11 @@ This repo is safe to keep **private** on GitHub. It never stores:
 - SSH private keys (`id_rsa`, `id_ed25519`, `*.pem`, `*.key`)
 - `~/.codex`, `~/.claude`, or any login/session state
 - Production credentials of any kind
+- Concrete machine addresses, SSH host keys, or provider project identifiers
 
-The `.gitignore` actively blocks these patterns. Real config lives in
-`/etc/ai-devops/` on each machine, never in git.
+The public-boundary test rejects credential-shaped content and protected
+topology. Runtime config lives under `/etc/ai-devops/`; private restore inputs
+come from `ai-private-config`, never this repository.
 
 ---
 

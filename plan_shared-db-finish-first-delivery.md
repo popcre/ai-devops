@@ -61,7 +61,7 @@ Files that own durable coordination and database delivery include:
 - `scripts/check-sql.sh` and the repository test commands named in `AGENTS.md`
 - `HANDOFF.d/` for unfinished session state
 
-Production Supabase project: `<removed-protected-project-ref>`. Preview branch/project reference: `<removed-protected-project-ref>`. These identifiers must be proved immediately before any write; they are never inferred from intent.
+Production Supabase project: `<protected-shared-prod-ref>`. Preview branch/project reference: `<protected-shared-preview-ref>`. These identifiers must be proved immediately before any write; they are never inferred from intent.
 
 ## 3. What triggered this work
 
@@ -256,7 +256,7 @@ Dependencies: §9.1 issue contract.
 Change or add in `shared-db`:
 
 - Add `--health` to `scripts/manage-migration-author-lanes.mjs`; keep GitHub/claim/orphan/lock classes in this command.
-- For preview identity and ledger, call or import read-only helpers from `scripts/check-migration-ledger-drift.mjs --target preview` after proving ref `<removed-protected-project-ref>`. Exit 2 or unreadable state is `GITHUB/ACCESS UNAVAILABLE`, never `CLEAN`. Do not import these readers into the claim mutex path.
+- For preview identity and ledger, call or import read-only helpers from `scripts/check-migration-ledger-drift.mjs --target preview` after proving ref `<protected-shared-preview-ref>`. Exit 2 or unreadable state is `GITHUB/ACCESS UNAVAILABLE`, never `CLEAN`. Do not import these readers into the claim mutex path.
 - Do not reuse `production_catalog_verification.py` or `historical_preview_recovery.py` as a generic preflight engine; they serve post-apply/recovery purposes.
 - Add tests beside each affected script.
 
@@ -273,7 +273,7 @@ Offline/GitHub health output must report without mutation:
 
 Credentialed early preflight, run once before authoring an outcome, must prove read-only:
 
-- exact preview identity `<removed-protected-project-ref>`;
+- exact preview identity `<protected-shared-preview-ref>`;
 - repository migration files versus preview ledger;
 - unknown remote-only versions;
 - required predecessor versions;
@@ -535,7 +535,7 @@ The implementing session must read the then-current repository test commands. At
 - `shared-db`: `C:\repos\shared-db`, GitHub `u2giants/shared-db`, branch plus PR.
 - `gh` is authenticated as `u2giants`; re-verify before relying on live issue/PR state.
 - Supabase CLI and database access are needed only for the read-only preflight and later governed outcome delivery. Prove project identity before use.
-- Preview ref: `<removed-protected-project-ref>`; production ref: `<removed-protected-project-ref>`.
+- Preview ref: `<protected-shared-preview-ref>`; production ref: `<protected-shared-prod-ref>`.
 - Secrets remain in 1Password vault `vibe_coding`; this plan needs no new credential. Never record values.
 - Reviewer wrappers: `ai-grok-review` and `ai-kimi`; use exact named sessions and the skills’ read-only rules. Kimi’s returned model/tokens/cost remain unavailable.
 - Concurrent uncommitted work exists in the primary ai-devops checkout. Use isolated worktrees and stage only owned paths.

@@ -252,7 +252,7 @@ statements about which branches are actually merged remain unproven.
    guard it: the plan's non-goals in §1, rejected approach R1, locked decision D1,
    plus two test cases in step 5.
 2. **Does the `916` machine rollout still matter?** Plan step 2 forces an answer.
-   Last measured 2026-08-12: `<removed-protected-address>:22` refused a connection.
+   Last measured 2026-08-12: `<protected-dev-peer-address>:22` refused a connection.
 3. **What are the 15 `refs/codex/turn-diffs/checkpoints/*` refs and who owns
    them?** Nobody knows. Deliberately out of scope; the tool will report them.
 4. **`issue: none` on this very file** is the weakness the plan is fixing,

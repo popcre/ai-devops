@@ -1,0 +1,12 @@
+[
+  {"query":"this chat is a week old; did we ever finish and commit this?","should_trigger":true},
+  {"query":"I abandoned this session last month and am picking it back up","should_trigger":true},
+  {"query":"after this long gap, check whether the pending markdown updates still apply","should_trigger":true},
+  {"query":"is the old merge request already handled by another session?","should_trigger":true},
+  {"query":"resume this stale conversation but verify current Git first","should_trigger":true},
+  {"query":"continue the work we started five minutes ago","should_trigger":false},
+  {"query":"wrap up this active session","should_trigger":false},
+  {"query":"commit and push the current clean diff","should_trigger":false},
+  {"query":"write a new implementation plan","should_trigger":false},
+  {"query":"summarize the last command output","should_trigger":false}
+]

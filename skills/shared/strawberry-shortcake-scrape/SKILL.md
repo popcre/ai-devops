@@ -1,6 +1,6 @@
 ---
 name: strawberry-shortcake-scrape
-description: Capture, refresh, validate, or interpret Strawberry Shortcake licensed source data from the WildBrain DAM (dam.wildbrain.com, a Wedia portal). Use when asked to scrape, re-scrape, inspect, reconcile, or load WildBrain / Strawberry Shortcake properties, eras, characters, style guides, or asset metadata; when a question depends on WildBrain's field names, era hierarchy, character IDs, or keyword-based style guides; or when deciding which WildBrain relationships are licensor-asserted versus inferred.
+description: Capture, refresh, validate, or interpret Strawberry Shortcake source data from the WildBrain Wedia DAM. Use for properties, eras, characters, style guides, asset metadata, WildBrain fields, era hierarchy, character IDs, keywords, or asserted relationships.
 ---
 
 # Strawberry Shortcake (WildBrain DAM) scrape

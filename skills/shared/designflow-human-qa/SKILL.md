@@ -1,6 +1,6 @@
 ---
 name: designflow-human-qa
-description: Test DesignFlow PLM as real admin, sourcing manager, sales, designer, production, and vendor users. Use for human QA, exploratory testing, role-access checks, customer journeys, RFQ pricing and margin math, Item Library, Art Piece, licensing, production, samples, factory workflows, or requests to poke, prod, click through, or test alsand.designflow.app.
+description: Test DesignFlow PLM as real business roles. Use for human QA, role access, customer journeys, RFQ pricing, Item Library, Art Piece, licensing, production, samples, factory workflows, or requests to click through alsand.designflow.app.
 ---
 
 # DesignFlow Human QA

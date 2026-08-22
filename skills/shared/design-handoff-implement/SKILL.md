@@ -1,6 +1,6 @@
 ---
 name: design-handoff-implement
-description: Implement a Claude Design handoff zip in the real app. Use when the user attaches a design zip ("dflow RFQ design update.zip", "poppim.zip") and says "read the README in this zip in full", "recreate these screens in our app", or "implement the design". Used for dflow (Angular/AG-Grid) and the React apps (poppim-web, popcrm-web, popdam, hiclaw). Shared by Claude and Codex.
+description: Implement an attached Claude Design handoff zip in the real app. Use for "read the README in this zip", "recreate these screens", or "implement the design" in DesignFlow or POP React applications.
 ---
 
 # design-handoff-implement

@@ -1,12 +1,22 @@
 ---
 name: codex-shared-db-change
-description: Read this BEFORE any change to the shared supabase.com backend from an app repo, and before answering any question about its schema. Fires on "make db changes the proper way", "mirror it to shared-db", "re-author it properly in shared-db", "all db work goes through shared-db", "review the schema", "what columns exist", "does the shared database fit our data", "compare our data shape to the schema". Covers every STRUCTURAL change in ANY app repo (designflow/dflow, popcrm-web, poppim-web, popdam) — schema, table, column, view, RPC, trigger, RLS policy, index, structural seed, migration, cross-app data contract — every one of which is authored in `u2giants/shared-db`, never in the app repo. Also states Rule 0: read-only inspection of the shared schema is ALLOWED from every app repo, with no issue and no dispatch. And Rule 0.5: DATA is NOT gated — an application session owns the rows it writes, updates, or deletes in the normal course of its work, with no issue and no dispatch (owner ruling 2026-08-13, `AGENTS.md` §0.0-B); the ONE exception is bulk/ad-hoc loading of outside-sourced content into curated Master Data (`core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory`, `*_ext`).
+description: Read before any shared Supabase schema question or structural change. Use for tables, columns, views, RPCs, triggers, RLS, indexes, migrations, cross-app contracts, "make db changes properly", "mirror to shared-db", schema review, or data-shape comparison. Structural work routes through u2giants/shared-db; ordinary application row data does not.
 ---
 
 # codex-shared-db-change
 
+Resolve environment identifiers from the protected configuration before use:
+
+```bash
+SHARED_PROD_REF="$(ai-private-config value supabase_shared_prod_ref)"
+SHARED_PREVIEW_REF="$(ai-private-config value supabase_shared_preview_ref)"
+```
+
+The angle-bracketed names below are explanatory labels, never literal command
+arguments. Prove the live link again immediately before every write.
+
 `u2giants/shared-db` is the **canonical** repo for the shared supabase.com backend
-(production project `<removed-protected-project-ref>`) used by CRM, DAM, PM/PIM, and PLM
+(production project `<protected-shared-prod-ref>`) used by CRM, DAM, PM/PIM, and PLM
 (designflow). Every app reads/writes the same tables, so a schema change made in
 one app repo can silently break another. All durable DB **structure** lives in shared-db.
 
@@ -33,9 +43,9 @@ one app repo can silently break another. All durable DB **structure** lives in s
 > wherever they disagree.** This skill is a portable summary and it had drifted badly.
 >
 > 1. **The preview project ref in this file was WRONG.** It said
->    `<removed-protected-project-ref>`, which is not a project in this account. Preview is
->    **`<removed-protected-project-ref>`** (Supabase branch `shared-db-schema-rehearsal`);
->    production is `<removed-protected-project-ref>`. Fixed throughout.
+>    `<protected-retired-preview-ref>`, which is not a project in this account. Preview is
+>    **`<protected-shared-preview-ref>`** (Supabase branch `shared-db-schema-rehearsal`);
+>    production is `<protected-shared-prod-ref>`. Fixed throughout.
 > 2. **You almost certainly may not do this work yourself.** `shared-db` runs **one
 >    orchestrator session** and every other session **stops and opens a GitHub issue**:
 >    `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
@@ -82,7 +92,7 @@ Three conditions:
 against the shared database.** That means: do NOT add `ALTER TABLE`/`CREATE
 TABLE`/`CREATE INDEX`/`CREATE POLICY`/seed/backfill SQL to app code (e.g. a
 Sequelize `models/db.js` startup migration), do NOT `execute_sql`/`psql` a
-`ALTER`/`CREATE`/`DROP` against `<removed-protected-project-ref>`, and do NOT rely on an
+`ALTER`/`CREATE`/`DROP` against `<protected-shared-prod-ref>`, and do NOT rely on an
 app-repo-only migration. **Author it in `u2giants/shared-db` first.** App repos
 only get updated (models, generated types, adapters, API code) AFTER the shared-db
 change is applied.
@@ -116,17 +126,17 @@ the correct route. A predecessor's repository is context, not routing proof.
    ```
 4. **Preview first**, then production. Link with the matching DB password
    (1Password `Supabase DB Password - shared POP database` for prod; the preview
-   item for `<removed-protected-project-ref>`):
+   item for `<protected-shared-preview-ref>`):
    ```bash
    cat supabase/.temp/project-ref            # PROVE the target (AGENTS.md §4.2)
-   supabase link --project-ref <removed-protected-project-ref>   # preview ONLY
+   supabase link --project-ref "$SHARED_PREVIEW_REF"   # preview ONLY
    supabase db push --dry-run   # must be clean: only your change
    cat supabase/.temp/project-ref            # prove again, immediately before the push
    supabase db push
    ```
 
    ⚠️ **Corrected 2026-08-09: this block used to continue straight into
-   `supabase link --project-ref <removed-protected-project-ref> && supabase db push`. Do NOT
+   `supabase link --project-ref "$SHARED_PROD_REF" && supabase db push`. Do NOT
    promote to production that way.** Production almost always carries pending
    migrations from other workstreams that other teams have deliberately kept off it,
    so a plain `db push` either refuses or sweeps up work that was never approved.
@@ -147,8 +157,8 @@ the correct route. A predecessor's repository is context, not routing proof.
 
 ## Correct project refs (never mix)
 
-- shared backend (prod): `<removed-protected-project-ref>`  ·  preview branch: `<removed-protected-project-ref>`
-- popdam prod: `<removed-protected-project-ref>`  ·  oracle: `<removed-protected-project-ref>`
+- shared backend (prod): `<protected-shared-prod-ref>`  ·  preview branch: `<protected-shared-preview-ref>`
+- popdam prod: `<protected-popdam-ref>`  ·  oracle: `<protected-oracle-ref>`
 
 ## Data-model semantics that keep getting violated
 

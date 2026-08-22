@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_CALL="${AI_MODEL_CALL_BIN:-$ROOT/bin/ai-model-call}"
 DIGEST="${AI_REVIEW_SANDBOX_BIN:-$ROOT/bin/ai-review-sandbox}"
+REPO_POLICY="${AI_REPO_POLICY_BIN:-$ROOT/bin/ai-repo-policy}"
 die(){ printf 'ai-run-task: error: %s\n' "$*" >&2; exit 1; }
 sha_file(){ sha256sum "$1" | cut -d' ' -f1; }
 atomic_manifest(){ local f="$1" json="$2" t; t="$(mktemp "$(dirname "$f")/.manifest.XXXXXX")"; printf '%s\n' "$json" > "$t"; jq -e . "$t" >/dev/null; mv -f "$t" "$f"; }
@@ -16,15 +17,18 @@ check_run(){
   case "$canon/" in "$base"/*) printf '%s' "$canon";; *) die 'run directory is outside .ai/runs.';; esac
 }
 start_run(){
-  local task="$*" repo slug stamp run head source task_sha manifest
+  local task="$*" repo slug stamp run head source task_sha manifest policy workflow main_branch identity branch
   [ -n "$task" ] || die 'task text is required.'; repo="$(repo_root)"; cd "$repo"
   git check-ignore -q .ai/runs/probe || die '.ai/runs must be Git-ignored.'
   slug="$(printf '%s' "$task" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g;s/^-+//;s/-+$//' | cut -c1-40)"; [ -n "$slug" ] || slug=task
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"; run="$repo/.ai/runs/$stamp-$slug"; mkdir -p "$run/prompts"
   printf '# User request\n\n%s\n' "$task" > "$run/00-user-request.md"; task_sha="$(sha_file "$run/00-user-request.md")"
+  policy="$($REPO_POLICY)"; workflow="$(jq -r .workflow <<<"$policy")"; main_branch="$(jq -r .main_branch <<<"$policy")"; identity="$(jq -r .repository <<<"$policy")"; branch="$(git branch --show-current)"
+  [ "$workflow" != main-only ] || [ "$branch" = "$main_branch" ] || die "repository policy requires branch $main_branch, not $branch."
   head="$(git rev-parse HEAD)"; source="$($DIGEST digest "$repo")"
   manifest="$(jq -nc --arg repo "$repo" --arg run "$run" --arg task "$run/00-user-request.md" --arg task_sha "$task_sha" --arg head "$head" --arg source "$source" --arg now "$(date -u +%FT%TZ)" \
-    '{schema_version:1,status:"ready",repository_root:$repo,run_directory:$run,task_artifact:$task,task_sha256:$task_sha,starting_head:$head,current_source_digest:$source,created_at:$now,updated_at:$now,
+    --arg identity "$identity" --arg workflow "$workflow" --arg main_branch "$main_branch" --arg branch "$branch" \
+    '{schema_version:1,status:"ready",repository_root:$repo,repository_identity:$identity,repository_workflow:$workflow,main_branch:$main_branch,starting_branch:$branch,run_directory:$run,task_artifact:$task,task_sha256:$task_sha,starting_head:$head,current_source_digest:$source,created_at:$now,updated_at:$now,
       stages:[
         {number:1,name:"plan",role:"codex-planner",template:"templates/prompts/01-opus48-plan.md",output:"01-plan.md",status:"pending"},
         {number:2,name:"plan-review",role:"claude-opus-5-reviewer",template:"templates/prompts/02-opus-plan-review.md",output:"02-plan-review.md",status:"pending"},
@@ -40,6 +44,7 @@ run_all(){
   repo="$(repo_root)"; run="$(check_run "$repo" "$1")"; manifest="$run/manifest.json"; lock="$run/.lock"
   mkdir "$lock" 2>/dev/null || die "run is already active: $run"; trap 'rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
   [ "$(jq -r .repository_root "$manifest")" = "$repo" ] || die 'run belongs to a different repository.'
+  [ "$(git branch --show-current)" = "$(jq -r .starting_branch "$manifest")" ] || die 'repository branch changed outside this run.'
   [ "$(sha_file "$(jq -r .task_artifact "$manifest")")" = "$(jq -r .task_sha256 "$manifest")" ] || die 'immutable task artifact changed.'
   count="$(jq '.stages|length' "$manifest")"
   for ((index=0; index<count; index++)); do

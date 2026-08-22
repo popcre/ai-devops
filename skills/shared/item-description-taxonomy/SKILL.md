@@ -1,6 +1,6 @@
 ---
 name: item-description-taxonomy
-description: Interpret product item descriptions, split them into item type, size, licensor, property, and artwork wording, and build or repair a consolidated item-type phrase dictionary. Use for item-master cleanup, historical merchandise-group recategorization, description parsing, product-type normalization, phrase-list deduplication, or any request to infer what products are from free-text descriptions.
+description: Parse product descriptions into item type, size, licensor, property, and artwork wording. Use for item-master cleanup, merchandise recategorization, product-type normalization, phrase dictionaries, deduplication, or inferring products from free text.
 ---
 
 # Item description taxonomy

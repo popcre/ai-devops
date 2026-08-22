@@ -74,7 +74,7 @@ regardless of intent. An agent nearly reported **production** data as preview da
 
 **Rule:** call `get_project_url` first and quote the ref. For preview work use the
 Supabase CLI / WSL `psql`, and verify `cat supabase/.temp/project-ref` reads
-`<removed-protected-project-ref>` before **every** push.
+the value from `ai-private-config value supabase_shared_preview_ref` before **every** push.
 
 Related facts: preview is a Supabase **branch**, so it does not appear in
 `supabase projects list`; the preview pooler host is **`aws-0-us-east-1`**, not the

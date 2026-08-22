@@ -1,0 +1,12 @@
+[
+  {"query":"read the entire codebase and find bugs, inefficiency, and poor code","should_trigger":true},
+  {"query":"do a whole-repository quality audit and write bugs.md","should_trigger":true},
+  {"query":"deep audit this repo for implementation flaws","should_trigger":true},
+  {"query":"audit context and prompt caching correctness across the codebase","should_trigger":true},
+  {"query":"review every module in these repositories for defects","should_trigger":true},
+  {"query":"diagnose this one failing unit test","should_trigger":false},
+  {"query":"review only the current git diff","should_trigger":false},
+  {"query":"write an implementation plan for this known bug","should_trigger":false},
+  {"query":"run human QA against the website","should_trigger":false},
+  {"query":"summarize the architecture document","should_trigger":false}
+]

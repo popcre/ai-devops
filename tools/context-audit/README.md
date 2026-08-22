@@ -19,6 +19,11 @@ Generated reports belong under `.ai/` and are not committed. The report labels
 the bytes-divided-by-four value as an estimate. It is not a provider token
 or billing claim.
 
+Render a current Markdown table directly from that JSON with
+`python tools/context-audit/render-measurements.py .ai/context-audit/baseline.json`.
+Do not maintain copied measurement tables by hand. The compact current contract
+is [`../../docs/context-spec.md`](../../docs/context-spec.md).
+
 Skill frontmatter is parsed without a YAML dependency. Single-line values and
 YAML block scalars (`>`, `>-`, `|`, `|-`, and the `+` forms) are supported.
 Folded values join a paragraph's lines with single spaces and keep one newline

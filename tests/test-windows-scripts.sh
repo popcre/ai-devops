@@ -40,13 +40,20 @@ for f in bin/setup-machine.ps1 bin/setup-opencode-glm.ps1; do
   if grep -q 'PSCommandPath' "$f"; then ok "$(basename "$f") defaults to its own checkout"
   else bad "$(basename "$f") does not derive RepoPath from its own location"; fi
 done
-# The full restore contract deliberately owns C:\repos\ai-devops. No other
-# component may invent a drive-letter default.
+# Setup derives its checkout from the executing script. A fixed drive default
+# creates a second copy when the real checkout lives elsewhere.
 drive_defaults="$(grep -nE '\$RepoPath\s*=.*"[A-Za-z]:' bin/*.ps1 || true)"
-unexpected_defaults="$(printf '%s\n' "$drive_defaults" | grep -vF 'bin/setup-machine.ps1:123:    $RepoPath = "C:\repos\ai-devops"' || true)"
-if [ -n "$unexpected_defaults" ]; then
-  bad "unexpected hardcoded drive-letter RepoPath default"; printf '%s\n' "$unexpected_defaults" | sed 's/^/       /'
-else ok "only the canonical C:\\repos\\ai-devops fallback is hardcoded"; fi
+if [ -n "$drive_defaults" ]; then
+  bad "unexpected hardcoded drive-letter RepoPath default"; printf '%s\n' "$drive_defaults" | sed 's/^/       /'
+else ok "no setup script hardcodes a checkout drive"; fi
+
+echo "== protected topology source =="
+if grep -q 'ai-private-config' bin/setup-machine.ps1 &&
+   grep -q 'path ssh_config' bin/setup-machine.ps1 &&
+   grep -q 'path ssh_known_hosts' bin/setup-machine.ps1 &&
+   ! grep -q 'Join-Path \$RepoPath "config\\ssh-config.template"' bin/setup-machine.ps1; then
+  ok "Windows setup resolves SSH topology from protected configuration"
+else bad "Windows setup still consumes public SSH topology"; fi
 
 echo "== Windows paths must not trust Git Bash \$HOME =="
 if grep -q 'export HOME=' bin/setup-opencode-glm.ps1; then ok "GLM launcher pins HOME to the Windows profile"

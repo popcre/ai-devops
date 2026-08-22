@@ -13,7 +13,7 @@
 > verified before removal and remains at
 > `/root/recovery/claude-remote-control-20260818T191705Z.tar.gz`.
 
-**Server:** `hetz` (Hetzner VPS, <removed-protected-address>)
+**Server:** `hetz` (Hetzner VPS, <protected-vps-public-address>)
 **Date:** 2026-08-05
 **Made by:** Claude, via `devops-mcp` `run_command`, as root
 **Ansible status:** ⚠️ NOT committed to `/worksp/ansible`. These are direct host edits and will be lost on an Ansible rebuild. See "Outstanding" at the bottom.
