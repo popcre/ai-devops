@@ -113,7 +113,7 @@ CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 # sleep made the assertions depend on how quickly Windows created repositories.
 echo hold > "$TMP/mode"
 export AI_GROK_HEARTBEAT_INTERVAL=2
-( cd "$REPO" && bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
+( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=90 bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
 for _i in $(seq 1 60); do
   [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1
@@ -174,16 +174,18 @@ LEGACY_CALLS="$(wc -l < "$TMP/argv.txt")"
 LEGACY_BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new legacy-overlap --prompt x 2>&1 )"; LEGACY_RC=$?
 check "legacy_live_lock_for_same_upstream_blocks_rollout" "[ \"$LEGACY_RC\" -ne 0 ] && printf '%s' \"$LEGACY_BLOCKED\" | grep -q 'legacy Grok paid-work lock' && [ \"$LEGACY_CALLS\" -eq \"\$(wc -l < '$TMP/argv.txt')\" ]"
 rm -rf "$LEGACY_LOCK"
-echo wait > "$TMP/mode"
+rm -f "$TMP/hold-started" "$TMP/release-grok"
+echo hold > "$TMP/mode"
 
 # A locally interrupted wrapper must not claim or assume that the paid remote
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
-for _i in 1 2 3 4 5; do
+for _i in $(seq 1 30); do
   LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
-  [ -n "$LOCK_NOW" ] && break
+  [ -n "$LOCK_NOW" ] && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
+check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '$TMP/hold-started'"
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"

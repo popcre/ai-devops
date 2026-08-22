@@ -53,35 +53,53 @@ function Get-CanonicalRemote([string]$Url) {
         '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
 }
 
+function Invoke-GitCommand {
+    param([string[]]$Arguments)
+
+    # Windows PowerShell 5.1 can promote ordinary native stderr (including
+    # successful Git fetch/clone progress) to a terminating NativeCommandError
+    # when the script's normal ErrorActionPreference is Stop. Git's exit code is
+    # the authority; keep diagnostics visible without mistaking them for failure.
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& git @Arguments)
+        $script:LastGitExitCode = $LASTEXITCODE
+        return $output
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+}
+
 function Assert-ReadyRepository([string]$Path) {
-    $dirty = git -C $Path status --porcelain
-    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the ai-devops checkout.' }
+    $dirty = Invoke-GitCommand @('-C', $Path, 'status', '--porcelain')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not inspect the ai-devops checkout.' }
     if ($dirty) { throw 'The ai-devops checkout is dirty; refusing to install from mixed source.' }
-    $origin = git -C $Path remote get-url origin
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops origin.' }
+    $origin = Invoke-GitCommand @('-C', $Path, 'remote', 'get-url', 'origin')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops origin.' }
     $expectedIdentity = 'github.com/u2giants/ai-devops'
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) {
         $expectedIdentity = Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
     }
     if ((Get-CanonicalRemote $origin) -ne $expectedIdentity) { throw "Noncanonical ai-devops origin: $origin" }
-    $branch = git -C $Path branch --show-current
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops branch.' }
+    $branch = Invoke-GitCommand @('-C', $Path, 'branch', '--show-current')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops branch.' }
     if ($branch.Trim() -ne 'main') { throw "ai-devops must be on main; found '$branch'." }
-    git -C $Path fetch origin main
-    if ($LASTEXITCODE -ne 0) { throw 'Fetching ai-devops origin/main failed.' }
-    $head = git -C $Path rev-parse HEAD
-    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops HEAD.' }
-    $remoteHead = git -C $Path rev-parse origin/main
-    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
+    Invoke-GitCommand @('-C', $Path, 'fetch', 'origin', 'main') | Out-Host
+    if ($script:LastGitExitCode -ne 0) { throw 'Fetching ai-devops origin/main failed.' }
+    $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops HEAD.' }
+    $remoteHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'origin/main')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
     if ($head.Trim() -ne $remoteHead.Trim()) {
-        $counts = git -C $Path rev-list --left-right --count HEAD...origin/main
-        if ($LASTEXITCODE -ne 0) { throw 'Could not compare ai-devops source state.' }
+        $counts = Invoke-GitCommand @('-C', $Path, 'rev-list', '--left-right', '--count', 'HEAD...origin/main')
+        if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops source state.' }
         $parts = @($counts -split '\s+') | Where-Object { $_ }
         if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from origin/main.' }
-        git -C $Path merge --ff-only origin/main
-        if ($LASTEXITCODE -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
-        $head = git -C $Path rev-parse HEAD
-        if ($LASTEXITCODE -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
+        Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
+        if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
+        if ($script:LastGitExitCode -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
     }
 }
 
@@ -147,17 +165,40 @@ $script:ManagedMarker = ".ai-devops-managed"
 # same managed outcome on the same inputs, so anything changed here changes
 # there too.
 
+function Get-Sha256 {
+    param([string]$Path)
+
+    # Do not depend on Get-FileHash module auto-loading. A documented
+    # powershell.exe 5.1 install can inherit pwsh's PSModulePath and then fail to
+    # discover that cmdlet even though the operating system supplies it.
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $bytes = $hasher.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $hasher.Dispose()
+    }
+}
+
 function Get-TreeHashes {
     param([string]$Dir)
 
     $map = @{}
     if (-not (Test-Path -LiteralPath $Dir)) { return $map }
-    $base = (Resolve-Path -LiteralPath $Dir).Path.TrimEnd('\') + '\'
-    Get-ChildItem -LiteralPath $Dir -Recurse -Force -File |
+    # Use one FileSystemInfo spelling for both the root and its children. Git
+    # Bash can hand PowerShell an 8.3 path (for example RUNNER~1), while
+    # Resolve-Path may expand only the root to its long spelling. Substring
+    # arithmetic across those two spellings produced nonexistent relative keys
+    # and falsely classified every installed file as a local edit.
+    $root = Get-Item -LiteralPath $Dir -Force
+    Get-ChildItem -LiteralPath $root.FullName -Recurse -Force -File |
         Where-Object { $_.Name -ne $script:ManagedMarker } |
         ForEach-Object {
-            $rel = $_.FullName.Substring($base.Length).Replace('\', '/')
-            $map[$rel] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $rel = $_.FullName.Substring($root.FullName.TrimEnd('\').Length + 1).Replace('\', '/')
+            $map[$rel] = Get-Sha256 $_.FullName
         }
     return $map
 }
@@ -426,8 +467,8 @@ function Install-GlobalFile {
         return
     }
 
-    $srcHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
-    $dstHash = (Get-FileHash -LiteralPath $Dest -Algorithm SHA256).Hash
+    $srcHash = Get-Sha256 $Source
+    $dstHash = Get-Sha256 $Dest
     $backupRoot = Join-Path (Split-Path -Parent $Dest) "globals-backup"
     $leaf = Split-Path -Leaf $Dest
     if ($srcHash -eq $dstHash) {
@@ -470,8 +511,8 @@ if ($SkillsDryRun) {
     } else {
         Write-Note "Repo missing; cloning from $RepoUrl."
         if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') { throw "Noncanonical RepoUrl: $RepoUrl" }
-        git clone --branch main --single-branch $RepoUrl $RepoPath
-        if ($LASTEXITCODE -ne 0) { throw 'Cloning ai-devops failed.' }
+        Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
+        if ($script:LastGitExitCode -ne 0) { throw 'Cloning ai-devops failed.' }
         Assert-ReadyRepository $RepoPath
     }
 }

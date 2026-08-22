@@ -18,6 +18,12 @@ if ! command -v pwsh >/dev/null 2>&1; then
   exit 0
 fi
 
+# The production installer is deliberately Windows PowerShell 5.1-safe. Use
+# that runtime for the cross-installer direction when Windows provides it, so
+# CI cannot pass under pwsh 7 while the documented install command is broken.
+PS_CROSS_BIN=pwsh
+command -v powershell.exe >/dev/null 2>&1 && PS_CROSS_BIN=powershell.exe
+
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -86,7 +92,7 @@ grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not acce
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
 out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
-  pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+  "$PS_CROSS_BIN" -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
@@ -94,5 +100,7 @@ out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
+[[ "$PS_CROSS_BIN" != powershell.exe ]] || powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.Major' | tr -d '\r' | grep -qx 5 \
+  || fail "cross-installer check did not run under Windows PowerShell 5.1"
 
 echo "PASS: installer parity"
