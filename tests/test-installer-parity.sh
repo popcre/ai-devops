@@ -91,8 +91,15 @@ if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "Bash s
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
+# Force the optional GitHub login probe to be unauthenticated. Windows
+# PowerShell 5.1 must treat that ordinary native nonzero exit as information,
+# not a terminating NativeCommandError that aborts an otherwise valid install.
+gh_config_dir="$TMP_ROOT/empty-gh-config"
+mkdir -p "$gh_config_dir"
+gh_config_native="$(cygpath -w "$gh_config_dir" 2>/dev/null || echo "$gh_config_dir")"
 set +e
-out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
+out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
+  AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
   "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
@@ -101,6 +108,13 @@ out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url
 cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
+if command -v gh >/dev/null 2>&1; then
+  grep -Fq 'GitHub CLI is installed but not logged in' <<<"$out" \
+    || fail "PowerShell cross-installer did not handle an unauthenticated optional GitHub probe"
+else
+  grep -Fq 'GitHub CLI not found' <<<"$out" \
+    || fail "PowerShell cross-installer did not handle a missing optional GitHub CLI"
+fi
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"

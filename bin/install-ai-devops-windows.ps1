@@ -71,6 +71,31 @@ function Invoke-GitCommand {
     }
 }
 
+function Invoke-NativeProbe {
+    param(
+        [string]$Command,
+        [string[]]$Arguments = @()
+    )
+
+    # Optional login/version probes are informational. Windows PowerShell 5.1
+    # promotes native stderr to NativeCommandError when the script normally
+    # uses ErrorActionPreference=Stop, even though the native exit code is the
+    # result we need to inspect. Keep the probe isolated and return both facts
+    # without letting an expected unauthenticated result abort installation.
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Command @Arguments 2>$null)
+        $exitCode = $LASTEXITCODE
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = $output
+        }
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+}
+
 function Assert-ReadyRepository([string]$Path) {
     $dirty = Invoke-GitCommand @('-C', $Path, 'status', '--porcelain')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not inspect the ai-devops checkout.' }
@@ -588,8 +613,8 @@ if ($SkillsDryRun) {
 
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
-    gh auth status 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $ghProbe = Invoke-NativeProbe -Command 'gh' -Arguments @('auth', 'status')
+    if ($ghProbe.ExitCode -ne 0) {
         Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
     }
 } else {
@@ -609,7 +634,8 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 }
 
 if (Get-Command kimi -ErrorAction SilentlyContinue) {
-    $kimiVersion = (& kimi --version 2>$null) -join " "
+    $kimiProbe = Invoke-NativeProbe -Command 'kimi' -Arguments @('--version')
+    $kimiVersion = $kimiProbe.Output -join " "
     if ([string]::IsNullOrWhiteSpace($kimiVersion)) {
         Write-Note "Kimi Code CLI found."
     } else {
@@ -621,7 +647,8 @@ if (Get-Command kimi -ErrorAction SilentlyContinue) {
 }
 
 if (Get-Command qwen -ErrorAction SilentlyContinue) {
-    $qwenVersion = (& qwen --version 2>$null) -join " "
+    $qwenProbe = Invoke-NativeProbe -Command 'qwen' -Arguments @('--version')
+    $qwenVersion = $qwenProbe.Output -join " "
     if ([string]::IsNullOrWhiteSpace($qwenVersion)) {
         Write-Note "Qwen Code CLI found."
     } else {
