@@ -23,8 +23,9 @@ For each finding: file/line, the problem, severity, and a concrete fix.
 
 ## Verdict (required)
 
-End with exactly one of:
+End with a `## Verdict` heading and put exactly one bare verdict word on the
+immediately following line, with no blank line, Markdown emphasis, or extra text:
 
 - **APPROVE**
-- **APPROVE WITH CHANGES**
-- **BLOCK**
+- **REJECT** — material correctness or plan-conformance defects must be fixed.
+- **BLOCKED** — required evidence or access is unavailable.

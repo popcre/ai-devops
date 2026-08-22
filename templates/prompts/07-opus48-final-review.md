@@ -22,3 +22,12 @@ Answer each question directly:
    anything) he should watch out for.
 
 Be candid. If it is not ready, say so plainly and list exactly what remains.
+
+## Verdict (required)
+
+End with a `## Verdict` heading and put exactly one bare verdict word on the
+immediately following line, with no blank line, Markdown emphasis, or extra text:
+
+- **APPROVE** — the requested outcome is complete and ready.
+- **REJECT** — material product or architecture defects must be fixed.
+- **BLOCKED** — required evidence or access is unavailable.

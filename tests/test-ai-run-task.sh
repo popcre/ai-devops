@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-run-task"
+PLAN_REVIEW_PROMPT="$ROOT/templates/prompts/02-opus-plan-review.md"
+DIFF_REVIEW_PROMPT="$ROOT/templates/prompts/04-opus-diff-review.md"
+SECURITY_REVIEW_PROMPT="$ROOT/templates/prompts/06-opus-security-review.md"
+FINAL_REVIEW_PROMPT="$ROOT/templates/prompts/07-opus48-final-review.md"
 PASS=0; FAIL=0; ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }; check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT; R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q; git -C "$R" config user.name T; git -C "$R" config user.email t@e
 printf '.ai/\n' > "$R/.gitignore"; echo base > "$R/a"; git -C "$R" add .gitignore a; git -C "$R" commit -qm init
@@ -15,6 +19,10 @@ case "$stage" in
 EOF
 chmod +x "$STUB"; export AI_MODEL_CALL_BIN="$STUB" AI_RUN_TEST_LOG="$TMP/calls"
 echo '== ai-run-task'
+for review_prompt in "$PLAN_REVIEW_PROMPT" "$DIFF_REVIEW_PROMPT" "$SECURITY_REVIEW_PROMPT" "$FINAL_REVIEW_PROMPT"; do
+  check "$(basename "$review_prompt") uses the exact runtime verdict contract" "grep -q '## Verdict' '$review_prompt' && grep -q 'one bare verdict word' '$review_prompt' && grep -q '\*\*APPROVE\*\*' '$review_prompt' && grep -q '\*\*REJECT\*\*' '$review_prompt' && grep -q '\*\*BLOCKED\*\*' '$review_prompt' && ! grep -q 'APPROVE WITH CHANGES' '$review_prompt'"
+done
+check 'plan review is scope-bound, proportional, and convergence-safe' "grep -q 'scope authority' '$PLAN_REVIEW_PROMPT' && grep -q 'proportional to the change' '$PLAN_REVIEW_PROMPT' && grep -q 'Reviews must converge' '$PLAN_REVIEW_PROMPT' && grep -q 'merely theoretical edge' '$PLAN_REVIEW_PROMPT'"
 RUN="$(cd "$R" && "$SCRIPT" start 'Build the exact requested feature')"; MAN="$RUN/manifest.json"
 check 'start creates a seven-stage ready manifest' "jq -e '.status==\"ready\" and (.stages|length)==7' '$MAN'"
 check 'roles pin Codex work and Claude Opus 5 review' "jq -e '[.stages[].role]|index(\"codex-implementer\")!=null and index(\"claude-opus-5-reviewer\")!=null' '$MAN'"

@@ -31,8 +31,9 @@ Low), a concrete exploit sketch, and the fix.
 
 ## Verdict (required)
 
-End with exactly one of:
+End with a `## Verdict` heading and put exactly one bare verdict word on the
+immediately following line, with no blank line, Markdown emphasis, or extra text:
 
 - **APPROVE** — no security blockers.
-- **APPROVE WITH CHANGES** — fix the listed items first.
-- **BLOCK** — do not ship; critical/high issues present.
+- **REJECT** — do not ship; material security defects must be fixed.
+- **BLOCKED** — required evidence or access is unavailable.
