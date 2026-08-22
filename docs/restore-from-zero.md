@@ -19,8 +19,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-windows-dev.ps1 -RepoP
 The bootstrap proves the source is clean canonical `main` exactly equal to
 `origin/main` before any machine change. Recovery-critical WinGet, npm, MCP,
 and model versions come from the reviewed `config/tool-versions.json` catalog,
-so a restore cannot silently pick a newer release. It then installs skills, restores protected SSH and MCP wiring from
-1Password, fixes the Codex executable path, and registers background memory
+so a restore cannot silently pick a newer release. It then obtains one-time
+GitHub authorization for the private restore-input repository, installs skills,
+restores protected SSH and MCP wiring, fixes the Codex executable path, and registers background memory
 sync (the schedule stays disabled until explicitly qualified). If the protected service-account token file is absent, supply the token
 once from the `vibe_coding` vault. Do not paste it into a repo file.
 

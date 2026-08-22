@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
   [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
+  [string]$PublicKeyPath = '',
   [switch]$TestOnly,
   [switch]$SkipTailscaleLogin
 )
@@ -49,15 +50,21 @@ if ($capability.State -ne 'Installed' -and -not $TestOnly) {
 if ($capability.State -eq 'Installed') { Result 'OpenSSH capability' 'OK' 'Installed' }
 else { Result 'OpenSSH capability' 'MISSING' $capability.State }
 
-$publicKeyPath = Join-Path $RepoPath 'config\916-alien.pub'
-if (-not (Test-Path $publicKeyPath)) { throw "Missing committed public key: $publicKeyPath" }
+if ([string]::IsNullOrWhiteSpace($PublicKeyPath)) {
+  $gitBash = 'C:\Program Files\Git\bin\bash.exe'
+  $resolver = Join-Path $RepoPath 'bin\ai-private-config'
+  if (-not (Test-Path -LiteralPath $gitBash)) { throw "Git Bash is required at $gitBash." }
+  $PublicKeyPath = (& $gitBash $resolver path bootstrap_authorized_key | Select-Object -Last 1).Trim()
+  if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the protected bootstrap SSH key.' }
+}
+if (-not (Test-Path -LiteralPath $PublicKeyPath)) { throw "Missing protected public key: $PublicKeyPath" }
 
 if (-not $TestOnly -and $capability.State -eq 'Installed') {
   Set-Service sshd -StartupType Automatic
   Start-Service sshd
 
   $authorizedKeys = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
-  $publicKey = (Get-Content -Raw $publicKeyPath).Trim()
+  $publicKey = (Get-Content -Raw $PublicKeyPath).Trim()
   if (-not (Test-Path $authorizedKeys)) { New-Item -ItemType File -Path $authorizedKeys -Force | Out-Null }
   $existingKeys = @(Get-Content $authorizedKeys -ErrorAction SilentlyContinue)
   if ($existingKeys -notcontains $publicKey) { Add-Content -Path $authorizedKeys -Value $publicKey }

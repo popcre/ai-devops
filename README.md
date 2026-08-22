@@ -28,10 +28,10 @@ strategy remediation, so old clones must be replaced after that rewrite.
 
 ## Set up a new machine (start here)
 
-Goal: on a brand-new computer, run **one script**, paste **one code once**, and
-then Claude works everywhere with all passwords filled in automatically. You do
-not need to know any of the details — just follow the three lines for your
-computer type.
+Goal: on a brand-new computer, run **one script**, complete GitHub's one-time
+browser authorization for the private restore inputs, paste **one 1Password
+code once**, and then Claude works everywhere with all passwords filled in
+automatically.
 
 You will be asked once for a **service-account code** (it starts with `ops_`).
 It comes from 1Password (`vibe_coding` vault, item *"vibe_coding-service-account"*,
@@ -58,7 +58,7 @@ ownership, expected changes, recovery, and rollout gates.
 It installs the complete Windows dev-tool set, including Grok Build and Kimi
 Code, configures Tailscale-only
 OpenSSH, prepares Ubuntu/WSL as an Ansible controller, configures AI DevOps,
-and asks you to paste the code once. If Windows requires a reboot, rerun the
+and asks you to authorize GitHub and paste the code once. If Windows requires a reboot, rerun the
 same line afterward; completed stages are reconciled rather than repeated.
 When it finishes,
 follow the short checklist it prints (fully close and reopen Claude Desktop; if
@@ -74,7 +74,8 @@ cd /worksp/ai-devops
 ./install.sh
 ```
 
-`install.sh` asks you to paste the code once, then wires everything up. After it
+`install.sh` asks for one-time GitHub authorization and the 1Password code,
+then wires everything up. After it
 finishes, open a new terminal and just run `claude` in any app folder — the
 tokens fill in by themselves.
 

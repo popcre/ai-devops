@@ -31,7 +31,12 @@ case "${1:-}" in
   sync)
     [ "$#" -eq 1 ] || die 'sync accepts no extra arguments.'
     if [ ! -d "$ROOT/.git" ]; then
-      command -v gh >/dev/null || die 'GitHub CLI is required.'; gh auth status >/dev/null 2>&1 || die 'GitHub CLI is not authenticated.'
+      command -v gh >/dev/null || die 'GitHub CLI is required.'
+      if ! gh auth status >/dev/null 2>&1; then
+        [ -r /dev/tty ] || die 'GitHub CLI is not authenticated; run: gh auth login'
+        printf '%s\n' 'Protected restore inputs require one-time GitHub authorization.' >&2
+        gh auth login --web --git-protocol https </dev/tty || die 'GitHub authorization did not complete.'
+      fi
       mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null
     else
       validate; [ -z "$(git -C "$ROOT" status --porcelain)" ] || die 'protected configuration checkout is dirty.'

@@ -105,7 +105,7 @@ try {
       throw "RepoUrl is not the canonical ai-devops repository: $RepoUrl"
     }
     git clone --branch main --single-branch $RepoUrl $RepoPath
-    if ($LASTEXITCODE -ne 0) { throw 'Clone failed. Authenticate GitHub first because this repository is private.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
     $sourceSha = Assert-ReadyRepository $RepoPath
     Add-Result 'Repository' 'OK' "Cloned canonical main at $sourceSha."
   }
@@ -150,6 +150,12 @@ try {
   } else { throw "Grok/Kimi CLI setup failed with exit code $LASTEXITCODE." }
 
   if (-not $SkipRemoteAccess) {
+    if (-not $TestOnly) {
+      $gitBash = 'C:\Program Files\Git\bin\bash.exe'
+      $privateConfig = Join-Path $RepoPath 'bin\ai-private-config'
+      & $gitBash $privateConfig sync | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'Protected configuration sync failed. Authenticate GitHub CLI for the private restore inputs.' }
+    }
     $remoteAccess = Join-Path $RepoPath 'bin\configure-windows-bootstrap-access.ps1'
     $remoteArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$remoteAccess,'-RepoPath',$RepoPath)
     if ($TestOnly) { $remoteArgs += '-TestOnly' }
