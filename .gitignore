@@ -62,10 +62,6 @@ node_modules/
 .ai/tmp/
 .ai/reviews/
 .ai/
-!.ai/
-.ai/*
-!.ai/reviewer-issues/
-!.ai/reviewer-issues/**
 
 # === Machine-local AI permissions ===
 .claude/settings.local.json

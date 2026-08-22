@@ -6,6 +6,8 @@ root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDA
 failed=0
 while IFS= read -r path; do
   case "$path" in
+    .ai/*)
+      echo "BOUNDARY FAIL: generated AI artifact tracked at $path" >&2; failed=1 ;;
     claude_chats/*|codex_chats/*|transcripts/claude_chats/*|transcripts/codex_chats/*)
       echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
     memory/*.md|memory/*/*.md)
