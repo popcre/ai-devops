@@ -1,6 +1,6 @@
-# Stage 06 — Security Review (Opus, independent reviewer)
+# Stage 06 — Security Review (Claude Opus 5, independent reviewer)
 
-**Model role:** Opus is the independent reviewer. Here it reviews for security
+**Model role:** Claude Opus 5 is the independent reviewer. Here it reviews for security
 **only**.
 
 **Hard rule:** Do **not** edit, create, or delete any files. Review only.

@@ -1,6 +1,6 @@
-# Stage 04 — Diff Review (Opus, independent reviewer)
+# Stage 04 — Diff Review (Claude Opus 5, independent reviewer)
 
-**Model role:** Opus is the independent reviewer. Here it reviews the current
+**Model role:** Claude Opus 5 is the independent reviewer. Here it reviews the current
 git diff.
 
 **Hard rule:** Do **not** edit, create, or delete any files. Review only.

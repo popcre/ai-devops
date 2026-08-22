@@ -38,9 +38,9 @@ It tells you, in plain terms:
 
 ## A normal task, start to finish
 
-1. Ask for the task. The AI plans it (Opus 4.8) and a reviewer checks the plan.
-2. The AI makes a branch and writes the code (GPT-5.5 / Codex).
-3. Reviewers (Opus) check the code, then the security, then the final result.
+1. Ask for the task. Codex/GPT-5.6 plans it and Claude Opus 5 checks the plan.
+2. The AI makes a branch and writes the code (GPT-5.6 / Codex, medium reasoning).
+3. Claude Opus 5 checks the code, then the security, then the final result.
 4. You get a **plain-English summary** of what changed and whether it's ready.
 5. If it's ready, it becomes a PR and then gets merged into `main`.
 

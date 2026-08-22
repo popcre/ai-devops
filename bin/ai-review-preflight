@@ -18,7 +18,7 @@ die()  { printf 'ai-review-preflight: error: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
-valid_provider() { case "$1" in grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
+valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
 static_status() {
@@ -93,6 +93,7 @@ explain_failure() {
 
 provider_wrapper() {
   case "$1" in
+    claude) printf '%s' "${AI_REVIEW_CLAUDE_WRAPPER:-$SCRIPT_DIR/ai-claude-review}" ;;
     grok) printf '%s' "${AI_REVIEW_GROK_WRAPPER:-$SCRIPT_DIR/ai-grok-review}" ;;
     kimi) printf '%s' "${AI_REVIEW_KIMI_WRAPPER:-$SCRIPT_DIR/ai-kimi}" ;;
     glm)  printf '%s' "${AI_REVIEW_GLM_WRAPPER:-$SCRIPT_DIR/ai-glm}" ;;
@@ -178,7 +179,7 @@ case "$cmd" in
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(grok kimi glm muse gemini qwen codex deepseek); fi
+    else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
     for provider in "${providers[@]}"; do
       if static_status "$provider"; then :
       elif active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"

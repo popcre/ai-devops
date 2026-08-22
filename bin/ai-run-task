@@ -1,68 +1,75 @@
 #!/usr/bin/env bash
-# ai-run-task — scaffold a new staged task run (v0.1).
-#
-# This is scaffolding ONLY. It does not edit code and does not call models.
-# It creates a run directory, records the user's task, snapshots workspace
-# status, and points you at the next command in the workflow.
-#
-# Usage:
-#   ai-run-task "Short description of the task"
-
-set -uo pipefail
-
-TASK="${*:-}"
-
-if [ -z "$TASK" ]; then
-  echo "Usage: ai-run-task \"Short description of the task\"" >&2
-  exit 2
-fi
-
-# Must be inside a git repo.
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "ai-run-task must be run inside a git repository." >&2
-  exit 1
-fi
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT" || exit 1
-
-# Build a filesystem-safe slug from the task text.
-slug="$(printf '%s' "$TASK" \
-  | tr '[:upper:]' '[:lower:]' \
-  | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
-  | cut -c1-40)"
-[ -z "$slug" ] && slug="task"
-
-TS="$(date +%Y%m%d-%H%M%S)"
-RUN_DIR="$REPO_ROOT/.ai/runs/${TS}-${slug}"
-mkdir -p "$RUN_DIR"
-
-# 1) Save the user request.
-cat > "$RUN_DIR/00-user-request.md" <<EOF
-# User request
-
-- Timestamp: $TS
-- Repo: $REPO_ROOT
-- Branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-
-## Task
-
-$TASK
-EOF
-
-# 2) Snapshot workspace status.
-if command -v ai-workspace-status >/dev/null 2>&1; then
-  ai-workspace-status > "$RUN_DIR/01-workspace-status.txt" 2>&1 || true
-else
-  echo "ai-workspace-status not found on PATH" > "$RUN_DIR/01-workspace-status.txt"
-fi
-
-echo "Created run: $RUN_DIR"
-echo "  - 00-user-request.md"
-echo "  - 01-workspace-status.txt"
-echo
-echo "Next recommended step:"
-echo "  1) Draft the plan with Opus 4.8 (high reasoning):"
-echo "       ai-model-call plan   $RUN_DIR/plan-prompt.md   $RUN_DIR/02-plan.md"
-echo "     (see templates/prompts/01-opus48-plan.md for the prompt to use)"
-echo "  2) Then get a second opinion on the plan:"
-echo "       ai-codex-review plan-review"
+# ai-run-task — immutable, resumable seven-stage development workflow.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODEL_CALL="${AI_MODEL_CALL_BIN:-$ROOT/bin/ai-model-call}"
+DIGEST="${AI_REVIEW_SANDBOX_BIN:-$ROOT/bin/ai-review-sandbox}"
+die(){ printf 'ai-run-task: error: %s\n' "$*" >&2; exit 1; }
+sha_file(){ sha256sum "$1" | cut -d' ' -f1; }
+atomic_manifest(){ local f="$1" json="$2" t; t="$(mktemp "$(dirname "$f")/.manifest.XXXXXX")"; printf '%s\n' "$json" > "$t"; jq -e . "$t" >/dev/null; mv -f "$t" "$f"; }
+usage(){ printf '%s\n' 'Usage: ai-run-task start "task"' '       ai-run-task run|resume <run-directory>' '       ai-run-task status <run-directory>'; }
+repo_root(){ git rev-parse --show-toplevel 2>/dev/null || die 'must run inside a Git repository.'; }
+check_run(){
+  local repo="$1" run="$2" base canon
+  base="$repo/.ai/runs"; [ -d "$run" ] && [ -f "$run/manifest.json" ] || die "run not found: $run"
+  canon="$(cd "$run" && pwd -P)"; mkdir -p "$base"; base="$(cd "$base" && pwd -P)"
+  case "$canon/" in "$base"/*) printf '%s' "$canon";; *) die 'run directory is outside .ai/runs.';; esac
+}
+start_run(){
+  local task="$*" repo slug stamp run head source task_sha manifest
+  [ -n "$task" ] || die 'task text is required.'; repo="$(repo_root)"; cd "$repo"
+  git check-ignore -q .ai/runs/probe || die '.ai/runs must be Git-ignored.'
+  slug="$(printf '%s' "$task" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g;s/^-+//;s/-+$//' | cut -c1-40)"; [ -n "$slug" ] || slug=task
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"; run="$repo/.ai/runs/$stamp-$slug"; mkdir -p "$run/prompts"
+  printf '# User request\n\n%s\n' "$task" > "$run/00-user-request.md"; task_sha="$(sha_file "$run/00-user-request.md")"
+  head="$(git rev-parse HEAD)"; source="$($DIGEST digest "$repo")"
+  manifest="$(jq -nc --arg repo "$repo" --arg run "$run" --arg task "$run/00-user-request.md" --arg task_sha "$task_sha" --arg head "$head" --arg source "$source" --arg now "$(date -u +%FT%TZ)" \
+    '{schema_version:1,status:"ready",repository_root:$repo,run_directory:$run,task_artifact:$task,task_sha256:$task_sha,starting_head:$head,current_source_digest:$source,created_at:$now,updated_at:$now,
+      stages:[
+        {number:1,name:"plan",role:"codex-planner",template:"templates/prompts/01-opus48-plan.md",output:"01-plan.md",status:"pending"},
+        {number:2,name:"plan-review",role:"claude-opus-5-reviewer",template:"templates/prompts/02-opus-plan-review.md",output:"02-plan-review.md",status:"pending"},
+        {number:3,name:"implement",role:"codex-implementer",template:"templates/prompts/03-gpt55-implement.md",output:"03-implementation.md",status:"pending"},
+        {number:4,name:"diff-review",role:"claude-opus-5-reviewer",template:"templates/prompts/04-opus-diff-review.md",output:"04-diff-review.md",status:"pending"},
+        {number:5,name:"test",role:"codex-tester",template:"templates/prompts/05-gpt55-test.md",output:"05-test.md",status:"pending"},
+        {number:6,name:"security",role:"claude-opus-5-reviewer",template:"templates/prompts/06-opus-security-review.md",output:"06-security-review.md",status:"pending"},
+        {number:7,name:"final",role:"claude-opus-5-reviewer",template:"templates/prompts/07-opus48-final-review.md",output:"07-final-review.md",status:"pending"}] }')"
+  atomic_manifest "$run/manifest.json" "$manifest"; printf '%s\n' "$run"
+}
+run_all(){
+  local repo run manifest lock index count stage status template output prompt prev input_sha source_before source_after output_sha prompt_sha now json rc verdict expected
+  repo="$(repo_root)"; run="$(check_run "$repo" "$1")"; manifest="$run/manifest.json"; lock="$run/.lock"
+  mkdir "$lock" 2>/dev/null || die "run is already active: $run"; trap 'rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
+  [ "$(jq -r .repository_root "$manifest")" = "$repo" ] || die 'run belongs to a different repository.'
+  [ "$(sha_file "$(jq -r .task_artifact "$manifest")")" = "$(jq -r .task_sha256 "$manifest")" ] || die 'immutable task artifact changed.'
+  count="$(jq '.stages|length' "$manifest")"
+  for ((index=0; index<count; index++)); do
+    status="$(jq -r ".stages[$index].status" "$manifest")"
+    if [ "$status" = completed ]; then
+      output="$(jq -r ".stages[$index].output_artifact // empty" "$manifest")"; [ -s "$output" ] || die "completed stage $((index+1)) lost its output artifact."
+      [ "$(sha_file "$output")" = "$(jq -r ".stages[$index].output_sha256" "$manifest")" ] || die "completed stage $((index+1)) output changed."
+      continue
+    fi
+    [ "$status" != blocked ] || die "stage $((index+1)) is blocked by a non-APPROVE verdict; start a new evidence generation after correcting it."
+    source_before="$($DIGEST digest "$repo")"
+    [ "$source_before" = "$(jq -r .current_source_digest "$manifest")" ] || die 'repository source changed outside this run; start a new evidence generation.'
+    if [ "$status" = failed ]; then expected="$(jq -r ".stages[$index].source_before // empty" "$manifest")"; [ -z "$expected" ] || [ "$expected" = "$source_before" ] || die 'failed stage changed source; automatic retry is unsafe.'; fi
+    stage="$(jq -r ".stages[$index].name" "$manifest")"; template="$(jq -r ".stages[$index].template" "$manifest")"; output="$run/$(jq -r ".stages[$index].output" "$manifest")"; prompt="$run/prompts/$(printf '%02d' $((index+1)))-$stage.md"
+    [ ! -e "$output" ] || die "unrecorded stage output already exists: $output"
+    if [ "$index" -eq 0 ]; then prev="$(jq -r .task_artifact "$manifest")"; else prev="$run/$(jq -r ".stages[$((index-1))].output" "$manifest")"; fi
+    [ -s "$prev" ] || die "prior named artifact is missing: $prev"; input_sha="$(sha_file "$prev")"
+    { cat "$ROOT/$template"; printf '\n\n## Immutable run input\n\n- Run manifest: `%s`\n- Prior artifact: `%s`\n- Prior SHA-256: `%s`\n- Source digest before stage: `%s`\n\n## Prior artifact contents\n\n' "$manifest" "$prev" "$input_sha" "$source_before"; cat "$prev"; } > "$prompt"
+    prompt_sha="$(sha_file "$prompt")"; now="$(date -u +%FT%TZ)"
+    json="$(jq --argjson i "$index" --arg now "$now" --arg prompt "$prompt" --arg prompt_sha "$prompt_sha" --arg input "$prev" --arg input_sha "$input_sha" --arg source "$source_before" '.status="running"|.updated_at=$now|.stages[$i].status="running"|.stages[$i].started_at=$now|.stages[$i].prompt_artifact=$prompt|.stages[$i].prompt_sha256=$prompt_sha|.stages[$i].input_artifact=$input|.stages[$i].input_sha256=$input_sha|.stages[$i].source_before=$source' "$manifest")"; atomic_manifest "$manifest" "$json"
+    set +e; (cd "$repo" && "$MODEL_CALL" "$stage" "$prompt" "$output"); rc=$?; set -e
+    if [ "$rc" -ne 0 ]; then now="$(date -u +%FT%TZ)"; json="$(jq --argjson i "$index" --arg now "$now" --argjson rc "$rc" '.status="failed"|.updated_at=$now|.stages[$i].status="failed"|.stages[$i].exit_code=$rc|.stages[$i].finished_at=$now' "$manifest")"; atomic_manifest "$manifest" "$json"; die "stage $stage failed; later stages were not started."; fi
+    [ -s "$output" ] || die "stage $stage published no output."; source_after="$($DIGEST digest "$repo")"; output_sha="$(sha_file "$output")"; now="$(date -u +%FT%TZ)"; verdict=""; status=completed
+    case "$stage" in plan-review|diff-review|security|final) verdict="$(awk '/^## Verdict[[:space:]]*$/{getline;gsub(/^[[:space:]]+|[[:space:]]+$/,"");print;exit}' "$output")"; case "$verdict" in APPROVE) ;; REJECT|BLOCKED) status=blocked;; *) die "review stage $stage has no exact verdict.";; esac;; esac
+    json="$(jq --argjson i "$index" --arg now "$now" --arg status "$status" --arg output "$output" --arg output_sha "$output_sha" --arg source "$source_after" --arg verdict "$verdict" '.status=(if $status=="blocked" then "blocked" else "running" end)|.current_source_digest=$source|.updated_at=$now|.stages[$i].status=$status|.stages[$i].output_artifact=$output|.stages[$i].output_sha256=$output_sha|.stages[$i].source_after=$source|.stages[$i].finished_at=$now|.stages[$i].exit_code=0|.stages[$i].verdict=(if $verdict=="" then null else $verdict end)' "$manifest")"; atomic_manifest "$manifest" "$json"
+    [ "$status" != blocked ] || die "stage $stage returned $verdict; later stages were not started."
+  done
+  now="$(date -u +%FT%TZ)"; json="$(jq --arg now "$now" '.status="completed"|.updated_at=$now|.completed_at=$now' "$manifest")"; atomic_manifest "$manifest" "$json"; trap - EXIT INT TERM; rmdir "$lock"; printf '%s\n' "$manifest"
+}
+case "${1:-}" in
+  start) shift; start_run "$@";; run|resume) cmd="$1"; shift; [ "$#" -eq 1 ] || die "$cmd requires a run directory."; run_all "$1";;
+  status) shift; [ "$#" -eq 1 ] || die 'status requires a run directory.'; repo="$(repo_root)"; run="$(check_run "$repo" "$1")"; jq '{status,starting_head,current_source_digest,stages:[.stages[]|{number,name,role,status,verdict,output_artifact,output_sha256}]}' "$run/manifest.json";;
+  -h|--help|help|'') usage;; *) usage >&2; exit 2;; esac

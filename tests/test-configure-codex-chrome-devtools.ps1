@@ -41,7 +41,7 @@ notifications = true
 
   $content = Get-Content -Raw -LiteralPath $configPath
   Assert-True (([regex]::Matches($content, '\[mcp_servers\.chrome-devtools\]')).Count -eq 1) "one Chrome DevTools block after repeated runs"
-  Assert-True ($content.Contains('chrome-devtools-mcp@latest')) "uses the current Chrome DevTools MCP package"
+  Assert-True ($content.Contains('chrome-devtools-mcp@1.7.0')) "uses the pinned Chrome DevTools MCP package"
   Assert-True ($content.Contains('startup_timeout_sec = 20')) "allows Chrome enough startup time on Windows"
   Assert-True ($content.Contains('[mcp_servers.keep-me]')) "preserves unrelated MCP servers"
   Assert-True ($content.Contains('[mcp_servers.chrome-devtools.tools.screenshot]')) "preserves tool approval guards"

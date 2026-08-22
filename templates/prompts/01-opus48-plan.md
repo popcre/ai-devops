@@ -1,6 +1,6 @@
-# Stage 01 — Implementation Plan (Opus 4.8, high reasoning)
+# Stage 01 — Implementation Plan (Codex / GPT-5.6, medium reasoning)
 
-**Model role:** Opus 4.8 with high reasoning is the architecture and
+**Model role:** Codex with GPT-5.6 medium reasoning is the architecture and
 implementation-planning model.
 
 **Hard rule:** Do **not** edit, create, or delete any files. This stage produces

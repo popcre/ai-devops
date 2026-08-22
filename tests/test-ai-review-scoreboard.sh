@@ -41,7 +41,7 @@ check "missing Kimi token and cost stay null" "sed -n 2p '$AI_REVIEW_SCOREBOARD_
 check "failure class is recorded" "sed -n 2p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.failure_class==\"allowance-exhausted\"'"
 check "stale evidence is recorded" "sed -n 3p '$AI_REVIEW_SCOREBOARD_FILE' | jq -e '.stale==true'"
 check "report counts outcomes" "$SCRIPT report | jq -e '.reviews==3 and .usable_verdicts==1 and .failures==2 and .over_15_minutes==1'"
-check "all active providers are accepted" "for p in muse gemini qwen codex deepseek; do $SCRIPT append \"\$p\" '$TMP/grok.json' --elapsed 1 --stale false >/dev/null || exit 1; done"
+check "all active providers are accepted" "for p in claude muse gemini qwen codex deepseek; do $SCRIPT append \"\$p\" '$TMP/grok.json' --elapsed 1 --stale false >/dev/null || exit 1; done"
 printf '{"packet_sha256":"p"}\n' > "$TMP/unknown.json"
 row="$($SCRIPT append qwen "$TMP/unknown.json" --elapsed 1)"
 check "missing repository and head are unknown" "printf '%s' '$row' | jq -e '.evidence_state==\"unknown\" and .stale==false'"

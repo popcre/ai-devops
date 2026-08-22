@@ -15,7 +15,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-windows-dev.ps1 -RepoP
 ```
 
 The bootstrap proves the source is clean canonical `main` exactly equal to
-`origin/main` before any machine change. It then installs skills, restores protected SSH and MCP wiring from
+`origin/main` before any machine change. Recovery-critical WinGet, npm, MCP,
+and model versions come from the reviewed `config/tool-versions.json` catalog,
+so a restore cannot silently pick a newer release. It then installs skills, restores protected SSH and MCP wiring from
 1Password, fixes the Codex executable path, and registers background memory
 sync (the schedule stays disabled until explicitly qualified). If the protected service-account token file is absent, supply the token
 once from the `vibe_coding` vault. Do not paste it into a repo file.
@@ -70,6 +72,10 @@ existing real config), installs skills, calls `bin/setup-secrets.sh` for the
 1Password-backed MCP wiring, symlinks the `bin/` tools into `/usr/local/bin`,
 and runs `ai-devops doctor`. The final stage summary must have no required
 failure; the command returns nonzero otherwise.
+
+The model and npm/MCP selections are the exact reviewed values in
+`config/tool-versions.json`. Do not substitute `latest` during recovery. Version
+upgrades are a separate tested change after the machine is healthy.
 
 ### 6. Log in to Claude
 

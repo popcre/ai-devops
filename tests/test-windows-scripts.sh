@@ -121,8 +121,8 @@ echo "== portable Codex defaults =="
 if grep -q 'codex-portable.toml' bin/setup-machine.ps1 && grep -q -- '-not (Test-Path -LiteralPath $codexConfigPath)' bin/setup-machine.ps1; then
   ok "setup seeds Codex defaults only when config is absent"
 else bad "Codex defaults may overwrite an established config"; fi
-if grep -q 'model_reasoning_effort = "low"' config/codex-portable.toml &&
-   ! grep -q '^model = ' config/codex-portable.toml; then
+if grep -q '^model = "gpt-5.6-sol"' config/codex-portable.toml &&
+   grep -q 'model_reasoning_effort = "medium"' config/codex-portable.toml; then
   ok "portable Codex defaults pin safe effort without hard-coding a model"
 else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
@@ -136,7 +136,7 @@ if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
 else bad "Windows setup leaves the Codex MCP set incomplete"; fi
 if grep -Fq "\$CodexMcpServers['railway']" bin/setup-machine.ps1 &&
    grep -Fq 'https://mcp.railway.com' bin/setup-machine.ps1 &&
-   grep -Fq '@railway/cli@latest' bin/reconcile-windows-package-exceptions.ps1; then
+   grep -Fq '@railway/cli@5.43.1' bin/reconcile-windows-package-exceptions.ps1; then
   ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
 else bad "Windows setup does not fully manage Railway"; fi
 for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger recall-ai 1password supabase; do

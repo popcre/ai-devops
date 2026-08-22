@@ -1,22 +1,22 @@
 {
-  "version": 1,
+  "version": 2,
   "files": {
     "models.env": {
       "example": "config/models.env.example",
       "required": [
         "AI_DEVOPS_HOME",
-        "OPUS48_HIGH_REASONING_CMD",
-        "OPUS_REVIEW_CMD",
-        "GPT55_CMD",
-        "CODEX_CMD",
-        "TESTER_CMD"
+        "CLAUDE_REVIEW_CMD",
+        "CODEX_PLAN_CMD",
+        "CODEX_IMPLEMENT_CMD",
+        "CODEX_TEST_CMD",
+        "CODEX_CMD"
       ],
       "command_keys": [
-        "OPUS48_HIGH_REASONING_CMD",
-        "OPUS_REVIEW_CMD",
-        "GPT55_CMD",
-        "CODEX_CMD",
-        "TESTER_CMD"
+        "CLAUDE_REVIEW_CMD",
+        "CODEX_PLAN_CMD",
+        "CODEX_IMPLEMENT_CMD",
+        "CODEX_TEST_CMD",
+        "CODEX_CMD"
       ]
     },
     "server.env": {

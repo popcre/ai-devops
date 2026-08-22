@@ -12,14 +12,14 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-21 | private head `2765c34192a74a4a106998ef5f9d7f792bcf7263`; coverage health zero findings; DesignFlow aliases deduplicated |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ✅ complete | 2026-08-21 | behavioral fixtures pass; live private sync and public-target rejection proven; schedules remain disabled |
 | 4 | Correct stale database/transcript/audit instructions | ✅ complete | 2026-08-21 | private stale facts tombstoned; canonical destination guard and hostile fixtures pass |
-| 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-21 | stage/failure and Node fixtures pass; awaits config migrator hook and live Ubuntu restore |
-| 6 | Make Windows source, secret, and configuration setup fail closed | 🟨 verifying | 2026-08-21 | source/ACL/JSON fixtures pass; awaits disposable-machine two-run proof |
-| 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | 🟨 verifying | 2026-08-21 | config/manifest/uninstall/doctor fixtures pass; awaits live archive/restore proof |
-| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-21 | first workflow run exposed missing Linux execute bits; repaired; awaits green rerun and post-rewrite ruleset |
-| 9 | Make shared reviewer snapshots and lifecycle fail closed | 🟦 in progress | 2026-08-21 | all-or-nothing digest-bound snapshot and lifecycle tests pass; provider wiring continues in Step 10 |
-| 10 | Finish provider-specific reviewer repairs and qualification | 🟦 in progress | 2026-08-21 | Codex offline repair complete; Qwen and GLM startup remain; unavailable providers stay advisory/quarantined |
-| 11 | Finish the seven-stage workflow with two supported approval paths | ⬜ open | — | end-to-end scratch-repository run and exact artifact chain |
-| 12 | Pin restore inputs and prove clean-machine reproducibility | ⬜ open | — | Windows first/second-run reports and Ubuntu disposable restore report |
+| 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-22 | stage/failure, Node, config migration, and manifest fixtures pass; awaits live Ubuntu restore |
+| 6 | Make Windows source, secret, and configuration setup fail closed | 🟨 verifying | 2026-08-22 | source/ACL/atomic JSON fixtures pass; awaits two-run production proof |
+| 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | 🟨 verifying | 2026-08-22 | config/manifest/uninstall/doctor fixtures pass; awaits live archive/restore proof |
+| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-22 | source/test entry points and public/link gates are present; repairing remaining CI portability failures before final ruleset |
+| 9 | Make shared reviewer snapshots and lifecycle fail closed | ✅ complete | 2026-08-22 | digest-bound atomic snapshots, packet, lifecycle, preflight, scoreboard, incident join, and hostile fixtures pass |
+| 10 | Finish provider-specific reviewer repairs and qualification | 🟨 verifying | 2026-08-22 | all provider source contracts repaired; Claude Opus 5 and Codex GPT-5.6-sol live access proven; advisory providers cannot satisfy approval |
+| 11 | Finish the seven-stage workflow with two supported approval paths | 🟨 verifying | 2026-08-22 | manifest-driven pipeline, exact artifact chaining, supported-provider gate, and resume/stale-source tests pass; live scratch run pending |
+| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟦 in progress | 2026-08-22 | governed WinGet/npm/MCP/model catalog and drift test pass; live two-run reports pending |
 | 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ⬜ open | — | strict context audit, trigger matrix, policy tests, `ai-facts` tests |
 | 14 | Remove public topology and close every transcript-ingestion path | ⬜ open | — | public-tree scan and transcript destination hostile tests |
 | 15 | Purge exposed Git history through a recoverable coordinated rewrite | ⬜ open | — | protected backup location, rewrite map, unauthenticated fresh-clone scan |

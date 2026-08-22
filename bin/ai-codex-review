@@ -9,7 +9,7 @@ SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
 LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$SCRIPT_DIR/ai-review-lifecycle}"
 CALLER="${AI_CODEX_REVIEW_CALLER:-codex}"
-CODEX_CMD='codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'
+CODEX_CMD='codex exec -m gpt-5.6-sol --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 
 die(){ printf 'ai-codex-review: error: %s\n' "$*" >&2; exit 1; }
@@ -25,6 +25,7 @@ EOF
 
 validate_command(){
   case " $CODEX_CMD " in *' --sandbox read-only '*) ;; *) die 'CODEX_CMD must explicitly contain --sandbox read-only.';; esac
+  case " $CODEX_CMD " in *' -m gpt-5.6-sol '*|*' --model gpt-5.6-sol '*) ;; *) die 'CODEX_CMD must explicitly pin gpt-5.6-sol.';; esac
   printf '%s' "$CODEX_CMD" | grep -Eq 'model_reasoning_effort=(low|medium)([^A-Za-z]|$)' \
     || die 'CODEX_CMD must explicitly pin model_reasoning_effort=low or medium.'
   case "$CODEX_CMD" in *dangerously-bypass*|*sandbox=workspace-write*|*'--sandbox workspace-write'*|*'--sandbox danger-full-access'*) die 'CODEX_CMD requests a writable or bypassed sandbox.';; esac
@@ -83,6 +84,14 @@ case "$MODE" in
   visual-review) DECISION='Judge UI/visual test impact, responsiveness, accessibility, and missing visual proof.';;
   final-check) DECISION='Give the final go/no-go judgment for shipping this exact source state.';;
 esac
+if [ -n "${AI_REVIEW_BRIEF_FILE:-}" ]; then
+  [ -f "$AI_REVIEW_BRIEF_FILE" ] && [ ! -L "$AI_REVIEW_BRIEF_FILE" ] || die 'AI_REVIEW_BRIEF_FILE is not a regular file.'
+  DECISION="$DECISION
+
+Follow this exact stage brief and treat its named prior artifact as the input contract:
+
+$(cat "$AI_REVIEW_BRIEF_FILE")"
+fi
 PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)" \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact review evidence.'; }
 "$PACKET" verify "$PACKET_DIR" >/dev/null \

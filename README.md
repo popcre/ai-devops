@@ -2,10 +2,14 @@
 
 A backed-up, repeatable AI coding workflow toolkit. Scripts, prompt templates,
 restore docs, and skill/MCP scaffolding for a multi-model staged coding workflow
-built around **Claude (Opus 4.8)** and **Codex / GPT-5.5**.
+built around **Claude Opus 5** and **Codex / GPT-5.6**.
 
 This repo exists so the entire workflow can be **restored from zero** on a fresh
 Ubuntu server if the current one dies.
+
+Recovery-critical package, MCP, and model versions are recorded in
+[`config/tool-versions.json`](config/tool-versions.json); restore paths use
+those reviewed pins instead of mutable `latest` releases.
 
 > **New here (developer or AI session)?** Read [`AGENTS.md`](AGENTS.md) — it is
 > the canonical operating guide and documentation router. Its **Documentation
@@ -116,21 +120,18 @@ The `.gitignore` actively blocks these patterns. Real config lives in
 
 | Stage | Model | Role |
 |-------|-------|------|
-| Plan / architecture | **Opus 4.8 (high reasoning)** | Implementation plans, architecture design |
-| Plan review | **Opus** | Independent review of the plan |
-| Implementation | **GPT-5.5 / Codex** | Writes the code, smallest safe change |
-| Diff review | **Opus** | Reviews the git diff for regressions |
-| Test | **GPT-5.5 / Codex** | Runs tests, visual checks, fixes, reruns |
-| Security review | **Opus** | Auth, data-leak, SQL, secrets review |
-| Final review | **Opus 4.8 (high reasoning)** | Final product/architecture sign-off |
+| Plan / architecture | **GPT-5.6 / Codex (medium)** | Implementation plans, architecture design |
+| Plan review | **Claude Opus 5** | Independent review of the plan |
+| Implementation | **GPT-5.6 / Codex (medium)** | Writes the code, smallest safe change |
+| Diff review | **Claude Opus 5** | Reviews the git diff for regressions |
+| Test | **GPT-5.6 / Codex (medium)** | Runs tests, visual checks, fixes, reruns |
+| Security review | **Claude Opus 5** | Auth, data-leak, SQL, secrets review |
+| Final review | **Claude Opus 5** | Final product/architecture sign-off |
 
 High-level roles:
 
-- **Opus 4.8 high reasoning** — implementation plans, architecture review, final
-  product/architecture review.
-- **GPT-5.5 / Codex** — coding, implementation, testing, fixing.
-- **Opus** — independent review throughout: plan review, diff review, security
-  review, final review.
+- **Claude Opus 5** — independent plan, diff, security, and final review.
+- **GPT-5.6 / Codex (medium)** — planning, implementation, testing, fixing.
 
 The exact CLI flags for each model live in `/etc/ai-devops/models.env` and can be
 edited per machine (see `docs/model-setup.md`).
@@ -154,7 +155,7 @@ Albert says “ask GLM” or “run this by GLM.”
 
 ### Reviewer health and measurement
 
-`ai-review-preflight check <grok|kimi|glm> <repo>` verifies the repository,
+`ai-review-preflight check <provider> <repo>` verifies the repository,
 evidence packet, writable result area, and provider health before a review is
 assigned. Failed providers are temporarily quarantined so the next caller does
 not immediately repeat the same failure. Add `--live` only when a small paid
@@ -236,7 +237,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review |
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
-| `ai-run-task "<task>"` | Scaffold a new staged task run (v0.1) |
+| `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
@@ -266,7 +267,8 @@ uninstall.sh    Remove symlinks (keeps config/auth unless flagged)
 
 ## Safety notes
 
-- Review scripts (`ai-codex-review`) are **read-only** by default — they never
+- Review scripts (`ai-review`, `ai-claude-review`, `ai-codex-review`) are **read-only** — they never
   commit, push, merge, or delete.
-- `ai-run-task` is v0.1 scaffolding — it does not edit code.
+- `ai-run-task` is the fail-closed seven-stage orchestrator. Only its
+  implementation and testing stages may edit code.
 - Application repos are **not** touched by this toolkit's setup.

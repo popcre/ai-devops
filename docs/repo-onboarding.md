@@ -42,7 +42,7 @@ automatically.
 
 6. **Try a dry run** of the task scaffold (does not edit code):
    ```bash
-   ai-run-task "Describe a small first task"
+   ai-run-task start "Describe a small first task"
    ```
 
 ## What onboarding does NOT do

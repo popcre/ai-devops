@@ -25,7 +25,7 @@ $programFiles = if ($env:ProgramFiles) { $env:ProgramFiles } else { "C:\Program 
 $newBlock = @(
   '[mcp_servers.chrome-devtools]'
   'command = "cmd"'
-  'args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest"]'
+  'args = ["/c", "npx", "-y", "chrome-devtools-mcp@1.7.0"]'
   ("env = {{ SystemRoot = '{0}', PROGRAMFILES = '{1}' }}" -f $systemRoot, $programFiles)
   'startup_timeout_sec = 20'
 )

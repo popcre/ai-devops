@@ -41,7 +41,7 @@ check "live review packet is never touched" "grep -qx 'live-review-evidence' '$R
 check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
-check "all active providers are registered" "for p in grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
+check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "Codex status is available for its doctor contract" "$SCRIPT status codex | jq -e '.status==\"available\"'"

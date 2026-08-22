@@ -292,13 +292,13 @@ Update-SessionPath
 if (Get-Command npm -ErrorAction SilentlyContinue) {
 
     Step "Installing/updating Vercel CLI ..."
-    cmd /c "npm install -g vercel@latest" 2>&1 | Out-Null
+    cmd /c "npm install -g vercel@54.15.1" 2>&1 | Out-Null
     Update-SessionPath
     $ver = Get-ToolVersion "vercel"
     if ($ver) { Add-Result "Vercel CLI" "OK" $ver } else { Add-Result "Vercel CLI" "Installed (restart terminal to verify)" "-" }
 
     Step "Installing/updating Trigger.dev CLI ..."
-    cmd /c "npm install -g trigger.dev@latest" 2>&1 | Out-Null
+    cmd /c "npm install -g trigger.dev@4.4.6" 2>&1 | Out-Null
     Update-SessionPath
     $ver = Get-ToolVersion "trigger.dev" "--version"
     if (-not $ver) { $ver = Get-ToolVersion "trigger" "--version" }

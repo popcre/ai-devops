@@ -16,6 +16,7 @@ check 'ask resumes exact session' "grep -q -- '--session \"\$sid\"' '$SCRIPT'"
 check 'same named session is locked across turns' "grep -q 'lock_session \"\$rid\" \"\$name\"' '$SCRIPT'"
 check 'failed lock acquisition cannot remove its owner' "grep -q 'LOCK=\"\$candidate\"' '$SCRIPT'"
 check 'caller names are path-safe' "grep -q 'name_ok \"\$CALLER\"' '$SCRIPT'"
+check 'credentialed commands never guess their caller' "grep -q 'AI_MUSE_CALLER must be set explicitly' '$SCRIPT'"
 check 'completion requires stop' "grep -q '\[ \"\$FINISH\" != stop \]' '$SCRIPT'"
 check 'source state is checked after every turn' "test \"\$(grep -c 'stale response rejected' '$SCRIPT')\" -eq 2"
 check 'temporary files use a securely created directory' "grep -q 'mktemp -d' '$SCRIPT' && grep -q 'trap cleanup EXIT' '$SCRIPT'"
@@ -33,7 +34,7 @@ check 'installed profile must exactly match its trusted source' "grep -q 'cmp -s
 check '1Password reads use one global credential lock' "grep -q 'credential.lock.d' '$SCRIPT' && grep -q 'release_credential_lock' '$SCRIPT'"
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
-check 'report destination is proven ignored and unlinked' "grep -q 'check-ignore -q .ai/reviews/ai-muse-probe' '$SCRIPT' && grep -q 'contains tracked files' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'report destination is proven ignored, unique, and unlinked' "grep -q 'check-ignore -q .ai/reviews/ai-muse-probe' '$SCRIPT' && grep -q 'refusing to replace a tracked Muse report' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO"
@@ -85,6 +86,7 @@ check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/stat
 check 'new returns first response' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 META="$(find "$TMP/state" -name 'codex--debate.json' -type f)"
 check 'new stores exact session id' "jq -e '.session_id==\"ses_new\" and .name==\"debate\"' '$META'"
+check 'state was created before the provider turn' "grep -q 'status:\"turn_in_progress\"' '$SCRIPT'"
 ASK_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' ask debate --prompt followup" 2>&1)"
 check 'ask resumes and returns remembered response' "printf '%s' \"\$ASK_OUT\" | grep -q '^remembered'"
 check 'list shows named session' "cd '$REPO' && eval \"$ENV '$SCRIPT' list\" | grep -q debate"
@@ -139,6 +141,8 @@ git -C "$REPO" checkout -q -- a.txt
 check 'compatibility review rejects a stopped answer without verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=narration '$SCRIPT' review '$REPO' test\""
 check 'compatibility review rejects a verdict before the final line' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE\\nqualification' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: APPROVE'"
+printf 'historic\n' > "$REPO/.ai/reviews/historic.md"; git -C "$REPO" add -f .ai/reviews/historic.md; git -C "$REPO" commit -qm historic
+check 'tracked historic reports do not block a new unique report' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' historic\" | grep -q 'VERDICT: APPROVE'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

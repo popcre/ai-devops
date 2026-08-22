@@ -1,6 +1,6 @@
-# Stage 07 — Final Product / Architecture Review (Opus 4.8, high reasoning)
+# Stage 07 — Final Product / Architecture Review (Claude Opus 5)
 
-**Model role:** Opus 4.8 with high reasoning performs the final product and
+**Model role:** Claude Opus 5 performs the final product and
 architecture review.
 
 **Hard rule:** Do **not** edit files. Produce the final assessment only.

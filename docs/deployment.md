@@ -51,6 +51,12 @@ cd /worksp/ai-devops
 7. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 
+Recovery-critical WinGet, npm/MCP, and model versions are governed by
+`config/tool-versions.json`. The install and Windows bootstrap paths use those
+reviewed pins; `tests/test-tool-version-pins.sh` prevents a mutable `latest`
+specifier or a consumer/catalog mismatch. Upgrades are deliberate repository
+changes, not an incidental side effect of deployment.
+
 Every operation is an explicit required, optional, or skipped stage. The final
 summary names every result, and any required failure makes the installer
 nonzero after preserving the successful earlier stages. Secrets are required

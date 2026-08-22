@@ -1,67 +1,49 @@
 ---
 name: ai-development-pipeline
 description: >-
-  Drive the staged multi-model coding workflow (plan → review → implement →
-  review → test → security → final). Use when the user wants to run a change
-  through the full AI DevOps pipeline with Opus for planning/review and
-  GPT-5.5/Codex for implementation/testing. Scaffolding v0.1.
+  Run a code change through the governed seven-stage plan, review,
+  implementation, test, security, and final-review workflow. Use when a task
+  needs the complete multi-model pipeline rather than one isolated review.
 ---
 
-# AI Development Pipeline (Claude / Opus)
+# AI Development Pipeline
 
-This skill orchestrates the staged AI coding workflow for an application repo.
-Claude (Opus) owns **planning** and **review**; GPT-5.5 / Codex owns
-**implementation** and **testing**.
+Use the repository's deterministic orchestrator. It owns artifact identity,
+source freshness, resume behavior, and the approval gates; do not reproduce the
+seven stages manually.
 
-> Status: v0.1 scaffolding. It defines the stages and the commands to run; full
-> automated orchestration is future work.
+## Run
 
-## When to use
-
-- The user asks to take a task through the full staged workflow.
-- The user wants a plan, then reviewed implementation, then security/final sign-off.
-
-## Model roles
-
-- **Opus 4.8 (high reasoning)** — Stage 01 plan, Stage 07 final review.
-- **Opus** — Stage 02 plan review, Stage 04 diff review, Stage 06 security review.
-- **GPT-5.5 / Codex** — Stage 03 implement, Stage 05 test/fix.
-
-(Fable is not used anywhere; planning/final review use Opus 4.8 high reasoning.)
-
-## The stages & commands
-
-Run from inside the target git repo. Scaffold a run first:
+From the target Git repository:
 
 ```bash
-ai-run-task "Short description of the task"
+run_dir="$(ai-run-task start "Exact user request")"
+ai-run-task run "$run_dir"
+ai-run-task status "$run_dir"
 ```
 
-Then, per stage (prompts live in the toolkit's `templates/prompts/`):
+Use `ai-run-task resume "$run_dir"` only when a failed attempt left the source
+digest unchanged. The command verifies every completed output hash before it
+skips anything. If it reports external source drift, a changed artifact, or a
+failed write stage that changed source, start a new evidence generation instead
+of forcing resume.
 
-| Stage | Model | Command / template |
-|-------|-------|--------------------|
-| 01 Plan | Opus 4.8 high | `ai-model-call plan   <prompt> <out>` · `01-opus48-plan.md` |
-| 02 Plan review | Opus | `ai-codex-review plan-review` / `02-opus-plan-review.md` |
-| 03 Implement | GPT-5.5/Codex | `ai-model-call implement <prompt> <out>` · `03-gpt55-implement.md` |
-| 04 Diff review | Opus | `ai-codex-review diff-review` · `04-opus-diff-review.md` |
-| 05 Test | GPT-5.5/Codex | `ai-model-call test <prompt> <out>` · `05-gpt55-test.md` |
-| 06 Security review | Opus | `ai-codex-review security-review` · `06-opus-security-review.md` |
-| 07 Final review | Opus 4.8 high | `ai-model-call final <prompt> <out>` · `07-opus48-final-review.md` |
+## Roles and boundaries
 
-## Guardrails
+- Codex / GPT-5.6 at medium reasoning plans in a read-only sandbox, then owns
+  implementation and testing in an explicit workspace-write sandbox.
+- Claude Opus 5 independently reviews the plan, diff, security, and final state
+  with only Read, Grep, and Glob in a complete disposable snapshot.
+- `ai-review claude ...` and `ai-review codex ...` are the only approval-capable
+  front doors. Other model wrappers are advisory or quarantined and cannot
+  replace a required approval.
+- Any `REJECT`, `BLOCKED`, missing verdict, provider failure, source change, or
+  lifecycle-accounting failure stops later stages.
 
-- **Phased plans:** each phase spec must end with an instruction telling the
-  implementing agent to, when the phase finishes, re-read all downstream phases
-  (to plan-end) and report any drift it introduced or discovered. This is the
-  authoring side of the `fresh-session` skill's Step 3 check.
-- Feature branch only; never work on `main`/`master`.
-- Planning/review stages are read-only.
-- Implementation makes the smallest safe change and adds/updates tests.
-- No secrets; no weakening auth. Never merge/push/force without human approval.
-- Run `ai-workspace-status` before starting and before opening a PR.
+The run manifest under `.ai/runs/` is the durable record. Each stage consumes
+the prior named artifact, records its hashes and source digest, and publishes a
+new immutable output. Do not edit completed run artifacts.
 
-## Output
-
-End with the completion report (`templates/repo-docs/docs-ai-completion-report.md`),
-including the plain-English summary for Albert.
+Normal Git, deployment, authorization, and production rules still apply after
+the pipeline completes; the pipeline does not grant permission to push, merge,
+or deploy.

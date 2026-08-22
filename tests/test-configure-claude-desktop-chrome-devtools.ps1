@@ -35,7 +35,7 @@ try {
 
   Assert-True ($config["theme"] -eq "dark") "preserves unrelated Claude settings"
   Assert-True ($config["mcpServers"].ContainsKey("keep-me")) "preserves other MCP servers"
-  Assert-True ($config["mcpServers"]["chrome-devtools"]["args"] -contains "chrome-devtools-mcp@latest") "configures the Chrome DevTools package"
+  Assert-True ($config["mcpServers"]["chrome-devtools"]["args"] -contains "chrome-devtools-mcp@1.7.0") "configures the pinned Chrome DevTools package"
   Assert-True ($config["mcpServers"].Keys.Where({ $_ -eq "chrome-devtools" }).Count -eq 1) "keeps one Chrome DevTools entry"
   Assert-True ((Test-Path -LiteralPath "$configPath.aidevops.bak")) "creates a recoverable backup"
 } finally {

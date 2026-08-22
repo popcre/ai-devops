@@ -1,6 +1,6 @@
-# Stage 02 — Plan Review (Opus, independent reviewer)
+# Stage 02 — Plan Review (Claude Opus 5, independent reviewer)
 
-**Model role:** Opus is the independent reviewer. Here it reviews the plan only.
+**Model role:** Claude Opus 5 is the independent reviewer. Here it reviews the plan only.
 
 **Hard rule:** Do **not** edit, create, or delete any files. Review only.
 

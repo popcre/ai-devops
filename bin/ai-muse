@@ -8,7 +8,7 @@ CFG="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
 BIN="$HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
 MODEL="meta-model-api/muse-spark-1.2-contributor"
-CALLER="${AI_MUSE_CALLER:-codex}"
+CALLER="${AI_MUSE_CALLER:-unknown}"
 STATE="${AI_MUSE_STATE_DIR:-$HOME/.local/state/ai-devops/muse}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
@@ -91,10 +91,9 @@ tree_state(){
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
 }
 ensure_report_destination(){
-  local root="$1" dir="$root/.ai/reviews" tracked
+  local root="$1" dir="$root/.ai/reviews"
   [ ! -L "$root/.ai" ] && [ ! -L "$dir" ] || die 'refusing Muse reports: .ai or .ai/reviews is a linked path.'
   git -C "$root" check-ignore -q .ai/reviews/ai-muse-probe || die 'refusing Muse reports: .ai/reviews must be Git-ignored.'
-  tracked="$(git -C "$root" ls-files '.ai/reviews/*')"; [ -z "$tracked" ] || die 'refusing Muse reports: .ai/reviews contains tracked files.'
   mkdir -p "$dir" || die "could not create Muse report directory: $dir"
   [ ! -L "$dir" ] || die 'refusing Muse reports: .ai/reviews became a linked path.'
 }
@@ -124,12 +123,15 @@ preserve_failure(){
   { printf '# Muse incomplete turn\n\nThis is not an accepted review result. Raw provider and error bodies are deliberately omitted.\n\n## Failure\n\n%s\n\n## Request\n\n%s\n\n## Recoverable identity\n\n- requested session: `%s`\n- returned session: `%s`\n- completion reason: `%s`\n- process result: `%s`\n' "$TURN_ERROR" "$(cat "$prompt")" "$( [ -f "$meta" ] && jq -r '.session_id//""' "$meta" || true)" "$TURN_SID" "$FINISH" "${RUN_RC:-unknown}"; [ -z "$TEXT" ] || printf '\n## Partial response\n\n%s\n' "$TEXT"; } > "$path" || return 1
   chmod 600 "$path" 2>/dev/null || true; now="$(date -u +%FT%TZ)"
   if [ "$mode" = ask ] && [ -f "$meta" ]; then tmp="$(tmp_file)"; jq --arg report "$path" --arg now "$now" '.status="provider_outcome_uncertain"|.last_failure_report=$report|.updated_at=$now' "$meta" > "$tmp" && mv -f "$tmp" "$meta" || return 1; return 0; fi
-  [ -n "$TURN_SID" ] || return 0; sid="$TURN_SID"; mkdir -p "$(dirname "$meta")"
+  sid="$TURN_SID"; mkdir -p "$(dirname "$meta")"
   tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$(repo_id "$root")" --arg sid "$sid" --arg dir "$REVIEW_DIR" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg report "$path" --arg now "$now" '{schema_version:1,status:"provider_outcome_uncertain",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:$sid,review_dir:$dir,sandbox_tag:$tag,model:$model,head:$head,packet_sha256:$packet,last_report:null,last_failure_report:$report,created_at:$now,updated_at:$now}' > "$tmp" || return 1; mv -f "$tmp" "$meta" || return 1; chmod 600 "$meta" 2>/dev/null || true
 }
 report(){
   local root="$1" name="$2" prompt="$3" path; path="$root/.ai/reviews/muse-$name-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"
   mkdir -p "$(dirname "$path")" || die "could not create Muse report directory: $(dirname "$path")"
+  [ ! -e "$path" ] && [ ! -L "$path" ] || die "refusing to replace an existing Muse report: $path"
+  git -C "$root" check-ignore -q "${path#$root/}" || die "refusing a Muse report destination that is not ignored: $path"
+  ! git -C "$root" ls-files --error-unmatch -- "${path#$root/}" >/dev/null 2>&1 || die "refusing to replace a tracked Muse report: $path"
   { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } > "$path" || die "could not write Muse report: $path"
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
 }
@@ -137,7 +139,9 @@ cmd_new(){
   local name="$1"; shift; local root rid meta prompt out rep before after tmp
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: ai-muse ask $name"; ensure_report_destination "$root"
-  prompt="$(read_prompt "$@")"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; if ! run_turn "$REVIEW_DIR" "$prompt" "$out"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
+  prompt="$(read_prompt "$@")"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
+  mkdir -p "$(dirname "$meta")"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg dir "$REVIEW_DIR" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '{schema_version:1,status:"turn_in_progress",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:$dir,sandbox_tag:$tag,model:$model,head:$head,packet_sha256:$packet,last_report:null,created_at:$now,updated_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true
+  if ! run_turn "$REVIEW_DIR" "$prompt" "$out"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.
   mkdir -p "$(dirname "$meta")"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg sid "$TURN_SID" --arg dir "$REVIEW_DIR" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '{schema_version:1,status:"completed_pending_local_checks",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:$sid,review_dir:$dir,sandbox_tag:$tag,model:$model,head:$head,packet_sha256:$packet,last_report:null,created_at:$now,updated_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true
@@ -172,10 +176,10 @@ cmd_doctor(){ local failures=0; check(){ local label="$1"; shift; if "$@" >/dev/
 usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 case "${1:-}" in
-  new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
-  ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
+  new) [ "$CALLER" != unknown ] || die 'AI_MUSE_CALLER must be set explicitly to codex or claude.'; shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
+  ask) [ "$CALLER" != unknown ] || die 'AI_MUSE_CALLER must be set explicitly to codex or claude.'; shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
   list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; doctor) cmd_doctor;;
-  review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
+  review) [ "$CALLER" != unknown ] || die 'AI_MUSE_CALLER must be set explicitly to codex or claude.'; shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;
   -h|--help|help|'') usage;; *) die "unknown command '$1'. Use: ai-muse --help";;

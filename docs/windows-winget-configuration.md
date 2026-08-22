@@ -32,7 +32,8 @@ Ansible previously needed SSH before it could configure SSH.
 This split is intentional:
 
 - WinGet Configuration and DSC own ordinary packages and non-secret Windows
-  settings. Re-running them updates packages and repairs drift.
+  settings. Every recovery-critical package is pinned to the reviewed version
+  in `config/tool-versions.json`; re-running repairs drift to that version.
 - `setup-machine.ps1` owns skills, managed dotfiles, SSH aliases and keys, MCP
   launchers, and 1Password references. Secrets are resolved only at runtime and
   are never placed in the WinGet file or Git.
@@ -57,8 +58,8 @@ The bootstrap is authoritative for:
   1Password runtime wiring.
 
 Matching state should be left alone, missing state installed, and declared
-drift repaired. Package and repository updates may change versions even when a
-tool already works. Dirty Git checkouts must fail loudly rather than be
+drift repaired. Versions change only through a reviewed catalog update with
+tests, rather than silently during a restore. Dirty Git checkouts must fail loudly rather than be
 overwritten. The workflow does not own unrelated application repositories,
 user documents, undeclared Windows personalization, Tailscale ACL policy, or
 cloud credentials outside the documented 1Password flow.
@@ -74,6 +75,12 @@ declarative WinGet file honest about package ownership.
 The bootstrap also runs the official Windows installers for Grok Build and Kimi
 Code. Their first login remains an intentional one-time browser step owned by
 each provider; no provider password or API key is stored by this repository.
+
+`config/tool-versions.json` is the one inventory for WinGet packages, npm CLIs,
+MCP packages, and production model pins. `tests/test-tool-version-pins.sh`
+rejects drift between that catalog and every recovery path. Upgrade a version
+by changing the catalog and all named consumers together, running the focused
+test, and proving the two-run restore gate before rolling it to other machines.
 
 ## Run it
 

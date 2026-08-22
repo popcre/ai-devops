@@ -1,96 +1,44 @@
 #!/usr/bin/env bash
-# ai-model-call — generic model invocation helper (v0.1 scaffolding).
-#
-# Loads the model command for a named stage from /etc/ai-devops/models.env,
-# feeds it a prompt file, and writes the model's output to an output file.
-#
-# Usage:
-#   ai-model-call <stage> <prompt-file> <output-file>
-#
-# <stage> is one of the logical stage names below; each maps to a *_CMD
-# variable in models.env:
-#
-#   plan        -> OPUS48_HIGH_REASONING_CMD
-#   plan-review -> OPUS_REVIEW_CMD
-#   implement   -> GPT55_CMD
-#   diff-review -> OPUS_REVIEW_CMD
-#   test        -> TESTER_CMD
-#   security    -> OPUS_REVIEW_CMD
-#   final       -> OPUS48_HIGH_REASONING_CMD
-#
-# This is intentionally simple. It does not orchestrate stages — it just runs
-# one model against one prompt. Higher-level orchestration comes later.
-
-set -uo pipefail
-
-STAGE="${1:-}"
-PROMPT_FILE="${2:-}"
-OUT_FILE="${3:-}"
-
-usage() {
-  cat <<EOF
-Usage: ai-model-call <stage> <prompt-file> <output-file>
-
-Stages:
-  plan         Opus 4.8 high reasoning — implementation plan / architecture
-  plan-review  Opus — review the plan
-  implement    GPT-5.5 / Codex — write code
-  diff-review  Opus — review the diff
-  test         GPT-5.5 / Codex — run & fix tests
-  security     Opus — security review
-  final        Opus 4.8 high reasoning — final product/architecture review
-EOF
+# ai-model-call — one fail-closed stage invocation with atomic output.
+set -euo pipefail
+MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REVIEW="${AI_REVIEW_BIN:-$ROOT/ai-review}"
+usage(){ printf '%s\n' 'Usage: ai-model-call <plan|plan-review|implement|diff-review|test|security|final> <prompt-file> <output-file>'; }
+die(){ printf 'ai-model-call: error: %s\n' "$*" >&2; exit 1; }
+[ "$#" -eq 3 ] || { usage >&2; exit 2; }; STAGE="$1"; PROMPT="$2"; OUT="$3"
+[ -f "$PROMPT" ] && [ ! -L "$PROMPT" ] || die "prompt is not a regular file: $PROMPT"
+[ ! -e "$OUT" ] || die "refusing to replace immutable stage output: $OUT"
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must run inside a Git repository.'
+REPO="$(git rev-parse --show-toplevel)"; mkdir -p "$(dirname "$OUT")"; TMP="$(mktemp "$(dirname "$OUT")/.stage.XXXXXX")"
+cleanup(){ rm -f "$TMP"; }; trap cleanup EXIT INT TERM
+[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+CODEX_PLAN_CMD="${CODEX_PLAN_CMD:-codex exec -m gpt-5.6-sol --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium}"
+CODEX_IMPLEMENT_CMD="${CODEX_IMPLEMENT_CMD:-codex exec -m gpt-5.6-sol --skip-git-repo-check --sandbox workspace-write -c model_reasoning_effort=medium}"
+CODEX_TEST_CMD="${CODEX_TEST_CMD:-$CODEX_IMPLEMENT_CMD}"
+validate_codex(){
+  local command="$1" sandbox="$2"
+  if printf '%s' "$command" | grep -Eq '[;&|<>`]|[$][({]'; then
+    die 'model commands may not contain shell operators or expansions.'
+  fi
+  case " $command " in *" --sandbox $sandbox "*) ;; *) die "stage requires explicit --sandbox $sandbox.";; esac
+  case " $command " in *' -m gpt-5.6-sol '*|*' --model gpt-5.6-sol '*) ;; *) die 'Codex stage commands must explicitly pin gpt-5.6-sol.';; esac
+  printf '%s' "$command" | grep -Eq 'model_reasoning_effort=(low|medium)([^A-Za-z]|$)' || die 'Codex reasoning must be explicitly low or medium.'
+  read -r -a MODEL_ARGS <<< "$command"; command -v "${MODEL_ARGS[0]}" >/dev/null 2>&1 || die "model command not found: ${MODEL_ARGS[0]}"
 }
-
-if [ -z "$STAGE" ] || [ "$STAGE" = "-h" ] || [ "$STAGE" = "--help" ]; then
-  usage; exit 0
-fi
-if [ -z "$PROMPT_FILE" ] || [ -z "$OUT_FILE" ]; then
-  echo "Error: prompt-file and output-file are required." >&2
-  echo >&2; usage >&2; exit 2
-fi
-if [ ! -f "$PROMPT_FILE" ]; then
-  echo "Error: prompt file not found: $PROMPT_FILE" >&2
-  exit 1
-fi
-
-# Load model commands (non-fatal if missing; we validate the chosen one below).
-MODELS_ENV="/etc/ai-devops/models.env"
-# shellcheck source=/dev/null
-[ -f "$MODELS_ENV" ] && . "$MODELS_ENV" 2>/dev/null || true
-
-# Map stage -> command variable.
+review_stage(){
+  local mode="$1" report rc brief
+  brief="$(cd "$(dirname "$PROMPT")" && pwd -P)/$(basename "$PROMPT")"
+  set +e; report="$(cd "$REPO" && AI_REVIEW_BRIEF_FILE="$brief" "$REVIEW" claude "$mode")"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && [ -s "$report" ] || die "governed Claude review failed for $STAGE."
+  cp "$report" "$TMP"
+}
 case "$STAGE" in
-  plan)        CMD="${OPUS48_HIGH_REASONING_CMD:-}" ;;
-  plan-review) CMD="${OPUS_REVIEW_CMD:-}" ;;
-  implement)   CMD="${GPT55_CMD:-}" ;;
-  diff-review) CMD="${OPUS_REVIEW_CMD:-}" ;;
-  test)        CMD="${TESTER_CMD:-}" ;;
-  security)    CMD="${OPUS_REVIEW_CMD:-}" ;;
-  final)       CMD="${OPUS48_HIGH_REASONING_CMD:-}" ;;
-  *) echo "Unknown stage: $STAGE" >&2; echo >&2; usage >&2; exit 2 ;;
+  plan) validate_codex "$CODEX_PLAN_CMD" read-only; printf '%s\n' "$(cat "$PROMPT")" | (cd "$REPO" && "${MODEL_ARGS[@]}" -) > "$TMP" 2>&1 || die 'Codex planning failed.' ;;
+  implement) validate_codex "$CODEX_IMPLEMENT_CMD" workspace-write; printf '%s\n' "$(cat "$PROMPT")" | (cd "$REPO" && "${MODEL_ARGS[@]}" -) > "$TMP" 2>&1 || die 'Codex implementation failed.' ;;
+  test) validate_codex "$CODEX_TEST_CMD" workspace-write; printf '%s\n' "$(cat "$PROMPT")" | (cd "$REPO" && "${MODEL_ARGS[@]}" -) > "$TMP" 2>&1 || die 'Codex testing failed.' ;;
+  plan-review) review_stage plan-review;; diff-review) review_stage diff-review;; security) review_stage security-review;; final) review_stage final-check;;
+  *) usage >&2; exit 2;;
 esac
-
-if [ -z "$CMD" ]; then
-  echo "Error: no model command configured for stage '$STAGE'." >&2
-  echo "Set the matching *_CMD variable in $MODELS_ENV (see config/models.env.example)." >&2
-  exit 1
-fi
-
-echo "Stage   : $STAGE" >&2
-echo "Command : $CMD" >&2
-echo "Prompt  : $PROMPT_FILE" >&2
-echo "Output  : $OUT_FILE" >&2
-echo "Running…" >&2
-
-# Feed the prompt on stdin, capture output. `eval` so multi-word commands with
-# flags in models.env are honored.
-if printf '%s\n' "$(cat "$PROMPT_FILE")" | eval "$CMD" >"$OUT_FILE" 2>&1; then
-  echo "Done. Output written to: $OUT_FILE" >&2
-  echo "$OUT_FILE"
-else
-  rc=$?
-  echo "Model command exited non-zero ($rc). See $OUT_FILE for details." >&2
-  echo "$OUT_FILE"
-  exit "$rc"
-fi
+[ -s "$TMP" ] || die "stage $STAGE produced no output."
+mv "$TMP" "$OUT"; trap - EXIT INT TERM; printf '%s\n' "$OUT"

@@ -35,20 +35,20 @@ having scripts read from the repo would make `update.sh` overwrite local tuning.
 ## Model CLI flags are configurable, not hard-coded
 
 Looks like:
-`OPUS48_HIGH_REASONING_CMD='claude --model opus-4.8 --reasoning high'` — a very
-specific command that may not match the installed `claude`/`codex` CLI.
+The shipped Claude Opus 5 and Codex/GPT-5.6 commands are very specific and may
+need adjustment as the installed CLIs evolve.
 
 Actually:
-These are **defaults meant to be edited** per machine in
-`/etc/ai-devops/models.env`. The exact model ids and flags differ across CLI
-versions.
+These are versioned safe defaults migrated into `/etc/ai-devops/models.env`.
+Machine-specific adjustments remain possible, but the wrappers refuse changes
+that remove the required model, tool, sandbox, permission, or reasoning guards.
 
 Why:
 The `claude`/`codex` CLIs evolve; hard-coding flags would break on some machines.
 
 Do not change because:
-Removing the indirection (e.g. hard-coding `claude ...` inside the scripts) would
-force a code edit on every machine whose CLI flags differ. See
+Removing the indirection would force a code edit on every machine whose CLI
+flags differ; removing validation would make configuration a safety bypass. See
 [`model-setup.md`](model-setup.md).
 
 ## Fable is deliberately absent
@@ -58,15 +58,15 @@ A planning/final-review model slot with no "Fable" option, even though earlier
 drafts of this workflow mentioned it.
 
 Actually:
-Fable is intentionally **not used**. Planning and final review use **Opus 4.8
-with high reasoning** instead.
+Fable is intentionally **not used**. Planning uses Codex/GPT-5.6 at medium
+reasoning; independent review and final sign-off use Claude Opus 5.
 
 Why:
 Fable is being removed from the subscription plan.
 
 Do not change because:
-Re-introducing Fable would reference a model that is going away. Use Opus 4.8
-(high reasoning) for the planning and final-review stages.
+Re-introducing Fable would reference a retired workflow. Preserve the current
+Codex planning and Claude Opus 5 approval roles.
 
 ## `codex-cli` MCP uses Codex's own `mcp-server`, not a third-party wrapper
 

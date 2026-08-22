@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $ConfigPath) {
 if (-not $config.ContainsKey("mcpServers")) { $config["mcpServers"] = @{} }
 $config["mcpServers"]["chrome-devtools"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "chrome-devtools-mcp@latest")
+  args = @("/c", "npx", "-y", "chrome-devtools-mcp@1.7.0")
 }
 ($config | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $ConfigPath -Encoding utf8
 

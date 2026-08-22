@@ -353,10 +353,10 @@ servers = {
     # --read-only is mandatory: all shared-DB schema work goes through the
     # u2giants/shared-db repo (branch + PR), never through this MCP.
     "supabase": {"command": launch, "args": [
-        "npx", "-y", "@supabase/mcp-server-supabase@latest",
+        "npx", "-y", "@supabase/mcp-server-supabase@0.11.0",
         "--read-only", "--project-ref", supa_ref]},
     "trigger": {"command": launch, "args": [
-        "npx", "-y", "trigger.dev@latest", "mcp"]},
+        "npx", "-y", "trigger.dev@4.4.6", "mcp"]},
     "1password": {"command": launch, "args": [
         "npx", "-y", "@u2giants/1password-mcp"]},
 
@@ -375,7 +375,7 @@ servers = {
 
     # no secret at all. vercel authenticates via mcp-remote's browser OAuth flow,
     # so it must NOT go through the remote launcher (that would force a header).
-    "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+    "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@0.0.79"]},
     "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
     "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
                                               "https://mcp.vercel.com"]},

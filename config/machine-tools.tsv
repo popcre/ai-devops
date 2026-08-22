@@ -5,9 +5,17 @@ ai-gemini	bin/ai-gemini	bash+cmd	yes	gemini	install-machine-tools.ps1
 ai-kimi	bin/ai-kimi	bash+cmd	yes	kimi	install-machine-tools.ps1
 ai-qwen	bin/ai-qwen	bash+cmd	yes	qwen	install-machine-tools.ps1
 ai-deepseek-agent	bin/ai-deepseek-agent	bash+cmd	yes	none	install-machine-tools.ps1
+ai-review	bin/ai-review	bash+cmd	yes	none	install-machine-tools.ps1
+ai-claude-review	bin/ai-claude-review	bash+cmd	yes	claude	install-machine-tools.ps1
+ai-codex-review	bin/ai-codex-review	bash+cmd	yes	codex	install-machine-tools.ps1
+ai-review-sandbox	bin/ai-review-sandbox	bash+cmd	yes	none	install-machine-tools.ps1
+ai-review-packet	bin/ai-review-packet	bash+cmd	yes	none	install-machine-tools.ps1
+ai-review-lifecycle	bin/ai-review-lifecycle	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-preflight	bin/ai-review-preflight	bash+cmd	yes	none	install-machine-tools.ps1
 ai-review-scoreboard	bin/ai-review-scoreboard	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reviewer-issue	bin/ai-reviewer-issue	bash+cmd	yes	none	install-machine-tools.ps1
+ai-model-call	bin/ai-model-call	bash+cmd	yes	none	install-machine-tools.ps1
+ai-run-task	bin/ai-run-task	bash+cmd	yes	none	install-machine-tools.ps1
 ai-muse	bin/ai-muse	bash+cmd	yes	muse	install-machine-tools.ps1
 ai-glm	bin/ai-glm	cmd-only-external	yes	none	setup-opencode-glm.ps1
 ai-headroom	bin/ai-headroom	bash+cmd	yes	none	install-machine-tools.ps1

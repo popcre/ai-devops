@@ -16,7 +16,7 @@ LOCK_WAIT="${AI_REVIEW_SCOREBOARD_LOCK_WAIT:-10}"
 SCOREBOARD_LOCK=""
 
 die(){ printf 'ai-review-scoreboard: error: %s\n' "$*" >&2; exit 1; }
-valid_provider(){ case "$1" in grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
+valid_provider(){ case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
 
 lock_acquire(){
   local lock="$LEDGER.lock" waited=0

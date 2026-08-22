@@ -28,7 +28,7 @@ what happened. Keep it in the repo (e.g. under `.ai/runs/<run>/` or the PR body)
 | Plan review | Opus | <approve / approve-with-changes / block> |
 | Diff review | Opus | <verdict> |
 | Security review | Opus | <verdict> |
-| Final review | Opus 4.8 (high reasoning) | <ready / not ready> |
+| Final review | Claude Opus 5 | <ready / not ready> |
 
 ## Plan deviations
 

@@ -86,6 +86,8 @@ check "unsafe_run_id_is_rejected" \
   "! '$SCRIPT' begin --provider grok --repo '$R' --run-id '../escape' --caller codex >/dev/null 2>&1"
 check "unknown_provider_is_rejected" \
   "! '$SCRIPT' begin --provider fake --repo '$R' --run-id fake --caller codex >/dev/null 2>&1"
+check "claude_is_a_supported_governed_provider" \
+  "AI_DEVOPS_TEST_MODE=1 '$SCRIPT' begin --provider claude --repo '$R' --run-id claude-test --caller codex --preflight none >/dev/null"
 check "unknown_command_is_rejected" "! '$SCRIPT' nonsense"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

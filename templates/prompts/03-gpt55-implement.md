@@ -1,6 +1,6 @@
-# Stage 03 — Implementation (GPT-5.5 / Codex)
+# Stage 03 — Implementation (GPT-5.6 / Codex, medium reasoning)
 
-**Model role:** GPT-5.5 / Codex is the implementation model.
+**Model role:** GPT-5.6 / Codex is the implementation model.
 
 ## Your task
 

@@ -32,11 +32,15 @@ for how to adapt the exact flags to your installed CLIs (they may differ).
 | Variable | Used by | Default |
 |---|---|---|
 | `AI_DEVOPS_HOME` | path resolution | `/worksp/ai-devops` |
-| `OPUS48_HIGH_REASONING_CMD` | `ai-model-call plan`, `ai-model-call final` | `claude --model opus-4.8 --reasoning high` |
-| `OPUS_REVIEW_CMD` | `ai-model-call plan-review`/`diff-review`/`security` | `claude --model opus-4.8 --reasoning high` |
-| `GPT55_CMD` | `ai-model-call implement` | `codex exec --skip-git-repo-check` |
-| `CODEX_CMD` | `ai-codex-review` | `codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium` |
-| `TESTER_CMD` | `ai-model-call test` | `codex exec --skip-git-repo-check` |
+| `CLAUDE_REVIEW_CMD` | governed plan/diff/security/final review | Claude Opus 5, JSON output, `Read,Grep,Glob` only, plan permission mode, no ambient MCP |
+| `CODEX_PLAN_CMD` | `ai-model-call plan` | `gpt-5.6-sol`, read-only sandbox, medium reasoning |
+| `CODEX_IMPLEMENT_CMD` | `ai-model-call implement` | `gpt-5.6-sol`, workspace-write sandbox, medium reasoning |
+| `CODEX_TEST_CMD` | `ai-model-call test` | `gpt-5.6-sol`, workspace-write sandbox, medium reasoning |
+| `CODEX_CMD` | `ai-codex-review` | `gpt-5.6-sol`, read-only sandbox, medium reasoning |
+
+Command values are parsed as argument lists, not evaluated by a shell. Shell
+operators and expansions are rejected. Review commands cannot remove their
+explicit model, tool, permission, sandbox, or reasoning protections.
 
 ## `server.env` variables
 

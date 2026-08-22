@@ -8,10 +8,10 @@ roles, adapting CLI flags, and how the scripts use the commands.
 
 ## The model workflow (roles)
 
-- **Opus 4.8 (high reasoning)** — implementation plans, architecture review,
-  final product/architecture review.
-- **GPT-5.5 / Codex** — coding, implementation, testing, fixing.
-- **Opus** — independent review throughout (plan, diff, security, final).
+- **GPT-5.6-Sol / Codex (medium reasoning)** — planning, implementation, testing,
+  and fixing. Only implementation and testing receive workspace write access.
+- **Claude Opus 5** — independent plan, diff, security, and final approval
+  reviews through a tool-limited, digest-bound adapter.
 - **GLM-5.3** — optional independent second opinion invoked by either Claude or
   Codex through `ai-glm`, in named persistent sessions; defaults to read-only review.
 
@@ -48,9 +48,9 @@ copy credentials.
 
 ## Important: the exact flags may differ on your machine
 
-The Claude/Codex CLIs evolve, and the exact model identifiers and flags
-(`--model`, `--reasoning`, etc.) may not match your installed versions. **You may
-need to edit `/etc/ai-devops/models.env` after install.**
+The Claude/Codex CLIs evolve. The installed configuration is validated against
+the safety contract before use; do not remove an explicit sandbox, allowed
+reasoning level, Claude model pin, or Claude tool restriction.
 
 To find the right flags:
 
@@ -65,14 +65,15 @@ model id or the reasoning flag. The scripts always read the real file at
 
 ## How the scripts use these
 
-- `ai-model-call <stage> <prompt> <out>` maps a stage name to the matching
-  `*_CMD` and pipes the prompt in on stdin.
+- `ai-run-task start "task"` creates an immutable run; `ai-run-task run <dir>`
+  executes all seven stages and `resume` verifies every prior artifact first.
+- `ai-model-call <stage> <prompt> <out>` runs one atomic stage without shell
+  evaluation.
+- `ai-review claude <mode>` and `ai-review codex <mode>` are the only supported
+  approval front doors. Other provider tools remain advisory or quarantined.
 - `ai-codex-review <mode>` uses `CODEX_CMD` for read-only reviews and refuses
   configuration that does not explicitly retain `--sandbox read-only` plus
   `model_reasoning_effort=low` or `medium`.
 
-## A note on Fable
-
-Earlier drafts of this workflow referenced "Fable." **Fable is not used.**
-Wherever planning/final-review would have used it, this workflow uses
-**Opus 4.8 with high reasoning** instead.
+Live capability probes on 2026-08-21 proved `claude-opus-5` and
+`gpt-5.6-sol`. The rejected generic `gpt-5.6` identifier is not used.

@@ -19,9 +19,9 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 foreach ($package in @(
-  @{ Name='Vercel CLI'; Npm='vercel@latest'; Command='vercel' },
-  @{ Name='Trigger.dev CLI'; Npm='trigger.dev@latest'; Command='trigger.dev' },
-  @{ Name='Railway CLI'; Npm='@railway/cli@latest'; Command='railway' }
+  @{ Name='Vercel CLI'; Npm='vercel@54.15.1'; Command='vercel' },
+  @{ Name='Trigger.dev CLI'; Npm='trigger.dev@4.4.6'; Command='trigger.dev' },
+  @{ Name='Railway CLI'; Npm='@railway/cli@5.43.1'; Command='railway' }
 )) {
   if ($TestOnly) {
     $present = [bool](Get-Command $package.Command -ErrorAction SilentlyContinue)

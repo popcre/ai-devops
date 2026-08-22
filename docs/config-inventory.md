@@ -231,7 +231,8 @@ per-machine hand additions survive. Everything else in the file stays
 machine-local; only the required-permissions list is synced.
 
 ### 5. `~/.codex/config.toml`
-Codex CLI settings: `model = "gpt-5.5"`, `model_reasoning_effort = "medium"`,
+Portable Codex CLI settings pin `model = "gpt-5.6-sol"` and
+`model_reasoning_effort = "medium"`. Established machine files also contain
 `[windows] sandbox = "elevated"`, `[desktop]` UI prefs, enabled plugins
 (chrome, documents, spreadsheets, pdf, browser, visualize, …), a local
 `node_repl` MCP server, and marketplaces. **Most of the file is machine-specific

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# ai-claude-review — fail-closed Claude Opus 5 review of an exact source state.
+set -euo pipefail
+
+VERSION="1.0.0"
+MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
+PACKET="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
+LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$SCRIPT_DIR/ai-review-lifecycle}"
+CALLER="${AI_CLAUDE_REVIEW_CALLER:-codex}"
+CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {"mcpServers":{}} --no-session-persistence --no-chrome --disable-slash-commands'
+[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+
+die(){ printf 'ai-claude-review: error: %s\n' "$*" >&2; exit 1; }
+usage(){ cat <<'EOF'
+Usage: ai-claude-review <plan-review|diff-review|security-review|visual-review|final-check>
+       ai-claude-review doctor [--live]
+
+Claude Opus 5 receives a complete disposable snapshot with only Read, Grep,
+and Glob tools. Success requires the exact model, an exact verdict, an atomic
+report, lifecycle terminal accounting, and unchanged source identity.
+EOF
+}
+
+validate_command(){
+  case " $CLAUDE_REVIEW_CMD " in *' --model claude-opus-5 '*) ;; *) die 'CLAUDE_REVIEW_CMD must pin --model claude-opus-5.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *' --permission-mode plan '*) ;; *) die 'CLAUDE_REVIEW_CMD must pin --permission-mode plan.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *' --tools Read,Grep,Glob '*) ;; *) die 'CLAUDE_REVIEW_CMD must allow only Read,Grep,Glob.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *' --output-format json '*);; *) die 'CLAUDE_REVIEW_CMD must use JSON output.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *' --strict-mcp-config '*);; *) die 'CLAUDE_REVIEW_CMD must refuse ambient MCP servers.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *dangerously*|*bypassPermissions*|*acceptEdits*|*'--tools '*Write*|*'--tools '*Edit*|*'--tools '*Bash*|*'--tools '*Task*) die 'CLAUDE_REVIEW_CMD grants a write, shell, task, or bypass capability.';; esac
+  read -r -a CLAUDE_ARGS <<< "$CLAUDE_REVIEW_CMD"
+  command -v "${CLAUDE_ARGS[0]}" >/dev/null 2>&1 || die "Claude command not found: ${CLAUDE_ARGS[0]}"
+}
+
+doctor(){
+  local live="${1:-}" probe
+  validate_command; "$SANDBOX" --version >/dev/null; "$PACKET" --version >/dev/null; "$LIFECYCLE" --version >/dev/null
+  if [ "$live" = --live ]; then
+    probe="$(printf '%s\n' 'Return exactly: OPUS5_ACCESS_OK' | "${CLAUDE_ARGS[0]}" -p --model claude-opus-5 --effort high --output-format json --tools "" --no-session-persistence --no-chrome)" \
+      || die 'live Claude Opus 5 capability probe failed.'
+    jq -e '.is_error==false and .result=="OPUS5_ACCESS_OK" and .modelUsage["claude-opus-5"].canonicalModel=="claude-opus-5"' <<<"$probe" >/dev/null \
+      || die 'live Claude response did not prove canonical claude-opus-5 access.'
+  elif [ -n "$live" ]; then die "unknown doctor option: $live"; fi
+  printf 'PASS provider=claude model=claude-opus-5 tools=Read,Grep,Glob permission=plan live=%s\n' "$([ "$live" = --live ] && printf verified || printf not-requested)"
+}
+
+MODE="${1:-}"; case "$MODE" in
+  doctor) doctor "${2:-}"; exit 0;;
+  plan-review|diff-review|security-review|visual-review|final-check) ;;
+  ''|-h|--help|help) usage; exit 0;; *) usage >&2; exit 2;; esac
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
+REPO_ROOT="$(git rev-parse --show-toplevel)"; cd "$REPO_ROOT"; validate_command
+REPORT_DIR="$REPO_ROOT/.ai/reviews"
+[ ! -L "$REPO_ROOT/.ai" ] && [ ! -L "$REPORT_DIR" ] || die 'refusing a linked .ai report destination.'
+git check-ignore -q .ai/reviews/ai-claude-review-probe || die '.ai/reviews must be Git-ignored.'
+mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="claude-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
+STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_JSON=""; TMP_TEXT=""; TMP_REPORT=""
+cleanup(){
+  [ -z "$TMP_JSON" ] || rm -f "$TMP_JSON"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"; [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
+  [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
+  "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+STATE="$($LIFECYCLE begin --provider claude --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
+REVIEW_DIR="$($SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create review snapshot.'; }
+case "$MODE" in
+  plan-review) DECISION='Judge the implementation plan for missing cases, unsafe assumptions, forgotten files, and test gaps.';;
+  diff-review) DECISION='Judge the complete change for correctness, regressions, data exposure, and missing tests.';;
+  security-review) DECISION='Judge only security risks: authorization, data leakage, injection, secrets, file boundaries, and permissions.';;
+  visual-review) DECISION='Judge UI/visual test impact, responsiveness, accessibility, and missing visual proof.';;
+  final-check) DECISION='Give the final go/no-go judgment for shipping this exact source state.';;
+esac
+if [ -n "${AI_REVIEW_BRIEF_FILE:-}" ]; then
+  [ -f "$AI_REVIEW_BRIEF_FILE" ] && [ ! -L "$AI_REVIEW_BRIEF_FILE" ] || die 'AI_REVIEW_BRIEF_FILE is not a regular file.'
+  DECISION="$DECISION
+
+Follow this exact stage brief and treat its named prior artifact as the input contract:
+
+$(cat "$AI_REVIEW_BRIEF_FILE")"
+fi
+PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact evidence.'; }
+"$PACKET" verify "$PACKET_DIR" >/dev/null || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
+
+PROMPT="You are performing a READ-ONLY $MODE. Do not edit, create, commit, push, merge, or delete files.
+
+Read $PACKET_DIR/MANIFEST.md first. It binds the exact whole-source digest and change evidence. You may use only Read, Grep, and Glob under $REVIEW_DIR.
+
+$DECISION
+
+Return findings with file and line evidence. End with a literal heading and one allowed word exactly:
+
+## Verdict
+APPROVE|REJECT|BLOCKED"
+TMP_JSON="$(mktemp "$REPORT_DIR/.claude-output.XXXXXX")"
+set +e; (cd "$REVIEW_DIR" && printf '%s\n' "$PROMPT" | "${CLAUDE_ARGS[@]}") > "$TMP_JSON" 2>&1; PROVIDER_RC=$?; set -e
+ELAPSED="$(( $(date +%s)-STARTED ))"
+[ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; die "Claude exited nonzero ($PROVIDER_RC)."; }
+jq -e '.is_error==false and (.result|type=="string") and .modelUsage["claude-opus-5"].canonicalModel=="claude-opus-5" and ((.permission_denials//[])|length==0)' "$TMP_JSON" >/dev/null 2>&1 \
+  || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die 'Claude response did not prove Opus 5, successful completion, and zero permission denials.'; }
+TMP_TEXT="$(mktemp "$REPORT_DIR/.claude-text.XXXXXX")"; jq -r .result "$TMP_JSON" > "$TMP_TEXT"; [ -s "$TMP_TEXT" ] || die 'Claude returned an empty response.'
+EXPECTED_DIGEST="$(sed -n 's/^source_digest=//p' "$REVIEW_DIR/.ai-review-sandbox")"; ACTUAL_DIGEST="$($SANDBOX digest "$REVIEW_DIR")" || ACTUAL_DIGEST=""
+[ -n "$EXPECTED_DIGEST" ] && [ "$EXPECTED_DIGEST" = "$ACTUAL_DIGEST" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure reviewer-write-detected >/dev/null 2>&1 || true; die 'Claude changed or invalidated its review snapshot.'; }
+VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict >/dev/null 2>&1 || true; die 'Claude returned no valid ## Verdict.';; esac
+
+OUT="$REPORT_DIR/claude-${MODE}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
+TMP_REPORT="$(mktemp "$REPORT_DIR/.claude-report.XXXXXX")"
+{
+  printf '# Claude Opus 5 review — %s\n\n| field | value |\n|---|---|\n' "$MODE"
+  printf '| model | `claude-opus-5` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$REPO_ROOT" "$(jq -r .head "$STATE")" "$(jq -r .source_digest "$STATE")"
+  printf '| run | `%s` |\n| provider session | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | `Read,Grep,Glob` |\n\n## Result\n\n' "$RUN_ID" "$(jq -r .session_id "$TMP_JSON")" "$CALLER" "$ELAPSED"
+  cat "$TMP_TEXT"
+} > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
+FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")" || { mv "$OUT" "$OUT.accounting-failed" 2>/dev/null || true; die 'lifecycle accounting failed.'; }
+[ "$(jq -r .stale <<<"$FINAL_STATE")" = false ] && [ "$(jq -r .verdict <<<"$FINAL_STATE")" = "$VERDICT" ] || { mv "$OUT" "$OUT.stale" 2>/dev/null || true; die 'source changed during review.'; }
+printf '%s\n' "$OUT"

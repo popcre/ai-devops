@@ -33,7 +33,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
 esac
 EOF
 chmod +x "$STUB"; mkdir -p "$TMP/args"
-MODELS="$TMP/models.env"; printf "CODEX_CMD='%s exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'\n" "$STUB" > "$MODELS"
+MODELS="$TMP/models.env"; printf "CODEX_CMD='%s exec -m gpt-5.6-sol --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'\n" "$STUB" > "$MODELS"
 
 export AI_DEVOPS_MODELS_ENV="$MODELS"
 export AI_CODEX_TEST_ARGS="$TMP/args"

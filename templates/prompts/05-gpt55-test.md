@@ -1,6 +1,6 @@
-# Stage 05 — Test & Fix (GPT-5.5 / Codex)
+# Stage 05 — Test & Fix (GPT-5.6 / Codex, medium reasoning)
 
-**Model role:** GPT-5.5 / Codex runs checks and tests, and fixes what breaks.
+**Model role:** GPT-5.6 / Codex runs checks and tests, and fixes what breaks.
 
 ## Your task
 

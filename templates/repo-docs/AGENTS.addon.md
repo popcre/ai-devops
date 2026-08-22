@@ -4,10 +4,10 @@
   It tells Codex-family agents how to behave in this repo.
 -->
 
-## AI DevOps workflow (Codex / GPT-5.5 agents)
+## AI DevOps workflow (Codex / GPT-5.6 agents)
 
 This repo is onboarded to the AI DevOps staged workflow. When you act as the
-**implementation** or **testing** agent (GPT-5.5 / Codex):
+**planning**, **implementation**, or **testing** agent (GPT-5.6 / Codex, medium reasoning):
 
 - Work only from an **approved plan**. If there is no approved plan, ask for one.
 - Make the **smallest safe change**. Do not refactor unrelated code.

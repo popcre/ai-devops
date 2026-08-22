@@ -177,7 +177,7 @@ if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn
 # idempotent and repairs an outdated or incomplete existing installation.
 if (-not $SkipRailwayCliReconcile -and (Get-Command npm -ErrorAction SilentlyContinue)) {
   Write-Host "    reconciling Railway CLI via npm..."
-  & npm.cmd install --global '@railway/cli@latest'
+  & npm.cmd install --global '@railway/cli@5.43.1'
   if ($LASTEXITCODE -ne 0) { throw "Railway CLI npm installation failed." }
   $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
 }
@@ -341,7 +341,7 @@ $McpServers = [ordered]@{}
 $McpServers["supabase"] = @{
   command = "cmd"
   args = @("/c", $Launcher, "cmd", "/c", "npx", "-y",
-           "@supabase/mcp-server-supabase@latest", "--read-only",
+           "@supabase/mcp-server-supabase@0.11.0", "--read-only",
            "--project-ref", $SupabaseProjectRef)
 }
 
@@ -375,7 +375,7 @@ $McpServers["recall-ai"] = @{
 # TRIGGER_ACCESS_TOKEN (from mcp.env) at launch - no token in the config.
 $McpServers["trigger"] = @{
   command = "cmd"
-  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@latest", "mcp")
+  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@4.4.6", "mcp")
 }
 
 # 1password (stdio, npx). The launcher reads the vault-locked service-account
@@ -392,11 +392,11 @@ $McpServers["1password"] = @{
 # windows. Codex adds Vercel below using its supported native HTTP transport.
 $McpServers["playwright"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "@playwright/mcp@latest")
+  args = @("/c", "npx", "-y", "@playwright/mcp@0.0.79")
 }
 $McpServers["chrome-devtools"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "chrome-devtools-mcp@latest")
+  args = @("/c", "npx", "-y", "chrome-devtools-mcp@1.7.0")
 }
 $McpServers["ag-grid"] = @{
   command = "cmd"
