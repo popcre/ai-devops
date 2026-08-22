@@ -39,7 +39,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -82,24 +82,87 @@ remove_sandbox() {
   rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
 }
 
+remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
+  local build="$1" final="$2"
+  [ -e "$build" ] || return 0
+  case "$build" in "$final".building.*) rm -rf -- "$build" ;; *) die "refusing to remove unexpected partial snapshot: $build" ;; esac
+}
+
+source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible tree identity
+  local root="$1" output="$2" list diff rel kind bytes digest tree
+  list="$(mktemp)"; diff="$(mktemp)"
+  tree="$(git -C "$root" rev-parse HEAD^{tree} 2>/dev/null)" \
+    || { rm -f "$list" "$diff"; return 1; }
+  git -C "$root" diff --binary HEAD > "$diff" 2>/dev/null \
+    || { rm -f "$list" "$diff"; return 1; }
+  git -C "$root" ls-files --others --exclude-standard -z > "$list" \
+    || { rm -f "$list" "$diff"; return 1; }
+  : > "$output"
+  printf 'head_tree\0%s\0tracked_diff_bytes\0%s\0tracked_diff_sha256\0%s\0' \
+    "$tree" "$(wc -c < "$diff" | tr -d ' ')" "$(sha256sum "$diff" | cut -d' ' -f1)" >> "$output"
+  while IFS= read -r -d '' rel; do
+    case "$rel" in .ai-review*|AI-REVIEW-SANDBOX.md) continue ;; esac
+    if [ -L "$root/$rel" ]; then
+      kind=symlink
+      bytes="$(readlink -n "$root/$rel" | wc -c | tr -d ' ')" || { rm -f "$list" "$diff"; return 1; }
+      digest="$(readlink -n "$root/$rel" | sha256sum | cut -d' ' -f1)" || { rm -f "$list" "$diff"; return 1; }
+    elif [ -f "$root/$rel" ]; then
+      [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
+      kind=file
+      bytes="$(wc -c < "$root/$rel" | tr -d ' ')" || { rm -f "$list" "$diff"; return 1; }
+      digest="$(sha256sum "$root/$rel" | cut -d' ' -f1)" || { rm -f "$list" "$diff"; return 1; }
+    else
+      rm -f "$list" "$diff"
+      return 1
+    fi
+    printf 'path\0%s\0type\0%s\0bytes\0%s\0sha256\0%s\0' \
+      "$rel" "$kind" "$bytes" "$digest" >> "$output"
+  done < "$list"
+  rm -f "$list" "$diff"
+}
+
+source_digest() { # source_digest ROOT
+  local inventory digest
+  inventory="$(mktemp)"
+  source_inventory "$1" "$inventory" \
+    || { rm -f "$inventory"; die "could not read the complete review-visible source inventory in $1"; }
+  digest="$(sha256sum "$inventory" | cut -d' ' -f1)"
+  rm -f "$inventory"
+  printf '%s' "$digest"
+}
+
+run_test_hook() { # deterministic hostile tests; never evaluates text from an environment variable
+  local point="$1" root="$2" attempt="$3" hook="${AI_REVIEW_SANDBOX_TEST_HOOK:-}"
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "$hook" ] || return 0
+  [ -x "$hook" ] || die "test hook is not executable: $hook"
+  "$hook" "$point" "$root" "$attempt"
+}
+
 copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-ignored files
-  local src="$1" dst="$2" rel
+  local src="$1" dst="$2" rel list
+  list="$(mktemp)"
+  git -C "$src" ls-files --others --exclude-standard -z > "$list" \
+    || { rm -f "$list"; return 1; }
   # An untracked link is not self-contained: even an in-repository absolute
   # target would still point back into the live checkout after cp -P. Refuse
   # every untracked link before copying anything. Tracked links remain exactly
   # as committed and are visible in the review diff.
   while IFS= read -r -d '' rel; do
     [ -L "$src/$rel" ] || continue
+    rm -f "$list"
     die "refusing untracked link in review snapshot: $rel"
-  done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
+  done < "$list"
   while IFS= read -r -d '' rel; do
     [ -n "$rel" ] || continue
     # Evidence packets are session-owned generated state. A fresh snapshot must
     # build its own packet and must never copy another live review's packet.
     case "$rel" in .ai-review*) continue ;; esac
-    mkdir -p "$dst/$(dirname "$rel")"
-    cp -Pp "$src/$rel" "$dst/$rel" 2>/dev/null || warn "could not copy untracked file: $rel"
-  done < <(git -C "$src" ls-files --others --exclude-standard -z 2>/dev/null || true)
+    [ "${AI_DEVOPS_TEST_MODE:-0}:${AI_REVIEW_SANDBOX_TEST_FAIL_COPY:-}" != "1:$rel" ] \
+      || { rm -f "$list"; return 1; }
+    mkdir -p "$dst/$(dirname "$rel")" || { rm -f "$list"; return 1; }
+    cp -Pp "$src/$rel" "$dst/$rel" 2>/dev/null || { rm -f "$list"; return 1; }
+  done < "$list"
+  rm -f "$list"
 }
 
 validate_snapshot_links() { # validate_snapshot_links STAGE
@@ -111,43 +174,37 @@ validate_snapshot_links() { # validate_snapshot_links STAGE
   done < <(find "$stage" -path "$stage/.git" -prune -o -type l -print0 2>/dev/null)
 }
 
-create_or_refresh() { # create_or_refresh ROOT TAG STAGE
-  local root="$1" tag="$2" stage="$3" base carry
+build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
+  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry
   base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
     || die "worktree $root has no commits yet; there is nothing to snapshot."
 
-  # Reuse the snapshot only when it already holds the commit we need; otherwise
-  # rebuild it. Rebuilding is always correct and a stale snapshot never is.
-  if [ -d "$stage/.git" ] && is_managed "$stage" \
-     && git -C "$stage" cat-file -e "${base}^{commit}" 2>/dev/null; then
-    git -C "$stage" reset --hard --quiet "$base" 2>/dev/null || die "could not reset the review snapshot to $base"
-    git -C "$stage" clean -fdq 2>/dev/null || true
-  else
-    remove_sandbox "$stage"
-    mkdir -p "$(dirname "$stage")"
-    git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$stage" 2>/dev/null \
-      || die "could not create the review snapshot at $stage"
-    git -C "$stage" remote remove origin >/dev/null 2>&1 || true
-    git -C "$stage" checkout --quiet --detach "$base" 2>/dev/null \
-      || die "could not check out $base in the review snapshot"
-  fi
+  git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
+    || return 1
+  printf '%s\nsource_digest=%s\n' "$root" "$before" > "$build/$MARKER" || return 1
+  git -C "$build" remote remove origin >/dev/null 2>&1 || true
+  git -C "$build" checkout --quiet --detach "$base" 2>/dev/null || return 1
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.
   carry="$(mktemp)"
-  git -C "$root" diff HEAD --binary > "$carry" 2>/dev/null || true
+  if [ "${AI_DEVOPS_TEST_MODE:-0}:${AI_REVIEW_SANDBOX_TEST_FAIL_DIFF:-0}" = 1:1 ]; then
+    rm -f "$carry"; return 1
+  fi
+  git -C "$root" diff HEAD --binary > "$carry" 2>/dev/null \
+    || { rm -f "$carry"; return 1; }
   if [ -s "$carry" ]; then
-    git -C "$stage" apply "$carry" 2>/dev/null \
-      || { rm -f "$carry"; die "could not reproduce the worktree's uncommitted changes in the review snapshot"; }
+    git -C "$build" apply "$carry" 2>/dev/null \
+      || { rm -f "$carry"; return 1; }
   fi
   rm -f "$carry"
-  copy_untracked "$root" "$stage"
-  validate_snapshot_links "$stage"
+  copy_untracked "$root" "$build" || return 1
+  validate_snapshot_links "$build"
+  run_test_hook after-copy "$root" "$attempt"
 
-  printf '%s\n' "$root" > "$stage/$MARKER"
-  printf '%s\n' "$MARKER" >> "$stage/.git/info/exclude"
-  printf 'AI-REVIEW-SANDBOX.md\n' >> "$stage/.git/info/exclude"
-  cat > "$stage/AI-REVIEW-SANDBOX.md" <<EOF
+  printf '%s\n' "$MARKER" >> "$build/.git/info/exclude"
+  printf 'AI-REVIEW-SANDBOX.md\n' >> "$build/.git/info/exclude"
+  cat > "$build/AI-REVIEW-SANDBOX.md" <<EOF
 # Review snapshot — not the working copy
 
 This directory is a disposable, self-contained snapshot of:
@@ -165,7 +222,36 @@ the review session ends. Refer to files by their path relative to this directory
 (that path is identical in the real worktree).
 
 Snapshot tag: $tag
+Source digest: $before
 EOF
+}
+
+create_or_refresh() { # create_or_refresh ROOT TAG STAGE
+  local root="$1" tag="$2" stage="$3" lock="$3.lock" build="" before after attempt
+  mkdir -p "$SANDBOX_DIR"
+  mkdir "$lock" 2>/dev/null || die "snapshot is already being built for tag '$tag': $lock"
+  trap '[ -z "${build:-}" ] || remove_partial "$build" "$stage"; rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
+
+  for attempt in 1 2; do
+    before="$(source_digest "$root")"
+    build="$stage.building.$$.$attempt"
+    [ ! -e "$build" ] || die "partial snapshot path already exists: $build"
+    if ! build_snapshot "$root" "$tag" "$build" "$before" "$attempt"; then
+      remove_partial "$build" "$stage"; build=""
+      die "could not build a complete review snapshot; no partial evidence was published."
+    fi
+    after="$(source_digest "$root")"
+    if [ "$before" = "$after" ]; then
+      if [ -e "$stage" ]; then remove_sandbox "$stage"; fi
+      mv "$build" "$stage" || die "could not publish the complete review snapshot."
+      build=""
+      rmdir "$lock" 2>/dev/null || true
+      trap - EXIT INT TERM
+      return 0
+    fi
+    remove_partial "$build" "$stage"; build=""
+    [ "$attempt" -lt 2 ] || die "source changed during both snapshot attempts; review stopped without publishing mixed evidence."
+  done
 }
 
 cmd_ensure() {
@@ -203,6 +289,7 @@ case "${1:-}" in
   remove)      shift; cmd_remove "$@" ;;
   remove-copy) shift; cmd_remove "${1:-}" "${2:-}" 1 ;;
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
+  digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|path|remove|remove-copy|is-worktree} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac

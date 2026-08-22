@@ -175,6 +175,11 @@ check "worktree_refusal_names_the_fix"        "'$SCRIPT' build '$WT' wt 2>&1 | g
 SNAP="$("$REPO_ROOT/bin/ai-review-sandbox" ensure "$WT" packettest)"
 check "sandbox_snapshot_is_accepted"          "'$SCRIPT' build '$SNAP' wt >/dev/null"
 check "snapshot_packet_verifies"              "'$SCRIPT' verify '$SNAP/.ai-review-wt'"
+check "packet_manifest_binds_snapshot_digest" \
+  "grep -Eq 'Whole-source digest: .[0-9a-f]{64}.' '$SNAP/.ai-review-wt/MANIFEST.md'"
+echo stale-after-snapshot >> "$SNAP/a.txt"
+check "stale_snapshot_digest_is_refused"      "! '$SCRIPT' build '$SNAP' stale-snapshot >/dev/null 2>&1"
+check "stale_snapshot_packet_is_not_published" "[ ! -e '$SNAP/.ai-review-stale-snapshot' ]"
 "$REPO_ROOT/bin/ai-review-sandbox" remove "$WT" packettest
 
 # --- deletion safety ----------------------------------------------------------

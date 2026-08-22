@@ -10,7 +10,7 @@
 # code or provider sessions.
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISSUE_DIR="${AI_REVIEWER_ISSUE_DIR:-$TOOLKIT_ROOT/.ai/reviewer-issues}"
@@ -25,6 +25,7 @@ Usage:
   ai-reviewer-issue record --provider NAME --summary "title" [--details TEXT | --details-file PATH]
                            [--command TEXT] [--repo PATH] [--error-file PATH]
                            [--run-id ID] [--session-id ID] [--caller NAME]
+                           [--lifecycle-state PATH]
   ai-reviewer-issue list
   ai-reviewer-issue show <issue-id>
   ai-reviewer-issue path
@@ -68,15 +69,16 @@ latest_json(){ # latest_json DIRECTORY
   printf '%s' "$latest"
 }
 
-exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER
-  local dir="$1" run="$2" session="$3" repo="$4" head="$5" caller="$6" f match="" count=0
+exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER SOURCE_DIGEST
+  local dir="$1" run="$2" session="$3" repo="$4" head="$5" caller="$6" source_digest="$7" f match="" count=0
   { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
   [ -d "$dir" ] || return 0
   while IFS= read -r -d '' f; do
-    jq -e --arg run "$run" --arg session "$session" --arg repo "$repo" --arg head "$head" --arg caller "$caller" '
+    jq -e --arg run "$run" --arg session "$session" --arg repo "$repo" --arg head "$head" --arg caller "$caller" --arg source "$source_digest" '
       ($run=="" or (.run_id // .job_id // .id // "")==$run) and
       ($session=="" or (.session_id // .session // .name // "")==$session) and
       ((.repo // .repository_root // "")==$repo) and (.head // "")==$head and
+      ($source=="" or (.source_digest // "")==$source) and
       (.caller // "")==$caller' "$f" >/dev/null 2>&1 && { match="$f"; count=$((count + 1)); }
   done < <(find "$dir" -type f -name '*.json' -print0 2>/dev/null)
   case "$count" in
@@ -140,19 +142,20 @@ capture_exact_files(){ # capture_exact_files METADATA KIND ALLOWED_ROOT DEST INV
   done < <(jq -r "$filter | .[] | select(type==\"string\" and length>0)" "$metadata" 2>/dev/null)
 }
 
-capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER DESTINATION
-  local provider="$1" repo="$2" head="$3" run="$4" session="$5" caller="$6" dest="$7" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
+capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER SOURCE DESTINATION
+  local provider="$1" repo="$2" head="$3" run="$4" session="$5" caller="$6" source="$7" dest="$8" ledger="${AI_REVIEW_SCOREBOARD_FILE:-$STATE_BASE/review-scoreboard/reviews.jsonl}"
   { [ -n "$run" ] || [ -n "$session" ]; } && [ -n "$caller" ] || return 0
   [ -f "$ledger" ] || return 0
-  jq -s --arg provider "$provider" --arg repo "$repo" --arg head "$head" --arg run "$run" --arg session "$session" --arg caller "$caller" \
+  jq -s --arg provider "$provider" --arg repo "$repo" --arg head "$head" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg source "$source" \
     '[.[] | select(.provider==$provider and .repo==$repo and .head==$head and
       ($run=="" or (.run_id // "")==$run) and ($session=="" or (.session_id // "")==$session) and
+      ($source=="" or (.source_digest // "")==$source) and
       (.caller // "")==$caller)] | last // empty' "$ledger" > "$dest"
   [ -s "$dest" ] || rm -f "$dest"
 }
 
 record_issue(){
-  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" root now stamp host id report_dir
+  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" metadata_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -166,9 +169,20 @@ record_issue(){
       --run-id) run_id="${2:-}"; shift 2 ;;
       --session-id) session_id="${2:-}"; shift 2 ;;
       --caller) caller="${2:-}"; shift 2 ;;
+      --lifecycle-state) lifecycle_state="${2:-}"; shift 2 ;;
       *) die "unknown option '$1'." ;;
     esac
   done
+  if [ -n "$lifecycle_state" ]; then
+    [ -f "$lifecycle_state" ] && [ ! -L "$lifecycle_state" ] || die "lifecycle state not found: $lifecycle_state"
+    jq -e '.schema_version==1 and (.provider|type=="string") and (.run_id|type=="string") and (.caller|type=="string") and (.source_digest|type=="string")' "$lifecycle_state" >/dev/null 2>&1 \
+      || die "invalid lifecycle state: $lifecycle_state"
+    [ -z "$provider" ] || [ "$provider" = "$(jq -r .provider "$lifecycle_state")" ] || die "--provider conflicts with lifecycle state."
+    [ "$repo" = "$(pwd)" ] || [ "$(repo_root "$repo")" = "$(jq -r .repository_root "$lifecycle_state")" ] || die "--repo conflicts with lifecycle state."
+    provider="$(jq -r .provider "$lifecycle_state")"; repo="$(jq -r .repository_root "$lifecycle_state")"
+    run_id="$(jq -r .run_id "$lifecycle_state")"; session_id="$(jq -r '.session_id // empty' "$lifecycle_state")"
+    caller="$(jq -r .caller "$lifecycle_state")"; source_digest="$(jq -r .source_digest "$lifecycle_state")"
+  fi
   safe_provider "$provider" || die "provider must use only letters, numbers, dot, dash, or underscore."
   [ -n "$summary" ] || die "--summary is required."
   [ -z "$details" ] || [ -z "$details_file" ] || die "use --details or --details-file, not both."
@@ -191,7 +205,7 @@ record_issue(){
     remote="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
     status_short="$(git -C "$root" status --short --untracked-files=no 2>/dev/null || true)"
   fi
-  metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller")" || metadata_status=$?
+  metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller" "$source_digest")" || metadata_status=$?
   if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
     metadata_copy="$report_dir/reviewer-metadata.redacted.json"
     sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
@@ -203,7 +217,7 @@ record_issue(){
   : > "$report_dir/captured-provider-logs.txt"
   capture_exact_files "$metadata_source" report "$root" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
   capture_exact_files "$metadata_source" log "$STATE_BASE/$provider" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
-  capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$report_dir/latest-scoreboard-entry.json"
+  capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$source_digest" "$report_dir/latest-scoreboard-entry.json"
   if [ "$metadata_status" -eq 2 ]; then
     printf 'Multiple reviewer metadata records matched provider, repository, head, run/session, and caller. No evidence was captured because ownership is ambiguous.\n' > "$report_dir/missing-evidence.txt"
   elif [ -z "$metadata_source" ]; then
@@ -228,9 +242,9 @@ record_issue(){
     --arg shell "${SHELL:-unavailable}" --arg metadata_source "$metadata_source" \
     --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
     --arg details_file "$details_file" --arg details "$details" \
-    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" \
+    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" \
     '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
-      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end)},
+      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
       repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
       machine:{hostname:$host,os:$os,shell:$shell},

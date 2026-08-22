@@ -15,8 +15,8 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-21 | stage/failure and Node fixtures pass; awaits config migrator hook and live Ubuntu restore |
 | 6 | Make Windows source, secret, and configuration setup fail closed | 🟨 verifying | 2026-08-21 | source/ACL/JSON fixtures pass; awaits disposable-machine two-run proof |
 | 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | 🟨 verifying | 2026-08-21 | config/manifest/uninstall/doctor fixtures pass; awaits live archive/restore proof |
-| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-21 | local aggregate exposed/fixed two integration mismatches; awaits green workflow and post-rewrite ruleset |
-| 9 | Make shared reviewer snapshots and lifecycle fail closed | ⬜ open | — | shared hostile-copy/digest/governance tests |
+| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-21 | first workflow run exposed missing Linux execute bits; repaired; awaits green rerun and post-rewrite ruleset |
+| 9 | Make shared reviewer snapshots and lifecycle fail closed | 🟦 in progress | 2026-08-21 | all-or-nothing digest-bound snapshot and lifecycle tests pass; provider wiring continues in Step 10 |
 | 10 | Finish provider-specific reviewer repairs and qualification | ⬜ open | — | provider plan STATUS tables and bounded live evidence bundles |
 | 11 | Finish the seven-stage workflow with two supported approval paths | ⬜ open | — | end-to-end scratch-repository run and exact artifact chain |
 | 12 | Pin restore inputs and prove clean-machine reproducibility | ⬜ open | — | Windows first/second-run reports and Ubuntu disposable restore report |

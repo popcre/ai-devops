@@ -24,9 +24,12 @@ ai-reviewer-issue record --provider grok \
   --details "The reviewer completed its run but returned neither approval nor rejection. It was the first attempt; no retry has been made."
 ```
 
-When the failed wrapper exposes them, pass `--run-id`, `--session-id`, and
-`--caller`. Evidence is copied only when provider, repository, commit, and these
-join fields match exactly. Missing exact evidence is recorded in
+When the wrapper created provider-neutral lifecycle state, pass
+`--lifecycle-state <path>`; it supplies the provider, repository, source digest,
+run/session, and caller as one indivisible join. Older wrappers may pass
+`--run-id`, `--session-id`, and `--caller` directly. Evidence is copied only when
+provider, repository, commit, source digest when available, and these join
+fields match exactly. Missing exact evidence is recorded in
 `missing-evidence.txt`; the recorder never substitutes the newest nearby run.
 
 The title is only an index label. `--details` has no length limit. For longer

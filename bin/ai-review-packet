@@ -65,7 +65,8 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ONE PACKET PER SESSION, NOT ONE PER DIRECTORY.
 #
@@ -204,7 +205,7 @@ list_block() { # list_block PACKET_DIR FILENAME EMPTY_TEXT CONTENT
 }
 
 cmd_build() {
-  local root tag pkt base head base_subj head_subj base_date head_date
+  local root tag pkt base head base_subj head_subj base_date head_date source_digest_before source_digest_after marker_digest
   root="$(canon "${1:?usage: ai-review-packet build <review-dir> <tag> [options]}")"; shift
   tag="${1:?usage: ai-review-packet build <review-dir> <tag> [options]}"; shift
 
@@ -308,6 +309,14 @@ judgment, say so rather than assuming."
   else
     test_block="**No tests were run for this packet.** Treat this as unknown, not
 as a pass. If the change needs test evidence to judge, say so in your verdict."
+  fi
+
+  source_digest_before="$($SCRIPT_DIR/ai-review-sandbox digest "$root")" \
+    || { rm -rf "$pkt"; die "could not bind the packet to a complete source digest."; }
+  if [ -f "$root/.ai-review-sandbox" ]; then
+    marker_digest="$(sed -n 's/^source_digest=//p' "$root/.ai-review-sandbox")"
+    [ -n "$marker_digest" ] && [ "$marker_digest" = "$source_digest_before" ] \
+      || { rm -rf "$pkt"; die "review snapshot digest does not match its source marker; rebuild the snapshot before reviewing."; }
   fi
 
   # --- the patch -------------------------------------------------------------
@@ -425,6 +434,8 @@ spend turns reconstructing the diff by hand — it is already in \`$PATCH\`.
 | **base** | \`$base\` | $base_subj | $base_date |
 | **head** | \`$head\` | $head_subj | $head_date |
 
+Whole-source digest: \`$source_digest_before\`
+
 Base selection rule: $BASE_RULE.
 
 Your verdict applies to head \`$head\` and to no other commit. If this directory
@@ -491,6 +502,10 @@ Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
 Use BLOCKED when you could not reach a judgment; never approve by default.
 EOF
 
+  source_digest_after="$($SCRIPT_DIR/ai-review-sandbox digest "$root")" \
+    || { rm -rf "$pkt"; die "could not re-read the complete source after packet creation."; }
+  [ "$source_digest_before" = "$source_digest_after" ] \
+    || { rm -rf "$pkt"; die "source changed while the evidence packet was being built; no mixed packet was published."; }
   hash_packet "$pkt" > "$pkt/$HASHFILE"
   printf '%s' "$pkt"
 }

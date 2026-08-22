@@ -74,6 +74,8 @@ check "sandbox_git_dir_is_inside_the_boundary" \
 check "committed_worktree_content_present"    "grep -q committed-in-worktree '$STAGE/b.txt'"
 check "uncommitted_edits_reproduced"          "grep -q uncommitted '$STAGE/a.txt'"
 check "untracked_files_reproduced"            "grep -q brand-new '$STAGE/c.txt'"
+check "snapshot_records_whole_source_digest" \
+  "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$STAGE/.ai-review-sandbox'"
 
 # An untracked link must never import a file outside the repository boundary.
 if ln -s "$TMP/outside.txt" "$WT/outside-link" 2>/dev/null && [ -L "$WT/outside-link" ]; then
@@ -102,6 +104,75 @@ check "head_matches_the_worktree" \
 check "sandbox_is_labelled_for_the_reviewer"  "grep -q 'Review snapshot' '$STAGE/AI-REVIEW-SANDBOX.md'"
 check "sandbox_scaffolding_is_not_review_noise" \
   "[ -z \"\$(git -C '$STAGE' status --porcelain -- AI-REVIEW-SANDBOX.md .ai-review-sandbox)\" ]"
+# All-or-nothing hostile cases. A copy/diff failure must preserve the prior good
+# snapshot and leave no building directory behind.
+PRESERVE_STAGE="$STAGE"
+PRESERVE_HASH="$(sha256sum "$PRESERVE_STAGE/a.txt" | cut -d' ' -f1)"
+check "failed_untracked_copy_is_fatal" \
+  "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_FAIL_COPY=c.txt '$SCRIPT' ensure '$WT' reviewtag >/dev/null 2>&1; [ \$? -ne 0 ]"
+check "failed_copy_preserves_previous_snapshot" \
+  "[ '$PRESERVE_HASH' = \"\$(sha256sum '$PRESERVE_STAGE/a.txt' | cut -d' ' -f1)\" ]"
+check "failed_copy_removes_partial_snapshot" \
+  "! compgen -G '$PRESERVE_STAGE.building.*' >/dev/null"
+check "failed_diff_is_fatal_and_unpublished" \
+  "! AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_FAIL_DIFF=1 '$SCRIPT' ensure '$WT' failed-diff >/dev/null 2>&1; [ ! -e \"\$('$SCRIPT' path '$WT' failed-diff)\" ]"
+
+# A change during copy retries once and publishes only a stable second attempt.
+HOOK_ONCE="$TMP/mutate-once.sh"
+cat > "$HOOK_ONCE" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = after-copy ] || exit 0
+[ "$3" = 1 ] || exit 0
+printf 'mutation-during-copy\n' >> "$2/a.txt"
+EOF
+chmod +x "$HOOK_ONCE"
+MUTATION_STAGE="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$HOOK_ONCE" "$SCRIPT" ensure "$WT" mutation-once)"
+check "mid_copy_mutation_retries_to_stable_source" \
+  "grep -q mutation-during-copy '$MUTATION_STAGE/a.txt'"
+check "retried_snapshot_digest_matches_source" \
+  "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$MUTATION_STAGE/.ai-review-sandbox'"
+
+HOOK_ALWAYS="$TMP/mutate-always.sh"
+cat > "$HOOK_ALWAYS" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = after-copy ] || exit 0
+printf 'mutation-%s\n' "$3" >> "$2/a.txt"
+EOF
+chmod +x "$HOOK_ALWAYS"
+ALWAYS_STAGE="$($SCRIPT path "$WT" mutation-always)"
+check "two_mid_copy_mutations_fail_closed" \
+  "! AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK='$HOOK_ALWAYS' '$SCRIPT' ensure '$WT' mutation-always >/dev/null 2>&1"
+check "unstable_snapshot_is_never_published" \
+  "[ ! -e '$ALWAYS_STAGE' ] && ! compgen -G '$ALWAYS_STAGE.building.*' >/dev/null"
+
+# A disappearing untracked file is handled as a source change: the first mixed
+# copy is discarded and the stable retry reflects the now-current tree.
+echo vanishing > "$WT/vanish.txt"
+HOOK_VANISH="$TMP/vanish-once.sh"
+cat > "$HOOK_VANISH" <<'EOF'
+#!/usr/bin/env bash
+[ "$1:$3" = after-copy:1 ] || exit 0
+rm -f "$2/vanish.txt"
+EOF
+chmod +x "$HOOK_VANISH"
+VANISH_STAGE="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$HOOK_VANISH" "$SCRIPT" ensure "$WT" disappearing)"
+check "disappearing_file_never_survives_mixed_snapshot" "[ ! -e '$VANISH_STAGE/vanish.txt' ]"
+check "disappearing_file_retry_is_digest_bound" \
+  "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$VANISH_STAGE/.ai-review-sandbox'"
+
+# A duplicate owner for the same tag is rejected instead of racing publication.
+LOCK_STAGE="$($SCRIPT path "$WT" duplicate-lock)"; mkdir -p "$LOCK_STAGE.lock"
+check "duplicate_snapshot_lock_is_rejected" "! '$SCRIPT' ensure '$WT' duplicate-lock >/dev/null 2>&1"
+rmdir "$LOCK_STAGE.lock"
+
+# Keep a non-trivial path in the inventory to guard accidental newline/space or
+# path-truncation rewrites. (The production clone also enables core.longpaths.)
+LONG_REL="long directory/segment-012345678901234567890123456789/segment-abcdefghij/file with spaces.txt"
+mkdir -p "$WT/$(dirname "$LONG_REL")"; echo long-path > "$WT/$LONG_REL"
+LONG_STAGE="$($SCRIPT ensure "$WT" long-path)"
+check "long_and_spaced_path_is_copied_exactly" "grep -qx long-path '$LONG_STAGE/$LONG_REL'"
+check "long_path_snapshot_is_digest_bound" \
+  "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$LONG_STAGE/.ai-review-sandbox'"
 
 # path is pure: same answer, no side effects.
 check "path_matches_ensure"                   "[ \"\$('$SCRIPT' path '$WT' reviewtag)\" = '$STAGE' ]"

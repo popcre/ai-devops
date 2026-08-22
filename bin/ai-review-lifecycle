@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# ai-review-lifecycle — provider-neutral ownership and accounting for reviews.
+#
+# Provider adapters own only the provider call and response parsing. This tool
+# owns repository identity, source identity, assignment locks, health preflight,
+# running/terminal state, report binding, scoreboard accounting, and the exact
+# join fields used by ai-reviewer-issue.
+set -euo pipefail
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$SCRIPT_DIR/ai-review-preflight}"
+SCOREBOARD="${AI_REVIEW_SCOREBOARD_BIN:-$SCRIPT_DIR/ai-review-scoreboard}"
+DIGEST="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
+
+die(){ printf 'ai-review-lifecycle: error: %s\n' "$*" >&2; exit 1; }
+valid_provider(){ case "$1" in claude|codex|deepseek|gemini|glm|grok|kimi|muse|qwen) return 0;; *) return 1;; esac; }
+valid_id(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) [ "${#1}" -le 128 ];; esac; }
+canon(){ (cd "$1" 2>/dev/null && pwd -P) || die "directory not found: $1"; }
+sha(){ printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+
+BEGIN_LOCK=""; BEGIN_TOKEN=""
+cleanup_begin_failure(){
+  [ -n "$BEGIN_LOCK" ] && [ -d "$BEGIN_LOCK" ] || return 0
+  [ "$(cat "$BEGIN_LOCK/token" 2>/dev/null || true)" = "$BEGIN_TOKEN" ] || return 0
+  rm -f "$BEGIN_LOCK/token" "$BEGIN_LOCK/state"; rmdir "$BEGIN_LOCK" 2>/dev/null || true
+}
+
+normalize_remote(){
+  local value="$1" scheme rest host path
+  value="${value%/}"; value="${value%.git}"
+  case "$value" in
+    git@*:* ) host="${value#git@}"; host="${host%%:*}"; path="${value#*:}"; printf 'https://%s/%s' "${host,,}" "$path";;
+    ssh://git@* ) value="${value#ssh://git@}"; host="${value%%/*}"; path="${value#*/}"; printf 'https://%s/%s' "${host,,}" "$path";;
+    http://*|https://* )
+      value="$(printf '%s' "$value" | sed -E 's#^(https?://)[^/@]+@#\1#')"
+      scheme="${value%%://*}"; rest="${value#*://}"; host="${rest%%/*}"; path="${rest#*/}"
+      printf '%s://%s/%s' "$scheme" "${host,,}" "$path";;
+    /*|[A-Za-z]:[/\\]* ) printf 'file://%s' "$(canon "$value")";;
+    '' ) return 1;;
+    * ) printf '%s' "$value";;
+  esac
+}
+
+identity_json(){
+  local repo remote upstream head source dirty key
+  repo="$(canon "$1")"
+  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a Git repository: $repo"
+  head="$(git -C "$repo" rev-parse --verify HEAD^{commit} 2>/dev/null)" || die "repository has no readable HEAD."
+  remote="$(git -C "$repo" remote get-url origin 2>/dev/null || true)"
+  if [ -n "$remote" ]; then upstream="$(normalize_remote "$remote")" || die "could not normalize origin remote."
+  else upstream="local://$(sha "$repo")"; fi
+  source="$($DIGEST digest "$repo")" || die "could not compute whole-source digest."
+  dirty="$(git -C "$repo" status --porcelain=v1 -z | sha256sum | cut -d' ' -f1)" || die "could not compute working-tree status digest."
+  key="$(sha "$upstream")"
+  jq -nc --arg repo "$repo" --arg upstream "$upstream" --arg head "$head" \
+    --arg source "$source" --arg dirty "$dirty" --arg key "$key" \
+    '{schema_version:1,repository_root:$repo,normalized_upstream:$upstream,repository_key:$key,head:$head,source_digest:$source,working_tree_sha256:$dirty}'
+}
+
+atomic_json(){ # DEST JSON
+  local dest="$1" value="$2" tmp
+  mkdir -p "$(dirname "$dest")"; chmod 0700 "$STATE_DIR" "$(dirname "$dest")" 2>/dev/null || true
+  tmp="$(mktemp "$(dirname "$dest")/.lifecycle.XXXXXX")"
+  printf '%s\n' "$value" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true
+  jq -e . "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; die "refusing invalid lifecycle JSON."; }
+  mv -f "$tmp" "$dest"
+}
+
+state_checked(){
+  local state="$1" parent base
+  [ -f "$state" ] && [ ! -L "$state" ] || die "lifecycle state not found: $state"
+  parent="$(canon "$(dirname "$state")")"; base="$(canon "$STATE_DIR")"
+  case "$parent/" in "$base"/*) ;; *) die "lifecycle state is outside managed storage: $state";; esac
+  jq -e '.schema_version==1 and (.status|type=="string")' "$state" >/dev/null 2>&1 || die "invalid lifecycle state: $state"
+  printf '%s' "$state"
+}
+
+release_lock(){ # STATE
+  local state="$1" lock token
+  lock="$(jq -r .lock_path "$state")"; token="$(jq -r .lock_token "$state")"
+  [ -d "$lock" ] || return 0
+  [ "$(cat "$lock/token" 2>/dev/null || true)" = "$token" ] || die "lock ownership changed; refusing release: $lock"
+  rm -f "$lock/token" "$lock/state"; rmdir "$lock" || die "could not release lifecycle lock: $lock"
+}
+
+begin(){
+  local provider="" repo="" run="" session="" caller="" base="" mode=standard identity key lock token state now preflight_rc=0 preflight_out row
+  while [ "$#" -gt 0 ]; do case "$1" in
+    --provider) provider="${2:-}"; shift 2;; --repo) repo="${2:-}"; shift 2;;
+    --run-id) run="${2:-}"; shift 2;; --session-id) session="${2:-}"; shift 2;;
+    --caller) caller="${2:-}"; shift 2;; --base) base="${2:-}"; shift 2;;
+    --preflight) mode="${2:-}"; shift 2;; *) die "unknown begin option: $1";; esac; done
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  valid_id "$run" || die "--run-id must be a safe non-empty identifier."
+  valid_id "$caller" || die "--caller must be a safe non-empty identifier."
+  [ -z "$session" ] || valid_id "$session" || die "--session-id is invalid."
+  case "$mode" in standard|live) ;; none) [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die "preflight may be skipped only by hostile tests.";; *) die "--preflight must be standard or live.";; esac
+  identity="$(identity_json "$repo")"; repo="$(jq -r .repository_root <<<"$identity")"
+  key="$(sha "$(jq -r .normalized_upstream <<<"$identity")|$provider|$caller|$run")"
+  lock="$STATE_DIR/locks/$key.lock"; token="$$-$(date +%s)-$RANDOM"
+  state="$STATE_DIR/runs/$(jq -r .repository_key <<<"$identity")/$provider/$caller/$run.json"
+  [ ! -e "$state" ] || die "run id already has lifecycle state: $state"
+  mkdir -p "$(dirname "$lock")"; chmod 0700 "$STATE_DIR" "$(dirname "$lock")" 2>/dev/null || true
+  mkdir "$lock" 2>/dev/null || die "duplicate review assignment is already active: $lock"
+  BEGIN_LOCK="$lock"; BEGIN_TOKEN="$token"; trap cleanup_begin_failure EXIT INT TERM
+  printf '%s\n' "$token" > "$lock/token"; printf '%s\n' "$state" > "$lock/state"
+  now="$(date -u +%FT%TZ)"
+  row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" \
+    '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
+  atomic_json "$state" "$row"
+  if [ "$mode" != none ]; then
+    local -a preflight_args=(check "$provider" "$repo")
+    [ -z "$base" ] || preflight_args+=(--base "$base")
+    [ "$mode" != live ] || preflight_args+=(--live)
+    preflight_out="$(mktemp)"
+    set +e; "$PREFLIGHT" "${preflight_args[@]}" >"$preflight_out" 2>&1; preflight_rc=$?; set -e
+    if [ "$preflight_rc" -ne 0 ]; then
+      row="$(jq --arg now "$(date -u +%FT%TZ)" --arg output "$(tail -20 "$preflight_out")" --argjson rc "$preflight_rc" '.status="preflight_failed"|.preflight={exit_code:$rc,summary:$output}|.updated_at=$now|.finished_at=$now' "$state")"
+      rm -f "$preflight_out"; atomic_json "$state" "$row"; release_lock "$state"; BEGIN_LOCK=""; BEGIN_TOKEN=""; trap - EXIT INT TERM
+      die "provider preflight failed; terminal state recorded at $state"
+    fi
+    rm -f "$preflight_out"
+  fi
+  row="$(jq --arg now "$(date -u +%FT%TZ)" '.status="running"|.preflight={exit_code:0}|.updated_at=$now' "$state")"
+  atomic_json "$state" "$row"; BEGIN_LOCK=""; BEGIN_TOKEN=""; trap - EXIT INT TERM; printf '%s\n' "$state"
+}
+
+terminal(){ # finish|fail args
+  local operation="$1"; shift; local state="" verdict="" report="" elapsed="" failure="" current row report_sha="" stale=false scoreboard_rc=0 now
+  while [ "$#" -gt 0 ]; do case "$1" in
+    --state) state="${2:-}"; shift 2;; --verdict) verdict="${2:-}"; shift 2;;
+    --report) report="${2:-}"; shift 2;; --elapsed) elapsed="${2:-}"; shift 2;;
+    --failure) failure="${2:-}"; shift 2;; *) die "unknown terminal option: $1";; esac; done
+  state="$(state_checked "$state")"; [ "$(jq -r .status "$state")" = running ] || die "lifecycle is not running: $state"
+  case "$elapsed" in ''|*[!0-9]*) die "--elapsed must be a non-negative integer.";; esac
+  if [ "$operation" = finish ]; then case "$verdict" in APPROVE|REJECT|BLOCKED) ;; *) die "finish requires APPROVE, REJECT, or BLOCKED.";; esac
+  else verdict=BLOCKED; [ -n "$failure" ] || failure=provider-failed; fi
+  if [ -n "$report" ]; then [ -f "$report" ] && [ ! -L "$report" ] || die "report is not a regular file: $report"; report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; report_sha="$(sha256sum "$report"|cut -d' ' -f1)"; fi
+  current="$($DIGEST digest "$(jq -r .repository_root "$state")")" || die "could not verify source at terminal transition."
+  if [ "$current" != "$(jq -r .source_digest "$state")" ]; then stale=true; verdict=BLOCKED; failure=stale-source; fi
+  now="$(date -u +%FT%TZ)"
+  row="$(jq --arg status "$([ "$operation" = finish ] && printf completed || printf failed)" --arg verdict "$verdict" --arg failure "$failure" --arg report "$report" --arg report_sha "$report_sha" --arg now "$now" --argjson elapsed "$elapsed" --argjson stale "$stale" \
+    '.status=$status|.verdict=$verdict|.failure_class=(if $failure=="" then null else $failure end)|.report_path=(if $report=="" then null else $report end)|.report_sha256=(if $report_sha=="" then null else $report_sha end)|.elapsed_seconds=$elapsed|.stale=$stale|.updated_at=$now|.finished_at=$now|.tree_sha256=.source_digest' "$state")"
+  atomic_json "$state" "$row"
+  set +e; "$SCOREBOARD" append "$(jq -r .provider "$state")" "$state" --elapsed "$elapsed" --verdict "$verdict" --failure "$failure" --stale "$stale" >/dev/null; scoreboard_rc=$?; set -e
+  if [ "$scoreboard_rc" -ne 0 ]; then
+    row="$(jq --arg now "$(date -u +%FT%TZ)" '.status="accounting_failed"|.updated_at=$now' "$state")"; atomic_json "$state" "$row"
+    die "terminal result was preserved but scoreboard accounting failed; lock retained: $state"
+  fi
+  release_lock "$state"; jq . "$state"
+}
+
+join(){
+  local state; state="$(state_checked "${1:-}")"
+  jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class}' "$state"
+}
+
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
+
+case "${1:-}" in
+  identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;
+  begin) shift; begin "$@";; finish) shift; terminal finish "$@";; fail) shift; terminal fail "$@";;
+  join) shift; [ "$#" -eq 1 ] || die "join requires one state file."; join "$1";;
+  --version) printf 'ai-review-lifecycle %s\n' "$VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;;
+esac

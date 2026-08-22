@@ -113,10 +113,14 @@ Every active reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex, and
 DeepSeek—is registered with preflight and the scoreboard. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
-each relative file name, byte length, and digest. Snapshots refuse untracked
-links that resolve outside the source repository. Incident reports copy only
-evidence joined to the exact provider, repository, commit, run/session, and
-caller.
+each relative file name, byte length, and digest. `ai-review-sandbox` publishes
+only after the committed tree, tracked binary diff, and NUL-safe untracked-file
+inventory produce the same whole-source digest before and after the copy.
+`ai-review-lifecycle` owns normalized upstream identity, one assignment lock,
+preflight, running/terminal state, stale-source rejection, report hashing, and
+scoreboard append. Provider adapters own only their provider call and response
+parsing. Incident reports consume that lifecycle state so copied evidence joins
+the exact provider, repository, commit, source digest, run/session, and caller.
 
 - Pure Bash + coreutils + `git`, `jq`, `rg`, `gh`, and the `claude`/`codex` CLIs.
 - No network services, no database, no containers.
