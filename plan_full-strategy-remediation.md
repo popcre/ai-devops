@@ -8,12 +8,12 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | Step | Work | Status | Date | Evidence / restart point |
 |---|---|---|---|---|
 | 0 | Publish this plan, the corrected audit record, and the linked handoff | ✅ complete | 2026-08-21 | Commit `0b495562453909bd6da6b64ee845e6d3e4987892` on `origin/main`; issue #62 comment links the immutable plan |
-| 1 | Contain and preserve the live four-machine memory incident | 🟨 verifying | 2026-08-21 | all writers contained; awaiting the second full former schedule interval with no new public-memory commit |
+| 1 | Contain and preserve the live four-machine memory incident | ✅ complete | 2026-08-21 | two full former 30-minute intervals elapsed after `c972622` with no new public-memory commit |
 | 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-21 | private head `2765c34192a74a4a106998ef5f9d7f792bcf7263`; coverage health zero findings; DesignFlow aliases deduplicated |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ✅ complete | 2026-08-21 | behavioral fixtures pass; live private sync and public-target rejection proven; schedules remain disabled |
 | 4 | Correct stale database/transcript/audit instructions | ✅ complete | 2026-08-21 | private stale facts tombstoned; canonical destination guard and hostile fixtures pass |
 | 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-21 | stage/failure and Node fixtures pass; awaits config migrator hook and live Ubuntu restore |
-| 6 | Make Windows source, secret, and configuration setup fail closed | ⬜ open | — | Windows fixture suite plus disposable-machine idempotency evidence |
+| 6 | Make Windows source, secret, and configuration setup fail closed | 🟨 verifying | 2026-08-21 | source/ACL/JSON fixtures pass; awaits disposable-machine two-run proof |
 | 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | ⬜ open | — | config/uninstall/doctor suites and rollback artifact |
 | 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | ⬜ open | — | `.github/workflows/verify.yml`, successful run ID, and ruleset JSON |
 | 9 | Make shared reviewer snapshots and lifecycle fail closed | ⬜ open | — | shared hostile-copy/digest/governance tests |

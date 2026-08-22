@@ -1,5 +1,6 @@
 <# 
-Install or update Albert's AI DevOps toolkit on a Windows computer.
+Internal/advanced skill installer for Albert's AI DevOps toolkit on Windows.
+The public restore entry point is bin\bootstrap-windows-dev.ps1.
 
 What this does:
 - Clones https://github.com/u2giants/ai-devops.git if missing.
@@ -11,14 +12,14 @@ What this does:
 Run in PowerShell:
   powershell -ExecutionPolicy Bypass -File .\bin\install-ai-devops-windows.ps1
 
-Or remote one-liner:
-  if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+For complete setup, run:
+  pwsh -NoProfile -File C:\repos\ai-devops\bin\bootstrap-windows-dev.ps1
 #>
 
 [CmdletBinding()]
 param(
     [string]$RepoUrl = "https://github.com/u2giants/ai-devops.git",
-    [string]$InstallRoot = "$HOME\repos",
+    [string]$InstallRoot = "C:\repos",
     [string]$RepoPath = "",
     [switch]$SkipGitInstall,
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
@@ -28,6 +29,7 @@ param(
     # switch a differing global is reported and left alone. The old file is
     # copied to <client>\globals-backup\ first.
     [switch]$AdoptGlobals,
+    [switch]$SourceGateOnly,
     # Deprecated: retiring skills is now automatic and needs no flag.
     # Accepted so older docs and scripts keep working.
     [switch]$MigrateObsolete
@@ -44,6 +46,43 @@ function Write-Step {
 function Write-Note {
     param([string]$Message)
     Write-Host "    $Message"
+}
+
+function Get-CanonicalRemote([string]$Url) {
+    return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
+        '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
+}
+
+function Assert-ReadyRepository([string]$Path) {
+    $dirty = git -C $Path status --porcelain
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the ai-devops checkout.' }
+    if ($dirty) { throw 'The ai-devops checkout is dirty; refusing to install from mixed source.' }
+    $origin = git -C $Path remote get-url origin
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops origin.' }
+    $expectedIdentity = 'github.com/u2giants/ai-devops'
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) {
+        $expectedIdentity = Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+    }
+    if ((Get-CanonicalRemote $origin) -ne $expectedIdentity) { throw "Noncanonical ai-devops origin: $origin" }
+    $branch = git -C $Path branch --show-current
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops branch.' }
+    if ($branch.Trim() -ne 'main') { throw "ai-devops must be on main; found '$branch'." }
+    git -C $Path fetch origin main
+    if ($LASTEXITCODE -ne 0) { throw 'Fetching ai-devops origin/main failed.' }
+    $head = git -C $Path rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops HEAD.' }
+    $remoteHead = git -C $Path rev-parse origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
+    if ($head.Trim() -ne $remoteHead.Trim()) {
+        $counts = git -C $Path rev-list --left-right --count HEAD...origin/main
+        if ($LASTEXITCODE -ne 0) { throw 'Could not compare ai-devops source state.' }
+        $parts = @($counts -split '\s+') | Where-Object { $_ }
+        if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from origin/main.' }
+        git -C $Path merge --ff-only origin/main
+        if ($LASTEXITCODE -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        $head = git -C $Path rev-parse HEAD
+        if ($LASTEXITCODE -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
+    }
 }
 
 function Ensure-Directory {
@@ -424,16 +463,22 @@ if ($SkillsDryRun) {
     Ensure-Directory (Split-Path -Parent $RepoPath)
 
     if (Test-Path -LiteralPath (Join-Path $RepoPath ".git")) {
-        Write-Note "Repo exists; pulling latest main from GitHub."
-        git -C $RepoPath fetch origin
-        git -C $RepoPath checkout main
-        git -C $RepoPath pull --ff-only origin main
+        Write-Note "Repo exists; proving canonical clean main and fast-forwarding only."
+        Assert-ReadyRepository $RepoPath
     } elseif (Test-Path -LiteralPath $RepoPath) {
         throw "$RepoPath exists but is not a git repo. Move it aside or pass -RepoPath to a different folder."
     } else {
         Write-Note "Repo missing; cloning from $RepoUrl."
-        git clone $RepoUrl $RepoPath
+        if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') { throw "Noncanonical RepoUrl: $RepoUrl" }
+        git clone --branch main --single-branch $RepoUrl $RepoPath
+        if ($LASTEXITCODE -ne 0) { throw 'Cloning ai-devops failed.' }
+        Assert-ReadyRepository $RepoPath
     }
+}
+
+if ($SourceGateOnly) {
+    Write-Note 'Source gate passed; no skill or global files were changed.'
+    return
 }
 
 Assert-NoSharedSkillCollisions -Root $RepoPath

@@ -120,7 +120,7 @@ if ([string]::IsNullOrWhiteSpace($RepoPath)) {
   if (Test-Path -LiteralPath (Join-Path $selfRepo "config\mcp.env.example")) {
     $RepoPath = $selfRepo
   } else {
-    $RepoPath = Join-Path $env:USERPROFILE "repos\ai-devops"
+    $RepoPath = "C:\repos\ai-devops"
   }
 }
 
@@ -143,6 +143,12 @@ $McpEnv    = Join-Path $CfgDir "mcp.env"
 $Launcher  = Join-Path $CfgDir "mcp-launch.cmd"
 $RemoteLauncher = Join-Path $CfgDir "mcp-remote-launch.cmd"
 $SecretLauncher = Join-Path $RepoPath "bin\mcp-secret-launch.ps1"
+$privateFileHelper = Join-Path $RepoPath "bin\windows-private-file.ps1"
+if (-not (Test-Path -LiteralPath $privateFileHelper)) { throw "Missing private-file helper: $privateFileHelper" }
+. $privateFileHelper
+$jsonFileHelper = Join-Path $RepoPath "bin\windows-json-file.ps1"
+if (-not (Test-Path -LiteralPath $jsonFileHelper)) { throw "Missing JSON-file helper: $jsonFileHelper" }
+. $jsonFileHelper
 
 # --------------------------------------------------------------------------
 # 1. Base tools: git, op, node/npx
@@ -257,13 +263,12 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
 }
 if ([string]::IsNullOrWhiteSpace($Token)) { throw "No token provided." }
 
-# Write the token file and lock its ACL to the current user only.
-Set-Content -Path $TokenFile -Value $Token.Trim() -NoNewline -Encoding ascii
-try {
-  icacls $TokenFile /inheritance:r | Out-Null
-  icacls $TokenFile /grant:r "$($env:USERNAME):(R,W)" | Out-Null
-  Ok "Token stored (user-only ACL) at $TokenFile"
-} catch { Warn "Stored token but could not tighten ACL: $_" }
+# Stage under a user/SYSTEM-only directory, verify the effective ACL, and only
+# then atomically publish. ACL failure leaves the existing token byte-identical.
+$tokenBytes = [Text.Encoding]::ASCII.GetBytes($Token.Trim())
+$tokenBackup = Set-AiDevOpsPrivateFileAtomic -Path $TokenFile -Bytes $tokenBytes
+Ok "Token stored with verified private ACL at $TokenFile"
+if ($tokenBackup) { Note "Previous protected token retained at $tokenBackup" }
 
 $env:OP_SERVICE_ACCOUNT_TOKEN = $Token.Trim()
 $who = (op whoami 2>$null | Out-String)
@@ -471,16 +476,13 @@ if ($LASTEXITCODE -eq 0 -and $priv) {
   # op read returns lines as an array; rejoin with LF and guarantee trailing LF.
   $privText = (($priv -join "`n") -replace "`r`n", "`n")
   if (-not $privText.EndsWith("`n")) { $privText += "`n" }
-  [System.IO.File]::WriteAllText($keyPath, $privText)
-  try {
-    icacls $keyPath /inheritance:r | Out-Null
-    icacls $keyPath /grant:r "$($env:USERNAME):(R,W)" | Out-Null
-  } catch { Warn "Wrote key but could not tighten ACL: $_" }
+  $keyBackup = Set-AiDevOpsPrivateFileAtomic -Path $keyPath -Bytes ([Text.Encoding]::UTF8.GetBytes($privText))
   $pub = & op read $pubRef 2>$null
   if ($LASTEXITCODE -eq 0 -and $pub) {
     [System.IO.File]::WriteAllText("$keyPath.pub", ((($pub -join " ").Trim()) + "`n"))
   }
-  Ok "Restored $keyPath (+ .pub), user-only ACL"
+  Ok "Restored $keyPath (+ .pub), verified private ACL"
+  if ($keyBackup) { Note "Previous protected key retained at $keyBackup" }
 } else {
   Warn "Could not read '$privRef' from 1Password - skipping SSH key restore."
   Warn "  (Item missing, or the service-account token lacks access. Not fatal.)"
@@ -553,22 +555,18 @@ if ($SkipDesktopMcp) {
     Warn "Expected (MSIX): $msix"
   } else {
     New-Item -ItemType Directory -Force -Path (Split-Path $cfgPath) | Out-Null
-    $cfg = @{}
-    if (Test-Path $cfgPath) {
-      Copy-Item $cfgPath "$cfgPath.aidevops.bak" -Force
-      try { $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json -AsHashtable } catch { $cfg = @{} }
+    $desktopResult = Update-AiDevOpsJsonFileAtomic -Path $cfgPath -Depth 12 -Update {
+      param($cfg)
+      if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
+      foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
+      $null = $cfg["mcpServers"].Remove("vercel")
+      return $cfg
     }
-    if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-
-    # Merge the ONE server set defined in step 5d. Servers already present that we
-    # do not define (Windows-MCP extension entries, anything hand-added) are left
-    # untouched - this only ever adds or refreshes our own.
-    foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
-    # Remove the formerly managed Vercel bridge so upgrades stop its recurring
-    # browser-authentication loop. Preserve every unrelated/hand-added server.
-    $null = $cfg["mcpServers"].Remove("vercel")
-    ($cfg | ConvertTo-Json -Depth 12) | Set-Content -Path $cfgPath -Encoding utf8
-    Ok "Updated $cfgPath (backup: $cfgPath.aidevops.bak)"
+    Ok "Updated $cfgPath atomically"
+    if ($desktopResult.Backup) {
+      Ok "  protected prior JSON: $($desktopResult.Backup)"
+      Note "  recovery: Copy-Item -LiteralPath '$($desktopResult.Backup)' -Destination '$cfgPath' -Force"
+    }
     Ok "Wired token-free: $McpServerList - no tokens in the file"
     Warn "KNOWN FAULT (seen 2026-08-20): the app itself rewrites this file and"
     Warn "  DELETES the whole mcpServers block - every other key survives, no error,"
@@ -688,47 +686,46 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
 # Claude Desktop only).
 Step "Token-free MCP for Claude Code (~/.claude.json)"
 $ccConfig = Join-Path $HOME ".claude.json"
-$cc = @{}
-if (Test-Path $ccConfig) {
-  Copy-Item $ccConfig "$ccConfig.aidevops.bak" -Force
-  try { $cc = Get-Content $ccConfig -Raw | ConvertFrom-Json -AsHashtable } catch {
-    Warn "$ccConfig is not valid JSON; leaving it alone. Fix or delete it and re-run."
-    $cc = $null
-  }
-} else {
+if (-not (Test-Path $ccConfig)) {
   Note "No ~/.claude.json yet - creating one."
 }
-if ($null -ne $cc) {
+$ccResult = Update-AiDevOpsJsonFileAtomic -Path $ccConfig -Depth 12 -Update {
+  param($cc)
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
   foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
   $null = $cc["mcpServers"].Remove("vercel")
-  ($cc | ConvertTo-Json -Depth 12) | Set-Content -Path $ccConfig -Encoding utf8
-  Ok "Claude Code wired token-free: $McpServerList"
+  return $cc
+}
+Ok "Claude Code wired token-free: $McpServerList"
+if ($ccResult.Backup) {
+  Ok "  protected prior JSON: $($ccResult.Backup)"
+  Note "  recovery: Copy-Item -LiteralPath '$($ccResult.Backup)' -Destination '$ccConfig' -Force"
+}
 
-  # Strip the stale copy out of settings.json. Leaving it behind is worse than
+# Strip the stale copy out of settings.json. Leaving it behind is worse than
   # useless - a plainly-present block in a plainly-ignored file is exactly what
   # made this undiagnosable. Only the keys we own are removed; permissions,
   # hooks, theme, plugins and foreign servers stay exactly as found.
   $ccSettings = Join-Path $HOME ".claude\settings.json"
   if (Test-Path $ccSettings) {
-    try {
-      $legacy = Get-Content $ccSettings -Raw | ConvertFrom-Json -AsHashtable
+    $removed = @()
+    $legacyResult = Update-AiDevOpsJsonFileAtomic -Path $ccSettings -Depth 12 -Update {
+      param($legacy)
       if ($legacy.ContainsKey("mcpServers")) {
-        $removed = @($McpServers.Keys | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
-        if ($removed.Count -gt 0) {
-          Copy-Item $ccSettings "$ccSettings.aidevops.mcpclean.bak" -Force
-          foreach ($name in $removed) { $legacy["mcpServers"].Remove($name) }
-          if ($legacy["mcpServers"].Count -eq 0) { $legacy.Remove("mcpServers") }
-          ($legacy | ConvertTo-Json -Depth 12) | Set-Content -Path $ccSettings -Encoding utf8
-          Ok "Removed the stale (ignored) MCP block from settings.json: $($removed -join ', ')"
-          Ok "  backup: $ccSettings.aidevops.mcpclean.bak"
-        }
+        $script:removed = @($McpServers.Keys | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
+        foreach ($name in $script:removed) { $legacy["mcpServers"].Remove($name) }
+        if ($legacy["mcpServers"].Count -eq 0) { $legacy.Remove("mcpServers") }
       }
-    } catch {
-      Warn "$ccSettings is not valid JSON; left untouched (stale MCP block may remain)."
+      return $legacy
+    }
+    if ($removed.Count -gt 0) {
+      Ok "Removed the stale (ignored) MCP block from settings.json: $($removed -join ', ')"
+      if ($legacyResult.Backup) {
+        Ok "  protected prior JSON: $($legacyResult.Backup)"
+        Note "  recovery: Copy-Item -LiteralPath '$($legacyResult.Backup)' -Destination '$ccSettings' -Force"
+      }
     }
   }
-}
 
 # --------------------------------------------------------------------------
 # 8. Memory auto-sync - keep Claude memories in sync across machines

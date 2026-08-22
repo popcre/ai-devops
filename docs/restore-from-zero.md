@@ -6,17 +6,18 @@ from 1Password vault `vibe_coding`; secret values never belong in Git.
 
 ## Windows 11
 
-1. Install Git and PowerShell 7 if they are absent.
-2. Clone `https://github.com/u2giants/ai-devops.git` to `C:\repos\ai-devops`.
-3. Run this in PowerShell 7:
+1. Save `bootstrap-windows-dev.ps1` from this repository to a local file.
+2. Run it from an elevated-capable PowerShell session; it installs Git when
+   needed and owns the canonical `C:\repos\ai-devops` clone:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File C:\repos\ai-devops\bin\setup-machine.ps1 -RepoPath C:\repos\ai-devops
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-windows-dev.ps1 -RepoPath C:\repos\ai-devops
 ```
 
-The script installs skills, restores protected SSH and MCP wiring from
+The bootstrap proves the source is clean canonical `main` exactly equal to
+`origin/main` before any machine change. It then installs skills, restores protected SSH and MCP wiring from
 1Password, fixes the Codex executable path, and registers background memory
-sync. If the protected service-account token file is absent, supply the token
+sync (the schedule stays disabled until explicitly qualified). If the protected service-account token file is absent, supply the token
 once from the `vibe_coding` vault. Do not paste it into a repo file.
 
 Verify with the script's final checks and a real `codex exec` sandbox write.

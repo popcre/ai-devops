@@ -17,8 +17,8 @@ changes. Therefore use normal mode on a new/disposable machine, but use
 gates pass. The bootstrap may change anything listed under "Owned state"; it
 does not preserve working but noncompliant owned settings.
 
-The professional Windows setup entry point is `bin/bootstrap-windows-dev.ps1`.
-It updates the private `u2giants/ai-devops` checkout, applies the declarative
+The only public Windows setup entry point is `bin/bootstrap-windows-dev.ps1`.
+It updates the public `u2giants/ai-devops` checkout, applies the declarative
 `.config/configuration.winget` file, and then calls `bin/setup-machine.ps1` for
 Albert-specific configuration.
 
@@ -83,10 +83,9 @@ From PowerShell in an existing checkout (the script self-elevates):
 pwsh -NoProfile -File .\bin\bootstrap-windows-dev.ps1
 ```
 
-On a fresh machine, authenticate GitHub first because this is a private repo,
-download the bootstrap script, and run it. It installs Git if necessary and
-clones the repo to `%USERPROFILE%\repos\ai-devops` by default. Use `-RepoPath`
-to select another location.
+On a fresh machine, download the bootstrap script and run it. It installs Git
+if necessary and clones the repo to `C:\repos\ai-devops`. `-RepoPath` is an
+advanced override; every documented recovery path uses the canonical location.
 
 Use the read-only modes before rollout:
 
@@ -96,8 +95,9 @@ pwsh -NoProfile -File .\bin\verify-windows-dev.ps1
 pwsh -NoProfile -File .\tests\windows-winget-config.tests.ps1
 ```
 
-`-TestOnly` validates the file and asks WinGet/DSC to test desired state; it
-does not clone, pull, install, or configure. The standalone verification command
+`-TestOnly` fetches and proves the checkout is clean canonical `main` exactly
+equal to `origin/main`, then asks WinGet/DSC to test desired state; it does not
+clone, merge, install, or configure. The standalone verification command
 writes a non-secret JSON report under `%TEMP%` by default. The structural test
 never invokes WinGet and is safe in CI or on a development computer.
 
@@ -148,7 +148,7 @@ continues idempotently. Ubuntu is probed and configured as root for the Ansible
 controller, avoiding a separate first-run username prompt for automation. The
 automation must never manufacture, print, or commit credentials.
 
-Internal scripts exist for separation and testing, but the user runs only
+Internal/advanced component scripts exist for separation and testing, but the user runs only
 `bootstrap-windows-dev.ps1`. `-SkipRemoteAccess`, `-SkipAnsibleController`, and
 `-SkipMachineSetup` are troubleshooting/advanced flags, not normal setup steps.
 

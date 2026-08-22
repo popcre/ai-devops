@@ -5,9 +5,9 @@ delegates secret-backed machine configuration to setup-machine.ps1.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-  [string]$RepoPath = (Join-Path $HOME 'repos\ai-devops'),
+  [string]$RepoPath = 'C:\repos\ai-devops',
   [string]$RepoUrl = 'https://github.com/u2giants/ai-devops.git',
-  [string]$AnsibleRepoPath = (Join-Path $HOME 'repos\ansible'),
+  [string]$AnsibleRepoPath = 'C:\repos\ansible',
   [string]$AnsibleRepoUrl = 'https://github.com/u2giants/ansible.git',
   [switch]$SkipMachineSetup,
   [switch]$SkipRemoteAccess,
@@ -23,6 +23,47 @@ function Add-Result([string]$Stage, [string]$Status, [string]$Detail) {
 function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
     [Environment]::GetEnvironmentVariable('Path','User')
+}
+function Get-CanonicalRemote([string]$Url) {
+  return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
+      '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
+}
+function Assert-ReadyRepository([string]$Path) {
+  $dirty = git -C $Path status --porcelain
+  if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing ai-devops checkout.' }
+  if ($dirty) { throw 'The ai-devops checkout has local changes. Preserve or commit them before bootstrap.' }
+
+  $origin = git -C $Path remote get-url origin
+  if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops origin remote.' }
+  if ((Get-CanonicalRemote $origin) -ne 'github.com/u2giants/ai-devops') {
+    throw "The ai-devops origin is not canonical: $origin"
+  }
+
+  $branch = git -C $Path branch --show-current
+  if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops branch.' }
+  if ($branch.Trim() -ne 'main') { throw "The ai-devops checkout must already be on main; found '$branch'." }
+
+  git -C $Path fetch origin main
+  if ($LASTEXITCODE -ne 0) { throw 'The ai-devops fetch of origin/main failed.' }
+  $head = git -C $Path rev-parse HEAD
+  if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the ai-devops HEAD.' }
+  $remoteHead = git -C $Path rev-parse origin/main
+  if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
+  if ($head.Trim() -ne $remoteHead.Trim()) {
+    if ($TestOnly) { throw 'The ai-devops checkout is not exactly equal to origin/main; TestOnly will not update it.' }
+    $counts = git -C $Path rev-list --left-right --count HEAD...origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'Could not compare ai-devops with origin/main.' }
+    $parts = @($counts -split '\s+') | Where-Object { $_ }
+    if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) {
+      throw 'The ai-devops checkout is ahead of or diverged from origin/main; refusing machine changes.'
+    }
+    git -C $Path merge --ff-only origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'The ai-devops fast-forward update failed.' }
+    $head = git -C $Path rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve updated ai-devops HEAD.' }
+    if ($head.Trim() -ne $remoteHead.Trim()) { throw 'The updated checkout is not exactly equal to origin/main.' }
+  }
+  return $head.Trim()
 }
 
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -54,22 +95,19 @@ try {
   }
 
   if (Test-Path (Join-Path $RepoPath '.git')) {
-    $dirty = git -C $RepoPath status --porcelain
-    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing ai-devops checkout.' }
-    if ($dirty) {
-      Add-Result 'Repository' 'PRESERVED' 'Local changes exist; skipped pull.'
-    } elseif (-not $TestOnly) {
-      git -C $RepoPath pull --ff-only
-      if ($LASTEXITCODE -ne 0) { throw 'The ai-devops fast-forward pull failed.' }
-      Add-Result 'Repository' 'OK' 'Updated from GitHub with fast-forward only.'
-    } else { Add-Result 'Repository' 'OK' 'Checkout present; TestOnly skipped pull.' }
+    $sourceSha = Assert-ReadyRepository $RepoPath
+    Add-Result 'Repository' 'OK' "Canonical clean main equals origin/main at $sourceSha."
   } elseif ($TestOnly) {
     throw "Repository is absent at $RepoPath; TestOnly never clones."
   } else {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $RepoPath) | Out-Null
-    git clone $RepoUrl $RepoPath
+    if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') {
+      throw "RepoUrl is not the canonical ai-devops repository: $RepoUrl"
+    }
+    git clone --branch main --single-branch $RepoUrl $RepoPath
     if ($LASTEXITCODE -ne 0) { throw 'Clone failed. Authenticate GitHub first because this repository is private.' }
-    Add-Result 'Repository' 'OK' 'Cloned from GitHub.'
+    $sourceSha = Assert-ReadyRepository $RepoPath
+    Add-Result 'Repository' 'OK' "Cloned canonical main at $sourceSha."
   }
 
   $configuration = Join-Path $RepoPath '.config\configuration.winget'

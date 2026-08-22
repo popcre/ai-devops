@@ -64,7 +64,17 @@ function Invoke-Installer {
         MigrateObsolete = [bool]$MigrateObsolete
         AdoptGlobals = [bool]$AdoptGlobals
     }
-    return (& $Installer @parameters *>&1 | Out-String)
+    $oldMode = $env:AI_DEVOPS_INSTALL_TEST_MODE
+    $oldRemote = $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+    try {
+        $env:AI_DEVOPS_INSTALL_TEST_MODE = '1'
+        $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = (git -C $Fixture remote get-url origin)
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read fixture remote.' }
+        return (& $Installer @parameters *>&1 | Out-String)
+    } finally {
+        $env:AI_DEVOPS_INSTALL_TEST_MODE = $oldMode
+        $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = $oldRemote
+    }
 }
 
 try {
@@ -126,6 +136,9 @@ try {
     $fixture = New-Fixture "migrate"
     New-Item -ItemType Directory -Path (Join-Path $fixture "config") -Force | Out-Null
     "synology-sharesync-stuck-triage" | Set-Content -LiteralPath (Join-Path $fixture "config\retired-skills.txt")
+    git -C $fixture add config/retired-skills.txt
+    git -C $fixture commit -m "add retired skill fixture" | Out-Null
+    git -C $fixture push | Out-Null
     $claude = Join-Path $TempRoot "migrate\claude"
     $codex = Join-Path $TempRoot "migrate\codex"
     New-TestSkill $claude "" "synology-sharesync-stuck-triage"
@@ -166,6 +179,9 @@ try {
     # locally extended: a file the repo does not ship survives an update.
     "local note" | Set-Content -LiteralPath (Join-Path $installed "LOCAL-NOTES.md")
     @("---", "name: client-claude", "description: test v2", "---") | Set-Content -LiteralPath $skill
+    git -C $fixture add skills/claude/client-claude/SKILL.md
+    git -C $fixture commit -m "update fixture to v2" | Out-Null
+    git -C $fixture push | Out-Null
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True ($output -match "~ client-claude \(Claude\) update") "source change not classified as update"
     Assert-True (Test-Path -LiteralPath (Join-Path $installed "LOCAL-NOTES.md")) "local extension deleted by update"
@@ -175,6 +191,9 @@ try {
     # locally conflicting: an edited installed file is backed up first.
     Add-Content -LiteralPath (Join-Path $installed "SKILL.md") -Value "hand edited"
     @("---", "name: client-claude", "description: test v3", "---") | Set-Content -LiteralPath $skill
+    git -C $fixture add skills/claude/client-claude/SKILL.md
+    git -C $fixture commit -m "update fixture to v3" | Out-Null
+    git -C $fixture push | Out-Null
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True ($output -match "LOCAL EDITS") "local edit not detected"
     Assert-True ((((Get-Content -LiteralPath (Join-Path $claude "skills-backup\client-claude\SKILL.md")) -join "`n") -match "hand edited")) `

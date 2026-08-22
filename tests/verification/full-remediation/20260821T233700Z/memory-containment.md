@@ -25,6 +25,10 @@ The former public-memory sequence ended with:
 2. `aff60860bef074b4269145aa6534d915ce83b757` - `hetz`
 3. `c97262261e9cfc46745c31bc77c98d0af4b2713c` - `edge-dev`
 
+At `2026-08-21T20:31:15-04:00`, a fresh `origin/main` fetch showed no later
+memory-sync commit. That is 60 minutes 13 seconds after the last former writer,
+proving two full former 30-minute schedule intervals remained contained.
+
 No memory file was deleted during capture. Protected source copies are outside
 the public checkout with inheritance removed and access restricted to the owner
 and Windows SYSTEM.
@@ -37,8 +41,8 @@ and Windows SYSTEM.
 - Credential-reference remediation: one SSH-passphrase memory was tombstoned and
   removed without opening or displaying its contents. The protected incident
   sources remain the recovery copy pending the coordinated public-history purge.
-- Current private head: `8419afe80accff2646508322cfda33c352d251ae`
-- Coverage health: 25 non-empty projects, 467 facts, zero missing indexes, zero
+- Current private head: `2765c34192a74a4a106998ef5f9d7f792bcf7263`
+- Coverage health: 24 non-empty projects, 420 facts, zero missing indexes, zero
   missing index entries, zero broken index targets
 - Empty but required indexes exist for `directus`, `plane`, and `twenty`.
 
@@ -54,5 +58,5 @@ and Windows SYSTEM.
 - `tests/test-memory-sync-scheduled-task.ps1`: schedule requires explicit opt-in,
   reports the real child exit status, prevents overlap, and remains disabled by
   default.
-- Live `albt16` private sync pushed `8419afe` and the exact private head passed
+- Live `albt16` private sync pushed the private hub and the exact head passed
   `ai-memory-health --hub-only --coverage-only` with zero findings.
