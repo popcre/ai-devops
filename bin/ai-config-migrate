@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Merge safe schema defaults into machine config without replacing user values.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_DIR="${AI_DEVOPS_ETC:-/etc/ai-devops}"
+DRY_RUN=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo-root) REPO_ROOT="$2"; shift 2 ;;
+    --config-dir) CONFIG_DIR="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) echo 'usage: ai-config-migrate [--repo-root DIR] [--config-dir DIR] [--dry-run]'; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+schema="$REPO_ROOT/config/config-schema.json"
+command -v jq >/dev/null 2>&1 || { echo 'CONFIG FAIL: jq is required' >&2; exit 1; }
+jq -e '.version >= 1 and (.files|type=="object")' "$schema" >/dev/null || {
+  echo 'CONFIG FAIL: invalid config schema' >&2; exit 1; }
+version="$(jq -r '.version' "$schema")"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_root="$CONFIG_DIR/backups/schema-$version-$stamp"
+changed=0
+
+validate_file() {
+  local path="$1" allow_missing="${2:-0}" schema_file="${3:-$(basename "$1")}" key count raw
+  if grep -Ev '^[[:space:]]*(#|$|[A-Z][A-Z0-9_]*=)' "$path" | grep -q .; then
+    echo "CONFIG FAIL: unsupported line in $path" >&2; return 1
+  fi
+  while IFS= read -r key; do
+    key="${key%$'\r'}"
+    count="$(grep -Ec "^${key}=" "$path")"
+    if [ "$count" -eq 0 ] && [ "$allow_missing" -eq 1 ]; then continue; fi
+    [ "$count" -eq 1 ] || { echo "CONFIG FAIL: $key occurs $count times in $path" >&2; return 1; }
+    raw="$(grep -E "^${key}=" "$path" | cut -d= -f2-)"
+    [ -n "$raw" ] || { echo "CONFIG FAIL: $key is empty in $path" >&2; return 1; }
+  done < <(jq -r --arg file "$schema_file" '.files[$file].required[]' "$schema")
+  while IFS= read -r key; do
+    key="${key%$'\r'}"
+    grep -qE "^${key}=" "$path" || continue
+    raw="$(grep -E "^${key}=" "$path" | cut -d= -f2-)"
+    bash -n -c "${key}=${raw}" 2>/dev/null || {
+      echo "CONFIG FAIL: $key has invalid shell syntax in $path" >&2; return 1; }
+  done < <(jq -r --arg file "$schema_file" '.files[$file].command_keys[]' "$schema")
+}
+
+while IFS= read -r file; do
+  file="${file%$'\r'}"
+  path="$CONFIG_DIR/$file"
+  example_rel="$(jq -r --arg file "$file" '.files[$file].example' "$schema")"
+  example="$REPO_ROOT/$example_rel"
+  [ -f "$example" ] || { echo "CONFIG FAIL: missing $example" >&2; exit 1; }
+  [ -f "$path" ] || { echo "CONFIG FAIL: missing live config $path" >&2; exit 1; }
+  validate_file "$path" 1 || exit 1
+  additions=()
+  while IFS= read -r key; do
+    key="${key%$'\r'}"
+    if ! grep -qE "^${key}=" "$path"; then
+      line="$(grep -E "^${key}=" "$example" | head -n 1)"
+      [ -n "$line" ] || { echo "CONFIG FAIL: schema key $key has no example default" >&2; exit 1; }
+      additions+=("$line")
+    fi
+  done < <(jq -r --arg file "$file" '.files[$file].required[]' "$schema")
+
+  if [ "${#additions[@]}" -gt 0 ]; then
+    changed=1
+    echo "CONFIG MIGRATE: $file add ${#additions[@]} safe default(s)"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      mkdir -p "$backup_root" || exit 1
+      chmod 700 "$CONFIG_DIR/backups" "$backup_root" 2>/dev/null || exit 1
+      if [ "${AI_CONFIG_TEST_FAIL_BACKUP:-0}" = "1" ]; then echo 'CONFIG FAIL: simulated backup failure' >&2; exit 1; fi
+      cp -p "$path" "$backup_root/$file" || exit 1
+      chmod 600 "$backup_root/$file" || exit 1
+      [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$(sha256sum "$backup_root/$file" | cut -d' ' -f1)" ] || {
+        echo "CONFIG FAIL: backup verification failed for $file" >&2; exit 1; }
+      tmp="$path.tmp.$$"
+      cp -p "$path" "$tmp" || exit 1
+      { printf '\n# Added by ai-config-migrate schema %s\n' "$version"; printf '%s\n' "${additions[@]}"; } >> "$tmp"
+      validate_file "$tmp" 0 "$file" || { rm -f "$tmp"; exit 1; }
+      mv -f "$tmp" "$path" || exit 1
+    fi
+  fi
+done < <(jq -r '.files | keys[]' "$schema")
+
+source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ "$DRY_RUN" -eq 0 ]; then
+  state_tmp="$CONFIG_DIR/config-state.json.tmp.$$"
+  jq -n --argjson schema "$version" --arg source_sha "$source_sha" --arg applied_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema:$schema,source_sha:$source_sha,applied_at:$applied_at}' > "$state_tmp" || exit 1
+  jq -e '.schema and .source_sha and .applied_at' "$state_tmp" >/dev/null || exit 1
+  mv -f "$state_tmp" "$CONFIG_DIR/config-state.json" || exit 1
+fi
+echo "CONFIG OK: schema=$version source=$source_sha changed=$changed dry_run=$DRY_RUN"

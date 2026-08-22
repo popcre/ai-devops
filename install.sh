@@ -78,7 +78,7 @@ require_commands() {
 # independent Node/npm/npx verification without touching machine state.
 if [ "${1:-}" = "--test-stage-runner" ]; then
   test_stage() { [ "${AI_INSTALL_TEST_FAIL_STAGE:-}" != "$1" ]; }
-  for test_name in dependencies directories config tools skills identity permissions memory doctor; do
+  for test_name in dependencies directories config config-migration tools skills identity permissions memory manifest doctor; do
     run_stage required "$test_name" test_stage "$test_name"
   done
   run_stage optional optional-provider test_stage optional-provider
@@ -175,6 +175,8 @@ install_configs() {
   install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env" || return 1
 }
 run_stage required "Configuration seed" install_configs
+run_stage required "Configuration migration and validation" \
+  "$REPO_ROOT/bin/ai-config-migrate" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR"
 
 # --------------------------------------------------------------------------
 # 4. Symlink bin/* into /usr/local/bin
@@ -276,6 +278,9 @@ seed_memory() {
   fi
 }
 run_stage required "Private memory seed" seed_memory
+
+run_stage required "Managed artifact manifest" \
+  "$REPO_ROOT/bin/ai-install-manifest" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR" --bin-target "$BIN_TARGET"
 
 # --------------------------------------------------------------------------
 # 4d. OpenCode GLM server (hosts GLM for `ai-glm`)

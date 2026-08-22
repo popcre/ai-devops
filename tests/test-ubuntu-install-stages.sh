@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-required=(dependencies directories config tools skills identity permissions memory doctor node-toolchain)
+required=(dependencies directories config config-migration tools skills identity permissions memory manifest doctor node-toolchain)
 for stage in "${required[@]}"; do
   output="$(AI_INSTALL_TEST_FAIL_STAGE="$stage" bash "$ROOT/install.sh" --test-stage-runner 2>&1)" &&
     fail "required stage $stage returned success"

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Record exact managed artifacts and the source/config versions that installed them.
+set -uo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_DIR="${AI_DEVOPS_ETC:-/etc/ai-devops}"
+BIN_TARGET="/usr/local/bin"
+MANAGED_HOME="$HOME"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo-root) REPO_ROOT="$2"; shift 2 ;;
+    --config-dir) CONFIG_DIR="$2"; shift 2 ;;
+    --bin-target) BIN_TARGET="$2"; shift 2 ;;
+    --home) MANAGED_HOME="$2"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+mkdir -p "$CONFIG_DIR" || exit 1
+tmp="$CONFIG_DIR/install-manifest.tsv.tmp.$$"
+manifest="$CONFIG_DIR/install-manifest.tsv"
+source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+schema="$(jq -r '.schema // "unknown"' "$CONFIG_DIR/config-state.json" 2>/dev/null || echo unknown)"
+{
+  printf 'meta\tsource_sha\t%s\t-\n' "$source_sha"
+  printf 'meta\tconfig_schema\t%s\t-\n' "$schema"
+  for src in "$REPO_ROOT"/bin/*; do
+    [ -f "$src" ] && [ -x "$src" ] || continue
+    dest="$BIN_TARGET/$(basename "$src")"
+    [ -L "$dest" ] || continue
+    target="$(readlink -f "$dest" 2>/dev/null || true)"
+    expected="$(readlink -f "$src" 2>/dev/null || true)"
+    [ "$target" = "$expected" ] || continue
+    printf 'symlink\t%s\t%s\t%s\n' "$dest" "$src" "$(sha256sum "$src" | cut -d' ' -f1)"
+  done
+  for path in "$CONFIG_DIR/models.env" "$CONFIG_DIR/server.env" "$CONFIG_DIR/config-state.json"; do
+    [ -f "$path" ] || continue
+    printf 'config\t%s\tmanaged\t%s\n' "$path" "$(sha256sum "$path" | cut -d' ' -f1)"
+  done
+  for marker in "$MANAGED_HOME/.claude/skills"/*/.ai-devops-managed "$MANAGED_HOME/.codex/skills"/*/.ai-devops-managed; do
+    [ -f "$marker" ] || continue
+    printf 'skill-marker\t%s\tmanaged\t%s\n' "$marker" "$(sha256sum "$marker" | cut -d' ' -f1)"
+  done
+} > "$tmp" || { rm -f "$tmp"; exit 1; }
+chmod 600 "$tmp" || { rm -f "$tmp"; exit 1; }
+mv -f "$tmp" "$manifest" || exit 1
+echo "MANIFEST OK: $manifest source=$source_sha schema=$schema"

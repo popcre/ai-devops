@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "files": {
+    "models.env": {
+      "example": "config/models.env.example",
+      "required": [
+        "AI_DEVOPS_HOME",
+        "OPUS48_HIGH_REASONING_CMD",
+        "OPUS_REVIEW_CMD",
+        "GPT55_CMD",
+        "CODEX_CMD",
+        "TESTER_CMD"
+      ],
+      "command_keys": [
+        "OPUS48_HIGH_REASONING_CMD",
+        "OPUS_REVIEW_CMD",
+        "GPT55_CMD",
+        "CODEX_CMD",
+        "TESTER_CMD"
+      ]
+    },
+    "server.env": {
+      "example": "config/server.env.example",
+      "required": [
+        "AI_DEVOPS_HOME",
+        "AI_DEVOPS_ETC",
+        "AI_DEVOPS_LOG_DIR",
+        "WORKSPACE_ROOT",
+        "DEFAULT_MAIN_BRANCH",
+        "OWNER_NAME"
+      ],
+      "command_keys": []
+    }
+  }
+}

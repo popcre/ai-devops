@@ -35,7 +35,8 @@ cd /worksp/ai-devops
    `node`, `npm`, and `npx` independently.
 2. Creates `/etc/ai-devops/` and `/var/log/ai-devops/`.
 3. Seeds `/etc/ai-devops/models.env` and `server.env` from the examples **only if
-   absent** (never overwrites real config).
+   absent**, then runs the versioned merge-based config migrator (never
+   overwrites user values).
 4. Symlinks executable Unix entrypoints in `bin/` into `/usr/local/bin/`.
    Windows-only `.ps1`/`.bat` files are not chmodded or linked, so an update
    leaves the Git checkout clean.
@@ -46,6 +47,8 @@ cd /worksp/ai-devops
    agent call; non-interactive updates reuse the existing protected bootstrap
    file automatically and never change normal Claude/Codex authentication.
 6. Runs `ai-devops doctor`.
+7. Records exact source, config schema, owned symlinks, config files, managed
+   skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 
 Every operation is an explicit required, optional, or skipped stage. The final
 summary names every result, and any required failure makes the installer
@@ -130,12 +133,16 @@ installer has any required failure and reports the exact source SHA attempted.
 ## Uninstall
 
 ```bash
-./uninstall.sh                # remove symlinks only (keeps config + checkout)
-./uninstall.sh --purge        # also remove /etc/ai-devops config
-./uninstall.sh --remove-repo  # also remove the /worksp/ai-devops checkout
+./uninstall.sh --dry-run      # exact read-only ownership/removal preview
+./uninstall.sh                # minimal: owned symlinks only
+./uninstall.sh --purge        # minimal + archive/remove config
+./uninstall.sh --full         # archive/remove config and clean checkout
 ```
 
-`uninstall.sh` never touches Claude/Codex/gh login state.
+`uninstall.sh` removes only manifest-owned symlinks whose target and hash still
+match. Destructive modes first create and verify a protected config archive and
+Git bundle, refuse broad paths or a dirty checkout, and never touch
+Claude/Codex/gh login state.
 
 ## Runtime environment variables
 

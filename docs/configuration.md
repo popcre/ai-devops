@@ -15,6 +15,12 @@ All machine-local configuration for the toolkit. Canonical guide:
 does not already exist**, so your edits survive `update.sh` and re-installs. The
 repo only ever contains the `*.env.example` files — never the real ones.
 
+`config/config-schema.json` versions the required secret-free keys. Every
+install runs `ai-config-migrate`: it previews or adds only missing safe defaults,
+preserves existing values, validates assignment/command syntax, writes a
+restricted hash-verified backup before a change, and records the applied schema
+and source SHA in `/etc/ai-devops/config-state.json`.
+
 There are **no secrets** in these files. Model access comes from the Claude/Codex
 CLI login sessions (`~/.claude`, `~/.codex`), not from variables here.
 
@@ -105,3 +111,9 @@ the key.
    `config/*.env.example` and to this doc, so fresh installs get it.
 3. Never edit the `*.env.example` files with real per-machine values, and never
    commit a real `.env`.
+
+Preview and validate a migration without changing the machine:
+
+```bash
+ai-config-migrate --dry-run
+```

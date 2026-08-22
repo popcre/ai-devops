@@ -12,8 +12,8 @@
 set -uo pipefail
 
 AI_DEVOPS_VERSION="0.1.0"
-AI_DEVOPS_HOME_DEFAULT="/worksp/ai-devops"
-AI_DEVOPS_ETC="/etc/ai-devops"
+AI_DEVOPS_HOME_DEFAULT="${AI_DEVOPS_HOME_DEFAULT:-/worksp/ai-devops}"
+AI_DEVOPS_ETC="${AI_DEVOPS_ETC:-/etc/ai-devops}"
 MODELS_ENV="${AI_DEVOPS_ETC}/models.env"
 SERVER_ENV="${AI_DEVOPS_ETC}/server.env"
 
@@ -58,6 +58,80 @@ check_file() {
     FAILED=1
   else
     c_warn "$2 missing ($1)"
+  fi
+}
+
+check_install_state() {
+  local current installed schema expected_schema type path source expected actual drift=0
+  current="$(git -C "$AI_DEVOPS_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
+  [ "$current" != unknown ] && c_ok "repo source SHA $current" || { c_fail 'repo source SHA unavailable'; FAILED=1; }
+  if [ -f "$AI_DEVOPS_ETC/config-state.json" ]; then
+    schema="$(jq -r '.schema // "unknown"' "$AI_DEVOPS_ETC/config-state.json" 2>/dev/null || echo invalid)"
+    expected_schema="$(jq -r '.version // "unknown"' "$AI_DEVOPS_HOME/config/config-schema.json" 2>/dev/null || echo invalid)"
+    if [ "$schema" = "$expected_schema" ]; then c_ok "config schema $schema applied"; else c_fail "config schema $schema (expected $expected_schema)"; FAILED=1; fi
+  else c_fail 'config migration state missing'; FAILED=1
+  fi
+  if [ -f "$AI_DEVOPS_ETC/install-manifest.tsv" ]; then
+    installed="$(awk -F '\t' '$1=="meta"&&$2=="source_sha"{print $3;exit}' "$AI_DEVOPS_ETC/install-manifest.tsv")"
+    if [ "$installed" = "$current" ]; then c_ok "installed source SHA matches repo ($installed)"; else c_fail "installed source $installed differs from repo $current"; FAILED=1; fi
+    while IFS=$'\t' read -r type path source expected; do
+      case "$type" in
+        symlink)
+          if [ -L "$path" ] && [ "$(readlink -f "$path" 2>/dev/null || true)" = "$(readlink -f "$source" 2>/dev/null || true)" ]; then
+            actual="$(sha256sum "$source" 2>/dev/null | cut -d' ' -f1)"
+            [ "$actual" = "$expected" ] || drift=1
+          else drift=1; fi ;;
+        skill-marker)
+          [ -f "$path" ] && actual="$(sha256sum "$path" | cut -d' ' -f1)" && [ "$actual" = "$expected" ] || drift=1 ;;
+        config)
+          if [ -f "$path" ]; then
+            actual="$(sha256sum "$path" | cut -d' ' -f1)"
+            [ "$actual" = "$expected" ] || c_warn "machine config changed since install: $path"
+          else c_fail "managed config missing: $path"; FAILED=1; fi ;;
+      esac
+    done < "$AI_DEVOPS_ETC/install-manifest.tsv"
+    if [ "$drift" -eq 0 ]; then c_ok 'managed command/skill hashes match manifest'; else c_fail 'managed command or skill drift detected'; FAILED=1; fi
+  else c_fail 'install manifest missing'; FAILED=1
+  fi
+}
+
+check_memory_and_schedule() {
+  local hub="${AI_MEMORY_HUB:-$HOME/.cache/ai-devops-memory-private}" remote
+  if [ -d "$hub/.git" ]; then
+    remote="$(git -C "$hub" config --get remote.origin.url 2>/dev/null || true)"
+    case "$remote" in *github.com/u2giants/ai-devops-memory.git) c_ok "private memory hub present ($hub)" ;; *) c_fail 'private memory hub has noncanonical origin'; FAILED=1 ;; esac
+  else c_warn "private memory hub not cloned yet ($hub)"
+  fi
+  if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q 'ai-memory-sync'; then
+    c_ok 'private memory schedule installed'
+  else
+    c_warn 'private memory schedule not installed (intentional until qualification or managed elsewhere)'
+  fi
+}
+
+check_provider_registry() {
+  local provider status
+  if have ai-review-preflight; then
+    while IFS= read -r provider; do
+      [ -n "$provider" ] || continue
+      status="$(ai-review-preflight status "$provider" 2>/dev/null | jq -r '.status' 2>/dev/null || echo invalid)"
+      case "$status" in
+        available) c_ok "review provider $provider registered and available" ;;
+        quarantined) c_warn "review provider $provider registered but quarantined" ;;
+        unknown) c_warn "review provider $provider registered; live doctor unsupported" ;;
+        *) c_fail "review provider $provider status invalid"; FAILED=1 ;;
+      esac
+    done <<'EOF'
+grok
+kimi
+glm
+muse
+gemini
+qwen
+codex
+deepseek
+EOF
+  else c_fail 'ai-review-preflight missing'; FAILED=1
   fi
 }
 
@@ -174,8 +248,9 @@ cmd_doctor() {
   check_required rg    "ripgrep (rg)"
 
   c_head "Node / npm"
-  if have node; then c_ok "node installed ($(node --version 2>/dev/null))"; else c_warn "node not found (optional)"; fi
-  if have npm;  then c_ok "npm installed ($(npm --version 2>/dev/null))";  else c_warn "npm not found (optional)"; fi
+  check_required node "node"
+  check_required npm "npm"
+  check_required npx "npx"
 
   c_head "GitHub CLI"
   if have gh; then
@@ -220,6 +295,10 @@ cmd_doctor() {
   if [ -d "$AI_DEVOPS_HOME" ]; then c_ok "repo dir exists ($AI_DEVOPS_HOME)"; else c_fail "repo dir missing ($AI_DEVOPS_HOME)"; FAILED=1; fi
   check_file "$MODELS_ENV" "models.env" req
   check_file "$SERVER_ENV" "server.env" req
+  check_install_state
+
+  c_head "Private memory and schedule"
+  check_memory_and_schedule
 
   c_head "Companion scripts"
   for s in ai-codex-review ai-workspace-status ai-model-call ai-run-task ai-glm; do
@@ -230,6 +309,9 @@ cmd_doctor() {
       FAILED=1
     fi
   done
+
+  c_head "Reviewer providers"
+  check_provider_registry
 
   echo
   if [ "$FAILED" -eq 0 ]; then
