@@ -1,0 +1,8 @@
+# Protected source notice
+#
+# Verified SSH host identities are machine topology and live in the private
+# u2giants/ai-devops-private-config repository. Machine setup resolves them with:
+#
+#   ai-private-config path ssh_known_hosts
+#
+# This public placeholder contains no host keys and must not be installed.

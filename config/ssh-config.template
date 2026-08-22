@@ -1,0 +1,9 @@
+# Protected source notice
+#
+# Concrete SSH aliases, routes, users, keys, and addresses are intentionally not
+# stored in this public repository. Machine setup resolves the current template
+# from the private u2giants/ai-devops-private-config repository through:
+#
+#   ai-private-config path ssh_config
+#
+# This file is documentation only and must never be installed as ~/.ssh/config.

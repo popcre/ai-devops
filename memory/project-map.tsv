@@ -1,0 +1,27 @@
+# slug -> canonical project key overrides for ai-sync-memory.
+# One "slug<TAB>project" per line. Lines starting with # are comments.
+# Only needed when the default heuristic is wrong. The heuristic handles
+# "...repos-<name>" (Windows C:/D: checkouts) and "-worksp-<name>" (Linux
+# /worksp checkouts) automatically; everything else needs a line here.
+#
+# WHY THIS MATTERS (found 2026-07-26): a slug that does not normalise gets its
+# own project key, so the same logical project silently stores memory in TWO
+# places and neither machine ever sees the other's. 87 memory files sat stranded
+# under "-worksp-*" keys and 17 more under "D--*"/"C--PopDAM-*"; `pull` reported
+# them as ordinary "no local project dir on this machine yet" skips, which reads
+# as normal. If you add a checkout on a NEW path shape, add its mapping here in
+# the same commit.
+C--repos-temp-1Password-MCP	1password-mcp
+
+# Windows checkouts not under a directory called "repos".
+C--PopDAM-popdam3	popdam3
+D--openclaw	openclaw
+D--popdam-claude-supabase-mcp	claude-supabase-mcp
+D--synology-monitor	synology-monitor
+dflow_plm	dflow-plm
+
+# Linux (hetz) sessions rooted at "/" and at "/worksp" itself. These are
+# session-level memory rather than a single project's, so they keep their own
+# keys instead of being folded into a project.
+-	hetz-root
+-worksp	worksp-root
