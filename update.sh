@@ -25,4 +25,10 @@ else
 fi
 
 info "Re-running install.sh"
-exec "$REPO_ROOT/install.sh"
+source_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+if "$REPO_ROOT/install.sh" "$@"; then
+  info "update.sh installed source SHA $source_sha"
+  exit 0
+fi
+warn "update.sh failed while installing source SHA $source_sha"
+exit 1

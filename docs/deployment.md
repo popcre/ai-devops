@@ -30,8 +30,9 @@ cd /worksp/ai-devops
 ```
 
 `install.sh`:
-1. Verifies/installs base deps (`git`, `curl`, `jq`, `ripgrep`, `unzip`,
-   `python3`, `pip3`; `node`/`npm` best-effort via apt).
+1. Verifies/installs base dependencies (`git`, `curl`, `jq`, `ripgrep`,
+   `unzip`, `python3`, `pip3`, and `gh`). It detects, installs, and verifies
+   `node`, `npm`, and `npx` independently.
 2. Creates `/etc/ai-devops/` and `/var/log/ai-devops/`.
 3. Seeds `/etc/ai-devops/models.env` and `server.env` from the examples **only if
    absent** (never overwrites real config).
@@ -45,6 +46,12 @@ cd /worksp/ai-devops
    agent call; non-interactive updates reuse the existing protected bootstrap
    file automatically and never change normal Claude/Codex authentication.
 6. Runs `ai-devops doctor`.
+
+Every operation is an explicit required, optional, or skipped stage. The final
+summary names every result, and any required failure makes the installer
+nonzero after preserving the successful earlier stages. Secrets are required
+when an interactive/token-backed install selects them; `--require-secrets`
+forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
 
@@ -107,10 +114,11 @@ an install by the other reports "up to date" rather than inventing local edits.
 
 ```bash
 cd /worksp/ai-devops
-./update.sh          # git pull --ff-only, then re-run install.sh
+./update.sh          # git pull --ff-only, re-run install.sh, report installed SHA
 ```
 
-`update.sh` never overwrites `/etc/ai-devops/*.env`.
+`update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
+installer has any required failure and reports the exact source SHA attempted.
 
 ## Rollback
 

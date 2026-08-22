@@ -32,11 +32,11 @@ Fully quit and reopen Claude Desktop before checking its MCP servers.
 
 Provision a fresh Ubuntu box (any recent LTS). Log in as a sudo-capable user.
 
-### 2. Install git
+### 2. Install Git and GitHub CLI
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git
+sudo apt-get install -y git gh
 ```
 
 ### 3. Clone this repo to /worksp/ai-devops
@@ -48,23 +48,27 @@ git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ```
 
-### 4. Run install.sh
+### 4. Authenticate GitHub CLI
+
+The private memory hub is part of a complete restore, so authenticate before
+installing:
 
 ```bash
-./install.sh
+gh auth login
+```
+
+### 5. Run install.sh
+
+```bash
+./install.sh --require-secrets
 ```
 
 This installs base dependencies, creates `/etc/ai-devops` and
 `/var/log/ai-devops`, seeds `models.env` / `server.env` (without overwriting any
 existing real config), installs skills, calls `bin/setup-secrets.sh` for the
 1Password-backed MCP wiring, symlinks the `bin/` tools into `/usr/local/bin`,
-and runs `ai-devops doctor`.
-
-### 5. Authenticate GitHub CLI
-
-```bash
-gh auth login
-```
+and runs `ai-devops doctor`. The final stage summary must have no required
+failure; the command returns nonzero otherwise.
 
 ### 6. Log in to Claude
 

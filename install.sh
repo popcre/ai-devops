@@ -23,6 +23,88 @@ BIN_TARGET="/usr/local/bin"
 
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
+ok()   { printf '\033[32m[PASS]\033[0m %s\n' "$1"; }
+
+required_failures=()
+optional_failures=()
+stage_results=()
+
+run_stage() {
+  local classification="$1" name="$2"
+  shift 2
+  info "$name"
+  if "$@"; then
+    stage_results+=("PASS\t$classification\t$name")
+    ok "$name"
+  else
+    local rc=$?
+    stage_results+=("FAIL($rc)\t$classification\t$name")
+    if [ "$classification" = "required" ]; then
+      required_failures+=("$name")
+      warn "REQUIRED stage failed: $name"
+    else
+      optional_failures+=("$name")
+      warn "Optional stage failed: $name"
+    fi
+  fi
+}
+
+print_summary() {
+  echo
+  info "Install stage summary"
+  printf '  %b\n' "${stage_results[@]}"
+  if [ "${#optional_failures[@]}" -gt 0 ]; then
+    warn "Optional failures: ${optional_failures[*]}"
+  fi
+  if [ "${#required_failures[@]}" -gt 0 ]; then
+    warn "Install incomplete; required failures: ${required_failures[*]}"
+    return 1
+  fi
+  return 0
+}
+
+require_commands() {
+  local missing=() command_name
+  for command_name in "$@"; do
+    command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
+  done
+  [ "${#missing[@]}" -eq 0 ] || {
+    warn "Missing required commands after installation attempt: ${missing[*]}"
+    return 1
+  }
+}
+
+# Dependency-light contract used by tests. It exercises the same runner and
+# independent Node/npm/npx verification without touching machine state.
+if [ "${1:-}" = "--test-stage-runner" ]; then
+  test_stage() { [ "${AI_INSTALL_TEST_FAIL_STAGE:-}" != "$1" ]; }
+  for test_name in dependencies directories config tools skills identity permissions memory doctor; do
+    run_stage required "$test_name" test_stage "$test_name"
+  done
+  run_stage optional optional-provider test_stage optional-provider
+  test_node_toolchain() {
+    [ "${AI_INSTALL_TEST_FAIL_STAGE:-}" != "node-toolchain" ] || return 1
+    [ "${AI_INSTALL_TEST_NODE_MODE:-present}" = "present" ] || return 1
+    node() { :; }; npm() { :; }; npx() { :; }
+    export -f node npm npx
+    require_commands node npm npx
+  }
+  run_stage required node-toolchain test_node_toolchain
+  print_summary
+  exit $?
+fi
+
+REQUIRE_SECRETS=auto
+for arg in "$@"; do
+  case "$arg" in
+    --require-secrets) REQUIRE_SECRETS=yes ;;
+    --skip-secrets) REQUIRE_SECRETS=no ;;
+    -h|--help)
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets]"
+      exit 0 ;;
+    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
 
 # Pick a sudo prefix only if we are not already root.
 SUDO=""
@@ -34,41 +116,47 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
-# --------------------------------------------------------------------------
-# 1. Dependencies
-# --------------------------------------------------------------------------
-info "Checking dependencies"
-APT_PKGS=(git curl jq ripgrep unzip python3 python3-pip)
-# nodejs/npm added only if apt can provide them (some servers use nvm instead).
-MISSING=()
-for bin in git curl jq rg unzip python3 pip3; do
-  command -v "$bin" >/dev/null 2>&1 || MISSING+=("$bin")
-done
-
-if [ "${#MISSING[@]}" -gt 0 ]; then
-  info "Attempting to install missing packages via apt: ${MISSING[*]}"
-  if command -v apt-get >/dev/null 2>&1; then
-    $SUDO apt-get update -y || warn "apt-get update failed; continuing"
-    $SUDO apt-get install -y "${APT_PKGS[@]}" || warn "apt-get install failed for some packages"
-    # node/npm are best-effort via apt.
-    $SUDO apt-get install -y nodejs npm || warn "nodejs/npm not installed via apt (nvm/other is fine)"
-  else
-    warn "apt-get not available; install these manually: ${MISSING[*]}"
+install_dependencies() {
+  local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh)
+  local missing=() command_name
+  for command_name in git curl jq rg unzip python3 pip3 gh; do
+    command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    command -v apt-get >/dev/null 2>&1 || {
+      warn "apt-get unavailable; install manually: ${missing[*]}"
+      return 1
+    }
+    $SUDO apt-get update -y || return 1
+    $SUDO apt-get install -y "${apt_packages[@]}" || return 1
   fi
-else
-  info "All base dependencies present"
-fi
+  require_commands git curl jq rg unzip python3 pip3 gh
+}
 
-# gh is required but is not always in apt; verify and instruct if missing.
-if ! command -v gh >/dev/null 2>&1; then
-  warn "GitHub CLI (gh) not found. Install: https://github.com/cli/cli#installation"
-fi
+install_node_toolchain() {
+  local missing=() command_name
+  for command_name in node npm npx; do
+    command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    command -v apt-get >/dev/null 2>&1 || {
+      warn "apt-get unavailable; install Node.js with node, npm, and npx"
+      return 1
+    }
+    $SUDO apt-get update -y || return 1
+    $SUDO apt-get install -y nodejs npm || return 1
+  fi
+  require_commands node npm npx
+}
+
+run_stage required "Base dependencies" install_dependencies
+run_stage required "Node toolchain (node/npm/npx)" install_node_toolchain
 
 # --------------------------------------------------------------------------
 # 2. System directories
 # --------------------------------------------------------------------------
-info "Creating $ETC_DIR and $LOG_DIR"
-$SUDO mkdir -p "$ETC_DIR" "$LOG_DIR"
+create_system_directories() { $SUDO mkdir -p "$ETC_DIR" "$LOG_DIR"; }
+run_stage required "System directories" create_system_directories
 
 # --------------------------------------------------------------------------
 # 3. Config files (never overwrite real config)
@@ -82,8 +170,11 @@ install_config() {
     $SUDO cp "$example" "$dest"
   fi
 }
-install_config "$REPO_ROOT/config/models.env.example" "$ETC_DIR/models.env"
-install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env"
+install_configs() {
+  install_config "$REPO_ROOT/config/models.env.example" "$ETC_DIR/models.env" || return 1
+  install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env" || return 1
+}
+run_stage required "Configuration seed" install_configs
 
 # --------------------------------------------------------------------------
 # 4. Symlink bin/* into /usr/local/bin
@@ -91,29 +182,31 @@ install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env"
 # First prune symlinks that point into this repo's bin/ but whose target is gone.
 # Without this, a retired command (e.g. ai-glm-agent.ps1) leaves a dangling link on
 # PATH forever: the loop below skips it because there is no source file to link from.
-info "Pruning stale $BIN_TARGET symlinks that point into this repo"
-for dest in "$BIN_TARGET"/*; do
-  [ -L "$dest" ] || continue
-  target="$(readlink "$dest")"
-  case "$target" in
-    "$REPO_ROOT"/bin/*)
-      [ -e "$dest" ] || { $SUDO rm -f "$dest"; info "  removed stale $(basename "$dest")"; } ;;
-  esac
-done
-
-info "Symlinking Unix entrypoints into $BIN_TARGET"
-for src in "$REPO_ROOT"/bin/*; do
-  [ -f "$src" ] && [ -x "$src" ] || continue
-  name="$(basename "$src")"
-  dest="$BIN_TARGET/$name"
-  # Only replace if missing or already points into this repo.
-  if [ -L "$dest" ] || [ ! -e "$dest" ]; then
-    $SUDO ln -sfn "$src" "$dest"
-    info "  linked $name"
-  else
-    warn "  $dest exists and is not a symlink; leaving it untouched"
-  fi
-done
+install_entrypoints() {
+  local dest target src name conflicts=0
+  for dest in "$BIN_TARGET"/*; do
+    [ -L "$dest" ] || continue
+    target="$(readlink "$dest")"
+    case "$target" in
+      "$REPO_ROOT"/bin/*)
+        [ -e "$dest" ] || { $SUDO rm -f "$dest" || return 1; info "  removed stale $(basename "$dest")"; } ;;
+    esac
+  done
+  for src in "$REPO_ROOT"/bin/*; do
+    [ -f "$src" ] && [ -x "$src" ] || continue
+    name="$(basename "$src")"
+    dest="$BIN_TARGET/$name"
+    if [ -L "$dest" ] || [ ! -e "$dest" ]; then
+      $SUDO ln -sfn "$src" "$dest" || return 1
+      info "  linked $name"
+    else
+      warn "  $dest exists and is not a symlink; leaving it untouched"
+      conflicts=1
+    fi
+  done
+  [ "$conflicts" -eq 0 ]
+}
+run_stage required "Unix entrypoints" install_entrypoints
 
 # --------------------------------------------------------------------------
 # 4.5 Claude + Codex skills and global instruction files. Delegate to the one
@@ -125,8 +218,7 @@ done
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
   warn "Running as root via sudo; skills would land under /root. Re-run as your normal user for per-user skill install."
 fi
-info "Installing Claude + Codex skills into \$HOME"
-"$REPO_ROOT/bin/ai-install-skills"
+run_stage required "Claude and Codex skills" "$REPO_ROOT/bin/ai-install-skills"
 
 # --------------------------------------------------------------------------
 # 4.6 Git commit identity. Without a global identity Git does not stop — it
@@ -135,8 +227,7 @@ info "Installing Claude + Codex skills into \$HOME"
 #     Machine-level on purpose: every agent (Claude, Codex, GLM, Grok, Kimi)
 #     uses the same git binary, so one setting covers all of them.
 # --------------------------------------------------------------------------
-info "Pinning Git commit identity (and disabling Git's silent auto-guess)"
-"$REPO_ROOT/bin/ai-git-identity"
+run_stage required "Git commit identity" "$REPO_ROOT/bin/ai-git-identity"
 
 # --------------------------------------------------------------------------
 # 4.7 Claude tool permissions. Claude Code stops and asks before a tool that is
@@ -145,8 +236,7 @@ info "Pinning Git commit identity (and disabling Git's silent auto-guess)"
 #     required entries live in config/claude-permissions.allow and are merged
 #     into the USER-level ~/.claude/settings.json, covering every project.
 # --------------------------------------------------------------------------
-info "Ensuring required Claude tool permissions"
-"$REPO_ROOT/bin/ai-claude-permissions" || warn "Claude permission merge failed; see message above"
+run_stage required "Claude tool permissions" "$REPO_ROOT/bin/ai-claude-permissions"
 
 # --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
@@ -155,11 +245,15 @@ info "Ensuring required Claude tool permissions"
 # reference file, and the transparent `claude` launcher. Runs only in an
 # interactive terminal (it may prompt once for the token). In automation, run
 # `setup-secrets.sh` by hand, or pass OP_SERVICE_ACCOUNT_TOKEN in the env.
-info "Secrets wiring (1Password service account + claude launcher)"
-if [ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
-  "$REPO_ROOT/bin/setup-secrets.sh" || warn "setup-secrets.sh did not complete; run it by hand later."
+secrets_available=0
+[ -t 0 ] || [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ -s "$HOME/.config/ai-devops/op-service-account" ] && secrets_available=1
+if [ "$REQUIRE_SECRETS" = "yes" ] || { [ "$REQUIRE_SECRETS" = "auto" ] && [ "$secrets_available" -eq 1 ]; }; then
+  run_stage required "Secrets wiring" "$REPO_ROOT/bin/setup-secrets.sh"
+elif [ "$REQUIRE_SECRETS" = "no" ]; then
+  stage_results+=("SKIP\tselected\tSecrets wiring (--skip-secrets)")
 else
-  info "  Non-interactive shell — skipping. Run: setup-secrets.sh"
+  stage_results+=("SKIP\toptional\tSecrets wiring (no interactive input or protected token)")
+  info "Secrets wiring skipped: no interactive input or protected token"
 fi
 
 # --------------------------------------------------------------------------
@@ -174,8 +268,14 @@ fi
 # /worksp/ansible (the `cron_glue` role / `cron_glue_entries`), so it stays
 # tracked and reproducible. Windows machines (not ansible-managed) schedule it
 # via the Scheduled Task in bin/setup-machine.ps1.
-info "Memory auto-sync (one-time seed; schedule is owned by ansible cron_glue)"
-"$BIN_TARGET/ai-memory-sync" >/dev/null 2>&1 || "$REPO_ROOT/bin/ai-memory-sync" >/dev/null 2>&1 || true
+seed_memory() {
+  if [ -x "$BIN_TARGET/ai-memory-sync" ]; then
+    "$BIN_TARGET/ai-memory-sync"
+  else
+    "$REPO_ROOT/bin/ai-memory-sync"
+  fi
+}
+run_stage required "Private memory seed" seed_memory
 
 # --------------------------------------------------------------------------
 # 4d. OpenCode GLM server (hosts GLM for `ai-glm`)
@@ -189,24 +289,32 @@ info "Memory auto-sync (one-time seed; schedule is owned by ansible cron_glue)"
 # files carry the only working read-only enforcement in OpenCode, so the repo
 # copy must always win. Do not "fix" this to match the no-overwrite pattern.
 if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tOpenCode GLM server (root install)")
   warn "Running as root — skipping OpenCode GLM server setup. Re-run as your normal user, or run: bin/setup-opencode-glm.sh"
 elif [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
-  info "OpenCode GLM server (pinned $(tr -d ' \t\r\n' < "$REPO_ROOT/config/opencode/version"))"
-  "$REPO_ROOT/bin/setup-opencode-glm.sh" || warn "setup-opencode-glm.sh did not complete; run it by hand later."
+  run_stage required "OpenCode GLM server (pinned $(tr -d ' \t\r\n' < "$REPO_ROOT/config/opencode/version"))" \
+    "$REPO_ROOT/bin/setup-opencode-glm.sh"
 else
+  stage_results+=("SKIP\toptional\tOpenCode GLM server (no protected token)")
   info "  No 1Password service-account token yet — skipping. Run: setup-opencode-glm.sh"
 fi
 
 # --------------------------------------------------------------------------
 # 5. Doctor
 # --------------------------------------------------------------------------
-info "Running ai-devops doctor"
-echo
-if command -v ai-devops >/dev/null 2>&1; then
-  ai-devops doctor || true
-else
-  "$REPO_ROOT/bin/ai-devops" doctor || true
-fi
+run_doctor() {
+  echo
+  if command -v ai-devops >/dev/null 2>&1; then
+    ai-devops doctor
+  else
+    "$REPO_ROOT/bin/ai-devops" doctor
+  fi
+}
+run_stage required "ai-devops doctor" run_doctor
 
 echo
-info "install.sh complete."
+if print_summary; then
+  info "install.sh complete. source=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  exit 0
+fi
+exit 1
