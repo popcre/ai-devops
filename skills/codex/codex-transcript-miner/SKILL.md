@@ -21,6 +21,10 @@ Use this for the repeated "find all local Codex session transcripts" and
   private keys, or connection strings.
 - If credential-shaped material is found, report the file/path category and
   recommend rotation or 1Password storage without exposing the value.
+- Before copying or backing up any transcript, run
+  `ai-transcript-destination-check <checkout>`. A missing validator or nonzero
+  result stops the operation. Only private `u2giants/ai-devops-transcripts` is
+  accepted; public `ai-devops` and lookalike remotes are always rejected.
 
 ## Find Transcripts
 

@@ -15,6 +15,7 @@ function Get-CanonicalProject([string] $Slug) {
         'D--openclaw' = 'openclaw'
         'D--popdam-claude-supabase-mcp' = 'claude-supabase-mcp'
         'D--synology-monitor' = 'synology-monitor'
+        'dflow_plm' = 'dflow-plm'
         '-' = 'hetz-root'
         '-worksp' = 'worksp-root'
     }

@@ -35,7 +35,7 @@ that removes an explicit Codex reasoning safeguard.
 |---|---|---|
 | Public/private boundary | Critical repair needed | Secret-bearing transcripts are still reachable in public Git history |
 | Cross-machine memory | Active critical incident | Four machines are deleting/restoring safety-index entries about every 30 minutes; failed-push commits can also be destroyed |
-| Database safety memory | High-risk repair needed | Indexed memory teaches a nonexistent preview database and forbidden migration path, but no wrong write is proven |
+| Database safety memory | Remediated 2026-08-21 | Stale procedure facts were tombstoned in the private hub, duplicate namespaces were merged, and governed skills remain authoritative |
 | Ubuntu/Windows recovery | High-risk gaps | Multiple required failures can still end in a successful-looking install |
 | Reviewer isolation/evidence | Strong design, incomplete enforcement | Private copies can omit or mix source states; providers implement lifecycle rules differently |
 | Context ownership/routing | Strong foundation, medium measurement debt | Live context is undercounted and installed copies can drift; the corrected installed total is 21,808 bytes on the audit machine |
@@ -107,13 +107,12 @@ Claude Opus 5 debate.
 
 ### 3. Indexed memory teaches the wrong database and a forbidden migration route
 
-- **Current severity: HIGH** — the instruction is dangerous and certain, but a wrong
-  production write was not proven to have occurred
+- **Current severity: REMEDIATED 2026-08-21** — the instruction was dangerous, but no
+  wrong production write was proven to have occurred
 
-- Files: `memory/dflow/feedback_all_db_work_via_shared_db.md:14-18`,
-  `memory/dflow/MEMORY.md:8`, `memory/dflow-plm/shared-db-canonical-repo.md:10-14`,
-  `memory/dflow_plm/shared-db-canonical-repo.md:10-14`,
-  `skills/codex/codex-shared-db-change/SKILL.md:30-46`
+- Former private-hub files: `memory/dflow/feedback_all_db_work_via_shared_db.md`,
+  `memory/dflow-plm/shared-db-canonical-repo.md`, and the duplicate `dflow_plm`
+  namespace. The governed shared-database skill remains the live authority.
 - Confidence: certain
 - What happens: indexed memory names preview project `<removed-protected-project-ref>`; the
   current governed skill explicitly says that project does not exist and names
@@ -122,7 +121,7 @@ Claude Opus 5 debate.
   in `shared-db`.
 - User-visible impact: a future AI session can target the wrong environment or create
   schema drift while believing it is following durable company memory.
-- Required correction: remove or correct the stale procedure memories immediately,
+- Correction completed: tombstone the stale procedure memories,
   deduplicate the two project folders, keep volatile procedures in the governed skill
   rather than memory, and validate high-risk project references against one canonical
   source.

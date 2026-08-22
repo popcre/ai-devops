@@ -9,9 +9,9 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 |---|---|---|---|---|
 | 0 | Publish this plan, the corrected audit record, and the linked handoff | ✅ complete | 2026-08-21 | Commit `0b495562453909bd6da6b64ee845e6d3e4987892` on `origin/main`; issue #62 comment links the immutable plan |
 | 1 | Contain and preserve the live four-machine memory incident | 🟨 verifying | 2026-08-21 | all writers contained; awaiting the second full former schedule interval with no new public-memory commit |
-| 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-21 | private head `8419afe80accff2646508322cfda33c352d251ae`; coverage health zero findings |
+| 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-21 | private head `2765c34192a74a4a106998ef5f9d7f792bcf7263`; coverage health zero findings; DesignFlow aliases deduplicated |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ✅ complete | 2026-08-21 | behavioral fixtures pass; live private sync and public-target rejection proven; schedules remain disabled |
-| 4 | Correct stale database/transcript/audit instructions | ⬜ open | — | focused content tests and strict reference scan |
+| 4 | Correct stale database/transcript/audit instructions | ✅ complete | 2026-08-21 | private stale facts tombstoned; canonical destination guard and hostile fixtures pass |
 | 5 | Make Ubuntu install/update deterministic and truthful | ⬜ open | — | installer failure-injection suite and Ubuntu restore smoke evidence |
 | 6 | Make Windows source, secret, and configuration setup fail closed | ⬜ open | — | Windows fixture suite plus disposable-machine idempotency evidence |
 | 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | ⬜ open | — | config/uninstall/doctor suites and rollback artifact |

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Read-only guard for every transcript copy/backup destination.
+set -euo pipefail
+
+destination="${1:-}"
+[[ -n "$destination" ]] || { echo "usage: ai-transcript-destination-check <checkout>" >&2; exit 2; }
+[[ -d "$destination/.git" || -f "$destination/.git" ]] || {
+  echo "BLOCKED: destination is not a Git checkout" >&2; exit 1; }
+
+canonical() {
+  printf '%s' "$1" | sed -E \
+    -e 's#^git@github\.com:#github.com/#' \
+    -e 's#^https?://github\.com/#github.com/#' \
+    -e 's#\.git$##' -e 's#/$##'
+}
+
+origin="$(git -C "$destination" config --get remote.origin.url 2>/dev/null || true)"
+[[ "$(canonical "$origin")" == "github.com/u2giants/ai-devops-transcripts" ]] || {
+  echo "BLOCKED: transcript destination is not the canonical private repository" >&2
+  exit 1
+}
+
+if [[ "${AI_TRANSCRIPT_TEST_MODE:-}" == "1" && "${AI_TRANSCRIPT_TEST_PRIVATE:-}" == "1" ]]; then
+  :
+else
+  command -v gh >/dev/null 2>&1 || { echo "BLOCKED: GitHub CLI is required to prove privacy" >&2; exit 1; }
+  private="$(gh api repos/u2giants/ai-devops-transcripts --jq '.private' 2>/dev/null)" || {
+    echo "BLOCKED: could not verify transcript repository privacy" >&2; exit 1; }
+  [[ "$private" == "true" ]] || { echo "BLOCKED: transcript repository is not private" >&2; exit 1; }
+fi
+
+echo "PASS: canonical private transcript destination verified"

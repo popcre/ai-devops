@@ -1,15 +1,13 @@
-> **STOP — transcripts moved to a private repo (2026-07-17).** Live credentials
-> (including the 1Password service-account token) were found in committed
-> transcripts while `u2giants/ai-devops` was PUBLIC. Transcripts now live in the
-> PRIVATE repo `u2giants/ai-devops-transcripts` (git submodule). Do NOT commit
-> `claude_chats/` or `codex_chats/` into ai-devops — `.gitignore` blocks them.
-
 ---
 name: claude-transcript-backup
 description: Find all local Claude Code session transcripts on this machine and back them up to the PRIVATE repo u2giants/ai-devops-transcripts under claude_chats/<machine>. Use when the user says "find all the Local Claude Code session transcripts everywhere on this entire machine" or "put all of these into claude_chats".
 ---
 
 # claude-transcript-backup
+
+> **STOP — transcripts belong only in the private transcript repository.**
+> Before any copy, run `ai-transcript-destination-check <checkout>`. A missing
+> validator or nonzero result stops the backup.
 
 Albert ran this identically on 916, t16, 4837, hetz, seafile, compshop.
 
@@ -35,12 +33,16 @@ manual procedure below on any platform.
 
 1. Locate all `.jsonl` transcripts in the paths above; report the count, total
    size, and date range before copying.
-2. Clone/pull `u2giants/ai-devops`; copy into `claude_chats/<machine>/`
+2. Clone/pull private `u2giants/ai-devops-transcripts` (or initialize the
+   `transcripts/` submodule), then run
+   `ai-transcript-destination-check <private-checkout>`. Only after it passes,
+   copy into that checkout's `claude_chats/<machine>/`
    mirroring the source layout (machine name = short hostname, e.g. `916` for
    `916-alien`; Windows layout keeps the `D--repos-x` encoded folders and a
    `local-agent-mode-sessions/` subfolder).
-3. Respect the repo's `.gitignore` — files matching `*secret*`/`*token*`
-   patterns are intentionally excluded; do not force-add them.
+3. Refuse the public `ai-devops` checkout and every lookalike remote even if its
+   directory is named `transcripts`. Respect the private repo's `.gitignore`;
+   never force-add excluded paths.
 4. Update `claude_chats/README.md` with a machine section in the existing
    format (transcript counts per project folder).
 5. Commit and push to main. Warn (don't block) on files over GitHub's 50 MB
