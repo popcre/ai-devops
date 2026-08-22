@@ -5,19 +5,28 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="${AI_DEVOPS_ETC:-/etc/ai-devops}"
 BIN_TARGET="/usr/local/bin"
 MANAGED_HOME="$HOME"
+SOURCE_SHA=""
+OUTPUT=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --config-dir) CONFIG_DIR="$2"; shift 2 ;;
     --bin-target) BIN_TARGET="$2"; shift 2 ;;
     --home) MANAGED_HOME="$2"; shift 2 ;;
+    --source-sha) SOURCE_SHA="$2"; shift 2 ;;
+    --output) OUTPUT="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
 mkdir -p "$CONFIG_DIR" || exit 1
-tmp="$CONFIG_DIR/install-manifest.tsv.tmp.$$"
-manifest="$CONFIG_DIR/install-manifest.tsv"
-source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+manifest="${OUTPUT:-$CONFIG_DIR/install-manifest.tsv}"
+mkdir -p "$(dirname "$manifest")" || exit 1
+tmp="$manifest.tmp.$$"
+source_sha="$SOURCE_SHA"
+if [ -z "$source_sha" ]; then source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"; fi
+printf '%s' "$source_sha" | grep -Eq '^(unknown|[0-9a-f]{40})$' || {
+  echo 'MANIFEST FAIL: invalid source SHA' >&2; exit 1;
+}
 schema="$(jq -r '.schema // "unknown"' "$CONFIG_DIR/config-state.json" 2>/dev/null || echo unknown)"
 {
   printf 'meta\tsource_sha\t%s\t-\n' "$source_sha"

@@ -152,6 +152,9 @@ if (-not (Test-Path -LiteralPath $privateFileHelper)) { throw "Missing private-f
 $jsonFileHelper = Join-Path $RepoPath "bin\windows-json-file.ps1"
 if (-not (Test-Path -LiteralPath $jsonFileHelper)) { throw "Missing JSON-file helper: $jsonFileHelper" }
 . $jsonFileHelper
+$gitBashPathHelper = Join-Path $RepoPath "bin\windows-git-bash-path.ps1"
+if (-not (Test-Path -LiteralPath $gitBashPathHelper)) { throw "Missing Git Bash path helper: $gitBashPathHelper" }
+. $gitBashPathHelper
 
 # --------------------------------------------------------------------------
 # 1. Base tools: git, op, node/npx
@@ -192,10 +195,14 @@ if ([string]::IsNullOrWhiteSpace($SupabaseProjectRef)) {
   $SupabaseProjectRef = (& $gitBash $privateConfigTool value supabase_project_ref | Select-Object -Last 1).Trim()
   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($SupabaseProjectRef)) { throw "Protected Supabase project reference is unavailable." }
 }
-$sshTmpl = (& $gitBash $privateConfigTool path ssh_config | Select-Object -Last 1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sshTmpl)) { throw "Protected SSH configuration is unavailable." }
-$knownHostsTmpl = (& $gitBash $privateConfigTool path ssh_known_hosts | Select-Object -Last 1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $knownHostsTmpl)) { throw "Protected SSH host keys are unavailable." }
+$sshTmplRaw = (& $gitBash $privateConfigTool path ssh_config | Select-Object -Last 1).Trim()
+$sshPathExitCode = $LASTEXITCODE
+if ($sshPathExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($sshTmplRaw)) { throw "Protected SSH configuration is unavailable." }
+$sshTmpl = ConvertFrom-GitBashPath -Path $sshTmplRaw -GitBashPath $gitBash
+$knownHostsTmplRaw = (& $gitBash $privateConfigTool path ssh_known_hosts | Select-Object -Last 1).Trim()
+$knownHostsPathExitCode = $LASTEXITCODE
+if ($knownHostsPathExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($knownHostsTmplRaw)) { throw "Protected SSH host keys are unavailable." }
+$knownHostsTmpl = ConvertFrom-GitBashPath -Path $knownHostsTmplRaw -GitBashPath $gitBash
 
 # Railway's official MCP is bundled into its CLI. Reconcile the current official
 # npm package even when setup-machine.ps1 is run directly. npm install is

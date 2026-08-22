@@ -28,4 +28,13 @@ fi
 grep -Fq 'source SHA $source_sha' "$ROOT/update.sh" ||
   fail 'update.sh does not report the exact installed source SHA'
 
-echo 'PASS: required stages fail truthfully, optional failures warn, and Node tools verify independently'
+grep -Fq '$SUDO "$REPO_ROOT/bin/ai-config-migrate"' "$ROOT/install.sh" ||
+  fail 'configuration migration does not use the installer privilege boundary'
+grep -Fq -- '--source-sha "$source_sha"' "$ROOT/install.sh" ||
+  fail 'privileged configuration tools do not retain the unprivileged source identity'
+grep -Fq '$SUDO install -o "$owner" -g "$group" -m 600' "$ROOT/install.sh" ||
+  fail 'managed manifest is not published owner-readably through the privilege boundary'
+grep -Fq -- '--home "$HOME" --source-sha "$source_sha" --output "$staged"' "$ROOT/install.sh" ||
+  fail 'staged manifest does not retain the installing user home and source identity'
+
+echo 'PASS: required stages fail truthfully, privileged config artifacts publish safely, optional failures warn, and Node tools verify independently'

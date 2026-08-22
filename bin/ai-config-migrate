@@ -5,12 +5,14 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="${AI_DEVOPS_ETC:-/etc/ai-devops}"
 DRY_RUN=0
+SOURCE_SHA=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --config-dir) CONFIG_DIR="$2"; shift 2 ;;
+    --source-sha) SOURCE_SHA="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) echo 'usage: ai-config-migrate [--repo-root DIR] [--config-dir DIR] [--dry-run]'; exit 0 ;;
+    -h|--help) echo 'usage: ai-config-migrate [--repo-root DIR] [--config-dir DIR] [--source-sha SHA] [--dry-run]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -97,7 +99,11 @@ while IFS= read -r file; do
   fi
 done < <(jq -r '.files | keys[]' "$schema")
 
-source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+source_sha="$SOURCE_SHA"
+if [ -z "$source_sha" ]; then source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"; fi
+printf '%s' "$source_sha" | grep -Eq '^(unknown|[0-9a-f]{40})$' || {
+  echo 'CONFIG FAIL: invalid source SHA' >&2; exit 1;
+}
 if [ "$DRY_RUN" -eq 0 ]; then
   state_tmp="$CONFIG_DIR/config-state.json.tmp.$$"
   jq -n --argjson schema "$version" --arg source_sha "$source_sha" --arg applied_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

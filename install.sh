@@ -175,8 +175,12 @@ install_configs() {
   install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env" || return 1
 }
 run_stage required "Configuration seed" install_configs
-run_stage required "Configuration migration and validation" \
-  "$REPO_ROOT/bin/ai-config-migrate" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR"
+migrate_configuration() {
+  local source_sha
+  source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
+  $SUDO "$REPO_ROOT/bin/ai-config-migrate" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR" --source-sha "$source_sha"
+}
+run_stage required "Configuration migration and validation" migrate_configuration
 
 # --------------------------------------------------------------------------
 # 4. Symlink bin/* into /usr/local/bin
@@ -283,8 +287,21 @@ seed_memory() {
 }
 run_stage required "Private memory seed" seed_memory
 
-run_stage required "Managed artifact manifest" \
-  "$REPO_ROOT/bin/ai-install-manifest" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR" --bin-target "$BIN_TARGET"
+publish_install_manifest() {
+  local source_sha staged owner group
+  source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1
+  staged="$(mktemp)" || return 1
+  owner="$(id -un)"; group="$(id -gn)"
+  "$REPO_ROOT/bin/ai-install-manifest" --repo-root "$REPO_ROOT" --config-dir "$ETC_DIR" \
+    --bin-target "$BIN_TARGET" --home "$HOME" --source-sha "$source_sha" --output "$staged" || {
+      rm -f "$staged"; return 1;
+    }
+  $SUDO install -o "$owner" -g "$group" -m 600 "$staged" "$ETC_DIR/install-manifest.tsv" || {
+    rm -f "$staged"; return 1;
+  }
+  rm -f "$staged"
+}
+run_stage required "Managed artifact manifest" publish_install_manifest
 
 # --------------------------------------------------------------------------
 # 4d. OpenCode GLM server (hosts GLM for `ai-glm`)
