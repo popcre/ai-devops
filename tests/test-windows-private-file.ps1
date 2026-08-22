@@ -6,6 +6,13 @@ New-Item -ItemType Directory -Path $temp | Out-Null
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw "FAIL: $Message" } }
 
 try {
+  $explicitFixture = Join-Path $temp 'explicit-extra-grant'
+  New-Item -ItemType Directory -Path $explicitFixture | Out-Null
+  & icacls.exe $explicitFixture /inheritance:r /grant:r "$env:USERNAME`:(OI)(CI)(F)" 'SYSTEM:(OI)(CI)(F)' 'BUILTIN\Users:(OI)(CI)(RX)' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'FAIL: could not seed the unexpected explicit grant fixture' }
+  Protect-AiDevOpsPrivatePath -Path $explicitFixture -Directory
+  Assert-AiDevOpsPrivateAcl $explicitFixture
+
   $path = Join-Path $temp 'token'
   $first = [Text.Encoding]::ASCII.GetBytes('first-value')
   Set-AiDevOpsPrivateFileAtomic -Path $path -Bytes $first | Out-Null

@@ -6,7 +6,11 @@ $setup = Join-Path $repoRoot "bin\setup-machine.ps1"
 $skill = Join-Path $repoRoot "skills\shared\shared-db-orchestrator\SKILL.md"
 $manual = Join-Path $repoRoot "skills\shared\shared-db-orchestrator\references\operating-manual.md"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-gh-access-" + [guid]::NewGuid())
-$group = "$env:COMPUTERNAME\CodexSandboxUsers"
+# A clean CI runner does not have Codex's machine-local sandbox group. The
+# well-known Users group exercises the exact ACL grant and denial contract; the
+# production default remains CodexSandboxUsers.
+$group = ([Security.Principal.SecurityIdentifier]'S-1-5-32-545').Translate(
+  [Security.Principal.NTAccount]).Value
 
 try {
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -40,6 +44,10 @@ try {
   $setupText = Get-Content -LiteralPath $setup -Raw
   if ($setupText -notmatch 'repair-codex-github-cli-access\.ps1') {
     throw "Machine setup does not install the repair."
+  }
+  $repairText = Get-Content -LiteralPath $repair -Raw
+  if ($repairText -notmatch 'CodexSandboxUsers') {
+    throw 'Production repair no longer defaults to the Codex sandbox group.'
   }
   foreach ($doc in @($skill, $manual)) {
     $text = Get-Content -LiteralPath $doc -Raw

@@ -11,17 +11,59 @@ default_root(){
 ROOT="$(default_root)"
 [ -d "$ROOT" ] || die "private memory hub not found: $ROOT (run ai-sync-memory first)."
 ROOT="$(cd "$ROOT" && pwd -P)"
+FACTS_TMP=""
+cleanup(){ [ -z "$FACTS_TMP" ] || rm -f -- "$FACTS_TMP"; }
+trap cleanup EXIT INT TERM
 if [ "${AI_FACTS_ALLOW_FIXTURE:-0}" != 1 ]; then
   remote="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
   identity="$(printf '%s' "$remote" | sed -E -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##')"
   [ "$identity" = "u2giants/ai-devops-memory" ] || die 'refusing a memory root that is not the canonical private hub.'
 fi
 
+markdown_files() {
+  local rel file
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    while IFS= read -r -d '' rel; do
+      case "$rel" in .*|*/.*) continue ;; esac
+      file="$ROOT/$rel"; [ -f "$file" ] || continue
+      printf '%s\0' "$file"
+    done \
+      < <(git -C "$ROOT" ls-files -co --exclude-standard -z -- '*.md')
+  else
+    while IFS= read -r -d '' file; do
+      rel="${file#"$ROOT"/}"
+      case "$rel" in .*|*/.*) continue ;; esac
+      printf '%s\0' "$file"
+    done < <(find "$ROOT" -type f -name '*.md' -print0)
+  fi
+}
+
+search_without_rg() { # QUERY JSON LIMIT
+  local query="$1" json="$2" limit="$3" file rel line text count=0 tmp
+  tmp="$(mktemp)"; FACTS_TMP="$tmp"
+  while IFS= read -r -d '' file; do
+    rel="${file#"$ROOT"/}"
+    while IFS=: read -r line text; do
+      [ "$count" -lt "$limit" ] || break 2
+      text="${text%$'\r'}"
+      if [ "$json" -eq 1 ]; then
+        jq -nc --arg path "$rel" --argjson line "$line" --arg text "$text" \
+          '{path:$path,line:$line,text:$text}' >> "$tmp"
+      else
+        printf './%s:%s:%s\n' "$rel" "$line" "$text"
+      fi
+      count=$((count + 1))
+    done < <(grep -a -n -i -F -- "$query" "$file" 2>/dev/null || true)
+  done < <(markdown_files)
+  if [ "$json" -eq 1 ] && ! jq -s . "$tmp"; then rm -f "$tmp"; return 1; fi
+  rm -f "$tmp"; FACTS_TMP=""
+}
+
 case "${1:-}" in
   index)
     [ "$#" -eq 1 ] || die 'index accepts no extra arguments.'
-    files="$(rg --files "$ROOT" -g '*.md' -g '!.git/**' | wc -l | tr -d ' ')"
-    bytes="$(rg --files "$ROOT" -g '*.md' -g '!.git/**' -0 | xargs -0 wc -c 2>/dev/null | tail -1 | awk '{print $1}')"
+    files=0; bytes=0
+    while IFS= read -r -d '' file; do files=$((files + 1)); size="$(wc -c < "$file")"; bytes=$((bytes + size)); done < <(markdown_files)
     jq -nc --arg root "$ROOT" --argjson files "${files:-0}" --argjson bytes "${bytes:-0}" \
       '{schema_version:1,root:$root,markdown_files:$files,markdown_bytes:$bytes,mode:"read-only"}'
     ;;
@@ -30,15 +72,18 @@ case "${1:-}" in
     if [ "${1:-}" = --json ]; then json=1; shift; fi
     [ "$#" -ge 1 ] || die 'search text is required.'
     query="$*"; [ "${#query}" -le 200 ] || die 'search text is too long.'
-    if [ "$json" -eq 1 ]; then
+    if [ "${AI_FACTS_DISABLE_RG:-0}" = 1 ] || ! command -v rg >/dev/null 2>&1; then
+      search_without_rg "$query" "$json" "$limit"
+    elif [ "$json" -eq 1 ]; then
       raw="$(cd "$ROOT" && rg --json -i -F -m "$limit" -g '*.md' -g '!.git/**' -- "$query" . 2>/dev/null || {
         rc=$?; [ "$rc" -eq 1 ] || exit "$rc"
       })"
-      printf '%s' "$raw" | jq -s '[.[]|select(.type=="match")|{path:(.data.path.text|gsub("\\\\";"/")|sub("^\\./";"")),line:.data.line_number,text:(.data.lines.text|rtrimstr("\n")|rtrimstr("\r"))}]'
+      printf '%s' "$raw" | jq -s --argjson limit "$limit" '[.[]|select(.type=="match")|{path:(.data.path.text|gsub("\\\\";"/")|sub("^\\./";"")),line:.data.line_number,text:(.data.lines.text|rtrimstr("\n")|rtrimstr("\r"))}][:$limit]'
     else
-      (cd "$ROOT" && rg -n -i -F -m "$limit" -g '*.md' -g '!.git/**' -- "$query" .) || {
+      raw="$(cd "$ROOT" && rg -n -i -F -m "$limit" -g '*.md' -g '!.git/**' -- "$query" . 2>/dev/null || {
         rc=$?; [ "$rc" -eq 1 ] || exit "$rc"
-      }
+      })"
+      [ -z "$raw" ] || printf '%s\n' "$raw" | sed -n "1,${limit}p"
     fi
     ;;
   -h|--help|help|'') printf '%s\n' 'Usage: ai-facts index' '       ai-facts search [--json] <text>';;

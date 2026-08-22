@@ -29,6 +29,17 @@ function Protect-AiDevOpsPrivatePath {
   $grant = if ($Directory) { "$identity`:(OI)(CI)(F)" } else { "$identity`:(F)" }
   $systemGrant = if ($Directory) { 'SYSTEM:(OI)(CI)(F)' } else { 'SYSTEM:(F)' }
   Invoke-AiDevOpsIcacls -Path $Path -Arguments @('/grant:r', $grant, $systemGrant)
+  # /grant:r replaces grants for the named identities, but some Windows images
+  # retain other explicit grants after inheritance is removed. Remove each such
+  # grant by SID; this avoids Set-Acl's unnecessary audit-privilege requirement.
+  $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+    if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($sid -notin @($userSid, 'S-1-5-18')) {
+      Invoke-AiDevOpsIcacls -Path $Path -Arguments @('/remove:g', "*$sid")
+    }
+  }
   Assert-AiDevOpsPrivateAcl -Path $Path
 }
 

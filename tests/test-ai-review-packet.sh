@@ -55,7 +55,7 @@ PKT="$("$SCRIPT" build "$R" testtag --tests 'true' \
 M="$PKT/MANIFEST.md"
 
 check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
-check "packet_lives_inside_the_review_dir"    "[ '$PKT' = '$R/.ai-review-testtag' ]"
+check "packet_lives_inside_the_review_dir"    "[ \"\$(cd \"\$(dirname '$PKT')\" && pwd -P)\" = \"\$(cd '$R' && pwd -P)\" ] && [ \"\$(basename '$PKT')\" = '.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
 
 # --- identity: full SHAs, derived by the wrapper -----------------------------
@@ -256,7 +256,7 @@ mkdir -p "$PKT_A/nested"; printf nested > "$PKT_A/nested/MANIFEST.sha256"
 check "nested_reserved_name_breaks_seal"          "! '$SCRIPT' verify '$PKT_A'"
 rm -rf "$PKT_A/nested"
 check "each_packet_keeps_its_own_brief"          "grep -q 'Alpha decision' '$PKT_A/MANIFEST.md' && grep -q 'Beta decision' '$PKT_B/MANIFEST.md'"
-check "packet_is_named_after_the_session_tag"    "[ '$PKT_A' = '$R/.ai-review-reviewer-alpha' ]"
+check "packet_is_named_after_the_session_tag"    "[ \"\$(basename '$PKT_A')\" = '.ai-review-reviewer-alpha' ]"
 
 # Removing one session's packet must not touch the other's.
 "$SCRIPT" remove "$R" reviewer-beta
@@ -268,7 +268,7 @@ LONG_A="session-$(printf 'x%.0s' $(seq 1 60))-alpha"
 LONG_B="session-$(printf 'x%.0s' $(seq 1 60))-beta"
 P1="$("$SCRIPT" build "$R" "$LONG_A")"; P2="$("$SCRIPT" build "$R" "$LONG_B")"
 check "over_long_tags_do_not_collide"            "[ '$P1' != '$P2' ] && [ -s '$P1/MANIFEST.md' ]"
-check "over_long_packet_name_stays_bounded"      "[ \"\${#P1}\" -lt \"\$(( \${#R} + 70 ))\" ]"
+check "over_long_packet_name_stays_bounded"      "name=\$(basename '$P1'); [ \"\${#name}\" -le 59 ]"
 
 # THE BACKSTOP. Per-tag naming already keeps sessions apart, so a build that
 # lands on a packet owned by another tag means something is wrong. It must

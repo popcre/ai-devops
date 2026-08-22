@@ -37,6 +37,7 @@ printf '%s\n' 'model: test' > "$fixture/skills/shared/shared-one/agents/openai.y
 printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
 printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
 git -C "$fixture" init -q -b main
+git -C "$fixture" config core.autocrlf false
 git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
   -c commit.gpgsign=false add . >/dev/null
 git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
@@ -80,7 +81,7 @@ echo "2/2 cross-installer refresh reports 'up to date', not local edits"
 out="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
   CLAUDE_HOME="$TMP_ROOT/ps/claude" CODEX_HOME="$TMP_ROOT/ps/codex" \
   bash "$fixture/bin/ai-install-skills" 2>&1)"
-grep -Fq 'LOCAL EDITS' <<<"$out" && fail "Bash saw PowerShell's install as locally edited"
+if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "Bash saw PowerShell's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
@@ -90,7 +91,7 @@ out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -SkipGitInstall 2>&1)"
-grep -Fq 'LOCAL EDITS' <<<"$out" && fail "PowerShell saw Bash's install as locally edited"
+if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 

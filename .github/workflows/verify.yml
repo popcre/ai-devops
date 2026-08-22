@@ -39,9 +39,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Install offline test dependencies
+      - name: Verify offline test dependencies
         shell: pwsh
-        run: choco install jq ripgrep -y --no-progress
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The pinned Windows runner image does not provide jq.'
+          }
       - name: Complete offline Windows and Bash suites
         shell: pwsh
         run: .\tests\test-all.ps1

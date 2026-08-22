@@ -41,7 +41,7 @@ while IFS=$'\t' read -r package version; do
   else bad "npm pin $package@$version is missing from:$missing"; fi
 done < <(jq -r '.npm | to_entries[] | [.key,.value] | @tsv' "$CATALOG")
 
-if ! rg -n '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp)@latest' \
+if ! grep -R -n -E '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp)@latest' \
   "$ROOT/bin" "$ROOT/config" "$ROOT/.config" >/dev/null; then
   ok "recovery paths contain no mutable npm latest specifiers"
 else
