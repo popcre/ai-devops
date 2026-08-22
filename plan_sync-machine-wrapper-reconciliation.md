@@ -13,7 +13,7 @@
 | 6. Update docs and reconcile this computer | ✅ done | 2026-08-13 | Fresh PowerShell/Git Bash resolve all forms; installed Grok doctor reports 4.6/auth OK |
 | 7. Commit, push, and verify a clean sync | ✅ done | 2026-08-13 | Completed by implementation commit recorded in git history; origin verification performed after push |
 
-**Fresh-session starting point:** Start at §9.1 after reading §§1–8. This plan is registered by [HANDOFF.d/2026-08-13T1958Z-al8960ofc-codex-sync-wrapper-reconciliation-plan.md](HANDOFF.d/2026-08-13T1958Z-al8960ofc-codex-sync-wrapper-reconciliation-plan.md).
+**Fresh-session starting point:** Start at §9.1 after reading §§1–8. This plan was registered by former handoff `HANDOFF.d/2026-08-13T1958Z-al8960ofc-codex-sync-wrapper-reconciliation-plan.md`.
 
 ## 1. The ultimate goal — what we are trying to achieve
 

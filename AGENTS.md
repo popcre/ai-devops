@@ -7,8 +7,9 @@ file is a router and repository contract, not the complete operating manual.
 
 `u2giants/ai-devops` is Albert's backup-and-restore toolkit for a multi-model AI
 coding workflow. It contains Bash and PowerShell command-line tools, prompt
-templates, documentation, machine setup, and Claude/Codex skills. It is not a
-web application, hosted service, database, container stack, or CI/CD pipeline.
+templates, documentation, machine setup, Claude/Codex skills, and an offline
+verification workflow. It is not a web application, hosted service, database,
+container stack, or deployment pipeline.
 
 The outcome that matters is that the workflow can be restored on a new machine.
 The full recovery procedure is in
@@ -140,7 +141,7 @@ Before reporting completion:
 4. Reconcile concurrent `main` safely and push without force.
 5. Confirm the intended commit is present on `origin/main`.
 6. Report the commit and checks. There is no application deployment for this
-   repository.
+   repository; GitHub Actions runs the same offline verification suites used locally.
 
 Active work is recorded in `bugs.md`, root `plan_*.md` files, and matching OPEN
 handoffs. Completed plans are retained as decision records; do not treat their

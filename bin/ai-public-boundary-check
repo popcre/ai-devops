@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Fail if tracked public-repository paths or content cross the privacy boundary.
+set -uo pipefail
+root="${1:-.}"
+root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || { echo 'BOUNDARY FAIL: not a git repo' >&2; exit 1; }
+failed=0
+while IFS= read -r path; do
+  case "$path" in
+    claude_chats/*|codex_chats/*|transcripts/claude_chats/*|transcripts/codex_chats/*)
+      echo "BOUNDARY FAIL: tracked transcript path $path" >&2; failed=1 ;;
+    memory/*.md|memory/*/*.md)
+      [ "$path" = memory/README.md ] || { echo "BOUNDARY FAIL: operational memory tracked at $path" >&2; failed=1; } ;;
+    *.env|*.pem|*.key)
+      echo "BOUNDARY FAIL: secret-bearing file type tracked at $path" >&2; failed=1 ;;
+  esac
+done < <(git -C "$root" ls-files)
+
+pattern='(ops_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{24,})'
+if git -C "$root" grep -IlE "$pattern" -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tests/test-build-private-memory-hub.ps1' | grep -q .; then
+  echo 'BOUNDARY FAIL: credential-shaped tracked content found' >&2; failed=1
+fi
+[ "$failed" -eq 0 ] || exit 1
+echo 'PASS: public path and credential boundary'

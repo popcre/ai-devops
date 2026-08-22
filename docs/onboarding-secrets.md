@@ -203,7 +203,7 @@ and a new run is skipped while the prior one is still active.
 ## What lives where (boundary with Ansible)
 
 Per the host-change boundary, **installing host packages** (the `op` CLI,
-`gh`, node) belongs in [`/worksp/ansible`](../../ansible) — and already does:
+`gh`, node) belongs in [`u2giants/ansible`](https://github.com/u2giants/ansible) — and already does:
 `roles/apt_repos` + `roles/packages` install `1password-cli`, and the
 `ai_devops` role clones this repo and runs `install.sh`. The Ansible
 `ai_devops` role deliberately **writes no secret to disk**.

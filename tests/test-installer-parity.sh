@@ -41,6 +41,11 @@ git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
   -c commit.gpgsign=false add . >/dev/null
 git -C "$fixture" -c user.name=t -c user.email=t@example.invalid \
   -c commit.gpgsign=false commit -qm fixture >/dev/null
+remote="$TMP_ROOT/remote.git"
+git init -q --bare "$remote"
+git -C "$fixture" remote add origin "$remote"
+git -C "$fixture" push -q -u origin main
+remote_url="$(git -C "$fixture" remote get-url origin)"
 
 echo "1/2 fresh install: Bash and PowerShell agree file for file"
 mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex"
@@ -51,6 +56,7 @@ mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex"
 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
 CLAUDE_HOME="$TMP_ROOT/bash/claude" CODEX_HOME="$TMP_ROOT/bash/codex" \
   bash "$fixture/bin/ai-install-skills" >/dev/null 2>&1
+AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
 pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/ps/claude" 2>/dev/null || echo "$TMP_ROOT/ps/claude")" \
@@ -78,7 +84,8 @@ grep -Fq 'LOCAL EDITS' <<<"$out" && fail "Bash saw PowerShell's install as local
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not accept PowerShell's install"
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
-out="$(pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
+  pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \

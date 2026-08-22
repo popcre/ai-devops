@@ -2,7 +2,7 @@
 
 Tracking issue: [u2giants/ai-devops#34](https://github.com/u2giants/ai-devops/issues/34)
 Analysis this plan implements: [`fix_reviewer_system.md`](fix_reviewer_system.md)
-Handoff for this plan: [`HANDOFF.d/2026-08-17T2300Z-al8960ofc-claude-reviewer-packet-plan.md`](HANDOFF.d/2026-08-17T2300Z-al8960ofc-claude-reviewer-packet-plan.md)
+Former handoff for this plan: `HANDOFF.d/2026-08-17T2300Z-al8960ofc-claude-reviewer-packet-plan.md`
 
 ---
 

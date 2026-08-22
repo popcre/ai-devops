@@ -20,7 +20,7 @@ interrupted saves force recovery; damaged records remain safely deletable; moved
 checkouts reuse the original session; and first-turn Windows worktrees enable long
 paths. The offline suite now includes direct regression coverage for these cases.
 GLM 5.2's required-change review is incorporated and registered by
-[`HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md`](HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md).
+the former handoff `HANDOFF.d/2026-08-10T2338Z-AL8960OFC-codex-kimi-persistent-glm-amendments.md`.
 GLM 5.2 re-reviewed the amended file in the same named session on 2026-08-10,
 marked R1-R9 and all three minor notes PASS, returned `APPROVE`, and confirmed a
 brand-new session can execute it without questions.

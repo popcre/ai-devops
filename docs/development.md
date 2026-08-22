@@ -96,6 +96,18 @@ races, and idempotent finalization.
 
 ## Testing
 
+Run the complete declared offline suite on Windows with one command:
+
+```powershell
+pwsh -NoProfile -File tests/test-all.ps1
+```
+
+On Ubuntu, run `bash tests/test-all.sh`. The GitHub `verify` workflow runs the
+same deterministic Bash set on Linux and the complete Bash plus PowerShell set
+on Windows. New offline tests named `tests/test-*.sh` or `tests/test-*.ps1` are
+discovered automatically in sorted order. Paid or live provider qualification
+must live under `tests/probes/` and remains an explicit release gate, never CI.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash

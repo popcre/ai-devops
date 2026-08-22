@@ -1,7 +1,7 @@
 # Plan: make Kimi execution reliable on Windows without exposing credentials
 
 Planning issue: [u2giants/ai-devops#31](https://github.com/u2giants/ai-devops/issues/31)
-Paired handoff: [`HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execution-plan.md`](HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execution-plan.md)
+Former paired handoff: `HANDOFF.d/2026-08-17T0017Z-al8960ofc-codex-kimi-windows-execution-plan.md`
 
 ## STATUS
 

@@ -7,7 +7,8 @@ is no cloud release, container, or CI/CD. Canonical guide:
 
 ## What "deploy" means here
 
-- **No** GitHub Actions / CI/CD (`.github/workflows` does not exist).
+- GitHub Actions runs offline Linux and Windows verification only. It never
+  installs onto or mutates a production machine.
 - **No** container image, registry, or tag pattern — nothing is built or
   published.
 - **No** hosting platform, Coolify/Supabase app, or project ID.

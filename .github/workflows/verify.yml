@@ -1,0 +1,47 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install offline test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq ripgrep shellcheck
+      - name: Syntax
+        run: |
+          find bin tests -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do
+            head -n 1 "$file" | grep -q 'bash' || continue
+            bash -n "$file"
+          done
+      - name: Complete offline Bash suite
+        run: bash tests/test-all.sh
+
+  windows-offline:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install offline test dependencies
+        shell: pwsh
+        run: choco install jq ripgrep -y --no-progress
+      - name: Complete offline Windows and Bash suites
+        shell: pwsh
+        run: .\tests\test-all.ps1
