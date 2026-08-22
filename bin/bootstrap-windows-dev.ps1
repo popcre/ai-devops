@@ -28,39 +28,55 @@ function Get-CanonicalRemote([string]$Url) {
   return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
       '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
 }
+function Invoke-GitCommand {
+  param([string[]]$Arguments)
+
+  # Windows PowerShell 5.1 can promote successful Git progress from native
+  # stderr to NativeCommandError while ErrorActionPreference is Stop. Preserve
+  # the diagnostics, but make Git's real exit code the failure authority.
+  $priorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $output = @(& git @Arguments)
+    $script:LastGitExitCode = $LASTEXITCODE
+    return $output
+  } finally {
+    $ErrorActionPreference = $priorPreference
+  }
+}
 function Assert-ReadyRepository([string]$Path) {
-  $dirty = git -C $Path status --porcelain
-  if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing ai-devops checkout.' }
+  $dirty = Invoke-GitCommand @('-C', $Path, 'status', '--porcelain')
+  if ($script:LastGitExitCode -ne 0) { throw 'Could not inspect the existing ai-devops checkout.' }
   if ($dirty) { throw 'The ai-devops checkout has local changes. Preserve or commit them before bootstrap.' }
 
-  $origin = git -C $Path remote get-url origin
-  if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops origin remote.' }
+  $origin = Invoke-GitCommand @('-C', $Path, 'remote', 'get-url', 'origin')
+  if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops origin remote.' }
   if ((Get-CanonicalRemote $origin) -ne 'github.com/u2giants/ai-devops') {
     throw "The ai-devops origin is not canonical: $origin"
   }
 
-  $branch = git -C $Path branch --show-current
-  if ($LASTEXITCODE -ne 0) { throw 'Could not read the ai-devops branch.' }
+  $branch = Invoke-GitCommand @('-C', $Path, 'branch', '--show-current')
+  if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops branch.' }
   if ($branch.Trim() -ne 'main') { throw "The ai-devops checkout must already be on main; found '$branch'." }
 
-  git -C $Path fetch origin main
-  if ($LASTEXITCODE -ne 0) { throw 'The ai-devops fetch of origin/main failed.' }
-  $head = git -C $Path rev-parse HEAD
-  if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the ai-devops HEAD.' }
-  $remoteHead = git -C $Path rev-parse origin/main
-  if ($LASTEXITCODE -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
+  Invoke-GitCommand @('-C', $Path, 'fetch', 'origin', 'main') | Out-Host
+  if ($script:LastGitExitCode -ne 0) { throw 'The ai-devops fetch of origin/main failed.' }
+  $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
+  if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve the ai-devops HEAD.' }
+  $remoteHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'origin/main')
+  if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
   if ($head.Trim() -ne $remoteHead.Trim()) {
     if ($TestOnly) { throw 'The ai-devops checkout is not exactly equal to origin/main; TestOnly will not update it.' }
-    $counts = git -C $Path rev-list --left-right --count HEAD...origin/main
-    if ($LASTEXITCODE -ne 0) { throw 'Could not compare ai-devops with origin/main.' }
+    $counts = Invoke-GitCommand @('-C', $Path, 'rev-list', '--left-right', '--count', 'HEAD...origin/main')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops with origin/main.' }
     $parts = @($counts -split '\s+') | Where-Object { $_ }
     if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) {
       throw 'The ai-devops checkout is ahead of or diverged from origin/main; refusing machine changes.'
     }
-    git -C $Path merge --ff-only origin/main
-    if ($LASTEXITCODE -ne 0) { throw 'The ai-devops fast-forward update failed.' }
-    $head = git -C $Path rev-parse HEAD
-    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve updated ai-devops HEAD.' }
+    Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
+    if ($script:LastGitExitCode -ne 0) { throw 'The ai-devops fast-forward update failed.' }
+    $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve updated ai-devops HEAD.' }
     if ($head.Trim() -ne $remoteHead.Trim()) { throw 'The updated checkout is not exactly equal to origin/main.' }
   }
   return $head.Trim()
@@ -104,8 +120,8 @@ try {
     if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') {
       throw "RepoUrl is not the canonical ai-devops repository: $RepoUrl"
     }
-    git clone --branch main --single-branch $RepoUrl $RepoPath
-    if ($LASTEXITCODE -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
+    Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
+    if ($script:LastGitExitCode -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
     $sourceSha = Assert-ReadyRepository $RepoPath
     Add-Result 'Repository' 'OK' "Cloned canonical main at $sourceSha."
   }

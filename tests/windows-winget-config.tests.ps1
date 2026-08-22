@@ -43,8 +43,8 @@ $machineSetupText = Get-Content -Raw $machineSetup
 $exceptionsText = Get-Content -Raw $exceptions
 Assert ($bootstrapText -match 'setup-machine\.ps1') 'bootstrap must delegate repo-specific configuration'
 Assert ($bootstrapText -match 'TestOnly') 'bootstrap must expose a non-installing test path'
-Assert ($bootstrapText -match 'merge --ff-only origin/main') 'bootstrap must update without rewriting local history'
-Assert ($bootstrapText -match 'fetch origin main') 'bootstrap must fetch the canonical branch before machine changes'
+Assert ($bootstrapText.Contains("'merge', '--ff-only', 'origin/main'")) 'bootstrap must update without rewriting local history'
+Assert ($bootstrapText.Contains("'fetch', 'origin', 'main'")) 'bootstrap must fetch the canonical branch before machine changes'
 Assert ($bootstrapText -match 'reconcile-windows-package-exceptions\.ps1') 'bootstrap must own non-WinGet package exceptions'
 Assert ($bootstrapText -match 'setup.*-SkipRailwayCliReconcile') 'bootstrap must not install Railway twice'
 Assert ($exceptionsText -match '@railway/cli@5\.43\.1') 'package exceptions must install the pinned official Railway CLI'

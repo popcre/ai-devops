@@ -92,7 +92,7 @@ grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not acce
 [[ -e "$TMP_ROOT/ps/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 
 out="$(AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
-  "$PS_CROSS_BIN" -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
+  "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \

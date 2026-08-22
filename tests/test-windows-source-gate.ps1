@@ -49,11 +49,14 @@ try {
   Invoke-Gate $ahead -ExpectFailure
 
   $source = Get-Content -Raw $installer
-  Assert ($source -match 'git -C \$Path fetch origin main\s+if \(\$LASTEXITCODE -ne 0\)') 'fetch exit code is not checked immediately'
-  Assert ($source -match 'branch --show-current') 'main branch gate missing'
-  Assert ($source -match 'rev-parse origin/main') 'exact origin/main proof missing'
+  Assert ($source -match 'function Invoke-GitCommand') 'native Git stderr guard missing'
+  Assert ($source -match "Invoke-GitCommand @\('-C', \`$Path, 'fetch', 'origin', 'main'\)\s+\| Out-Host\s+if \(\`$script:LastGitExitCode -ne 0\)") 'fetch exit code is not checked immediately'
+  Assert ($source.Contains("'branch', '--show-current'")) 'main branch gate missing'
+  Assert ($source.Contains("'rev-parse', 'origin/main'")) 'exact origin/main proof missing'
   $bootstrap = Get-Content -Raw (Join-Path $root 'bin\bootstrap-windows-dev.ps1')
   Assert ($bootstrap.Contains("[string]`$RepoPath = 'C:\repos\ai-devops'")) 'bootstrap default is not C:\repos\ai-devops'
+  Assert ($bootstrap -match 'function Invoke-GitCommand') 'bootstrap native Git stderr guard missing'
+  Assert ($bootstrap -match "Invoke-GitCommand @\('-C', \`$Path, 'fetch', 'origin', 'main'\)\s+\| Out-Host\s+if \(\`$script:LastGitExitCode -ne 0\)") 'bootstrap fetch does not check the real Git exit code'
   Write-Host 'PASS: Windows source gate rejects dirty, wrong-branch, wrong-remote, failed-fetch, and ahead states'
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
