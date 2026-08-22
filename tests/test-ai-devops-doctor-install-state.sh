@@ -30,6 +30,12 @@ sed -i "s/^meta\tsource_sha\t.*/meta\tsource_sha\t$sha\t-/" "$TMP/etc/install-ma
 FAILED=0; check_install_state >/dev/null
 [ "$FAILED" -eq 1 ] || { echo 'FAIL: install manifest schema mismatch passed doctor'; exit 1; }
 
+rm -f "$TMP/etc/config-state.json"
+FAILED=0; check_install_state > "$TMP/missing-state.out"
+[ "$FAILED" -eq 1 ] || { echo 'FAIL: missing migration state passed doctor'; exit 1; }
+grep -q 'config migration state missing' "$TMP/missing-state.out" || { echo 'FAIL: missing migration state was not reported'; exit 1; }
+grep -q 'managed command/skill hashes match manifest' "$TMP/missing-state.out" || { echo 'FAIL: doctor stopped before completing install-state checks'; exit 1; }
+
 grep -q 'check_required npx' "$ROOT/bin/ai-devops" || { echo 'FAIL: npx is not required'; exit 1; }
 for provider in grok kimi glm muse gemini qwen codex deepseek; do
   grep -q "^$provider$" "$ROOT/bin/ai-devops" || { echo "FAIL: provider $provider omitted"; exit 1; }
