@@ -67,7 +67,9 @@ model id or the reasoning flag. The scripts always read the real file at
 
 - `ai-model-call <stage> <prompt> <out>` maps a stage name to the matching
   `*_CMD` and pipes the prompt in on stdin.
-- `ai-codex-review <mode>` uses `CODEX_CMD` for read-only reviews.
+- `ai-codex-review <mode>` uses `CODEX_CMD` for read-only reviews and refuses
+  configuration that does not explicitly retain `--sandbox read-only` plus
+  `model_reasoning_effort=low` or `medium`.
 
 ## A note on Fable
 

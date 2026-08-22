@@ -4,16 +4,16 @@ description: >-
   Run a read-only Codex second-opinion review (plan, diff, security, visual, or
   final-check) on the current git repo and save the result under .ai/reviews/.
   Use when the user wants Codex to independently review work without changing any
-  files. Scaffolding v0.1.
+  files.
 ---
 
 # AI Reviewer (Codex)
 
-Read-only second-opinion reviews from Codex / GPT-5.5, wrapping the toolkit's
+Read-only second-opinion reviews from Codex, wrapping the toolkit's
 `ai-codex-review` command. Reviews **never** edit, commit, push, merge, or
 delete anything.
 
-> Status: v0.1 scaffolding.
+> Status: fail-closed reviewer lifecycle.
 
 ## When to use
 
@@ -35,17 +35,25 @@ ai-codex-review final-check       # go/no-go readiness check
 
 Each run:
 
-- creates `.ai/reviews/` if missing,
-- saves output to `.ai/reviews/YYYYMMDD-HHMMSS-<mode>.md`,
+- requires `.ai/reviews/` to be Git-ignored and physically contained,
+- creates a disposable complete snapshot, including untracked and binary files,
+- seals and verifies an exact evidence packet and whole-source digest,
+- saves output under a collision-proof run identity,
 - prints the saved file path,
 - uses `CODEX_CMD` from `/etc/ai-devops/models.env`
-  (default: `codex exec --skip-git-repo-check`).
+  (default includes `--sandbox read-only` and medium reasoning), and
+- returns nonzero unless Codex succeeds, the snapshot remains unchanged, an
+  exact verdict is present, the source is still current, and lifecycle/
+  scoreboard accounting completes.
 
 ## Guardrails
 
 - Must be inside a git repo.
-- Read-only: no commits, pushes, merges, or deletions.
-- Does not read or emit secrets/`.env`/auth files.
+- Read-only is enforced by the Codex sandbox and verified again by hashing the
+  private snapshot after the provider returns.
+- The complete review-visible source is in scope. Never start this command in a
+  repository whose untracked files contain credentials or other material that
+  must not be sent to the configured model.
 
 ## Relationship to the pipeline
 

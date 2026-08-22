@@ -35,7 +35,7 @@ for how to adapt the exact flags to your installed CLIs (they may differ).
 | `OPUS48_HIGH_REASONING_CMD` | `ai-model-call plan`, `ai-model-call final` | `claude --model opus-4.8 --reasoning high` |
 | `OPUS_REVIEW_CMD` | `ai-model-call plan-review`/`diff-review`/`security` | `claude --model opus-4.8 --reasoning high` |
 | `GPT55_CMD` | `ai-model-call implement` | `codex exec --skip-git-repo-check` |
-| `CODEX_CMD` | `ai-codex-review` | `codex exec --skip-git-repo-check` |
+| `CODEX_CMD` | `ai-codex-review` | `codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium` |
 | `TESTER_CMD` | `ai-model-call test` | `codex exec --skip-git-repo-check` |
 
 ## `server.env` variables

@@ -42,9 +42,13 @@ esac
 cwd=""; prev=""
 for a in "$@"; do [ "$prev" = "--cwd" ] && cwd="$a"; prev="$a"; done
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
-case "$cwd" in /*) echo "Error: Failed to set working directory to \"$cwd\": (os error 3)" >&2; exit 1 ;; esac
-# Convert the native path back so the stub can write into the worktree.
-posix="$(cygpath -u "$cwd" 2>/dev/null || printf '%s' "$cwd")"
+case "$(uname -s)" in
+  MSYS*|MINGW*|CYGWIN*)
+    case "$cwd" in /*) echo "Error: Failed to set working directory to \"$cwd\": (os error 3)" >&2; exit 1 ;; esac
+    posix="$(cygpath -u "$cwd")";;
+  *)
+    case "$cwd" in /*) posix="$cwd";; *) echo "expected an absolute POSIX cwd: $cwd" >&2; exit 1;; esac;;
+esac
 case "$mode" in
   ok)        printf 'grok was here\n' > "$posix/made-by-grok.txt"
              echo '{"text":"done","stopReason":"EndTurn","sessionId":"s1","num_turns":3,"usage":{"total_tokens":100,"cache_read_input_tokens":10},"total_cost_usd":0.01,"modelUsage":{"grok-4.6-build":{}}}' ;;
@@ -108,11 +112,11 @@ grep -q -- '--permission-mode acceptEdits' "$TMP/argv.txt" && ok "never_uses_per
 grep -q -- '--max-turns' "$TMP/argv.txt" && ok "max_turns_always_present" || bad "max_turns_always_present"
 
 # --- 3. --cwd is a native path -----------------------------------------------
-# The stub exits 1 on a POSIX --cwd, mirroring the real os-error-3 failure.
+# Windows Grok needs a native drive path; Linux Grok needs an absolute POSIX path.
 cwd_arg="$(sed -n 's/.*--cwd \([^ ]*\).*/\1/p' "$TMP/argv.txt" | head -1)"
-case "$cwd_arg" in
-  /*) bad "cwd_is_native_path (got POSIX: $cwd_arg)" ;;
-  *)  ok "cwd_is_native_path" ;;
+case "$(uname -s)" in
+  MSYS*|MINGW*|CYGWIN*) case "$cwd_arg" in /*) bad "cwd_is_native_path (got POSIX: $cwd_arg)";; *) ok "cwd_is_native_path";; esac;;
+  *) case "$cwd_arg" in /*) ok "cwd_is_native_path";; *) bad "cwd_is_native_path (not POSIX: $cwd_arg)";; esac;;
 esac
 
 # --- 4. cleanup proved in both ledgers ---------------------------------------

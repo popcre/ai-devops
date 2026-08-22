@@ -24,7 +24,7 @@ now_epoch() { date +%s; }
 static_status() {
   case "$1" in
     gemini) printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
-    codex|deepseek) printf '{"provider":"%s","status":"unknown","failure_class":"doctor-unsupported"}\n' "$1"; return 0 ;;
+    deepseek) printf '{"provider":"%s","status":"unknown","failure_class":"doctor-unsupported"}\n' "$1"; return 0 ;;
     *) return 1 ;;
   esac
 }

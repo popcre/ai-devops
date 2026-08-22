@@ -132,7 +132,9 @@ controlled 2026-08-09 test showed that Git Bash translated a killed native OpenC
 child to `0x8007007F`/127 and Task Scheduler recorded completion without retrying. The
 wrapper now remains the task process and keeps `server.log` below 1 MiB with one prior
 copy. An explicit task stop is intentional and is not auto-restarted; use
-`ai-glm server start` to recover it.
+`ai-glm server start` to recover it. `start` succeeds only after the loopback
+health endpoint answers within the bounded readiness window; scheduling the task
+alone is not reported as success.
 
 Windows notes:
 - `HOME` must be the local profile. A roaming `Z:` home would send the install to a
@@ -173,6 +175,11 @@ ai-glm delete <name>            # clear a review or a terminal implementation re
 ai-glm doctor                   # full PASS/WARN/FAIL check, nonzero on failure
 ai-glm server status|start|stop|restart
 ```
+
+On both Windows and Ubuntu, `server start` and `server restart` return success
+only after bounded health proof. A launch that never becomes ready is nonzero,
+prints service/task diagnostics, and names `doctor` plus `server status` as the
+next checks.
 
 Named session creation is locked across the full check, server create, and local
 metadata write. Two same-name calls cannot create an untracked duplicate. On Windows,

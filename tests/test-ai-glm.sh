@@ -183,6 +183,27 @@ check "review path names a local dependency failure" "printf '%s' \"\$DOWN_OUT\"
 check "review path does not blame the provider" "printf '%s' \"\$DOWN_OUT\" | grep -q 'LOCAL SERVICE fault.*NOT a provider or model fault'"
 check "review path gives the recovery command" "printf '%s' \"\$DOWN_OUT\" | grep -q 'Start it with: ai-glm server start'"
 
+echo "== server start means healthy, not merely launched =="
+server_fixture() { # PLATFORM MODE COMMAND
+  local platform="$1" mode="$2" command="$3"
+  AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" FIX_PLATFORM="$platform" FIX_MODE="$mode" FIX_COMMAND="$command" FIX_LOG="$TMP/server-fixture.log" \
+    AI_GLM_SERVER_READY_TIMEOUT=3 AI_GLM_SERVER_READY_INTERVAL=1 bash -c '
+      source "$AI_GLM_SOURCE"; IS_WINDOWS="$FIX_PLATFORM"; COUNT=0; : > "$FIX_LOG"
+      server_up(){ COUNT=$((COUNT+1)); case "$FIX_MODE" in already) return 0;; delayed) [ "$COUNT" -ge 3 ];; *) return 1;; esac; }
+      sleep(){ :; }
+      systemctl(){ printf "systemctl %s\n" "$*" >> "$FIX_LOG"; [ "$FIX_MODE" != launchfail ]; }
+      schtasks(){ printf "schtasks %s\n" "$*" >> "$FIX_LOG"; [ "$FIX_MODE" != launchfail ]; }
+      cmd_server "$FIX_COMMAND"
+    '
+}
+check "linux start waits through delayed readiness" "server_fixture 0 delayed start 2>&1 | grep -q 'started and healthy'"
+check "windows start waits through delayed readiness" "server_fixture 1 delayed start 2>&1 | grep -q 'started and healthy'"
+check "already healthy start does not relaunch" "server_fixture 0 already start 2>&1 | grep -q 'already healthy' && [ ! -s '$TMP/server-fixture.log' ]"
+check "linux launch failure is nonzero" "! server_fixture 0 launchfail start >/dev/null 2>&1"
+check "windows launch failure is nonzero" "! server_fixture 1 launchfail start >/dev/null 2>&1"
+check "never healthy start is bounded and nonzero" "! server_fixture 0 never start >/dev/null 2>&1"
+check "linux restart also waits for readiness" "server_fixture 0 delayed restart 2>&1 | grep -q 'restarted and healthy'"
+
 echo "== completion rule =="
 check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_GLM' || grep -q 'finish\" = \"stop' '$AI_GLM'"
 check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' || grep -q 'idle -ge 2' '$AI_GLM'"
@@ -369,7 +390,12 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
       PROMPT_TEXT=fixture; PROMPT_FILE=""; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex
       AI_GLM_TEST_MODE=1; AI_GLM_TEST_PAUSE_AT="$JOB_PAUSE"; AI_GLM_TEST_READY="$JOB_READY"; AI_GLM_TEST_RELEASE="$JOB_RELEASE"; AI_GLM_TEST_FAIL_AT="$JOB_FAIL"
       cmd_implement "$JOB_NAME"
-    '
+    ' &
+  local impl_pid=$! impl_rc
+  trap 'kill -TERM "$impl_pid" 2>/dev/null || true; wait "$impl_pid" 2>/dev/null || true; exit 143' TERM INT HUP
+  wait "$impl_pid"; impl_rc=$?
+  trap - TERM INT HUP
+  return "$impl_rc"
 }
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
 wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }

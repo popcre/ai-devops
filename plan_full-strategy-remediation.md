@@ -17,7 +17,7 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | 🟨 verifying | 2026-08-21 | config/manifest/uninstall/doctor fixtures pass; awaits live archive/restore proof |
 | 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-21 | first workflow run exposed missing Linux execute bits; repaired; awaits green rerun and post-rewrite ruleset |
 | 9 | Make shared reviewer snapshots and lifecycle fail closed | 🟦 in progress | 2026-08-21 | all-or-nothing digest-bound snapshot and lifecycle tests pass; provider wiring continues in Step 10 |
-| 10 | Finish provider-specific reviewer repairs and qualification | ⬜ open | — | provider plan STATUS tables and bounded live evidence bundles |
+| 10 | Finish provider-specific reviewer repairs and qualification | 🟦 in progress | 2026-08-21 | Codex offline repair complete; Qwen and GLM startup remain; unavailable providers stay advisory/quarantined |
 | 11 | Finish the seven-stage workflow with two supported approval paths | ⬜ open | — | end-to-end scratch-repository run and exact artifact chain |
 | 12 | Pin restore inputs and prove clean-machine reproducibility | ⬜ open | — | Windows first/second-run reports and Ubuntu disposable restore report |
 | 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ⬜ open | — | strict context audit, trigger matrix, policy tests, `ai-facts` tests |

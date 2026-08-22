@@ -105,6 +105,8 @@ repo_root() {
 # clones, so the live checkout cannot move underneath a running session.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
+PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
+[ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
   "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
@@ -122,6 +124,19 @@ refresh_review_boundary() { # refresh_review_boundary ROOT TAG RECORDED
   [ "$(cd "$refreshed" && pwd -P)" = "$(cd "$recorded" && pwd -P)" ] || \
     die "review session is bound to $recorded but its private snapshot now resolves to $refreshed. Refusing to split one conversation across two directories."
   printf '%s' "$recorded"
+}
+prepare_review_evidence() { # WORKDIR TAG PROMPT_FILE
+  local workdir="$1" tag="$2" prompt="$3"
+  [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; a Qwen review without exact evidence is forbidden."
+  REVIEW_PACKET_DIR="$($PACKET_BIN build "$workdir" "$tag" --decision "$(cat "$prompt")" --class medium)" \
+    || die "could not build Qwen review evidence."
+  "$PACKET_BIN" verify "$REVIEW_PACKET_DIR" >/dev/null || die "Qwen review evidence failed verification."
+  REVIEW_PACKET_SHA="$(cat "$REVIEW_PACKET_DIR/MANIFEST.sha256")"
+  REVIEW_SOURCE_SHA="$(sed -n 's/^source_digest=//p' "$workdir/.ai-review-sandbox")"
+  REVIEW_HEAD_SHA="$(git -C "$workdir" rev-parse HEAD)"
+  REVIEW_BASE_SHA="$(sed -n 's/^| \*\*base\*\* | `\([^`]*\)`.*/\1/p' "$REVIEW_PACKET_DIR/MANIFEST.md")"
+  [ -n "$REVIEW_SOURCE_SHA" ] && [ -n "$REVIEW_BASE_SHA" ] || die "Qwen evidence is missing source or base identity."
+  printf '\n\nRead `%s/MANIFEST.md` first. It is the sealed evidence for this exact source generation.\n' "$REVIEW_PACKET_DIR" >> "$prompt"
 }
 legacy_repo_id() { printf '%s' "$1" | tr '\\' '/' | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
 repo_id() {
@@ -833,7 +848,7 @@ lifecycle_cancel() {
 }
 
 start_session() { # start_session NAME MODE
-  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner=""
+  local name="$1" mode="$2" repo rid meta pf out rid_lock sid rc before after wt="" base="" owner="" review_tag=""
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(meta_path "$rid" "$name")"
@@ -874,6 +889,9 @@ start_session() { # start_session NAME MODE
   pf="$(mktemp)"; LIFECYCLE_PF="$pf"
   out="$(mktemp)"; LIFECYCLE_OUT="$out"
   build_prompt_file "$pf"
+  if [ "$mode" = review ]; then
+    review_tag="qwen-$name"; prepare_review_evidence "$workdir" "$review_tag" "$pf"
+  fi
   before="$(tree_state "$workdir")"
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
@@ -901,9 +919,12 @@ start_session() { # start_session NAME MODE
   if [ "$mode" = review ]; then
     write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg mode "$mode" --arg model "$QWEN_MODEL" --arg review_dir "$workdir" \
-    --arg created "$(date -u +%FT%TZ)" --argjson turns 1 \
+    --arg base "$REVIEW_BASE_SHA" --arg head "$REVIEW_HEAD_SHA" --arg source "$REVIEW_SOURCE_SHA" --arg packet "$REVIEW_PACKET_SHA" --arg packet_dir "$REVIEW_PACKET_DIR" \
+    --arg created "$(date -u +%FT%TZ)" --argjson turns 1 --argjson generation 1 \
     '{qwen_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller, mode:$mode,
-      model:$model, review_dir:$review_dir, created:$created, updated:$created, turns:$turns}')"
+      model:$model, review_dir:$review_dir,base_sha:$base,head:$head,source_digest:$source,
+      packet_sha256:$packet,packet_dir:$packet_dir,generation:$generation,
+      created:$created, updated:$created, turns:$turns}')"
   fi
 
   # #1220: keep the lifecycle bookkeeping, THEN fail. Aborting on the spot would
@@ -935,7 +956,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode workdir
+  local name="$1" repo rid meta sid pf out rc before after sess_lock rid_lock mode workdir current_source current_head returned
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .qwen_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
@@ -962,7 +983,13 @@ cmd_ask() {
     write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$workdir" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
+  jq -e '(.base_sha|type=="string") and (.head|type=="string") and (.source_digest|type=="string") and (.packet_sha256|type=="string") and (.generation|type=="number")' "$meta" >/dev/null 2>&1 \
+    || die "review session '$name' predates exact evidence identity. Start a new named review; this conversation cannot produce another verdict."
+  current_source="$($SANDBOX_BIN digest "$repo")"; current_head="$(git -C "$repo" rev-parse HEAD)"
+  [ "$current_source" = "$(jq -r .source_digest "$meta")" ] && [ "$current_head" = "$(jq -r .head "$meta")" ] \
+    || die "review session '$name' is stale because committed, dirty, or untracked source changed. Start a new named review; no Qwen turn was started."
   workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
+  prepare_review_evidence "$workdir" "qwen-$name" "$pf"
   before="$(tree_state "$workdir")"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   if ! await_result "$out" "'$name'"; then
@@ -974,7 +1001,10 @@ cmd_ask() {
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
     die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
   fi
-  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.updated=$u | .turns=(.turns+1)' "$meta")"
+  returned="$(session_id_from "$out")"
+  [ "$returned" = "$sid" ] || die "Qwen returned session '$returned' instead of '$sid'; response rejected."
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg packet "$REVIEW_PACKET_SHA" --arg packet_dir "$REVIEW_PACKET_DIR" \
+    '.updated=$u | .turns=(.turns+1) | .generation=(.generation+1) | .packet_sha256=$packet | .packet_dir=$packet_dir' "$meta")"
   FINISH_RC=0
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$FINISH_RC" = 0 ]; then

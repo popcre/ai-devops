@@ -1565,10 +1565,37 @@ reconcile_implementation_records() {
   return "$rc"
 }
 
+server_start_diagnostics() {
+  if [ "$IS_WINDOWS" = 1 ]; then
+    schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
+  else
+    systemctl --user status opencode-glm.service --no-pager 2>&1 | tail -20 >&2 || true
+  fi
+}
+
+wait_for_server_health() { # LABEL
+  local label="$1" waited=0 timeout="${AI_GLM_SERVER_READY_TIMEOUT:-30}" interval="${AI_GLM_SERVER_READY_INTERVAL:-1}"
+  case "$timeout" in ''|*[!0-9]*) die "AI_GLM_SERVER_READY_TIMEOUT must be a positive integer.";; esac
+  case "$interval" in ''|*[!0-9]*) die "AI_GLM_SERVER_READY_INTERVAL must be a positive integer.";; esac
+  [ "$timeout" -gt 0 ] || die "AI_GLM_SERVER_READY_TIMEOUT must be greater than zero."
+  [ "$interval" -gt 0 ] || die "AI_GLM_SERVER_READY_INTERVAL must be greater than zero."
+  until server_up; do
+    if [ "$waited" -ge "$timeout" ]; then
+      warn "$label did not become healthy within ${timeout} seconds."
+      server_start_diagnostics
+      return 1
+    fi
+    sleep "$interval"; waited=$((waited + interval))
+  done
+}
+
 cmd_server() {
   if [ "$IS_WINDOWS" = 1 ]; then
     case "${1:-status}" in
-      start)   schtasks //Run    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "started" ;;
+      start)   if server_up; then note "already healthy"; return; fi
+               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not start AiDevOps-OpenCodeGlm"
+               wait_for_server_health "AiDevOps-OpenCodeGlm" || die "task started but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
+               note "started and healthy" ;;
       stop)    schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "stopped" ;;
       restart) schtasks //End //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 || true
                local waited=0
@@ -1586,11 +1613,7 @@ cmd_server() {
                  sleep 1; waited=$((waited + 1))
                done
                schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not restart AiDevOps-OpenCodeGlm"
-               waited=0
-               until server_up; do
-                 [ "$waited" -lt 30 ] || die "AiDevOps-OpenCodeGlm restarted but did not become healthy within 30 seconds."
-                 sleep 1; waited=$((waited + 1))
-               done
+               wait_for_server_health "AiDevOps-OpenCodeGlm restart" || die "task restarted but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
                note "restarted and healthy" ;;
       status)  schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20
                printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)" ;;
@@ -1599,9 +1622,14 @@ cmd_server() {
     return
   fi
   case "${1:-status}" in
-    start)   systemctl --user start opencode-glm.service;   note "started" ;;
+    start)   if server_up; then note "already healthy"; return; fi
+             systemctl --user start opencode-glm.service || die "could not start opencode-glm.service"
+             wait_for_server_health "opencode-glm.service" || die "service started but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
+             note "started and healthy" ;;
     stop)    systemctl --user stop opencode-glm.service;    note "stopped" ;;
-    restart) systemctl --user restart opencode-glm.service; note "restarted" ;;
+    restart) systemctl --user restart opencode-glm.service || die "could not restart opencode-glm.service"
+             wait_for_server_health "opencode-glm.service restart" || die "service restarted but GLM is not ready. Run: ai-glm doctor ; ai-glm server status"
+             note "restarted and healthy" ;;
     status)
       systemctl --user status opencode-glm.service --no-pager || true
       printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)"

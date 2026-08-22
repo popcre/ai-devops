@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Baseline failure fixtures | ⬜ open | `tests/test-ai-codex-review.sh` |
-| 2 | Complete change capture | ⬜ open | untracked-file fixture |
-| 3 | Fail-closed completion | ⬜ open | failed/missing-verdict fixtures |
-| 4 | Collision-proof artifacts and shared governance | ⬜ open | concurrency/preflight/scoreboard fixtures |
-| 5 | Land and install | ⬜ open | remote SHA and installed hash |
+| 1 | Baseline failure fixtures | ✅ complete | `tests/test-ai-codex-review.sh` (22 cases) |
+| 2 | Complete change capture | ✅ complete | text/binary untracked files are present in the digest-bound private snapshot |
+| 3 | Fail-closed completion | ✅ complete | provider, empty, missing-verdict, snapshot-write, and stale-source fixtures |
+| 4 | Collision-proof artifacts and shared governance | ✅ complete | concurrent atomic reports plus preflight/lifecycle/scoreboard evidence |
+| 5 | Land and install | 🟨 integrated locally | focused suites pass; exact-head review, push, and installation remain |
 
-Fresh session starts at Step 1.
+Fresh session starts at Step 5.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -39,10 +39,11 @@ selection, provider login, and other wrappers.
 
 ## 5. Current state of the code
 
-Artifact naming is `bin/ai-codex-review:66-67`; `gather_diff()` at `:69-73` uses
-only tracked diffs; failure handling at `:138-159` warns then exits zero and does
-not enforce `## Verdict`. No dedicated Codex wrapper suite currently guards
-these cases. The audit report is uncommitted.
+The wrapper now creates a complete disposable snapshot, seals a source-bound
+packet, enforces Codex's read-only sandbox and allowed reasoning, rejects any
+snapshot/source mutation, requires an exact verdict, publishes a unique atomic
+report, and completes provider-neutral lifecycle and scoreboard accounting.
+The dedicated 22-case hostile suite is the current evidence.
 
 ## 6. Key findings and root cause
 

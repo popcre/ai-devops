@@ -6,13 +6,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 
 | Step | Work | Status | Evidence |
 |---|---|---|---|
-| 1 | Cross-version continuation fixtures | ⬜ open | `tests/test-ai-qwen.sh` |
-| 2 | Bind session to exact evidence | ⬜ open | metadata/packet fixtures |
-| 3 | Explicit refresh/restart behavior | ⬜ open | stale-tree fixtures |
-| 4 | Shared governance integration | ⬜ open | preflight/scoreboard fixtures |
+| 1 | Cross-version continuation fixtures | ✅ complete | `tests/test-ai-qwen.sh` (37 cases) |
+| 2 | Bind session to exact evidence | ✅ complete | base/head/source/packet/generation metadata and sealed packet fixtures |
+| 3 | Explicit refresh/restart behavior | ✅ complete | committed, dirty, untracked, and legacy identity drift stop before provider contact |
+| 4 | Shared governance integration | 🟨 partial | packet/source identity complete; provider-neutral preflight/terminal accounting remains |
 | 5 | Live qualification and landing | ⬜ open | verification bundle/remote SHA |
 
-Fresh session starts at Step 1.
+Fresh session starts at Step 4.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -41,10 +41,12 @@ changes, broad permissions, other providers.
 
 ## 5. Current state of the code
 
-`start_session()` writes conversation/workspace metadata but not exact review
-identity. `cmd_ask()` obtains the current boundary, which can refresh a linked
-worktree snapshot. Existing Qwen suite passed 23 cases during the Kimi landing;
-none covers code changing between new and ask. No fix is committed.
+Review creation now builds and verifies a sealed packet, records base, head,
+whole-source digest, packet hash, and generation, and points Qwen at the manifest.
+An unchanged continuation rebuilds exact evidence and advances its named
+generation. Any committed, dirty, untracked, or legacy identity drift stops
+before provider contact. Provider-neutral preflight/terminal accounting and live
+qualification remain.
 
 ## 6. Key findings and root cause
 

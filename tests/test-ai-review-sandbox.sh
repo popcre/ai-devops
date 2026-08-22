@@ -76,6 +76,8 @@ check "uncommitted_edits_reproduced"          "grep -q uncommitted '$STAGE/a.txt
 check "untracked_files_reproduced"            "grep -q brand-new '$STAGE/c.txt'"
 check "snapshot_records_whole_source_digest" \
   "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$STAGE/.ai-review-sandbox'"
+check "head_matches_the_worktree" \
+  "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 
 # An untracked link must never import a file outside the repository boundary.
 if ln -s "$TMP/outside.txt" "$WT/outside-link" 2>/dev/null && [ -L "$WT/outside-link" ]; then
@@ -99,8 +101,6 @@ if ln -s "$TMP/outside.txt" "$WT/tracked-outside-link" 2>/dev/null && [ -L "$WT/
   git -C "$WT" rm -q tracked-outside-link
   git -C "$WT" commit -qm remove-tracked-hostile-link
 fi
-check "head_matches_the_worktree" \
-  "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 check "sandbox_is_labelled_for_the_reviewer"  "grep -q 'Review snapshot' '$STAGE/AI-REVIEW-SANDBOX.md'"
 check "sandbox_scaffolding_is_not_review_noise" \
   "[ -z \"\$(git -C '$STAGE' status --porcelain -- AI-REVIEW-SANDBOX.md .ai-review-sandbox)\" ]"
@@ -224,9 +224,11 @@ for w in ai-glm ai-kimi ai-qwen ai-grok-review; do
   fi
   check "${w}_releases_its_snapshot"          "grep -q 'release_boundary' '$REPO_ROOT/bin/$w'"
 done
-# ai-codex-review and ai-deepseek-agent send the diff as text and never hand a
-# directory to the model, so they are immune and deliberately not wired.
-check "codex_review_hands_over_no_directory"  "! grep -qE -- '--cd |--cwd ' '$REPO_ROOT/bin/ai-codex-review'"
+# ai-codex-review now uses the same complete, digest-bound disposable snapshot
+# as the other directory-aware reviewers. DeepSeek still receives evidence as
+# text and deliberately does not receive a repository directory.
+check "codex_review_uses_snapshot_boundary"   "grep -q 'ensure-copy' '$REPO_ROOT/bin/ai-codex-review' && grep -q 'remove-copy' '$REPO_ROOT/bin/ai-codex-review'"
+check "codex_review_hands_snapshot_to_model"  "grep -q -- '--cd \"\$REVIEW_DIR\"' '$REPO_ROOT/bin/ai-codex-review'"
 check "deepseek_hands_over_no_directory"      "! grep -qE -- '--cd |--cwd ' '$REPO_ROOT/bin/ai-deepseek-agent'"
 
 check "invalid_tag_rejected"                  "! '$SCRIPT' ensure '$WT' 'bad tag'"

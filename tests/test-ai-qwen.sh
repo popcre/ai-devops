@@ -35,7 +35,7 @@ case "${1:-}" in
     exit 0 ;;
 esac
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo review)"
-cat >/dev/null
+cat > "$TMPDIR_FOR_TEST/prompt.txt"
 case "$mode" in
   review) ;;
   write) printf 'qwen change\n' > qwen.txt ;;
@@ -67,10 +67,33 @@ check 'review record stores exact session' "run show review-1 | jq -e '.qwen_ses
 REVIEW_DIR="$(run show review-1 | jq -r .review_dir)"
 check 'ordinary clone review uses a private copy' "[ \"\$(cd '$REVIEW_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check 'private review copy owns its git controls' "test -d '$REVIEW_DIR/.git'"
+check 'review metadata binds exact evidence generation' \
+  "run show review-1 | jq -e '.generation==1 and (.base_sha|length)==40 and (.head|length)==40 and (.source_digest|length)==64 and (.packet_sha256|length)==64'"
+PACKET_DIR="$(run show review-1 | jq -r .packet_dir)"
+check 'review packet exists and verifies' "'$REPO_ROOT/bin/ai-review-packet' verify '$PACKET_DIR'"
+check 'review prompt names sealed manifest' "grep -q 'MANIFEST.md' '$TMP/prompt.txt'"
 
 run ask review-1 --prompt 'follow up' >/dev/null 2>&1
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
+check 'unchanged follow-up advances named evidence generation' "run show review-1 | jq -e '.generation==2 and .turns==2'"
+
+CALLS_BEFORE="$(wc -l < "$TMP/argv.txt")"
+printf 'dirty drift\n' >> "$REPO/a.txt"
+check 'dirty drift blocks review before provider contact' "! run ask review-1 --prompt stale >/dev/null 2>&1"
+check 'dirty drift starts no paid turn' "[ '$CALLS_BEFORE' = \"\$(wc -l < '$TMP/argv.txt')\" ]"
+git -C "$REPO" checkout -q -- a.txt
+printf 'untracked drift\n' > "$REPO/new-source.txt"
+check 'untracked drift blocks review before provider contact' "! run ask review-1 --prompt stale >/dev/null 2>&1"
+rm -f "$REPO/new-source.txt"
+
+META="$(find "$AI_QWEN_STATE_DIR/sessions" -name 'codex--review-1.json' -print -quit)"
+LEGACY="$(dirname "$META")/codex--legacy-review.json"
+jq 'del(.base_sha,.head,.source_digest,.packet_sha256,.packet_dir,.generation)|.name="legacy-review"' "$META" > "$LEGACY"
+check 'legacy identity-free review cannot resume' "! run ask legacy-review --prompt stale >/dev/null 2>&1"
+
+printf 'new commit\n' > "$REPO/committed-drift.txt"; git -C "$REPO" add committed-drift.txt; git -C "$REPO" commit -qm drift
+check 'committed drift blocks review before provider contact' "! run ask review-1 --prompt stale >/dev/null 2>&1"
 
 echo mutate-review > "$TMP/mode"
 if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi
