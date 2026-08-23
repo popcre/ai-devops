@@ -25,6 +25,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_KIMI_STATE_DIR="$TMP/state"
 export AI_REVIEW_SANDBOX_DIR="$TMP/review-sandboxes"
 export AI_KIMI_CALLER="claude"
+export AI_KIMI_TEST_MODE=1
 export AI_KIMI_POLL_INTERVAL=1
 export AI_KIMI_WAIT_TIMEOUT=15
 
@@ -210,7 +211,10 @@ OUT="$(run start missing-prompt-file --prompt-file "$TMP/not-present" 2>&1)"; RC
 check "prompt-build failure is nonzero and removes its private prompt" "test '$RC' -ne 0 && ! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q ."
 check "late worker refuses a removed prompt before provider resolution" "sed -n '/^run_turn()/,/resolve_kimi/p' '$SCRIPT' | grep -q '\[ ! -s \"\$pf\" \]'"
 echo ok > "$TMP/mode"
-AI_KIMI_TEST_FAIL_ARTIFACT=1 run start artifact-finalization-failure --prompt review >/dev/null
+# Artifact finalization has its own contract. Exercise it through the real
+# worker while leaving the Windows detached-launch contract to the dedicated
+# launch/path tests below; coupling both made this fixture depend on runner load.
+AI_KIMI_TEST_DIRECT_WORKER=1 AI_KIMI_TEST_FAIL_ARTIFACT=1 run start artifact-finalization-failure --prompt review >/dev/null
 AI_KIMI_WAIT_TIMEOUT=30 run wait artifact-finalization-failure >/dev/null 2>&1 || true
 ARTIFACT_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--artifact-finalization-failure/job.json' -print -quit)"
 check "worker-level artifact failure remains recovery-required" "jq -e '.phase==\"recovery-required\" and .terminal_reason==\"artifact-write-failed\"' '$ARTIFACT_FAIL_META'"

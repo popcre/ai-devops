@@ -964,6 +964,12 @@ create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
 launch_review_worker() { # JOB-DIR PROMPT-FILE
   local dir="$1" pf="$2" pid="" bash_bin win_dir win_pf win_self ps_bash ps_dir ps_pf ps_self
   [ "${AI_KIMI_TEST_FAIL_WORKER_START:-0}" != 1 ] || return 1
+  if [ "${AI_KIMI_TEST_DIRECT_WORKER:-0}" = 1 ]; then
+    [ "${AI_KIMI_TEST_MODE:-0}" = 1 ] || return 1
+    nohup bash "$_self" __review-worker "$dir" "$pf" </dev/null >>"$dir/worker.log" 2>&1 &
+    printf '%s' "$!"
+    return 0
+  fi
   # Start-Process is the Windows primitive that survives a Git-Bash/Codex
   # caller boundary and does not show a console.  The generated launcher has
   # only paths, never a prompt or credentials.
