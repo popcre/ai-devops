@@ -80,6 +80,7 @@ check "report_has_exact_verdict" "grep -A1 '^## Verdict' '$OUT' | tail -1 | grep
 check "report_binds_source_digest" "grep -q \"$BEFORE\" '$OUT'"
 check "provider_received_complete_untracked_snapshot" "grep -q 'review saw complete snapshot' '$OUT'"
 check "provider_command_keeps_readonly_sandbox" "grep -Rzq -- '--sandbox' '$TMP/args' && grep -Rzq -- 'read-only' '$TMP/args'"
+check "provider_command_ignores_secret_bearing_user_config" "grep -Rzq -- '--ignore-user-config' '$TMP/args'"
 check "provider_command_receives_private_directory" "grep -Rzq -- '--cd' '$TMP/args'"
 check "source_is_unchanged_by_successful_review" "[ \"$BEFORE\" = \"\$('$REPO_ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
 if [ -n "${SYSTEMROOT:-}" ]; then

@@ -222,7 +222,10 @@ TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
 set +e
-printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+# A sealed repository review needs Codex authentication, but no user-configured
+# MCP servers. Loading them adds unrelated network capabilities and can expose
+# secret-bearing launcher arguments through terminal-title control sequences.
+printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"

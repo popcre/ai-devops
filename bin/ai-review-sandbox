@@ -26,6 +26,8 @@
 #
 #   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
 #   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
+#   ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy> # refresh a recorded stable path
+#   ai-review-sandbox remove-recorded <tag> <managed-copy> # remove that exact recorded stable path
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
 #   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
 #   ai-review-sandbox is-worktree <dir>          # exit 0 when <dir> is a linked worktree
@@ -39,7 +41,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.3.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -265,6 +267,35 @@ cmd_ensure() {
   printf '%s' "$stage"
 }
 
+cmd_refresh_copy() { # refresh an exact, already-recorded directory for directory-bound reviewer sessions
+  local root tag stage sandbox_root
+  root="$(canon "${1:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}")"
+  tag="${2:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}"
+  stage="${3:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}"
+  valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
+  mkdir -p "$SANDBOX_DIR"; sandbox_root="$(canon "$SANDBOX_DIR")"; stage="$(canon "$stage")"
+  case "$stage" in "$sandbox_root"/*) ;; *) die "refusing to refresh $stage: it is outside managed review storage." ;; esac
+  is_managed "$stage" || die "refusing to refresh $stage: it is not a managed review snapshot."
+  grep -Fqx "Snapshot tag: $tag" "$stage/AI-REVIEW-SANDBOX.md" 2>/dev/null \
+    || die "refusing to refresh $stage: its recorded snapshot tag does not match '$tag'."
+  create_or_refresh "$root" "$tag" "$stage"
+  printf '%s' "$stage"
+}
+
+cmd_remove_recorded() {
+  local tag stage sandbox_root
+  tag="${1:?usage: ai-review-sandbox remove-recorded <tag> <managed-copy>}"
+  stage="${2:?usage: ai-review-sandbox remove-recorded <tag> <managed-copy>}"
+  valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
+  [ -e "$stage" ] || return 0
+  mkdir -p "$SANDBOX_DIR"; sandbox_root="$(canon "$SANDBOX_DIR")"; stage="$(canon "$stage")"
+  case "$stage" in "$sandbox_root"/*) ;; *) die "refusing to remove $stage: it is outside managed review storage." ;; esac
+  is_managed "$stage" || die "refusing to remove $stage: it is not a managed review snapshot."
+  grep -Fqx "Snapshot tag: $tag" "$stage/AI-REVIEW-SANDBOX.md" 2>/dev/null \
+    || die "refusing to remove $stage: its recorded snapshot tag does not match '$tag'."
+  remove_sandbox "$stage"
+}
+
 cmd_path() {
   local root tag
   root="$(canon "${1:?usage: ai-review-sandbox path <repo-root> <tag>}")"
@@ -285,11 +316,13 @@ cmd_remove() {
 case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
   ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
+  refresh-copy) shift; cmd_refresh_copy "$@" ;;
+  remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
   remove-copy) shift; cmd_remove "${1:-}" "${2:-}" 1 ;;
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac

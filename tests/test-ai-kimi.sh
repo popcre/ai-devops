@@ -232,6 +232,16 @@ EVIDENCE_WORKSPACE="$(tail -1 "$TMP/pwd.txt")"
 run ask r-evidence --prompt "recheck" >/dev/null 2>&1
 RESUMED_WORKSPACE="$(tail -1 "$TMP/pwd.txt" 2>/dev/null || true)"
 check "named review resumes in its original directory" "test '$RESUMED_WORKSPACE' = '$EVIDENCE_WORKSPACE'"
+REVIEW_MOVED="$TMP/review-moved"; git clone -q "$REPO" "$REVIEW_MOVED"; git -C "$REVIEW_MOVED" remote set-url origin https://example.invalid/test/repo.git
+OUT="$(cd "$REVIEW_MOVED" && bash "$SCRIPT" ask r-evidence --prompt 'continue after checkout move' 2>&1 >/dev/null)"; RC=$?
+[ "$RC" -eq 0 ] && ok "moved checkout review ask preserves exact session continuity" || { bad "moved checkout review ask preserves exact session continuity"; printf '  diagnostic: %s\n' "$OUT"; }
+MOVED_REVIEW_WORKSPACE="$(tail -1 "$TMP/pwd.txt" 2>/dev/null || true)"
+check "moved checkout review resumes in its recorded stable workspace" "test '$MOVED_REVIEW_WORKSPACE' = '$EVIDENCE_WORKSPACE'"
+check "durable review metadata binds upstream base and head" "find '$AI_KIMI_STATE_DIR/sessions' -name 'claude--r-evidence.json' -exec jq -e '.upstream_identity==\"example.invalid/test/repo\" and (.base|length)>0 and (.head|length)>0' {} \;"
+OUT="$(cd "$REVIEW_MOVED" && bash "$SCRIPT" delete r-evidence 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && ok "moved checkout review delete succeeds" || { bad "moved checkout review delete succeeds"; printf '  diagnostic: %s\n' "$OUT"; }
+check "moved checkout review delete removes original stable workspace" "test ! -e '$EVIDENCE_WORKSPACE'"
+check "moved checkout review delete removes original session record" "! (cd '$REVIEW_MOVED' && bash '$SCRIPT' show r-evidence >/dev/null 2>&1)"
 ARGV_LINES_BEFORE="$(wc -l < "$TMP/argv.txt")"
 run new architecture-kind --review-kind architecture --decision "choose the operating model" --prompt "Read plan.md and decide." >/dev/null 2>&1
 ARCH_ARGV="$(tail -n +$((ARGV_LINES_BEFORE + 1)) "$TMP/argv.txt")"

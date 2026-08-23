@@ -240,13 +240,22 @@ repo_root() {
 # ordinary clone it echoes the root unchanged. See that script's header.
 SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
-review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
+review_boundary() { # review_boundary ROOT TAG [RECORDED-DIRECTORY] -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+  if [ -n "${3:-}" ]; then
+    "$SANDBOX_BIN" refresh-copy "$1" "$2" "$3" || die "could not refresh the recorded private review snapshot for $1"
+  else
+    "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+  fi
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
   "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+}
+release_recorded_boundary() { # release_recorded_boundary TAG RECORDED-DIRECTORY
+  [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; cannot safely remove the recorded private snapshot."
+  "$SANDBOX_BIN" remove-recorded "$1" "$2" \
+    || die "could not safely remove the recorded private review snapshot: $2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -268,10 +277,10 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 REVIEW_SNAPSHOT_SECONDS=0; REVIEW_PACKET_SECONDS=0; REVIEW_TEST_SECONDS=0
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
-prepare_review() { # prepare_review ROOT TAG
-  local root="$1" tag="$2" pkt want snapshot_started packet_started
+prepare_review() { # prepare_review ROOT TAG [RECORDED-DIRECTORY]
+  local root="$1" tag="$2" recorded="${3:-}" pkt want snapshot_started packet_started
   snapshot_started="$(date +%s)"
-  REVIEW_DIR="$(review_boundary "$root" "$tag")"
+  REVIEW_DIR="$(review_boundary "$root" "$tag" "$recorded")"
   REVIEW_SNAPSHOT_SECONDS="$(( $(date +%s) - snapshot_started ))"
   REVIEW_HEAD="$(git -C "$REVIEW_DIR" rev-parse HEAD 2>/dev/null || true)"
   [ -n "$REVIEW_HEAD" ] || die "could not read HEAD in $REVIEW_DIR; refusing to review a directory with no commit identity."
@@ -934,17 +943,17 @@ write_job_state() { # META JSON-PATCH
 }
 
 create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
-  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid stamp canonical
+  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid stamp canonical upstream
   dir="$(job_dir "$rid" "$name")"; meta="$dir/job.json"
   mkdir -p "$dir" || die "could not create durable Kimi job state."
   chmod 0700 "$dir" 2>/dev/null || true
-  now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"
+  now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"; upstream="$(require_upstream_identity "$repo")"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"; canonical="$dir/review-$stamp.md"
-  write_meta "$meta" "$(jq -n --arg id "$jobid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
+  write_meta "$meta" "$(jq -n --arg id "$jobid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg upstream "$upstream" \
     --arg head "$(git -C "$repo" rev-parse HEAD)" --arg caller "$CALLER" --arg name "$name" --arg mode "$mode" \
     --arg sid "$sid" --arg model "$KIMI_MODEL" --arg home_hash "$(safe_home_hash)" --arg created "$now" \
     --arg out "$dir/stream.jsonl" --arg log "$dir/worker.log" --arg canonical "$canonical" --arg cancel "$dir/cancel.request" \
-    '{version:1,job_id:$id,repo:$repo,repo_remote:$remote,head:$head,caller:$caller,name:$name,mode:$mode,
+    '{version:1,job_id:$id,repo:$repo,repo_remote:$remote,upstream_identity:$upstream,head:$head,caller:$caller,name:$name,mode:$mode,
       kimi_session_id:(if $sid=="" then null else $sid end),model:$model,kimi_home_sha256:$home_hash,
       created:$created,updated:$created,phase:"preflight",worker_pid:null,kimi_child_pid:null,
       last_output_at:null,last_output_size:0,terminal_reason:null,exit_code:null,
@@ -1035,7 +1044,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
       exit 1
     fi
     [ "$source_before" = "$(tree_state "$repo")" ] || stale=true
-    write_meta "$(meta_path "$(repo_id "$repo")" "$name")" "$(jq -n --arg sid "$new_sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg workspace "$workdir" --arg kind "$(jq -r '.review_kind // "diff"' "$meta")" --arg name "$name" --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg created "$(date -u +%FT%TZ)" '{kimi_session_id:$sid,repo:$repo,repo_remote:$remote,review_workspace:$workspace,review_kind:$kind,name:$name,caller:$caller,mode:$mode,model:$model,created:$created,updated:$created,turns:1}')"
+    write_meta "$(meta_path "$(repo_id "$repo")" "$name")" "$(jq -n --arg sid "$new_sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg upstream "$(jq -r .upstream_identity "$meta")" --arg workspace "$workdir" --arg kind "$(jq -r '.review_kind // "diff"' "$meta")" --arg base "$(jq -r '.base // ""' "$meta")" --arg head "$(jq -r '.head // ""' "$meta")" --arg name "$name" --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg created "$(date -u +%FT%TZ)" '{kimi_session_id:$sid,repo:$repo,repo_remote:$remote,upstream_identity:$upstream,review_workspace:$workspace,review_kind:$kind,base:$base,head:$head,name:$name,caller:$caller,mode:$mode,model:$model,created:$created,updated:$created,turns:1}')"
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="session.resume_hint"|.exit_code=$rc|.updated=$u' || exit 2
     finalize_review_artifact "$meta" "$out" complete session.resume_hint || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --argjson stale "$stale" '.phase="completed"|.kimi_session_id=$sid|.updated=$u|.source_checkout_changed=$stale|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="complete"|.artifact_sha256=$h' || exit 2
@@ -1058,7 +1067,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 start_review_job() { # NAME [CONTINUE]
-  local name="$1" cont="${2:-0}" repo rid upstream lockid existing sid pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase
+  local name="$1" cont="${2:-0}" repo rid upstream lockid existing sid stored_upstream recorded_workspace="" pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; dir="$(job_dir "$rid" "$name")"
   if [ -f "$dir/job.json" ] && ! job_is_terminal "$dir/job.json"; then
@@ -1071,6 +1080,11 @@ start_review_job() { # NAME [CONTINUE]
   sid=""
   if [ "$cont" = 1 ]; then
     existing="$(find_meta "$rid" "$name")"; sid="$(jq -r .kimi_session_id "$existing")"
+    stored_upstream="$(jq -r '.upstream_identity // empty' "$existing")"
+    [ -n "$stored_upstream" ] || die "review session '$name' predates durable upstream binding and cannot be resumed safely. Start a new named Kimi review."
+    [ "$upstream" = "$stored_upstream" ] || die "review session '$name' belongs to a different shared upstream. Restore its original origin or start a new named Kimi review; no provider call was made."
+    recorded_workspace="$(jq -r '.review_workspace // empty' "$existing")"
+    [ -n "$recorded_workspace" ] || die "review session '$name' has no recorded stable workspace and cannot be resumed safely. Start a new named Kimi review."
     [ -n "$OPT_REVIEW_KIND" ] || OPT_REVIEW_KIND="$(jq -r '.review_kind // "diff"' "$existing")"
   elif [ -f "$(meta_path "$rid" "$name")" ]; then
     die "session '$name' already exists. Use: ai-kimi ask $name"
@@ -1083,7 +1097,7 @@ start_review_job() { # NAME [CONTINUE]
     warn "use a focused command for an ordinary review; broad suites belong to an explicit final check."
   fi
   OPT_REVIEW_KIND="${OPT_REVIEW_KIND:-diff}"
-  prepare_review "$repo" "kimi-$CALLER-$name"
+  prepare_review "$repo" "kimi-$CALLER-$name" "$recorded_workspace"
   if [ "$source_before_prepare" != "$(tree_state "$repo")" ]; then
     release_boundary "$repo" "kimi-$CALLER-$name"
     die "source-checkout-changed while the private review snapshot was being prepared; retry from a stable checkout."
@@ -1693,7 +1707,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
 }
 
 cmd_ask() {
-  local name="$1" repo rid lockid meta sid pf out rc before after sess_lock rid_lock mode prev_head stored_upstream current_upstream
+  local name="$1" repo rid lockid meta sid pf out rc before after sess_lock rid_lock mode prev_head stored_upstream current_upstream recorded_workspace
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .kimi_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
@@ -1714,7 +1728,9 @@ cmd_ask() {
   trap cancel_plain_turn INT TERM
 
   pf="$(mktemp)"; out="$(mktemp)"
-  prepare_review "$repo" "kimi-$name"
+  recorded_workspace="$(jq -r '.review_workspace // empty' "$meta")"
+  [ -n "$recorded_workspace" ] || die "review session '$name' has no recorded stable workspace and cannot be resumed safely. Start a new named Kimi review."
+  prepare_review "$repo" "kimi-$CALLER-$name" "$recorded_workspace"
   # A continuation that silently moved to a different commit would let a verdict
   # about one head be recorded against another.
   prev_head="$(jq -r '.head // ""' "$meta")"
@@ -1840,7 +1856,7 @@ cmd_list() {
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() {
-  local rid meta dir manifest sess_lock f base
+  local rid meta dir manifest sess_lock f base recorded_workspace
   rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
   [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
   sess_lock="$(lock_path "$rid" "$1")"
@@ -1861,7 +1877,15 @@ cmd_delete() {
     done
     rm -f "$dir"/metadata.json "$dir"/owner.json "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/.tmp.* "$dir"/.cumulative.*
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
-  else rm -f "$meta"; release_boundary "$(repo_root)" "kimi-$CALLER-$1"; fi
+  else
+    recorded_workspace="$(jq -r '.review_workspace // empty' "$meta")"
+    if [ -n "$recorded_workspace" ]; then
+      release_recorded_boundary "kimi-$CALLER-$1" "$recorded_workspace"
+    else
+      release_boundary "$(repo_root)" "kimi-$CALLER-$1"
+    fi
+    rm -f "$meta"
+  fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
 }
 cmd_transcript() {
