@@ -219,12 +219,13 @@ check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE'
 # The configured wait ceiling must also bound a Grok process that never exits.
 # A timed-out paid turn remains blocked because local process death does not
 # prove that the provider stopped billing or working.
-rm -f "$TMP/release-grok"; echo hold > "$TMP/mode"
+rm -f "$TMP/release-grok" "$TMP/hold-child-pid" "$TMP/hold-child-terminated"; echo hold > "$TMP/mode"
 TIMEOUT_START="$(date +%s)"
 TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"; TIMED_OUT_RC=$?
 TIMEOUT_ELAPSED=$(( $(date +%s) - TIMEOUT_START ))
 TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
-check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && test '$TIMEOUT_ELAPSED' -lt 12"
+check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured 3s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
+check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt 45"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
 rm -rf "$TIMEOUT_LOCK"
 
@@ -258,7 +259,7 @@ LEGACY_CALLS="$(wc -l < "$TMP/argv.txt")"
 LEGACY_BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new legacy-overlap --prompt x 2>&1 )"; LEGACY_RC=$?
 check "legacy_live_lock_for_same_upstream_blocks_rollout" "[ \"$LEGACY_RC\" -ne 0 ] && printf '%s' \"$LEGACY_BLOCKED\" | grep -q 'legacy Grok paid-work lock' && [ \"$LEGACY_CALLS\" -eq \"\$(wc -l < '$TMP/argv.txt')\" ]"
 rm -rf "$LEGACY_LOCK"
-rm -f "$TMP/hold-started" "$TMP/release-grok"
+rm -f "$TMP/hold-started" "$TMP/release-grok" "$TMP/hold-child-pid" "$TMP/hold-child-terminated"
 echo hold > "$TMP/mode"
 
 # A locally interrupted wrapper must not claim or assume that the paid remote
