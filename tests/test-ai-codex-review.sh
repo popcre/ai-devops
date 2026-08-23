@@ -53,6 +53,17 @@ check "doctor_proves_readonly_and_reasoning" "cd '$R' && '$SCRIPT' doctor | grep
 if command -v cygpath >/dev/null 2>&1; then
   TEST_ROOT_WINDOWS="$(cygpath -w "$TMP")"
   check "doctor_normalizes_equivalent_Windows_test_paths" "cd '$R' && AI_CODEX_REVIEW_TEST_DIR='$TEST_ROOT_WINDOWS' '$SCRIPT' doctor | grep -q 'sandbox=read-only reasoning=explicit'"
+  mkdir -p "$TMP/path-tools"
+  cat > "$TMP/path-tools/readlink" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -f ] && [ "${2:-}" = "${AI_CODEX_PATH_FIXTURE:-}" ]; then
+  cygpath -am "$2"
+else
+  /usr/bin/readlink "$@"
+fi
+EOF
+  chmod +x "$TMP/path-tools/readlink"
+  check "doctor_normalizes_mixed_tmp_and_native_executable_paths" "cd '$R' && AI_CODEX_PATH_FIXTURE='$STUB' PATH='$TMP/path-tools:$PATH' '$SCRIPT' doctor | grep -q 'sandbox=read-only reasoning=explicit'"
 fi
 check "models_configuration_is_parsed_as_data" "test ! -e '$TMP/models-executed'"
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"

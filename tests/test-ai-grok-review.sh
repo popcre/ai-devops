@@ -158,6 +158,10 @@ for _i in $(seq 1 60); do
   [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
+if [ ! -f "$TMP/hold-started" ]; then
+  printf '  diagnostic: first held review did not reach the Grok stub\n' >&2
+  sed -n '1,80p' "$TMP/first.err" >&2 2>/dev/null || true
+fi
 check "slow_fixture_reached_the_provider_before_mode_changes" "test -f '$TMP/hold-started'"
 SECOND="$( cd "$CLONE" && bash "$SCRIPT" new other-clone --prompt x 2>&1 )"; SECOND_RC=$?
 [ "$SECOND_RC" -ne 0 ] && ok "equivalent_github_clones_share_one_paid_review_lock" || bad "equivalent_github_clones_share_one_paid_review_lock"
