@@ -104,6 +104,7 @@ case "${1:-}" in
     printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
     [ "${MUSE_STUB_MODE:-}" = mixedstart ] && printf '{"type":"step_start","sessionID":"ses_other","part":{"type":"step-start"}}\n'
     [ -z "${MUSE_STUB_TOUCH:-}" ] || printf changed >> "$MUSE_STUB_TOUCH"
+    [ -z "${MUSE_STUB_PREAMBLE:-}" ] || printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$MUSE_STUB_PREAMBLE"
     text="${MUSE_STUB_TEXT:-$([ -n "$prior" ] && echo remembered || echo first)}"
     printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$text"
     [ "${MUSE_STUB_MODE:-}" = mixed ] && printf '{"type":"text","sessionID":"ses_other","part":{"type":"text","text":"wrong"}}\n'
@@ -125,6 +126,7 @@ else
 fi
 check 'offline doctor does not contact the provider' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' '$SCRIPT' doctor\" && test ! -e '$TMP/doctor-called'"
 check 'live doctor contacts Muse and proves its exact response' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" | grep -q 'live provider response' && test -e '$TMP/doctor-called'"
+check 'live doctor accepts provider progress before the exact final response' "cd '$REPO' && eval \"$ENV MUSE_STUB_PREAMBLE=checking MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" | grep -q 'live provider response'"
 export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
 check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
 check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT=MUSE_REVIEWER_HEALTHY '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"

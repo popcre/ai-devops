@@ -354,7 +354,7 @@ cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="
   "$PACKET" remove "$(jq -r .review_dir "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag"; rm -f "$m"; unlock_session; printf 'deleted Muse session: %s\n' "$1"
 }
 cmd_doctor(){
-  local failures=0 live=0 prompt out fixture prior_timeout
+  local failures=0 live=0 prompt out fixture prior_timeout final_text
   case "${1:-}" in '') ;; --live) live=1;; *) die "unknown doctor option: $1";; esac
   [ "$#" -le 1 ] || die 'usage: ai-muse doctor [--live]'
   check(){ local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"; else printf 'FAIL  %s\n' "$label"; failures=$((failures+1)); fi; }
@@ -374,7 +374,8 @@ cmd_doctor(){
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
     if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; die "$TURN_ERROR"; fi
     TIMEOUT="$prior_timeout"
-    [ "$TEXT" = MUSE_REVIEWER_HEALTHY ] || die 'Muse live probe returned unexpected text.'
+    final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"
+    [ "$final_text" = MUSE_REVIEWER_HEALTHY ] || die 'Muse live probe returned unexpected final text.'
     printf 'PASS  live provider response\n'
   fi
 }
