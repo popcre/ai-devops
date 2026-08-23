@@ -94,6 +94,7 @@ HEARTBEAT_INTERVAL="${AI_GROK_HEARTBEAT_INTERVAL:-60}"
 RUN_TURN_RC=0
 ACTIVE_GROK_CHILD=''
 ACTIVE_ISOLATED_CWD=''
+ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
 ACTIVE_SESSION_LOCK=''
 
@@ -391,12 +392,23 @@ session_lock_acquire() { # local-only serialization; paid uncertainty is owned b
 
 clear_active_grok() {
   [ -z "$ACTIVE_ISOLATED_CWD" ] || rmdir "$ACTIVE_ISOLATED_CWD" 2>/dev/null || true
-  ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''
+  if [ -n "$ACTIVE_ISOLATED_HOME" ]; then
+    case "$ACTIVE_ISOLATED_HOME" in
+      "$STATE_DIR"/runtime-home.*)
+        [ -L "$ACTIVE_ISOLATED_HOME" ] || rm -rf -- "$ACTIVE_ISOLATED_HOME" 2>/dev/null || true
+        ;;
+      *) warn "refusing to remove unexpected isolated user-home path: $ACTIVE_ISOLATED_HOME" ;;
+    esac
+  fi
+  ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME=''
 }
 
 stop_active_grok_tree() {
   local child="$ACTIVE_GROK_CHILD" i
-  [ -n "$child" ] || return 0
+  # A signal can land after the neutral profile is created but between the
+  # inspection and paid children, or just after a child is reaped. Cleanup is
+  # still required even when there is no PID left to terminate.
+  [ -n "$child" ] || { clear_active_grok; return 0; }
   kill -TERM "$child" 2>/dev/null || true
   for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
   kill -KILL "$child" 2>/dev/null || true
@@ -574,18 +586,34 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
     rm -f -- "$isolated_home/auth.json"
   fi
   ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
+  ACTIVE_ISOLATED_HOME="$(mktemp -d "$STATE_DIR/runtime-home.XXXXXX")"
+  chmod 700 "$ACTIVE_ISOLATED_HOME" 2>/dev/null || true
   # GROK_HOME isolates Grok's own state, but Grok 1.0.5 also discovers Claude
   # plugins directly from the operating-system user home. Give only the Grok
   # child a neutral user home so an installed Claude plugin cannot inject hooks
   # or tools into paid reviewer work. Keep the owning wrapper's HOME unchanged.
-  local -a isolation_home_env=("HOME=$isolated_home" "GROK_HOME=$isolated_home")
+  local -a isolation_home_env=(
+    "HOME=$ACTIVE_ISOLATED_HOME" "GROK_HOME=$isolated_home"
+    "XDG_CONFIG_HOME=$ACTIVE_ISOLATED_HOME/.config"
+    "XDG_CACHE_HOME=$ACTIVE_ISOLATED_HOME/.cache"
+    "XDG_DATA_HOME=$ACTIVE_ISOLATED_HOME/.local/share"
+  )
   case "$(uname -s 2>/dev/null || true)" in
     MINGW*|MSYS*|CYGWIN*)
-      local isolated_native_home="$isolated_home"
+      local isolated_native_home="$isolated_home" isolated_native_user_home="$ACTIVE_ISOLATED_HOME"
       if command -v cygpath >/dev/null 2>&1; then
         isolated_native_home="$(cygpath -w "$isolated_home")"
+        isolated_native_user_home="$(cygpath -w "$ACTIVE_ISOLATED_HOME")"
       fi
-      isolation_home_env+=("USERPROFILE=$isolated_native_home")
+      isolation_home_env=(
+        "HOME=$isolated_native_user_home" "GROK_HOME=$isolated_native_home"
+        "USERPROFILE=$isolated_native_user_home"
+        "XDG_CONFIG_HOME=$isolated_native_user_home\\.config"
+        "XDG_CACHE_HOME=$isolated_native_user_home\\.cache"
+        "XDG_DATA_HOME=$isolated_native_user_home\\.local\\share"
+        "APPDATA=$isolated_native_user_home\\AppData\\Roaming"
+        "LOCALAPPDATA=$isolated_native_user_home\\AppData\\Local"
+      )
       ;;
   esac
   local inspect inspect_rc=0 inspect_waited=0; inspect="$(mktemp)"
@@ -674,6 +702,11 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   # rc is recorded, never trusted: exit 0 with an empty file is the normal
   # appearance of the early-return bug.
   RUN_TURN_RC="$rc"
+  # The owned process tree is fully reaped, so the temporary operating-system
+  # user profile is no longer needed. Remove it before result/session parsing:
+  # those later fail-closed checks must not be able to strand ambient-state
+  # isolation directories.
+  clear_active_grok
 }
 
 # The frozen prefix, minus --max-turns, for the stability assertion. --max-turns

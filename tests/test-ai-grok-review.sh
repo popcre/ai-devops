@@ -18,22 +18,41 @@ ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 isolation_homes_match(){
-  local home grok_home profile normalized_home normalized_grok normalized_profile want="$AI_GROK_STATE_DIR/isolated-home"
-  while IFS='|' read -r home grok_home profile; do
+  local home grok_home profile xdg_config xdg_cache xdg_data appdata localappdata
+  local normalized_home normalized_grok normalized_profile normalized_config normalized_cache normalized_data
+  local normalized_appdata normalized_localappdata
+  local want_grok="$AI_GROK_STATE_DIR/isolated-home" first_home='' count=0
+  while IFS='|' read -r home grok_home profile xdg_config xdg_cache xdg_data appdata localappdata; do
     normalized_home="$home"; normalized_grok="$grok_home"; normalized_profile="$profile"
+    normalized_config="$xdg_config"; normalized_cache="$xdg_cache"; normalized_data="$xdg_data"
+    normalized_appdata="$appdata"; normalized_localappdata="$localappdata"
     if command -v cygpath >/dev/null 2>&1; then
       normalized_home="$(cygpath -u "$home" 2>/dev/null || printf '%s' "$home")"
       normalized_grok="$(cygpath -u "$grok_home" 2>/dev/null || printf '%s' "$grok_home")"
       normalized_profile="$(cygpath -u "$profile" 2>/dev/null || printf '%s' "$profile")"
+      normalized_config="$(cygpath -u "$xdg_config" 2>/dev/null || printf '%s' "$xdg_config")"
+      normalized_cache="$(cygpath -u "$xdg_cache" 2>/dev/null || printf '%s' "$xdg_cache")"
+      normalized_data="$(cygpath -u "$xdg_data" 2>/dev/null || printf '%s' "$xdg_data")"
+      normalized_appdata="$(cygpath -u "$appdata" 2>/dev/null || printf '%s' "$appdata")"
+      normalized_localappdata="$(cygpath -u "$localappdata" 2>/dev/null || printf '%s' "$localappdata")"
     fi
-    if [ "$normalized_grok" = "$want" ]; then
-      case "$(uname -s 2>/dev/null || true)" in
-        MINGW*|MSYS*|CYGWIN*) [ "$normalized_profile" = "$want" ] && return 0 ;;
-        *) [ "$normalized_home" = "$want" ] && return 0 ;;
-      esac
-    fi
+    [ "$normalized_grok" = "$want_grok" ] || return 1
+    case "$normalized_home" in "$AI_GROK_STATE_DIR"/runtime-home.*) ;; *) return 1;; esac
+    [ "$normalized_config" = "$normalized_home/.config" ] || return 1
+    [ "$normalized_cache" = "$normalized_home/.cache" ] || return 1
+    [ "$normalized_data" = "$normalized_home/.local/share" ] || return 1
+    case "$(uname -s 2>/dev/null || true)" in
+      MINGW*|MSYS*|CYGWIN*)
+        [ "$normalized_profile" = "$normalized_home" ] || return 1
+        [ "$normalized_appdata" = "$normalized_home/AppData/Roaming" ] || return 1
+        [ "$normalized_localappdata" = "$normalized_home/AppData/Local" ] || return 1
+        ;;
+    esac
+    [ -z "$first_home" ] && first_home="$normalized_home"
+    [ "$normalized_home" = "$first_home" ] || return 1
+    count=$((count + 1))
   done < "$TMP/isolation-homes.txt"
-  return 1
+  [ "$count" -eq 2 ]
 }
 check "missing local runtime is named distinctly" "grep -q 'local_dependency_unavailable: grok binary not found' '$SCRIPT'"
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
@@ -68,7 +87,11 @@ cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 printf '%s|%s|%s|%s\n' "${GROK_CLAUDE_MCPS_ENABLED:-}" "${GROK_CLAUDE_HOOKS_ENABLED:-}" "${GROK_CURSOR_MCPS_ENABLED:-}" "${GROK_CODEX_SESSIONS_ENABLED:-}" >> "$TMPDIR_FOR_TEST/isolation.txt"
-printf '%s|%s|%s\n' "${HOME:-}" "${GROK_HOME:-}" "${USERPROFILE:-}" >> "$TMPDIR_FOR_TEST/isolation-homes.txt"
+printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
+  "${HOME:-}" "${GROK_HOME:-}" "${USERPROFILE:-}" \
+  "${XDG_CONFIG_HOME:-}" "${XDG_CACHE_HOME:-}" "${XDG_DATA_HOME:-}" \
+  "${APPDATA:-}" "${LOCALAPPDATA:-}" >> "$TMPDIR_FOR_TEST/isolation-homes.txt"
+printf '%s\n' "$([ -f "${GROK_HOME:-}/auth.json" ] && printf visible || printf missing)" >> "$TMPDIR_FOR_TEST/isolation-auth.txt"
 if printf '%s\n' "$@" | grep -qx inspect; then
   case "${AI_GROK_TEST_INSPECT_MODE:-ok}" in
     badshape) printf '%s\n' '{}' ;;
@@ -96,6 +119,7 @@ case "$mode" in
   ok)        cat "$TMPDIR_FOR_TEST/fixture.json" ;;
   cancelled) cat "$TMPDIR_FOR_TEST/cancelled.json" ;;
   weird)     cat "$TMPDIR_FOR_TEST/weird.json" ;;
+  nosession) cat "$TMPDIR_FOR_TEST/no-session.json" ;;
   empty)     : ;;
   slow)      # exit immediately leaving an empty file, then complete later:
              # this is the early-return bug, reproduced.
@@ -141,6 +165,10 @@ EOF
 cat > "$TMP/endturn.json" <<'EOF'
 {"text":"## Verdict\nAPPROVE","sessionId":"s-endturn","stopReason":"EndTurn","num_turns":1,
  "usage":{"cache_read_input_tokens":10},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0.01}
+EOF
+cat > "$TMP/no-session.json" <<'EOF'
+{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,
+ "usage":{},"modelUsage":{"grok-4.6-build":{}},"total_cost_usd":0}
 EOF
 echo ok > "$TMP/mode"
 
@@ -311,6 +339,10 @@ check "help exits 0" "run --help"
 # 2/3 -----------------------------------------------------------------------
 echo "== max_turns_always_present / permissions_are_fixed =="
 : > "$TMP/argv.txt"
+: > "$TMP/isolation-homes.txt"
+: > "$TMP/isolation-auth.txt"
+mkdir -p "$AI_GROK_AUTH_HOME"
+printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 run new t1 --prompt "review this" >/dev/null 2>&1
 ARGV="$(cat "$TMP/argv.txt")"
 check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
@@ -320,8 +352,10 @@ check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.t
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
-check "review gives the Grok child a neutral HOME and GROK_HOME" "isolation_homes_match && grep -q 'isolation_home_env=(\"HOME=\$isolated_home\" \"GROK_HOME=\$isolated_home\")' '$REPO_ROOT/bin/ai-grok-review'"
-check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q 'isolation_home_env+=(\"USERPROFILE=\$isolated_native_home\")' '$REPO_ROOT/bin/ai-grok-review'"
+check "inspect and paid children share one empty user home separate from GROK_HOME" "isolation_homes_match"
+check "inspect and paid children both retain credential reachability through GROK_HOME" "test \"\$(grep -cx visible '$TMP/isolation-auth.txt')\" -eq 2"
+check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q '\"USERPROFILE=\$isolated_native_user_home\"' '$REPO_ROOT/bin/ai-grok-review'"
+check "Windows reviewer isolates every XDG root for the native Grok child" "grep -q '\"XDG_CONFIG_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_CACHE_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_DATA_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review'"
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
 check "review disables subagents"          "grep -q -- '--no-subagents' '$TMP/argv.txt'"
 check "review runs from a neutral non-repository cwd" "! grep -q -- '--cwd $REPO' '$TMP/argv.txt'"
@@ -403,6 +437,10 @@ check "cancelled recommends a fresh session"   "printf '%s' \"\$OUT\" | grep -qi
 echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1
 [ $? -ne 0 ] && ok "unknown stopReason exits non-zero" || bad "unknown stopReason exits non-zero"
+echo nosession > "$TMP/mode"
+run new missing-session-cleanup --prompt x >/dev/null 2>&1
+[ $? -ne 0 ] && ok "missing sessionId exits non-zero" || bad "missing sessionId exits non-zero"
+check "missing sessionId cannot strand a temporary user profile" "! find '$AI_GROK_STATE_DIR' -maxdepth 1 -type d -name 'runtime-home.*' -print -quit | grep -q ."
 echo ok > "$TMP/mode"
 cp "$TMP/fixture.json" "$TMP/fixture.lower.bak"
 cp "$TMP/endturn.json" "$TMP/fixture.json"
@@ -477,6 +515,9 @@ check "show emits json"            "run show t1 | jq -e .grok_session_id"
 check "transcript works"           "run transcript t1 | grep -q transcript"
 check "transcript reads the isolated reviewer session home" "grep -qx '$AI_GROK_STATE_DIR/isolated-home' '$TMP/export-home'"
 check "a reaped supervisor PID is disarmed before later failure handling" "sed -n '/local child=/,/^frozen_prefix()/p' '$SCRIPT' | grep -q \"ACTIVE_GROK_CHILD=''\""
+SIGNAL_WINDOW_HOME="$AI_GROK_STATE_DIR/runtime-home.signal-window"; mkdir -p "$SIGNAL_WINDOW_HOME"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME="$SIGNAL_WINDOW_HOME"; stop_active_grok_tree )
+check "signal-window cleanup removes the temporary profile without an active child" "test ! -e '$SIGNAL_WINDOW_HOME'"
 check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()/,/^cmd_new()/p' '$SCRIPT' | grep -q 'clear_active_grok'"
 check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
