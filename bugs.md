@@ -702,7 +702,7 @@ session locks, and preserved recovery evidence. Gemini remains quarantined.**
 **Repair status (2026-08-23): fixed and exact-source live-qualified; normalized
 upstream locking spans clones, legacy checkout-keyed locks block mixed-version
 rollout calls, and Grok returned terminal APPROVE on open issue #61. Landing and
-installed-hash verification remain.**
+Ubuntu installed-hash verification remain.**
 
 - Files: `bin/ai-grok-review:202-206`, `bin/ai-grok-review:597-604`,
   `bin/ai-grok-review:658-665`

@@ -11,7 +11,7 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | two-heartbeat fixture plus a process-level timeout that retains remote uncertainty |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |
-| 6 | Live qualification and landing | 🟨 live passed; landing open | exact-source doctor and issue #61 APPROVE at `f4def41`; remote SHA, installed hash, CI, issue closure remain |
+| 6 | Live qualification and landing | 🟨 live passed; landing open | exact-source doctor, issue #61 APPROVE, installed/source hashes, and bounded two-clone canary passed; remote SHA, Ubuntu install, CI, and issue closure remain |
 
 Step 6 is in landing verification. Exact-source live qualification passed on
 2026-08-23; see
@@ -54,8 +54,10 @@ The source now separates checkout-bound sessions from upstream-wide paid-work
 locks, exposes active work across clones, preserves unconfirmed remote work after
 signals, process timeouts, missing terminal results, or dead local owners, and
 emits factual bounded heartbeats. Offline tests cover normalized clone identity,
-two progress updates, a bounded hung local process, and all uncertainty paths. The
-status table above is authoritative; live qualification remains open.
+two progress updates, a bounded hung local process, and all uncertainty paths.
+Installed Windows live qualification, including the authoritative bounded
+two-clone canary, passed on 2026-08-23; landing remains open. The status table
+above is authoritative.
 
 ## 6. Key findings and root cause
 
