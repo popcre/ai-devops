@@ -233,7 +233,8 @@ Claude Opus 5 debate.
 - **Current severity: MEDIUM** — the mechanism is real, but `git apply` stops the
   largest race variant and no occurrence was proven
 
-- Files: `bin/ai-review-sandbox:114-145`, `bin/ai-kimi:1030-1039`,
+- Files: `bin/ai-review-sandbox:114-145`, `bin/ai-kimi:243-250`,
+  `bin/ai-kimi:280-285`,
   `bin/ai-grok-review:137-170`
 - Confidence: high; changing bytes in an already-modified file leaves short Git status
   unchanged
@@ -721,7 +722,7 @@ and live-qualified. Normalized upstream locking is covered by equivalent-remote
 and cross-clone fixtures; the installed matrix passed 218/218 and the
 deleted-caller-clone result remained retrievable.**
 
-- Files: `bin/ai-kimi:386-403`, `bin/ai-kimi:1071-1076`
+- Files: `bin/ai-kimi:363-407`, `bin/ai-kimi:1076-1078`
 - Confidence: certain from equivalent-remote, cross-clone, and installed live
   evidence.
 - Historical failure: Kimi included the physical checkout path in its claimed
@@ -739,14 +740,14 @@ deleted-caller-clone result remained retrievable.**
 wrapper returned terminal `session.resume_hint` records, preserved complete and
 typed incomplete artifacts, and passed the authenticated production matrix.**
 
-- Files: `plan_kimi-review-failure-recovery.md:11-18`
+- Files: `plan_kimi-review-failure-recovery.md:12-19`
 - Confidence: certain from exact-head independent review, installed hash proof,
   `doctor --live`, the 218/218 matrix, and deleted-clone canonical retrieval.
 - Historical failure: authentication and safety checks passed, but the provider
   did not return the required completion record.
 - Current outcome: Kimi can deliver qualified production reviews and remains
   fail-closed for missing, incomplete, timed-out, quota, or interrupted results.
-- Existing tracker: issue #46 closed with evidence on 2026-08-23.
+- Existing tracker: issue #46 closed with production evidence on 2026-08-23.
 
 ### 10. Muse rejects valid repositories containing historic review reports
 
@@ -974,7 +975,7 @@ quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
 **Repair status (2026-08-22): fixed; status, logs, result, and wait all return
 the same friendly missing-job guidance, with regression fixtures.**
 
-- Files: `bin/ai-kimi:1059-1070`, `bin/ai-kimi:1111-1112`
+- Files: `bin/ai-kimi:1139-1157`, `bin/ai-kimi:1197-1199`
 - Confidence: high
 - What happens: `status` and `logs` do not perform the friendly existence check
   used by `wait`.

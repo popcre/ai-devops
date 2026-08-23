@@ -1,6 +1,7 @@
 # IMPLEMENTATION PLAN — restore trustworthy Kimi reviews (2026-08-20)
 
-The paired handoff was retired after every step reached production evidence.
+Former paired handoff: `HANDOFF.d/2026-08-20T0213Z-edge-dev-codex-kimi-review-recovery-plan.md`
+(retired after completion under the repository successor rule).
 
 Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/issues/46)
 
@@ -18,8 +19,7 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 | 8. Requalify Kimi live, independently review the exact head, and land | ✅ complete | 2026-08-23 | Exact-head Codex reviews approved `818a8b4` and `9c54e65`; production install and hashes matched; `doctor --live` passed; installed matrix passed 218/218; deleted-clone retrieval returned a complete canonical artifact. See `tests/verification/kimi-review-issue-46/2026-08-23-live.md`. |
 
 **Fresh-session starting point:** This plan is complete; do not repeat Steps 1–8.
-The
-checkout had concurrent uncommitted changes to `bin/ai-kimi` and
+The checkout had concurrent uncommitted changes to `bin/ai-kimi` and
 `tests/test-ai-kimi.sh` when this plan was written; that note is historical.
 
 ## 1. The ultimate goal — what we are trying to achieve

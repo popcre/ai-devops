@@ -45,12 +45,13 @@ metrics unavailable from Kimi, or changing implementation network policy.
 
 ## 5. Current state of the code
 
-Completed recovery is on main per `plan_kimi-review-failure-recovery.md:11-18`.
-Repo ID/lock are `bin/ai-kimi:349-378,1005-1014`; job lookup and raw status/logs
-are `:1059-1070,1111-1112`. Final offline evidence is 203/203; the installed
+Completed recovery is on main per `plan_kimi-review-failure-recovery.md:12-19`.
+Repo identity is `bin/ai-kimi:363-369`, locking is `bin/ai-kimi:375-407`, job
+lookup is `bin/ai-kimi:1139-1157`, and status/log commands are
+`bin/ai-kimi:1197-1198`. Final offline evidence is 203/203; the installed
 authenticated matrix passed 218/218, and the deleted-clone canonical-result
-canary passed. Kimi is production-qualified; issue #46 is ready for evidence-backed
-closure.
+canary passed. Kimi is production-qualified; issue #46 closed with production
+evidence on 2026-08-23.
 
 ## 6. Key findings and root cause
 
