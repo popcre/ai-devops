@@ -74,6 +74,10 @@ merge_memory_index() {
   tmp="$output.merge.$$"
   cp -a "$hub_index" "$tmp"
   while IFS= read -r line; do
+    # Windows working trees may present CRLF even when Git stores LF. Compare
+    # and append the canonical LF form so every sync does not re-add the same
+    # index entries with a hidden trailing carriage return.
+    line="${line%$'\r'}"
     [[ "$line" == '- ['*']('*')'* ]] || continue
     if ! grep -Fqx -- "$line" "$tmp"; then
       if [[ "$added" -eq 0 ]]; then

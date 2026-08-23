@@ -44,8 +44,17 @@ sync_a() {
   AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
   AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
   AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
     bash "$ROOT/bin/ai-memory-sync" "$@"
 }
+
+# Reproduce a Windows working-tree index while the private Git hub stores LF.
+# A hidden trailing CR must not make the same entry look new on every run.
+awk '{ printf "%s\r\n", $0 }' \
+  "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md" \
+  > "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md.crlf"
+mv "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md.crlf" \
+  "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md"
 
 sync_a sync >/dev/null
 INDEX="$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md"
@@ -53,6 +62,13 @@ grep -Fq '(hub.md)' "$INDEX" || fail "machine did not receive hub index entry"
 grep -Fq '(local.md)' "$INDEX" || fail "machine lost local index entry"
 git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(hub.md)' || fail "hub entry vanished"
 git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(local.md)' || fail "local entry did not reach hub"
+
+converged_head="$(git --git-dir="$REMOTE" rev-parse main)"
+sync_a sync >/dev/null
+[[ "$(git --git-dir="$REMOTE" rev-parse main)" == "$converged_head" ]] ||
+  fail "second CRLF sync created another commit"
+[[ "$(git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fc '(local.md)')" -eq 1 ]] ||
+  fail "CRLF sync duplicated the local index entry"
 
 # Offline fetch is a visible failure and leaves the only local fact untouched.
 printf 'offline fact\n' > "$CLAUDE_A/projects/C--repos-sample/memory/offline.md"
