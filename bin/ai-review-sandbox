@@ -41,7 +41,7 @@
 
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.3.1"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -53,6 +53,7 @@ warn() { printf 'ai-review-sandbox: %s\n' "$1" >&2; }
 is_worktree() { [ -f "$1/.git" ] && ! [ -d "$1/.git" ]; }
 
 canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
+canon_quiet() { (cd "$1" 2>/dev/null && pwd -P); }
 
 valid_tag() {
   case "$1" in
@@ -72,8 +73,13 @@ sandbox_path() { printf '%s/%s' "$SANDBOX_DIR" "$(sandbox_id "$1" "$2")"; }
 # Refuse to touch anything that is not one of ours: a managed snapshot always
 # carries the marker file AND lives under the sandbox directory.
 is_managed() {
-  local d="$1"
-  case "$d" in "$SANDBOX_DIR"/*) ;; *) return 1 ;; esac
+  local d="$1" sandbox_root
+  # Git Bash can expose the same Windows directory through both an 8.3 path
+  # (RUNNER~1) and its long path (runneradmin). Compare physical paths so a
+  # recorded snapshot remains manageable across those equivalent spellings.
+  sandbox_root="$(canon_quiet "$SANDBOX_DIR")" || return 1
+  d="$(canon_quiet "$d")" || return 1
+  case "$d" in "$sandbox_root"/*) ;; *) return 1 ;; esac
   [ -f "$d/$MARKER" ]
 }
 

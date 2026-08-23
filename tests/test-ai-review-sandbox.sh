@@ -197,6 +197,8 @@ check "refresh_head_matches_the_worktree" \
 # refreshed this way.
 RECORDED="$($SCRIPT ensure-copy "$MAIN" stable-move)"
 MOVED_SOURCE="$TMP/moved-source"; git clone -q "$MAIN" "$MOVED_SOURCE"
+git -C "$MOVED_SOURCE" config user.email t@example.com
+git -C "$MOVED_SOURCE" config user.name Test
 echo moved-source > "$MOVED_SOURCE/moved.txt"; git -C "$MOVED_SOURCE" add moved.txt; git -C "$MOVED_SOURCE" commit -qm moved-source
 REFRESHED="$($SCRIPT refresh-copy "$MOVED_SOURCE" stable-move "$RECORDED")"
 check "recorded_copy_refresh_keeps_exact_directory" "[ '$REFRESHED' = '$RECORDED' ]"
