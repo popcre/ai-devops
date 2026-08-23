@@ -70,6 +70,70 @@ sync_a sync >/dev/null
 [[ "$(git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fc '(local.md)')" -eq 1 ]] ||
   fail "CRLF sync duplicated the local index entry"
 
+# A duplicate-storm index must merge in one pass. The previous implementation
+# launched one full-file grep per local entry, turning this fixture (and the
+# 19.9 MB shared-db incident index) into quadratic work.
+LARGE_CLAUDE="$TMP/claude-large"
+LARGE_HUB="$TMP/hub-large"
+mkdir -p "$LARGE_CLAUDE/projects/C--repos-large/memory" "$LARGE_HUB/memory/large"
+for i in $(seq 1 20000); do
+  printf -- '- [fact-%05d](fact-%05d.md) - fact.\n' "$i" "$i"
+done > "$LARGE_HUB/memory/large/MEMORY.md"
+awk '{ printf "%s\r\n", $0 }' "$LARGE_HUB/memory/large/MEMORY.md" \
+  > "$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
+printf '%s\r\n' '- [local-only](local-only.md) - local fact.' \
+  >> "$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
+if ! CLAUDE_HOME="$LARGE_CLAUDE" AI_MEMORY_HUB_ROOT="$LARGE_HUB" \
+  timeout 15 bash "$ROOT/bin/ai-sync-memory" pull >/dev/null; then
+  fail "large CRLF index merge did not complete within 15 seconds"
+fi
+LARGE_INDEX="$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
+[[ "$(grep -Fc '(fact-00001.md)' "$LARGE_INDEX")" -eq 1 ]] ||
+  fail "large CRLF merge duplicated an existing hub entry"
+[[ "$(grep -Fc '(local-only.md)' "$LARGE_INDEX")" -eq 1 ]] ||
+  fail "large CRLF merge lost or duplicated the local-only entry"
+
+# Empty files are valid intermediate states. Awk's NR==FNR idiom misclassifies
+# the entire second file when the first file has zero records, so exercise both
+# data-flow directions explicitly.
+ZERO_PULL_CLAUDE="$TMP/claude-zero-pull"
+ZERO_PULL_HUB="$TMP/hub-zero-pull"
+mkdir -p "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory" \
+  "$ZERO_PULL_HUB/memory/zero-pull"
+printf '%s\n' '- [local-survives](local-survives.md) - local fact.' \
+  > "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory/MEMORY.md"
+: > "$ZERO_PULL_HUB/memory/zero-pull/MEMORY.md"
+CLAUDE_HOME="$ZERO_PULL_CLAUDE" AI_MEMORY_HUB_ROOT="$ZERO_PULL_HUB" \
+  bash "$ROOT/bin/ai-sync-memory" pull >/dev/null
+grep -Fq '(local-survives.md)' \
+  "$ZERO_PULL_CLAUDE/projects/C--repos-zero-pull/memory/MEMORY.md" ||
+  fail "empty hub index erased the local index"
+
+ZERO_PUSH_CLAUDE="$TMP/claude-zero-push"
+ZERO_PUSH_HUB="$TMP/hub-zero-push"
+mkdir -p "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory" \
+  "$ZERO_PUSH_HUB/memory/zero-push"
+: > "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory/MEMORY.md"
+printf '%s\n' '- [hub-survives](hub-survives.md) - hub fact.' \
+  > "$ZERO_PUSH_HUB/memory/zero-push/MEMORY.md"
+printf 'interrupted merge scratch\n' \
+  > "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory/MEMORY.md.merge.123"
+printf 'interrupted additions scratch\n' \
+  > "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory/MEMORY.md.additions.123"
+printf 'interrupted tombstone scratch\n' \
+  > "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory/MEMORY.md.tombstone.123"
+printf 'interrupted forgotten scratch\n' \
+  > "$ZERO_PUSH_CLAUDE/projects/C--repos-zero-push/memory/.forgotten.tmp"
+CLAUDE_HOME="$ZERO_PUSH_CLAUDE" AI_MEMORY_HUB_ROOT="$ZERO_PUSH_HUB" \
+  bash "$ROOT/bin/ai-sync-memory" push >/dev/null
+grep -Fq '(hub-survives.md)' "$ZERO_PUSH_HUB/memory/zero-push/MEMORY.md" ||
+  fail "empty machine index erased the hub index"
+[[ ! -e "$ZERO_PUSH_HUB/memory/zero-push/MEMORY.md.merge.123" &&
+   ! -e "$ZERO_PUSH_HUB/memory/zero-push/MEMORY.md.additions.123" &&
+   ! -e "$ZERO_PUSH_HUB/memory/zero-push/MEMORY.md.tombstone.123" &&
+   ! -e "$ZERO_PUSH_HUB/memory/zero-push/.forgotten.tmp" ]] ||
+  fail "interrupted merge scratch was copied as a memory fact"
+
 # Offline fetch is a visible failure and leaves the only local fact untouched.
 printf 'offline fact\n' > "$CLAUDE_A/projects/C--repos-sample/memory/offline.md"
 printf '%s\n' '- [offline](offline.md) - must survive fetch failure.' >> "$INDEX"

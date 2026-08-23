@@ -68,26 +68,53 @@ public_ai_devops_hub() {
 # This compatibility merge is intentionally conservative and can be removed
 # after every scheduled writer is running the private-hub protocol.
 merge_memory_index() {
-  local local_index="$1" hub_index="$2" output="$3" tmp line added=0
+  local local_index="$1" hub_index="$2" output="$3" tmp additions
   [[ -f "$local_index" ]] || return 0
-  [[ -f "$hub_index" ]] || { cp -a "$local_index" "$output"; return 0; }
+  if [[ ! -f "$hub_index" ]]; then
+    cp -a "$local_index" "$output" || return 1
+    return 0
+  fi
   tmp="$output.merge.$$"
-  cp -a "$hub_index" "$tmp"
-  while IFS= read -r line; do
-    # Windows working trees may present CRLF even when Git stores LF. Compare
-    # and append the canonical LF form so every sync does not re-add the same
-    # index entries with a hidden trailing carriage return.
-    line="${line%$'\r'}"
-    [[ "$line" == '- ['*']('*')'* ]] || continue
-    if ! grep -Fqx -- "$line" "$tmp"; then
-      if [[ "$added" -eq 0 ]]; then
-        printf '\n## Local entries preserved during migration\n\n' >> "$tmp"
-      fi
-      printf '%s\n' "$line" >> "$tmp"
-      added=$((added+1))
+  additions="$output.additions.$$"
+  if ! cp -a "$hub_index" "$tmp"; then
+    rm -f "$tmp" "$additions"
+    return 1
+  fi
+  # Load the hub entries once, then test every local entry against that in-memory
+  # set. The former grep-per-line loop became quadratic on a duplicate-storm
+  # index (a 20 MB index required hours). Canonicalize CRLF on both sides for the
+  # comparison while preserving the hub file byte-for-byte.
+  if ! awk '
+    FILENAME == ARGV[1] {
+      value = $0
+      sub(/\r$/, "", value)
+      if (value ~ /^- \[.*\]\(.*\).*/) seen[value] = 1
+      next
+    }
+    {
+      value = $0
+      sub(/\r$/, "", value)
+    }
+    value ~ /^- \[.*\]\(.*\).*/ && !(value in seen) {
+      print value
+      seen[value] = 1
+    }
+  ' "$tmp" "$local_index" > "$additions"; then
+    rm -f "$tmp" "$additions"
+    return 1
+  fi
+  if [[ -s "$additions" ]]; then
+    if ! { printf '\n## Local entries preserved during migration\n\n' >> "$tmp" &&
+      cat "$additions" >> "$tmp"; }; then
+      rm -f "$tmp" "$additions"
+      return 1
     fi
-  done < "$local_index"
-  mv -f "$tmp" "$output"
+  fi
+  rm -f "$additions"
+  if ! mv -f "$tmp" "$output"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 copy_fact_union() {
@@ -96,7 +123,9 @@ copy_fact_union() {
   for file in "$source"/* "$source"/.[!.]*; do
     [[ -f "$file" ]] || continue
     base="$(basename "$file")"
-    [[ "$base" == "MEMORY.md" || "$base" == "$FORGET_NAME" ]] && continue
+    [[ "$base" == "MEMORY.md" || "$base" == "$FORGET_NAME" ||
+       "$base" == MEMORY.md.merge.* || "$base" == MEMORY.md.additions.* ||
+       "$base" == MEMORY.md.tombstone.* || "$base" == "$FORGET_NAME.tmp" ]] && continue
     target="$destination/$base"
     if [[ ! -e "$target" ]]; then
       run cp -a "$file" "$target"
@@ -236,7 +265,11 @@ case "$DIRECTION" in
       # cannot shrink the hub index; only an explicit tombstone removes one.
       copy_fact_union "$md" "$dest" "$(hostname)"
       if [[ -n "$hub_index" ]]; then
-        merge_memory_index "$hub_index" "$md/MEMORY.md" "$dest/MEMORY.md"
+        if ! merge_memory_index "$hub_index" "$md/MEMORY.md" "$dest/MEMORY.md"; then
+          rm -f "$hub_index"
+          echo "[FAIL] Could not merge the memory/$proj index into the hub." >&2
+          exit 1
+        fi
         rm -f "$hub_index"
       fi
       # Re-apply after the copy: the machine may still hold a file the hub has
@@ -249,7 +282,9 @@ case "$DIRECTION" in
       # human decide, via `ai-sync-memory forget`.
       while IFS= read -r rf; do
         base="$(basename "$rf")"
-        [[ "$base" == "$FORGET_NAME" ]] && continue
+        [[ "$base" == "$FORGET_NAME" || "$base" == MEMORY.md.merge.* ||
+           "$base" == MEMORY.md.additions.* || "$base" == MEMORY.md.tombstone.* ||
+           "$base" == "$FORGET_NAME.tmp" ]] && continue
         [[ -e "$md/$base" ]] || echo "  note    memory/$proj/$base is in the hub but not on this machine (deleted here, or never pulled) — 'ai-sync-memory forget $proj $base \"why\"' to propagate a deletion"
       done < <(find "$dest" -maxdepth 1 -type f 2>/dev/null)
       echo "  push  $slug  ->  memory/$proj"
@@ -290,7 +325,11 @@ case "$DIRECTION" in
           fi
           copy_fact_union "$pd" "$md" "hub"
           if [[ -n "$local_index" ]]; then
-            merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md"
+            if ! merge_memory_index "$local_index" "$pd/MEMORY.md" "$md/MEMORY.md"; then
+              rm -f "$local_index"
+              echo "[FAIL] Could not merge the memory/$proj index into $slug." >&2
+              exit 1
+            fi
             rm -f "$local_index"
           fi
           # This is what makes a deletion actually propagate: the hub's
