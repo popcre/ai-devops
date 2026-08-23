@@ -40,7 +40,7 @@ doctor(){
   if [ "$live" = --live ]; then
     probe="$(printf '%s\n' 'Return exactly: OPUS5_ACCESS_OK' | "${CLAUDE_ARGS[0]}" -p --model claude-opus-5 --effort high --output-format json --tools "" --no-session-persistence --no-chrome)" \
       || die 'live Claude Opus 5 capability probe failed.'
-    jq -e '.is_error==false and .result=="OPUS5_ACCESS_OK" and (.modelUsage|type=="object") and (.modelUsage|keys==["claude-opus-5"]) and ((.modelUsage["claude-opus-5"].canonicalModel? // "claude-opus-5")=="claude-opus-5")' <<<"$probe" >/dev/null \
+    jq -e 'def valid_models: (.modelUsage|type=="object") and (.modelUsage["claude-opus-5"]|type=="object") and ((.modelUsage["claude-opus-5"].canonicalModel? // "claude-opus-5")=="claude-opus-5") and ([.modelUsage|to_entries[]|select(.key!="claude-opus-5")|((.key|startswith("claude-haiku-")) and (.value.provider?=="firstParty") and ((.value.canonicalModel?|type)=="string") and (.value.canonicalModel|startswith("claude-haiku-")))]|all); .is_error==false and .result=="OPUS5_ACCESS_OK" and valid_models' <<<"$probe" >/dev/null \
       || die 'live Claude response did not prove canonical claude-opus-5 access.'
   elif [ -n "$live" ]; then die "unknown doctor option: $live"; fi
   printf 'PASS provider=claude model=claude-opus-5 tools=Read,Grep,Glob permission=plan live=%s\n' "$([ "$live" = --live ] && printf verified || printf not-requested)"
@@ -101,7 +101,7 @@ TMP_JSON="$(mktemp "$REPORT_DIR/.claude-output.XXXXXX")"
 set +e; (cd "$REVIEW_DIR" && printf '%s\n' "$PROMPT" | "${CLAUDE_ARGS[@]}") > "$TMP_JSON" 2>&1; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 [ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; die "Claude exited nonzero ($PROVIDER_RC)."; }
-jq -e '.is_error==false and (.result|type=="string") and (.modelUsage|type=="object") and (.modelUsage|keys==["claude-opus-5"]) and ((.modelUsage["claude-opus-5"].canonicalModel? // "claude-opus-5")=="claude-opus-5") and ((.permission_denials//[])|length==0)' "$TMP_JSON" >/dev/null 2>&1 \
+jq -e 'def valid_models: (.modelUsage|type=="object") and (.modelUsage["claude-opus-5"]|type=="object") and ((.modelUsage["claude-opus-5"].canonicalModel? // "claude-opus-5")=="claude-opus-5") and ([.modelUsage|to_entries[]|select(.key!="claude-opus-5")|((.key|startswith("claude-haiku-")) and (.value.provider?=="firstParty") and ((.value.canonicalModel?|type)=="string") and (.value.canonicalModel|startswith("claude-haiku-")))]|all); .is_error==false and (.result|type=="string") and valid_models and ((.permission_denials//[])|length==0)' "$TMP_JSON" >/dev/null 2>&1 \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die 'Claude response did not prove Opus 5, successful completion, and zero permission denials.'; }
 TMP_TEXT="$(mktemp "$REPORT_DIR/.claude-text.XXXXXX")"; jq -r .result "$TMP_JSON" > "$TMP_TEXT"; [ -s "$TMP_TEXT" ] || die 'Claude returned an empty response.'
 EXPECTED_DIGEST="$(sed -n 's/^source_digest=//p' "$REVIEW_DIR/.ai-review-sandbox")"; ACTUAL_DIGEST="$($SANDBOX digest "$REVIEW_DIR")" || ACTUAL_DIGEST=""
