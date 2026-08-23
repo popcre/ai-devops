@@ -563,8 +563,22 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
     rm -f -- "$isolated_home/auth.json"
   fi
   ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
+  # GROK_HOME isolates Grok's own state, but Grok 1.0.5 also discovers Claude
+  # plugins directly from the operating-system user home. Give only the Grok
+  # child a neutral user home so an installed Claude plugin cannot inject hooks
+  # or tools into paid reviewer work. Keep the owning wrapper's HOME unchanged.
+  local -a isolation_home_env=("HOME=$isolated_home" "GROK_HOME=$isolated_home")
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*)
+      local isolated_native_home="$isolated_home"
+      if command -v cygpath >/dev/null 2>&1; then
+        isolated_native_home="$(cygpath -w "$isolated_home")"
+      fi
+      isolation_home_env+=("USERPROFILE=$isolated_native_home")
+      ;;
+  esac
   local inspect inspect_rc=0 inspect_waited=0; inspect="$(mktemp)"
-  GROK_HOME="$isolated_home" env "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- \
+  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- \
     "${grok_command[@]}" --cwd "$ACTIVE_ISOLATED_CWD" inspect --json > "$inspect" 2>"$inspect.err" &
   ACTIVE_GROK_CHILD=$!
   while kill -0 "$ACTIVE_GROK_CHILD" 2>/dev/null; do
@@ -608,7 +622,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   set +e
-  GROK_HOME="$isolated_home" env "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
+  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   ACTIVE_GROK_CHILD="$child"
   while kill -0 "$child" 2>/dev/null; do

@@ -27,8 +27,9 @@ still does not prove remote cancellation, the same paid-work block remains.
 Long turns print elapsed-time heartbeats; these prove only that the local wrapper is
 still waiting, not that the provider is active.
 
-Every paid turn runs from a neutral directory with Grok's native, project,
-plugin, Claude, Cursor, and standard `.mcp.json` discovery excluded. The wrapper
+Every paid turn runs with a child-only neutral user home and neutral directory,
+with Grok's native, project, plugin, Claude, Cursor, and standard `.mcp.json`
+discovery excluded. The wrapper
 also denies MCP meta-tools and subagents, verifies discovery before spending,
 and terminates the tracked local process tree on interruption or timeout. The
 supervisor waits for every descendant, not only the launcher. If Grok leaves a

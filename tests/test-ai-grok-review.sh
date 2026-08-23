@@ -17,6 +17,24 @@ PASS=0; FAIL=0
 ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+isolation_homes_match(){
+  local home grok_home profile normalized_home normalized_grok normalized_profile want="$AI_GROK_STATE_DIR/isolated-home"
+  while IFS='|' read -r home grok_home profile; do
+    normalized_home="$home"; normalized_grok="$grok_home"; normalized_profile="$profile"
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_home="$(cygpath -u "$home" 2>/dev/null || printf '%s' "$home")"
+      normalized_grok="$(cygpath -u "$grok_home" 2>/dev/null || printf '%s' "$grok_home")"
+      normalized_profile="$(cygpath -u "$profile" 2>/dev/null || printf '%s' "$profile")"
+    fi
+    if [ "$normalized_grok" = "$want" ]; then
+      case "$(uname -s 2>/dev/null || true)" in
+        MINGW*|MSYS*|CYGWIN*) [ "$normalized_profile" = "$want" ] && return 0 ;;
+        *) [ "$normalized_home" = "$want" ] && return 0 ;;
+      esac
+    fi
+  done < "$TMP/isolation-homes.txt"
+  return 1
+}
 check "missing local runtime is named distinctly" "grep -q 'local_dependency_unavailable: grok binary not found' '$SCRIPT'"
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
@@ -49,6 +67,7 @@ cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 printf '%s|%s|%s|%s\n' "${GROK_CLAUDE_MCPS_ENABLED:-}" "${GROK_CLAUDE_HOOKS_ENABLED:-}" "${GROK_CURSOR_MCPS_ENABLED:-}" "${GROK_CODEX_SESSIONS_ENABLED:-}" >> "$TMPDIR_FOR_TEST/isolation.txt"
+printf '%s|%s|%s\n' "${HOME:-}" "${GROK_HOME:-}" "${USERPROFILE:-}" >> "$TMPDIR_FOR_TEST/isolation-homes.txt"
 if printf '%s\n' "$@" | grep -qx inspect; then
   case "${AI_GROK_TEST_INSPECT_MODE:-ok}" in
     badshape) printf '%s\n' '{}' ;;
@@ -296,6 +315,8 @@ check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.t
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
+check "review gives the Grok child a neutral HOME and GROK_HOME" "isolation_homes_match && grep -q 'isolation_home_env=(\"HOME=\$isolated_home\" \"GROK_HOME=\$isolated_home\")' '$REPO_ROOT/bin/ai-grok-review'"
+check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q 'isolation_home_env+=(\"USERPROFILE=\$isolated_native_home\")' '$REPO_ROOT/bin/ai-grok-review'"
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
 check "review disables subagents"          "grep -q -- '--no-subagents' '$TMP/argv.txt'"
 check "review runs from a neutral non-repository cwd" "! grep -q -- '--cwd $REPO' '$TMP/argv.txt'"
