@@ -501,6 +501,7 @@ check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'alrea
 # 13 ------------------------------------------------------------------------
 echo "== reviews_dir_safety =="
 check "review file written when .ai is ignored" "ls '$REPO'/.ai/reviews/grok-t1-*.md"
+check "review publication reads cached tokens from the completed result, not stdin" "grep -q 'Tokens: 22720 (cached 21248)' '$REPO'/.ai/reviews/grok-t1-*.md"
 REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
 git -C "$REPO2" config user.email t@example.com; git -C "$REPO2" config user.name T
 echo x > "$REPO2/f"; git -C "$REPO2" add -A; git -C "$REPO2" commit -qm i

@@ -854,7 +854,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "- Session: \`$(jq -r '.sessionId // "?"' "$f")\`"
     echo "- Model: \`$(jq -r '(.modelUsage // {} | keys | first) // "?"' "$f")\`"
     echo "- stopReason: \`$(jq -r '.stopReason // "?"' "$f")\` · turns: $(jq -r '.num_turns // "?"' "$f")"
-    echo "- Tokens: $(jq -r '.usage.total_tokens // "?"' "$f") (cached $(jq -r '.usage.cache_read_input_tokens // 0')) · cost: \$$(jq -r '.total_cost_usd // 0' "$f")"
+    echo "- Tokens: $(jq -r '.usage.total_tokens // "?"' "$f") (cached $(jq -r '.usage.cache_read_input_tokens // 0' "$f")) · cost: \$$(jq -r '.total_cost_usd // 0' "$f")"
     echo
     echo "---"
     echo
