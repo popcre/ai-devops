@@ -699,8 +699,10 @@ session locks, and preserved recovery evidence. Gemini remains quarantined.**
 
 ### 7. Grok's one-paid-review rule fails across clones
 
-**Repair status (2026-08-21): fixed; normalized upstream locking spans clones,
-and legacy checkout-keyed locks block mixed-version rollout calls.**
+**Repair status (2026-08-23): fixed and exact-source live-qualified; normalized
+upstream locking spans clones, legacy checkout-keyed locks block mixed-version
+rollout calls, and Grok returned terminal APPROVE on open issue #61. Landing and
+installed-hash verification remain.**
 
 - Files: `bin/ai-grok-review:202-206`, `bin/ai-grok-review:597-604`,
   `bin/ai-grok-review:658-665`
@@ -849,8 +851,9 @@ now current, stale, or unknown, and unknown verdicts are unusable.**
 
 ### 18. Grok interruption and deletion do not tell the truth about remote work
 
-**Repair status (2026-08-21): fixed; unconfirmed remote work retains a paid-work
-block, including dead-owner and uncertainty-marker failure paths.**
+**Repair status (2026-08-23): fixed and exact-source live-qualified; unconfirmed
+remote work retains a paid-work block, including dead-owner,
+uncertainty-marker, timeout, and signal-window paths.**
 
 - Files: `bin/ai-grok-review:604`, `bin/ai-grok-review:665`,
   `bin/ai-grok-review:762-767`
@@ -863,8 +866,10 @@ block, including dead-owner and uncertainty-marker failure paths.**
 
 ### 19. Grok has no useful live progress or cross-clone activity view
 
-**Repair status (2026-08-21): fixed; factual heartbeats and cross-clone activity
-include elapsed time without claiming provider health.**
+**Repair status (2026-08-23): fixed and exact-source live-qualified; factual
+heartbeats and cross-clone activity include elapsed time without claiming
+provider health. The issue #61 canary emitted bounded progress through its
+terminal APPROVE.**
 
 - Files: `bin/ai-grok-review:303-330`, `bin/ai-grok-review:730-743`
 - Confidence: certain

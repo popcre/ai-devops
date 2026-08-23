@@ -11,9 +11,12 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | two-heartbeat fixture plus a process-level timeout that retains remote uncertainty |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |
-| 6 | Live qualification and landing | ⬜ open | remote SHA, issue #56 close |
+| 6 | Live qualification and landing | 🟨 live passed; landing open | exact-source doctor and issue #61 APPROVE at `f4def41`; remote SHA, installed hash, CI, issue closure remain |
 
-Fresh session starts at Step 6. This is the provider-facing companion to the more
+Step 6 is in landing verification. Exact-source live qualification passed on
+2026-08-23; see
+[`tests/verification/grok-review-issue-61/2026-08-23-live.md`](tests/verification/grok-review-issue-61/2026-08-23-live.md).
+This is the provider-facing companion to the more
 detailed existing `plan_grok-review-concurrency-cancellation-observability.md`;
 that plan remains the authoritative engineering detail where it is stricter.
 
