@@ -48,3 +48,27 @@ jobs:
       - name: Complete offline Windows and Bash suites
         shell: pwsh
         run: .\tests\test-all.ps1
+
+  windows-reviewer-safety:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify offline reviewer dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The pinned Windows runner image does not provide jq.'
+          }
+      - name: Focused Windows reviewer safety suites
+        shell: pwsh
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          $failures = 0
+          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
+            & $bash $test
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+          }
+          if ($failures -ne 0) { exit 1 }

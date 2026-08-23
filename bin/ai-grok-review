@@ -591,7 +591,15 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   done
   set +e; wait "$ACTIVE_GROK_CHILD"; inspect_rc=$?; set -e
   ACTIVE_GROK_CHILD=''
-  if [ "$inspect_rc" -ne 0 ] || ! jq -e '
+  if [ "$inspect_rc" -ne 0 ]; then
+    if [ "${AI_GROK_TEST_MODE:-}" = 1 ]; then
+      note '  test diagnostic: isolation inspection stderr follows'
+      sed -n '1,80p' "$inspect.err" >&2 2>/dev/null || true
+    fi
+    rm -f "$inspect" "$inspect.err"; clear_active_grok
+    die "Grok isolation inspection failed locally (exit $inspect_rc); refusing paid reviewer work."
+  fi
+  if ! jq -e '
       (.mcpServers | type) == "array" and
       (.hooks | type) == "array" and
       (.plugins | type) == "array" and
@@ -612,6 +620,11 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       (.plugins | length) == 0 and
       ([.externalCompat.cells[]? | select(.enabled == true)] | length) == 0
     ' "$inspect" >/dev/null 2>&1; then
+    if [ "${AI_GROK_TEST_MODE:-}" = 1 ]; then
+      note '  test diagnostic: rejected isolation inspection JSON follows'
+      sed -n '1,80p' "$inspect" >&2 2>/dev/null || true
+      sed -n '1,80p' "$inspect.err" >&2 2>/dev/null || true
+    fi
     rm -f "$inspect" "$inspect.err"; clear_active_grok
     die 'Grok isolation inspection found an enabled MCP, hook, plugin, or compatibility import; refusing paid reviewer work.'
   fi

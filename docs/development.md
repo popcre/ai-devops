@@ -104,9 +104,13 @@ pwsh -NoProfile -File tests/test-all.ps1
 
 On Ubuntu, run `bash tests/test-all.sh`. The GitHub `verify` workflow runs the
 same deterministic Bash set on Linux and the complete Bash plus PowerShell set
-on Windows. New offline tests named `tests/test-*.sh` or `tests/test-*.ps1` are
-discovered automatically in sorted order. Paid or live provider qualification
-must live under `tests/probes/` and remains an explicit release gate, never CI.
+on Windows. A separate `windows-reviewer-safety` job repeats the Codex and Grok
+reviewer suites in parallel so a Windows-only safety regression is reported
+without waiting for the complete Windows matrix; the complete matrix remains
+the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
+`tests/test-*.ps1` are discovered automatically in sorted order. Paid or live
+provider qualification must live under `tests/probes/` and remains an explicit
+release gate, never CI.
 
 Installer behavior has lightweight, dependency-free tests:
 

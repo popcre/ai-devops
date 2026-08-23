@@ -44,7 +44,7 @@ EOF
 }
 
 validate_command(){
-  local physical test_root
+  local physical test_root physical_dir physical_base
   case "$REVIEW_TIMEOUT" in ''|0|*[!0-9]*) die 'AI_CODEX_REVIEW_TIMEOUT must be a positive whole number of seconds.';; esac
   load_codex_command
   read -r -a CODEX_ARGS <<< "$CODEX_CMD"
@@ -55,17 +55,23 @@ validate_command(){
   case "${CODEX_ARGS[8]}" in model_reasoning_effort=low|model_reasoning_effort=medium) ;; *) die 'CODEX_CMD must explicitly pin model_reasoning_effort=low or medium.';; esac
   if [ -n "${AI_CODEX_REVIEW_TEST_DIR:-}" ]; then
     physical="$(readlink -f "${CODEX_ARGS[0]}" 2>/dev/null || true)"; test_root="$(cd "$AI_CODEX_REVIEW_TEST_DIR" 2>/dev/null && pwd -P || true)"
+    [ -n "$physical" ] && [ -n "$test_root" ] || die 'could not resolve the test Codex executable boundary.'
     # Git Bash can spell the same Windows path as /tmp/..., D:/..., /d/...,
     # or a mixed-case native path. Convert both sides through an absolute
     # Windows spelling before enforcing the test-only executable boundary.
-    # `cygpath -u` alone is insufficient on GitHub's Windows runner because
-    # readlink and pwd can choose different aliases for the same /tmp tree.
+    # cygpath conversion alone is insufficient on GitHub's Windows runner
+    # because readlink and pwd can choose different aliases for the same /tmp
+    # tree. Resolve each directory through Git Bash's canonical Windows view.
     if command -v cygpath >/dev/null 2>&1; then
-      physical="$(cygpath -am "$physical" 2>/dev/null || printf '%s' "$physical")"
-      test_root="$(cygpath -am "$test_root" 2>/dev/null || printf '%s' "$test_root")"
+      physical_base="$(basename "$physical")"
+      physical_dir="$(cd -P "$(dirname "$physical")" 2>/dev/null && pwd -W 2>/dev/null || true)"
+      test_root="$(cd -P "$test_root" 2>/dev/null && pwd -W 2>/dev/null || true)"
+      [ -n "$physical_dir" ] && [ -n "$physical_base" ] && [ -n "$test_root" ] \
+        || die 'could not canonicalize the Windows test Codex executable boundary.'
+      physical="$physical_dir/$physical_base"
       physical="${physical,,}"; test_root="${test_root,,}"
     fi
-    case "$physical" in "$test_root"/*) ;; *) die 'test Codex executable escaped AI_CODEX_REVIEW_TEST_DIR.';; esac
+    case "$physical" in "$test_root"/*) ;; *) die "test Codex executable escaped AI_CODEX_REVIEW_TEST_DIR (executable=$physical boundary=$test_root).";; esac
   else
     case "${CODEX_ARGS[0]}" in codex|codex.exe) ;; *) die 'production CODEX_CMD must invoke the governed codex executable directly.';; esac
   fi

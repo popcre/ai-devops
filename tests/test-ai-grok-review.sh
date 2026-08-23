@@ -45,6 +45,7 @@ trap cleanup EXIT
 export AI_GROK_STATE_DIR="$TMP/state"
 export AI_GROK_AUTH_HOME="$TMP/no-auth"
 export AI_GROK_CALLER="claude"
+export AI_GROK_TEST_MODE=1
 export AI_GROK_POLL_INTERVAL=1
 export AI_GROK_WAIT_TIMEOUT=15
 
