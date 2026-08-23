@@ -10,10 +10,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Improve missing-job errors | ✅ complete | status/logs/result/wait fixtures |
 | 3 | Wait for and re-prove live completion | ✅ complete | installed `doctor --live` plus complete issue #46 artifact |
 | 4 | Run installed canary matrix | ✅ complete | `tests/verification/kimi-review-issue-46/2026-08-23-live.md`; 218/218 plus deleted-clone retrieval |
-| 5 | Land/unquarantine/close #46 | 🟨 closure pending | qualification is complete; evidence commit must pass exact-head review, push, install, and then close #46 before this row completes |
+| 5 | Land/unquarantine/close #46 | ✅ complete | evidence commit `792f6d6` passed exact-head review, pushed, installed with matching hashes, received final installed Kimi `APPROVE`, and issue #46 closed 2026-08-23 |
 
-All implementation and production qualification steps are complete. Evidence
-landing and issue closure remain. The merged artifact-recovery history remains governed by
+All implementation, production qualification, evidence landing, and issue
+closure steps are complete. The merged artifact-recovery history remains governed by
 `plan_kimi-review-failure-recovery.md`.
 
 ## 1. The ultimate goal — what we are trying to achieve

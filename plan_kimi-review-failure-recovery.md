@@ -17,8 +17,8 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 | 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-23 | Exact-head evidence passed 203 Kimi, 71 review-sandbox, and 41 Codex-review tests; the live-fixture correction separately passed all 203 Kimi cases. |
 | 8. Requalify Kimi live, independently review the exact head, and land | ✅ complete | 2026-08-23 | Exact-head Codex reviews approved `818a8b4` and `9c54e65`; production install and hashes matched; `doctor --live` passed; installed matrix passed 218/218; deleted-clone retrieval returned a complete canonical artifact. See `tests/verification/kimi-review-issue-46/2026-08-23-live.md`. |
 
-**Fresh-session starting point:** Production qualification is complete. Start at
-the remaining issue-closure checkbox in Section 13; do not repeat Steps 1–8. The
+**Fresh-session starting point:** This plan is complete; do not repeat Steps 1–8.
+The
 checkout had concurrent uncommitted changes to `bin/ai-kimi` and
 `tests/test-ai-kimi.sh` when this plan was written; that note is historical.
 
@@ -706,8 +706,8 @@ artifacts; do not copy old pass counts into the STATUS table.
 - [x] Source is committed as Albert, pushed to `main`, GitHub checks are green if
       present, installed source hash matches merged source, and installed live
       canaries pass.
-- [ ] Issue #46 is closed with evidence; then mark this plan complete and retire
-      the paired handoff under the successor rule.
+- [x] Issue #46 closed with evidence on 2026-08-23; this plan is complete and the
+      paired handoffs are retired under the successor rule.
 
 ### Main risks and rollback
 
