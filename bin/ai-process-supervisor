@@ -21,10 +21,11 @@ def die(message: str) -> "None":
     raise SystemExit(2)
 
 
-def posix_main(command: list[str]) -> int:
+def posix_main(command: list[str], stop_file: str | None = None) -> int:
     child = subprocess.Popen(command, start_new_session=True)
     pgid = child.pid
     stopped_by = 0
+    stop_requested = False
 
     def stop(signum: int, _frame: object) -> None:
         nonlocal stopped_by
@@ -41,6 +42,13 @@ def posix_main(command: list[str]) -> int:
     while True:
         if direct_rc is None:
             direct_rc = child.poll()
+        if stop_file and not stop_requested and os.path.exists(stop_file):
+            stop_requested = True
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 3
         try:
             os.killpg(pgid, 0)
             group_alive = True
@@ -49,8 +57,10 @@ def posix_main(command: list[str]) -> int:
         except PermissionError:
             group_alive = True
         if direct_rc is not None and not group_alive:
+            if stop_requested:
+                return 124
             return 128 + stopped_by if stopped_by else direct_rc
-        if stopped_by:
+        if stopped_by or stop_requested:
             # Finish group escalation before the shell wrapper's five-second
             # fallback can hard-kill this supervisor and orphan the group.
             deadline = deadline or time.monotonic() + 3
@@ -62,7 +72,7 @@ def posix_main(command: list[str]) -> int:
         time.sleep(0.1)
 
 
-def windows_main(command: list[str]) -> int:
+def windows_main(command: list[str], stop_file: str | None = None) -> int:
     from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -131,6 +141,7 @@ def windows_main(command: list[str]) -> int:
         die("NtResumeProcess failed")
 
     stopped_by = 0
+    stop_requested = False
 
     def stop(signum: int, _frame: object) -> None:
         nonlocal stopped_by
@@ -143,6 +154,12 @@ def windows_main(command: list[str]) -> int:
     while True:
         if direct_rc is None:
             direct_rc = child.poll()
+        if stop_file and not stop_requested and os.path.exists(stop_file):
+            stop_requested = True
+            if not kernel32.TerminateJobObject(job, 124):
+                error = ctypes.get_last_error()
+                kernel32.CloseHandle(job)
+                die(f"TerminateJobObject failed ({error})")
         accounting = Accounting()
         if not kernel32.QueryInformationJobObject(job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
             kernel32.TerminateJobObject(job, 1)
@@ -150,18 +167,24 @@ def windows_main(command: list[str]) -> int:
             die(f"QueryInformationJobObject failed ({ctypes.get_last_error()})")
         if direct_rc is not None and accounting.ActiveProcesses == 0:
             kernel32.CloseHandle(job)
+            if stop_requested:
+                return 124
             return 128 + stopped_by if stopped_by else direct_rc
         time.sleep(0.1)
 
 
 def main() -> int:
     args = sys.argv[1:]
+    stop_file = None
+    if len(args) >= 2 and args[0] == "--stop-file":
+        stop_file = args[1]
+        args = args[2:]
     if args and args[0] == "--":
         args = args[1:]
     if not args:
         die("usage: ai-process-supervisor -- COMMAND [ARG ...]")
     try:
-        return windows_main(args) if os.name == "nt" else posix_main(args)
+        return windows_main(args, stop_file) if os.name == "nt" else posix_main(args, stop_file)
     except FileNotFoundError as exc:
         die(f"command not found: {exc.filename}")
     return 2

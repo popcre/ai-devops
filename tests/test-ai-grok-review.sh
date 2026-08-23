@@ -239,6 +239,8 @@ TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -
 check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured 3s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
 check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt 45"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
+check "Windows timeouts delegate both process trees to the native supervisor" "test \"\$(grep -c -- '--stop-file \"\$ACTIVE_GROK_NATIVE_STOP_FILE\"' '$SCRIPT')\" -eq 2 && grep -q 'TerminateJobObject(job, 124)' '$REPO_ROOT/bin/ai-process-supervisor'"
+check "Windows fallback translates the MSYS PID and never emits a console signal" "grep -q '/proc/\$child/winpid' '$SCRIPT' && grep -q 'taskkill.exe /PID \"\$windows_pid\"' '$SCRIPT'"
 rm -rf "$TIMEOUT_LOCK"
 
 # The launcher may exit before the worker. The terminal-result timeout must
@@ -535,6 +537,35 @@ check "a reaped supervisor PID is disarmed before later failure handling" "sed -
 SIGNAL_WINDOW_HOME="$AI_GROK_STATE_DIR/runtime-home.signal-window"; mkdir -p "$SIGNAL_WINDOW_HOME"
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME="$SIGNAL_WINDOW_HOME"; stop_active_grok_tree )
 check "signal-window cleanup removes the temporary profile without an active child" "test ! -e '$SIGNAL_WINDOW_HOME'"
+check "paid signal requests native-supervisor shutdown before fallback" "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'request_active_grok_stop || stop_active_grok_tree'"
+if case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
+  (
+    . "$TMP/lib.sh"
+    STATE_DIR="$AI_GROK_STATE_DIR"
+    ACTIVE_GROK_STOP_DIR=''; ACTIVE_GROK_STOP_FILE=''; ACTIVE_GROK_NATIVE_STOP_FILE=''
+    ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME=''
+    sleep 300 & ACTIVE_GROK_CHILD=$!
+    printf '%s\n' "$ACTIVE_GROK_CHILD" > "$TMP/windows-fallback-child-pid"
+    stop_active_grok_tree
+  )
+  FALLBACK_RC=$?
+  check "Windows native fallback executes against and reaps the translated live child" "test '$FALLBACK_RC' -eq 0 && test -s '$TMP/windows-fallback-child-pid' && ! kill -0 \"\$(cat '$TMP/windows-fallback-child-pid')\" 2>/dev/null"
+  FAIL_CLOSED_LOCK="$TMP/windows-fallback-failure.lock.d"
+  (
+    . "$TMP/lib.sh"
+    STATE_DIR="$AI_GROK_STATE_DIR"
+    mkdir -p "$FAIL_CLOSED_LOCK"; printf '%s\n' "$$" > "$FAIL_CLOSED_LOCK/pid"
+    ACTIVE_GROK_STOP_DIR=''; ACTIVE_GROK_STOP_FILE=''; ACTIVE_GROK_NATIVE_STOP_FILE=''
+    ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME=''; ACTIVE_GROK_CHILD=99999999
+    preserve_uncertain_paid_turn "$FAIL_CLOSED_LOCK"
+  )
+  FAIL_CLOSED_RC=$?
+  check "failed Windows fallback returns normally and preserves remote uncertainty" "test '$FAIL_CLOSED_RC' -eq 0 && test -f '$FAIL_CLOSED_LOCK/remote-uncertain'"
+else
+  ok "Windows native fallback runtime test skipped on non-Windows"
+  ok "Windows fallback-failure fail-closed test skipped on non-Windows"
+fi
+check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
 check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()/,/^cmd_new()/p' '$SCRIPT' | grep -q 'clear_active_grok'"
 check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"

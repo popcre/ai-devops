@@ -58,7 +58,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.0.4"
 
 STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
 CALLER="${AI_GROK_CALLER:-claude}"
@@ -93,6 +93,9 @@ POLL_INTERVAL="${AI_GROK_POLL_INTERVAL:-5}"
 HEARTBEAT_INTERVAL="${AI_GROK_HEARTBEAT_INTERVAL:-60}"
 RUN_TURN_RC=0
 ACTIVE_GROK_CHILD=''
+ACTIVE_GROK_STOP_DIR=''
+ACTIVE_GROK_STOP_FILE=''
+ACTIVE_GROK_NATIVE_STOP_FILE=''
 ACTIVE_ISOLATED_CWD=''
 ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
@@ -369,6 +372,18 @@ mark_remote_uncertain() { # retain paid-work lock after local interruption
   date -u +%FT%TZ > "$dir/remote-uncertain"
 }
 
+preserve_uncertain_paid_turn() { # preserve lock before any fallible tree cleanup
+  local rid_lock="$1" sess_lock="${2:-}"
+  # Disable normal EXIT deletion first. If even the marker write fails, the
+  # repository lock itself remains as the fail-closed paid-work barrier.
+  trap - EXIT
+  mark_remote_uncertain "$rid_lock" \
+    || warn 'could not write the uncertainty marker; retaining the paid-work lock for manual reconciliation.'
+  [ -z "$sess_lock" ] || lock_release "$sess_lock"
+  stop_active_grok_tree \
+    || warn 'could not confirm local reviewer-tree termination; paid work remains blocked for manual reconciliation.'
+}
+
 session_lock_acquire() { # local-only serialization; paid uncertainty is owned by the repository lock
   local dir="$1" label="$2" owner quarantine moved_owner
   mkdir -p "$(dirname "$dir")"
@@ -392,7 +407,28 @@ session_lock_acquire() { # local-only serialization; paid uncertainty is owned b
   warn "reclaimed a stale local-only session lock from process $owner"
 }
 
+clear_active_stop_file() {
+  [ -z "$ACTIVE_GROK_STOP_FILE" ] || rm -f -- "$ACTIVE_GROK_STOP_FILE" 2>/dev/null || true
+  [ -z "$ACTIVE_GROK_STOP_DIR" ] || rmdir "$ACTIVE_GROK_STOP_DIR" 2>/dev/null || true
+  ACTIVE_GROK_STOP_DIR=''
+  ACTIVE_GROK_STOP_FILE=''
+  ACTIVE_GROK_NATIVE_STOP_FILE=''
+}
+
+prepare_active_stop_file() {
+  ACTIVE_GROK_STOP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-stop.XXXXXX")" \
+    || die 'could not reserve a process-supervisor stop directory.'
+  chmod 700 "$ACTIVE_GROK_STOP_DIR" 2>/dev/null || true
+  ACTIVE_GROK_STOP_FILE="$ACTIVE_GROK_STOP_DIR/stop"
+  ACTIVE_GROK_NATIVE_STOP_FILE="$ACTIVE_GROK_STOP_FILE"
+  if command -v cygpath >/dev/null 2>&1; then
+    ACTIVE_GROK_NATIVE_STOP_FILE="$(cygpath -w "$ACTIVE_GROK_STOP_FILE" 2>/dev/null || true)"
+  fi
+  [ -n "$ACTIVE_GROK_NATIVE_STOP_FILE" ] || die 'could not translate the process-supervisor stop-file path.'
+}
+
 clear_active_grok() {
+  clear_active_stop_file
   [ -z "$ACTIVE_ISOLATED_CWD" ] || rmdir "$ACTIVE_ISOLATED_CWD" 2>/dev/null || true
   if [ -n "$ACTIVE_ISOLATED_HOME" ]; then
     case "$ACTIVE_ISOLATED_HOME" in
@@ -405,23 +441,59 @@ clear_active_grok() {
   ACTIVE_GROK_CHILD=''; ACTIVE_ISOLATED_CWD=''; ACTIVE_ISOLATED_HOME=''
 }
 
-stop_active_grok_tree() {
+request_active_grok_stop() {
   local child="$ACTIVE_GROK_CHILD" i
+  [ -n "$child" ] && [ -n "$ACTIVE_GROK_STOP_FILE" ] || return 1
+  printf 'stop\n' > "$ACTIVE_GROK_STOP_FILE" 2>/dev/null || return 1
+  for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
+  kill -0 "$child" 2>/dev/null && return 1
+  wait "$child" 2>/dev/null || true
+  ACTIVE_GROK_CHILD=''
+  clear_active_grok
+}
+
+stop_active_grok_tree() {
+  local child="$ACTIVE_GROK_CHILD" i windows_pid
   # A signal can land after the neutral profile is created but between the
   # inspection and paid children, or just after a child is reaped. Cleanup is
   # still required even when there is no PID left to terminate.
   [ -n "$child" ] || { clear_active_grok; return 0; }
-  kill -TERM "$child" 2>/dev/null || true
-  for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
-  kill -KILL "$child" 2>/dev/null || true
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # Git Bash signals can target the native supervisor's console group and
+      # kill this wrapper. Translate the MSYS PID before taskkill owns the
+      # Windows tree fallback; never guess at a native PID.
+      windows_pid="$(cat "/proc/$child/winpid" 2>/dev/null || true)"
+      case "$windows_pid" in
+        ''|*[!0-9]*) warn "could not resolve native Windows PID for reviewer child $child; leaving paid work blocked for reconciliation."; return 1 ;;
+      esac
+      if ! MSYS2_ARG_CONV_EXCL='*' taskkill.exe /PID "$windows_pid" /T /F >/dev/null 2>&1; then
+        warn "native Windows tree termination failed for reviewer child $child; leaving paid work blocked for reconciliation."
+        return 1
+      fi
+      for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
+      if kill -0 "$child" 2>/dev/null; then
+        warn "native Windows reviewer child $child did not exit after tree termination; leaving paid work blocked for reconciliation."
+        return 1
+      fi
+      ;;
+    *)
+      kill -TERM "$child" 2>/dev/null || true
+      for i in 1 2 3 4 5; do kill -0 "$child" 2>/dev/null || break; sleep 1; done
+      kill -KILL "$child" 2>/dev/null || true
+      ;;
+  esac
   wait "$child" 2>/dev/null || true
   clear_active_grok
 }
 
 on_paid_signal() {
   trap - EXIT INT TERM
-  stop_active_grok_tree
-  warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
+  if request_active_grok_stop || stop_active_grok_tree; then
+    warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
+  else
+    warn 'local wrapper stopped but could not confirm termination of its Grok process tree; remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
+  fi
   [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
   [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK"
   exit 130
@@ -618,20 +690,29 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       )
       ;;
   esac
-  local inspect inspect_rc=0 inspect_waited=0; inspect="$(mktemp)"
-  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- \
+  local inspect inspect_rc=0 inspect_waited=0 inspect_stopped=0; inspect="$(mktemp)"
+  prepare_active_stop_file
+  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- \
     "${grok_command[@]}" --cwd "$ACTIVE_ISOLATED_CWD" inspect --json > "$inspect" 2>"$inspect.err" &
   ACTIVE_GROK_CHILD=$!
   while kill -0 "$ACTIVE_GROK_CHILD" 2>/dev/null; do
     if [ "$inspect_waited" -ge "$ISOLATION_TIMEOUT" ]; then
-      stop_active_grok_tree
+      if request_active_grok_stop || stop_active_grok_tree; then
+        inspect_stopped=1
+      else
+        warn 'could not confirm termination of the timed-out local isolation inspection.'
+      fi
       rm -f "$inspect" "$inspect.err"
-      die "Grok isolation inspection exceeded ${ISOLATION_TIMEOUT}s and its process tree was terminated; refusing paid reviewer work."
+      if [ "$inspect_stopped" -eq 1 ]; then
+        die "Grok isolation inspection exceeded ${ISOLATION_TIMEOUT}s and its process tree was terminated; refusing paid reviewer work."
+      fi
+      die "Grok isolation inspection exceeded ${ISOLATION_TIMEOUT}s and its process-tree termination is unconfirmed; refusing paid reviewer work."
     fi
     sleep 1; inspect_waited=$((inspect_waited + 1))
   done
   set +e; wait "$ACTIVE_GROK_CHILD"; inspect_rc=$?; set -e
   ACTIVE_GROK_CHILD=''
+  clear_active_stop_file
   if [ "$inspect_rc" -ne 0 ]; then
     if [ "${AI_GROK_TEST_MODE:-}" = 1 ]; then
       note '  test diagnostic: isolation inspection stderr follows'
@@ -675,15 +756,19 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   [ -n "$sid" ] && args+=(--resume "$sid")
 
   : > "$out"
+  prepare_active_stop_file
   set +e
-  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
+  env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   ACTIVE_GROK_CHILD="$child"
   while kill -0 "$child" 2>/dev/null; do
     if [ "$waited" -ge "$WAIT_TIMEOUT" ]; then
       note "  Grok command exceeded the configured ${WAIT_TIMEOUT}s limit; stopping the local process."
       note "  This does not prove the provider stopped, so paid work remains blocked for reconciliation."
-      stop_active_grok_tree
+      # Let the native supervisor terminate its own Windows Job Object. Sending
+      # TERM from Git Bash to a native Python PID can signal the surrounding
+      # console process group on hosted Windows and kill the caller as well.
+      request_active_grok_stop || stop_active_grok_tree
       RUN_TURN_RC=124
       set -e
       return 0
@@ -979,9 +1064,7 @@ cmd_new() {
   build_prompt_file "$pf"
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
-    stop_active_grok_tree
-    trap - EXIT
-    mark_remote_uncertain "$rid_lock"
+    preserve_uncertain_paid_turn "$rid_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
@@ -1077,10 +1160,7 @@ $REVIEW_HEAD only."
   build_prompt_file "$pf"
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
-    stop_active_grok_tree
-    lock_release "$sess_lock"
-    trap - EXIT
-    mark_remote_uncertain "$rid_lock"
+    preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
