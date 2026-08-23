@@ -518,7 +518,7 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 # ---------------------------------------------------------------------------
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
-  local grok supervisor python_bin; local -a grok_command; grok="$(resolve_grok)"
+  local grok supervisor python_bin bash_bin; local -a grok_command; grok="$(resolve_grok)"
   supervisor="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
   if [ ! -x "$supervisor" ]; then
     # Ubuntu installs this wrapper as a symlink into /usr/local/bin. Resolve
@@ -541,7 +541,18 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   esac
   case "$(uname -s 2>/dev/null || true):${grok,,}" in
     MINGW*:*.exe|MINGW*:*.com|MINGW*:*.bat|MINGW*:*.cmd|MSYS*:*.exe|MSYS*:*.com|MSYS*:*.bat|MSYS*:*.cmd|CYGWIN*:*.exe|CYGWIN*:*.com|CYGWIN*:*.bat|CYGWIN*:*.cmd) ;;
-    MINGW*:*|MSYS*:*|CYGWIN*:*) grok_command=(bash "$grok") ;;
+    MINGW*:*|MSYS*:*|CYGWIN*:*)
+      # The process supervisor is native Windows Python. A bare `bash` makes
+      # CreateProcess search the Windows PATH, where WSL or an app-execution
+      # alias can win over the Git Bash that owns this wrapper. Pin the exact
+      # current Bash executable and translate only that executable for Python.
+      bash_bin="${BASH:-$(command -v bash 2>/dev/null || true)}"
+      [ -n "$bash_bin" ] || die 'could not resolve the current Bash executable for the Grok script launcher.'
+      if command -v cygpath >/dev/null 2>&1; then
+        bash_bin="$(cygpath -w "$bash_bin" 2>/dev/null || true)"
+      fi
+      [ -n "$bash_bin" ] || die 'could not translate the current Bash executable for the Grok script launcher.'
+      grok_command=("$bash_bin" "$grok") ;;
   esac
   local isolated_home="$STATE_DIR/isolated-home" auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true

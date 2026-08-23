@@ -325,6 +325,7 @@ check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
 check "review disables subagents"          "grep -q -- '--no-subagents' '$TMP/argv.txt'"
 check "review runs from a neutral non-repository cwd" "! grep -q -- '--cwd $REPO' '$TMP/argv.txt'"
+check "Windows script launcher pins the current Git Bash for native Python" "grep -q 'bash_bin=\"\${BASH:-\$(command -v bash' '$SCRIPT' && grep -q 'bash_bin=\"\$(cygpath -w' '$SCRIPT' && ! grep -q 'grok_command=(bash ' '$SCRIPT'"
 BAD_SHAPE="$(AI_GROK_TEST_INSPECT_MODE=badshape run new inspect-schema-drift --prompt x 2>&1)"; BAD_SHAPE_RC=$?
 check "isolation inspection fails closed on schema drift" "test '$BAD_SHAPE_RC' -ne 0 && printf '%s' \"$BAD_SHAPE\" | grep -q 'isolation inspection'"
 BAD_HOOK="$(AI_GROK_TEST_INSPECT_MODE=enabledhook run new inspect-enabled-hook --prompt x 2>&1)"; BAD_HOOK_RC=$?
