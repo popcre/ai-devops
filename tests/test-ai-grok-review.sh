@@ -58,7 +58,18 @@ check "missing local runtime is named distinctly" "grep -q 'local_dependency_una
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
-cleanup() { rm -rf "$TMP"; }
+cleanup() {
+  # Native Windows children can exit before Git Bash releases their final cwd
+  # handle. Keep a persistent leak visible, but allow that bounded handoff to
+  # settle so a fully passing safety run does not fail only in EXIT cleanup.
+  cd "$REPO_ROOT" || return 1
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    rm -rf "$TMP" 2>/dev/null && return 0
+    sleep 1
+  done
+  rm -rf "$TMP"
+}
 trap cleanup EXIT
 
 export AI_GROK_STATE_DIR="$TMP/state"
