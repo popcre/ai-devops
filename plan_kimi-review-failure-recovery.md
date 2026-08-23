@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — restore trustworthy Kimi reviews (2026-08-20)
 
-Paired handoff: [`HANDOFF.d/2026-08-20T0213Z-edge-dev-codex-kimi-review-recovery-plan.md`](HANDOFF.d/2026-08-20T0213Z-edge-dev-codex-kimi-review-recovery-plan.md)
+The paired handoff was retired after every step reached production evidence.
 
 Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/issues/46)
 
