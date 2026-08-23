@@ -115,6 +115,7 @@ case "${1:-}" in
   models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.6"; exit 0 ;;
   export)    printf '%s\n' "$GROK_HOME" > "$TMPDIR_FOR_TEST/export-home"; echo "# transcript stub"; exit 0 ;;
 esac
+touch "$TMPDIR_FOR_TEST/provider-contacted"
 case "$mode" in
   ok)        cat "$TMPDIR_FOR_TEST/fixture.json" ;;
   cancelled) cat "$TMPDIR_FOR_TEST/cancelled.json" ;;
@@ -504,9 +505,12 @@ REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
 git -C "$REPO2" config user.email t@example.com; git -C "$REPO2" config user.name T
 echo x > "$REPO2/f"; git -C "$REPO2" add -A; git -C "$REPO2" commit -qm i
 git -C "$REPO2" remote add origin https://github.com/Example/Unsafe-Fixture.git
-ERR="$( cd "$REPO2" && bash "$SCRIPT" new t10 --prompt x 2>&1 >/dev/null )"
-check "refuses to write into a repo that would commit it" "printf '%s' \"\$ERR\" | grep -qi 'not git-ignored'"
+rm -f "$TMP/provider-contacted"
+ERR="$( cd "$REPO2" && bash "$SCRIPT" new t10 --prompt x 2>&1 >/dev/null )"; UNSAFE_RC=$?
+check "refuses to write into a repo that would commit it" "test '$UNSAFE_RC' -ne 0 && printf '%s' \"\$ERR\" | grep -qi 'exact report destination is unsafe'"
 check "and writes no file there" "! ls '$REPO2'/.ai/reviews/*.md 2>/dev/null"
+check "unsafe report destination is refused before provider contact" "test ! -e '$TMP/provider-contacted'"
+check "Muse and Grok both fail closed on an unsafe exact report destination" "grep -q 'return 1' '$SCRIPT' && grep -q 'exact destination is not Git-ignored' '$REPO_ROOT/bin/ai-muse'"
 
 # 14 ------------------------------------------------------------------------
 echo "== session bookkeeping =="

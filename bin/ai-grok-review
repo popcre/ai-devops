@@ -97,6 +97,8 @@ ACTIVE_ISOLATED_CWD=''
 ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
 ACTIVE_SESSION_LOCK=''
+PENDING_REVIEW_BASE=''
+PENDING_REVIEW_DIR=''
 
 die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
@@ -827,13 +829,21 @@ reviews_dir() { # reviews_dir REPO EXACT-BASENAME -> path, or empty if unsafe
   fi
 }
 
+preflight_review_file() { # preflight_review_file REPO NAME
+  local repo="$1" name="$2"
+  PENDING_REVIEW_BASE="grok-${name}-$(date -u +%Y%m%dT%H%M%SZ)-$$.md"
+  PENDING_REVIEW_DIR="$(reviews_dir "$repo" "$PENDING_REVIEW_BASE")"
+  [ -n "$PENDING_REVIEW_DIR" ] || die "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
+}
+
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
   local repo="$1" name="$2" f="$3" dir ts out base
-  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="grok-${name}-${ts}.md"; dir="$(reviews_dir "$repo" "$base")"
+  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
-    warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo (it would be committable). Add '.ai/reviews/' to .gitignore."
-    return 0
+    warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
+    return 1
   fi
+  [ -z "$PENDING_REVIEW_DIR" ] || [ "$dir" = "$PENDING_REVIEW_DIR" ] || { warn 'refusing Grok review: report destination changed after preflight.'; return 1; }
   mkdir -p "$dir"
   out="$dir/$base"
   {
@@ -964,6 +974,7 @@ cmd_new() {
   pf="$(mktemp)"; out="$(mktemp)"
 
   note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
+  preflight_review_file "$repo" "$name"
   prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   build_prompt_file "$pf"
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
@@ -1038,6 +1049,7 @@ cmd_ask() {
   pf="$(mktemp)"; out="$(mktemp)"
 
   note "Grok review '$name' continuing session $sid (max-turns $turns)…"
+  preflight_review_file "$repo" "$name"
   boundary="$(jq -r '.review_dir // empty' "$meta")"
   if [ -z "$boundary" ]; then
     # Sessions created before issue #53 used the live checkout for ordinary
@@ -1107,7 +1119,10 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     clear_active_grok
     return 1
   fi
-  path="$(write_review_file "$repo" "$name" "$out")"
+  if ! path="$(write_review_file "$repo" "$name" "$out")"; then
+    clear_active_grok
+    return 1
+  fi
   if [ "${OPT_JSON:-0}" = 1 ]; then
     cat "$out"
   else

@@ -51,7 +51,16 @@ LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
 cleanup(){
-  local accepted_path="" accepted_id=""
+  local accepted_path="" accepted_id="" active_status="" active_tmp=""
+  if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
+    active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
+    case "$active_status" in
+      preparing|preparing_followup)
+        active_tmp="$(tmp_file)"
+        jq --arg now "$(date -u +%FT%TZ)" '.status="preparation_failed"|.failure_reason="local_preparation_incomplete"|.updated_at=$now' "$ACTIVE_META" > "$active_tmp" 2>/dev/null && mv -f "$active_tmp" "$ACTIVE_META" || true
+        ;;
+    esac
+  fi
   [ ! -f "$RUN_TMP/published-report" ] || { accepted_path="$(sed -n '1p' "$RUN_TMP/published-report")"; accepted_id="$(sed -n '2p' "$RUN_TMP/published-report")"; }
   release_credential_lock; release_lock
   [ -z "$PUBLISH_FD" ] || { eval "exec ${PUBLISH_FD}>&-" 2>/dev/null || true; PUBLISH_FD=""; }
@@ -62,10 +71,12 @@ cleanup(){
   rm -rf "$RUN_TMP"
 }
 mark_uncertain(){
-  local reason="$1" tmp
+  local reason="$1" tmp status next_status
   [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ] || return 0
+  status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
+  case "$status" in preparing|preparing_followup) next_status=preparation_failed;; *) next_status=provider_outcome_uncertain;; esac
   tmp="$(tmp_file)"
-  jq --arg now "$(date -u +%FT%TZ)" --arg reason "$reason" '.status="provider_outcome_uncertain"|.failure_reason=$reason|.updated_at=$now' "$ACTIVE_META" > "$tmp" && mv -f "$tmp" "$ACTIVE_META" || true
+  jq --arg now "$(date -u +%FT%TZ)" --arg reason "$reason" --arg status "$next_status" '.status=$status|.failure_reason=$reason|.updated_at=$now' "$ACTIVE_META" > "$tmp" && mv -f "$tmp" "$ACTIVE_META" || true
 }
 on_signal(){
   mark_uncertain interrupted-local-observer
@@ -229,6 +240,7 @@ run_turn(){
   chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
   protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
   provider_key=""
+  [ -z "${AI_MUSE_TEST_PRE_LAUNCH_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PRE_LAUNCH_MARKER"; sleep "${AI_MUSE_TEST_PRE_LAUNCH_DELAY:-3}"; }
   set +e
   clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
@@ -238,7 +250,12 @@ run_turn(){
     clean_env+=("AI_MUSE_TEST_DIR=$AI_MUSE_TEST_DIR")
     while IFS='=' read -r safe_name _; do case "$safe_name" in AI_MUSE_TEST_*|MUSE_STUB_*) clean_env+=("$safe_name=${!safe_name}");; esac; done < <(env)
   fi
+  if [ -n "$meta" ]; then
+    local launch_tmp; launch_tmp="$(tmp_file)"
+    jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
+  fi
   ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" "$prompt_text" ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+  [ -z "${AI_MUSE_TEST_POST_LAUNCH_MARKER:-}" ] || { printf '%s\n' "$TURN_PID" > "$AI_MUSE_TEST_POST_LAUNCH_MARKER"; sleep "${AI_MUSE_TEST_POST_LAUNCH_DELAY:-3}"; }
   ACTIVE_META="$meta"; [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
   while kill -0 "$TURN_PID" 2>/dev/null; do
     sleep 1; waited=$((waited+1))
@@ -292,10 +309,12 @@ report(){
 cmd_new(){
   local name="$1"; shift; local root rid meta prompt out rep before after tmp report_path now
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
-  root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
-  prompt="$(read_prompt "$@")"; report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
-  mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg dir "$REVIEW_DIR" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$now" '{schema_version:1,status:"turn_in_progress",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:$dir,sandbox_tag:$tag,model:$model,head:$head,packet_sha256:$packet,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true
+  root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
+  mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
+  [ -z "${AI_MUSE_TEST_PREPARE_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PREPARE_MARKER"; sleep "${AI_MUSE_TEST_PREPARE_DELAY:-3}"; }
+  report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
+  tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.
@@ -309,7 +328,9 @@ cmd_ask(){
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."
   status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = active ] || die "session '$name' requires reconciliation ($status). Inspect: AI_MUSE_CALLER=$CALLER ai-muse transcript $name ; then run: AI_MUSE_CALLER=$CALLER ai-muse reconcile $name"
   validate_heartbeat
-  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="turn_in_progress"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
+  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
+  printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
+  report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
   if [ "$TURN_SID" != "$sid" ]; then TURN_ERROR="Muse resumed a different session ($TURN_SID instead of $sid)."; if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Response rejected and evidence preserved."; else die "$TURN_ERROR Response rejected; evidence could not be saved and the session remains blocked."; fi; fi
   tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="completed_pending_local_checks"|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
@@ -320,8 +341,12 @@ find_meta(){ local root rid m; name_ok "$1" || die "invalid session name '$1'.";
 cmd_list(){ local f; printf '%-24s %-8s %-26s %s\n' NAME CALLER UPDATED REPOSITORY; while IFS= read -r -d '' f; do jq -r '[.name,.caller,.updated_at,.repository_root]|@tsv' "$f"; done < <(find "$STATE/sessions" -type f -name '*.json' -print0 2>/dev/null) | awk -F '\t' '{printf "%-24s %-8s %-26s %s\n",$1,$2,$3,$4}'; }
 cmd_show(){ jq . "$(find_meta "$1")"; }
 cmd_transcript(){ local m; m="$(find_meta "$1")"; runtime_env; "$BIN" export "$(jq -r .session_id "$m")"; }
-cmd_reconcile(){ local m rid tmp status; m="$(find_meta "$1")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; status="$(jq -r '.status//"active"' "$m")"; case "$status" in provider_outcome_uncertain|completed_pending_local_checks|turn_in_progress) ;; *) die "session '$1' cannot be reconciled from status: $status";; esac; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="active"|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"; unlock_session; printf 'reconciled Muse session: %s\n' "$1"; }
+cmd_reconcile(){ local m rid tmp status sid; m="$(find_meta "$1")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; status="$(jq -r '.status//"active"' "$m")"; sid="$(jq -r '.session_id//""' "$m")"; case "$status" in provider_outcome_uncertain) [ -n "$sid" ] || die "session '$1' may have reached Muse but returned no provider identity. Keep it blocked; do not retry duplicate paid work.";; completed_pending_local_checks|turn_in_progress) ;; preparation_failed) [ -n "$sid" ] || die "session '$1' failed before Muse created a provider session. Delete it, then retry with ai-muse new.";; *) die "session '$1' cannot be reconciled from status: $status";; esac; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="active"|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"; unlock_session; printf 'reconciled Muse session: %s\n' "$1"; }
 cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="$(jq -r .repository_root "$m")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; tag="$(jq -r .sandbox_tag "$m")"; sid="$(jq -r .session_id "$m")"; status="$(jq -r '.status//"active"' "$m")"; runtime_env
+  if [ "$sid" = null ] || [ -z "$sid" ]; then
+    [ "$status" = preparation_failed ] || die "session '$1' has no provider identity and cannot be deleted from status: $status"
+    "$PACKET" remove "$(jq -r '.review_dir//""' "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag" >/dev/null 2>&1 || true; rm -f "$m"; unlock_session; printf 'deleted pre-provider Muse session: %s\n' "$1"; return 0
+  fi
   if [ "$status" != provider_deleted ]; then
     "$BIN" session delete "$sid" >/dev/null 2>&1 || die "could not positively confirm deletion of Muse session $sid; local record preserved."
     tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="provider_deleted"|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"

@@ -39,6 +39,7 @@ check 'installed profile must exactly match its trusted source' "grep -q 'cmp -s
 check '1Password reads use one global credential lock' "grep -q 'credential.lock.d' '$SCRIPT' && grep -q 'release_credential_lock' '$SCRIPT'"
 check 'Muse key reaches the provider through a private handoff, never argv or the heartbeat parent' "grep -q 'unset MODEL_API_KEY' '$SCRIPT' && grep -q 'internal credential-boundary failure: Muse key reached the heartbeat parent' '$SCRIPT' && grep -q 'AI_MUSE_SECRET_FILE=\$key_file' '$SCRIPT' && ! grep -q '\"MODEL_API_KEY=\$provider_key\"' '$SCRIPT' && grep -q 'env_bin.*-i' '$SCRIPT'"
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
+check 'new publishes preparing state before snapshot preparation' "fn=\$(sed -n '/^cmd_new()/,/^cmd_ask()/p' '$SCRIPT'); state_line=\$(printf '%s\n' \"\$fn\" | grep -n 'status:\"preparing\"' | head -1 | cut -d: -f1); prepare_line=\$(printf '%s\n' \"\$fn\" | grep -n 'prepare \"\$root\"' | head -1 | cut -d: -f1); test \"\$state_line\" -lt \"\$prepare_line\""
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
 check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
 check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
@@ -199,6 +200,38 @@ cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$HOME_FIX/.config/ai-devop
 tmpcfg="$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json.tmp"; jq '.provider["meta-model-api"].npm="untrusted"' "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json" > "$tmpcfg"; mv "$tmpcfg" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json"
 check 'hostile provider package is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile-provider --prompt test\""
 cp "$ROOT/config/opencode-muse/opencode.json" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json"
+PREP_LOG="$TMP/prepare-visible.log"; PREP_MARKER="$TMP/prepare-visible.marker"
+(cd "$REPO" && eval "$ENV AI_MUSE_TEST_PREPARE_MARKER='$PREP_MARKER' AI_MUSE_TEST_PREPARE_DELAY=3 '$SCRIPT' new prepare-visible --prompt test" >"$PREP_LOG" 2>&1) & PREP_PID=$!
+for _ in $(seq 1 100); do [ -s "$PREP_MARKER" ] && break; sleep .1; done
+PREP_META="$(find "$TMP/state" -name 'codex--prepare-visible.json' -type f -print -quit)"
+check 'preparation cannot hang without visible durable state' "test -f '$PREP_META' && jq -e '.status==\"preparing\" and .turn_kind==\"new\" and .session_id==null' '$PREP_META' && grep -q 'Muse session started: prepare-visible' '$PREP_LOG' && grep -Fq 'State: $PREP_META' '$PREP_LOG'"
+wait "$PREP_PID"
+check 'prepared session advances from visible startup state' "jq -e '.status==\"active\" and .session_id==\"ses_new\"' '$PREP_META'"
+check 'visible preparation session remains normally deletable' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete prepare-visible\" && test ! -e '$PREP_META'"
+PREP_INT_LOG="$TMP/prepare-interrupt.log"; PREP_INT_MARKER="$TMP/prepare-interrupt.marker"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PREPARE_MARKER="$PREP_INT_MARKER" AI_MUSE_TEST_PREPARE_DELAY=30 "$SCRIPT" new prepare-interrupt --prompt test >"$PREP_INT_LOG" 2>&1) & PREP_INT_PID=$!
+for _ in $(seq 1 100); do [ -s "$PREP_INT_MARKER" ] && break; sleep .1; done
+PREP_INT_META="$(find "$TMP/state" -name 'codex--prepare-interrupt.json' -type f -print -quit)"
+kill -TERM "$PREP_INT_PID" 2>/dev/null || true; PREP_INT_RC=0; wait "$PREP_INT_PID" || PREP_INT_RC=$?
+check 'pre-provider interruption is recoverable without inventing provider uncertainty' "test '$PREP_INT_RC' -ne 0 && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$PREP_INT_META'"
+check 'interrupted pre-provider session can be deleted and retried' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete prepare-interrupt\" && test ! -e '$PREP_INT_META' && eval \"$ENV '$SCRIPT' new prepare-interrupt --prompt retry\" >/dev/null && eval \"$ENV '$SCRIPT' delete prepare-interrupt\" >/dev/null"
+SETUP_FAIL_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_TIMEOUT_BIN='$TMP/missing-timeout' '$SCRIPT' new setup-fail --prompt test" 2>&1 || true)"; SETUP_FAIL_META="$(find "$TMP/state" -name 'codex--setup-fail.json' -type f -print -quit)"
+check 'local setup failure stays pre-provider and recoverable' "printf '%s' \"\$SETUP_FAIL_OUT\" | grep -q 'trusted timeout executable is unavailable' && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"local_preparation_incomplete\"' '$SETUP_FAIL_META'"
+check 'local setup failure can be deleted' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete setup-fail\" && test ! -e '$SETUP_FAIL_META'"
+PRE_LAUNCH_LOG="$TMP/pre-launch-interrupt.log"; PRE_LAUNCH_MARKER="$TMP/pre-launch-interrupt.marker"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_LAUNCH_MARKER="$PRE_LAUNCH_MARKER" AI_MUSE_TEST_PRE_LAUNCH_DELAY=30 "$SCRIPT" new pre-launch-interrupt --prompt test >"$PRE_LAUNCH_LOG" 2>&1) & PRE_LAUNCH_PID=$!
+for _ in $(seq 1 300); do [ -s "$PRE_LAUNCH_MARKER" ] && break; sleep .1; done
+PRE_LAUNCH_META="$(find "$TMP/state" -name 'codex--pre-launch-interrupt.json' -type f -print -quit)"
+kill -TERM "$PRE_LAUNCH_PID" 2>/dev/null || true; PRE_LAUNCH_RC=0; wait "$PRE_LAUNCH_PID" || PRE_LAUNCH_RC=$?
+check 'interruption immediately before provider launch stays recoverable' "test '$PRE_LAUNCH_RC' -ne 0 && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$PRE_LAUNCH_META'"
+check 'pre-launch interruption can be deleted' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete pre-launch-interrupt\" && test ! -e '$PRE_LAUNCH_META'"
+POST_LAUNCH_LOG="$TMP/post-launch-interrupt.log"; POST_LAUNCH_MARKER="$TMP/post-launch-interrupt.marker"
+(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_LAUNCH_MARKER="$POST_LAUNCH_MARKER" AI_MUSE_TEST_POST_LAUNCH_DELAY=30 MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 "$SCRIPT" new post-launch-interrupt --prompt test >"$POST_LAUNCH_LOG" 2>&1) & POST_LAUNCH_PID=$!
+for _ in $(seq 1 300); do [ -s "$POST_LAUNCH_MARKER" ] && break; sleep .1; done
+POST_LAUNCH_META="$(find "$TMP/state" -name 'codex--post-launch-interrupt.json' -type f -print -quit)"
+kill -TERM "$POST_LAUNCH_PID" 2>/dev/null || true; POST_LAUNCH_RC=0; wait "$POST_LAUNCH_PID" || POST_LAUNCH_RC=$?
+check 'post-launch interruption cannot be misclassified as local preparation failure' "test '$POST_LAUNCH_RC' -ne 0 && jq -e '.status==\"provider_outcome_uncertain\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$POST_LAUNCH_META'"
+check 'unknown launched provider work cannot be deleted reconciled or retried' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' delete post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' reconcile post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' new post-launch-interrupt --prompt duplicate\""
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
 NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
@@ -211,6 +244,7 @@ rm -f "$TMP/heartbeat-ask-called"
 check 'invalid heartbeat leaves an existing session active without provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-ask-called' '$SCRIPT' ask debate --prompt invalid\"; test ! -e '$TMP/heartbeat-ask-called'; jq -e '.status==\"active\"' '$META'"
 ASK_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' ask debate --prompt followup" 2>&1)"
 check 'ask resumes and returns remembered response' "printf '%s' \"\$ASK_OUT\" | grep -q '^remembered'"
+check 'ask emits its session and exact state path before provider completion' "printf '%s' \"\$ASK_OUT\" | grep -q 'Muse session continuing: debate' && printf '%s' \"\$ASK_OUT\" | grep -Fq 'State: $META'"
 check 'list shows named session' "cd '$REPO' && eval \"$ENV '$SCRIPT' list\" | grep -q debate"
 check 'show returns stored identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show debate\" | jq -e '.session_id==\"ses_new\"'"
 check 'transcript exports exact session' "cd '$REPO' && eval \"$ENV '$SCRIPT' transcript debate\" | jq -e '.sessionID==\"ses_new\"'"
