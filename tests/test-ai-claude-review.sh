@@ -28,6 +28,7 @@ case "${AI_CLAUDE_STUB_MODE:-success}" in
   canonical-mismatch) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:"claude-sonnet-5"}}}' ;;
   auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-haiku-4-5-20251001":{canonicalModel:"claude-haiku-4-5",provider:"firstParty"}}}' ;;
   legacy-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-3-haiku-20240307":{canonicalModel:"claude-3-haiku-20240307",provider:"firstParty"}}}' ;;
+  legacy-two-segment-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-3-5-haiku-20241022":{canonicalModel:"claude-3-5-haiku-20241022",provider:"firstParty"}}}' ;;
   canonical-false) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:false}}}' ;;
   foreign-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-sonnet-5":{canonicalModel:"claude-sonnet-5",provider:"firstParty"}}}' ;;
   scalar-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-haiku-4-5-20251001":7}}' ;;
@@ -47,6 +48,7 @@ check 'live doctor proves canonical returned model' "cd '$R' && '$SCRIPT' doctor
 check 'live doctor accepts the current exact-key envelope without canonicalModel' "cd '$R' && AI_CLAUDE_STUB_MODE=no-canonical '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check 'live doctor accepts the first-party Haiku helper in the current envelope' "cd '$R' && AI_CLAUDE_STUB_MODE=auxiliary '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check 'live doctor accepts a proven legacy first-party Haiku helper' "cd '$R' && AI_CLAUDE_STUB_MODE=legacy-auxiliary '$SCRIPT' doctor --live | grep -q 'live=verified'"
+check 'live doctor accepts a proven two-segment legacy Haiku helper' "cd '$R' && AI_CLAUDE_STUB_MODE=legacy-two-segment-auxiliary '$SCRIPT' doctor --live | grep -q 'live=verified'"
 BEFORE="$($ROOT/bin/ai-review-sandbox digest "$R")"; OUT="$(cd "$R" && "$SCRIPT" diff-review)"
 check 'successful review publishes report' "test -s '$OUT'"
 check 'report identifies canonical Opus 5' "grep -q 'model.*claude-opus-5' '$OUT'"
