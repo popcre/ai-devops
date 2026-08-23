@@ -186,6 +186,21 @@ clone + `./install.sh` (Ubuntu) first.
    Both must return 1. If either returns 0, the adoption did not take — say so
    and STOP; do not report the sync successful.
 
+4c. **Install the protected topology:** `bin/ai-private-config sync`.
+   Some tools (e.g. `ai-headroom`) deliberately keep private addresses OUT of
+   this public repo and read them from `u2giants/ai-devops-private-config`. A
+   machine without it has tools that look installed and then fail confusingly —
+   on 2026-08-23 `ai-headroom status` reported "Proxy health: NOT REACHABLE.
+   Claude WILL FAIL to connect" against a perfectly healthy proxy, purely
+   because this config was missing. Verify afterwards:
+
+   ```bash
+   ai-private-config value headroom_proxy_url
+   ```
+
+   It must print a URL. If it errors, say so and STOP — do not report the sync
+   successful.
+
 5. **Ensure the required Claude tool permissions:** `bin/ai-claude-permissions`.
    Merges every entry in `config/claude-permissions.allow` into the USER-level
    `~/.claude/settings.json`, so it covers every project on the machine. It is
