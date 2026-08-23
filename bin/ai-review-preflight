@@ -8,7 +8,7 @@
 # assigning the same unhealthy provider again.
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
@@ -230,7 +230,7 @@ case "$cmd" in
     else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
     for provider in "${providers[@]}"; do
       if static_status "$provider"; then :
-      elif active_quarantine "$provider"; then jq -c . "$(provider_file "$provider")"
+      elif active_quarantine "$provider"; then jq -c '. + {status:"quarantined"}' "$(provider_file "$provider")"
       else printf '{"provider":"%s","status":"available"}\n' "$provider"; fi
     done ;;
   explain) explain_failure "${1:-}" ;;

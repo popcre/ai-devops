@@ -40,4 +40,21 @@ grep -q 'check_required npx' "$ROOT/bin/ai-devops" || { echo 'FAIL: npx is not r
 for provider in grok kimi glm muse gemini qwen codex deepseek; do
   grep -q "^$provider$" "$ROOT/bin/ai-devops" || { echo "FAIL: provider $provider omitted"; exit 1; }
 done
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/ai-review-preflight" <<'EOF'
+#!/usr/bin/env bash
+provider="${2:-unknown}"
+if [ "$provider" = glm ]; then
+  printf '{"provider":"glm","status":"quarantined","failure_class":"allowance-exhausted"}\n'
+else
+  printf '{"provider":"%s","status":"available"}\n' "$provider"
+fi
+EOF
+chmod +x "$TMP/bin/ai-review-preflight"
+PATH="$TMP/bin:$PATH"
+FAILED=0
+check_provider_registry > "$TMP/provider-registry.out"
+[ "$FAILED" -eq 0 ] || { echo 'FAIL: active provider quarantine failed doctor'; exit 1; }
+grep -q 'review provider glm registered but quarantined' "$TMP/provider-registry.out" || { echo 'FAIL: active provider quarantine was not reported'; exit 1; }
 echo 'PASS: doctor proves source/schema/manifest and covers Node, memory, schedule, and every reviewer provider'
