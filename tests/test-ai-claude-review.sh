@@ -27,7 +27,8 @@ case "${AI_CLAUDE_STUB_MODE:-success}" in
   no-canonical) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{inputTokens:1}}}' ;;
   canonical-mismatch) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:"claude-sonnet-5"}}}' ;;
   auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-haiku-4-5-20251001":{canonicalModel:"claude-haiku-4-5",provider:"firstParty"}}}' ;;
-  legacy-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-3-5-haiku-20241022":{canonicalModel:"claude-3-5-haiku-20241022",provider:"firstParty"}}}' ;;
+  legacy-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-3-haiku-20240307":{canonicalModel:"claude-3-haiku-20240307",provider:"firstParty"}}}' ;;
+  canonical-false) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:false}}}' ;;
   foreign-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-sonnet-5":{canonicalModel:"claude-sonnet-5",provider:"firstParty"}}}' ;;
   scalar-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-haiku-4-5-20251001":7}}' ;;
   unproven-auxiliary) jq -nc --arg result "$result" --arg model "$model" '{is_error:false,result:$result,session_id:"claude-test-session",permission_denials:[],modelUsage:{($model):{canonicalModel:$model},"claude-haiku-4-5-20251001":{canonicalModel:"claude-haiku-4-5"}}}' ;;
@@ -60,7 +61,7 @@ check 'review accepts the current exact-key envelope without canonicalModel' "te
 AUXILIARY_OUT="$(cd "$R" && AI_CLAUDE_STUB_MODE=auxiliary "$SCRIPT" security-review)"
 check 'review accepts only a proven first-party Haiku auxiliary model' "test -s '$AUXILIARY_OUT' && grep -A1 '^## Verdict' '$AUXILIARY_OUT' | tail -1 | grep -qx APPROVE"
 COUNT="$(find "$R/.ai/reviews" -name 'claude-*.md' | wc -l | tr -d ' ')"
-for mode in fail malformed wrong-model canonical-mismatch foreign-auxiliary scalar-auxiliary unproven-auxiliary uncanonical-auxiliary missing mutate; do check "$mode is rejected" "cd '$R' && ! AI_CLAUDE_STUB_MODE='$mode' '$SCRIPT' security-review >/dev/null 2>&1"; done
+for mode in fail malformed wrong-model canonical-mismatch canonical-false foreign-auxiliary scalar-auxiliary unproven-auxiliary uncanonical-auxiliary missing mutate; do check "$mode is rejected" "cd '$R' && ! AI_CLAUDE_STUB_MODE='$mode' '$SCRIPT' security-review >/dev/null 2>&1"; done
 check 'failed reviews publish no accepted report' "[ '$COUNT' = \"\$(find '$R/.ai/reviews' -name 'claude-*.md' | wc -l | tr -d ' ')\" ]"
 check 'source mutation during review is rejected' "cd '$R' && ! AI_CLAUDE_STUB_MODE=mutate-source '$SCRIPT' final-check >/dev/null 2>&1"
 git -C "$R" checkout -q -- a.txt; printf 'changed\n' >> "$R/a.txt"
