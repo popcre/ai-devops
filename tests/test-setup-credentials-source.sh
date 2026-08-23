@@ -59,4 +59,50 @@ else
   bad "all embedded Python blocks compile"
 fi
 
+if ! grep -q 'GLM_AGENT_OK' "$SOURCE" &&
+   grep -q -- '--json --prompt' "$SOURCE" &&
+   grep -q 'session.type == "review"' "$SOURCE" &&
+   grep -q 'session.model == "zai-coding-plan/glm-5.3"' "$SOURCE" &&
+   grep -q 'APPROVE|REJECT' "$SOURCE" &&
+   grep -q '\[ -s "$glm_report" \]' "$SOURCE"; then
+  ok "GLM capability probe verifies the protected review envelope and report"
+else
+  bad "GLM capability probe verifies the protected review envelope and report"
+fi
+
+GLM_FILTER=""
+if [ -n "$PYTHON" ]; then
+  GLM_FILTER="$("$PYTHON" - "$SOURCE" <<'PY'
+import pathlib
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+anchor = text.index('glm_report="$(printf')
+start = text.index("jq -er '\n", anchor) + len("jq -er '\n")
+end = text.index("\n       ' 2>/dev/null)", start)
+print(text[start:end])
+PY
+)"
+fi
+
+probe_fixture() {
+  local text="$1" model="${2:-zai-coding-plan/glm-5.3}"
+  jq -n --arg text "$text" --arg model "$model" \
+    '{schema_version:1,ok:true,session:{type:"review",model:$model},response:{text:$text},artifacts:{report:"/tmp/report.md"}}' |
+    jq -e "$GLM_FILTER" >/dev/null 2>&1
+}
+
+if [ -n "$GLM_FILTER" ] && command -v jq >/dev/null 2>&1 &&
+   probe_fixture $'Reviewed.\n\n## Verdict\n\n**APPROVE**\n' &&
+   probe_fixture $'Finding.\n\n## Verdict\nREJECT - repair required\n' &&
+   ! probe_fixture '' &&
+   ! probe_fixture $'Reviewed without a terminal verdict.' &&
+   ! probe_fixture $'## Verdict\nBLOCKED\n' &&
+   ! probe_fixture $'## Verdict\nAPPROVE\n\ntrailing nonterminal text\n' &&
+   ! probe_fixture $'## Verdict\nAPPROVE\n' 'zai-coding-plan/wrong-model'; then
+  ok "GLM capability probe accepts only a terminal protected verdict from the exact model"
+else
+  bad "GLM capability probe accepts only a terminal protected verdict from the exact model"
+fi
+
 [ "$failures" -eq 0 ]

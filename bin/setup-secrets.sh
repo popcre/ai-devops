@@ -593,16 +593,25 @@ if [ "$fail" -eq 0 ]; then
     info "Verifying the GLM session harness end-to-end"
     glm_probe="$(mktemp -d)"
     ( cd "$glm_probe" && git init -q && git -c user.email=probe@local -c user.name=probe commit -q --allow-empty -m probe ) >/dev/null 2>&1
-    if ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
-           --prompt "Reply with exactly GLM_AGENT_OK and nothing else." 2>/dev/null ) |
-         grep -q GLM_AGENT_OK; then
-      ok "GLM-5.2 verified end-to-end through the OpenCode session harness and Z.ai"
-      ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" delete secrets-probe ) >/dev/null 2>&1 || true
+    glm_result=""
+    if glm_result="$(cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
+           --json --prompt "Review this empty capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
+       glm_report="$(printf '%s' "$glm_result" | jq -er '
+         select(.schema_version == 1 and .ok == true) |
+         select(.session.type == "review" and .session.model == "zai-coding-plan/glm-5.3") |
+         select(.response.text | type == "string" and
+           test("(?s)## Verdict[ \\t]*\\r?\\n(?:[ \\t]*\\r?\\n)?[ \\t]*(?:\\*\\*)?(APPROVE|REJECT)(?:\\*\\*)?[^\\r\\n]*(?:\\r?\\n[ \\t]*)?$")) |
+         .artifacts.report | select(type == "string" and length > 0)
+       ' 2>/dev/null)" &&
+       [ -s "$glm_report" ]; then
+      ok "GLM-5.3 verified end-to-end through the protected OpenCode review harness and Z.ai"
     else
+      ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" delete secrets-probe ) >/dev/null 2>&1 || true
       rm -rf "$glm_probe"
       warn "GLM capability check failed. Run: ai-glm doctor"
       exit 1
     fi
+    ( cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" delete secrets-probe ) >/dev/null 2>&1 || true
     rm -rf "$glm_probe"
   else
     warn "Claude Code is missing; GLM agent cannot be capability-tested yet."
