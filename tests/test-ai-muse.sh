@@ -56,7 +56,10 @@ else
   ok 'installed symlink execution fixture unavailable on this host'
 fi
 if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/installed/bin/setup-opencode-muse.sh" 2>/dev/null && [ -L "$TMP/installed/bin/setup-opencode-muse.sh" ]; then
-  check 'installed setup symlink locates repository configuration' "USERPROFILE= HOME='$TMP/setup-home' '$TMP/installed/bin/setup-opencode-muse.sh' 2>&1 | grep -q 'OpenCode .* is not installed'"
+  SETUP_HOME="$TMP/setup-home"; SETUP_VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
+  SETUP_BIN="$SETUP_HOME/.local/lib/ai-devops/opencode/$SETUP_VERSION/node_modules/opencode-ai/bin"
+  mkdir -p "$SETUP_BIN"; printf '#!/usr/bin/env bash\nexit 0\n' > "$SETUP_BIN/opencode.exe"; chmod +x "$SETUP_BIN/opencode.exe"
+  check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
 else
   rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
   ok 'installed setup symlink fixture unavailable on this host'
