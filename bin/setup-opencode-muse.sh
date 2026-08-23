@@ -2,7 +2,10 @@
 # Install the direct, protected persistent Muse profile. Safe to re-run.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF="${BASH_SOURCE[0]}"
+REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
+[ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 CFG="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
 VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
 HOME_DIR="${USERPROFILE:-$HOME}"

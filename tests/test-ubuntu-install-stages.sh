@@ -36,5 +36,9 @@ grep -Fq '$SUDO install -o "$owner" -g "$group" -m 600' "$ROOT/install.sh" ||
   fail 'managed manifest is not published owner-readably through the privilege boundary'
 grep -Fq -- '--home "$HOME" --source-sha "$source_sha" --output "$staged"' "$ROOT/install.sh" ||
   fail 'staged manifest does not retain the installing user home and source identity'
+grep -Fq 'run_stage required "Protected Muse review profile"' "$ROOT/install.sh" ||
+  fail 'Ubuntu install does not provision the protected Muse profile as a required stage'
+grep -Fq '"$REPO_ROOT/bin/setup-opencode-muse.sh"' "$ROOT/install.sh" ||
+  fail 'Ubuntu install does not invoke the repository-owned Muse setup'
 
 echo 'PASS: required stages fail truthfully, privileged config artifacts publish safely, optional failures warn, and Node tools verify independently'

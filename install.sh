@@ -320,8 +320,11 @@ if [ "$(id -u)" -eq 0 ]; then
 elif [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
   run_stage required "OpenCode GLM server (pinned $(tr -d ' \t\r\n' < "$REPO_ROOT/config/opencode/version"))" \
     "$REPO_ROOT/bin/setup-opencode-glm.sh"
+  run_stage required "Protected Muse review profile" \
+    "$REPO_ROOT/bin/setup-opencode-muse.sh"
 else
   stage_results+=("SKIP\toptional\tOpenCode GLM server (no protected token)")
+  stage_results+=("SKIP\toptional\tProtected Muse review profile (OpenCode unavailable)")
   info "  No 1Password service-account token yet — skipping. Run: setup-opencode-glm.sh"
 fi
 

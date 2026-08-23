@@ -10,6 +10,8 @@ check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 check 'wrapper parses' "bash -n '$SCRIPT'"
 check 'installed symlink resolution is implemented' "grep -q 'REAL_SELF=.*readlink -f' '$SCRIPT' && grep -q 'dirname \"\$SELF\"' '$SCRIPT'"
 check 'setup parses' "bash -n '$ROOT/bin/setup-opencode-muse.sh'"
+check 'setup resolves its installed symlink' "grep -q 'REAL_SELF=.*readlink -f' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'dirname \"\$SELF\"' '$ROOT/bin/setup-opencode-muse.sh'"
+check 'Ubuntu install provisions the protected Muse profile' "grep -q 'run_stage required \"Protected Muse review profile\"' '$ROOT/install.sh' && grep -q '\"\$REPO_ROOT/bin/setup-opencode-muse.sh\"' '$ROOT/install.sh'"
 check 'exact Contributor model is pinned' "grep -q 'meta-model-api/muse-spark-1.2-contributor' '$SCRIPT'"
 check 'persistent new command exists' "grep -q 'cmd_new' '$SCRIPT'"
 check 'persistent ask command exists' "grep -q 'cmd_ask' '$SCRIPT'"
@@ -50,6 +52,12 @@ if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>
 else
   rm -f -- "$TMP/installed/bin/ai-muse"
   ok 'installed symlink execution fixture unavailable on this host'
+fi
+if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/installed/bin/setup-opencode-muse.sh" 2>/dev/null && [ -L "$TMP/installed/bin/setup-opencode-muse.sh" ]; then
+  check 'installed setup symlink locates repository configuration' "HOME='$TMP/setup-home' '$TMP/installed/bin/setup-opencode-muse.sh' 2>&1 | grep -q 'OpenCode .* is not installed'"
+else
+  rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
+  ok 'installed setup symlink fixture unavailable on this host'
 fi
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO"
 git -C "$REPO" init -q; git -C "$REPO" config user.name Test; git -C "$REPO" config user.email t@example.com

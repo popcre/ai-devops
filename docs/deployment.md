@@ -47,9 +47,11 @@ cd /worksp/ai-devops
 6. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects
-   the Z.ai Coding Plan key from 1Password and proves a real GLM-5.3 OpenCode
-   agent call; non-interactive updates reuse the existing protected bootstrap
-   file automatically and never change normal Claude/Codex authentication.
+   the Z.ai Coding Plan key from 1Password, proves a real GLM-5.3 OpenCode
+   agent call, and installs the protected Muse review profile into its isolated
+   configuration root; non-interactive updates reuse the existing protected
+   bootstrap file automatically and never change normal Claude/Codex
+   authentication.
 7. Runs `ai-devops doctor`.
 8. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
