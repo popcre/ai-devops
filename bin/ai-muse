@@ -3,7 +3,10 @@
 set -euo pipefail
 umask 077
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF="${BASH_SOURCE[0]}"
+REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
+[ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
 CFG="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"

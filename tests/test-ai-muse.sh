@@ -8,6 +8,7 @@ bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
 check 'wrapper parses' "bash -n '$SCRIPT'"
+check 'installed symlink resolution is implemented' "grep -q 'REAL_SELF=.*readlink -f' '$SCRIPT' && grep -q 'dirname \"\$SELF\"' '$SCRIPT'"
 check 'setup parses' "bash -n '$ROOT/bin/setup-opencode-muse.sh'"
 check 'exact Contributor model is pinned' "grep -q 'meta-model-api/muse-spark-1.2-contributor' '$SCRIPT'"
 check 'persistent new command exists' "grep -q 'cmd_new' '$SCRIPT'"
@@ -43,6 +44,13 @@ check 'private Windows ACL is revalidated even when a marker already exists' "! 
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_MUSE_TEST_DIR="$TMP"
+mkdir -p "$TMP/installed/bin"
+if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>/dev/null && [ -L "$TMP/installed/bin/ai-muse" ]; then
+  check 'installed symlink executes with repository configuration' "AI_MUSE_CALLER=codex '$TMP/installed/bin/ai-muse' --help"
+else
+  rm -f -- "$TMP/installed/bin/ai-muse"
+  ok 'installed symlink execution fixture unavailable on this host'
+fi
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO"
 git -C "$REPO" init -q; git -C "$REPO" config user.name Test; git -C "$REPO" config user.email t@example.com
 printf '.ai/\n' > "$REPO/.gitignore"; printf 'marker\n' > "$REPO/a.txt"; git -C "$REPO" add .gitignore a.txt; git -C "$REPO" commit -qm init
