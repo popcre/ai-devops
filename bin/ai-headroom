@@ -41,6 +41,15 @@ PROXY_URL="${AI_HEADROOM_PROXY_URL:-}"
 if [ -z "$PROXY_URL" ] && [ -x "$(dirname "$0")/ai-private-config" ]; then
   PROXY_URL="$("$(dirname "$0")/ai-private-config" value headroom_proxy_url 2>/dev/null || true)"
 fi
+# An unresolved proxy URL must NEVER surface as "proxy not reachable" -- that
+# sends you to debug the network when the real problem is that this machine has
+# no protected config. Reproduced 2026-08-23: status said "NOT REACHABLE. Claude
+# WILL FAIL to connect" against a perfectly healthy proxy, purely because
+# ai-private-config was not installed here.
+# `off` deliberately does not need the URL: the escape hatch must still work.
+PROXY_URL_MISSING=0
+[ -n "$PROXY_URL" ] || PROXY_URL_MISSING=1
+
 SETTINGS="$HOME/.claude/settings.json"
 BASHRC="$HOME/.bashrc"
 KEEP_BACKUPS=10
@@ -344,7 +353,16 @@ case "$action" in
       printf '    shell inherits this value. Open a NEW terminal to pick up the change.
 '
     fi
-    if [ "$HAVE_CURL" != 1 ]; then
+    if [ "$PROXY_URL_MISSING" = 1 ]; then
+      printf 'Proxy health           : UNKNOWN -- the proxy address is not configured
+'
+      printf '  This machine has no protected config, so I cannot tell whether the
+'
+      printf '  proxy is up. This is NOT a network problem. Fix with:
+'
+      printf '      ai-private-config sync
+'
+    elif [ "$HAVE_CURL" != 1 ]; then
       printf 'Proxy health           : UNKNOWN (curl not on PATH, cannot check)
 '
     elif proxy_healthy; then
