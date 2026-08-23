@@ -700,10 +700,10 @@ session locks, and preserved recovery evidence. Gemini remains quarantined.**
 
 ### 7. Grok's one-paid-review rule fails across clones
 
-**Repair status (2026-08-23): fixed and exact-source live-qualified; normalized
-upstream locking spans clones, legacy checkout-keyed locks block mixed-version
-rollout calls, and Grok returned terminal APPROVE on open issue #61. Landing and
-Ubuntu installed-hash verification remain.**
+**Repair status (2026-08-23): fixed, independently approved, pushed, installed,
+and exact-source live-qualified. Normalized upstream locking spans clones,
+legacy checkout-keyed locks block mixed-version rollout calls, and Grok returned
+terminal APPROVE on issue #61.**
 
 - Files: `bin/ai-grok-review:202-206`, `bin/ai-grok-review:597-604`,
   `bin/ai-grok-review:658-665`
@@ -712,8 +712,7 @@ Ubuntu installed-hash verification remain.**
   clones of the same GitHub repository therefore receive different locks.
 - User-visible failure: duplicate billed reviews can run against the same
   repository at the same time.
-- Existing tracker: issue #56; repair and qualification steps are complete,
-  while landing, Ubuntu installation, CI, and issue closure remain.
+- Existing tracker: issue #56 closed with production evidence on 2026-08-23.
 
 ### 8. Kimi had the same clone-based duplicate-run weakness (fixed)
 
@@ -730,9 +729,9 @@ deleted-caller-clone result remained retrievable.**
 - Current outcome: the paid-run lock is derived from normalized shared-upstream
   identity, while persistent session records remain safely bound to their exact
   upstream and recorded workspace.
-- Existing tracker: issue #46; production proof is recorded under
-  `tests/verification/kimi-review-issue-46/2026-08-23-live.md` and only GitHub
-  closure remains.
+- Existing tracker: issue #46 closed with production evidence on 2026-08-23;
+  proof is recorded under
+  `tests/verification/kimi-review-issue-46/2026-08-23-live.md`.
 
 ### 9. Kimi lacked a trusted live completion record (fixed)
 
@@ -747,26 +746,28 @@ typed incomplete artifacts, and passed the authenticated production matrix.**
   did not return the required completion record.
 - Current outcome: Kimi can deliver qualified production reviews and remains
   fail-closed for missing, incomplete, timed-out, quota, or interrupted results.
-- Existing tracker: issue #46, ready for evidence-backed closure.
+- Existing tracker: issue #46 closed with evidence on 2026-08-23.
 
 ### 10. Muse rejects valid repositories containing historic review reports
 
-**Repair status (2026-08-22): fixed in source; Muse accepts deliberate tracked
-history while still proving the exact new destination, and a Windows review of
-open issue #51 completed. Ubuntu installed verification remains.**
+**Repair status (2026-08-23): fixed, independently approved, pushed, installed,
+and live-qualified. Muse accepts deliberate tracked history while still proving
+the exact new destination; a production review of issue #51 returned terminal
+`NO FINDINGS`.**
 
 - Files: `bin/ai-muse:96-97`
 - Confidence: high; reproduced in shared-db
 - What happens: Muse rejects the repository when any file under `.ai/reviews/`
   is tracked, even when those historic reports are deliberate, cited records.
 - User-visible failure: Muse cannot start in shared-db.
-- Existing tracker: issues #45 and #51.
+- Existing tracker: issue #51 closed with production evidence on 2026-08-23.
 
 ### 11. Muse leaves no visible state during a long provider call
 
-**Repair status (2026-08-22): fixed in source; durable pre-call state, factual
-heartbeats, interruption recovery, and exact publication are covered by the
-105-case hostile suite. Windows live review passed; Ubuntu remains.**
+**Repair status (2026-08-23): fixed, independently approved, pushed, installed,
+and live-qualified. Durable pre-call state, factual heartbeats, interruption
+recovery, and exact publication pass the 128-case suite; production issue #51
+review published immediate state plus 10-second heartbeats.**
 
 - Files: `bin/ai-muse:139-146`
 - Confidence: high; reproduced in two 17-minute stalls
@@ -775,7 +776,7 @@ heartbeats, interruption recovery, and exact publication are covered by the
 - User-visible failure: a caller cannot tell whether Muse never started, is
   healthy, is stuck, or has vanished; repeated attempts can waste more time and
   paid usage.
-- Existing tracker: issue #51.
+- Existing tracker: issue #51 closed with production evidence on 2026-08-23.
 
 ### 12. Codex reports success even when the review command failed
 
@@ -870,7 +871,7 @@ uncertainty-marker, timeout, and signal-window paths.**
   proof that the remote paid turn stopped.
 - User-visible failure: another review may be started while the first provider
   call is still running.
-- Existing tracker: issue #56.
+- Existing tracker: issue #56 closed with production evidence on 2026-08-23.
 
 ### 19. Grok has no useful live progress or cross-clone activity view
 
@@ -885,13 +886,15 @@ terminal APPROVE.**
   completed records for the current checkout.
 - User-visible failure: a healthy long review, a stuck review, and an abandoned
   review look the same.
-- Existing tracker: issue #56.
+- Existing trackers: issues #56 and #61 closed with production evidence on
+  2026-08-23.
 
 ### 20. GLM says the service started before it is ready
 
-**Repair status (2026-08-22): fixed in source; start and restart share a bounded
-readiness gate, with already-healthy and deadline fixtures in the 244-case GLM
-suite. Final installed open-issue proof remains.**
+**Repair status (2026-08-23): fixed, pushed, installed, and live-qualified.
+Start and restart share a bounded readiness gate, with already-healthy and
+deadline fixtures; every canonical installation completed the protected GLM 5.3
+end-to-end live qualification and the final doctor reports GLM available.**
 
 - Files: `bin/ai-glm:1551`, `bin/ai-glm:1582`
 - Confidence: high
@@ -902,9 +905,9 @@ suite. Final installed open-issue proof remains.**
 
 ### 21. Muse assigns omitted callers to Codex
 
-**Repair status (2026-08-22): fixed in source; caller identity is mandatory and
-the shared skill supplies the real client explicitly. Omitted and mismatched
-caller fixtures fail closed.**
+**Repair status (2026-08-23): fixed, installed, and live-qualified. Caller
+identity is mandatory and the shared skill supplies the real client explicitly;
+omitted and mismatched caller fixtures fail closed.**
 
 - Files: `bin/ai-muse:11`, `skills/shared/ask-muse/SKILL.md:31-33`
 - Confidence: high; reproduced in a Claude-launched run
