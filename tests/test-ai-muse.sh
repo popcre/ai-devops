@@ -211,28 +211,22 @@ check 'preparation cannot hang without visible durable state' "test -f '$PREP_ME
 wait "$PREP_PID"
 check 'prepared session advances from visible startup state' "jq -e '.status==\"active\" and .session_id==\"ses_new\"' '$PREP_META'"
 check 'visible preparation session remains normally deletable' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete prepare-visible\" && test ! -e '$PREP_META'"
-PREP_INT_LOG="$TMP/prepare-interrupt.log"; PREP_INT_MARKER="$TMP/prepare-interrupt.marker"
-(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PREPARE_MARKER="$PREP_INT_MARKER" AI_MUSE_TEST_PREPARE_DELAY=30 "$SCRIPT" new prepare-interrupt --prompt test >"$PREP_INT_LOG" 2>&1) & PREP_INT_PID=$!
-for _ in $(seq 1 100); do [ -s "$PREP_INT_MARKER" ] && break; sleep .1; done
+PREP_INT_LOG="$TMP/prepare-interrupt.log"; PREP_INT_RC=0
+(cd "$REPO" && eval "$ENV AI_MUSE_TEST_INTERRUPT_AT=preparing '$SCRIPT' new prepare-interrupt --prompt test" >"$PREP_INT_LOG" 2>&1) || PREP_INT_RC=$?
 PREP_INT_META="$(find "$TMP/state" -name 'codex--prepare-interrupt.json' -type f -print -quit)"
-kill -TERM "$PREP_INT_PID" 2>/dev/null || true; PREP_INT_RC=0; wait "$PREP_INT_PID" || PREP_INT_RC=$?
 check 'pre-provider interruption is recoverable without inventing provider uncertainty' "test '$PREP_INT_RC' -ne 0 && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$PREP_INT_META'"
 check 'interrupted pre-provider session can be deleted and retried' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete prepare-interrupt\" && test ! -e '$PREP_INT_META' && eval \"$ENV '$SCRIPT' new prepare-interrupt --prompt retry\" >/dev/null && eval \"$ENV '$SCRIPT' delete prepare-interrupt\" >/dev/null"
 SETUP_FAIL_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_TIMEOUT_BIN='$TMP/missing-timeout' '$SCRIPT' new setup-fail --prompt test" 2>&1 || true)"; SETUP_FAIL_META="$(find "$TMP/state" -name 'codex--setup-fail.json' -type f -print -quit)"
 check 'local setup failure stays pre-provider and recoverable' "printf '%s' \"\$SETUP_FAIL_OUT\" | grep -q 'trusted timeout executable is unavailable' && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"local_preparation_incomplete\"' '$SETUP_FAIL_META'"
 check 'local setup failure can be deleted' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete setup-fail\" && test ! -e '$SETUP_FAIL_META'"
-PRE_LAUNCH_LOG="$TMP/pre-launch-interrupt.log"; PRE_LAUNCH_MARKER="$TMP/pre-launch-interrupt.marker"
-(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_LAUNCH_MARKER="$PRE_LAUNCH_MARKER" AI_MUSE_TEST_PRE_LAUNCH_DELAY=30 "$SCRIPT" new pre-launch-interrupt --prompt test >"$PRE_LAUNCH_LOG" 2>&1) & PRE_LAUNCH_PID=$!
-for _ in $(seq 1 300); do [ -s "$PRE_LAUNCH_MARKER" ] && break; sleep .1; done
+PRE_LAUNCH_LOG="$TMP/pre-launch-interrupt.log"; PRE_LAUNCH_RC=0
+(cd "$REPO" && eval "$ENV AI_MUSE_TEST_INTERRUPT_AT=pre_launch '$SCRIPT' new pre-launch-interrupt --prompt test" >"$PRE_LAUNCH_LOG" 2>&1) || PRE_LAUNCH_RC=$?
 PRE_LAUNCH_META="$(find "$TMP/state" -name 'codex--pre-launch-interrupt.json' -type f -print -quit)"
-kill -TERM "$PRE_LAUNCH_PID" 2>/dev/null || true; PRE_LAUNCH_RC=0; wait "$PRE_LAUNCH_PID" || PRE_LAUNCH_RC=$?
 check 'interruption immediately before provider launch stays recoverable' "test '$PRE_LAUNCH_RC' -ne 0 && jq -e '.status==\"preparation_failed\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$PRE_LAUNCH_META'"
 check 'pre-launch interruption can be deleted' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete pre-launch-interrupt\" && test ! -e '$PRE_LAUNCH_META'"
-POST_LAUNCH_LOG="$TMP/post-launch-interrupt.log"; POST_LAUNCH_MARKER="$TMP/post-launch-interrupt.marker"
-(cd "$REPO" && exec env HOME="$HOME_FIX" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_LAUNCH_MARKER="$POST_LAUNCH_MARKER" AI_MUSE_TEST_POST_LAUNCH_DELAY=30 MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 "$SCRIPT" new post-launch-interrupt --prompt test >"$POST_LAUNCH_LOG" 2>&1) & POST_LAUNCH_PID=$!
-for _ in $(seq 1 300); do [ -s "$POST_LAUNCH_MARKER" ] && break; sleep .1; done
+POST_LAUNCH_LOG="$TMP/post-launch-interrupt.log"; POST_LAUNCH_RC=0
+(cd "$REPO" && eval "$ENV AI_MUSE_TEST_INTERRUPT_AT=post_launch MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 '$SCRIPT' new post-launch-interrupt --prompt test" >"$POST_LAUNCH_LOG" 2>&1) || POST_LAUNCH_RC=$?
 POST_LAUNCH_META="$(find "$TMP/state" -name 'codex--post-launch-interrupt.json' -type f -print -quit)"
-kill -TERM "$POST_LAUNCH_PID" 2>/dev/null || true; POST_LAUNCH_RC=0; wait "$POST_LAUNCH_PID" || POST_LAUNCH_RC=$?
 check 'post-launch interruption cannot be misclassified as local preparation failure' "test '$POST_LAUNCH_RC' -ne 0 && jq -e '.status==\"provider_outcome_uncertain\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$POST_LAUNCH_META'"
 check 'unknown launched provider work cannot be deleted reconciled or retried' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' delete post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' reconcile post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' new post-launch-interrupt --prompt duplicate\""
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"

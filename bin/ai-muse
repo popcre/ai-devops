@@ -91,6 +91,7 @@ on_signal(){
 trap cleanup EXIT
 trap on_signal HUP INT TERM
 tmp_file(){ mktemp "$RUN_TMP/file.XXXXXX"; }
+test_interrupt_at(){ [ "${AI_MUSE_TEST_INTERRUPT_AT:-}" != "$1" ] || kill -TERM "$$"; }
 lock_session(){
   local candidate="$STATE/locks/$1--$CALLER--$2.lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
   for attempt in 1 2 3; do
@@ -240,7 +241,7 @@ run_turn(){
   chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
   protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
   provider_key=""
-  [ -z "${AI_MUSE_TEST_PRE_LAUNCH_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PRE_LAUNCH_MARKER"; sleep "${AI_MUSE_TEST_PRE_LAUNCH_DELAY:-3}"; }
+  test_interrupt_at pre_launch
   set +e
   clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
@@ -255,8 +256,8 @@ run_turn(){
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
   ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" "$prompt_text" ) > "$out" 2> "$out.stderr" & TURN_PID=$!
-  [ -z "${AI_MUSE_TEST_POST_LAUNCH_MARKER:-}" ] || { printf '%s\n' "$TURN_PID" > "$AI_MUSE_TEST_POST_LAUNCH_MARKER"; sleep "${AI_MUSE_TEST_POST_LAUNCH_DELAY:-3}"; }
-  ACTIVE_META="$meta"; [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
+  ACTIVE_META="$meta"; test_interrupt_at post_launch
+  [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
   while kill -0 "$TURN_PID" 2>/dev/null; do
     sleep 1; waited=$((waited+1))
     [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
@@ -312,6 +313,7 @@ cmd_new(){
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
+  test_interrupt_at preparing
   [ -z "${AI_MUSE_TEST_PREPARE_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PREPARE_MARKER"; sleep "${AI_MUSE_TEST_PREPARE_DELAY:-3}"; }
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
   tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
