@@ -6,10 +6,10 @@ SELF="${BASH_SOURCE[0]}"
 REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
-CFG="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
 VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
 HOME_DIR="${USERPROFILE:-$HOME}"
 case "$HOME_DIR" in [A-Za-z]:*) HOME_DIR="/$(printf '%s' "$HOME_DIR" | sed 's#\\#/#g; s#:#/#')";; esac
+CFG="${AI_MUSE_CONFIG_DIR:-$HOME_DIR/.config/ai-devops-muse}"
 BIN="$HOME_DIR/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
 
 [ -x "$BIN" ] || {

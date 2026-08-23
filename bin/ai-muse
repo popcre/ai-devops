@@ -8,12 +8,14 @@ REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
-CFG="${AI_MUSE_CONFIG_DIR:-$HOME/.config/ai-devops-muse}"
+PROFILE_HOME="${USERPROFILE:-$HOME}"
+case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
+CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
-BIN="$HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
+BIN="$PROFILE_HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
 MODEL="meta-model-api/muse-spark-1.2-contributor"
 CALLER="${AI_MUSE_CALLER:-}"
-STATE="${AI_MUSE_STATE_DIR:-$HOME/.local/state/ai-devops/muse}"
+STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
@@ -93,9 +95,9 @@ unlock_session(){ release_lock; }
 
 runtime_env(){
   export XDG_CONFIG_HOME="$CFG/opencode-xdg"
-  export XDG_DATA_HOME="$HOME/.local/share/ai-devops/opencode-muse-direct"
-  export XDG_STATE_HOME="$HOME/.local/state/ai-devops/muse-direct"
-  export XDG_CACHE_HOME="$HOME/.cache/ai-devops/opencode-muse-direct"
+  export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/opencode-muse-direct"
+  export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-direct"
+  export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/opencode-muse-direct"
   mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 }
 require_runtime(){
@@ -228,7 +230,7 @@ run_turn(){
   protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
   provider_key=""
   set +e
-  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
+  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
   done
