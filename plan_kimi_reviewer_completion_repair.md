@@ -8,12 +8,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 |---|---|---|---|
 | 1 | Add normalized upstream lock | ✅ complete | equivalent HTTPS/SSH/authenticated-HTTPS/arbitrary-user/case-insensitive suffix and chained relative-origin fixtures, case-sensitive repository paths, plus persistent-session upstream binding; `tests/test-ai-kimi.sh` 189/189 |
 | 2 | Improve missing-job errors | ✅ complete | status/logs/result/wait fixtures |
-| 3 | Wait for and re-prove live completion | 🟨 pending installed revision | issue #46 live artifact |
-| 4 | Run installed canary matrix | 🟨 pending Step 3 | installed verification evidence |
-| 5 | Land/unquarantine/close #46 | 🟨 pending exact-head approval | remote SHA and issue close |
+| 3 | Wait for and re-prove live completion | ✅ complete | installed `doctor --live` plus complete issue #46 artifact |
+| 4 | Run installed canary matrix | ✅ complete | `tests/verification/kimi-review-issue-46/2026-08-23-live.md`; 218/218 plus deleted-clone retrieval |
+| 5 | Land/unquarantine/close #46 | 🟨 closure pending | qualification is complete; evidence commit must pass exact-head review, push, install, and then close #46 before this row completes |
 
-Current work starts at Step 3. The merged artifact-recovery work remains governed
-by `plan_kimi-review-failure-recovery.md`; do not redo its completed Steps 1–7.
+All implementation and production qualification steps are complete. Evidence
+landing and issue closure remain. The merged artifact-recovery history remains governed by
+`plan_kimi-review-failure-recovery.md`.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -29,10 +30,11 @@ read-only review profile and durable jobs. It is part of public `ai-devops` on
 
 ## 3. What triggered this work
 
-Issue #46 fixed artifact loss and partial-verdict handling, but repeated installed
-live probes still return no required `session.resume_hint`. Audit finding 8 found
-the same clone-based repository lock weakness as Grok; finding 26 found raw
-missing-job errors.
+At planning time, issue #46 had fixed artifact loss and partial-verdict handling,
+but repeated installed live probes still returned no required
+`session.resume_hint`. Audit finding 8 found the same clone-based repository lock
+weakness as Grok; finding 26 found raw missing-job errors. All three historical
+conditions are now resolved by the completed STATUS evidence above.
 
 ## 4. Scope — in and out
 
@@ -45,14 +47,18 @@ metrics unavailable from Kimi, or changing implementation network policy.
 
 Completed recovery is on main per `plan_kimi-review-failure-recovery.md:11-18`.
 Repo ID/lock are `bin/ai-kimi:349-378,1005-1014`; job lookup and raw status/logs
-are `:1059-1070,1111-1112`. Offline evidence was 173/173 at merge. Kimi remains
-quarantined and issue #46 open.
+are `:1059-1070,1111-1112`. Final offline evidence is 203/203; the installed
+authenticated matrix passed 218/218, and the deleted-clone canonical-result
+canary passed. Kimi is production-qualified; issue #46 is ready for evidence-backed
+closure.
 
 ## 6. Key findings and root cause
 
-Durability is repaired, availability is not proven. The repository lock uses
-checkout path where cost serialization needs normalized upstream identity.
-`job_for_name()` supplies a fallback path rather than a typed existence result.
+Historical root cause, now repaired: durability was repaired first while
+availability remained unproven; the repository lock used checkout path where
+cost serialization needed normalized upstream identity, and `job_for_name()`
+supplied a fallback path rather than a typed existence result. The final code and
+installed matrix close each of those gaps.
 
 ## 7. Approaches considered and REJECTED
 
@@ -104,11 +110,12 @@ authenticated. No 1Password read is needed for a normal free retry.
 
 ## 13. Definition of done + risks and open questions
 
-Done: clone/job tests plus full suite pass; terminal live record and canary matrix
+Done when: clone/job tests plus full suite pass; terminal live record and canary matrix
 pass; exact-head review clears findings; Albert identity/scoped commit/main push/
 remote-install hashes verified; #46 closed; quarantine removed; docs/plans/handoff
-current. No deployment. Risk is provider allowance/contract; remain quarantined
-and blocked rather than infer success. Rollback by commit and quarantine.
+current. No deployment. If provider allowance or the completion contract regresses
+in the future, quarantine and block the reviewer rather than infer success.
+Rollback is by commit plus quarantine.
 
 ## Mandatory self-audit
 

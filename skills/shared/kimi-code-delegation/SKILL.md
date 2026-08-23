@@ -5,14 +5,13 @@ description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrap
 
 # Kimi Code Delegation
 
-## Active quarantine and repair
+## Production qualification
 
-While `u2giants/ai-devops#46` is open, read
-[`plan_kimi-review-failure-recovery.md`](../../../plan_kimi-review-failure-recovery.md)
-and its STATUS table before relying on or changing Kimi reviews. Kimi remains out
-of reviewer rotation until the merged installed wrapper passes the plan's live
-qualification. A recovered partial answer is evidence only and must be labeled
-`INCOMPLETE — NO VERDICT`; it can never approve a change.
+The installed wrapper passed its authenticated production matrix on 2026-08-23;
+the redacted evidence is
+[`tests/verification/kimi-review-issue-46/2026-08-23-live.md`](../../../tests/verification/kimi-review-issue-46/2026-08-23-live.md).
+A recovered partial answer is evidence only and must be labeled `INCOMPLETE — NO
+VERDICT`; it can never approve a change.
 
 ## Use `ai-kimi`. Never hand-assemble a `kimi` command.
 

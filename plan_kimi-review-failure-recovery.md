@@ -14,12 +14,13 @@ Tracking issue: [u2giants/ai-devops#46](https://github.com/u2giants/ai-devops/is
 | 4. Preserve failed partial reviews without turning them into verdicts | ✅ complete | 2026-08-20 | Incomplete artifacts state `NO VERDICT` and commands remain nonzero |
 | 5. Present exact typed failures and preserve diagnostic evidence | ✅ complete | 2026-08-20 | Typed guidance plus raw stream/stderr paths in the artifact |
 | 6. Make temporary-copy provenance and retrieval unambiguous | ✅ complete | 2026-08-20 | Artifact records launch repository, reviewed head, private canonical path, and optional mirror |
-| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-22 | `bash tests/test-ai-kimi.sh` passed 197/197 after parent/worker cleanup, prompt-build failure cleanup, and late-worker no-contact repairs; the repository-wide suite is rerun at the final head in Step 8. |
-| 8. Requalify Kimi live, independently review the exact head, and land | 🟨 in progress | 2026-08-22 | `ai-kimi doctor --live` passed and named issue #46 returned a complete `session.resume_hint` artifact at `.ai/reviews/kimi-issue-46-production-proof-20260822T193848Z-4055091.md`. Kimi confirmed the cleanup code has no Critical/High/Medium defect; final exact-head independent review, push, install, and installed canaries remain. |
+| 7. Run the complete offline regression and hostile safety suite | ✅ complete | 2026-08-23 | Exact-head evidence passed 203 Kimi, 71 review-sandbox, and 41 Codex-review tests; the live-fixture correction separately passed all 203 Kimi cases. |
+| 8. Requalify Kimi live, independently review the exact head, and land | ✅ complete | 2026-08-23 | Exact-head Codex reviews approved `818a8b4` and `9c54e65`; production install and hashes matched; `doctor --live` passed; installed matrix passed 218/218; deleted-clone retrieval returned a complete canonical artifact. See `tests/verification/kimi-review-issue-46/2026-08-23-live.md`. |
 
-**Fresh-session starting point:** Step 1. Read the entire plan before editing. The
+**Fresh-session starting point:** Production qualification is complete. Start at
+the remaining issue-closure checkbox in Section 13; do not repeat Steps 1–8. The
 checkout had concurrent uncommitted changes to `bin/ai-kimi` and
-`tests/test-ai-kimi.sh` when this plan was written; never overwrite them.
+`tests/test-ai-kimi.sh` when this plan was written; that note is historical.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -30,8 +31,9 @@ Albert must be able to assign a Kimi review and receive one truthful outcome:
 
 A failed, quota-limited, timed-out, or incomplete Kimi run must never look like an
 approval. A successful run must never lose its findings because a temporary folder
-was removed or a folder-safety check was wrong. Kimi remains quarantined until the
-merged, installed wrapper passes a bounded authenticated qualification.
+was removed or a folder-safety check was wrong. Kimi stayed quarantined until the
+merged, installed wrapper passed its bounded authenticated qualification on
+2026-08-23.
 
 If any step below conflicts with this goal, the goal wins — stop and flag it.
 
@@ -178,7 +180,9 @@ and test files belong to concurrent work and must not be staged or overwritten.
 - `plan_reviewer-system-repair.md` completed provider preflight, typed guidance,
   and the scoreboard. This plan extends Kimi-specific terminal presentation; it
   does not create automatic provider selection.
-- No code for issue #46 has been committed, pushed, installed, or live-qualified.
+- At planning time, no code for issue #46 had been committed, pushed, installed,
+  or live-qualified. That historical condition was resolved on 2026-08-23; see
+  the STATUS table and production evidence record.
 - There is no hosted deployment. “Deployed” means the installed `ai-kimi`
   launcher resolves to the merged canonical source and passes live qualification.
 
@@ -253,8 +257,9 @@ change. Fail-closed behavior remains locked.
 
 ### LOCKED — do not relitigate
 
-- **2026-08-20: Kimi remains quarantined until Step 8 passes.** Strong model
-  quality does not compensate for an untrustworthy delivery path.
+- **2026-08-20: Kimi stays quarantined until Step 8 passes.** Strong model
+  quality does not compensate for an untrustworthy delivery path. Step 8 passed
+  on 2026-08-23.
 - **2026-08-20: the durable worker owns canonical artifacts.** Foreground waiters
   only retrieve and display them.
 - **2026-08-20: private wrapper state is the durable authority.** An ignored
@@ -681,28 +686,28 @@ artifacts; do not copy old pass counts into the STATUS table.
 
 ### Definition of done
 
-- [ ] Every STATUS row is complete with a re-runnable artifact, commit, or test path.
-- [ ] Concurrent reviewer-wrapper changes were preserved and reconciled.
-- [ ] Worker owns one canonical report; wait/result are idempotent retrieval.
-- [ ] Complete findings and verdict are always durably recoverable.
-- [ ] Every failed provider attempt produces a typed failure and, where useful,
+- [x] Every STATUS row is complete with a re-runnable artifact, commit, or test path.
+- [x] Concurrent reviewer-wrapper changes were preserved and reconciled.
+- [x] Worker owns one canonical report; wait/result are idempotent retrieval.
+- [x] Complete findings and verdict are always durably recoverable.
+- [x] Every failed provider attempt produces a typed failure and, where useful,
       an explicitly incomplete durable report.
-- [ ] Repository ignore detection is correct for directory rules and negations.
-- [ ] Private fallback storage works and resists path/overwrite attacks.
-- [ ] Temporary caller-copy deletion cannot destroy canonical evidence.
-- [ ] Historical `f65cc77` findings/no-verdict guards remain green.
-- [ ] Full offline, Windows, installation, and hostile safety suites pass.
-- [ ] Bounded authenticated live qualification passes after allowance is available.
-- [ ] Independent exact-head review has no unresolved Critical/High/Medium finding.
-- [ ] Durable incident documentation corrects unsupported claims without altering
+- [x] Repository ignore detection is correct for directory rules and negations.
+- [x] Private fallback storage works and resists path/overwrite attacks.
+- [x] Temporary caller-copy deletion cannot destroy canonical evidence.
+- [x] Historical `f65cc77` findings/no-verdict guards remain green.
+- [x] Full offline, Windows, installation, and hostile safety suites pass.
+- [x] Bounded authenticated live qualification passes after allowance is available.
+- [x] Independent exact-head review has no unresolved Critical/High/Medium finding.
+- [x] Durable incident documentation corrects unsupported claims without altering
       original evidence.
-- [ ] Every identical ignored-folder probe is repaired or assigned to one linked
+- [x] Every identical ignored-folder probe is repaired or assigned to one linked
       governed follow-up issue; none is silently left known-broken.
-- [ ] Source is committed as Albert, pushed to `main`, GitHub checks are green if
+- [x] Source is committed as Albert, pushed to `main`, GitHub checks are green if
       present, installed source hash matches merged source, and installed live
       canaries pass.
-- [ ] Issue #46 is closed with evidence; this plan is marked complete and the
-      paired handoff is retired under the successor rule.
+- [ ] Issue #46 is closed with evidence; then mark this plan complete and retire
+      the paired handoff under the successor rule.
 
 ### Main risks and rollback
 

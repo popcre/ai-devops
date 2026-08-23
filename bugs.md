@@ -245,36 +245,37 @@ Claude Opus 5 debate.
 - Required correction: compute a NUL-safe whole-source digest before and after snapshot
   creation, retry once, and otherwise stop. Store that digest in every review record.
 
-### 11. Codex review is neither enforced read-only nor trustworthy on failure
+### 11. Codex review lacked enforced read-only and truthful failure handling (fixed)
 
-- **Current severity: HIGH**
+- **Current severity: RESOLVED**
 
 - Files: `bin/ai-codex-review:26-30`, `bin/ai-codex-review:61-85`,
   `bin/ai-codex-review:138-159`, `plan_codex_reviewer_trust_repair.md:7-12`
-- Confidence: certain
-- What happens: it runs in the live repo without an enforced read-only sandbox, omits
-  untracked files, and turns missing CLI/nonzero provider results into an exit-zero
-  report. Same-second runs share a filename.
-- User-visible impact: it can change the work or certify a review that failed or skipped
-  the main new files.
-- Required correction: route Codex through the same private-copy, sealed-packet,
-  enforced read-only, exact-verdict, unique atomic-report lifecycle as trusted reviewers.
+- Confidence: certain from exact-head production reviews and hostile offline tests.
+- Historical failure: it ran in the live repo without an enforced read-only sandbox,
+  omitted untracked files, and could turn provider failures into misleading reports.
+- Current outcome: Codex reviews use a complete private snapshot, sealed evidence,
+  enforced read-only execution, exact terminal verdicts, unique atomic reports, and
+  source/lifecycle verification. User-configured MCP launchers are excluded from the
+  sealed review invocation so secret-bearing commands cannot enter terminal titles.
 
-### 12. Reviewer identity, freshness, and paid-run rules still diverge by provider
+### 12. Qwen identity and freshness rules remain unresolved; Kimi is fixed
 
 - **Current severity: HIGH**
 
-- Files: `bin/ai-qwen:901-979`, `bin/ai-kimi:354-360`,
-  `bin/ai-kimi:1014-1019`, `plan_qwen_reviewer_evidence_repair.md:7-12`,
-  `plan_kimi_reviewer_completion_repair.md:7-12`
+- Files: `bin/ai-qwen:901-979`,
+  `plan_qwen_reviewer_evidence_repair.md:7-12`
 - Confidence: high
-- What happens: Qwen resumes old reasoning after refreshing to new code without binding
-  head/tree/packet identity. Kimi’s repository-wide paid-run lock includes physical
-  checkout path, so two clones of one upstream can run twice. Kimi also remains correctly
-  quarantined because live completion is not proven.
-- User-visible impact: conclusions cross code versions and duplicate paid work can run.
-- Required correction: one upstream identity, one evidence-generation identity, and one
-  lock/state schema for every provider.
+- What happens: Qwen can resume old reasoning after refreshing to new code without
+  binding head/tree/packet identity. Qwen live qualification is skipped while account
+  credits are exhausted.
+- Kimi outcome: normalized upstream locking, durable session identity, installed live
+  completion, and clone-deletion recovery are production-qualified; see
+  `tests/verification/kimi-review-issue-46/2026-08-23-live.md`.
+- User-visible impact: Qwen conclusions can cross code versions until its separate
+  repair and later live qualification finish.
+- Required correction: finish Qwen's source repair and keep it quarantined until live
+  credits permit qualification; do not regress Kimi's proven identity schema.
 
 ### 13. Central reviewer governance exists but wrappers do not use it automatically
 
@@ -714,33 +715,39 @@ Ubuntu installed-hash verification remain.**
 - Existing tracker: issue #56; repair and qualification steps are complete,
   while landing, Ubuntu installation, CI, and issue closure remain.
 
-### 8. Kimi has the same clone-based duplicate-run weakness
+### 8. Kimi had the same clone-based duplicate-run weakness (fixed)
 
-**Repair status (2026-08-22): fixed in source; normalized upstream locking is
-covered by equivalent-remote and cross-clone fixtures, and the live issue #46
-review completed. Exact-head landing and installed verification remain.**
+**Repair status (2026-08-23): fixed, independently approved, pushed, installed,
+and live-qualified. Normalized upstream locking is covered by equivalent-remote
+and cross-clone fixtures; the installed matrix passed 218/218 and the
+deleted-caller-clone result remained retrievable.**
 
-- Files: `bin/ai-kimi:349-353`, `bin/ai-kimi:1012-1014`
-- Confidence: high
-- What happens: Kimi also includes the physical checkout path in the identity
-  used for its claimed repository-wide lock.
-- User-visible failure: separate clones can start concurrent Kimi jobs for the
-  same upstream repository.
-- Tracker gap: this is not covered by the current issue-46 closeout plan.
+- Files: `bin/ai-kimi:386-403`, `bin/ai-kimi:1071-1076`
+- Confidence: certain from equivalent-remote, cross-clone, and installed live
+  evidence.
+- Historical failure: Kimi included the physical checkout path in its claimed
+  repository-wide lock, so separate clones could start duplicate paid jobs.
+- Current outcome: the paid-run lock is derived from normalized shared-upstream
+  identity, while persistent session records remain safely bound to their exact
+  upstream and recorded workspace.
+- Existing tracker: issue #46; production proof is recorded under
+  `tests/verification/kimi-review-issue-46/2026-08-23-live.md` and only GitHub
+  closure remains.
 
-### 9. Kimi is still unavailable as a trusted live reviewer
+### 9. Kimi lacked a trusted live completion record (fixed)
 
-**Repair status (2026-08-22): fixed in source and requalified live; the wrapper
-returned a terminal `session.resume_hint` review for open issue #46 and preserved
-the complete report. Exact-head landing and installed verification remain.**
+**Repair status (2026-08-23): fixed, installed, and production-qualified. The
+wrapper returned terminal `session.resume_hint` records, preserved complete and
+typed incomplete artifacts, and passed the authenticated production matrix.**
 
 - Files: `plan_kimi-review-failure-recovery.md:11-18`
-- Confidence: certain from repeated installed live probes
-- What happens: authentication and safety checks pass, but the provider does not
-  return the required completion record.
-- User-visible failure: Kimi cannot currently deliver a qualified review. Its
-  repaired failure handling is correctly keeping it quarantined.
-- Existing tracker: issue #46.
+- Confidence: certain from exact-head independent review, installed hash proof,
+  `doctor --live`, the 218/218 matrix, and deleted-clone canonical retrieval.
+- Historical failure: authentication and safety checks passed, but the provider
+  did not return the required completion record.
+- Current outcome: Kimi can deliver qualified production reviews and remains
+  fail-closed for missing, incomplete, timed-out, quota, or interrupted results.
+- Existing tracker: issue #46, ready for evidence-backed closure.
 
 ### 10. Muse rejects valid repositories containing historic review reports
 
