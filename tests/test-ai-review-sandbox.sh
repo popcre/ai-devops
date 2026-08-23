@@ -195,21 +195,22 @@ check "refresh_head_matches_the_worktree" \
 # A directory-bound reviewer must keep one recorded path even after the source
 # checkout moves. Only an existing managed snapshot with the exact tag may be
 # refreshed this way.
-RECORDED="$($SCRIPT ensure-copy "$MAIN" stable-move)"
+ALIASED_SANDBOX_DIR="$TMP/alias/../sandboxes"; mkdir -p "$TMP/alias"
+RECORDED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" ensure-copy "$MAIN" stable-move)"
 MOVED_SOURCE="$TMP/moved-source"; git clone -q "$MAIN" "$MOVED_SOURCE"
 git -C "$MOVED_SOURCE" config user.email t@example.com
 git -C "$MOVED_SOURCE" config user.name Test
 echo moved-source > "$MOVED_SOURCE/moved.txt"; git -C "$MOVED_SOURCE" add moved.txt; git -C "$MOVED_SOURCE" commit -qm moved-source
-REFRESHED="$($SCRIPT refresh-copy "$MOVED_SOURCE" stable-move "$RECORDED")"
+REFRESHED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" refresh-copy "$MOVED_SOURCE" stable-move "$RECORDED")"
 check "recorded_copy_refresh_keeps_exact_directory" "[ '$REFRESHED' = '$RECORDED' ]"
 check "recorded_copy_refresh_uses_current_source" "grep -qx moved-source '$RECORDED/moved.txt' && [ \"\$(git -C '$RECORDED' rev-parse HEAD)\" = \"\$(git -C '$MOVED_SOURCE' rev-parse HEAD)\" ]"
-check "recorded_copy_refresh_rejects_wrong_tag" "! '$SCRIPT' refresh-copy '$MOVED_SOURCE' wrong-tag '$RECORDED'"
+check "recorded_copy_refresh_rejects_wrong_tag" "! AI_REVIEW_SANDBOX_DIR='$ALIASED_SANDBOX_DIR' '$SCRIPT' refresh-copy '$MOVED_SOURCE' wrong-tag '$RECORDED'"
 UNMANAGED_REFRESH="$TMP/sandboxes/unmanaged-refresh"; mkdir -p "$UNMANAGED_REFRESH"; touch "$UNMANAGED_REFRESH/preserve"
 check "recorded_copy_refresh_rejects_unmanaged_target" "! '$SCRIPT' refresh-copy '$MOVED_SOURCE' stable-move '$UNMANAGED_REFRESH'"
 check "rejected_unmanaged_refresh_preserves_target" "test -f '$UNMANAGED_REFRESH/preserve'"
-check "recorded_copy_removal_rejects_wrong_tag" "! '$SCRIPT' remove-recorded wrong-tag '$RECORDED'"
+check "recorded_copy_removal_rejects_wrong_tag" "! AI_REVIEW_SANDBOX_DIR='$ALIASED_SANDBOX_DIR' '$SCRIPT' remove-recorded wrong-tag '$RECORDED'"
 check "recorded_copy_removal_rejects_unmanaged_target" "! '$SCRIPT' remove-recorded stable-move '$UNMANAGED_REFRESH'"
-check "recorded_copy_removal_deletes_exact_snapshot" "'$SCRIPT' remove-recorded stable-move '$RECORDED' && test ! -e '$RECORDED'"
+check "recorded_copy_removal_deletes_exact_snapshot" "AI_REVIEW_SANDBOX_DIR='$ALIASED_SANDBOX_DIR' '$SCRIPT' remove-recorded stable-move '$RECORDED' && test ! -e '$RECORDED'"
 
 # Tags isolate concurrent sessions.
 STAGE_B="$("$SCRIPT" ensure "$WT" second-session)"

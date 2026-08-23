@@ -68,7 +68,15 @@ sandbox_id() { # sandbox_id ROOT TAG -> stable directory name
   printf '%s-%s' "$2" "$h"
 }
 
-sandbox_path() { printf '%s/%s' "$SANDBOX_DIR" "$(sandbox_id "$1" "$2")"; }
+sandbox_path() {
+  local root="$SANDBOX_DIR"
+  # Git Bash can expose the same Windows directory through equivalent mount,
+  # long-name, and 8.3 spellings. Once the managed root exists, publish and
+  # persist its physical spelling so later argv conversion cannot change the
+  # directory identity recorded for a persistent review.
+  [ ! -d "$root" ] || root="$(canon "$root")"
+  printf '%s/%s' "$root" "$(sandbox_id "$1" "$2")"
+}
 
 # Refuse to touch anything that is not one of ours: a managed snapshot always
 # carries the marker file AND lives under the sandbox directory.
@@ -268,6 +276,7 @@ cmd_ensure() {
   tag="${2:?usage: ai-review-sandbox ensure <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
   if [ "$force_copy" != 1 ] && ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
+  mkdir -p "$SANDBOX_DIR"
   stage="$(sandbox_path "$root" "$tag")"
   create_or_refresh "$root" "$tag" "$stage"
   printf '%s' "$stage"
