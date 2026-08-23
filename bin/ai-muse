@@ -142,8 +142,8 @@ ensure_report_destination(){
   case "$path" in "$dir"/*) ;; *) die "refusing Muse report outside $dir: $path" ;; esac
   [ ! -L "$root/.ai" ] && [ ! -L "$dir" ] || die 'refusing Muse reports: .ai or .ai/reviews is a linked path.'
   rel="${path#"$root"/}"
-  git -C "$root" check-ignore -q "$rel" || die "refusing Muse report: exact destination is not Git-ignored: $rel"
-  ! git -C "$root" ls-files --error-unmatch "$rel" >/dev/null 2>&1 || die "refusing Muse report: exact destination is tracked: $rel"
+  git -C "$root" check-ignore -q "$rel" || die "refusing Muse report: exact destination is not Git-ignored: $rel. Add .ai/reviews/ to .gitignore, then retry."
+  ! git -C "$root" ls-files --error-unmatch "$rel" >/dev/null 2>&1 || die "refusing Muse report: exact destination is tracked: $rel. Preserve it, remove it from Git tracking with: git rm --cached -- '$rel'; then retry."
   [ ! -e "$path" ] || die "refusing Muse report: exact destination already exists: $rel"
   mkdir -p "$dir" || die "could not create Muse report directory: $dir"
   secure_review_directory "$dir" || die "could not enforce private Muse report storage: $dir"
@@ -293,6 +293,7 @@ cmd_new(){
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
   prompt="$(read_prompt "$@")"; report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg dir "$REVIEW_DIR" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$now" '{schema_version:1,status:"turn_in_progress",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:$dir,sandbox_tag:$tag,model:$model,head:$head,packet_sha256:$packet,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true
+  printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.

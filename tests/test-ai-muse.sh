@@ -42,6 +42,7 @@ check 'review profile explicitly removes dangerous tools' "for tool in write edi
 check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
 check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
 check 'report destination is proven exact, ignored, untracked and unlinked' "grep -q 'exact destination is not Git-ignored' '$SCRIPT' && grep -q 'exact destination is tracked' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
+check 'report refusal explains the exact remedies' "grep -q 'Add .ai/reviews/ to .gitignore, then retry' '$SCRIPT' && grep -q 'git rm --cached' '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$dir/.ai-devops-private-reviews-v1\" ]' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -248,6 +249,7 @@ for _ in $(seq 1 300); do [ -s "$SLOW_PROVIDER_PID" ] && break; sleep .1; done
 SLOW_META=""; for _ in $(seq 1 50); do SLOW_META="$(find "$TMP/state" -name 'codex--visible-slow.json' -type f -print -quit)"; [ -n "$SLOW_META" ] && jq -e '.status=="turn_in_progress" and (.worker_pid|type)=="number" and (.last_heartbeat_at|length)>0' "$SLOW_META" >/dev/null 2>&1 && break; sleep .1; done
 check 'slow turn publishes durable in-progress state before completion' "test -f '$SLOW_META' && jq -e '.status==\"turn_in_progress\" and (.worker_pid|type)==\"number\" and (.last_heartbeat_at|length)>0' '$SLOW_META'"
 wait "$SLOW_PID"
+check 'new emits its session and exact state path before provider completion' "grep -q 'Muse session started: visible-slow' '$SLOW_LOG' && grep -Fq 'State: $SLOW_META' '$SLOW_LOG'"
 check 'slow turn emits bounded progress' "grep -q 'Muse turn active:' '$SLOW_LOG'"
 check 'failed provider turns preserve incomplete evidence' "test \"\$(find '$REPO/.ai/reviews' -name 'muse-*-incomplete-*.md' | wc -l)\" -ge 4"
 check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask stale --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$STALE_META'"
