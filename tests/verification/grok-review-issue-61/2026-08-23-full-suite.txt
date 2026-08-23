@@ -1,0 +1,2112 @@
+===== COMPLETE OFFLINE BASH SUITE =====
+
+===== BASH test-ai-adopt-globals.sh =====
+1/8 machine section is detected, saved and restored byte-identically
+2/8 installed body equals the repo template exactly
+3/8 a machine with no machine section is handled without inventing one
+4/8 --dry-run changes nothing
+5/8 originals are always recoverable
+6/8 an interleaved tail keeps machine facts and drops re-synced template blocks
+7/8 a dropped block is still recoverable in the backup
+8/8 an old installed sync skill adopts globals on its first post-pull install
+ALL TESTS PASSED
+
+===== BASH test-ai-claude-permissions.sh =====
+== runtime: python ==
+  ok   fresh: exit 0
+  ok   fresh: added 2
+  ok   fresh: both entries written
+  ok   rerun: exit 0
+  ok   rerun: reports already present
+  ok   check: compliant exit 0
+  ok   check: missing exit 1
+  ok   check: creates nothing
+  ok   existing: other top-level key kept
+  ok   existing: prior allow entry kept
+  ok   existing: deny untouched
+  ok   existing: new entry added
+  ok   existing: backup written
+  ok   broken: exit 3
+  ok   broken: file untouched
+  ok   broken: says unparseable
+  ok   weird: exit 0
+  ok   weird: entries added anyway
+== runtime: node ==
+  ok   fresh: exit 0
+  ok   fresh: added 2
+  ok   fresh: both entries written
+  ok   rerun: exit 0
+  ok   rerun: reports already present
+  ok   check: compliant exit 0
+  ok   check: missing exit 1
+  ok   check: creates nothing
+  ok   existing: other top-level key kept
+  ok   existing: prior allow entry kept
+  ok   existing: deny untouched
+  ok   existing: new entry added
+  ok   existing: backup written
+  ok   broken: exit 3
+  ok   broken: file untouched
+  ok   broken: says unparseable
+  ok   weird: exit 0
+  ok   weird: entries added anyway
+
+passed: 36   failed: 0
+
+===== BASH test-ai-claude-review.sh =====
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-claude-review
+  ok   doctor proves exact model and tool boundary
+  ok   live doctor proves canonical returned model
+  ok   live doctor accepts the current exact-key envelope without canonicalModel
+  ok   live doctor accepts the first-party Haiku helper in the current envelope
+  ok   live doctor accepts a proven legacy first-party Haiku helper
+  ok   live doctor accepts a proven two-segment legacy Haiku helper
+  ok   successful review publishes report
+  ok   report identifies canonical Opus 5
+  ok   report contains exact verdict
+  ok   provider saw complete untracked snapshot
+  ok   provider receives only read grep glob tools
+  ok   source remains unchanged
+  ok   lifecycle records Claude completion
+  ok   scoreboard records Claude current result
+  ok   review accepts the current exact-key envelope without canonicalModel
+  ok   review accepts only a proven first-party Haiku auxiliary model
+  ok   fail is rejected
+  ok   malformed is rejected
+  ok   wrong-model is rejected
+  ok   canonical-mismatch is rejected
+  ok   canonical-false is rejected
+  ok   foreign-auxiliary is rejected
+  ok   scalar-auxiliary is rejected
+  ok   unproven-auxiliary is rejected
+  ok   uncanonical-auxiliary is rejected
+  ok   missing is rejected
+  ok   mutate is rejected
+  ok   failed reviews publish no accepted report
+  ok   source mutation during review is rejected
+  ok   concurrent reviews both complete
+  ok   concurrent reports do not collide
+  ok   unsafe command is refused
+  ok   unknown mode is rejected
+
+33 passed, 0 failed
+
+===== BASH test-ai-codex-memories.sh =====
+  ok   already enabled exits 0
+  ok   already enabled says so
+  ok   already enabled makes no backup
+  ok   enable exits 0
+  ok   enable reports success
+  ok   enable backs up config first
+  ok   backup matches the original
+  ok   --check on disabled exits 1
+  ok   --check does not enable
+  ok   --check makes no backup
+  ok   --check on enabled exits 0
+  ok   failed enable exits 1
+  ok   failed enable is loud
+  ok   missing feature flag exits 1
+  ok   missing feature flag is loud
+  ok   no Codex exits 2
+  ok   no Codex is informational, not an error
+  ok   unknown option exits 2
+
+18 passed, 0 failed
+
+===== BASH test-ai-codex-review.sh =====
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-codex-review
+  ok   doctor_proves_readonly_and_reasoning
+  ok   doctor_normalizes_equivalent_Windows_test_paths
+  ok   doctor_normalizes_mixed_tmp_and_native_executable_paths
+  ok   models_configuration_is_parsed_as_data
+  ok   doctor_rejects_unknown_options
+  ok   review_runs_the_supplied_test_evidence_command
+  ok   review_rejects_a_missing_tests_command
+  ok   review_rejects_duplicate_test_commands
+  ok   review_rejects_unknown_options
+  ok   successful_review_publishes_one_report
+  ok   provider_diagnostics_do_not_corrupt_the_model_verdict
+  ok   report_has_exact_verdict
+  ok   report_binds_source_digest
+  ok   provider_received_complete_untracked_snapshot
+  ok   provider_command_keeps_readonly_sandbox
+  ok   provider_command_receives_private_directory
+  ok   source_is_unchanged_by_successful_review
+  ok   review_storage_has_a_private_Windows_ACL
+  ok   lifecycle_records_completed_verdict
+  ok   scoreboard_records_current_result
+  ok   provider_failure_is_nonzero
+  ok   provider_failure_publishes_no_success_report
+  ok   provider_failure_preserves_private_sanitized_diagnostics
+  ok   missing_verdict_is_nonzero
+  ok   empty_response_is_nonzero
+  ok   text_after_verdict_is_rejected
+  ok   multiple_verdict_sections_are_rejected
+  ok   provider_run_is_bounded
+  ok   signal_stops_and_reaps_the_provider
+  ok   signal_finalizes_the_lifecycle_as_failed
+  ok   provider_write_to_snapshot_is_rejected
+  ok   provider_write_does_not_touch_source
+  ok   source_change_during_review_is_rejected
+  ok   concurrent_reviews_both_complete
+  ok   concurrent_reviews_use_distinct_reports
+  ok   concurrent_reports_are_both_complete
+  ok   missing_readonly_and_reasoning_config_is_refused
+  ok   appended_command_options_are_refused
+warning: in the working copy of '.ai/reviews/historic.md', LF will be replaced by CRLF the next time Git touches it
+  ok   tracked_historic_reports_do_not_block_a_unique_destination
+  ok   unknown_mode_is_rejected
+
+40 passed, 0 failed
+
+===== BASH test-ai-config-migrate.sh =====
+PASS: config migration previews, preserves values, backs up, merges defaults, validates, and records schema
+
+===== BASH test-ai-deepseek-agent.sh =====
+warning: in the working copy of 'tracked', LF will be replaced by CRLF the next time Git touches it
+ai-deepseek-agent tests
+  ok   1Password re-exec was attempted
+  ok   credential resolution rejects an executable outside its trusted installation or test root
+  ok   provider endpoint override is rejected before credential resolution
+  ok   managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary
+  ok   managed re-exec keeps the DeepSeek key out of process arguments
+  ok   managed descriptor handoff delivers the key without exporting it to curl
+  ok   Windows re-exec uses explicit Git Bash
+  ok   help succeeds
+  ok   unknown command fails
+  ok   offline doctor succeeds without provider contact
+  ok   offline doctor leaves the repository byte state unchanged
+  ok   live doctor proves exact provider response
+  ok   live doctor leaves the repository byte state unchanged
+  ok   doctor rejects unknown options
+  ok   zero provider timeout is rejected before contact
+  ok   nonnumeric connect timeout is rejected before contact
+  ok   send creates a safe session
+  ok   show reads stored session
+  ok   provider calls have connection and total time limits
+  ok   provider key never appears in curl process arguments or a temporary header file
+  ok   provider key is removed from child-process environments
+  ok   hostile name rejected: ..
+  ok   hostile name rejected: ../outside
+  ok   hostile name rejected: ../../outside
+  ok   hostile name rejected: /tmp/outside
+  ok   hostile name rejected: C:\outside
+  ok   hostile name rejected: C:/outside
+  ok   hostile name rejected: CON
+  ok   hostile name rejected: con.txt
+  ok   hostile name rejected: name/part
+  ok   hostile name rejected: name\part
+  ok   hostile name rejected: .hidden
+  ok   hostile names preserve outside files
+  ok   session-file symlink is rejected
+  ok   symlink fixture unavailable on this host
+  ok   provider failure is nonzero
+  ok   provider failure leaves history unchanged
+  ok   concurrent replies both complete
+  ok   concurrent replies retain complete turns
+  ok   interrupted reply exits nonzero and does not resume after lock release
+  ok   interrupted reply stops its provider child before unlocking
+  ok   interrupted reply releases its owned lock
+  ok   formal review refuses a missing Git commit before provider contact
+  ok   review mode rejects missing verdict
+  ok   review mode accepts usable verdict
+  ok   review metadata binds exact session/head/caller
+  ok   real metadata publication failure is not masked by cleanup
+  ok   real transcript publication failure is not masked by cleanup
+  ok   transcript failure publishes no completion metadata
+  ok   list excludes metadata sidecars
+  ok   shell syntax is valid
+passed 51, failed 0
+
+===== BASH test-ai-devops-doctor-codex-probe.sh =====
+PASS: codex sandbox probe closes stdin and classifies auth/sandbox/timeout/ok
+
+===== BASH test-ai-devops-doctor-install-state.sh =====
+PASS: doctor proves source/schema/manifest and covers Node, memory, schedule, and every reviewer provider
+
+===== BASH test-ai-facts.sh =====
+warning: in the working copy of 'deleted.md', LF will be replaced by CRLF the next time Git touches it
+  ok   search returns a known portable fact
+  ok   search is case insensitive
+  ok   no match is successful and empty
+  ok   JSON no match is successful and empty
+  ok   index reports Markdown coverage only
+  ok   search falls back safely when ripgrep is unavailable
+  ok   ripgrep and fallback both enforce the 50-result cap
+  ok   plain fallback keeps the normal relative path format
+  ok   fallback excludes ignored memory files like ripgrep
+  ok   fallback skips hidden memory files like ripgrep
+  ok   index skips tracked files deleted from disk
+  ok   fact access never writes the hub
+  ok   noncanonical root is refused without fixture override
+  ok   skill forbids Codex SQLite access
+
+14 passed, 0 failed
+
+===== BASH test-ai-gemini.sh =====
+== ai-gemini fixed response contracts
+  ok   empty success fixture is rejected
+  ok   wrong model fixture is rejected
+  ok   wrapper exposes safety version
+  ok   doctor finds the official Linux per-user installation outside PATH
+  ok   doctor keeps Gemini quarantined pending live proof
+  ok   normal operation cannot bypass quarantine
+  ok   quarantine exposes only the governed live qualification path without overstating denied-tool proof
+  ok   provider prompt states the exact allowed verdict words
+== byte identity and exact identity gates
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   already-dirty file content mutation is rejected
+  ok   failed mutation remains recovery-required
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   ignored-file mutation is rejected
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   outside sentinel mutation is rejected
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   same-turn protected tracked-source mutation is rejected
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   same-turn protected ignored-file mutation is rejected
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   tracked files inside runtime directories remain protected
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   normal review writes a durable report
+  ok   completed state stores exact conversation
+  ok   duplicate new is refused
+  ok   duplicate new preserves metadata report packet and private copy byte-for-byte
+  ok   duplicate new never invokes the provider
+  ok   wrong resumed conversation ID is rejected
+  ok   follow-up refuses configured model drift before provider contact
+  ok   follow-up refuses between-turn private-copy tampering before provider contact
+  ok   private-copy tampering remains recovery-required
+  ok   wrong model is rejected
+  ok   write during model verification is rejected
+  ok   empty response is rejected
+  ok   invalid verdict word is rejected
+  ok   rejected provider output is durably linked from session state
+  ok   preserved failure evidence uses a private Windows ACL
+  ok   privacy-control failure rejects output without leaving a readable artifact
+== lifecycle, concurrency, report, and head gates
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   unsafe report destination makes the review fail
+  ok   report failure remains recovery-required
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   dead local lock owner is safely reclaimed
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   concurrent stale-lock reclaimers cannot both enter a review
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   concurrent new is refused before touching evidence
+  ok   concurrent delete is refused while review runs
+  ok   concurrent follow-up is refused while review runs
+  ok   interrupted review returns failure
+  ok   interrupted work is marked for recovery
+  ok   interrupted private copy is preserved
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   follow-up refuses a changed repository head
+  ok   stale-head refusal becomes recovery-required
+  ok   delete refuses uncertain evidence
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   follow-up refuses uncommitted tracked source drift
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   follow-up refuses untracked source drift
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   follow-up refuses ignored protected-source drift
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+  ok   wrapper-owned .ai runtime evidence does not create false source drift
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitmodules', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitmodules', LF will be replaced by CRLF the next time Git touches it
+  ok   initialized gitlink content drift is fingerprinted before provider contact
+
+49 passed, 0 failed
+
+===== BASH test-ai-glm.sh =====
+== static checks ==
+  ok   ai-glm is executable
+  ok   ai-glm parses
+  ok   GLM password is streamed to curl instead of exposed in argv
+  ok   setup-opencode-glm.sh parses
+  ok   retired launcher is gone
+  ok   retired launcher not on PATH
+== pinned config ==
+  ok   version file exists
+  ok   version is a bare semver
+  ok   opencode.json is valid json
+  ok   model is pinned to glm-5.3
+  ok   autoupdate disabled
+  ok   sharing disabled
+== agent safety (the only working read-only enforcement) ==
+  ok   glm-review exists
+  ok   glm-review has webfetch: false
+  ok   glm-review pins the model
+  ok   glm-implement exists
+  ok   glm-implement has webfetch: false
+  ok   glm-implement pins the model
+  ok   glm-review has write: false
+  ok   glm-review has edit: false
+  ok   glm-review has NO bash tool
+  ok   glm-review explicitly allows todowrite
+  ok   glm-implement can write
+  ok   glm-implement HAS a bash tool
+  ok   glm-implement explicitly allows todowrite
+  ok   sandbox is a clone, not a worktree
+  ok   sandbox removes its git remote
+== systemd unit ==
+  ok   unit exists
+  ok   unit is a user service (uses %h)
+  ok   unit has no secret material
+  ok   unit rate-limits restarts
+  ok   unit sets NoNewPrivileges
+  ok   unit does not bind publicly
+== cli contract ==
+  ok   no command exits 0
+  ok   unknown command rejected
+  ok   help works
+  ok   --model is rejected
+  ok   --model error explains why
+  ok   --agent is rejected
+  ok   --agent error explains why
+  ok   --system is rejected
+  ok   --system error explains why
+  ok   --tools is rejected
+  ok   --tools error explains why
+  ok   --provider is rejected
+  ok   --provider error explains why
+  ok   --directory is rejected
+  ok   --directory error explains why
+  ok   --temperature is rejected
+  ok   --temperature error explains why
+  ok   --reasoning is rejected
+  ok   --reasoning error explains why
+  ok   doctor symlink check skipped (host created a copy)
+== repository + session identity ==
+warning: in the working copy of 'f.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'f.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   distinct repos get distinct ids
+  ok   repo id is stable
+  ok   new locks before server session creation
+  ok   failed metadata write deletes created server session
+== error paths without a server ==
+  ok   new fails when server is down
+  ok   server-down message is actionable
+  ok   ask on unknown session fails
+  ok   invalid session name rejected
+  ok   non-git directory rejected
+  ok   empty prompt rejected
+  ok   missing prompt file rejected
+  ok   list works with no sessions
+ai-glm: error: AI_GLM_SERVER_START_TIMEOUT must be a positive whole number of seconds.
+  ok   nonnumeric server-start timeout is rejected
+ai-glm: error: AI_GLM_SERVER_START_TIMEOUT must be a positive whole number of seconds.
+  ok   zero server-start timeout is rejected
+== caller separation ==
+  ok   claude and codex sessions coexist
+== worktree hygiene ==
+  ok   no scratch worktrees leaked
+  ok   repoA has only its own worktree
+== secret hygiene ==
+  ok   ai-glm never echoes a key
+  ok   launcher unsets ZAI_API_KEY
+  ok   launcher guards empty key
+  ok   launcher has re-exec guard
+  ok   mcp.env.example keeps ZAI_API_KEY
+  ok   dead ZAI_ANTHROPIC_BASE_URL gone
+  ok   dead ZAI_GLM_MODEL gone
+== skill ==
+  ok   skill exists
+  ok   skill tells callers to use ai-glm
+  ok   skill forbids calling opencode
+  ok   skill says continue, not recreate
+  ok   skill has no stale launcher ref
+  ok   skill keeps todowrite wildcard narrow
+  ok   skill names permission failure evidence
+== doctor must report, not abort ==
+  ok   doctor reports every check on a bare machine
+  ok   doctor exits nonzero on a bare machine
+  ok   doctor prints no stray error lines
+  ok   doctor knows Windows from Linux
+  ok   server control works on Windows
+  ok   Linux start waits through delayed readiness
+  ok   Linux start fails bounded with recovery guidance
+  ok   blocking health probes obey the real startup deadline
+  ok   complete start operation shares one startup deadline
+  ok   Windows start waits for health
+== platform-correct doctor checks ==
+  ok   password check is platform-aware
+  ok   secret check targets real files
+  ok   no vacuous systemd-only secret check
+  ok   doctor sweeps the glm-claude vestige
+  ok   ubuntu setup sweeps it too
+  ok   windows setup sweeps it too
+== a down server must explain itself ==
+  ok   health failure names a next command
+  ok   health failure names the setup script
+  ok   health failure shows recent log lines
+  ok   review path names a local dependency failure
+  ok   review path does not blame the provider
+  ok   review path gives the recovery command
+== server start means healthy, not merely launched ==
+  ok   linux start waits through delayed readiness
+  ok   windows start waits through delayed readiness
+  ok   already healthy start does not relaunch
+  ok   linux launch failure is nonzero
+  ok   windows launch failure is nonzero
+  ok   never healthy start is bounded and nonzero
+  ok   linux restart also waits for readiness
+== completion rule ==
+  ok   requires finish==stop
+  ok   requires two idle polls
+  ok   detects the 400 permission wedge
+  ok   names the stuck tool on timeout
+  ok   default timeout remains 1800s
+  ok   new passes review directory
+  ok   ask passes review directory
+  ok   ask reuses recorded review directory
+  ok   boundary comes from prepare_review
+  ok   new reviews always use a private copy
+  ok   new review records its fixed directory
+  ok   legacy live-checkout session warns once
+  ok   prepare_review builds an evidence packet
+  ok   review prompt points at the packet
+  ok   packet does not fence the reviewer in
+  ok   wrapper derives head itself
+  ok   caller sha is only ever checked
+  ok   stale head is announced
+  ok   session is created on the safe boundary
+  ok   implement passes sandbox directory
+== permission classifier ==
+  ok   empty data envelope is valid
+  ok   unmeasured bare array fails closed
+  ok   in-directory read is approved
+  ok   in-directory list is approved
+  ok   in-directory glob is approved
+  ok   in-directory grep is approved
+  ok   measured todowrite shape is approved
+  ok   todowrite wildcard is action-local
+  ok   todowrite rejects a path resource
+  ok   todowrite rejects missing save shape
+  ok   todowrite rejects broader save shape
+  ok   implementation root is classified
+  ok   outside-directory resource fails
+  ok   mixed resource set fails closed
+  ok   external-directory action fails
+  ok   unknown action fails
+  ok   missing id fails
+  ok   missing resources fails
+  ok   malformed JSON fails
+  ok   unsupported envelope fails
+  ok   InvalidRequestError fails
+  ok   other HTTP failure fails
+  ok   unknown mode fails
+  ok   diagnostic redacts sensitive fields
+  ok   diagnostic is capped after redaction
+  ok   diagnostic marks truncation
+  ok   failed approval fails closed
+  ok   uncleared approval fails by third poll
+== permission failure is diagnosable (step 1) ==
+  ok   every classifier branch is distinguishable
+  ok   no branch falls through unclassified
+  ok   unknown action branch names its action
+  ok   failure detail is valid JSON with a branch id
+  ok   failure detail redacts secrets
+== transport failure is not a permission failure (step 7) ==
+  ok   a dropped local poll is retried to the bound
+  ok   a poll that recovers stops retrying
+  ok   status 000 is classified as transport
+  ok   status 000 is not called a permission problem
+  ok   transport branch has its own id
+  ok   a real HTTP 500 still fails closed as permission
+  ok   transport message names doctor and server status
+  ok   transport message does not claim a permission failure
+  ok   running outside read is deterministic
+  ok   running inside read remains legitimate
+  ok   unmeasured running input is not guessed
+== implementation job records ==
+  ok   implement_record_exists_before_clone_creation
+  ok   implement_list_and_show_are_type_and_state_aware
+  ok   concurrent_same_name_implement_creates_one_job_and_session
+  ok   implement_record_is_private_and_contains_no_prompt_or_secret
+  ok   implement_ask_is_rejected_as_one_shot
+  ok   delete_refuses_active_implementation_job
+  ok   starting-job abort is recorded before a server session exists
+  ok   starting-job abort has no clone to delete
+  ok   pre-resource abort records terminal state
+  ok   abort_targets_exact_active_implementation_session
+  ok   abort_never_deletes_live_clone_from_control_process
+  ok   abort owner records terminal state and cleans exact resources
+  ok   aborted-no-changes outcome creates no patch
+  ok   interrupt_records_terminal_state_and_cleans
+  ok   aborted-partial exports before cleanup
+  ok   implement_record_adds_clone_and_session_atomically
+  ok   normal_and_no_change_completion_clean_resources
+  ok   complete run keeps distinct normal artifacts
+  ok   provider_and_permission_failures_record_failure_and_clean
+  ok   failed-no-changes is truthful and has no empty patch
+  ok   failed-partial exports and stays nonzero
+  ok   untracked incomplete patch applies to captured base
+  ok   usage-limit-partial is truthful and binary
+  ok   incomplete report is clear bounded and secret-safe
+  ok   in-progress or failed usage is never zero
+  ok   usage-limit-no-changes creates no patch
+  ok   timed-out-partial is truthful
+  ok   timed-out-no-changes is truthful
+  ok   unsupported permission fails on first exposed poll
+  ok   permission failure records truthful terminal evidence
+  ok   permission failure exports incomplete work then cleans
+  ok   permission failure records the exact classifier branch
+  ok   show exposes the durable failure detail
+  ok   a dropped poll is recorded as transport, not permission
+  ok   transport failure still preserves incomplete work
+  ok   transport failure message avoids permission wording
+  ok   permission-failed-no-changes creates no patch
+  ok   failed job cannot be deleted before cleanup finishes
+  ok   metadata_failure_cleans_new_server_session
+  ok   partial clone failure is not mislabeled as recovery work
+  ok   Windows clone enables long paths before checkout
+  ok   Windows exact cleanup uses Git long-path removal
+  ok   patch_failure_preserves_recovery_evidence
+  ok   incomplete-destination records artifact-export-failed
+  ok   incomplete-destination gives loud exact recovery
+  ok   incomplete-move records artifact-export-failed
+  ok   incomplete-move gives loud exact recovery
+  ok   incomplete-metadata records artifact-export-failed
+  ok   incomplete-metadata gives loud exact recovery
+  ok   artifact export requires exact live lock ownership
+  ok   repeated finalization is idempotent
+  ok   dead_owner_reconciliation_requires_all_safety_checks
+  ok   dead permission-failure owner completes cleanup without losing cause
+  ok   live_owner_and_forged_or_outside_paths_are_never_swept
+  ok   different_implementation_names_run_independently
+  ok   abort_completion_race_records_observed_truth
+  ok   ambiguous_server_state_is_reported_not_deleted
+  ok   terminal_record_can_be_cleared_for_safe_name_reuse
+== shared-server attach ==
+  ok   ai-glm loads when getent fails/absent
+  ok   ai-glm parses cleanly
+  ok   own password wins over the shared one
+  ok   fallback never copies the password
+  ok   fallback is limited to a named user
+  ok   never attaches to its own account
+  ok   liveness stamping behaves: poll always, activity only on real provider output
+  ok   touch_liveness is driven by the assistant message, not /session/status
+  ok   both review call sites arm TURN_META before await_turn
+
+244 passed, 0 failed
+
+===== BASH test-ai-grok-implement.sh =====
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   happy_path_exits_zero
+  ok   happy_path_emits_terminal_json
+  ok   diff_survives_cleanup
+  ok   diff_holds_grok_work
+  ok   diff_excludes_wrapper_scratch
+  ok   never_passes_worktree_flag
+  ok   never_uses_permission_mode_auto
+  ok   max_turns_always_present
+  ok   cwd_is_native_path
+  ok   cleanup_removes_worktree_dir
+  ok   cleanup_proves_removal_git
+  ok   cleanup_removes_branch
+  ok   primary_checkout_unchanged
+  ok   primary_checkout_clean
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   detached_head_run_succeeds
+  ok   detached_head_uses_origin_main
+  ok   worktree_exposes_fresh_content
+  ok   keep_then_cleanup
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   detached_head_without_remote_refuses
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   cancelled_is_failure
+  ok   failure_preserves_worktree
+  ok   failure_preserves_diff
+  ok   cleanup_refuses_unique_work
+  ok   cleanup_force_removes
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   empty_diff_is_failure
+  ok   empty_diff_reason_recorded
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   exit_zero_without_json_is_failure
+  ok   refuses_arbitrary_flags
+  ok   doctor_reports_version
+
+29 passed, 0 failed
+
+===== BASH test-ai-grok-review.sh =====
+  ok   missing local runtime is named distinctly
+  ok   local runtime failure does not blame Grok
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+== shared_upstream_lock_visibility_and_truthful_interrupt ==
+  ok   slow_fixture_reached_the_provider_before_mode_changes
+  ok   equivalent_github_clones_share_one_paid_review_lock
+  ok   live doctor shares the repository paid-work lock
+  ok   https_ssh_dotgit_and_case_normalize_to_one_upstream
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'x', LF will be replaced by CRLF the next time Git touches it
+  ok   unrelated_upstreams_do_not_block_each_other
+  ok   list_shows_active_reviews_across_clones_and_callers
+  ok   list_reports_start_elapsed_pid_checkout_and_owner_state
+  ok   slow_turn_emits_truthful_bounded_heartbeats
+  ok   terminal_stop_reason_remains_the_only_completion_rule
+  ok   configured_timeout_stops_the_local_grok_process
+  ok   timed_out_paid_work_remains_blocked
+  ok   launcher_exit_timeout_kills_the_tracked_orphan_worker
+  ok   orphan_timeout_remains_fail_closed_for_remote_work
+  ok   dead_owner_becomes_remote_uncertain
+  ok   dead_owner_lock_is_preserved
+  ok   malformed_lock_is_not_reclaimed
+  ok   legacy_live_lock_for_same_upstream_blocks_rollout
+  ok   interrupt_fixture_reached_the_provider
+  ok   signal_releases_owned_locks_and_warns_about_remote_turn
+  ok   directed signal terminates and reaps the owned local Grok child
+  ok   remote_uncertainty_blocks_duplicate_paid_turn
+  ok   missing_terminal_result_fails
+  ok   missing_terminal_result_retains_uncertainty_lock
+  ok   missing_terminal_result_blocks_second_paid_turn
+  ok   marker_write_failure_preserves_paid_work_lock
+  ok   marker_write_failure_still_blocks_second_paid_turn
+ai-grok-review tests
+== debate_contract_and_skill_guidance ==
+  ok   debate template exists
+  ok   template has Goal
+  ok   template has Disputed claim
+  ok   template has Other model's reasoning
+  ok   template has Current plan or diff paths
+  ok   template has New test or runtime evidence
+  ok   template has Constraints
+  ok   template has What changed since the last turn
+  ok   template has Claim-by-claim check
+  ok   template has Material objections
+  ok   template has Required correction
+  ok   template has Consensus question
+  ok   template has Consensus ledger
+  ok   template has Agreed decisions
+  ok   template has Rejected alternatives
+  ok   template has Unresolved objections
+  ok   template has Evidence still needed
+  ok   template has Last verified commit and path state
+  ok   template requires current path re-read
+  ok   Grok skill uses shared template
+  ok   GLM skill uses shared template
+  ok   Grok debate reuses exact named session
+  ok   Grok debate has three-rebuttal bound
+  ok   Grok debate has default cost ceiling
+  ok   Grok debate reports unresolved objections
+  ok   Grok skill keeps frozen prefix
+  ok   Grok skill forbids automatic turn increases
+  ok   Grok skill removes higher-turn recovery
+  ok   wrapper still reports cached tokens
+  ok   wrapper still reports cost
+== usage_and_exit_codes ==
+  ok   no args exits 2
+  ok   unknown command exits 2
+  ok   help exits 0
+== max_turns_always_present / permissions_are_fixed ==
+  ok   new passes --max-turns
+  ok   new pins the model
+  ok   new denies Edit
+  ok   new denies Bash
+  ok   new disables web search
+  ok   new passes --no-memory
+  ok   review disables ambient MCP, hook, and compatibility session imports
+  ok   inspect and paid children share one empty user home separate from GROK_HOME
+  ok   inspect and paid children both retain credential reachability through GROK_HOME
+  ok   Windows reviewer isolates USERPROFILE for the native Grok child
+  ok   Windows reviewer isolates every XDG root for the native Grok child
+  ok   review denies MCP meta-tools
+  ok   review disables subagents
+  ok   review runs from a neutral non-repository cwd
+  ok   isolation inspection fails closed on schema drift
+  ok   isolation inspection rejects an enabled compatibility hook
+  ok   hung isolation inspection is bounded and its process tree is terminated
+  ok   never uses permission-mode auto
+  ok   never allows Bash
+  ok   never uses --always-approve
+  ok   uses --prompt-file (no ARG_MAX)
+  ok   ask passes --max-turns
+  ok   ask resumes the session
+  ok   ask keeps the frozen permissions
+== no_flag_passthrough ==
+  ok   arbitrary grok flags are rejected
+  ok   --always-approve is rejected
+== prefix_stable_across_turns ==
+  ok   prefix minus --max-turns is byte-identical
+  ok   --max-turns override is accepted on ask
+== await_blocks_until_terminal_json (the regression test) ==
+  ok   await_result succeeds once JSON is terminal
+  ok   await_result blocked through empty+partial (5s)
+== stop_reason handling ==
+  ok   cancelled exits non-zero
+  ok   cancelled has cancellation recovery message
+  ok   cancelled message names the session
+  ok   cancelled does not recommend resume
+  ok   cancelled recommends a fresh session
+  ok   unknown stopReason exits non-zero
+  ok   missing sessionId exits non-zero
+  ok   missing sessionId cannot strand a temporary user profile
+  ok   current EndTurn spelling succeeds
+== json_field_extraction ==
+  ok   --json emits the raw result
+  ok   null top-level model is fine
+  ok   usage line reports tokens
+  ok   usage line reports cached
+  ok   usage line reports cost
+  ok   model reported by prefix
+== verdict_delimiter_extraction ==
+  ok   verdict section is emitted
+  ok   verdict comes first
+  ok   findings are NOT discarded
+  ok   findings are clearly labelled
+  ok   missing delimiter warns
+== duplicate_new_is_refused (per-repo in-flight lock) ==
+  ok   a second concurrent review is refused
+  ok   refusal names the running review
+== reviews_dir_safety ==
+  ok   review file written when .ai is ignored
+warning: in the working copy of 'f', LF will be replaced by CRLF the next time Git touches it
+  ok   refuses to write into a repo that would commit it
+  ok   and writes no file there
+== session bookkeeping ==
+  ok   list shows a session
+  ok   list shows cumulative cost
+  ok   show emits json
+  ok   transcript works
+  ok   transcript reads the isolated reviewer session home
+  ok   a reaped supervisor PID is disarmed before later failure handling
+  ok   signal-window cleanup removes the temporary profile without an active child
+  ok   live doctor cleans its neutral runtime directory
+  ok   installed symlink resolves the repository-owned process supervisor
+  ok   timeout restores shell fail-fast state before returning
+  ok   POSIX supervisor escalates before the wrapper fallback
+  ok   dead local-only session lock is safely reclaimed without inventing paid uncertainty
+  ok   delete removes the record
+== doctor ==
+  ok   doctor is free (no billable probe by default)
+  ok   doctor reports the resolved binary
+  ok   ambiguous auth does not blame grok doctor
+== linked worktree boundary (2026-08-17 regression) ==
+  ok   worktree run hands over a directory
+  ok   handed directory is not the raw worktree
+  ok   handed directory owns its git control files
+  ok   handed directory carries the worktree's untracked work
+  ok   delete removes the snapshot
+  ok   ordinary clone is reviewed in a private copy
+  ok   ordinary-clone copy owns its git controls
+  ok   ordinary-clone session records its fixed directory
+  ok   ordinary-clone continuation reuses the recorded copy
+== evidence packet (issue #34, step 3) ==
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   packet is built in the review directory
+  ok   packet carries the real head sha
+  ok   packet is sealed with a hash
+  ok   packet verifies
+  ok   packet never enters the repository
+  ok   prompt points at the manifest
+  ok   prompt does not point at a shared packet
+  ok   prompt keeps the caller's own brief
+  ok   prompt still demands the verdict heading
+  ok   prompt does NOT fence the reviewer in
+  ok   meta records the head sha
+  ok   meta records the base sha derived by the wrapper
+  ok   meta records the packet hash
+  ok   wrong --assert-head is refused
+  ok   refusal names both shas
+  ok   right --assert-head is accepted
+
+passed 157, failed 0
+
+===== BASH test-ai-install-manifest.sh =====
+PASS: install manifest records source, schema, owned symlinks, config, and hashes
+
+===== BASH test-ai-install-skills.sh =====
+1/9 shared directory absent
+2/9 dual-client install and counts
+3/9 dry-run makes no changes
+4/9 collision fails before mutation
+5/9 orphans quarantine by default, marker-scoped
+6/9 reconciliation fixture matrix: absent, identical, extended, conflicting
+7/9 unmanaged directory is backed up before adoption, dropped files removed
+8/9 dry-run previews the classification and writes nothing
+9/9 globals: never clobbered without --adopt-globals, backed up with it
+PASS: ai-install-skills
+
+===== BASH test-ai-kimi.sh =====
+  ok   missing local runtime is never a provider failure
+  ok   local runtime failure says Kimi was not contacted
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+ai-kimi tests
+== usage_and_exit_codes ==
+  ok   no args exits 2
+  ok   unknown command exits 2
+  ok   help exits 0
+== review_uses_readonly_agent (structural read-only) ==
+  ok   review passes --agent-file
+  ok   review pins the model
+  ok   review uses stream-json
+  ok   never uses --yolo
+  ok   never uses --auto
+  ok   never uses -c/--continue
+  ok   preflight created an isolated Kimi sessions directory
+  ok   review runs in a private workspace
+== durable_review_jobs ==
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-durable-2183875b1d6d/.ai-review-kimi-claude-durable (base 4b825dc642cb, head 0f673b97ce3f, sha 948064f9f0cc)
+  ok   start returns a durable job id
+  ok   status reports a durable phase
+  ok   worker finalizes only on resume hint
+  ok   durable job records measured preparation and provider timing
+  ok   result is available after terminal proof
+  ok   completed review has one hashed canonical artifact
+  ok   canonical and optional repository mirror both exist
+  ok   repeated result retrieval creates no duplicate
+  ok   recovery hashes and restores a proven complete artifact
+  ok   job remains retrievable from another clone of the same remote
+  ok   fallback retrieval never crosses caller identities
+  ok   recovery cannot approve a worker-classified safety failure
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-quota-review-2183875b1d6d/.ai-review-kimi-claude-quota-review (base 4b825dc642cb, head 0f673b97ce3f, sha a631ed37785c)
+  ok   durable review classifies quota separately from authentication
+  ok   quota failure preserves an incomplete no-verdict artifact
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-durable-timeout-2183875b1d6d/.ai-review-kimi-claude-durable-timeout (base 4b825dc642cb, head 0f673b97ce3f, sha 1436744d1eb2)
+  ok   durable wall deadline records timed-out
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-durable-cancel-2183875b1d6d/.ai-review-kimi-claude-durable-cancel (base 4b825dc642cb, head 0f673b97ce3f, sha 2774b9c958e9)
+  ok   durable cancel is worker-confirmed
+  ok   durable cancel keeps an atomic sidecar signal
+  ok   cancelled review removes its private prompt and launchers
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-verdict-defect-2183875b1d6d/.ai-review-kimi-claude-verdict-defect (base 4b825dc642cb, head 0f673b97ce3f, sha 0a5c77fd80d0)
+  ok   answer defect is typed and removes its private prompt and launchers
+  ok   detached launch failure refuses immediately
+  ok   detached launch failure is durable and typed
+  ok   detached launch failure removes its private prompt and launchers
+  ok   pre-worker shell errors are covered by the transient cleanup trap
+  ok   prompt-build failure is nonzero and removes its private prompt
+  ok   late worker refuses a removed prompt before provider resolution
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-artifact-finalization-failure-2183875b1d6d/.ai-review-kimi-claude-artifact-finalization-failure (base 4b825dc642cb, head 0f673b97ce3f, sha b381a70ef40a)
+  ok   worker-level artifact failure remains recovery-required
+  ok   worker emergency exit removes its private prompt and launchers
+  evidence packet: /tmp/tmp.2KMwQDSYgV/review-sandboxes/kimi-claude-directory-mismatch-2183875b1d6d/.ai-review-kimi-claude-directory-mismatch (base 4b825dc642cb, head 0f673b97ce3f, sha a2ca41d7438b)
+  ok   directory binding failure is typed
+  ok   unwritable Kimi home refuses before launch
+  ok   denial gives the main-task hand-back
+  ok   review accepts sealed evidence options
+  ok   named review resumes in its original directory
+  ok   architecture review uses a decision contract
+  ok   architecture review does not receive the diff preamble
+  ok   architecture continuation preserves its decision contract
+  ok   broad pre-provider test command warns visibly
+  ok   help documents evidence base
+  ok   Windows detached worker accepts spaced state paths
+== debate contract and context rules ==
+  ok   template has Goal
+  ok   template has Disputed claim
+  ok   template has Other model.s reasoning
+  ok   template has Current plan or diff paths
+  ok   template has New test or runtime evidence
+  ok   template has Constraints
+  ok   template has What changed since the last turn
+  ok   template has Claim-by-claim check
+  ok   template has Material objections
+  ok   template has Required correction
+  ok   template has Consensus question
+  ok   template has Consensus ledger
+  ok   skill requires exact-session ask
+  ok   skill has same-session recovery
+  ok   skill requires current-artifact re-read
+  ok   skill forbids numerical metric claims
+  ok   skill bounds rebuttals
+== review_refuses_without_agent_file ==
+  ok   review refuses to run with no read-only profile
+  ok   and says why
+== ask_resumes_and_drops_the_agent ==
+  ok   ask resumes with -r
+  ok   ask does NOT pass --agent-file
+  ok   origin changes cannot move a persistent review to a different paid lock
+  ok   origin mismatch explains safe recovery
+== caller separation ==
+  ok   Claude record still resolves
+  ok   Codex record is separate
+  ok   review and implementation names cannot collide
+  ok   mode collision starts no provider turn
+== same-name implementation concurrency ==
+  ok   same-name concurrent implementation is refused
+  ok   concurrent refusal starts no second provider turn
+  ok   concurrency test leaves no disposable worktree
+== legacy implementation sessions are not guessed ==
+  ok   legacy implement resume is refused
+  ok   refusal gives restart guidance
+== committed implementation work is preserved and cleaned ==
+  ok   committed changes are in patch
+  ok   committed patch applies to original base
+  ok   implementation worktree is removed
+  ok   implementation agent profile is used
+== persistent implementation resumes exact conversation and code ==
+  ok   persistent metadata is version 2
+  ok   canonical patch has first-turn text and binary
+  ok   implementation ask uses exact session id
+  ok   implementation stub executed the continuation branch
+  ok   implementation ask warns that it is a write run
+  ok   generation advances after durable continuation
+  ok   cumulative patch contains both turns
+  ok   canonical hash matches exact bytes
+  ok   canonical hash changed after continuation
+  ok   real repository remains unchanged
+  ok   every persistent turn removes disposable worktree
+  ok   implement existing name shares continuation path
+  ok   state persistence failure remains unsuccessful
+  ok   state failure keeps prior canonical patch
+  ok   state failure marks recovery required
+  ok   state failure cleans disposable worktree after durable human patch
+  ok   recovery-required blocks exact resume
+  ok   blocked resume gives explicit reset command
+  ok   explicit reset starts a proven new conversation generation
+  ok   moved checkout persistent ask succeeds
+  ok   moved checkout keeps original session state directory
+  ok   list discovers a persistent session after checkout move
+  ok   implement finds moved persistent session instead of duplicating it
+  ok   implement after move advances the original record
+  ok   ten-turn conversation keeps exact identity and one state record
+  ok   ten-turn conversation leaves one registered worktree
+  ok   failed continuation remains unsuccessful
+  ok   failed continuation exports cumulative recovery and turn-only patches
+  ok   failed continuation report describes only this turn
+  ok   delete cleans hash-mismatched state but keeps human artifacts
+  ok   implement interrupt removes worktree
+  ok   implement interrupt removes owner record
+== incomplete implementation recovery ==
+  ok   usage limit with changes returns nonzero
+  ok   usage limit exports incomplete patch
+  ok   usage limit exports incomplete report
+  ok   incomplete patch is binary
+  ok   incomplete patch applies to original base
+  ok   usage state is truthful
+  ok   report marks work incomplete
+  ok   report records base and requested-model warning
+  ok   report uses unavailable for missing session and usage
+  ok   report gives manual apply checks
+  ok   report is bounded and excludes prompt
+  ok   failed run never writes the real repository
+  ok   incomplete export cleans worktree
+  ok   incomplete export cleans owner record
+  ok   network failure with changes returns nonzero
+  ok   network failure exports generic incomplete patch
+  ok   generic report excludes raw provider text
+  ok   failure before changes returns nonzero
+  ok   failure before changes creates no empty patch
+  ok   failure before changes is named
+  ok   timeout with changes returns nonzero
+  ok   timeout exports incomplete patch
+  ok   interrupt with changes exports incomplete patch
+  ok   interrupt with changes cleans worktree
+== incomplete artifact failure safety ==
+  ok   destination export failure returns nonzero
+  ok   destination export failure preserves exact worktree
+  ok   destination export failure reports exact path
+  ok   doctor names preserved destination recovery
+  ok   move export failure returns nonzero
+  ok   move export failure preserves exact worktree
+  ok   move export failure reports exact path
+  ok   doctor names preserved move recovery
+== finalizer and owner-record hardening ==
+  ok   forged owner path is never deleted
+  ok   repeated finalizer is idempotent
+== no_flag_passthrough ==
+  ok   --yolo is rejected
+  ok   --auto is rejected
+== await_requires_resume_hint (the regression test) ==
+  ok   await succeeds once the resume hint arrives
+  ok   await blocked through an answer with no terminal record (5s)
+== a run that never completes is a failure ==
+  ok   no resume hint exits non-zero
+  ok   message names the terminal record
+  ok   empty output exits non-zero
+== a review that mutates the tree is caught (defence in depth) ==
+  ok   a read-only review that wrote is a hard failure
+  ok   message says the restriction is not holding
+== output handling ==
+  ok   verdict is emitted
+  ok   the body above the verdict is NOT discarded
+  ok   no token/cost is claimed
+== #1220: silence must never read as APPROVE ==
+  ok   a stream with no verdict is reported as a defect
+  ok   a stream with no answer at all is reported as a defect
+  ok   a complete review is NOT flagged as a defect
+  ok   the text above the verdict is still emitted
+== duplicate run refused (per-repo lock) ==
+  ok   a second concurrent run is refused
+  ok   refusal names the active run
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+  ok   equivalent HTTPS and SSH remotes share one paid-review lock
+  ok   remote .git suffix normalization is case-insensitive
+  ok   SCP-style remotes accept arbitrary valid SSH usernames
+  ok   authenticated HTTPS remotes share the canonical paid-review lock
+  ok   case-distinct repository paths cannot share a persistent review
+  ok   chained relative local origins resolve from each owning repository
+  ok   status gives one friendly missing-job error
+  ok   status hides raw parser/file errors
+  ok   logs gives one friendly missing-job error
+  ok   logs hides raw parser/file errors
+  ok   result gives one friendly missing-job error
+  ok   result hides raw parser/file errors
+  ok   wait gives one friendly missing-job error
+  ok   wait hides raw parser/file errors
+== bookkeeping and doctor ==
+  ok   list shows the session
+  ok   list shows the mode
+  ok   show emits json
+  ok   delete removes it
+  ok   delete removes the matching private snapshot
+  ok   doctor resolves binary
+  ok   doctor shows the profile
+  ok   doctor reports auth
+  ok   review file was written
+  ok   transcript writes a named archive
+  ok   transcript archive exists
+  ok   transcript archive is not binary stdout
+
+passed 197, failed 0
+
+===== BASH test-ai-machine-tools.sh =====
+PASS: machine tool catalog, repair, doctor, bootstrap, and skill contracts
+
+===== BASH test-ai-memory-health.sh =====
+  ok   clean project exits 0
+  ok   clean project reports clean
+  ok   unindexed memory exits 1
+  ok   unindexed memory is named
+  ok   broken index line detected
+  ok   dangling link detected
+  ok   missing frontmatter detected
+  ok   missing index detected
+  ok   possible duplicate detected
+  ok   oversized index detected
+  ok   stale memory detected at 30 days
+  ok   stale memory not flagged at 99999 days
+  ok   audit changed nothing on disk
+  ok   --out writes the report
+  ok   --out report names the machine
+  ok   unknown option exits 2
+  ok   missing projects dir exits 2
+
+17 passed, 0 failed
+
+===== BASH test-ai-memory-index-hook.sh =====
+  ok   unindexed memory produces a warning
+  ok   warning is valid JSON
+  ok   warning reaches the model as context
+  ok   warning reaches the user as a message
+  ok   indexed memory is silent
+  ok   MEMORY.md itself is silent
+  ok   ordinary source file is silent
+  ok   path merely containing 'memory' is silent
+  ok   missing index is reported
+  ok   empty stdin exits 0
+  ok   malformed JSON exits 0
+  ok   payload without a path exits 0
+  ok   nonexistent file exits 0
+  ok   installer registers the hook
+  ok   installer keeps the pre-existing hook
+  ok   installer keeps unrelated settings
+  ok   installer leaves valid JSON
+  ok   installer backs the file up
+  ok   installer copies the hook script
+  ok   installer is idempotent
+  ok   --check passes once installed
+  ok   installer fails on unparseable settings
+  ok   installer did not rewrite the broken file
+
+23 passed, 0 failed
+
+===== BASH test-ai-memory-sync.sh =====
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/hub.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/local.md', LF will be replaced by CRLF the next time Git touches it
+To C:/Users/ahazan/AppData/Local/Temp/tmp.uoOABtXNEh/private.git
+   e0075ec..ddb0356  HEAD -> main
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+To C:/Users/ahazan/AppData/Local/Temp/tmp.uoOABtXNEh/private.git
+   ddb0356..4aa6158  HEAD -> main
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/hub--edge-dev.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/orphan.md', LF will be replaced by CRLF the next time Git touches it
+To C:/Users/ahazan/AppData/Local/Temp/tmp.uoOABtXNEh/private.git
+   4aa6158..b33ca2e  HEAD -> main
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/MEMORY.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'memory/sample/.forgotten', LF will be replaced by CRLF the next time Git touches it
+To C:/Users/ahazan/AppData/Local/Temp/tmp.uoOABtXNEh/private.git
+   b33ca2e..804bd15  HEAD -> main
+PASS: private memory sync converges losslessly and preserves every failure state
+
+===== BASH test-ai-model-call.sh =====
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+== ai-model-call and ai-review gate
+  ok   read-only plan command succeeds
+  ok   writable implementation command succeeds
+  ok   review routes through supported Claude gate
+  ok   review output is copied as immutable artifact
+  ok   existing output is never replaced
+  ok   unsupported Codex reasoning is refused
+  ok   shell operators in config are refused
+  ok   advisory provider cannot satisfy gate
+  ok   unknown stage is rejected
+
+9 passed, 0 failed
+
+===== BASH test-ai-muse.sh =====
+  ok   wrapper parses
+  ok   setup parses
+  ok   exact Contributor model is pinned
+  ok   persistent new command exists
+  ok   persistent ask command exists
+  ok   ask resumes exact session
+  ok   same named session is locked across turns
+  ok   failed lock acquisition cannot remove its owner
+  ok   caller names are path-safe
+  ok   completion requires stop
+  ok   source state is checked after every turn
+  ok   temporary files use a securely created directory
+  ok   report writes fail closed
+  ok   one held-open report staging file is reserved before provider contact and revalidated
+  ok   delete takes the same session lock
+  ok   compatibility review still requires a verdict
+  ok   review uses a disposable copy
+  ok   review builds an evidence packet
+  ok   old generated reports are removed from each snapshot
+  ok   local runtime failure is distinct
+  ok   config pins exact protected provider and model
+  ok   runtime revalidates protected configuration
+  ok   doctor validates the full protected configuration
+  ok   live doctor requires an exact bounded provider response
+  ok   installed profile must exactly match its trusted source
+  ok   1Password reads use one global credential lock
+  ok   Muse key reaches the provider through a private handoff, never argv or the heartbeat parent
+  ok   new session metadata uses atomic replacement
+  ok   review profile explicitly removes dangerous tools
+  ok   caller identity is explicit
+  ok   shared skill selects the real client and all recovery guidance carries it
+  ok   report destination is proven exact, ignored, untracked and unlinked
+  ok   private Windows ACL is revalidated even when a marker already exists
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.ai/reviews/historic.md', LF will be replaced by CRLF the next time Git touches it
+  ok   destination replacement rejects publication, cleans moved staging, and never writes outside
+  ok   offline doctor does not contact the provider
+  ok   live doctor contacts Muse and proves its exact response
+  ok   Muse provider receives only its own key and the minimal runtime environment
+  ok   Muse key is absent from the provider process chain arguments
+  ok   live doctor rejects unexpected provider text
+  ok   post-open staging substitution is rejected against the held descriptor
+  ok   exclusive pre-open staging reservation rejects an attacker path without truncation
+  ok   interrupt after provider exit but before classification marks outcome uncertain
+  ok   HUP stops and waits for the provider child before releasing an uncertain session
+  ok   exact Muse report target creation is refused without overwrite
+  ok   interruption during final publication keeps session uncertain and publishes no report
+  ok   late report-directory replacement fixture unavailable on this host
+  ok   staging-file replacement is rejected and cannot publish attacker bytes
+  ok   cleanup preserves a same-basename file it does not own
+  ok   cleanup finds and removes its moved reserved inode under a different basename
+  ok   doctor rejects unknown options
+  ok   zero heartbeat interval is rejected before provider contact
+  ok   nonnumeric heartbeat interval is rejected before provider contact
+  ok   invalid heartbeat creates no stuck new-session metadata
+  ok   hostile installed profile is rejected before a turn
+  ok   hostile provider package is rejected before a turn
+  ok   tracked historic reports do not block a new exact destination
+  ok   old credential lock without an owner is reconciled
+  ok   new returns first response
+  ok   provider child never inherits the writable report descriptor
+  ok   new stores exact session id
+  ok   invalid heartbeat leaves an existing session active without provider contact
+  ok   ask resumes and returns remembered response
+  ok   list shows named session
+  ok   show returns stored identity
+  ok   transcript exports exact session
+  ok   reports are written for both turns
+  ok   Muse report storage has a private Windows ACL
+  ok   reports bind the exact reviewed code
+  ok   source changes reject an advanced follow-up
+  ok   rejected follow-up is marked for recovery
+  ok   delete refuses an active session
+  ok   refused delete preserves the active lock
+  ok   delete removes metadata and snapshot
+  ok   dead lock owner is reconciled
+  ok   old lock with missing owner is reconciled
+  ok   source changes during a turn reject stale output
+  ok   rejected stale turn preserves its Muse session
+  ok   pending session cannot continue without reconciliation
+  ok   explicit reconciliation re-enables continuation
+  ok   unsafe caller names are rejected
+  ok   unsafe names are rejected by every metadata command
+  ok   provider failure is rejected
+  ok   malformed provider output is rejected
+  ok   partly malformed output preserves a recoverable session
+  ok   missing completion is rejected
+  ok   provider timeout is rejected
+  ok   slow turn publishes durable in-progress state before completion
+  ok   slow turn emits bounded progress
+  ok   failed provider turns preserve incomplete evidence
+  ok   failed follow-up is marked uncertain
+  ok   uncertain session cannot continue without reconciliation
+  ok   interrupted turn state cannot continue without reconciliation
+  ok   wrong resumed session is rejected without replacing canonical identity
+  ok   mixed-session event stream is rejected
+  ok   conflicting start-event session is rejected
+  ok   delete safely retries after provider was already removed
+  ok   unconfirmed provider deletion preserves recovery record
+  ok   deleted provider session cannot be reconciled
+  ok   incomplete reports omit raw provider bodies
+  ok   compatibility review reads piped requests
+  ok   compatibility review rejects a stopped answer without verdict
+  ok   compatibility review rejects a verdict before the final line
+  ok   compatibility review rejects an undefined verdict
+  ok   compatibility review rejects a legacy undefined verdict
+  ok   compatibility review accepts an explicit verdict
+
+105 passed, 0 failed
+
+===== BASH test-ai-private-config.sh =====
+ok doctor validates a protected fixture
+ok value returns a manifest value
+ok path resolves an existing protected file
+ok unknown values fail closed
+ok unknown file keys fail closed
+ok path traversal is rejected
+ok fixture override is explicit and test-only
+ok production validation rejects the wrong upstream
+Passed: 8
+Failed: 0
+
+===== BASH test-ai-qwen.sh =====
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+ai-qwen tests
+  ok   syntax is valid
+  ok   private Windows ACL is revalidated even when a marker already exists
+  ok   help exits zero
+  ok   production Qwen executable overrides are refused
+  ok   provider installer applies Qwen child-process credential hardening
+  ok   behavioral verifier rejects a sanitizer that retains the credential
+  ok   initial review completes successfully
+  ok   Qwen preloader exposes the key only to direct runtime lookup and deletes its handoff
+  ok   Qwen runtime home has a private Windows ACL before provider contact
+  ok   review pins a Coding Plan supported Qwen model
+  ok   review uses safe mode
+  ok   review uses plan mode
+  ok   review excludes mutation tools
+  ok   review has all budgets
+  ok   review never uses yolo or continue
+  ok   review record stores exact session
+  ok   review record binds exact evidence identity
+  ok   review prompt requires the sealed packet first
+  ok   ordinary clone review uses a private copy
+  ok   private review copy owns its git controls
+  ok   first follow-up completes successfully
+  ok   follow-up resumes exact session
+  ok   follow-up keeps the recorded review copy
+  ok   follow-up re-verifies the exact stored packet before provider contact
+  ok   returned model mismatch is rejected
+  ok   rejected new review preserves provider identity and evidence as recovery-required
+  ok   rejected new review name cannot trigger duplicate spend
+  ok   follow-up model mismatch is rejected
+  ok   rejected model follow-up blocks continuation and preserves returned evidence
+  ok   recovery-required Qwen session cannot contact provider again
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   committed drift blocks before provider contact
+  ok   committed drift gives new-session guidance
+  ok   dirty drift blocks before provider contact
+  ok   untracked drift blocks before provider contact
+  ok   linked untracked evidence is rejected before provider contact (platform structural proof)
+  ok   FIFO untracked evidence is rejected without blocking or provider contact
+  ok   source drift during snapshot preparation blocks before provider contact
+  ok   follow-up source drift during packet rebuild blocks before provider contact
+  ok   same-turn dirty source drift rejects the response
+  ok   same-turn untracked source drift rejects the response
+  ok   same-turn committed source drift rejects the response
+  ok   same-turn source drift rejects a follow-up response
+  ok   source-drift follow-up also becomes recovery-required with evidence
+  ok   new paid turn is durable before untrappable termination
+  ok   crashed new review cannot be charged again under the same name
+  ok   follow-up is durable before untrappable termination
+  ok   crashed follow-up cannot resume the uncertain provider conversation
+  ok   interrupted follow-up becomes recovery-required with a preserved stream
+  ok   interrupted follow-up cannot be resumed again
+  ok   review mutation fails loudly
+  ok   mutation inside an already-dirty file fails
+  ok   private-copy mutation leaves owner work untouched
+  ok   implementation requires Qwen sandbox
+  ok   implementation preserves the complete shell/write/edit toolset
+  ok   implementation requires installed child-process credential hardening
+  ok   implementation exports a patch
+  ok   implementation does not touch live checkout
+  ok   implementation removes disposable worktree
+  ok   transcript copy stays in ignored review directory
+  ok   local transcript discovery receives no provider credential
+  ok   delete removes the private review copy
+  ok   doctor checks installed interface without a model call
+  ok   doctor fingerprints the repository credential preloader
+  ok   doctor fingerprint changes with installed runtime content
+  ok   offline doctor commands receive no provider credential
+  ok   missing governed authentication blocks before provider contact
+  ok   live doctor rejects a returned model mismatch
+  ok   live doctor requires terminal success from the pinned model
+  ok   missing terminal result fails
+== #1220: silence must never read as APPROVE ==
+  ok   a result with no verdict is reported as a defect
+  ok   a stream with no answer at all is reported as a defect
+  ok   a complete review is NOT flagged as a defect
+  ok   an invalid verdict word is rejected
+  ok   multiple verdict sections are rejected
+  ok   a non-final verdict is rejected
+  ok   raw JSON output cannot bypass verdict validation
+  ok   the text above the verdict is still emitted
+  ok   provider turns use a one-credential 1Password file
+  ok   Qwen child uses an explicit empty-environment allowlist
+  ok   preloaded-key Qwen process also receives no unrelated credentials
+  ok   Qwen receives only its dedicated home
+  ok   managed provider call gives op a one-variable reference file
+  ok   managed Qwen OS environment contains no real provider key
+  ok   Qwen secret handoff is removed after every provider turn
+  ok   agent-controlled Qwen children cannot inherit the real provider key
+  ok   real Qwen provider key uses one private self-deleting handoff and is removed before Qwen exec
+  ok   hostile shell startup hooks cannot observe managed credentials
+  ok   credentialed Qwen boundary uses only prevalidated absolute executables
+  ok   interrupted managed turn removes its temporary credential-reference file
+  ok   1Password service token is absent from wrapper post-call processes
+
+90 passed, 0 failed
+
+===== BASH test-ai-review-lifecycle.sh =====
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-review-lifecycle
+  ok   identity_normalizes_github_upstream
+  ok   identity_never_retains_remote_credential
+  ok   identity_has_exact_head_and_source_digest
+  ok   begin_runs_mandatory_preflight
+  ok   begin_records_running_state
+  ok   begin_records_exact_join_fields
+  ok   begin_holds_assignment_lock
+  ok   duplicate_run_is_rejected
+  ok   finish_records_terminal_state
+  ok   finish_releases_owned_lock
+  ok   finish_appends_scoreboard
+  ok   scoreboard_metadata_carries_source_digest
+  ok   incident_join_is_exact
+  ok   source_change_forces_blocked_verdict
+  ok   source_change_records_stale_failure
+  ok   preflight_failure_is_terminally_recorded
+  ok   preflight_failure_releases_lock
+  ok   scoreboard_failure_is_visible
+  ok   scoreboard_failure_retains_lock_for_recovery
+  ok   unsafe_run_id_is_rejected
+  ok   unknown_provider_is_rejected
+  ok   claude_is_a_supported_governed_provider
+  ok   unknown_command_is_rejected
+
+23 passed, 0 failed
+
+===== BASH test-ai-review-packet.sh =====
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/policy.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/policy.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'newfile.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-review-packet
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   build_prints_the_packet_directory
+  ok   packet_lives_inside_the_review_dir
+  ok   manifest_exists
+  ok   manifest_carries_full_head_sha
+  ok   manifest_carries_full_base_sha
+  ok   shas_are_40_characters
+  ok   base_selection_rule_is_stated
+  ok   verdict_is_bound_to_head
+  ok   changed_files_listed
+  ok   uncommitted_edits_listed
+  ok   untracked_files_listed
+  ok   packet_dir_not_listed_as_untracked
+  ok   patch_file_written
+  ok   patch_contains_committed_change
+  ok   patch_contains_uncommitted_change
+  ok   patch_not_inlined_into_manifest
+  ok   test_result_recorded
+  ok   test_duration_recorded
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   absent_tests_are_stated_not_implied
+  ok   absent_tests_are_not_a_pass
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   failing_tests_recorded_as_failed
+  ok   reviewer_retains_access_outside_the_packet
+  ok   manifest_invites_opening_other_files
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   pointer_is_listed_by_path
+  ok   policy_files_are_referenced_not_inlined
+  ok   missing_pointer_is_flagged_loudly
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   requires_the_literal_verdict_heading
+  ok   verdict_vocabulary_is_fixed
+  ok   provisional_verdict_is_requested
+  ok   provisional_cannot_approve
+  ok   hash_file_written
+  ok   fresh_packet_verifies
+  ok   hash_mismatch_fails_verification
+  ok   verify_rejects_a_non_packet
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'big.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'untracked.txt', LF will be replaced by CRLF the next time Git touches it
+  ok   oversized_patch_is_split_not_truncated
+  ok   split_is_announced_in_the_manifest
+  ok   split_has_directly_readable_numbered_parts
+  ok   split_packet_still_verifies
+  ok   long_untracked_list_spills_to_a_file
+  ok   spill_is_announced_in_the_manifest
+  ok   spill_states_the_real_total
+  ok   spill_drops_nothing
+  ok   manifest_stays_small_despite_the_list
+  ok   changed_file_is_still_visible
+  ok   packet_is_excluded_from_git
+  ok   exclusion_is_not_written_to_gitignore
+  ok   explicit_base_is_honoured
+  ok   bad_base_is_refused_loudly
+  ok   raw_worktree_is_refused
+  ok   worktree_refusal_names_the_fix
+  ok   sandbox_snapshot_is_accepted
+  ok   snapshot_packet_verifies
+  ok   packet_manifest_binds_snapshot_digest
+  ok   stale_snapshot_digest_is_refused
+  ok   stale_snapshot_packet_is_not_published
+  ok   remove_deletes_its_own_packet
+  ok   remove_is_idempotent
+  ok   remove_refuses_unmanaged
+  ok   setup: oversized run wrote a full patch
+  ok   rebuild does not inherit stale files
+  ok   rebuild verifies cleanly
+  ok   unmanaged packet dir is refused
+  ok   refusal is not silent
+  ok   unmanaged packet dir survives
+ai-review-packet: warning: the --tests command changed the working tree; the packet describes the tree AFTER the tests ran, and says so.
+  ok   tree change during tests is announced
+  ok   a clean test run is not falsely flagged
+  ok   manifest names the real checkout
+  ok   manifest says it is a snapshot
+  ok   concurrent_sessions_get_separate_packets
+  ok   first_packet_survives_the_second_build
+  ok   first_packet_still_verifies
+  ok   renamed_packet_file_breaks_seal
+  ok   restored_packet_name_verifies
+  ok   added_empty_file_breaks_seal
+  ok   nested_reserved_name_breaks_seal
+  ok   each_packet_keeps_its_own_brief
+  ok   packet_is_named_after_the_session_tag
+  ok   remove_targets_only_the_named_session
+  ok   over_long_tags_do_not_collide
+  ok   over_long_packet_name_stays_bounded
+  ok   foreign_owner_build_is_refused
+  ok   refusal_names_both_tags
+  ok   refusal_leaves_the_evidence_intact
+  ok   refusal_says_how_to_clear_it
+  ok   same_session_may_rebuild_its_own_packet
+  ok   all_session_packets_excluded_from_git
+  ok   path_creates_nothing
+  ok   unknown_subcommand_rejected
+  ok   unknown_option_rejected
+  ok   non_git_directory_rejected
+
+90 passed, 0 failed
+
+===== BASH test-ai-review-preflight.sh =====
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+== ai-review-preflight
+  ok   valid provider passes offline checks
+  ok   live review packet is never touched
+  ok   disposable preflight snapshot is cleaned
+  ok   bad base is refused before provider
+  ok   unknown provider is refused
+  ok   all active providers are registered
+  ok   Gemini status enforces built-in quarantine
+  ok   Gemini check cannot report healthy while quarantined
+  ok   Qwen status enforces built-in quarantine until live qualification
+  ok   Qwen check cannot report healthy while credits block live qualification
+  ok   successful Qwen live qualification durably releases quarantine
+  ok   Qwen runtime changes invalidate prior live qualification
+  ok   Qwen credential preloader changes invalidate prior live qualification
+  ok   Qwen wrapper changes invalidate prior live qualification
+  ok   Qwen can be requalified after a wrapper change
+  ok   Codex status is available with its doctor contract
+  ok   Codex preflight uses its doctor contract
+  ok   DeepSeek status is available with its doctor contract
+  ok   DeepSeek preflight uses its doctor contract
+  ok   DeepSeek without key or governed reference cannot pass offline preflight
+  ok   Muse preflight supplies its mandatory caller identity
+  ok   invalid Kimi credential fails
+  ok   invalid Kimi credential fails under ten seconds
+  ok   authentication failure is classified
+  ok   failed provider is quarantined
+  ok   quarantine skips provider without contact
+  ok   clear removes quarantine
+  ok   allowance failure is classified
+  ok   guidance exists for allowance-exhausted
+  ok   guidance exists for broken-snapshot
+  ok   guidance exists for empty-assistant-turns
+  ok   guidance exists for turn-exhaustion
+  ok   guidance exists for service-unavailable
+  ok   guidance exists for substantive-finding
+  ok   turn exhaustion never recommends more turns
+  ok   substantive finding stops shopping
+
+36 passed, 0 failed
+
+===== BASH test-ai-review-sandbox.sh =====
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-review-sandbox
+  ok   is_worktree_true_for_linked_worktree
+  ok   is_worktree_false_for_ordinary_clone
+  ok   ordinary_repo_passes_through
+  ok   ordinary_repo_creates_no_sandbox
+  ok   ensure_copy_isolates_ordinary_clone
+  ok   ensure_copy_excludes_live_packet
+  ok   remove_copy_deletes_only_snapshot
+  ok   worktree_gets_a_sandbox_path
+  ok   worktree_sandbox_is_self_contained
+  ok   sandbox_git_dir_is_inside_the_boundary
+  ok   committed_worktree_content_present
+  ok   uncommitted_edits_reproduced
+  ok   untracked_files_reproduced
+  ok   snapshot_records_whole_source_digest
+  ok   head_matches_the_worktree
+  ok   sandbox_is_labelled_for_the_reviewer
+  ok   sandbox_scaffolding_is_not_review_noise
+  ok   failed_untracked_copy_is_fatal
+  ok   failed_copy_preserves_previous_snapshot
+  ok   failed_copy_removes_partial_snapshot
+  ok   failed_diff_is_fatal_and_unpublished
+  ok   mid_copy_mutation_retries_to_stable_source
+  ok   retried_snapshot_digest_matches_source
+  ok   two_mid_copy_mutations_fail_closed
+  ok   unstable_snapshot_is_never_published
+  ok   disappearing_file_never_survives_mixed_snapshot
+  ok   disappearing_file_retry_is_digest_bound
+  ok   duplicate_snapshot_lock_is_rejected
+  ok   long_and_spaced_path_is_copied_exactly
+  ok   long_path_snapshot_is_digest_bound
+  ok   path_matches_ensure
+  ok   path_creates_nothing_new
+warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'b.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'c.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'd.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'inside-absolute-link', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'long directory/segment-012345678901234567890123456789/segment-abcdefghij/file with spaces.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'outside-link', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tracked-outside-link', LF will be replaced by CRLF the next time Git touches it
+  ok   refresh_keeps_the_same_path
+  ok   refresh_picks_up_new_commits
+  ok   refresh_picks_up_new_edits
+  ok   refresh_head_matches_the_worktree
+  ok   tags_are_isolated
+  ok   remove_deletes_its_own_sandbox
+  ok   remove_is_idempotent
+  ok   remove_on_ordinary_repo_is_a_noop
+  ok   ensure_refuses_to_clobber_unmarked_dir
+  ok   unmarked_dir_survives
+  ok   remove_refuses_unmarked_dir
+  ok   ai-glm_defines_review_boundary
+  ok   ai-glm_prepares_through_boundary
+  ok   ai-glm_uses_prepared_review_twice
+  ok   ai-glm_releases_its_snapshot
+  ok   ai-kimi_defines_review_boundary
+  ok   ai-kimi_prepares_through_boundary
+  ok   ai-kimi_uses_prepared_review_twice
+  ok   ai-kimi_releases_its_snapshot
+  ok   ai-qwen_defines_review_boundary
+  ok   ai-qwen_uses_review_boundary
+  ok   ai-qwen_releases_its_snapshot
+  ok   ai-grok-review_defines_review_boundary
+  ok   ai-grok-review_prepares_through_boundary
+  ok   ai-grok-review_uses_prepared_review_twice
+  ok   ai-grok-review_releases_its_snapshot
+  ok   codex_review_uses_snapshot_boundary
+  ok   codex_review_hands_snapshot_to_model
+  ok   deepseek_hands_over_no_directory
+  ok   invalid_tag_rejected
+  ok   unknown_subcommand_rejected
+
+63 passed, 0 failed
+
+===== BASH test-ai-review-scoreboard.sh =====
+warning: in the working copy of 'file.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-review-scoreboard
+  ok   three rows are appended
+  ok   every row is valid JSON
+  ok   Grok metrics are preserved
+  ok   correlation identity is preserved
+  ok   missing Kimi token and cost stay null
+  ok   failure class is recorded
+  ok   stale evidence is recorded
+  ok   report counts outcomes
+  ok   all active providers are accepted
+  ok   missing repository and head are unknown
+  ok   unknown evidence is never usable
+  ok   stale false cannot promote identity-free evidence
+  ok   identity-free verdict remains unusable
+  ok   unknown provider is refused
+  ok   invalid elapsed is refused
+
+15 passed, 0 failed
+
+===== BASH test-ai-reviewer-issue.sh =====
+warning: in the working copy of 'file.txt', LF will be replaced by CRLF the next time Git touches it
+== ai-reviewer-issue
+  ok   record creates a valid issue
+  ok   repository evidence is captured
+  ok   recent review artifacts are inventoried
+  ok   complete matching review output is captured
+  ok   captured review output is redacted
+  ok   recent provider logs are captured
+  ok   captured provider logs are redacted
+  ok   similar report name is not captured
+  ok   similar log path is not captured
+  ok   latest scoreboard outcome is captured
+  ok   safe reviewer metrics are preserved
+  ok   unrelated newer metadata is ignored
+  ok   prompt and credential fields are removed
+  ok   complete error log is captured and redacted
+  ok   unrestricted details are captured
+  ok   exact command is recorded
+  ok   list finds the recorded issue
+  ok   show returns the recorded issue
+  ok   path returns the configured directory
+  ok   missing join identifiers capture no nearby metadata
+  ok   missing join identifiers capture no nearby scoreboard row
+  ok   missing join identifiers capture no reports or provider logs
+  ok   missing join identifiers are labelled
+  ok   duplicate exact metadata captures no arbitrary record
+  ok   duplicate exact metadata captures no owned files
+  ok   duplicate exact metadata is labelled ambiguous
+  ok   missing summary is refused
+  ok   unsafe provider name is refused
+
+28 passed, 0 failed
+
+===== BASH test-ai-run-task.sh =====
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+== ai-run-task
+  ok   02-opus-plan-review.md uses the exact runtime verdict contract
+  ok   04-opus-diff-review.md uses the exact runtime verdict contract
+  ok   06-opus-security-review.md uses the exact runtime verdict contract
+  ok   07-opus48-final-review.md uses the exact runtime verdict contract
+  ok   plan review is scope-bound, proportional, and convergence-safe
+  ok   start creates a seven-stage ready manifest
+  ok   roles pin Codex work and Claude Opus 5 review
+  ok   manifest records repository workflow policy
+  ok   all seven stages complete
+  ok   every stage ran exactly once
+  ok   implementation and test source changes survive
+  ok   every output hash matches exact bytes
+  ok   each later stage consumes prior named artifact
+  ok   resume is idempotent after completion
+  ok   changed completed artifact is rejected
+  ok   non-approve verdict blocks later stages
+  ok   blocked run records exact verdict
+  ok   outside source drift blocks before a stage
+  ok   outside source drift contacts no model
+  ok   run directory outside .ai is refused
+
+20 passed, 0 failed
+
+===== BASH test-ai-sync-memory-public-containment.sh =====
+PASS: public memory uploads are blocked and pull preserves both indexes
+
+===== BASH test-codex-trigger-eval.sh =====
+PASS: codex-trigger-eval effort, sandbox, and trigger detection
+
+===== BASH test-install-ai-provider-clis.sh =====
+PASS: provider CLI installer contract
+
+===== BASH test-installer-parity.sh =====
+1/2 fresh install: Bash and PowerShell agree file for file
+2/2 cross-installer refresh reports 'up to date', not local edits
+PASS: installer parity
+
+===== BASH test-markdown-links.sh =====
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/target.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+PASS: 230 tracked Markdown files have valid local link targets
+
+===== BASH test-mcp-launch-lock.sh =====
+PASS: Codex skill header and Linux MCP lock lifetime
+
+===== BASH test-muse-opencode-contract.sh =====
+Muse OpenCode contract fixtures passed.
+
+===== BASH test-pop-business-rules-skill.sh =====
+PASS: pop-business-rules shared routing and authority contract
+
+===== BASH test-public-boundary.sh =====
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'claude_chats/session.jsonl', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'leak.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'topology.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'project.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.ai/reviewer-issues/issue.json', LF will be replaced by CRLF the next time Git touches it
+PASS: seeded transcript, AI artifact, credential, topology, and project violations fail the public boundary gate
+
+===== BASH test-repository-policy.sh =====
+warning: You appear to have cloned an empty repository.
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+  ok   local upstream resolves to stable repository identity
+  ok   main-only rule is selected from contract
+warning: in the working copy of 'a', LF will be replaced by CRLF the next time Git touches it
+  ok   workspace status fetches before remote counts
+  ok   main-only status gives correct direct-main advice
+  ok   main-only status never recommends a feature branch
+  ok   main-only status warns on the wrong branch
+
+6 passed, 0 failed
+
+===== BASH test-setup-credentials-source.sh =====
+ok - setup-secrets shell syntax is valid
+compiled 3 embedded Python blocks
+ok - all embedded Python blocks compile
+ok - GLM capability probe verifies the protected review envelope and report
+ok - GLM capability probe accepts only a terminal protected verdict from the exact model
+
+===== BASH test-shared-db-routing-rules.sh =====
+== shared-db source routing
+  ok   fixture names the predecessor
+  ok   successor classifies its own work
+  ok   successor routes to application session
+  ok   non-structural successor is rejected from author lane
+  ok   fixture claims no database objects
+  ok   orchestrator forbids inherited successor route
+  ok   manual requires reclassification from scratch
+  ok   Codex global carries successor rule
+  ok   Claude global carries successor rule
+  ok   misroute preserves private artifacts
+  ok   review safety gate is scoped to this toolkit, not every project
+
+11 passed, 0 failed
+
+===== BASH test-skill-trigger-eval-auth.sh =====
+PASS: Claude trigger evaluation refuses logged-out and inaccessible clients
+
+===== BASH test-skill-trigger-policy.sh =====
+  ok   policy requires repeated Windows and Linux evidence
+  ok   cleanup-worktree has one skill source
+  ok   cleanup-worktree has balanced committed trigger cases
+  ok   close-old-session has one skill source
+  ok   close-old-session has balanced committed trigger cases
+  ok   codex-portable-facts has one skill source
+  ok   codex-portable-facts has balanced committed trigger cases
+  ok   codex-shared-db-change has one skill source
+  ok   codex-shared-db-change has balanced committed trigger cases
+  ok   deepseek-second-opinion has one skill source
+  ok   deepseek-second-opinion has balanced committed trigger cases
+  ok   fresh-session has one skill source
+  ok   fresh-session has balanced committed trigger cases
+  ok   grok-cli has one skill source
+  ok   grok-cli has balanced committed trigger cases
+  ok   handoff-writer has one skill source
+  ok   handoff-writer has balanced committed trigger cases
+  ok   kimi-code-delegation has one skill source
+  ok   kimi-code-delegation has balanced committed trigger cases
+  ok   repo-bug-audit has one skill source
+  ok   repo-bug-audit has balanced committed trigger cases
+  ok   secrets-to-1password has one skill source
+  ok   secrets-to-1password has balanced committed trigger cases
+  ok   shared-db-change has one skill source
+  ok   shared-db-change has balanced committed trigger cases
+  ok   shared-db-handover has one skill source
+  ok   shared-db-handover has balanced committed trigger cases
+  ok   shared-db-orchestrator has one skill source
+  ok   shared-db-orchestrator has balanced committed trigger cases
+  ok   synology-long-running-operations has one skill source
+  ok   synology-long-running-operations has balanced committed trigger cases
+
+31 passed, 0 failed
+
+===== BASH test-tool-version-pins.sh =====
+  ok   version catalog has a dated schema
+  ok   WinGet pins Git.Git 2.54.0
+  ok   WinGet pins Microsoft.PowerShell 7.6.5.0
+  ok   WinGet pins OpenJS.NodeJS.LTS 24.17.0
+  ok   WinGet pins Python.Python.3.13 3.13.14
+  ok   WinGet pins GitHub.cli 2.95.0
+  ok   WinGet pins Microsoft.VisualStudioCode 1.134.0
+  ok   WinGet pins AgileBits.1Password.CLI 2.34.1
+  ok   WinGet pins Google.CloudSDK 581.0.0
+  ok   WinGet pins Microsoft.AzureCLI 2.87.0
+  ok   WinGet pins Cloudflare.cloudflared 2025.8.1
+  ok   WinGet pins Tailscale.Tailscale 1.102.2
+  ok   WinGet pins Microsoft.WSL 2.7.8.0
+  ok   WinGet pins Canonical.Ubuntu 2204.1.8.0
+  ok   WinGet pins Anthropic.ClaudeCode 2.1.229
+  ok   WinGet pins 9PLM9XGG6VKS 26.818.3698.0
+  ok   npm pin vercel@54.15.1 is consistent
+  ok   npm pin trigger.dev@4.4.6 is consistent
+  ok   npm pin @railway/cli@5.43.1 is consistent
+  ok   npm pin @supabase/mcp-server-supabase@0.11.0 is consistent
+  ok   npm pin @playwright/mcp@0.0.79 is consistent
+  ok   npm pin chrome-devtools-mcp@1.7.0 is consistent
+  ok   recovery paths contain no mutable npm latest specifiers
+  ok   portable Codex model matches the catalog
+  ok   pipeline model commands match the catalog
+
+25 passed, 0 failed
+
+===== BASH test-transcript-destination-check.sh =====
+PASS: transcript guard accepts only the canonical private destination
+
+===== BASH test-ubuntu-install-stages.sh =====
+PASS: required stages fail truthfully, privileged config artifacts publish safely, optional failures warn, and Node tools verify independently
+
+===== BASH test-uninstall.sh =====
+SKIP: platform does not provide real test symlinks
+
+===== BASH test-windows-scripts.sh =====
+== PowerShell files must be pure ASCII ==
+  ok   no non-ASCII in any repo .ps1
+== checked-out paths must fit Windows ==
+  ok   longest tracked path is 87 chars
+  ok   claude_chats/ is not tracked
+== setup must not clone a second copy of itself ==
+  ok   setup-machine.ps1 defaults to its own checkout
+  ok   setup-opencode-glm.ps1 defaults to its own checkout
+  ok   no setup script hardcodes a checkout drive
+== protected topology source ==
+  ok   Windows setup resolves SSH topology from protected configuration
+== Windows paths must not trust Git Bash $HOME ==
+  ok   GLM launcher pins HOME to the Windows profile
+  ok   ai-glm shim pins HOME
+== MCP remote bridge version must be pinned ==
+  ok   mcp-remote is pinned to 0.1.38 in generated launch paths
+== a failed GLM launcher must show its error ==
+  ok   launcher is smoke-tested before the task is registered
+== the generated Windows launcher must be valid bash ==
+  ok   rendered launcher is valid bash
+  ok   op run re-execs through bash.exe by absolute path
+  ok   launcher pins HOME
+  ok   no invalid backslash-dollar escapes in .ps1 files
+  ok   scheduled task writes a server log
+  ok   waits for the port before starting the task
+  ok   restart verifies the old listener before stopping it
+  ok   restart has a bounded port-free wait
+== GLM task recovery policy ==
+  ok   wrapper has bounded three-at-one-minute recovery
+  ok   task starts at logon
+  ok   service wrapper rotates its log
+  ok   service wrapper normalizes child failure
+  ok   doctor verifies the recovery policy
+== portable Codex defaults ==
+  ok   setup seeds Codex defaults only when config is absent
+  ok   portable Codex defaults pin safe effort without hard-coding a model
+== complete MCP set is managed for both clients ==
+  ok   Claude MCP set includes Chrome DevTools
+  ok   Windows setup configures the complete MCP set for Codex
+  ok   Windows setup installs Railway CLI and configures Railway MCP for Codex
+  ok   shared MCP set includes ag-grid
+  ok   shared MCP set includes playwright
+  ok   shared MCP set includes codex-cli
+  ok   shared MCP set includes synology-monitor
+  ok   shared MCP set includes devops-mcp
+  ok   shared MCP set includes railway
+  ok   shared MCP set includes trigger
+  ok   shared MCP set includes recall-ai
+  ok   shared MCP set includes 1password
+  ok   shared MCP set includes supabase
+  ok   Vercel is Codex-only and cannot trigger Claude browser-auth loops
+
+40 passed, 0 failed
+
+OFFLINE BASH SUMMARY tests=51 failures=0
+
+===== POWERSHELL test-build-private-memory-hub.ps1 =====
+PASS: private memory union preserves facts, honors tombstones, indexes all facts, and blocks secret patterns
+
+===== POWERSHELL test-codex-github-cli-access.ps1 =====
+Codex sandbox can read GitHub CLI settings; write access was not granted.
+PASS: exact read-only access, setup installation, and orchestrator diagnosis are covered.
+
+===== POWERSHELL test-configure-claude-desktop-chrome-devtools.ps1 =====
+ok Claude Desktop Chrome DevTools MCP configured (backup: C:\Users\ahazan\AppData\Local\Temp\claude-chrome-mcp-e5506050f7a04cd4bbbde6a5c1a75d3d\claude_desktop_config.json.aidevops.bak)
+Fully quit and reopen Claude Desktop before testing the connection.
+ok Claude Desktop Chrome DevTools MCP configured (backup: C:\Users\ahazan\AppData\Local\Temp\claude-chrome-mcp-e5506050f7a04cd4bbbde6a5c1a75d3d\claude_desktop_config.json.aidevops.bak)
+Fully quit and reopen Claude Desktop before testing the connection.
+  ok   preserves unrelated Claude settings
+  ok   preserves other MCP servers
+  ok   configures the pinned Chrome DevTools package
+  ok   keeps one Chrome DevTools entry
+  ok   creates a recoverable backup
+
+5 passed, 0 failed
+
+===== POWERSHELL test-configure-codex-chrome-devtools.ps1 =====
+ok Codex Chrome DevTools MCP configured (existing Codex settings preserved)
+ok Codex Chrome DevTools MCP configured (existing Codex settings preserved)
+  ok   one Chrome DevTools block after repeated runs
+  ok   uses the pinned Chrome DevTools MCP package
+  ok   allows Chrome enough startup time on Windows
+  ok   preserves unrelated MCP servers
+  ok   preserves tool approval guards
+  ok   preserves machine-local Codex settings
+  ok   creates a recoverable backup
+
+7 passed, 0 failed
+
+===== POWERSHELL test-configure-codex-mcps.ps1 =====
+ok Codex MCP server set configured: ag-grid, playwright, codex-cli, synology-monitor, devops-mcp, vercel, railway, trigger, recall-ai, 1password, supabase, chrome-devtools
+   backup: C:\Users\ahazan\AppData\Local\Temp\codex-mcps-989f97ce36a94537b120a714a348615d\config.toml.aidevops-20260823-025259.bak
+ok Codex MCP server set already current: ag-grid, playwright, codex-cli, synology-monitor, devops-mcp, vercel, railway, trigger, recall-ai, 1password, supabase, chrome-devtools
+  ok   one ag-grid block
+  ok   one playwright block
+  ok   one codex-cli block
+  ok   one synology-monitor block
+  ok   one devops-mcp block
+  ok   one vercel block
+  ok   one railway block
+  ok   one trigger block
+  ok   one recall-ai block
+  ok   one 1password block
+  ok   one supabase block
+  ok   one chrome-devtools block
+  ok   second run is byte-identical
+  ok   preserves unrelated MCP servers
+  ok   preserves tool approval guards
+  ok   writes a missing parent before its tool guards
+  ok   preserves machine-local Codex settings
+  ok   removes stale plaintext env values
+  ok   uses native Vercel transport
+  ok   uses Railway's authenticated CLI proxy
+  ok   allows long codex-cli calls
+  ok   creates one recoverable backup only when changed
+
+22 passed, 0 failed
+
+===== POWERSHELL test-context-audit.ps1 =====
+PASS: baseline classification, stable output, manifests, parity, safety markers, secret exclusions
+PASS: all eight locked safety categories fail individually with a plain-English reason
+PASS: both repair conditions are enforced independently in one client and both clients
+PASS: cross-client parity mismatch and stale divergence-allowlist entry both fail with a reason
+PASS: exceeded budgets warn with a plain reason and never fail the run
+PASS: effective installed globals include preserved machine sections and have a separate ratchet
+PASS: open handoffs are counted, an uncontracted one warns, a contracted one does not, and neither ever fails the run
+PASS: global text repeating a skill description is reported as duplicated startup context
+PASS: Claude and Codex start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs
+PASS: Codex trigger-eval runner pins low/medium reasoning and a read-only sandbox
+PASS: context audit enforcement suite
+
+===== POWERSHELL test-install-ai-devops-windows.ps1 =====
+1/8 shared directory absent
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\absent\remote.git
+ * [new branch]      main -> main
+2/8 dual-client install and counts
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\dual\remote.git
+ * [new branch]      main -> main
+3/8 skills dry-run makes no changes
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\dry\remote.git
+ * [new branch]      main -> main
+4/8 collision fails before mutation
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\collision\remote.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\collision\remote.git
+   8836ec0..090a7d8  main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\collision-codex\remote.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\collision-codex\remote.git
+   8f9c611..2a8569e  main -> main
+5/8 obsolete managed skill quarantines automatically
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\migrate\remote.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\migrate\remote.git
+   75d52e2..9ece217  main -> main
+6/8 reconciliation matrix: identical, extended, conflicting
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\matrix\remote.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\matrix\remote.git
+   971c8e9..6910128  main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\matrix\remote.git
+   6910128..a04e5d3  main -> main
+7/8 unmanaged directory is backed up before adoption
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\unmanaged\remote.git
+ * [new branch]      main -> main
+8/8 globals: never clobbered without -AdoptGlobals, backed up with it
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-skills-test-5f21828b-7e5f-46ad-83f4-8610bc2baaba\globals\remote.git
+ * [new branch]      main -> main
+PASS: install-ai-devops-windows
+
+===== POWERSHELL test-kimi-windows-execution.ps1 =====
+PASS: Windows Kimi execution controls are valid
+
+===== POWERSHELL test-mcp-env-launch.ps1 =====
+PASS: MCP 1Password launcher is parseable, single-flight, and DPAPI-encrypted.
+
+===== POWERSHELL test-memory-sync-scheduled-task.ps1 =====
+PASS: Windows memory sync scheduled task is hidden and bounded
+
+===== POWERSHELL test-windows-ai-kimi-shim.ps1 =====
+PASS: catalog-driven Windows launcher controls are valid
+
+===== POWERSHELL test-windows-ai-provider-clis.ps1 =====
+PASS: Windows Grok, Kimi, and Qwen CLI setup wiring is valid.
+
+===== POWERSHELL test-windows-git-bash-path.ps1 =====
+PASS: Git Bash paths are translated to verified native Windows files
+
+===== POWERSHELL test-windows-json-atomic.ps1 =====
+PASS: malformed JSON stays byte-identical and every atomic update retains a unique known-good backup
+
+===== POWERSHELL test-windows-private-file.ps1 =====
+PASS: Windows private files stage, verify ACL, publish atomically, and preserve prior state
+
+===== POWERSHELL test-windows-source-gate.ps1 =====
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\clean.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\dirty.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\branch.git
+ * [new branch]      main -> main
+Switched to a new branch 'feature'
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\wrong.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\fetch.git
+ * [new branch]      main -> main
+To C:\Users\ahazan\AppData\Local\Temp\ai-devops-source-gate-0348f2d7-41fd-455e-8036-9a9a4358446f\ahead.git
+ * [new branch]      main -> main
+PASS: Windows source gate rejects dirty, wrong-branch, wrong-remote, failed-fetch, and ahead states
+
+OFFLINE COMPLETE SUMMARY bash=1 powershell=16 failures=0
