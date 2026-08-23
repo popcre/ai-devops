@@ -711,7 +711,8 @@ Ubuntu installed-hash verification remain.**
   clones of the same GitHub repository therefore receive different locks.
 - User-visible failure: duplicate billed reviews can run against the same
   repository at the same time.
-- Existing tracker: issue #56; all repair-plan steps remain open.
+- Existing tracker: issue #56; repair and qualification steps are complete,
+  while landing, Ubuntu installation, CI, and issue closure remain.
 
 ### 8. Kimi has the same clone-based duplicate-run weakness
 
