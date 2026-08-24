@@ -1059,6 +1059,77 @@ self-contained copy on the SAME brief, independently.
   the brief instead. Briefs must carry what the reviewer needs rather than assuming it
   can fetch its own issue.
 
+## 2026-08-24 review sequence 272 — glm-5.3 on `u2giants/shared-db#1406`
+
+| field | evidence |
+|---|---|
+| issue / PR / head | #1400 / #1406 / `e1bc5792a71c192c8e7e2f89b39ea8fca56758ca` |
+| reviewer requested | `glm-5.3` via `ai-glm` (durable rotation, sequence 272; replaces failed sequence 271) |
+| reviewer proven | report header `zai-coding-plan/glm-5.3`, opencode `1.18.12` (pinned) |
+| session | `shared-db-pr1406-seq272` (`ses_fceca0e5cffeAiX1eY77LMzwyW`), base `dd8cab9`, head `e1bc579`, packet `bc738a93…` |
+| verdict | **APPROVE** |
+| findings | Critical 0 · High 0 · Medium 0 · Low 3 |
+| usage | input 39 · output 1,903 · reasoning 1,637 · cache read 81,408 · cache write 0 |
+| artifact | `.ai/reviews/glm-shared-db-pr1406-seq272-20260824T004643Z.md` (written; no false git-ignore warning this run) |
+| outcome | no blocking finding; merge gate satisfied on the review axis |
+
+**Coverage statement present and specific**, which is what the 2026-08-19 `AGENTS.md`
+rule demands. GLM named the incremental patch (one file, three hunks), then stated
+plainly that it had *also* re-audited the complete function definition at head rather
+than deferring to the previous round — and it listed the supporting objects it read:
+the gate `app.require_licensing_manager_access()`, the helpers `has_role` /
+`has_explicit_app_access` / `current_profile_id` / `jwt_role_names`, the `app_role` and
+`app_name` enums, the `app.role` / `user_role` / `app_access` unique constraints the
+test depends on, the Universe B table shapes, and the sibling contract file. It also
+declared its own limit unprompted: **no tests were executed** (review sessions have no
+shell), so the verdict is static.
+
+**Confirmed independently by the calling session**, by reading the head commit directly:
+
+- `perform app.require_licensing_manager_access()` is the **first** statement in the
+  function body, ahead of page-size parsing, cursor decoding and every table read, so
+  an unauthorized caller cannot use the cursor parser as an oracle.
+- `security definer set search_path to 'app', 'public'`; every table reference is
+  `core.`-qualified and the only non-builtin call is schema-qualified. No hijack surface.
+- Grants unchanged from the prior definition: `revoke all … from public`, `grant execute
+  … to authenticated`. Not weakened, not broadened.
+- Parentage joins solely on `p.licensor_id = l."licenseList_id"` with `p.type =
+  'PROPERTY'` — integer relationship only, no code/title inference.
+- Keyset cursor pins `collate "C"` on **both** the `ORDER BY` and the cursor comparison,
+  with the integer PK as tie-breaker; `limit v_page_size + 1` and a next-cursor emitted
+  only when `v_fetched > v_page_size`.
+- Character counts come from a server-side `group by property_id` CTE, not browser paging.
+- Identity is not spoofed by the definer context: the gate resolves the caller from
+  `request.jwt.claims`, which `SECURITY DEFINER` does not alter.
+
+Nothing disproved. No false positive found in the review.
+
+**The three Low findings are all test-strength or pre-existing**, not defects in the
+migration: (1) the orphan-completeness assertion uses a single-orphan fixture, so it
+proves cursor-independence but not unbounded completeness; (2) the licensing-role allow
+path is exercised before fixtures exist, so it proves authorization rather than a
+well-formed response on that identity; (3) the denial fixture picks the second active
+profile in the live database and would fail loudly — not silently — if that profile
+already held a qualifying role. Item 3 predates this commit.
+
+**Policy and tool adherence: clean.** Correct wrapper, no model or reasoning override,
+one persistent named session reused across the round, read-only enforced structurally,
+verdict emitted in a single block with the coverage statement attached — none of the
+recurring `## Verdict`-omission or discarded-findings failure modes appeared.
+
+**Transport note worth keeping.** The round could not start until a local fault was
+repaired: `ai-glm doctor` reported `FAIL health endpoint answers`, and
+`server.log` named the cause — `could not resolve item UUID for item designflow-mcp`.
+The 1Password item had been **retitled** to "DesignFlow MCP bearer tokens - DevOps and
+NAS (production)", which silently broke every title-based `op://` reference in
+`mcp.env`, and `op run` aborts the whole env file on one bad reference. The live
+`mcp.env` had already been repaired to reference the item by its immutable id
+(`f335s4oy3m6n74jmwj74hunrtu`); only the restart was outstanding. This is the second
+time a stopped/failing local OpenCode server has been mistaken for an unreliable GLM
+provider — see the 2026-08-19 entry above. **Check `ai-glm doctor` and the server log
+before recording a GLM provider failure.** Title-based `op://` references are the
+underlying fragility; id-based references survive a rename.
+
 ## 2026-08-24 review rotation evidence
 
 ### shared-db #1418 / PR #1421 — review sequence 286
