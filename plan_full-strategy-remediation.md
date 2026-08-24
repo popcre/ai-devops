@@ -12,21 +12,21 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 | 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-24 | private `u2giants/ai-devops-memory` is confirmed private and clean at `dc18be38006f11c8663b4cd7bd0a02f80cdc0dbd`; 940 tracked files; hub-only coverage audit found 840 memory files across 27 projects and zero findings |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ✅ complete | 2026-08-21 | behavioral fixtures pass; live private sync and public-target rejection proven; schedules remain disabled |
 | 4 | Correct stale database/transcript/audit instructions | ✅ complete | 2026-08-21 | private stale facts tombstoned; canonical destination guard and hostile fixtures pass |
-| 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-24 | stage/failure, Node, config migration, manifest, production `hetz`, doctor, and exact tagged rerun evidence pass; the written gate still requires a clean disposable Ubuntu restore |
+| 5 | Make Ubuntu install/update deterministic and truthful | ✅ complete | 2026-08-24 | [`tests/verification/full-remediation/20260824T051519Z/step-05-12-clean-ubuntu-restore.md`](tests/verification/full-remediation/20260824T051519Z/step-05-12-clean-ubuntu-restore.md) proves a clean Ubuntu 24.04 normal-user install and unchanged rerun at `961dc12`; every required stage and doctor passed |
 | 6 | Make Windows source, secret, and configuration setup fail closed | ✅ complete | 2026-08-24 | albt16 and 4837 installed cleanly at `8435f793`; both live `ai-glm doctor` runs passed every required check; memory writer disabled, health task ready, and no sync lock on either machine |
 | 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | ✅ complete | 2026-08-24 | [`tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md`](tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md) proves full archive rollback; config/manifest/uninstall/doctor suites and live doctors pass |
 | 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | ✅ complete | 2026-08-24 | exact runtime gate `32676734390` passed Linux in 7m50s, Windows reviewer safety in 10m38s, and the complete Windows matrix in 1h2m29s within its 75-minute bound; active ruleset `Protect main history` |
 | 9 | Make shared reviewer snapshots and lifecycle fail closed | ✅ complete | 2026-08-22 | digest-bound atomic snapshots, packet, lifecycle, preflight, scoreboard, incident join, and hostile fixtures pass |
 | 10 | Finish provider-specific reviewer repairs and qualification | ✅ complete | 2026-08-22 | all provider contracts and hostile lifecycle suites pass; Claude Opus 5 and Codex GPT-5.6-sol are the supported approval paths; advisory/quarantined providers cannot satisfy a gate |
 | 11 | Finish the seven-stage workflow with two supported approval paths | ✅ complete | 2026-08-22 | live disposable run `20260822T160752Z-332946-21980` completed all seven stages exactly once; review stages 2/4/6/7 returned `APPROVE`; test matrix passed; local canary commit `598fc44` |
-| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟨 verifying | 2026-08-24 | governed WinGet/npm/MCP/model catalog and repeated existing-machine installs pass; the written gate still requires clean disposable Windows 11 and Ubuntu first/second-run restore proofs |
+| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟨 verifying | 2026-08-24 | governed WinGet/npm/MCP/model catalog, repeated existing-machine installs, and the clean Ubuntu first/second-run proof pass; the written gate still requires clean disposable Windows 11 first/second-run restore proof |
 | 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ✅ complete | 2026-08-22 | strict audit measures 21,808 installed-global bytes with no safety/parity failure; protected trigger matrix 31/0, repository policy 6/0, portable facts 8/0 and a live known-fact retrieval |
 | 14 | Remove public topology and close every transcript-ingestion path | ✅ complete | 2026-08-22 | protected config head `7bb5875`; hostile public-boundary/private-config/transcript-destination suites pass; setup resolves topology, host identities, and provider identifiers from protected inputs |
 | 15 | Purge exposed Git history through a recoverable coordinated rewrite | 🟦 externally blocked | 2026-08-24 | public `main`, visible branches, and tags are rewritten and protected; 41 currently advertised GitHub-managed `refs/pull/*` still retain old objects and require GitHub Support deletion |
 | 16 | Install and verify the exact release on every managed machine | 🟦 externally blocked | 2026-08-24 | albt16, 4837, and hetz are exact at `8435f793` and green; memory writers remain deliberately disabled; 916 is offline; edge-dev is online but SSH authentication and DCOM authority are denied |
-| 17 | Obtain independent exact-head approval and close the workstream | 🟦 externally blocked | 2026-08-24 | source commit `8435f793` and Ansible production-safety commits have exact Claude Opus 5 approval; source CI, drift detection, governed deployment, and two exact zero-change reruns are green; issue #62 remains open for Steps 5, 12, 15, and 16 |
+| 17 | Obtain independent exact-head approval and close the workstream | 🟦 externally blocked | 2026-08-24 | source commit `8435f793` and Ansible production-safety commits have exact Claude Opus 5 approval; source CI, drift detection, governed deployment, and two exact zero-change reruns are green; issue #62 remains open for Steps 12, 15, and 16 |
 
-**Fresh-session start:** Step 5. Always start at the first non-complete row. Before each phase, re-read
+**Fresh-session start:** Step 12. Always start at the first non-complete row. Before each phase, re-read
 all downstream steps for drift and update this table in the same session.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -124,6 +124,10 @@ memory commits. These are active/existing states, not hypothetical lint findings
 
 ## 5. Current state of the code
 
+- Candidate `961dc12e1f21016590821c8adde47d4c599a1d07` is on `origin/main` and
+  contains the clean-machine private-memory seed repair proven by the Ubuntu
+  gate. It is not yet the installed production runtime: its hosted Windows gate
+  and governed albt16/4837/`hetz` rollout are still pending.
 - Canonical runtime release `8435f7938d9865158975c2a4dbd7e43a3c3bde97`
   is on `origin/main`. Exact hosted gate `32676734390` passed Linux, focused
   Windows reviewer safety, and the complete Windows matrix. Claude Opus 5
@@ -154,10 +158,11 @@ memory commits. These are active/existing states, not hypothetical lint findings
 - Windows machine 916 is offline (last Tailscale observation 2026-08-19; fresh
   ping timed out 2026-08-24). `edge-dev` is online, but SSH authentication and
   DCOM authority are denied. Do not weaken either boundary.
-- Clean disposable Windows 11 and Ubuntu first/second-run restore proofs remain
-  unperformed. Therefore Steps 5 and 12 remain verifying even though existing
-  machines, production deployment, migration, manifest, uninstall, and doctor
-  tests are green.
+- Clean disposable Ubuntu 24.04 first/second-run restore proof passes at
+  `961dc12...`; the permanent artifact records every required stage, doctor,
+  exact source/schema, clean private hub, and timestamp-only rerun difference.
+  Step 5 is complete. Clean disposable Windows 11 first/second-run proof remains
+  unperformed, so Step 12 remains verifying.
 - This repository has no application deployment. Installation is production;
   GitHub CI verifies source and `u2giants/ansible` owns the `hetz` host rollout.
 
@@ -788,9 +793,9 @@ release gates with artifacts, never hidden inside offline CI.
   confirmation.
 - Machine 916 must come online, and machine-owner SSH or DCOM access must be
   restored for edge-dev, before Step 16 can cover every managed machine.
-- Clean disposable Windows 11 and Ubuntu environments are required for the
-  unchanged Step 5 and Step 12 restore gates. Existing-machine reruns are useful
-  evidence but do not substitute for those written gates.
+- A clean disposable Windows 11 environment is still required for Step 12's
+  unchanged bootstrap/rerun gate. Existing-machine reruns are useful evidence
+  but do not substitute for that written gate. The clean Ubuntu gate is complete.
 - The actor or automation behind the four historical production checkout
   transitions remains unknown. Direct non-sudo recurrence is contained; do not
   infer attribution from reflog entries alone.

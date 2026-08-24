@@ -56,9 +56,9 @@ cd /worksp/ai-devops
    new Claude home with no project memory yet, this truthfully reports a
    fresh-machine seed and uploads nothing; matching project memory is applied
    by a later explicitly initiated sync after Claude creates the project.
-8. Runs `ai-devops doctor`.
-9. Records exact source, config schema, owned symlinks, config files, managed
+8. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
+9. Runs `ai-devops doctor`.
 
 Recovery-critical WinGet, npm/MCP, and model versions are governed by
 `config/tool-versions.json`. The install and Windows bootstrap paths use those

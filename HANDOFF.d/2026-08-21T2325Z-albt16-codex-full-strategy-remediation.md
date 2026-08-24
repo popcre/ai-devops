@@ -24,9 +24,9 @@ rollout completed:
 - `edge-dev` is online, but fresh checks on 2026-08-24 returned SSH authentication
   denied and DCOM access denied. Resume only with machine-owner access; do not
   weaken authentication or obtain broader credentials to bypass this boundary.
-- The unchanged plan gates for Steps 5 and 12 require clean disposable Ubuntu
-  and Windows 11 first/second-run restore proofs. Existing-machine reruns do not
-  satisfy those gates; provide or authorize suitable disposable environments.
+- Step 12 still requires a clean disposable Windows 11 first/second-run restore
+  proof. Existing-machine reruns do not satisfy that gate; provide or authorize
+  a suitable disposable Windows environment. The clean Ubuntu gate is complete.
 
 ### Recoverable choices already settled — do not re-ask
 
@@ -51,9 +51,11 @@ implementation. It starts with the four external conditions above.
 
 ## Current closeout state — authoritative 2026-08-24
 
-- Canonical tested runtime release is
-  `8435f7938d9865158975c2a4dbd7e43a3c3bde97`; later closeout-only documentation
-  commits do not change that deployment pin. The release replaces the
+- Installed production runtime release is currently
+  `8435f7938d9865158975c2a4dbd7e43a3c3bde97`. Candidate `961dc12...` adds the
+  clean-machine memory-seed repair proven by the Ubuntu gate, but is not yet
+  installed on albt16, 4837, or `hetz`; its hosted Windows gate and governed
+  rollout must complete before the production pin changes. The installed release replaces the
   pathological hub-by-local memory comparison
   with one-time indexes while preserving duplicate aliases, CRLF, missing final
   newline, and multiple local checkouts. Its 500-by-500 regression passed.
@@ -103,8 +105,9 @@ implementation. It starts with the four external conditions above.
   open in Ansible; do not infer attribution from reflog alone.
 - Step 7's full archive rollback proof is committed at
   `tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md`.
-  Steps 5 and 12 remain verifying because their exact clean-disposable restore
-  gates have not been run.
+  The clean Ubuntu 24.04 normal-user install and unchanged rerun at `961dc12...`
+  pass in `tests/verification/full-remediation/20260824T051519Z/step-05-12-clean-ubuntu-restore.md`;
+  Step 5 is complete and Step 12 remains verifying only for clean Windows 11.
 
 ## 1. What this application is
 
@@ -186,24 +189,20 @@ handoff is created. Production remains unchanged.
 
 ## 6. Exact next steps
 
-1. On clean disposable Ubuntu, run the canonical restore twice and capture
-   non-secret source/config/doctor reports. **Worked when:** the first run reaches
-   compliance and the unchanged second run has no unintended changes at exact
-   `8435f793...`.
-2. On clean disposable Windows 11, run the canonical bootstrap, honor any reboot,
+1. On clean disposable Windows 11, run the canonical bootstrap, honor any reboot,
    then rerun unchanged and capture the same evidence. **Worked when:** both runs
    identify exact source/config schema and the second has no unintended changes.
-3. With Albert's action-time confirmation, send GitHub Support the prepared
+2. With Albert's action-time confirmation, send GitHub Support the prepared
    request to delete/garbage-collect the 41 currently advertised hidden pull
    refs. **Worked when:** a fresh unauthenticated mirror no longer receives old
    objects.
-4. When 916 is online, fast-forward/install `8435f793...`, keep the memory writer
+3. When 916 is online, fast-forward/install the canonical runtime release, keep the memory writer
    disabled, run the required doctors, and record SHA/clean state. **Worked when:**
    the machine has exact source and clean required checks.
-5. Obtain machine-owner access to edge-dev, then perform the same exact rollout.
+4. Obtain machine-owner access to edge-dev, then perform the same exact rollout.
    Do not bypass SSH authentication or DCOM authority. **Worked when:** exact
    source, disabled writer, ready health task, no lock, and green doctor are proven.
-6. Close issue #62 and retire this handoff only after Steps 5, 12, and 15-17 are genuinely
+5. Close issue #62 and retire this handoff only after Steps 12 and 15-17 are genuinely
    complete. Do not mark the goal complete merely because external access is
    unavailable.
 
@@ -236,8 +235,9 @@ handoff is created. Production remains unchanged.
 ## 9. Open questions and risks
 
 The four owner/external conditions in §0 are open. All provider, source,
-production-server, reachable-Windows, CI, ruleset, canary, and Step 7 archive
-recoverability work is complete. Clean-disposable restore proof is not complete.
+production-server, reachable-Windows, CI, ruleset, canary, Step 7 archive
+recoverability, and clean Ubuntu restore work is complete. Clean-disposable
+Windows 11 restore proof is not complete.
 None of the remaining conditions authorizes a weaker success definition, an
 authentication/history-retention bypass, or substituting existing-machine proof
 for a clean-machine gate.

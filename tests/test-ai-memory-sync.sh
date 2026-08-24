@@ -56,17 +56,35 @@ FRESH_HOME="$TMP/home-fresh"
 FRESH_CLAUDE="$TMP/claude-fresh"
 FRESH_HUB="$TMP/hub-fresh"
 FRESH_LOG="$TMP/fresh.log"
+FRESH_REMOTE="$TMP/fresh-private.git"
+cp -a "$REMOTE" "$FRESH_REMOTE"
 mkdir -p "$FRESH_HOME" "$FRESH_CLAUDE/skills"
+fresh_remote_before="$(git --git-dir="$FRESH_REMOTE" rev-parse main)"
 HOME="$FRESH_HOME" CLAUDE_HOME="$FRESH_CLAUDE" \
 AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
-AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
+AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$FRESH_REMOTE" \
 AI_MEMORY_HUB="$FRESH_HUB" AI_MEMORY_LOG="$FRESH_LOG" \
   bash "$ROOT/bin/ai-memory-sync" sync > "$TMP/fresh.out"
 [[ -d "$FRESH_HUB/.git" ]] || fail "fresh-machine seed did not clone the private hub"
 grep -Fq 'fresh-machine seed complete' "$FRESH_LOG" ||
   fail "fresh-machine seed did not report its no-project state"
-[[ "$(git --git-dir="$REMOTE" rev-parse main)" == "$(git -C "$FRESH_HUB" rev-parse HEAD)" ]] ||
+[[ "$(git --git-dir="$FRESH_REMOTE" rev-parse main)" == "$fresh_remote_before" ]] ||
+  fail "fresh-machine seed uploaded a change despite having no project memory"
+[[ "$(git --git-dir="$FRESH_REMOTE" rev-parse main)" == "$(git -C "$FRESH_HUB" rev-parse HEAD)" ]] ||
   fail "fresh-machine seed changed or diverged from the private hub"
+
+# Forget is a hub operation and must still commit/push from a fresh machine.
+# The fresh-seed early exit must never turn a tombstone into false success.
+HOME="$FRESH_HOME" CLAUDE_HOME="$FRESH_CLAUDE" \
+AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$FRESH_REMOTE" \
+AI_MEMORY_HUB="$FRESH_HUB" AI_MEMORY_LOG="$FRESH_LOG" \
+  bash "$ROOT/bin/ai-memory-sync" forget sample hub.md 'fresh-machine deletion test' \
+  > "$TMP/fresh-forget.out"
+git --git-dir="$FRESH_REMOTE" show main:memory/sample/hub.md >/dev/null 2>&1 &&
+  fail "fresh-machine forget reported success without removing the fact"
+git --git-dir="$FRESH_REMOTE" show main:memory/sample/.forgotten |
+  grep -Fq $'hub.md\t' || fail "fresh-machine forget did not publish its tombstone"
 
 EMPTY_CLAUDE="$TMP/claude-unrecognized-empty"
 mkdir -p "$EMPTY_CLAUDE"
@@ -78,6 +96,39 @@ set -e
 [[ "$empty_status" -ne 0 ]] || fail "unrecognized empty Claude home did not fail closed"
 grep -Fq 'almost certainly not the home Claude Code uses' "$TMP/unrecognized-empty.out" ||
   fail "unrecognized empty Claude home lost the wrong-home diagnosis"
+
+MISMATCHED_CLAUDE="$TMP/claude-mismatched-with-skills"
+mkdir -p "$MISMATCHED_CLAUDE/skills" \
+  "$MISMATCHED_CLAUDE/projects/C--repos-not-in-hub/memory"
+set +e
+CLAUDE_HOME="$MISMATCHED_CLAUDE" AI_MEMORY_HUB_ROOT="$SEED" \
+  bash "$ROOT/bin/ai-sync-memory" pull > "$TMP/mismatched-with-skills.out" 2>&1
+mismatched_status=$?
+set -e
+[[ "$mismatched_status" -ne 0 ]] ||
+  fail "managed home with only nonmatching project memory did not fail closed"
+grep -Fq 'Every project was skipped' "$TMP/mismatched-with-skills.out" ||
+  fail "managed mismatched home lost the wrong-home diagnosis"
+
+# Exercise the wrapper's own managed-home guard independently of the child.
+WRAPPER_TOOL="$TMP/wrapper-tool"
+WRAPPER_HOME="$TMP/wrapper-home"
+WRAPPER_HUB="$TMP/wrapper-hub"
+mkdir -p "$WRAPPER_TOOL/bin" "$WRAPPER_HOME"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$WRAPPER_TOOL/bin/ai-sync-memory"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$WRAPPER_TOOL/bin/ai-memory-health"
+chmod +x "$WRAPPER_TOOL/bin/ai-sync-memory" "$WRAPPER_TOOL/bin/ai-memory-health"
+set +e
+HOME="$WRAPPER_HOME" CLAUDE_HOME="$WRAPPER_HOME/.claude" \
+AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+AI_MEMORY_TOOL_ROOT="$WRAPPER_TOOL" AI_MEMORY_REMOTE="$REMOTE" \
+AI_MEMORY_HUB="$WRAPPER_HUB" AI_MEMORY_LOG="$TMP/wrapper.log" \
+  bash "$ROOT/bin/ai-memory-sync" sync > "$TMP/wrapper-guard.out" 2>&1
+wrapper_guard_status=$?
+set -e
+[[ "$wrapper_guard_status" -ne 0 ]] || fail "wrapper accepted an unmanaged empty Claude home"
+grep -Fq 'is not a toolkit-managed Claude home' "$TMP/wrapper-guard.out" ||
+  fail "wrapper managed-home guard lost its diagnosis"
 
 # Reproduce a Windows working-tree index while the private Git hub stores LF.
 # A hidden trailing CR must not make the same entry look new on every run.
