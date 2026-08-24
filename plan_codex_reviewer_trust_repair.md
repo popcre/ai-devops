@@ -10,9 +10,8 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Complete change capture | ✅ complete | text/binary untracked files are present in the digest-bound private snapshot |
 | 3 | Fail-closed completion | ✅ complete | provider, empty, missing-verdict, snapshot-write, and stale-source fixtures |
 | 4 | Collision-proof artifacts and shared governance | ✅ complete | concurrent atomic reports plus preflight/lifecycle/scoreboard evidence |
-| 5 | Land and install | 🟨 integrated locally | 39/39 focused and the repository-wide 51-Bash/16-PowerShell run pass locally; the prior GitHub Windows failure's path-format cause is repaired. Exact-head review, push, CI, and installation remain. |
-
-Fresh session starts at Step 5.
+| 5 | Land and install | ✅ complete | landed on GitHub `main`, exact-head independently approved, CI green, and installed on Ubuntu production. A real review of open issue #13 returned a truthful `REJECT` (`.ai/reviews/codex-final-check-20260822T193613-4044464-27693.md`), which proves the reviewer operates. |
+All steps are complete; this plan is retained as a decision record.
 
 ## 1. The ultimate goal — what we are trying to achieve
 

@@ -10,9 +10,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Bind session to exact evidence | ✅ complete | head/tree/packet/model and prompt fixtures |
 | 3 | Explicit refresh/restart behavior | ✅ complete | committed/dirty/untracked/packet-drift fixtures |
 | 4 | Shared governance integration | ✅ complete | preflight/scoreboard fixtures and isolated credential boundary |
-| 5 | Live qualification and landing | 🟨 live skipped by owner | Qwen credits exhausted; offline proof complete, remote SHA pending |
+| 5 | Live qualification and landing | 🟨 live skipped by owner; source landed | the source is on GitHub `main`, CI is green, and Ubuntu production is installed. Offline proof re-verified 2026-08-24: `tests/test-ai-qwen.sh` 90/90. Live open-issue proof remains explicitly waived by the owner while Qwen credits are exhausted, so Qwen stays truthfully quarantined and is NOT provider-qualified. |
 
-Current work starts at Step 5; do not spend Qwen credits until the owner restores them.
+The source is landed and installed; only the owner-waived live proof is outstanding. Do not spend Qwen credits until the owner restores them.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -44,7 +44,10 @@ changes, broad permissions, other providers.
 `start_session()` writes conversation/workspace metadata but not exact review
 identity. `cmd_ask()` obtains the current boundary, which can refresh a linked
 worktree snapshot. Existing Qwen suite passed 23 cases during the Kimi landing;
-none covers code changing between new and ask. No fix is committed.
+none covers code changing between new and ask. This paragraph records the
+pre-repair state of 2026-08-21 and is retained as investigation history: the fix
+is committed, landed, and installed, the offline suite is 90/90, and only the
+owner-waived live proof remains. The STATUS table above is authoritative.
 
 ## 6. Key findings and root cause
 

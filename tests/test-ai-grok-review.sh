@@ -13,9 +13,13 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-grok-review"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+# A platform-gated case that did not execute is not a passing check.
+# Counting it as one inflated the non-Windows totals and hid which
+# Windows cases never ran.
+skip() { printf '  skip %s\n' "$1"; SKIP=$((SKIP+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 isolation_homes_match(){
   local home grok_home profile xdg_config xdg_cache xdg_data appdata localappdata
@@ -562,10 +566,31 @@ if case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) true;; *) fal
   FAIL_CLOSED_RC=$?
   check "failed Windows fallback returns normally and preserves remote uncertainty" "test '$FAIL_CLOSED_RC' -eq 0 && test -f '$FAIL_CLOSED_LOCK/remote-uncertain'"
 else
-  ok "Windows native fallback runtime test skipped on non-Windows"
-  ok "Windows fallback-failure fail-closed test skipped on non-Windows"
+  skip "Windows native fallback runtime test skipped on non-Windows"
+  skip "Windows fallback-failure fail-closed test skipped on non-Windows"
 fi
 check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
+# on_paid_signal ordering: the interrupt path must record paid-work uncertainty
+# BEFORE it attempts the fallible process-tree stop. Both stop helpers are
+# replaced with functions that abort, so a marker can only exist if it was
+# written first. This is the executable form of the 2026-08-23 Claude finding.
+SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
+(
+  . "$TMP/lib.sh"
+  STATE_DIR="$AI_GROK_STATE_DIR"
+  mkdir -p "$SIGNAL_LOCK"; printf '%s\n' "$$" > "$SIGNAL_LOCK/pid"
+  ACTIVE_PAID_LOCK="$SIGNAL_LOCK"; ACTIVE_SESSION_LOCK=''
+  ACTIVE_GROK_CHILD=99999999
+  request_active_grok_stop() { exit 99; }
+  stop_active_grok_tree()    { exit 99; }
+  on_paid_signal
+) >/dev/null 2>&1
+SIGNAL_RC=$?
+check "on_paid_signal records remote uncertainty before any fallible cleanup"   "test -f '$SIGNAL_LOCK/remote-uncertain' && test '$SIGNAL_RC' -eq 99"
+check "on_paid_signal warns instead of trusting the uncertainty marker write"   "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'retaining the paid-work lock for manual reconciliation'"
+check "unconfirmed stops drop only the temporary supervisor stop state"   "test \"\$(grep -c 'clear_active_stop_file' '$SCRIPT')\" -ge 6"
+check "the timeout path cleans orphaned stop state without releasing the paid lock"   "sed -n '/exceeded the configured/,/RUN_TURN_RC=124/p' '$SCRIPT' | grep -q 'clear_active_stop_file'"
+
 check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()/,/^cmd_new()/p' '$SCRIPT' | grep -q 'clear_active_grok'"
 check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
@@ -689,5 +714,5 @@ check "right --assert-head is accepted" \
   "( cd '$REPO' && bash '$SCRIPT' new goodsha --prompt x --assert-head \"\$(git -C '$REPO' rev-parse HEAD)\" ) >/dev/null 2>&1"
 
 echo
-printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
+printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

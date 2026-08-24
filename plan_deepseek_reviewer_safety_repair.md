@@ -10,9 +10,10 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Contained session identity | ✅ complete | hostile name, outside sentinel, and link fixtures |
 | 3 | Atomic locked conversation commits | ✅ complete | failed-call rollback, concurrent reply, bounded provider-call, and signal-owned child fixtures |
 | 4 | Review completion/governance contract | ✅ complete | `--review` refuses a missing Git commit before provider contact; verdict plus exact session/HEAD/caller sidecar; a real metadata-publication failure is nonzero and cannot be hidden by cleanup |
-| 5 | Land and install | 🟨 integrated locally | combined branch is rebased on current GitHub `main`; exact-head approval, push, and permitted installation remain |
+| 5 | Land and install | ✅ complete | landed on GitHub `main`, independently approved, and installed; `ai-deepseek-agent doctor --live` passes on Ubuntu production |
+| 6 | Truthful evidence boundary | 🟨 in landing verification (2026-08-24) | a `--review` run against open issue #62 returned a terminal verdict whose findings were fabricated, because DeepSeek has no repository access and was never told so. `--review` now states the boundary, requires `BLOCKED` over inference, accepts repeated `--file`, and records `evidence_scope`/`repository_access`/`attached_files`. See `bugs.md` finding 27 and `tests/verification/reviewer-production-completion/2026-08-24-grok-deepseek.md`. |
 
-Fresh session starts at Step 5.
+Fresh session starts at Step 6 landing verification: exact-head review, push, CI, install, then one installed open-issue review under the repaired evidence boundary.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -45,8 +46,9 @@ owns and bounds the provider request before unlocking, publishes history and
 reviewer metadata atomically, refuses formal reviews without an exact Git commit,
 and leaves failed provider turns out of durable history. The hostile traversal,
 link, concurrency, interruption, missing-commit, failed-call, and publication-
-failure tests pass. The STATUS table above is authoritative;
-GitHub landing and permitted installation remain.
+failure tests pass. The STATUS table above is authoritative: that work landed on
+GitHub `main` and was installed on 2026-08-23. Only the 2026-08-24 evidence-
+boundary repair (Step 6) is still in landing verification.
 
 ## 6. Key findings and root cause
 

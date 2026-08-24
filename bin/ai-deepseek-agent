@@ -10,12 +10,12 @@
 # a JSON transcript file and resends it each time).
 #
 # Usage:
-#   ai-deepseek-agent send "<message>" [--file FILE] [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"] [--review]
+#   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"] [--review]
 #       Start a NEW conversation. Prints:
 #         SESSION_ID: <id>
 #         <DeepSeek's reply>
 #
-#   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]
+#   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]...
 #       Continue an EXISTING conversation. Prints DeepSeek's reply.
 #
 #   ai-deepseek-agent show <session-id>
@@ -49,10 +49,10 @@ CALL_TIMEOUT="${AI_DEEPSEEK_CALL_TIMEOUT:-300}"
 usage() {
   cat <<'EOF'
 Usage:
-  ai-deepseek-agent send "<message>" [--file FILE] [--model MODEL] [--system "<prompt>"] [--review]
+  ai-deepseek-agent send "<message>" [--file FILE]... [--model MODEL] [--system "<prompt>"] [--review]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
 
-  ai-deepseek-agent reply <session-id> "<message>" [--file FILE]
+  ai-deepseek-agent reply <session-id> "<message>" [--file FILE]...
       Continue an existing conversation with full history.
 
   ai-deepseek-agent show <session-id>
@@ -69,6 +69,10 @@ same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
 
 --review requires a final ## Verdict heading and APPROVE, REJECT, or BLOCKED.
+It also tells DeepSeek that it has NO repository access, so it must not claim
+that anything exists or is missing unless the text quotes it, and must return
+BLOCKED when a conclusion would need evidence it was not given. --file may be
+repeated to attach all the evidence a real judgement needs.
 It writes a metadata sidecar bound to this repository's exact HEAD commit.
 EOF
 }
@@ -328,30 +332,109 @@ print(m.group(1))
 PY
 }
 
+# A reply resends the whole conversation, so files attached on ANY earlier turn
+# are still in front of DeepSeek. Recording only the latest turn understated
+# the evidence behind a continued review verdict. The ledger accumulates every
+# attachment actually sent in this session, in order, without duplicates. It is
+# named without a .json suffix so `list` cannot mistake it for a conversation.
+attachments_ledger() { session_path "$1" .attachments; }
+record_attachments() { # id [files...]
+  # NUL-delimited. A path may legally contain spaces or newlines, and a
+  # line-based ledger would silently rename or split such a file in the durable
+  # record - exactly the "the evidence record lies about what was reviewed"
+  # defect this change exists to remove.
+  local id="$1" ledger file; shift
+  [ "$#" -gt 0 ] || return 0
+  ledger="$(attachments_ledger "$id")" || return 1
+  for file in "$@"; do
+    [ -n "$file" ] || continue
+    printf '%s\0' "$file" >> "$ledger" || return 1
+  done
+  chmod 0600 "$ledger" 2>/dev/null || true
+}
+
+# The boundary must sit in the SYSTEM message. A caller-supplied --system is sent
+# with higher authority than the user turn, so a boundary living only in the user
+# message could be contradicted ("you can read the repository") while the wrapper
+# still published completed review metadata. Review mode therefore owns the system
+# prompt outright and refuses to proceed when it does not.
+review_system_present() { # transcript -> 0 when messages[0] is exactly the boundary
+  BOUNDARY="$REVIEW_INSTRUCTION" "$PYTHON" - "$1" <<'PY'
+import json, os, sys
+try: msgs = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception: raise SystemExit(1)
+if not msgs: raise SystemExit(1)
+first = msgs[0]
+raise SystemExit(0 if first.get("role") == "system" and first.get("content") == os.environ["BOUNDARY"] else 1)
+PY
+}
+
 write_review_metadata() { # id verdict
-  local id="$1" verdict="$2" meta tmp head repo
+  local id="$1" verdict="$2" meta tmp head repo ledger
   meta="$(session_path "$id" .meta.json)" || return 1
   tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="${REVIEW_HEAD:-}"
   [ -n "$head" ] || { rm -f "$tmp"; return 1; }
-  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" "$PYTHON" - "$tmp" <<'PY'
+  ledger="$(attachments_ledger "$id")" || { rm -f "$tmp"; return 1; }
+  # The head binds WHEN the review happened, never what DeepSeek could see.
+  # evidence_scope and attached_files keep that distinction in the durable
+  # record, so no later reader mistakes a text-only opinion for repository
+  # inspection at that commit.
+  # Paths travel as argv and as NUL-delimited bytes, never as newline-joined
+  # text, so a name containing spaces or newlines is recorded exactly as given.
+  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" \
+  "$PYTHON" - "$tmp" "$ledger" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"} <<'PY'
 import json, os, sys
-json.dump({"schema_version":1,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"status":"complete"},open(sys.argv[1],"w",encoding="utf-8"),indent=2)
+out, ledger, *attached_turn = sys.argv[1:]
+try: raw = open(ledger, "rb").read()
+except OSError: raw = b""
+attached = []
+for part in raw.split(b"\0"):
+    if not part: continue
+    name = os.fsdecode(part)
+    if name not in attached: attached.append(name)
+json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"status":"complete"},open(out,"w",encoding="utf-8"),indent=2)
 PY
   if [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" = publish ]; then mkdir -p "$meta" || return 1; fi
   if ! write_atomic "$meta" "$tmp"; then rm -f "$tmp"; return 1; fi
   rm -f "$tmp"
 }
 
-with_file_appended() {
-  # $1 = message, $2 = file path (may be empty) -> prints combined message
-  local msg="$1" file="$2"
-  if [ -n "$file" ]; then
+with_files_appended() {
+  # $1 = message, remaining args = file paths (may be none) -> combined text.
+  # --file may be repeated: a review is only as good as the evidence it is
+  # handed, and one attachment is rarely the whole story.
+  local msg="$1" file; shift
+  printf '%s' "$msg"
+  for file in "$@"; do
+    [ -n "$file" ] || continue
     [ -f "$file" ] || { echo "Error: file not found: $file" >&2; return 1; }
-    printf '%s\n\n--- %s ---\n%s\n--- end %s ---' "$msg" "$file" "$(cat "$file")" "$file"
-  else
-    printf '%s' "$msg"
-  fi
+    printf '\n\n--- %s ---\n%s\n--- end %s ---' "$file" "$(cat "$file")" "$file"
+  done
 }
+
+# DeepSeek reaches this wrapper over a plain text API: no repository, no
+# filesystem, no tools. Unless it is told so it answers as though it had
+# inspected the code, and reports files it was never shown as "absent". On
+# 2026-08-24 a --review run against issue #62 declared the CI workflow and both
+# test runners missing; all of them exist. A verdict is bound to an exact commit
+# in durable metadata, so that fabrication reads as an exact-source finding.
+# This contract is the fix: state the evidence boundary, and require BLOCKED
+# rather than a guess. A reply resends the whole conversation, so the boundary is
+# worded around the conversation rather than one message.
+REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You are
+being consulted through a text-only API. You have NO access to this repository,
+its files, its commit history, the network, or any tool. The ONLY evidence
+available to you is this conversation: the text of this message, any earlier
+turns in it, and any files quoted in them.
+
+Therefore: do not state that any file, test, workflow, directory, commit, or
+setting exists, is missing, or has particular contents unless it is quoted in
+this conversation. Absence from this conversation is NOT evidence of absence
+from the repository.
+If a conclusion would need evidence you were not given, name the missing
+evidence and return BLOCKED instead of inferring it.
+
+End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED.'
 
 case "$SUBCMD" in
   doctor)
@@ -392,28 +475,29 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
     ;;
 
   send)
-    MSG=""; FILE=""; SYSTEM=""; REVIEW=0
+    MSG=""; SYSTEM=""; REVIEW=0; REVIEW_FILES=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --file) FILE="${2:-}"; shift 2 ;;
+        --file) REVIEW_FILES+=("${2:-}"); shift 2 ;;
         --model) MODEL="${2:-}"; shift 2 ;;
         --system) SYSTEM="${2:-}"; shift 2 ;;
         --review) REVIEW=1; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
-    [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]' >&2; exit 2; }
+    [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]...' >&2; exit 2; }
+    if [ "$REVIEW" = 1 ] && [ -n "$SYSTEM" ]; then echo "Error: --system cannot be combined with --review; the review evidence boundary owns the system prompt. Put your instructions in the review message instead." >&2; exit 2; fi
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
-    MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+    MSG="$(with_files_appended "$MSG" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"})" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
-End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED."
+$REVIEW_INSTRUCTION"
 
     ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
     while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
     acquire_lock "$F" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
-    if [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
+    if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
     call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
     REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
@@ -427,6 +511,11 @@ End the response with a literal ## Verdict heading followed on the next line by 
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+      release_lock
+      echo "Error: the conversation was saved, but its attachment record could not be updated." >&2
+      exit 1
+    fi
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
@@ -440,10 +529,10 @@ End the response with a literal ## Verdict heading followed on the next line by 
 
   reply)
     ID="${1:-}"; shift || true
-    MSG=""; FILE=""; REVIEW=0
+    MSG=""; REVIEW=0; REVIEW_FILES=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --file) FILE="${2:-}"; shift 2 ;;
+        --file) REVIEW_FILES+=("${2:-}"); shift 2 ;;
         --review) REVIEW=1; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
@@ -452,10 +541,11 @@ End the response with a literal ## Verdict heading followed on the next line by 
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
-    MSG="$(with_file_appended "$MSG" "$FILE")" || exit 1
+    if [ "$REVIEW" = 1 ] && ! review_system_present "$F"; then echo "Error: this conversation was not started as a formal review, so its system prompt is not the review evidence boundary. Start the review with: ai-deepseek-agent send \"<message>\" --review" >&2; exit 1; fi
+    MSG="$(with_files_appended "$MSG" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"})" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
-End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED."
+$REVIEW_INSTRUCTION"
 
     acquire_lock "$F" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
@@ -472,6 +562,11 @@ End the response with a literal ## Verdict heading followed on the next line by 
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+      release_lock
+      echo "Error: the conversation was saved, but its attachment record could not be updated." >&2
+      exit 1
+    fi
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2

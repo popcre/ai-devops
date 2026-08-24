@@ -968,6 +968,30 @@ quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
 - User-visible failure: one session may use an unsafe unfinished reviewer while
   another refuses to work on it, depending on which source it reads.
 
+### 27. DeepSeek reviews assert repository evidence it was never given
+
+**Repair status (2026-08-24): fixed; `--review` now states the evidence
+boundary, requires BLOCKED instead of inference, accepts repeated `--file`, and
+publishes `evidence_scope`/`repository_access`/`attached_files` in schema 2
+metadata, accumulated NUL-safely across every turn of a conversation. The
+boundary is carried by the system prompt and cannot be overridden by `--system`.
+Bound by sixteen new cases in `tests/test-ai-deepseek-agent.sh` (67/67).**
+
+- Files: `bin/ai-deepseek-agent` (`REVIEW_INSTRUCTION`, `with_files_appended`,
+  `write_review_metadata`)
+- Confidence: high
+- What happens: `ai-deepseek-agent` reaches DeepSeek over a text-only chat API
+  with no repository, filesystem, or tool access, but `--review` never said so
+  and attached at most one file. The model answered as though it had inspected
+  the code. An installed review of open issue #62 on 2026-08-24 reported
+  `.github/workflows/verify.yml`, `tests/test-all.sh`, `tests/test-all.ps1`, and
+  `memory/README.md` as absent; all four exist at the reviewed commit.
+- User-visible failure: because `--review` binds the verdict to the exact Git
+  HEAD in durable metadata, a text-only opinion was published in a shape that
+  reads as exact-source repository inspection. A truthful-looking verdict
+  carrying fabricated absence findings is worse than a failed review, because
+  automation and later readers treat it as evidence.
+
 ## LOW
 
 ### 26. Kimi missing-job commands return raw file errors

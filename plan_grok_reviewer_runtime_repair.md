@@ -11,11 +11,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 3 | Truthful interruption/deletion | ✅ complete locally | uncertainty marker/block and active-delete behavior |
 | 4 | Mid-turn progress | ✅ complete locally | two-heartbeat fixture plus a process-level timeout that retains remote uncertainty |
 | 5 | Exact incident correlation | ✅ complete locally | shared evidence plan; 28 incident tests |
-| 6 | Live qualification and landing | 🟨 live passed; landing open | exact-source doctor, issue #61 APPROVE, installed/source hashes, and bounded two-clone canary passed; remote SHA, Ubuntu install, CI, and issue closure remain |
+| 6 | Live qualification and landing | ✅ complete | exact-source doctor, open issue #61 `APPROVE`, installed/source hashes, and the bounded two-clone canary passed; the source landed on GitHub `main`, CI is green, and Ubuntu production is installed |
+| 7 | Issue #62 follow-ups | 🟨 in landing verification (2026-08-24) | the three follow-ups Claude raised are repaired: `on_paid_signal` records paid-work uncertainty before fallible cleanup, non-Windows skips are no longer counted as passes, and orphaned supervisor stop directories are cleared without releasing an uncertain paid-work lock. Suite 172/172. See `tests/verification/reviewer-production-completion/2026-08-24-grok-deepseek.md`. |
 
-Step 6 is in landing verification. Exact-source live qualification passed on
-2026-08-23; see
+Step 6 is complete: exact-source live qualification passed on 2026-08-23 and the
+source is landed, green in CI, and installed; see
 [`tests/verification/grok-review-issue-61/2026-08-23-live.md`](tests/verification/grok-review-issue-61/2026-08-23-live.md).
+Current work is Step 7 only; do not reopen Steps 1-6.
 This is the provider-facing companion to the more
 detailed existing `plan_grok-review-concurrency-cancellation-observability.md`;
 that plan remains the authoritative engineering detail where it is stricter.
@@ -56,8 +58,10 @@ signals, process timeouts, missing terminal results, or dead local owners, and
 emits factual bounded heartbeats. Offline tests cover normalized clone identity,
 two progress updates, a bounded hung local process, and all uncertainty paths.
 Installed Windows live qualification, including the authoritative bounded
-two-clone canary, passed on 2026-08-23; landing remains open. The status table
-above is authoritative.
+two-clone canary, passed on 2026-08-23, and that source is landed on GitHub
+`main`, green in CI, and installed. Only the 2026-08-24 issue #62 follow-ups
+(Step 7) remain in landing verification. The status table above is
+authoritative.
 
 ## 6. Key findings and root cause
 

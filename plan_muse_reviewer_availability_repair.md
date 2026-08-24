@@ -10,9 +10,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 2 | Exact report-destination safety | ✅ complete | tracked-history and exact-destination fixtures |
 | 3 | Pre-provider durable state/progress | ✅ complete | interruption, slow-turn, heartbeat, and uncertainty fixtures |
 | 4 | Caller identity and central governance | ✅ complete | caller, preflight, and scoreboard fixtures |
-| 5 | Windows/Ubuntu qualification and landing | 🟨 pending exact-head approval | installed open-issue evidence and remote SHA |
+| 5 | Windows/Ubuntu qualification and landing | ✅ complete | landed on GitHub `main` and installed; open issue #51 returned a terminal `APPROVE` in Muse session `ses_fd536a935ffeNtsYMrPzK0yXnb` against reviewed commit `b17e6fc` (`.ai/reviews/muse-issue-51-production-proof-20260822T184546Z-3871140-29679.md`), with further installed proofs retained on Ubuntu production |
 
-Current work starts at Step 5. Reconcile with `plan_muse-opencode-harness.md` and
+All steps are complete; this plan is retained as a decision record. Reconcile with `plan_muse-opencode-harness.md` and
 issues #40/#45/#51; this plan governs the audit defects.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -45,8 +45,12 @@ server design, broadening permissions, GLM service changes, application repos.
 
 Caller default is `bin/ai-muse:11`; destination checks at `:93-99` reject any
 tracked `.ai/reviews` entry; prepare/run/meta order is `:136-146`, so no metadata
-exists during the call. Current Muse suite passes 71 existing cases. The harness
-plan still has partial/open Ubuntu, failure-matrix, preflight and landing work.
+exists during the call. Current Muse suite passes 71 existing cases. That
+remaining-work sentence recorded the 2026-08-21 state and is retained as
+investigation history: Muse landed, installed, and returned a terminal `APPROVE`
+on open issue #51. Any residual harness work is governed by
+`plan_muse-opencode-harness.md`, not by this plan. The STATUS table above is
+authoritative.
 
 ## 6. Key findings and root cause
 

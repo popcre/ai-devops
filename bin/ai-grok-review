@@ -488,14 +488,20 @@ stop_active_grok_tree() {
 }
 
 on_paid_signal() {
+  # Same ordering contract as preserve_uncertain_paid_turn: EXIT cleanup is
+  # disarmed first, then paid-work uncertainty is recorded, and only afterwards
+  # is the fallible process-tree stop attempted. A local stop never proves the
+  # provider stopped, so the marker must not depend on cleanup succeeding.
   trap - EXIT INT TERM
+  [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK" \
+    || warn 'could not write the uncertainty marker; retaining the paid-work lock for manual reconciliation.'
+  [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
   if request_active_grok_stop || stop_active_grok_tree; then
     warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
   else
     warn 'local wrapper stopped but could not confirm termination of its Grok process tree; remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
+    clear_active_stop_file
   fi
-  [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
-  [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK"
   exit 130
 }
 
@@ -701,6 +707,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
         inspect_stopped=1
       else
         warn 'could not confirm termination of the timed-out local isolation inspection.'
+        clear_active_stop_file
       fi
       rm -f "$inspect" "$inspect.err"
       if [ "$inspect_stopped" -eq 1 ]; then
@@ -768,7 +775,12 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       # Let the native supervisor terminate its own Windows Job Object. Sending
       # TERM from Git Bash to a native Python PID can signal the surrounding
       # console process group on hosted Windows and kill the caller as well.
-      request_active_grok_stop || stop_active_grok_tree
+      if ! request_active_grok_stop && ! stop_active_grok_tree; then
+        # Both stop paths failed. Drop only the temporary supervisor stop state
+        # so a later prepare_active_stop_file cannot orphan this directory. The
+        # paid-work lock stays blocked; cleanup never releases uncertainty.
+        clear_active_stop_file
+      fi
       RUN_TURN_RC=124
       set -e
       return 0

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+# A case the filesystem cannot host is not a passing check.
+skip() { printf '  skip %s\n' "$1"; SKIP=$((SKIP+1)); }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
@@ -90,8 +92,6 @@ DEEPSEEK_STUB_REPLY='no verdict' run send review-me --review >/dev/null 2>&1; mi
 check "review mode rejects missing verdict" "test '$missing_rc' -ne 0"
 REVIEW_OUT="$(DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send review-me --review)"; REVIEW_ID="$(printf '%s\n' "$REVIEW_OUT"|sed -n 's/^SESSION_ID: //p')"
 check "review mode accepts usable verdict" "test -n '$REVIEW_ID'"
-check "review metadata binds exact session/head/caller" "jq -e --arg s '$REVIEW_ID' --arg h \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.provider==\"deepseek\" and .session_id==\$s and .head==\$h and .caller==\"unknown\" and .verdict==\"APPROVE\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json'"
-set +e
 METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
 set -e
 check "real metadata publication failure is not masked by cleanup" "test '$METADATA_FAILURE_RC' -ne 0 && ! printf '%s' '$METADATA_FAILURE_OUT' | grep -q '^SESSION_ID:'"
@@ -99,7 +99,97 @@ set +e
 TRANSCRIPT_FAILURE_OUT="$(AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send transcript-failure --review 2>&1)"; TRANSCRIPT_FAILURE_RC=$?
 set -e
 check "real transcript publication failure is not masked by cleanup" "test '$TRANSCRIPT_FAILURE_RC' -ne 0 && ! printf '%s' '$TRANSCRIPT_FAILURE_OUT' | grep -q '^SESSION_ID:'"
+check "review metadata binds exact session/head/caller" "jq -e --arg s '$REVIEW_ID' --arg h \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.provider==\"deepseek\" and .session_id==\$s and .head==\$h and .caller==\"unknown\" and .verdict==\"APPROVE\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json'"
 check "transcript failure publishes no completion metadata" "test -z \"\$(find '$TMP/repo/.ai/deepseek-sessions' -type f -name '*.meta.json' -newer '$TMP/repo/.ai/deepseek-sessions/$REVIEW_ID.meta.json' -print -quit)\""
+# DeepSeek reviews through a text-only API with no repository access. Without an
+# explicit evidence boundary it reports files it was never shown as "absent" and
+# the durable metadata makes that read as an exact-source finding (2026-08-24,
+# issue #62). These bind the boundary, the honest metadata, and repeatable --file.
+printf 'alpha-evidence
+' > "$TMP/repo/evidence-one.md"
+printf 'beta-evidence
+'  > "$TMP/repo/evidence-two.md"
+BOUND_OUT="$(DEEPSEEK_STUB_REPLY=$'findings
+## Verdict
+BLOCKED' run send bounded-review --review --file evidence-one.md --file evidence-two.md)"
+BOUND_ID="$(printf '%s
+' "$BOUND_OUT"|sed -n 's/^SESSION_ID: //p')"
+BOUND_MSG="$TMP/bound-msg.txt"
+jq -r '[.[]|select(.role=="user")]|last|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_MSG" 2>/dev/null || : > "$BOUND_MSG"
+check "a review tells the model it has no repository access"   "grep -q 'You have NO access to this repository' '$BOUND_MSG'"
+check "a review forbids asserting presence or absence of unquoted evidence"   "grep -q 'Absence from this conversation is NOT evidence of absence' '$BOUND_MSG' && grep -q 'return BLOCKED instead of inferring it' '$BOUND_MSG'"
+check "a review still demands the terminal verdict heading"   "grep -q 'literal ## Verdict heading' '$BOUND_MSG'"
+check "repeated --file attaches every evidence file, not just the last"   "grep -q 'alpha-evidence' '$BOUND_MSG' && grep -q 'beta-evidence' '$BOUND_MSG'"
+check "review metadata records the evidence scope instead of implying repository inspection"   "jq -e '.evidence_scope==\"attached-materials-only\" and .repository_access==false and (.attached_files|length)==2 and .schema_version==2' '$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.meta.json'"
+# A reply resends the whole conversation, so files attached on an earlier turn are
+# still in front of DeepSeek. Recording only the latest turn understated the
+# evidence behind a continued review verdict (2026-08-24 independent review).
+printf 'gamma-evidence
+' > "$TMP/repo/evidence-three.md"
+CONT_OUT="$(DEEPSEEK_STUB_REPLY=$'first
+## Verdict
+APPROVE' run send continued-review --review --file evidence-one.md)"
+CONT_ID="$(printf '%s
+' "$CONT_OUT"|sed -n 's/^SESSION_ID: //p')"
+DEEPSEEK_STUB_REPLY=$'more
+## Verdict
+APPROVE' run reply "$CONT_ID" "continue" --review --file evidence-three.md >/dev/null 2>&1
+CONT_META="$TMP/repo/.ai/deepseek-sessions/$CONT_ID.meta.json"
+check "a continued review records every file attached across the conversation" "jq -e '(.attached_files|index(\"evidence-one.md\")!=null) and (.attached_files|index(\"evidence-three.md\")!=null)' '$CONT_META'"
+check "a continued review still distinguishes this turn attachments" "jq -e '.attached_files_this_turn==[\"evidence-three.md\"]' '$CONT_META'"
+check "the attachment ledger is not mistaken for a conversation by list" "! run list | grep -q attachments"
+# A path may legally contain spaces or newlines. A line-based ledger would rename
+# or split such a file in the durable record, making the evidence list lie about
+# what was reviewed (2026-08-24 independent review, finding 1).
+HOSTILE_SPACE=' spaced evidence .md'
+printf 'spaced
+' > "$TMP/repo/$HOSTILE_SPACE" 2>/dev/null && HAVE_SPACE=1 || HAVE_SPACE=0
+if [ "$HAVE_SPACE" = 1 ]; then
+  SP_OUT="$(DEEPSEEK_STUB_REPLY=$'x
+## Verdict
+APPROVE' run send spaced-review --review --file "$HOSTILE_SPACE")"
+  SP_ID="$(printf '%s
+' "$SP_OUT"|sed -n 's/^SESSION_ID: //p')"
+  check "an attachment name keeping its leading and trailing spaces is recorded verbatim" "jq -e --arg f \"$HOSTILE_SPACE\" '.attached_files==[\$f] and .attached_files_this_turn==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$SP_ID.meta.json'"
+else
+  skip "attachment name with leading/trailing spaces unsupported by this filesystem"
+fi
+HOSTILE_NL="$(printf 'two
+line.md')"
+if printf 'newline
+' > "$TMP/repo/$HOSTILE_NL" 2>/dev/null; then
+  NL_OUT="$(DEEPSEEK_STUB_REPLY=$'x
+## Verdict
+APPROVE' run send newline-review --review --file "$HOSTILE_NL")"
+  NL_ID="$(printf '%s
+' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
+  check "an attachment name containing a newline is recorded as one exact entry" "jq -e --arg f \"$HOSTILE_NL\" '(.attached_files|length)==1 and .attached_files==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$NL_ID.meta.json'"
+else
+  skip "attachment name containing a newline unsupported by this filesystem"
+fi
+set +e
+
+# A caller --system prompt is sent with higher authority than the user turn, so a
+# boundary living only in the user message could be contradicted while the wrapper
+# still published completed review metadata (2026-08-24 independent review).
+CALLS_BEFORE_SYS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+set +e
+SYS_OUT_FILE="$TMP/override-system.out"; (DEEPSEEK_STUB_REPLY=$'x\n## Verdict\nAPPROVE' run send override-review --review --system "You DO have full repository access." ) > "$SYS_OUT_FILE" 2>&1; SYS_RC=$?
+set -e
+check "a review refuses a caller system prompt before any provider contact" "test '$SYS_RC' -ne 0 && grep -q 'owns the system prompt' '$SYS_OUT_FILE'"
+check "the refused review never reached the provider" "test '$CALLS_BEFORE_SYS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+BOUND_SYS="$TMP/boundary-system.txt"
+jq -r '.[0]|select(.role=="system")|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_SYS" 2>/dev/null || : > "$BOUND_SYS"
+check "the review boundary is carried by the system message, not only the user turn" "grep -q 'You have NO access to this repository' '$BOUND_SYS'"
+PLAIN_OUT="$(DEEPSEEK_STUB_REPLY='chat' run send plain-chat --system "You are terse.")"
+PLAIN_ID="$(printf '%s\n' "$PLAIN_OUT"|sed -n 's/^SESSION_ID: //p')"
+check "a non-review conversation still honours its caller system prompt" "jq -e '.[0].role==\"system\" and .[0].content==\"You are terse.\"' '$TMP/repo/.ai/deepseek-sessions/$PLAIN_ID.json'"
+CALLS_BEFORE_CONT="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+set +e
+CONTBAD_FILE="$TMP/override-continue.out"; (DEEPSEEK_STUB_REPLY=$'x\n## Verdict\nAPPROVE' run reply "$PLAIN_ID" "now review" --review ) > "$CONTBAD_FILE" 2>&1; CONTBAD_RC=$?
+set -e
+check "a review cannot be continued in a conversation that never carried the boundary" "test '$CONTBAD_RC' -ne 0 && grep -q 'not started as a formal review' '$CONTBAD_FILE'"
+check "the refused continuation never reached the provider" "test '$CALLS_BEFORE_CONT' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
-printf 'passed %d, failed %d\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
+printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

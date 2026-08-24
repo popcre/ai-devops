@@ -65,7 +65,26 @@ before releasing the session lock, so a second turn cannot overlap it.
 For a formal review, add `--review` to `send` or `reply`. That mode requires a
 literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes a
 metadata sidecar bound to the session and exact Git HEAD. It refuses before
-provider contact when no Git commit can be resolved. A nonzero result is
+provider contact when no Git commit can be resolved.
+
+**DeepSeek cannot read the repository.** It sees only what you send it, so
+`--review` states that boundary in the SYSTEM prompt: DeepSeek must not claim
+anything exists or is missing unless the conversation quotes it, and must return
+`BLOCKED` rather than infer. Because that boundary is not negotiable:
+
+- `--system` cannot be combined with `--review`; put your instructions in the
+  review message instead. Ordinary non-review conversations still accept it.
+- Start a review with `send --review`. `reply --review` refuses, before provider
+  contact, in a conversation that did not begin as a review, because its system
+  prompt would not carry the boundary.
+- Attach the evidence a real judgement needs: `--file` may be repeated, and the
+  metadata records every file sent across the conversation in `attached_files`,
+  the current turn in `attached_files_this_turn`, and `repository_access: false`.
+
+This exists because on 2026-08-24 a `--review` of open issue #62 returned a
+confident verdict reporting four files as absent that were present. The HEAD
+binding made a text-only opinion read as exact-source inspection. Never quote a
+DeepSeek finding about repository contents unless the material was attached. A nonzero result is
 incomplete evidence, never approval. Set `AI_DEEPSEEK_CALLER` to the client
 running the review (`codex` or `claude`) so later incident evidence can match the
 exact caller instead of recording it as `unknown`.

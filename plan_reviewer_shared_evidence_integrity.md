@@ -12,9 +12,9 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 4 | Correlate incident evidence exactly | ✅ complete | 28 incident tests pass; duplicate exact matches and non-owned paths are refused |
 | 5 | Make freshness fail closed | ✅ complete | 15 scoreboard tests pass; run/session/caller identity is preserved |
 | 6 | Govern every active provider | ✅ complete | 35 preflight tests pass; explicit doctor/caller contracts are enforced, Gemini stays quarantined, and Qwen qualification is bound to both the exact wrapper revision and installed runtime hash |
-| 7 | Land and install | 🟨 integrated locally | combined branch is rebased on current GitHub `main`; exact-head approval, push, and permitted installation remain |
+| 7 | Land and install | ✅ complete | landed on GitHub `main`, exact-head independently approved, CI green, and installed on Ubuntu production; shared suites re-verified 2026-08-24 (packet 90, sandbox 71, preflight 36, scoreboard 15, all 0 failures) |
 
-Fresh session starts at Step 7. Re-read downstream steps after each phase.
+All steps are complete; this plan is retained as a decision record.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
