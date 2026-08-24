@@ -194,9 +194,9 @@ clone + `./install.sh` on Ubuntu).
    a plain delete does not propagate — the next `pull` restores it and any
    machine still holding it re-pushes it, making a WRONG memory immortal. Use
    `bin/ai-memory-sync forget <project> <file.md> "<reason>"` (reason mandatory);
-   it tombstones the file in `memory/<project>/.forgotten` so every machine drops
-   it on its next pull and no stale machine resurrects it. Then remove its line
-   from that project's `MEMORY.md`. The `note ... in the hub but not on this
+   it tombstones the file in `memory/<project>/.forgotten`, removes its index
+   line, and commits/pushes the private hub in the same transaction, so every
+   machine drops it and no stale machine resurrects it. The `note ... in the hub but not on this
    machine` line is NOT proof of a deletion — it is equally memory from a machine
    you never pulled; never delete on that basis alone.
 7. Verify `git status --short -- memory/` in public `ai-devops` shows no

@@ -418,6 +418,7 @@ case "$DIRECTION" in
       mv -f "$tmp" "$index"
     fi
     echo "  tombstoned $file in memory/$proj — every machine drops it on its next pull."
+    echo "  The ai-memory-sync parent commits and pushes this private-hub change; direct inner-tool use leaves it for explicit private-hub review."
     ;;
   *) usage ;;
 esac

@@ -87,8 +87,9 @@ git --git-dir="$FRESH_REMOTE" show main:memory/sample/hub.md >/dev/null 2>&1 &&
   fail "fresh-machine forget reported success without removing the fact"
 git --git-dir="$FRESH_REMOTE" show main:memory/sample/.forgotten |
   grep -Fq $'hub.md\t' || fail "fresh-machine forget did not publish its tombstone"
-git --git-dir="$FRESH_REMOTE" show main:memory/sample/MEMORY.md |
-  grep -Fq '(hub.md)' && fail "fresh-machine forget left a broken index line"
+fresh_index="$(git --git-dir="$FRESH_REMOTE" show main:memory/sample/MEMORY.md)"
+[[ "$fresh_index" != *'(hub.md)'* ]] ||
+  fail "fresh-machine forget left a broken index line"
 git --git-dir="$FRESH_REMOTE" show main:memory/sample/stay.md >/dev/null ||
   fail "fresh-machine forget damaged an unrelated fact"
 

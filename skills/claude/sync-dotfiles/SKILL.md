@@ -296,8 +296,9 @@ If the user wants a dry run first: `bin/ai-memory-sync --dry-run` and
   `bin/ai-memory-sync forget <project> <file.md> "<reason>"` — it records a
   tombstone in `memory/<project>/.forgotten`, so every machine drops the file on
   its next pull and no stale machine can resurrect it. A reason is mandatory
-  (without it the fact just gets re-learned later). Then remove the file's line
-  from that project's `MEMORY.md` and commit.
+  (without it the fact just gets re-learned later). The command removes the
+  file's index line and commits/pushes the private hub in the same transaction;
+  do not edit an index or public repository by hand.
 - `push` prints `note ...is in the hub but not on this machine`. That is NOT
   automatically a deletion — it is equally "memory from another machine you have
   never pulled". Never delete on that basis; use `forget` only when you know the
