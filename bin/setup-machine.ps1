@@ -396,10 +396,17 @@ $McpServers["synology-monitor"] = @{
 # secret left after the Phase 2 token-free pass, which missed it because nothing
 # ever rewrote the recall-ai entry. --transport preserves the flag the working
 # config used; the launcher passes %3+ through to mcp-remote untouched.
+#
+# The reference MUST be byte-identical to the one in config/mcp.env.example.
+# Remote mode looks the ref up in mcp.env by exact string match and throws
+# "Secret reference is not managed by ..." on any difference. This entry used the
+# item UUID while mcp.env used the title, so recall-ai could never start; the
+# mismatch stayed hidden until 2026-08-24 because an earlier failure in the shared
+# refresh killed the server before this check ran.
 $McpServers["recall-ai"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
-           "op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password",
+           "op://vibe_coding/recall-ai MCP/password",
            "--transport", "http-first")
 }
 

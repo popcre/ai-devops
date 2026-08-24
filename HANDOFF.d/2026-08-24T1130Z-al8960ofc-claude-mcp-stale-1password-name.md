@@ -15,17 +15,23 @@ Put this whole list to Albert in ONE message before starting work.
 
 **BLOCKING**
 
-**None.** Both items that were blocking are now settled: the VPS edit was approved
-and is done, and the 1Password write that looked broken was a stdin problem, not a
-permission problem (§4). Nothing is waiting on Albert.
+1. **Recall.ai is blocking the account — only Albert can pursue it.** `recall-ai`
+   now passes every local check and is then refused by Recall.ai with
+   `403 request_blocked`. A wrong token gets 401 and ours gets 403, so the
+   credential is valid and authenticates; the block is an account/workspace
+   security rule on their side, not our configuration. *Recommendation: sign in to
+   the Recall.ai dashboard or open a support ticket quoting the error. Nothing in
+   this repo can fix it, and the MCP entry has been left in place, not removed.*
 
 **RECOVERABLE**
 
-2. **Should `bin/setup-machine.ps1` also rewrite `~/.codex/config.toml`?** Today it
-   writes Claude's configs but not Codex's, so Codex drifted and had to be fixed by
-   hand. *Recommendation: yes, but as separate work — this session did not change
-   that split.* Note the standing rule that Claude setup must not touch Codex
-   configuration, so this needs Albert's ruling rather than an assumption.
+2. **`setup-machine.ps1` writes Codex's `config.toml` — is that intended?**
+   Established as fact this session: the 09:57 run reverted `~/.codex/config.toml`
+   along with the Claude configs. (An earlier note in this handoff wrongly said it
+   did not.) That sits awkwardly beside the standing rule that Claude setup must
+   never change Codex configuration. *Recommendation: leave it as is — it is what
+   keeps Codex's MCP set in step — but Albert should confirm the rule means
+   "Claude's own settings", not "the shared machine setup script".*
 
 **NOT PART OF THIS WORK, AND NOBODY IS ON IT**
 
@@ -94,8 +100,16 @@ five config locations are now correct.
 stale pointer field now name the right item; all seven secret fields verified
 unchanged at 64 chars.
 
-**Not done:** clients have not been restarted on either machine — the fix does not
-take effect in a running client. That is the only outstanding step.
+**Restarted once already, and it appeared to fail.** It did not: `setup-machine.ps1`
+ran from `main` at 09:57 and rewrote all three client configs with the stale name,
+because the repo fix was still on an unmerged branch. After merging and re-fixing the
+live files, `devops-mcp` and `synology-monitor` were each launched for real through
+the launcher and started cleanly (exit 0, no validation error).
+
+**`recall-ai` is still down** — reference mismatch fixed (§5), but Recall.ai now
+returns `403 request_blocked` at their end (§0.1).
+
+**Not done:** clients need one more restart to pick up the corrected configs.
 
 ## 4. Everything we tried that did NOT work
 
@@ -121,6 +135,15 @@ take effect in a running client. That is the only outstanding step.
   writes are broken / the service account may have lost write permission" — it was
   neither. **Fix: append `< /dev/null` to every `op` write.** The same edit that hung
   twice then completed instantly. Reads were never affected.
+- **Assuming a hand-edited config stays fixed.** All three were corrected and
+  verified, then silently reverted by `setup-machine.ps1` running from `main`. The
+  repo fix was on an unmerged branch. **Merge the writer first, then fix the live
+  files** — otherwise a restart looks like the fix failed.
+- **Chasing `recall-ai`'s "localhost URL in your payload" message.** It is
+  misleading. A bare `curl` with no URL in it gets the same 403, and all four
+  `mcp-remote` transports fail identically. The block is server-side and
+  account-level; do not rewrite the transport, the launcher, or the payload trying
+  to satisfy it.
 - **Looking for the item under its old title.** `op item list` does not show it;
   only `--include-archive` revealed the item, still live, under its new title. The
   item was never archived — the flag just widened the listing.
@@ -141,8 +164,18 @@ take effect in a running client. That is the only outstanding step.
   name-based reference under that title.
 - **The repo was already correct; the machine was not.** `config/mcp.env.example`
   had the UUID; the deployed copies still had the name. Nothing compares them.
-- **`bin/setup-machine.ps1` would have resurrected the outage** (lines 386, 391,
-  913) on its next run, because it is the canonical writer of the live configs.
+- **`bin/setup-machine.ps1` DID resurrect the outage** — not a hypothetical. It ran
+  from `main` at 09:57 and rewrote all three client configs (Claude Code, Claude
+  Desktop, **and Codex**) with the stale name, because the fix was still unmerged.
+- **A second, latent bug in `recall-ai`'s reference.** Remote mode matches the
+  `op://` argument against `mcp.env` **by exact string**
+  (`bin/mcp-secret-launch.ps1:99`). `setup-machine.ps1` passed the item UUID while
+  `mcp.env` declared the title — same secret, different spelling, so recall-ai could
+  never start. It was invisible until the upstream failure cleared. Fixed by aligning
+  both to the title form.
+- **`recall-ai` is blocked by Recall.ai, not by us.** Wrong token → 401; our stored
+  token → 403 `request_blocked`. It authenticates and is then refused, so the stored
+  credential is correct and the problem is on their side.
 
 ## 6. Exact next steps
 
@@ -151,9 +184,8 @@ take effect in a running client. That is the only outstanding step.
    a window close). *You'll know it worked when no new `Server disconnected` lines
    appear in `AppData\Local\Claude\Logs` and all six servers respond.*
 3. **Restart the VPS clients** after step 1, same check.
-4. **Merge this branch to `main`** (default `u2giants` work goes straight to main).
-   *You'll know it worked when `bin/setup-machine.ps1` on `main` contains
-   `f335s4oy3m6n74jmwj74hunrtu` and no `designflow-mcp`.*
+4. ~~Merge this branch to `main`~~ — **DONE**, and it is what stops the fix being
+   overwritten again.
 5. **Close issue #63 and DELETE this handoff file** in the same pull request.
 6. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
    record deliberately that it never will.

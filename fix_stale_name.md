@@ -1,8 +1,10 @@
 # fix_stale_name.md — a renamed 1Password item silently kills every secret-launched MCP server
 
 **Incident date:** 2026-08-24 · **Machines:** al8960ofc (Windows) + hetz (VPS) ·
-**Status:** all five config locations fixed and verified. Clients must be
-restarted to pick it up.
+**Status:** the stale-name outage is fixed and the fix is merged to `main`.
+`recall-ai` remains down for an unrelated reason that is **not** ours to fix
+(§9). Three separate faults were stacked here — read §2, §8, and §9 as distinct
+problems.
 
 ---
 
@@ -152,11 +154,12 @@ is **no new `Server disconnected` lines**.
 
 ## 6. Remaining work
 
-**None for the reference itself.** `/home/ai/.claude.json` on hetz was corrected on
-2026-08-24 (backup `.bak-20260824-mcpref`, JSON re-validated, zero stale
-occurrences left). What remains is operational: **restart the clients** on both
-machines — a running client keeps its old config, so the logs only go quiet after a
-full restart.
+**Only `recall-ai` (§9b), and it is not a configuration problem.** Everything else is
+done: all five locations carry the item UUID, the repo fix is merged to `main` so
+`setup-machine.ps1` can no longer reinstate the old name, and `devops-mcp` and
+`synology-monitor` were each launched for real and started cleanly.
+
+Restart the clients after any of this — a running client keeps its old config.
 
 ### SSH gotcha met while investigating
 
@@ -173,6 +176,9 @@ machine-in-the-middle.
 
 ## 7. How to stop this recurring
 
+0. **Merge the fix to `main` before hand-editing live configs.** `setup-machine.ps1`
+   is the canonical writer; an unmerged fix gets overwritten the next time it runs,
+   which is exactly what happened here (§8).
 1. **Renaming a `vibe_coding` item is a breaking change.** Before renaming, grep the
    fleet for the old title; after renaming, switch its references to the **UUID**.
 2. **Use the UUID whenever a title contains `(` or `)`** — `op` cannot parse those in
@@ -182,10 +188,76 @@ machine-in-the-middle.
    The repo was already correct here and the machine was still broken; nothing
    compared them. A periodic diff of the reference *names* (never the values) would
    have caught this before the outage.
-4. **Read the failing set before debugging individual servers.** "Exactly the
+4. **Keep `setup-machine.ps1` and `config/mcp.env.example` spelling the same
+   `op://` reference identically** — remote servers match it as a literal string
+   (§9a). A UUID-vs-title mismatch is silently fatal.
+5. **Read the failing set before debugging individual servers.** "Exactly the
    secret-launched servers" is a signature that points at one line in one file.
 
-## 8. Follow-on finding: the NAS bearer was never missing
+## 8. Second fault: a restart "didn't work" — `setup-machine.ps1` undid the fix
+
+After every config was corrected and the clients restarted, the same
+`designflow-mcp` error came back. Nothing regressed on its own:
+
+**`bin/setup-machine.ps1` ran from `main` at 09:57 local and rewrote all three
+client configs with the stale name.** The repo fix was sitting on an unmerged
+branch, so the canonical writer still carried the old reference — exactly the
+resurrection §4 warned about, arriving before the branch was merged. Its own
+backups (`*.aidevops.<timestamp>.bak`) are what date the run.
+
+**Rule this establishes: a config fix is not finished until the writer is merged to
+`main`.** Hand-editing `~/.claude.json`, the Desktop config, or `config.toml` only
+holds until the next setup run. Merge first, then fix the live files.
+
+**Correction to an earlier note in this file's history:** `setup-machine.ps1` *does*
+write Codex's `~/.codex/config.toml` — the 09:57 run reverted it along with the
+Claude configs. An earlier draft said it did not.
+
+## 9. Third fault: `recall-ai` — two problems, one still open
+
+### (a) A reference mismatch that could never have worked — FIXED
+
+Remote-mode servers hit a second check the batch failure had been masking.
+`bin/mcp-secret-launch.ps1:99` looks the `op://` argument up in `mcp.env` **by exact
+string match** and throws `Secret reference is not managed by ...` on any difference.
+
+`setup-machine.ps1` passed recall-ai's token as the item **UUID**
+(`dwvlpanu4odty3bjnmb5my5esy/password`) while `mcp.env` declared the same secret by
+**title** (`recall-ai MCP/password`). Same secret, different spelling, so recall-ai
+could never start — a latent bug, invisible until the stale-name failure upstream was
+cleared. Now aligned to the title form in both files.
+
+> **When adding a remote MCP server, the `op://` string in `setup-machine.ps1` must
+> be byte-identical to the one in `config/mcp.env.example`.** UUID vs title is not
+> interchangeable here, even though `op` resolves both.
+
+### (b) Recall.ai is blocking the account server-side — NOT FIXED, needs Albert
+
+With the reference fixed, recall-ai gets past every local check and is then refused
+by Recall.ai itself:
+
+```
+HTTP 403 {"code":"request_blocked","detail":"Request was blocked due to security
+rules. This is likely due to providing a localhost URL in your payload."}
+```
+
+The stated reason is misleading — the block is **not** about localhost and not about
+our config:
+
+- A plain `curl` containing no URL of any kind gets the same 403.
+- All four `mcp-remote` transports (`http-first`, `http-only`, `sse-first`,
+  `sse-only`) fail identically, so it is not the transport.
+- **A deliberately wrong token returns 401, while the stored token returns 403.** The
+  token therefore authenticates successfully and is then blocked — the credential is
+  valid and correctly stored.
+- `us-west-2` and `eu-central-1` return 401 (regions are separate accounts), so
+  `us-east-1` is the right endpoint.
+
+This is an account- or workspace-level rule on Recall.ai's side. It cannot be
+repaired from configuration; it needs Recall.ai's dashboard or their support. The MCP
+entry is left in place and working up to that point — **not** removed or disabled.
+
+## 10. Follow-on finding: the NAS bearer was never missing
 
 While fixing the above, the `nas-monitor-secrets` item in `vibe_coding` was found to
 carry a field asserting that the live client→nas-mcp bearer is **not** stored in
@@ -234,7 +306,7 @@ op item edit <id> --vault vibe_coding "field[text]=value" < /dev/null
 The same edit that hung twice completed instantly with `< /dev/null`. Do not
 conclude from a hang that the service account has lost write permission.
 
-## 9. Related reading
+## 11. Related reading
 
 - [`bin/mcp-secret-launch.ps1`](bin/mcp-secret-launch.ps1) — the shared refresh, the
   DPAPI cache, and the deliberate throw at line 53.
