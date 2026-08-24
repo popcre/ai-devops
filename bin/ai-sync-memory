@@ -407,8 +407,17 @@ case "$DIRECTION" in
     # Date comes from the OS; memories record absolute dates, never "today".
     printf '%s\t%s\t%s\n' "$file" "$(date +%Y-%m-%d)" "$reason" >> "$dest/$FORGET_NAME"
     [[ -e "$dest/$file" ]] && rm -f "$dest/$file" && echo "  removed memory/$proj/$file from the hub"
+    index="$dest/MEMORY.md"
+    if [[ -f "$index" ]]; then
+      tmp="$index.tombstone.$$"
+      if ! awk -v needle="($file)" 'index($0, needle) == 0' "$index" > "$tmp"; then
+        rm -f "$tmp"
+        echo "Could not remove $file from memory/$proj/MEMORY.md" >&2
+        exit 1
+      fi
+      mv -f "$tmp" "$index"
+    fi
     echo "  tombstoned $file in memory/$proj — every machine drops it on its next pull."
-    echo "  Remember to remove its line from memory/$proj/MEMORY.md, then commit+push ai-devops."
     ;;
   *) usage ;;
 esac

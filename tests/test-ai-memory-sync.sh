@@ -22,8 +22,10 @@ cat > "$SEED/memory/sample/MEMORY.md" <<'EOF'
 # Memory index - sample
 
 - [hub](hub.md) - hub fact.
+- [stay](stay.md) - fact that keeps project health active after forget.
 EOF
 printf 'hub fact\n' > "$SEED/memory/sample/hub.md"
+printf 'stay fact\n' > "$SEED/memory/sample/stay.md"
 git -C "$SEED" add memory
 git -C "$SEED" commit -qm seed
 git -C "$SEED" branch -M main
@@ -85,6 +87,10 @@ git --git-dir="$FRESH_REMOTE" show main:memory/sample/hub.md >/dev/null 2>&1 &&
   fail "fresh-machine forget reported success without removing the fact"
 git --git-dir="$FRESH_REMOTE" show main:memory/sample/.forgotten |
   grep -Fq $'hub.md\t' || fail "fresh-machine forget did not publish its tombstone"
+git --git-dir="$FRESH_REMOTE" show main:memory/sample/MEMORY.md |
+  grep -Fq '(hub.md)' && fail "fresh-machine forget left a broken index line"
+git --git-dir="$FRESH_REMOTE" show main:memory/sample/stay.md >/dev/null ||
+  fail "fresh-machine forget damaged an unrelated fact"
 
 EMPTY_CLAUDE="$TMP/claude-unrecognized-empty"
 mkdir -p "$EMPTY_CLAUDE"
