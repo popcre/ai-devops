@@ -19,6 +19,7 @@ if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
 else
   BASE_HOME="$HOME"
 fi
+MACHINE_CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 
 TOOL_ROOT="${AI_MEMORY_TOOL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 REMOTE="${AI_MEMORY_REMOTE:-https://github.com/u2giants/ai-devops-memory.git}"
@@ -121,6 +122,26 @@ fi
 log "union private hub into machine"
 AI_MEMORY_HUB_ROOT="$HUB" bash "$SYNC" pull $DRY || fail "incoming union failed"
 [[ "$MODE" == "pull" ]] && { log "pull complete"; exit 0; }
+
+# A clean restore has installed the managed Claude skills but Claude has not
+# created any per-project memory directories yet. The private hub clone and its
+# health check are the complete safe seed in that state. Do not turn a missing
+# project into an outgoing empty sync, and do not relax the wrong-home guard for
+# an unrecognized Claude home.
+machine_memory_found=0
+for machine_memory in "$MACHINE_CLAUDE_HOME"/projects/*/memory; do
+  [[ -d "$machine_memory" ]] || continue
+  machine_memory_found=1
+  break
+done
+if [[ "$machine_memory_found" -eq 0 ]]; then
+  [[ -d "$MACHINE_CLAUDE_HOME/skills" ]] ||
+    fail "no local project memory exists and $MACHINE_CLAUDE_HOME is not a toolkit-managed Claude home"
+  bash "$HEALTH" --repo-root "$HUB" --hub-only --coverage-only --ignore-sync-state >/dev/null ||
+    fail "private hub health rejected the fresh-machine seed"
+  log "fresh-machine seed complete; private hub is ready and no local project memory exists yet"
+  exit 0
+fi
 
 if [[ "$MODE" != "forget" ]]; then
   log "union machine into private hub"

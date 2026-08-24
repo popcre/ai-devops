@@ -48,6 +48,37 @@ sync_a() {
     bash "$ROOT/bin/ai-memory-sync" "$@"
 }
 
+# A restore-from-zero home has managed skills but no Claude project memory yet.
+# Pulling must validate the hub and succeed without inventing project paths or
+# attempting an empty upload. An unrecognized empty home still fails closed so
+# the historical wrong-HOME regression remains visible.
+FRESH_HOME="$TMP/home-fresh"
+FRESH_CLAUDE="$TMP/claude-fresh"
+FRESH_HUB="$TMP/hub-fresh"
+FRESH_LOG="$TMP/fresh.log"
+mkdir -p "$FRESH_HOME" "$FRESH_CLAUDE/skills"
+HOME="$FRESH_HOME" CLAUDE_HOME="$FRESH_CLAUDE" \
+AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
+AI_MEMORY_HUB="$FRESH_HUB" AI_MEMORY_LOG="$FRESH_LOG" \
+  bash "$ROOT/bin/ai-memory-sync" sync > "$TMP/fresh.out"
+[[ -d "$FRESH_HUB/.git" ]] || fail "fresh-machine seed did not clone the private hub"
+grep -Fq 'fresh-machine seed complete' "$FRESH_LOG" ||
+  fail "fresh-machine seed did not report its no-project state"
+[[ "$(git --git-dir="$REMOTE" rev-parse main)" == "$(git -C "$FRESH_HUB" rev-parse HEAD)" ]] ||
+  fail "fresh-machine seed changed or diverged from the private hub"
+
+EMPTY_CLAUDE="$TMP/claude-unrecognized-empty"
+mkdir -p "$EMPTY_CLAUDE"
+set +e
+CLAUDE_HOME="$EMPTY_CLAUDE" AI_MEMORY_HUB_ROOT="$SEED" \
+  bash "$ROOT/bin/ai-sync-memory" pull > "$TMP/unrecognized-empty.out" 2>&1
+empty_status=$?
+set -e
+[[ "$empty_status" -ne 0 ]] || fail "unrecognized empty Claude home did not fail closed"
+grep -Fq 'almost certainly not the home Claude Code uses' "$TMP/unrecognized-empty.out" ||
+  fail "unrecognized empty Claude home lost the wrong-home diagnosis"
+
 # Reproduce a Windows working-tree index while the private Git hub stores LF.
 # A hidden trailing CR must not make the same entry look new on every run.
 awk '{ printf "%s\r\n", $0 }' \

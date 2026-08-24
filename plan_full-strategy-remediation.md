@@ -9,24 +9,24 @@ Tracker: [GitHub issue #62](https://github.com/u2giants/ai-devops/issues/62)
 |---|---|---|---|---|
 | 0 | Publish this plan, the corrected audit record, and the linked handoff | ✅ complete | 2026-08-21 | Commit `0b495562453909bd6da6b64ee845e6d3e4987892` on `origin/main`; issue #62 comment links the immutable plan |
 | 1 | Contain and preserve the live four-machine memory incident | ✅ complete | 2026-08-21 | two full former 30-minute intervals elapsed after `c972622` with no new public-memory commit |
-| 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-21 | private head `2765c34192a74a4a106998ef5f9d7f792bcf7263`; coverage health zero findings; DesignFlow aliases deduplicated |
+| 2 | Move portable memory to a private hub and rebuild the authoritative indexes | ✅ complete | 2026-08-24 | private `u2giants/ai-devops-memory` is confirmed private and clean at `dc18be38006f11c8663b4cd7bd0a02f80cdc0dbd`; 940 tracked files; hub-only coverage audit found 840 memory files across 27 projects and zero findings |
 | 3 | Repair memory synchronization, privacy gates, and failure behavior | ✅ complete | 2026-08-21 | behavioral fixtures pass; live private sync and public-target rejection proven; schedules remain disabled |
 | 4 | Correct stale database/transcript/audit instructions | ✅ complete | 2026-08-21 | private stale facts tombstoned; canonical destination guard and hostile fixtures pass |
-| 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-22 | stage/failure, Node, config migration, and manifest fixtures pass; awaits live Ubuntu restore |
-| 6 | Make Windows source, secret, and configuration setup fail closed | 🟨 verifying | 2026-08-22 | source/ACL/atomic JSON fixtures pass; awaits two-run production proof |
-| 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | 🟨 verifying | 2026-08-22 | config/manifest/uninstall/doctor fixtures pass; awaits live archive/restore proof |
-| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | 🟨 verifying | 2026-08-22 | source/test entry points and public/link gates are present; repairing remaining CI portability failures before final ruleset |
+| 5 | Make Ubuntu install/update deterministic and truthful | 🟨 verifying | 2026-08-24 | stage/failure, Node, config migration, manifest, production `hetz`, doctor, and exact tagged rerun evidence pass; the written gate still requires a clean disposable Ubuntu restore |
+| 6 | Make Windows source, secret, and configuration setup fail closed | ✅ complete | 2026-08-24 | albt16 and 4837 installed cleanly at `8435f793`; both live `ai-glm doctor` runs passed every required check; memory writer disabled, health task ready, and no sync lock on either machine |
+| 7 | Add versioned config migration, recoverable uninstall, and capability-based doctor | ✅ complete | 2026-08-24 | [`tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md`](tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md) proves full archive rollback; config/manifest/uninstall/doctor suites and live doctors pass |
+| 8 | Add one test entry point, cross-platform CI, and GitHub enforcement | ✅ complete | 2026-08-24 | exact runtime gate `32676734390` passed Linux in 7m50s, Windows reviewer safety in 10m38s, and the complete Windows matrix in 1h2m29s within its 75-minute bound; active ruleset `Protect main history` |
 | 9 | Make shared reviewer snapshots and lifecycle fail closed | ✅ complete | 2026-08-22 | digest-bound atomic snapshots, packet, lifecycle, preflight, scoreboard, incident join, and hostile fixtures pass |
-| 10 | Finish provider-specific reviewer repairs and qualification | 🟨 verifying | 2026-08-22 | all provider source contracts repaired; Claude Opus 5 and Codex GPT-5.6-sol live access proven; advisory providers cannot satisfy approval |
-| 11 | Finish the seven-stage workflow with two supported approval paths | 🟨 verifying | 2026-08-22 | manifest-driven pipeline, exact artifact chaining, supported-provider gate, and resume/stale-source tests pass; live scratch run pending |
-| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟨 verifying | 2026-08-22 | governed WinGet/npm/MCP/model catalog and drift test pass; live two-run reports pending |
+| 10 | Finish provider-specific reviewer repairs and qualification | ✅ complete | 2026-08-22 | all provider contracts and hostile lifecycle suites pass; Claude Opus 5 and Codex GPT-5.6-sol are the supported approval paths; advisory/quarantined providers cannot satisfy a gate |
+| 11 | Finish the seven-stage workflow with two supported approval paths | ✅ complete | 2026-08-22 | live disposable run `20260822T160752Z-332946-21980` completed all seven stages exactly once; review stages 2/4/6/7 returned `APPROVE`; test matrix passed; local canary commit `598fc44` |
+| 12 | Pin restore inputs and prove clean-machine reproducibility | 🟨 verifying | 2026-08-24 | governed WinGet/npm/MCP/model catalog and repeated existing-machine installs pass; the written gate still requires clean disposable Windows 11 and Ubuntu first/second-run restore proofs |
 | 13 | Repair context measurement, routing, trigger coverage, and portable fact access | ✅ complete | 2026-08-22 | strict audit measures 21,808 installed-global bytes with no safety/parity failure; protected trigger matrix 31/0, repository policy 6/0, portable facts 8/0 and a live known-fact retrieval |
 | 14 | Remove public topology and close every transcript-ingestion path | ✅ complete | 2026-08-22 | protected config head `7bb5875`; hostile public-boundary/private-config/transcript-destination suites pass; setup resolves topology, host identities, and provider identifiers from protected inputs |
-| 15 | Purge exposed Git history through a recoverable coordinated rewrite | 🟦 in progress | 2026-08-22 | current public tree is clean; next gate is protected backup, disposable rewrite, force update, ruleset, and unauthenticated clone scan |
-| 16 | Install and verify the exact release on every managed machine | ⬜ open | — | per-machine SHA, installer, doctor, and memory-status records |
-| 17 | Obtain independent exact-head approval and close the workstream | ⬜ open | — | review report, final CI run, origin SHA, closed issue #62 |
+| 15 | Purge exposed Git history through a recoverable coordinated rewrite | 🟦 externally blocked | 2026-08-24 | public `main`, visible branches, and tags are rewritten and protected; 41 currently advertised GitHub-managed `refs/pull/*` still retain old objects and require GitHub Support deletion |
+| 16 | Install and verify the exact release on every managed machine | 🟦 externally blocked | 2026-08-24 | albt16, 4837, and hetz are exact at `8435f793` and green; memory writers remain deliberately disabled; 916 is offline; edge-dev is online but SSH authentication and DCOM authority are denied |
+| 17 | Obtain independent exact-head approval and close the workstream | 🟦 externally blocked | 2026-08-24 | source commit `8435f793` and Ansible production-safety commits have exact Claude Opus 5 approval; source CI, drift detection, governed deployment, and two exact zero-change reruns are green; issue #62 remains open for Steps 5, 12, 15, and 16 |
 
-**Fresh-session start:** Step 1. Always start at the first non-complete row. Before each phase, re-read
+**Fresh-session start:** Step 5. Always start at the first non-complete row. Before each phase, re-read
 all downstream steps for drift and update this table in the same session.
 
 ## 1. The ultimate goal — what we are trying to achieve
@@ -124,27 +124,42 @@ memory commits. These are active/existing states, not hypothetical lint findings
 
 ## 5. Current state of the code
 
-- Audit commit `e3330c08d48c0bb012a6eabfdc49ac0113c88fd7` is on `main`.
-- The governing plan/audit/handoff were published on `origin/main` in commit
-  `0b495562453909bd6da6b64ee845e6d3e4987892`; scheduled memory commits continue
-  to advance `origin/main`, so every phase must fetch and reconcile again.
-- The working tree was clean before plan work. Other sessions own the separate
-  Gemini and Grok repair checkouts named in their handoffs; never overwrite them.
-- Shared reviewer evidence, DeepSeek, and most Grok repairs are integrated in a
-  combined local lineage and documented as complete locally, but exact-head
-  review/push/live qualification status must be re-derived from current `main`.
-- Codex, Kimi, Muse, Qwen, and GLM provider plans still have open source steps.
-  Gemini requires live hostile qualification on Windows and Ubuntu.
-- `bugs.md` still contains the pre-debate 4/14/10 counts, the incorrect 44,700
-  installed-context figure, and a remedy to add secret scanning even though
-  GitHub secret scanning and push protection are already enabled.
-- The Windows canonical-route docs disagree. `install.sh` suppresses required
-  failures. `uninstall.sh` lacks a recoverable manifest-driven path. Doctor
-  checks presence more often than effective capability.
-- There is no `.github/workflows/` verification workflow or single supported
-  command that runs the whole offline suite.
-- `docs/deployment.md` correctly says this toolkit has no application deployment;
-  CI added here verifies the repository but does not build or deploy a container.
+- Canonical runtime release `8435f7938d9865158975c2a4dbd7e43a3c3bde97`
+  is on `origin/main`. Exact hosted gate `32676734390` passed Linux, focused
+  Windows reviewer safety, and the complete Windows matrix. Claude Opus 5
+  approved that exact source in provider session
+  `1deadafa-1bf3-4f5e-8889-190c8d4ca192`.
+- The quadratic T16 memory scan was caused by hub-by-local cross-product lookup.
+  The release uses one-time indexes and includes a 500-by-500 regression for
+  duplicate aliases, CRLF, missing final newline, and multiple checkout paths.
+- Private hub `u2giants/ai-devops-memory` is clean and synchronized at
+  `dc18be38006f11c8663b4cd7bd0a02f80cdc0dbd`. A hub-only audit found 840 memory
+  files across 27 projects with zero coverage findings. Memory writers remain
+  disabled by policy; manual union is the safe production state.
+- Reachable production installations are complete: albt16, 4837 (the machine
+  previously recorded as `al8960ofc`), and `hetz` are clean at `8435f793...` with
+  required doctors green. T16's 737 stale reviewer sandboxes and 139 matching
+  Claude-memory directories were moved recoverably, not deleted, under
+  `C:\Users\ahazan2\.local\state\ai-devops\cleanup-backups\20260824T0032Z-review-sandbox-debris`.
+- The `hetz` checkout is protected as `root:ai` mode `0750`; non-sudo user `ai`
+  can read/run but not edit it. Ansible run `32687426166` established the
+  boundary; exact governed runs `32689410687` and `32689623813` each passed the
+  privilege/symlink test and reported `changed=0`, `unreachable=0`, `failed=0`.
+  Drift run `32689224921` passed Phase 1 and software inventory. The historical
+  actor remains unknown and is tracked in the Ansible repository.
+- Public `main`, visible branches, and tags are rewritten and protected by the
+  active `Protect main history` ruleset. GitHub still advertises 41
+  platform-managed `refs/pull/*` that retain removed objects; only GitHub Support
+  can clear them.
+- Windows machine 916 is offline (last Tailscale observation 2026-08-19; fresh
+  ping timed out 2026-08-24). `edge-dev` is online, but SSH authentication and
+  DCOM authority are denied. Do not weaken either boundary.
+- Clean disposable Windows 11 and Ubuntu first/second-run restore proofs remain
+  unperformed. Therefore Steps 5 and 12 remain verifying even though existing
+  machines, production deployment, migration, manifest, uninstall, and doctor
+  tests are green.
+- This repository has no application deployment. Installation is production;
+  GitHub CI verifies source and `u2giants/ansible` owns the `hetz` host rollout.
 
 ## 6. Key findings and root causes
 
@@ -225,6 +240,9 @@ memory commits. These are active/existing states, not hypothetical lint findings
   `.env` value enters Git.
 - **D9:** `hetz` host/OS/task changes route through `u2giants/ansible`. GitHub is
   source of truth; no permanent server hand edits.
+- **D10:** Automatic memory writers stay disabled. Manual, explicitly initiated
+  private-hub union is the qualified production policy unless Albert separately
+  authorizes a future scheduler design and its two-cycle canary.
 
 ### OPEN only for implementation judgment
 
@@ -318,7 +336,7 @@ Targets: `bin/ai-sync-memory`, `bin/ai-memory-sync`, scheduled-task installers,
 
 **Gate:** failure injection proves the only copy survives every failure; a
 two-machine round trip converges to the union; no job can target the public repo;
-the scheduler remains disabled until Step 16.
+every automatic writer remains disabled under locked decision D10.
 
 #### Step 4 — correct dangerous instructions and the audit record
 
@@ -586,14 +604,15 @@ managed host discovered by the scheduler/config inventory.
   install route on Ubuntu. Back up machine config before migration.
 - Verify source SHA, installed launcher hashes, config schema, skills/globals,
   provider status, Node, Git identity, memory hub visibility, and doctor result.
-- Re-enable the repaired memory schedule one machine at a time. Observe two
-  cycles before enabling the next; verify union state never shrinks and no public
-  repo commit is created.
+- Keep every retired memory writer disabled. Run the private-hub union manually
+  on one machine at a time only when verification requires it; prove union state
+  never shrinks and no public repository commit is created.
 - Run a bounded seven-stage canary in a scratch repo from installed commands.
 
 **Gate:** every machine has a PASS compliance record tied to one release SHA;
-private memory converges over two cycles; `origin/main` receives no automated
-memory commit; restore documentation reproduces the installed state.
+manual private memory union converges without shrink; all automatic writers stay
+disabled; `origin/main` receives no memory commit; restore documentation
+reproduces the installed state.
 
 #### Step 17 — exact-head review, final CI, and closeout
 
@@ -735,7 +754,8 @@ release gates with artifacts, never hidden inside offline CI.
 - Force-push and branch deletion are blocked after the coordinated rewrite.
 - Public history no longer contains transcript, retired public memory, or private
   topology objects; a clean unauthenticated clone proves it.
-- Private memory converges without index shrink or public commits on every host.
+- Manual private-memory union converges without index shrink or public commits;
+  every automatic writer remains disabled.
 - Windows and Ubuntu fresh/idempotent restore gates pass.
 - Claude Opus 5 and Codex approval paths pass the shared lifecycle contract;
   every other provider is truthfully advisory/quarantined or separately proven.
@@ -760,30 +780,44 @@ release gates with artifacts, never hidden inside offline CI.
   restore boundary. A machine without access installs the public toolkit but
   reports portable memory unavailable rather than silently succeeding.
 
-### Open questions
+### Open questions and external conditions
 
-None require Albert before work starts. The user explicitly authorized rewriting
-the plan, implementing every fix, shipping to production, and continuing until
-the outcome is complete. Implementation judgments have deterministic gates in
-§8–§9; any genuinely new irreversible external scope not listed here must be
-raised rather than assumed.
+- GitHub Support must remove or garbage-collect the 41 currently advertised
+  platform-managed pull refs before Step 15 can pass its original public-history
+  gate. Sending that external support request requires Albert's action-time
+  confirmation.
+- Machine 916 must come online, and machine-owner SSH or DCOM access must be
+  restored for edge-dev, before Step 16 can cover every managed machine.
+- Clean disposable Windows 11 and Ubuntu environments are required for the
+  unchanged Step 5 and Step 12 restore gates. Existing-machine reruns are useful
+  evidence but do not substitute for those written gates.
+- The actor or automation behind the four historical production checkout
+  transitions remains unknown. Direct non-sudo recurrence is contained; do not
+  infer attribution from reflog entries alone.
 
-## Mandatory plan self-audit — passed 2026-08-21
+Albert authorized all ordinary scoped implementation and production work. None
+of these conditions authorizes an authentication bypass, a weaker history scan,
+or lowering a clean-machine gate.
+
+## Mandatory plan self-audit — passed 2026-08-24
 
 1. **Could a brand-new AI session execute this plan without asking anything? —
    Yes.** Sections 1–8 define the goal, system, incident, scope, state, evidence,
    rejected approaches, and locked choices. Section 9 gives exact files,
-   dependencies, behavior, and a verification gate for every step. Sections
-   10–13 define tests, constraints, access, rollback, and completion.
+   dependencies, behavior, and an unchanged verification gate for every step.
+   Sections 10–13 define tests, constraints, access, rollback, completion, and
+   the exact external restart conditions.
 2. **Does the plan carry every material nuance and rejected path? — Yes.**
    Section 6 records the eight root causes; §7 preserves ten rejected shortcuts;
    §8 resolves the memory destination, pipeline, reviewer surface, history route,
-   model, config, and machine-ownership decisions; the coverage table maps all 30
-   findings with no orphan.
+   model, config, scheduling, and machine-ownership decisions; the coverage table
+   maps all 30 findings with no orphan. Section 5 separates completed production
+   proof from clean-disposable proof that remains outstanding.
 3. **Is the ultimate goal clear enough to guide a correct judgment when a step is
    wrong? — Yes.** Section 1 states the business outcome and makes truthful,
    recoverable, capability-preserving behavior outrank any literal step. Section
-   13 supplies risk-specific rollback rules and the boundary for new authority.
+   13 supplies risk-specific rollback rules, names every remaining external
+   condition, and forbids weakening gates to claim completion.
 
 Checklist result: all 13 required sections are present; the status table and
 fresh-session start are at the top; plan/handoff links are reciprocal; out of

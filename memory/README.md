@@ -25,6 +25,5 @@ sync tool and the private hub. Machine paths, credentials, facts, host topology,
 and private-repository contents remain outside this public repository.
 
 Use `ai-memory-health --repo-root <private-hub> --hub-only --index-only` for a
-read-only coverage check. Memory synchronization remains disabled until the
-private-hub protocol has passed the two-machine failure-injection suite and is
-rolled out one machine at a time.
+read-only coverage check. Automatic memory writers remain disabled. A manual,
+explicitly initiated private-hub union is the qualified production policy.

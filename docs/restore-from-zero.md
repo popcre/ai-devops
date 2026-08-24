@@ -77,6 +77,12 @@ existing real config), installs skills, calls `bin/setup-secrets.sh` for the
 and runs `ai-devops doctor`. The final stage summary must have no required
 failure; the command returns nonzero otherwise.
 
+On a brand-new Claude home, the required private-memory stage clones and
+validates the private hub but has no project directory to populate yet. It
+reports `fresh-machine seed complete` and uploads nothing. After Claude creates
+a project, run `ai-memory-sync` manually to apply that project's portable
+memory; the installer does not enable a recurring writer.
+
 The model and npm/MCP selections are the exact reviewed values in
 `config/tool-versions.json`. Do not substitute `latest` during recovery. Version
 upgrades are a separate tested change after the machine is healthy.

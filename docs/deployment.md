@@ -52,8 +52,12 @@ cd /worksp/ai-devops
    configuration root; non-interactive updates reuse the existing protected
    bootstrap file automatically and never change normal Claude/Codex
    authentication.
-7. Runs `ai-devops doctor`.
-8. Records exact source, config schema, owned symlinks, config files, managed
+7. Clones, validates, and manually seeds the private portable-memory hub. On a
+   new Claude home with no project memory yet, this truthfully reports a
+   fresh-machine seed and uploads nothing; matching project memory is applied
+   by a later explicitly initiated sync after Claude creates the project.
+8. Runs `ai-devops doctor`.
+9. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 
 Recovery-critical WinGet, npm/MCP, and model versions are governed by
@@ -69,6 +73,10 @@ when an interactive/token-backed install selects them; `--require-secrets`
 forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
+
+The installer does not enable recurring memory synchronization. Automatic
+memory writers remain disabled; a manual private-hub union is the qualified
+production policy.
 
 Skill-only maintenance supports preview and a recoverable legacy migration:
 

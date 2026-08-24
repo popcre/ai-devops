@@ -322,9 +322,11 @@ case "$DIRECTION" in
     # but make lookup linear in the number of hub and local projects.
     declare -A local_memory_paths=()
     memory_path_separator=$'\034'
+    local_project_memory_count=0
     for md in "$CLAUDE_HOME"/projects/*/memory; do
       memory_parent="${md%/memory}"
       [[ -d "$memory_parent" ]] || continue
+      local_project_memory_count=$((local_project_memory_count+1))
       slug="${memory_parent##*/}"
       project_key="$(canonical "$slug")"
       local_memory_paths["$project_key"]+="$md$memory_path_separator"
@@ -374,9 +376,16 @@ case "$DIRECTION" in
       [[ $matched -eq 1 ]] && pulled=$((pulled+1))
     done
     # A skip is normal for a project this machine doesn't have. EVERY project
-    # skipping is not — that means CLAUDE_HOME points somewhere Claude Code
-    # never writes, and the "expected" skip messages are hiding a total failure.
+    # skipping is normally a wrong-home signal. There is one deliberate
+    # exception: restore-from-zero installs the managed skills before Claude has
+    # created its first projects/*/memory directory. In that recognizable fresh
+    # home, cloning and validating the private hub is the complete safe seed;
+    # there is no machine memory to receive or upload yet.
     if [[ "${pulled:-0}" -eq 0 && "${skipped:-0}" -gt 0 ]]; then
+      if [[ -d "$CLAUDE_HOME/skills" && "$local_project_memory_count" -eq 0 ]]; then
+        echo "[INFO] Fresh Claude home has no project memory yet; private hub is ready for the first project."
+        exit 0
+      fi
       echo "[FAIL] Every project was skipped — no local project directory matched." >&2
       echo "[FAIL] $CLAUDE_HOME is almost certainly not the home Claude Code uses." >&2
       echo "[FAIL] Memory did NOT sync. Do not report this sync as successful." >&2

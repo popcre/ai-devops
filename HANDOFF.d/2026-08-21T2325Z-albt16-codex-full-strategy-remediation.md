@@ -12,9 +12,21 @@ Canonical plan: [`../plan_full-strategy-remediation.md`](../plan_full-strategy-r
 
 ### Blocking
 
-None. Albert explicitly authorized rewriting the full plan, implementing every
-negotiated fix, and carrying the result through production. Do not pause to ask
-whether to begin or whether to perform ordinary reversible steps.
+Four external conditions remain after every in-scope repair and reachable
+rollout completed:
+
+- GitHub currently advertises 41 platform-managed `refs/pull/*` that still reach
+  the removed objects. Deletion requires GitHub Support. The support submission
+  itself requires Albert's action-time confirmation because it is an external
+  message.
+- Windows machine `916` is offline; Tailscale last saw it on 2026-08-19 and a
+  fresh ping timed out on 2026-08-24. Resume only when the machine is online.
+- `edge-dev` is online, but fresh checks on 2026-08-24 returned SSH authentication
+  denied and DCOM access denied. Resume only with machine-owner access; do not
+  weaken authentication or obtain broader credentials to bypass this boundary.
+- The unchanged plan gates for Steps 5 and 12 require clean disposable Ubuntu
+  and Windows 11 first/second-run restore proofs. Existing-machine reruns do not
+  satisfy those gates; provide or authorize suitable disposable environments.
 
 ### Recoverable choices already settled — do not re-ask
 
@@ -29,9 +41,70 @@ whether to begin or whether to perform ordinary reversible steps.
   recoverable coordinated history rewrite rather than creating a replacement.
 - 2026-08-21: `hetz` host-level changes go through `u2giants/ansible`; no permanent
   SSH hand edits.
+- 2026-08-22: keep every retired memory schedule absent until Albert explicitly
+  chooses a future scheduling policy; manual private-hub unions are the safe
+  production state.
 
-The next session must present this whole section in one message only if a new
-owner decision appears. There are currently none.
+If a new owner decision appears, present the whole decision set in one message
+rather than serial approval prompts. The next session should not redo completed
+implementation. It starts with the four external conditions above.
+
+## Current closeout state — authoritative 2026-08-24
+
+- Canonical tested runtime release is
+  `8435f7938d9865158975c2a4dbd7e43a3c3bde97`; later closeout-only documentation
+  commits do not change that deployment pin. The release replaces the
+  pathological hub-by-local memory comparison
+  with one-time indexes while preserving duplicate aliases, CRLF, missing final
+  newline, and multiple local checkouts. Its 500-by-500 regression passed.
+- Hosted source gate `32676734390` is fully green: Linux 7m50s, focused Windows
+  reviewer safety 10m38s, and the complete Windows matrix 1h2m29s within its
+  75-minute bound. Claude Opus 5 approved the exact source in provider session
+  `1deadafa-1bf3-4f5e-8889-190c8d4ca192`.
+- `hetz` is clean on `main` at `8435f793...`; its owner-only manifest and
+  versioned completion marker match, retired memory cron count is zero, and
+  every required `ai-devops doctor` check passed. The checkout is `root:ai`
+  mode `0750`: runtime user `ai` can read/run it but cannot write. `/worksp/hiclaw`
+  remains `ai:ai` mode `0755`.
+- Ansible `origin/main` at `1e5fe45b4cbe3df85e2e85f19e6c7d525938845b`
+  pins the release with both predecessor allowlists empty and records the
+  historical-transition containment. Exact Claude-approved ownership commit
+  `16c614753c40088e7293b02140dcc8266936f906` established the boundary in run
+  `32687426166`; exact Claude-approved idempotence commit
+  `b474a59864b09f53cd6f629dae07cbd8bb9d3751` passed production runs
+  `32689410687` and `32689623813`, each with `changed=0`, `unreachable=0`,
+  `failed=0`. Drift run `32689224921` passed Phase 1 and software inventory.
+- albt16 and 4837 are clean at `8435f793...`; both live `ai-glm doctor` runs passed
+  all required checks. On both machines `ai-memory-sync` is disabled,
+  `ai-memory-health` is ready, and no memory-sync lock remains. The formerly
+  hours-long T16 sync completed in about two minutes after the repair.
+- The 737 stale T16 reviewer sandboxes and 139 matching Claude project-memory
+  directories were inspected and moved recoverably to
+  `C:\Users\ahazan2\.local\state\ai-devops\cleanup-backups\20260824T0032Z-review-sandbox-debris`;
+  nothing was permanently deleted.
+- Private `u2giants/ai-devops-memory` is the only memory hub. It is clean and
+  synchronized at `dc18be38006f11c8663b4cd7bd0a02f80cdc0dbd` with 940 tracked
+  files. A hub-only coverage audit found 840 memory files across 27 projects and
+  zero coverage findings. The wider read-only local health scan still reports
+  consolidation suggestions; scheduled health reporting owns that non-destructive
+  maintenance and no automated deletion is permitted.
+- The live seven-stage canary run
+  `20260822T160752Z-332946-21980-implement-and-prove-the-disposable-canar`
+  completed all stages once. Review stages 2/4/6/7 were `APPROVE`, tests passed,
+  and local no-remote commit `598fc4459dbf6b4915a2692ebc65d07147db3d4e`
+  contains the exact two-file result.
+- Public `main`, visible branches, and tags were rewritten and protected by the
+  active `Protect main history` ruleset. The 41 currently advertised hidden pull
+  refs are a GitHub-owned external blocker, not an unperformed local rewrite.
+- Production reflog evidence records repeated historical checkout movement
+  outside governed Ansible dispatches, most recently an intervening local
+  `32fe573` commit and `pull --ff-only` to `8435f793`. Direct non-sudo recurrence
+  is contained by governed ownership. The actor remains unknown and is explicitly
+  open in Ansible; do not infer attribution from reflog alone.
+- Step 7's full archive rollback proof is committed at
+  `tests/verification/full-remediation/20260824T022652Z/step-07-archive-rollback.md`.
+  Steps 5 and 12 remain verifying because their exact clean-disposable restore
+  gates have not been run.
 
 ## 1. What this application is
 
@@ -55,7 +128,7 @@ The immediate objective of this session is to publish a zero-context-safe plan
 for all 30 negotiated findings, then execute its incident-first phases without
 losing concurrent work.
 
-## 3. Current state — what is true right now
+## 3. Original start snapshot — historical, superseded above
 
 - GitHub issue #62 is open and tracks the full remediation.
 - The canonical plan exists at `plan_full-strategy-remediation.md`; its STATUS
@@ -113,19 +186,26 @@ handoff is created. Production remains unchanged.
 
 ## 6. Exact next steps
 
-1. Self-audit and commit/push the plan, this handoff, corrected `bugs.md`, and
-   router links. **Worked when:** issue #62 links to a commit on `origin/main` and
-   Step 0 cites it.
-2. Execute Step 1 incident containment on all four writers before any long code
-   phase. **Worked when:** two schedule intervals pass with no new automatic
-   memory commit and protected evidence names every host/task.
-3. Continue from the first open STATUS row in the plan. Re-read downstream phases
-   before each phase and update the plan in the same session. **Worked when:** no
-   completed work is described as open and every done cell cites an artifact.
-4. Never delete this handoff merely because a phase completed. Retire it only
-   with Step 17 after final CI, install, history, exact-head review, and issue #62
-   are all complete. **Worked when:** Git history retains this handoff while the
-   live tree has no open workstream file.
+1. On clean disposable Ubuntu, run the canonical restore twice and capture
+   non-secret source/config/doctor reports. **Worked when:** the first run reaches
+   compliance and the unchanged second run has no unintended changes at exact
+   `8435f793...`.
+2. On clean disposable Windows 11, run the canonical bootstrap, honor any reboot,
+   then rerun unchanged and capture the same evidence. **Worked when:** both runs
+   identify exact source/config schema and the second has no unintended changes.
+3. With Albert's action-time confirmation, send GitHub Support the prepared
+   request to delete/garbage-collect the 41 currently advertised hidden pull
+   refs. **Worked when:** a fresh unauthenticated mirror no longer receives old
+   objects.
+4. When 916 is online, fast-forward/install `8435f793...`, keep the memory writer
+   disabled, run the required doctors, and record SHA/clean state. **Worked when:**
+   the machine has exact source and clean required checks.
+5. Obtain machine-owner access to edge-dev, then perform the same exact rollout.
+   Do not bypass SSH authentication or DCOM authority. **Worked when:** exact
+   source, disabled writer, ready health task, no lock, and green doctor are proven.
+6. Close issue #62 and retire this handoff only after Steps 5, 12, and 15-17 are genuinely
+   complete. Do not mark the goal complete merely because external access is
+   unavailable.
 
 ## 7. Constraints and gotchas in force
 
@@ -155,28 +235,32 @@ handoff is created. Production remains unchanged.
 
 ## 9. Open questions and risks
 
-No owner decision is open. Technical uncertainties are governed by plan gates:
-provider qualification may leave a provider advisory; a sensitive-memory scan may
-escalate the public-memory finding; history rewrite pauses if any writer or unknown
-ref remains; Windows may require reboot/application shutdown. None authorizes a
-weaker success definition.
+The four owner/external conditions in §0 are open. All provider, source,
+production-server, reachable-Windows, CI, ruleset, canary, and Step 7 archive
+recoverability work is complete. Clean-disposable restore proof is not complete.
+None of the remaining conditions authorizes a weaker success definition, an
+authentication/history-retention bypass, or substituting existing-machine proof
+for a clean-machine gate.
 
 Rollback risks and procedures are in plan §13. The largest risks are memory loss,
 old-history contamination after rewrite, and concurrent `main` movement. The plan
 requires protected copies, fresh clones, and exact-head checks for each.
 
-## Handoff self-audit — passed 2026-08-21
+## Handoff self-audit — passed 2026-08-24
 
 1. **Can a brand-new developer continue without asking a question? — Yes.** §§1–3
-   explain the system, objective, exact current commit/state; §6 names the restart
-   sequence and verification gates; the canonical plan supplies all 17 steps.
+   explain the system, objective, exact current release/deployment state; §6 names
+   the restart sequence and unchanged verification gates; the canonical plan
+   supplies all 17 steps.
 2. **Can they continue as effectively as this session? — Yes.** §§4–5 preserve
-   failed approaches, corrections, cadence, counts, and root causes; §§7–8 carry
-   every operating/environment constraint.
+   failed approaches, corrections, cadence, counts, root causes, production run
+   IDs, and the remaining clean-disposable gap; §§7–8 carry every operating and
+   environment constraint.
 3. **Is every needed detail present? — Yes.** Background/goals (§§1–2), current
    state (§3), failed attempts (§4), findings (§5), actions (§6), constraints (§7),
    access (§8), risks/decisions (§§0,9), and reciprocal plan link are present.
 4. **Would Albert see every decision by reading only §0? — Yes.** A line-by-line
-   sweep of §§1–9 found no unresolved owner choice. All settled architecture choices
-   that otherwise appear in §§5–9 are consolidated in §0 with dates and “do not
-   re-ask” wording.
+   sweep of §§1–9 found the four remaining external conditions and every settled
+   architecture choice represented in §0. The one-message delivery instruction
+   prevents serial approval prompts; “do not re-ask” wording protects locked
+   decisions.
