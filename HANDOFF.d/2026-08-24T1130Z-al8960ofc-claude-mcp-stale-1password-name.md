@@ -1,5 +1,5 @@
 ---
-issue: 63
+issue: 68
 status: OPEN
 owner: claude/mcp-server-failures-8a59bd
 ---
@@ -15,7 +15,7 @@ Put this whole list to Albert in ONE message before starting work.
 
 **BLOCKING**
 
-1. **Recall.ai is blocking the account — only Albert can pursue it.** `recall-ai`
+1. **Recall.ai is blocking the account — only Albert can pursue it** (issue #68). `recall-ai`
    now passes every local check and is then refused by Recall.ai with
    `403 request_blocked`. A wrong token gets 401 and ours gets 403, so the
    credential is valid and authenticates; the block is an account/workspace
@@ -179,7 +179,8 @@ returns `403 request_blocked` at their end (§0.1).
 
 ## 6. Exact next steps
 
-1. ~~Fix the VPS~~ — **DONE 2026-08-24.**
+1. ~~Fix the VPS~~ — **DONE 2026-08-24.** Issue #63 is closed; this file now tracks
+   #68 (recall-ai) and is retired when that closes.
 2. **Restart Claude Desktop, Claude Code, and Codex on al8960ofc** (a full quit, not
    a window close). *You'll know it worked when no new `Server disconnected` lines
    appear in `AppData\Local\Claude\Logs` and all six servers respond.*
