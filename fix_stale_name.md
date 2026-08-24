@@ -165,8 +165,8 @@ Restart the clients after any of this — a running client keeps its old config.
 
 `ssh hetz` fails with **`Host key verification failed`**. That is *not* a security
 problem and *not* a reason to touch `known_hosts`: **there is no `hetz` alias.**
-`~/.ssh/ai-devops.conf` defines the host as `vps`, `coolify`, or `hetzner` (all →
-`100.66.37.58`, which is already trusted). Typing `hetz` sends SSH to a literal
+`~/.ssh/ai-devops.conf` defines the host as `vps`, `coolify`, or `hetzner` — all pointing at
+the same already-trusted host. Typing `hetz` sends SSH to a literal
 hostname that was never trusted under that name, and `BatchMode=yes` suppresses the
 interactive trust prompt, so it fails outright.
 

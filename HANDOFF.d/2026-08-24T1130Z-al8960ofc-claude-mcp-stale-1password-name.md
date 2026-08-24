@@ -214,8 +214,9 @@ returns `403 request_blocked` at their end (§0.1).
 - **1Password:** service-account token at `~/.config/ai-devops/op-service-account`;
   vault `vibe_coding` only. Item UUID `f335s4oy3m6n74jmwj74hunrtu`. **Values never
   leave the vault or the DPAPI cache.**
-- **VPS:** `ssh vps` (aliases `coolify`, `hetzner` → `100.66.37.58`), **not**
-  `ssh hetz`. Claude/Codex there run as user `ai`.
+- **VPS:** `ssh vps` (aliases `coolify`, `hetzner`), **not** `ssh hetz`. The host
+  address is in `~/.ssh/ai-devops.conf`; it is deliberately not repeated here,
+  because this repo is public and `bin/ai-public-boundary-check` gates on it. Claude/Codex there run as user `ai`.
 
 ## 9. Open questions and risks
 
