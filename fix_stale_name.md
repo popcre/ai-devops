@@ -253,7 +253,7 @@ our config:
 - `us-west-2` and `eu-central-1` return 401 (regions are separate accounts), so
   `us-east-1` is the right endpoint.
 
-This is an account- or workspace-level rule on Recall.ai's side. It cannot be
+Tracked as issue #68. This is an account- or workspace-level rule on Recall.ai's side. It cannot be
 repaired from configuration; it needs Recall.ai's dashboard or their support. The MCP
 entry is left in place and working up to that point — **not** removed or disabled.
 
