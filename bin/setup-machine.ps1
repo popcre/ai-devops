@@ -383,12 +383,12 @@ $McpServers["supabase"] = @{
 $McpServers["devops-mcp"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
-           "op://vibe_coding/designflow-mcp/devops_token")
+           "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token")
 }
 $McpServers["synology-monitor"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
-           "op://vibe_coding/designflow-mcp/nas_token")
+           "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token")
 }
 
 # recall-ai (remote/HTTP). Same treatment. Until 2026-07-17 this token was
@@ -396,10 +396,17 @@ $McpServers["synology-monitor"] = @{
 # secret left after the Phase 2 token-free pass, which missed it because nothing
 # ever rewrote the recall-ai entry. --transport preserves the flag the working
 # config used; the launcher passes %3+ through to mcp-remote untouched.
+#
+# The reference MUST be byte-identical to the one in config/mcp.env.example.
+# Remote mode looks the ref up in mcp.env by exact string match and throws
+# "Secret reference is not managed by ..." on any difference. This entry used the
+# item UUID while mcp.env used the title, so recall-ai could never start; the
+# mismatch stayed hidden until 2026-08-24 because an earlier failure in the shared
+# refresh killed the server before this check ran.
 $McpServers["recall-ai"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
-           "op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password",
+           "op://vibe_coding/recall-ai MCP/password",
            "--transport", "http-first")
 }
 
@@ -910,7 +917,7 @@ Write-Host ""
 Write-Host "Validate on this machine:" -ForegroundColor Cyan
 Write-Host "  1. Run:  op run --env-file `"$McpEnv`" -- cmd /c echo ok"
 Write-Host "     (should print 'ok' with no auth error)"
-Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/designflow-mcp/devops_token"
+Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token"
 Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
 Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
 Write-Host "  4. Fully quit and reopen Claude Desktop (MCP servers only re-read config on a full restart)."
