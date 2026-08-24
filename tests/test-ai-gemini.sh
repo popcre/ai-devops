@@ -171,5 +171,17 @@ check 'wrapper-owned .ai runtime evidence does not create false source drift' "c
 SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'initialized gitlink content drift is fingerprinted before provider contact' "! (cd '$SUBPARENT' && '$SCRIPT' ask source-gitlink --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 
+
+# ai-review-sandbox rejects a tag over 64 characters. The tag is
+# "gemini-<12>-<caller>-<name>", so a name that fits on Windows can overflow on
+# Linux, where PIDs are wider. On 2026-08-24 the Ubuntu qualification failed that
+# way AFTER its paid turn. The guard must refuse before any provider contact.
+LONGREPO="$TMP/longname"; make_repo "$LONGREPO"
+LONG_NAME="$(printf %.0sx $(seq 1 60))"
+LONG_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'an over-long review name is refused before any provider contact' "! (cd '$LONGREPO' && '$SCRIPT' new '$LONG_NAME' --prompt x) && test '$LONG_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+LONG_OUT="$TMP/longname.out"; (cd "$LONGREPO" && "$SCRIPT" new "$LONG_NAME" --prompt x) > "$LONG_OUT" 2>&1 || true
+check 'the refusal names the limit so the caller can shorten the name' "grep -q 'limit is 64' '$LONG_OUT'"
+check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -975,7 +975,10 @@ boundary, requires BLOCKED instead of inference, accepts repeated `--file`, and
 publishes `evidence_scope`/`repository_access`/`attached_files` in schema 2
 metadata, accumulated NUL-safely across every turn of a conversation. The
 boundary is carried by the system prompt and cannot be overridden by `--system`.
-Bound by sixteen new cases in `tests/test-ai-deepseek-agent.sh` (67/67).**
+A ledger write that fails after the transcript is published marks the session
+recovery-required and refuses continuation, so the record can never understate
+the evidence. Bound by twenty new cases in `tests/test-ai-deepseek-agent.sh`
+(71/71).**
 
 - Files: `bin/ai-deepseek-agent` (`REVIEW_INSTRUCTION`, `with_files_appended`,
   `write_review_metadata`)

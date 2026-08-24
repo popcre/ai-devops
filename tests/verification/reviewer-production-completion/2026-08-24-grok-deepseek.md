@@ -190,10 +190,58 @@ quietly corrected:
 | `codex-final-check-20260824T042033-1914854-21506.md` | REJECT | a newline or space in a path corrupted the attachment record |
 | `codex-final-check-20260824T112029-658-16571.md` | REJECT | a caller `--system` prompt could override the evidence boundary |
 | `codex-final-check-20260824T123630-1767-29456.md` | REJECT | de-staled plan tables contradicted their own current-state prose |
-| `codex-final-check-20260824T133922-727-10061.md` | **APPROVE** | no blocking or material findings; 239 bound checks passed |
+| `codex-final-check-20260824T133922-727-10061.md` | APPROVE | no blocking or material findings; 239 bound checks passed |
+| `codex-final-check-20260824T160644-502304-26468.md` | REJECT | a failed ledger write left the session usable with an incomplete record |
 
-The approving review confirms the boundary is enforced as a system message,
+A sixth review, run against the already-pushed `b5155af`, found that the
+transcript is published before the ledger is appended, so a ledger failure left a
+saved turn whose attachments never reached the durable record — the same
+understatement the ledger exists to prevent. A ledger failure now writes a
+`.recovery-required` marker and `reply` refuses that session before any provider
+contact, so the record can never quietly fall behind. Four further bound cases
+cover it, and disabling the marker fails two of them.
+
+The fifth review confirms the boundary is enforced as a system message,
 conflicting caller system prompts are rejected, continuations verify the boundary
 is still present, attachments are NUL-safe and published as
 attached-materials-only with no repository-access claim, and Grok records
 uncertain paid work before fallible shutdown.
+
+## 7. Verification status of the final commit — read this
+
+The DeepSeek recovery-marker repair (§2) landed in a later commit than the rest of
+this note. Its verification is deliberately uneven, and the difference matters:
+
+**Locally confirmed on the exact committed tree:**
+
+- `bash tests/test-ai-deepseek-agent.sh`: 71 passed, 0 failed, 0 skipped.
+- `bash tests/test-ai-gemini.sh`: 52 passed, 0 failed.
+- `bash tests/test-markdown-links.sh`: PASS, 237 tracked Markdown files.
+
+**NOT confirmed locally on that exact tree:** the complete `tests/test-all.sh`
+sweep and `tests/test-all.ps1`. Three attempts were interrupted by session
+restarts before finishing; the furthest reached 14 suites with zero failures. The
+same code passed a complete 52-suite sweep before the recovery-marker change, and
+the change is confined to `bin/ai-deepseek-agent` and its own suite.
+
+**The exact-head GitHub Actions `verify` run is therefore the authoritative gate
+for this commit,** not a local sweep. Do not record this commit as fully verified
+until that run reports success on `linux-offline`, `windows-offline`, and
+`windows-reviewer-safety`. If it fails, fix forward; do not assume the local
+partial result cleared it.
+
+## 8. Unrelated repair: a broken link that had turned `main` red
+
+`origin/main` was failing CI on three consecutive commits (`a4a790b`, `3102d99`,
+`b24578d`) before this commit. Cause: `fix_stale_name.md`, added by a concurrent
+session, linked to `bin/mcp-secret-launch.ps1:53`. `tools/check-markdown-links.py`
+strips a `#fragment` but not a `:NN` line suffix, so it resolved the whole string
+as a path and reported a missing target. No other tracked Markdown file in the
+repository uses that form.
+
+Repaired here by pointing the link at `bin/mcp-secret-launch.ps1` and keeping the
+line number in the visible link text. The checker was deliberately NOT changed:
+teaching it to strip `:NN` would also hide genuine typos, and one document is the
+smaller, more reversible fix. This edits another session's committed file, which
+is normally avoided — but the file was already merged into shared code and, while
+broken, no session could prove any change green.

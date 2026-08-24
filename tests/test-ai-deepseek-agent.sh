@@ -190,6 +190,26 @@ CONTBAD_FILE="$TMP/override-continue.out"; (DEEPSEEK_STUB_REPLY=$'x\n## Verdict\
 set -e
 check "a review cannot be continued in a conversation that never carried the boundary" "test '$CONTBAD_RC' -ne 0 && grep -q 'not started as a formal review' '$CONTBAD_FILE'"
 check "the refused continuation never reached the provider" "test '$CALLS_BEFORE_CONT' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+
+# The transcript is published before the ledger is appended. A ledger failure
+# would otherwise leave a saved turn whose attachments never reach the durable
+# record, so a later review would understate its own evidence (2026-08-24
+# independent review). The session must become unusable instead.
+LEDGER_OUT="$TMP/ledger-failure.out"
+LEDGER_START="$(DEEPSEEK_STUB_REPLY=$'a\n## Verdict\nAPPROVE' run send ledger-fail --review --file evidence-one.md)"
+LEDGER_ID="$(printf '%s\n' "$LEDGER_START"|sed -n 's/^SESSION_ID: //p')"
+set +e
+(AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish DEEPSEEK_STUB_REPLY=$'b\n## Verdict\nAPPROVE' run reply "$LEDGER_ID" more --review --file evidence-two.md) > "$LEDGER_OUT" 2>&1; LEDGER_RC=$?
+set -e
+check "a failed attachment-ledger write is nonzero and names the recovery state" "test '$LEDGER_RC' -ne 0 && grep -q 'recovery-required' '$LEDGER_OUT'"
+check "a failed attachment-ledger write marks the session recovery-required" "test -f '$TMP/repo/.ai/deepseek-sessions/$LEDGER_ID.recovery-required'"
+LEDGER_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+LEDGER_CONT="$TMP/ledger-continue.out"
+set +e
+(DEEPSEEK_STUB_REPLY=$'c\n## Verdict\nAPPROVE' run reply "$LEDGER_ID" again --review) > "$LEDGER_CONT" 2>&1; LEDGER_CONT_RC=$?
+set -e
+check "a recovery-required session refuses continuation before any provider contact" "test '$LEDGER_CONT_RC' -ne 0 && test '$LEDGER_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && grep -q 'would understate what DeepSeek saw' '$LEDGER_CONT'"
+check "the recovery marker is not mistaken for a conversation by list" "! run list | grep -q recovery-required"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

@@ -338,6 +338,23 @@ PY
 # attachment actually sent in this session, in order, without duplicates. It is
 # named without a .json suffix so `list` cannot mistake it for a conversation.
 attachments_ledger() { session_path "$1" .attachments; }
+# The transcript is published before the ledger is appended, so a ledger failure
+# would otherwise leave a saved turn whose attachments are missing from the
+# durable record - the exact understatement this ledger exists to prevent. Mark
+# the session recovery-required instead, and refuse to continue it. The marker
+# has no .json suffix so `list` cannot mistake it for a conversation.
+recovery_marker() { session_path "$1" .recovery-required; }
+mark_recovery_required() { # id reason
+  local marker
+  marker="$(recovery_marker "$1")" || return 1
+  printf '%s\n' "$2" > "$marker" 2>/dev/null || return 1
+  chmod 0600 "$marker" 2>/dev/null || true
+}
+recovery_required() { # id -> 0 when the session must not be continued
+  local marker
+  marker="$(recovery_marker "$1")" || return 1
+  [ -f "$marker" ]
+}
 record_attachments() { # id [files...]
   # NUL-delimited. A path may legally contain spaces or newlines, and a
   # line-based ledger would silently rename or split such a file in the durable
@@ -346,6 +363,8 @@ record_attachments() { # id [files...]
   local id="$1" ledger file; shift
   [ "$#" -gt 0 ] || return 0
   ledger="$(attachments_ledger "$id")" || return 1
+  # Offline hostile test hook for a real ledger write failure.
+  [ "${AI_DEEPSEEK_TEST_LEDGER_FAILURE:-0}" != publish ] || return 1
   for file in "$@"; do
     [ -n "$file" ] || continue
     printf '%s\0' "$file" >> "$ledger" || return 1
@@ -512,8 +531,9 @@ $REVIEW_INSTRUCTION"
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+      mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
-      echo "Error: the conversation was saved, but its attachment record could not be updated." >&2
+      echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
@@ -541,6 +561,7 @@ $REVIEW_INSTRUCTION"
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
+    if recovery_required "$ID"; then echo "Error: this conversation is marked recovery-required because its attachment record fell behind its transcript; its evidence list would understate what DeepSeek saw. Reconcile or delete it before continuing." >&2; exit 1; fi
     if [ "$REVIEW" = 1 ] && ! review_system_present "$F"; then echo "Error: this conversation was not started as a formal review, so its system prompt is not the review evidence boundary. Start the review with: ai-deepseek-agent send \"<message>\" --review" >&2; exit 1; fi
     MSG="$(with_files_appended "$MSG" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"})" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
@@ -563,8 +584,9 @@ $REVIEW_INSTRUCTION"
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+      mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
-      echo "Error: the conversation was saved, but its attachment record could not be updated." >&2
+      echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then

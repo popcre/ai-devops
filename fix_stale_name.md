@@ -41,7 +41,7 @@ account's hourly rate cap and locked it out.
 The consequence: `op run` resolves **every** line in `mcp.env` before it returns
 anything. One unresolvable reference fails the whole batch (exit 1), the launcher
 throws by design at
-[`bin/mcp-secret-launch.ps1:53`](bin/mcp-secret-launch.ps1:53), and **every** server
+[`bin/mcp-secret-launch.ps1:53`](bin/mcp-secret-launch.ps1), and **every** server
 depending on that refresh dies — including the five that never needed the broken
 secret. The five survivors are simply the servers that need no secrets at all.
 
