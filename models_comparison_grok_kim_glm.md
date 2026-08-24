@@ -1058,3 +1058,64 @@ self-contained copy on the SAME brief, independently.
   the reviewer could not read the issue under review, said so plainly, and worked from
   the brief instead. Briefs must carry what the reviewer needs rather than assuming it
   can fetch its own issue.
+
+## 2026-08-24 review rotation evidence
+
+### shared-db #1418 / PR #1421 — review sequence 286
+
+- Reviewer: Grok 4.6, assigned by the durable round-robin and run through the
+  manager-assigned `ai-grok-review` wrapper. Requested `grok-4.6`; the wrapper
+  reported returned model `grok-4.6-build`. No model or reasoning override.
+- Exact reviewed head: `c7fc09131117670d989838836e1e54a329a651ad`.
+- Change under review: `plm.load_pmt_capture_chunk` full-body
+  `create or replace` in
+  `supabase/migrations/20260824135515_pmt_loader_raw_value_json_null_normalization.sql`,
+  plus new `supabase/tests/pmt_raw_value_json_null_contracts.sql`. The fix
+  normalizes a present-but-JSON-null `raw_value` key to SQL NULL with
+  `nullif(r->'raw_value','null'::jsonb)` so `pmt_amv_raw_value_shape_chk` stops
+  refusing an absent optional metadata remainder.
+- Verdict: **APPROVE**, with a coverage statement, no Critical, High or Medium
+  findings, and one Low finding.
+- Low finding: `supabase/tests/pmt_raw_value_json_null_contracts.sql` line 28
+  still carries the placeholder `LAST RUN: (fill in after the preview rehearsal)`.
+  The reviewer also stated plainly that it did not execute the contract suite
+  (no database in the review sandbox) and that CI's `supabase/tests/*.sql` glob
+  will run it.
+- Confirmed by the reviewer, with file and line citations: `nullif` on `jsonb`
+  uses JSONB equality, so only the JSON null scalar collapses to SQL NULL while
+  objects, strings, numbers, arrays and booleans pass through unchanged and still
+  meet the shape check; the absent-key case was already SQL NULL and stays so;
+  the only other `raw_value` read in the function targets
+  `plm.pmt_relationship_anomaly` through `->>` into a `text not null` column and
+  is a different contract; the `coalesce(r->'raw','{}'::jsonb)` entity reads have
+  no shape check and are a pre-existing operator quirk on `main`, not this bug.
+- Faithful re-derivation: the reviewer identified the live prior body as the
+  third rewrite in `20260814223552_pmt_collection_paramount_term_normalization.sql`,
+  confirmed no intervening rewrite, and reported the only differences as the one
+  expression plus comments, with the `#964`, `#965` and `#970` behaviours intact.
+- Independent verification by the orchestrator review runner (not accepted on the
+  reviewer's word): a programmatic unified diff of the two extracted function
+  bodies returned exactly two hunks — a five-line `#1418` comment block and
+  `r->'raw_value'` to `nullif(r->'raw_value','null'::jsonb)`. `grep` across
+  `supabase/migrations` confirmed `pmt_amv_raw_value_shape_chk` is defined once
+  (`20260811030000`) and never dropped, altered, disabled or marked `not valid`;
+  the new migration mentions it only in comments. `security definer`,
+  `set search_path = plm, core, public, extensions`, the two `revoke all`
+  statements and the single `grant execute ... to service_role` are byte-identical
+  to the prior body. Migration version `20260824135515` is unique in the tree.
+- Defects caught: 0. False positives: 0. No claim in the review was disproved.
+- Policy/tool adherence: read-only `ai-grok-review` only, run from a detached
+  review worktree pinned to the exact head, through the wrapper's own private
+  snapshot. No edits, no database calls, no preview, no merge, no production
+  contact, no secrets and no licensed rows.
+- Continuity: one named persistent session
+  (`seq286-pr1421-pmt-json-null`), initial review only, no rebuttal turns needed
+  because no Critical or High finding was raised. The wrapper extracted a
+  `## Verdict` section on the first attempt — no re-emit turn was required, which
+  is an improvement over the eight sequences noted on 2026-08-19.
+- Latency: roughly 6.5 minutes of wall clock, 13 internal turns.
+- Reported usage: 1,045,053 tokens (219,011 uncached input, 805,504 cached),
+  cost **$0.16388034**.
+- Final outcome at recording time: APPROVE with nothing blocking merge. Preview
+  rehearsal, required checks and the guarded merge remain the orchestrator's
+  separate steps.
