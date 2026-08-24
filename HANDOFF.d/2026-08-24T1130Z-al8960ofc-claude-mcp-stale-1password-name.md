@@ -220,6 +220,24 @@ returns `403 request_blocked` at their end (§0.1).
 
 ## 9. Open questions and risks
 
+- **CI run `verify` on `main` @ d152148 had not finished when this session ended.**
+  It is the first *complete* verification of two sets of changes at once: this
+  session's redaction, and the reviewer-repair session's commit 78c8009 (that
+  session pushed with only its directly-affected suites run locally — three attempts
+  at the full `tests/test-all.sh` sweep were killed by session restarts; its own
+  §7 in `tests/verification/reviewer-production-completion/2026-08-24-grok-deepseek.md`
+  says so). Both gates this session touched pass locally and were re-verified
+  independently by that session on its own checkout, including running the boundary
+  tool's topology regex across all tracked files (0 matches).
+  **If that run lands red on `bin/ai-deepseek-agent`, `bin/ai-gemini`,
+  `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-gemini.sh`, or either file under
+  `tests/verification/reviewer-production-completion/`, it belongs to that session,
+  not this one — report it to Albert rather than fixing it blind.**
+- **The redacted address is still in public git history.** HEAD is clean, which
+  limits further spread but does not un-publish it. The purge is Step 15 of
+  `plan_full-strategy-remediation.md` and needs a GitHub Support request only Albert
+  can open.
+
 - **Are there other machines with stale copies?** Two were checked (al8960ofc,
   hetz). Albert's other boxes (`916`, usually offline; `edge-dev`; `albt16`) were
   not. Any machine whose `mcp.env` or client config predates the rename has the same
