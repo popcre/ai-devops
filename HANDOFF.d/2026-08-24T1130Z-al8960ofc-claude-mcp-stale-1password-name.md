@@ -15,11 +15,15 @@ Put this whole list to Albert in ONE message before starting work.
 
 **BLOCKING**
 
-1. **May an AI session edit `/home/ai/.claude.json` on the hetz VPS?** This is the
-   last stale copy; Codex and Claude Code on that machine keep failing six MCP
-   servers until it is fixed. An attempt was blocked by the safety classifier as an
-   unattended write to production — correctly. *Recommendation: yes, approve the
-   one-line `sed` in §6 step 1; it is a name swap with a backup taken first.*
+1. **1Password writes are broken for the service account — is that expected?**
+   Every write through the `op` CLI hangs indefinitely (`op item edit`, and a
+   minimal `op item create` probe, both timed out; reads return instantly). It
+   blocks correcting a stale note (§0.3). *Recommendation: retry through the
+   1Password MCP after restarting the clients; if writes still hang, the service
+   account's write permission needs checking in the 1Password admin console —
+   only Albert can do that.*
+
+   *(Settled 2026-08-24: the VPS edit was approved and is DONE — see §3.)*
 
 **RECOVERABLE**
 
@@ -31,12 +35,16 @@ Put this whole list to Albert in ONE message before starting work.
 
 **NOT PART OF THIS WORK, AND NOBODY IS ON IT**
 
-3. **The NAS bearer token is stored nowhere.** `nas-monitor-secrets` in
-   `vibe_coding` carries a field that says the live client→nas-mcp bearer was
-   deliberately never copied into 1Password, and to retrieve it from Coolify if it
-   is ever needed. It is currently recoverable only from a running config or
-   Coolify. *Recommendation: have someone store it properly; if the machine configs
-   were lost, that credential would be too.*
+3. **CORRECTED — the NAS bearer was never missing, but its note still says it is.**
+   Albert asked for it to be copied from Coolify into 1Password. It is **already
+   there**: Coolify's `MCP_BEARER_TOKEN` and the vault's `nas_token` field are the
+   same value (identical SHA-256, verified 2026-08-24), so copying would have
+   created a duplicate of a live credential. Nothing was copied. What remains is
+   that `nas-monitor-secrets` still carries a field claiming the opposite, which is
+   what sent this session hunting. The correcting edit is blocked by §0.1.
+   *Recommendation: once writes work, replace that field's text with a pointer to
+   `op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token`. Draft text is ready in
+   the session scratchpad; details in `fix_stale_name.md` §8.*
 4. **A known-leaked NAS token still sits in this PUBLIC repo's git history**, kept
    on purpose so the leaked value stays identifiable. It is already rotated and
    returns Unauthorized, so this is a note, not an exposure. *Recommendation: no
@@ -83,8 +91,13 @@ resolved bearers.
 `bin/setup-machine.ps1` (commit `521ca0c`) plus `fix_stale_name.md` and this file.
 **No pull request opened yet.**
 
-**Not done:** `/home/ai/.claude.json` on hetz (§6 step 1). **Clients not yet
-restarted** — the fix does not take effect in a running client.
+**Fixed on hetz too** (approved by Albert 2026-08-24): `/home/ai/.claude.json`,
+backup `.bak-20260824-mcpref`, JSON re-validated, zero stale references left. All
+five config locations are now correct.
+
+**Not done:** the `nas-monitor-secrets` note correction (blocked, §0.1/§0.3).
+**Clients not yet restarted** on either machine — the fix does not take effect in a
+running client.
 
 ## 4. Everything we tried that did NOT work
 
@@ -99,6 +112,13 @@ restarted** — the fix does not take effect in a running client.
 - **A nested-quoting `python3 -c` over SSH** produced a misleading
   `PermissionError` that was really mangled quoting. If that error reappears,
   suspect the quoting before suspecting permissions.
+- **Fingerprinting a secret with `tee >(wc -c)` inside `ssh`.** The remote shell
+  has no process substitution, so `tee` wrote to a file literally named `>(wc` and
+  the hash came out wrong — which briefly looked like proof that Coolify held a
+  second, unstored NAS token. It did not. **Use a plain `| sha256sum` pipeline**,
+  and re-verify before acting on a "these differ" result.
+- **Writing to 1Password with the `op` CLI.** Hangs forever, reads are fine. Two
+  attempts timed out; no item was created. Use the 1Password MCP instead.
 - **Looking for the item under its old title.** `op item list` does not show it;
   only `--include-archive` revealed the item, still live, under its new title. The
   item was never archived — the flag just widened the listing.
@@ -124,9 +144,7 @@ restarted** — the fix does not take effect in a running client.
 
 ## 6. Exact next steps
 
-1. **Fix the VPS** (needs the §0.1 approval). Run the `ssh vps` command in
-   [`fix_stale_name.md` §6](../fix_stale_name.md). *You'll know it worked when it
-   prints `json ok` and `grep -c 'designflow-mcp/' /home/ai/.claude.json` returns 0.*
+1. ~~Fix the VPS~~ — **DONE 2026-08-24.**
 2. **Restart Claude Desktop, Claude Code, and Codex on al8960ofc** (a full quit, not
    a window close). *You'll know it worked when no new `Server disconnected` lines
    appear in `AppData\Local\Claude\Logs` and all six servers respond.*
@@ -135,7 +153,10 @@ restarted** — the fix does not take effect in a running client.
    *You'll know it worked when `bin/setup-machine.ps1` on `main` contains
    `f335s4oy3m6n74jmwj74hunrtu` and no `designflow-mcp`.*
 5. **Close issue #63 and DELETE this handoff file** in the same pull request.
-6. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
+6. **Correct the `nas-monitor-secrets` note** once 1Password writes work (§0.3).
+   *You'll know it worked when that item's pointer field no longer claims the bearer
+   is absent from the vault.*
+7. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
    record deliberately that it never will.
 
 ## 7. Constraints and gotchas in force
@@ -170,6 +191,9 @@ restarted** — the fix does not take effect in a running client.
   hetz). Albert's other boxes (`916`, usually offline; `edge-dev`; `albt16`) were
   not. Any machine whose `mcp.env` or client config predates the rename has the same
   outage waiting.
+- **1Password writes hang with the current service account.** Until that is
+  understood, no AI session can store or correct anything in the vault — only read.
+  That is a bigger constraint than this incident.
 - **Are other references stale for the same reason?** Only this one item was
   renamed, and the other seven references all resolved non-empty — so no others are
   broken *today*. Nothing prevents the next rename from repeating this.

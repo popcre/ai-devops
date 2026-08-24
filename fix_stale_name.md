@@ -1,7 +1,8 @@
 # fix_stale_name.md — a renamed 1Password item silently kills every secret-launched MCP server
 
-**Incident date:** 2026-08-24 · **Machine:** al8960ofc (Windows) · **Status:** fixed on
-al8960ofc; one remote file still pending (see [Remaining work](#remaining-work)).
+**Incident date:** 2026-08-24 · **Machines:** al8960ofc (Windows) + hetz (VPS) ·
+**Status:** all five config locations fixed and verified. Clients must be
+restarted to pick it up.
 
 ---
 
@@ -98,7 +99,7 @@ Five places, on two machines. Missing any one leaves a client broken.
 | 2 | `~/.claude.json` (`devops-mcp`, `synology-monitor` args) | al8960ofc | ✅ |
 | 3 | `%APPDATA%\Claude\claude_desktop_config.json` | al8960ofc | ✅ |
 | 4 | `~/.codex/config.toml` | al8960ofc | ✅ |
-| 5 | `/home/ai/.claude.json` | hetz (VPS) | ❌ pending |
+| 5 | `/home/ai/.claude.json` | hetz (VPS) | ✅ |
 | — | `bin/setup-machine.ps1` (lines 386, 391, 913) | repo | ✅ committed |
 | — | `config/mcp.env.example` | repo | already correct |
 | — | `/home/ai/.config/ai-devops/mcp.env` | hetz (VPS) | already correct |
@@ -151,18 +152,11 @@ is **no new `Server disconnected` lines**.
 
 ## 6. Remaining work
 
-**`/home/ai/.claude.json` on hetz still carries the stale name** (2 occurrences,
-confirmed 2026-08-24). Codex and Claude Code on the VPS will keep failing the same
-six servers until it is corrected. The VPS's own `mcp.env` is already fine, so this
-one file is the whole remaining job.
-
-An AI session's attempt to edit it was **blocked by the safety classifier** —
-correctly, as an unattended write to a production host. It needs Albert's explicit
-go-ahead or a human hand.
-
-```bash
-ssh vps "sudo -u ai cp /home/ai/.claude.json /home/ai/.claude.json.bak-20260824 && sudo -u ai sed -i 's|op://vibe_coding/designflow-mcp/|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/|g' /home/ai/.claude.json && sudo -u ai python3 -m json.tool /home/ai/.claude.json > /dev/null && echo 'json ok'"
-```
+**None for the reference itself.** `/home/ai/.claude.json` on hetz was corrected on
+2026-08-24 (backup `.bak-20260824-mcpref`, JSON re-validated, zero stale
+occurrences left). What remains is operational: **restart the clients** on both
+machines — a running client keeps its old config, so the logs only go quiet after a
+full restart.
 
 ### SSH gotcha met while investigating
 
@@ -191,7 +185,43 @@ machine-in-the-middle.
 4. **Read the failing set before debugging individual servers.** "Exactly the
    secret-launched servers" is a signature that points at one line in one file.
 
-## 8. Related reading
+## 8. Follow-on finding: the NAS bearer was never missing
+
+While fixing the above, the `nas-monitor-secrets` item in `vibe_coding` was found to
+carry a field asserting that the live client→nas-mcp bearer is **not** stored in
+1Password and must be fetched from Coolify. **That is no longer true**, and acting on
+it wastes a session.
+
+**Verified 2026-08-24.** The Coolify env var `MCP_BEARER_TOKEN` on the nas-mcp app
+(`efl17f5iocnz94840pexre9d` on hetz, serving `nas-mcp.designflow.app`) and the vault
+field `op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token` have **identical
+SHA-256 hashes** — same 64-character value. The app accepts exactly one token
+(`/app/apps/nas-mcp/dist/index.js:416` compares the request header against
+`MCP_BEARER_TOKEN`), and a deliberately wrong bearer returns `401 Unauthorized`, so
+the enforcement is real and the stored value is the live one.
+
+Comparison was done by hash on each side; **the value itself was never printed,
+transported, or written anywhere.**
+
+> **Method warning that nearly caused a wrong conclusion.** A first attempt piped the
+> value through `tee >(wc -c)` inside an `ssh` command. The remote shell does not
+> support process substitution, so `tee` treated `>(wc` as a filename and corrupted
+> the stream — producing a *different* hash and the false impression that Coolify held
+> a second, unstored token. **Fingerprint with a plain `| sha256sum` pipeline only**,
+> and re-verify any "these differ" result before acting on it.
+
+**Nothing needs copying.** Adding a second copy of a live credential is how the two
+drift apart; the correct fix is to correct the stale pointer text, not duplicate the
+secret.
+
+**Blocked:** correcting that note could not be completed this session. Every
+1Password **write** through the `op` CLI hangs indefinitely with the current service
+account (`op item edit` and a minimal `op item create` probe both timed out; reads
+return instantly). No probe item was created — the vault is unchanged. The normal
+write path is the 1Password **MCP**, which is one of the servers this outage took
+down; it should work once the clients are restarted. See issue #63.
+
+## 9. Related reading
 
 - [`bin/mcp-secret-launch.ps1`](bin/mcp-secret-launch.ps1) — the shared refresh, the
   DPAPI cache, and the deliberate throw at line 53.
