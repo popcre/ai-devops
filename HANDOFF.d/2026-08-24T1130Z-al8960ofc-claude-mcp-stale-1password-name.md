@@ -15,15 +15,9 @@ Put this whole list to Albert in ONE message before starting work.
 
 **BLOCKING**
 
-1. **1Password writes are broken for the service account — is that expected?**
-   Every write through the `op` CLI hangs indefinitely (`op item edit`, and a
-   minimal `op item create` probe, both timed out; reads return instantly). It
-   blocks correcting a stale note (§0.3). *Recommendation: retry through the
-   1Password MCP after restarting the clients; if writes still hang, the service
-   account's write permission needs checking in the 1Password admin console —
-   only Albert can do that.*
-
-   *(Settled 2026-08-24: the VPS edit was approved and is DONE — see §3.)*
+**None.** Both items that were blocking are now settled: the VPS edit was approved
+and is done, and the 1Password write that looked broken was a stdin problem, not a
+permission problem (§4). Nothing is waiting on Albert.
 
 **RECOVERABLE**
 
@@ -41,10 +35,11 @@ Put this whole list to Albert in ONE message before starting work.
    same value (identical SHA-256, verified 2026-08-24), so copying would have
    created a duplicate of a live credential. Nothing was copied. What remains is
    that `nas-monitor-secrets` still carries a field claiming the opposite, which is
-   what sent this session hunting. The correcting edit is blocked by §0.1.
-   *Recommendation: once writes work, replace that field's text with a pointer to
-   `op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token`. Draft text is ready in
-   the session scratchpad; details in `fix_stale_name.md` §8.*
+   what sent this session hunting.
+   **Corrected in the vault 2026-08-24** — the notes and the stale pointer field now
+   name `op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token`, and the seven secret
+   fields were verified unchanged afterwards. *No action needed; listed so a future
+   session knows why that item's text changed.*
 4. **A known-leaked NAS token still sits in this PUBLIC repo's git history**, kept
    on purpose so the leaked value stays identifiable. It is already rotated and
    returns Unauthorized, so this is a note, not an exposure. *Recommendation: no
@@ -95,9 +90,12 @@ resolved bearers.
 backup `.bak-20260824-mcpref`, JSON re-validated, zero stale references left. All
 five config locations are now correct.
 
-**Not done:** the `nas-monitor-secrets` note correction (blocked, §0.1/§0.3).
-**Clients not yet restarted** on either machine — the fix does not take effect in a
-running client.
+**`nas-monitor-secrets` corrected in the vault** (2026-08-24 12:44Z): notes and the
+stale pointer field now name the right item; all seven secret fields verified
+unchanged at 64 chars.
+
+**Not done:** clients have not been restarted on either machine — the fix does not
+take effect in a running client. That is the only outstanding step.
 
 ## 4. Everything we tried that did NOT work
 
@@ -117,8 +115,12 @@ running client.
   the hash came out wrong — which briefly looked like proof that Coolify held a
   second, unstored NAS token. It did not. **Use a plain `| sha256sum` pipeline**,
   and re-verify before acting on a "these differ" result.
-- **Writing to 1Password with the `op` CLI.** Hangs forever, reads are fine. Two
-  attempts timed out; no item was created. Use the 1Password MCP instead.
+- **`op` CLI writes "hang" — WRONG DIAGNOSIS, now understood.** `op item edit` and
+  `op item create` block forever **when stdin is left open**, which is the default in
+  this shell. No error, no timeout. This was briefly reported to Albert as "1Password
+  writes are broken / the service account may have lost write permission" — it was
+  neither. **Fix: append `< /dev/null` to every `op` write.** The same edit that hung
+  twice then completed instantly. Reads were never affected.
 - **Looking for the item under its old title.** `op item list` does not show it;
   only `--include-archive` revealed the item, still live, under its new title. The
   item was never archived — the flag just widened the listing.
@@ -153,10 +155,7 @@ running client.
    *You'll know it worked when `bin/setup-machine.ps1` on `main` contains
    `f335s4oy3m6n74jmwj74hunrtu` and no `designflow-mcp`.*
 5. **Close issue #63 and DELETE this handoff file** in the same pull request.
-6. **Correct the `nas-monitor-secrets` note** once 1Password writes work (§0.3).
-   *You'll know it worked when that item's pointer field no longer claims the bearer
-   is absent from the vault.*
-7. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
+6. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
    record deliberately that it never will.
 
 ## 7. Constraints and gotchas in force
@@ -191,9 +190,6 @@ running client.
   hetz). Albert's other boxes (`916`, usually offline; `edge-dev`; `albt16`) were
   not. Any machine whose `mcp.env` or client config predates the rename has the same
   outage waiting.
-- **1Password writes hang with the current service account.** Until that is
-  understood, no AI session can store or correct anything in the vault — only read.
-  That is a bigger constraint than this incident.
 - **Are other references stale for the same reason?** Only this one item was
   renamed, and the other seven references all resolved non-empty — so no others are
   broken *today*. Nothing prevents the next rename from repeating this.

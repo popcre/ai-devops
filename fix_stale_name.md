@@ -214,12 +214,25 @@ transported, or written anywhere.**
 drift apart; the correct fix is to correct the stale pointer text, not duplicate the
 secret.
 
-**Blocked:** correcting that note could not be completed this session. Every
-1Password **write** through the `op` CLI hangs indefinitely with the current service
-account (`op item edit` and a minimal `op item create` probe both timed out; reads
-return instantly). No probe item was created — the vault is unchanged. The normal
-write path is the 1Password **MCP**, which is one of the servers this outage took
-down; it should work once the clients are restarted. See issue #63.
+**Done 2026-08-24.** The `nas-monitor-secrets` notes and its stale pointer field now
+name the correct location. The seven secret fields were re-checked afterwards and are
+unchanged (64 chars each).
+
+### `op` CLI writes appear to hang — it is waiting on stdin
+
+Worth knowing, because it looks exactly like a broken permission and wasted time
+here. `op item edit` and `op item create` **hang forever when stdin is left open**,
+which is the default in most agent/CI shells. There is no error and no timeout — the
+CLI simply waits. Reads (`op read`, `op item get`) are unaffected.
+
+**Redirect stdin from /dev/null on every `op` write:**
+
+```bash
+op item edit <id> --vault vibe_coding "field[text]=value" < /dev/null
+```
+
+The same edit that hung twice completed instantly with `< /dev/null`. Do not
+conclude from a hang that the service account has lost write permission.
 
 ## 9. Related reading
 
