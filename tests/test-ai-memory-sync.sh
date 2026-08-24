@@ -132,7 +132,7 @@ mkdir -p "$MAP_TOOL/bin" "$MAP_TOOL/memory" \
   "$MAP_CLAUDE/projects/C--last/memory" \
   "$MAP_HUB/memory/first-project" "$MAP_HUB/memory/final-project"
 cp "$ROOT/bin/ai-sync-memory" "$MAP_TOOL/bin/ai-sync-memory"
-printf 'C--mapped\tfirst-project\nC--mapped\tsecond-project\nC--last\tfinal-project' \
+printf 'C--mapped\tfirst-project\r\nC--mapped\tsecond-project\r\nC--last\tfinal-project\r' \
   > "$MAP_TOOL/memory/project-map.tsv"
 printf '# Local mapped\n' > "$MAP_CLAUDE/projects/C--mapped/memory/MEMORY.md"
 printf '# Local final\n' > "$MAP_CLAUDE/projects/C--last/memory/MEMORY.md"
