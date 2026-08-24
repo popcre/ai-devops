@@ -383,12 +383,12 @@ $McpServers["supabase"] = @{
 $McpServers["devops-mcp"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
-           "op://vibe_coding/designflow-mcp/devops_token")
+           "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token")
 }
 $McpServers["synology-monitor"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
-           "op://vibe_coding/designflow-mcp/nas_token")
+           "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token")
 }
 
 # recall-ai (remote/HTTP). Same treatment. Until 2026-07-17 this token was
@@ -910,7 +910,7 @@ Write-Host ""
 Write-Host "Validate on this machine:" -ForegroundColor Cyan
 Write-Host "  1. Run:  op run --env-file `"$McpEnv`" -- cmd /c echo ok"
 Write-Host "     (should print 'ok' with no auth error)"
-Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/designflow-mcp/devops_token"
+Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token"
 Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
 Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
 Write-Host "  4. Fully quit and reopen Claude Desktop (MCP servers only re-read config on a full restart)."
