@@ -284,8 +284,8 @@ if [ -s "$TOKEN_FILE" ]; then
 fi
 URL="\$1"; REF="\$2"; shift 2
 case "\$REF" in
-  op://vibe_coding/designflow-mcp/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
-  op://vibe_coding/designflow-mcp/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
   op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password) TOK="\${RECALL_AI_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
@@ -368,10 +368,10 @@ servers = {
     # memory, so only the URL + op:// reference appear here.
     "devops-mcp": {"command": remote, "args": [
         "https://mcp.designflow.app/mcp",
-        "op://vibe_coding/designflow-mcp/devops_token"]},
+        "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token"]},
     "synology-monitor": {"command": remote, "args": [
         "https://nas-mcp.designflow.app/mcp",
-        "op://vibe_coding/designflow-mcp/nas_token"]},
+        "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"]},
     "recall-ai": {"command": remote, "args": [
         "https://us-east-1.recall.ai/mcp",
         "op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password",

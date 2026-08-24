@@ -309,7 +309,7 @@ that already exist in the vault:
 |---|---|
 | 1Password service-account token (for the MCP) | `vibe_coding-service-account` |
 | devops-mcp bearer | `devops-mcp-client-tokens` |
-| designflow MCP token | `designflow-mcp` |
+| DesignFlow MCP bearer tokens | `DesignFlow MCP bearer tokens - DevOps and NAS (production)`; references use item ID `f335s4oy3m6n74jmwj74hunrtu` because the title contains parentheses |
 | NAS monitor token | `nas-monitor-secrets` |
 | Trigger PAT | `Trigger.dev Personal Access Token (management)` |
 | SSH (existing server logins) | `hetz-ai-ssh`, `ci-deploy-ssh` |
