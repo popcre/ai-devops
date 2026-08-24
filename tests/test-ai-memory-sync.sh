@@ -93,6 +93,58 @@ LARGE_INDEX="$LARGE_CLAUDE/projects/C--repos-large/memory/MEMORY.md"
 [[ "$(grep -Fc '(local-only.md)' "$LARGE_INDEX")" -eq 1 ]] ||
   fail "large CRLF merge lost or duplicated the local-only entry"
 
+# Project matching must also be linear. Historical reviewer runs can leave
+# hundreds of local memory directories and matching hub projects. The former
+# nested loop canonicalized every possible pair and took hours on T16.
+MANY_CLAUDE="$TMP/claude-many-projects"
+MANY_HUB="$TMP/hub-many-projects"
+mkdir -p "$MANY_CLAUDE/projects" "$MANY_HUB/memory"
+for i in $(seq 1 500); do
+  mkdir -p "$MANY_CLAUDE/projects/C--repos-local-$i/memory" \
+    "$MANY_HUB/memory/hub-$i"
+done
+mkdir -p "$MANY_CLAUDE/projects/C--repos-shared/memory" \
+  "$MANY_CLAUDE/projects/D--repos-shared/memory" \
+  "$MANY_HUB/memory/shared"
+printf '# Local shared\n' \
+  > "$MANY_CLAUDE/projects/C--repos-shared/memory/MEMORY.md"
+printf '# Second local shared\n' \
+  > "$MANY_CLAUDE/projects/D--repos-shared/memory/MEMORY.md"
+printf '# Hub shared\n' > "$MANY_HUB/memory/shared/MEMORY.md"
+if ! CLAUDE_HOME="$MANY_CLAUDE" AI_MEMORY_HUB_ROOT="$MANY_HUB" \
+  timeout 30 bash "$ROOT/bin/ai-sync-memory" pull > "$TMP/many-projects.out"; then
+  fail "500-by-500 memory lookup did not complete within 30 seconds"
+fi
+grep -Fq '# Hub shared' \
+  "$MANY_CLAUDE/projects/C--repos-shared/memory/MEMORY.md" ||
+  fail "linear project lookup missed the final matching project"
+grep -Fq '# Hub shared' \
+  "$MANY_CLAUDE/projects/D--repos-shared/memory/MEMORY.md" ||
+  fail "linear project lookup dropped a second checkout for one project"
+
+# Explicit aliases retain the old first-declaration-wins behavior and include a
+# final mapping line even when a hand-edited file has no trailing newline.
+MAP_TOOL="$TMP/map-tool"
+MAP_CLAUDE="$TMP/claude-map"
+MAP_HUB="$TMP/hub-map"
+mkdir -p "$MAP_TOOL/bin" "$MAP_TOOL/memory" \
+  "$MAP_CLAUDE/projects/C--mapped/memory" \
+  "$MAP_CLAUDE/projects/C--last/memory" \
+  "$MAP_HUB/memory/first-project" "$MAP_HUB/memory/final-project"
+cp "$ROOT/bin/ai-sync-memory" "$MAP_TOOL/bin/ai-sync-memory"
+printf 'C--mapped\tfirst-project\nC--mapped\tsecond-project\nC--last\tfinal-project' \
+  > "$MAP_TOOL/memory/project-map.tsv"
+printf '# Local mapped\n' > "$MAP_CLAUDE/projects/C--mapped/memory/MEMORY.md"
+printf '# Local final\n' > "$MAP_CLAUDE/projects/C--last/memory/MEMORY.md"
+printf '# First wins\n' > "$MAP_HUB/memory/first-project/MEMORY.md"
+printf '# Final line works\n' > "$MAP_HUB/memory/final-project/MEMORY.md"
+CLAUDE_HOME="$MAP_CLAUDE" AI_MEMORY_HUB_ROOT="$MAP_HUB" \
+  bash "$MAP_TOOL/bin/ai-sync-memory" pull >/dev/null
+grep -Fq '# First wins' "$MAP_CLAUDE/projects/C--mapped/memory/MEMORY.md" ||
+  fail "duplicate explicit map entries no longer keep the first declaration"
+grep -Fq '# Final line works' "$MAP_CLAUDE/projects/C--last/memory/MEMORY.md" ||
+  fail "explicit map ignored a final line without a newline"
+
 # Empty files are valid intermediate states. Awk's NR==FNR idiom misclassifies
 # the entire second file when the first file has zero records, so exercise both
 # data-flow directions explicitly.

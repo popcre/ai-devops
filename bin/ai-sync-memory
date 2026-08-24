@@ -172,13 +172,25 @@ usage() {
   exit 2
 }
 
+# Load explicit path aliases once. canonical() is used for every local memory
+# directory; rereading project-map.tsv with awk on each call made even the
+# corrected one-pass project lookup unnecessarily expensive on Windows.
+declare -A explicit_project_map=()
+if [[ -f "$MAP_FILE" ]]; then
+  while IFS=$'\t' read -r mapped_slug mapped_project _ || [[ -n "${mapped_slug:-}" ]]; do
+    mapped_project="${mapped_project%$'\r'}"
+    [[ -n "$mapped_slug" && "$mapped_slug" != \#* && -n "$mapped_project" ]] || continue
+    # Preserve the former awk contract: the first declaration wins.
+    [[ -n "${explicit_project_map[$mapped_slug]+present}" ]] ||
+      explicit_project_map["$mapped_slug"]="$mapped_project"
+  done < "$MAP_FILE"
+fi
+
 # Canonical project key for a per-machine slug.
 canonical() {
   local slug="$1" mapped
-  if [[ -f "$MAP_FILE" ]]; then
-    mapped="$(awk -F'\t' -v s="$slug" '!/^#/ && $1==s {print $2; exit}' "$MAP_FILE")"
-    if [[ -n "$mapped" ]]; then echo "$mapped"; return; fi
-  fi
+  mapped="${explicit_project_map[$slug]:-}"
+  if [[ -n "$mapped" ]]; then echo "$mapped"; return; fi
   # Linux checkouts live under /worksp, whose slug is "-worksp-<name>". Without
   # this the Windows box stores "monitor" and hetz stores "-worksp-monitor" —
   # two keys for one project, neither machine ever seeing the other's memory.
@@ -302,16 +314,34 @@ case "$DIRECTION" in
     ;;
   pull)
     [[ -d "$MEM_REPO" ]] || { echo "No memory/ tree in repo yet — nothing to pull."; exit 0; }
+    # Build the machine-side project map once. The former nested scan called
+    # canonical() for every hub-project/local-project pair. A machine carrying
+    # 737 historical reviewer sandboxes therefore performed more than 543,000
+    # path classifications before copying a byte. Keep every matching memory
+    # directory (multiple checkout paths may intentionally map to one project),
+    # but make lookup linear in the number of hub and local projects.
+    declare -A local_memory_paths=()
+    memory_path_separator=$'\034'
+    for md in "$CLAUDE_HOME"/projects/*/memory; do
+      memory_parent="${md%/memory}"
+      [[ -d "$memory_parent" ]] || continue
+      slug="${memory_parent##*/}"
+      project_key="$(canonical "$slug")"
+      local_memory_paths["$project_key"]+="$md$memory_path_separator"
+    done
     pulled=0
     skipped=0
     for pd in "$MEM_REPO"/*/; do
       [[ -d "$pd" ]] || continue
-      proj="$(basename "$pd")"
+      project_path="${pd%/}"
+      proj="${project_path##*/}"
       matched=0
-      for md in "$CLAUDE_HOME"/projects/*/memory; do
-        [[ -d "$(dirname "$md")" ]] || continue
-        slug="$(basename "$(dirname "$md")")"
-        if [[ "$(canonical "$slug")" == "$proj" ]]; then
+      project_memory_paths="${local_memory_paths[$proj]:-}"
+      if [[ -n "$project_memory_paths" ]]; then
+        while IFS= read -r -d "$memory_path_separator" md; do
+          [[ -n "$md" ]] || continue
+          memory_parent="${md%/memory}"
+          slug="${memory_parent##*/}"
           run mkdir -p "$md"
           local_index=""
           if [[ "$DRY_RUN" != "--dry-run" && -f "$md/MEMORY.md" ]]; then
@@ -338,8 +368,8 @@ case "$DIRECTION" in
           ensure_index_coverage "$md" "$slug"
           echo "  pull  memory/$proj  ->  $slug"
           matched=1
-        fi
-      done
+        done < <(printf '%s' "$project_memory_paths")
+      fi
       [[ $matched -eq 0 ]] && { echo "  skip  memory/$proj  (no local project dir on this machine yet)"; skipped=$((skipped+1)); }
       [[ $matched -eq 1 ]] && pulled=$((pulled+1))
     done
