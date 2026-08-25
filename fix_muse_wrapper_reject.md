@@ -19,7 +19,7 @@ Nothing has been implemented. A fresh session starts at **Step 1**.
 | 2 | Name the changed paths in both rejection messages | ⬜ open | — |
 | 3 | Name `reconcile` in both rejection messages | ⬜ open | — |
 | 4 | Tests | ⬜ open | — |
-| 5 | Suite green, gate reviews, independent exact-head review, land | ⬜ open | — |
+| 5 | Finish every edit, prove it live, then review the exact final state and publish | ⬜ open | — |
 
 **Rule for this table:** ✅ requires an artifact — a commit SHA, a test name, or
 the exact command to re-run. Not a bare "done".
@@ -325,6 +325,54 @@ scratch setup. Do not add a new harness.
 
 ### Step 5 — Land it
 
+**Read the ordering rule before doing anything in this step.** The exact-state
+final review required by `AGENTS.md:39-42` reviews a *specific source state* and
+binds a whole-source digest. Any tracked file you edit afterwards — a doc, this
+plan's STATUS table, a handoff — changes that digest and silently invalidates the
+review. So every intended change lands **before** the review, and the only thing
+that happens after it is publishing the reviewed state.
+
+#### 5a — Finish every intended edit first
+
+Complete all of these while the review has not yet run:
+
+- The code and test changes from Steps 1–4.
+- `docs/muse-opencode.md`, describing the improved failure message and the
+  `reconcile` recovery path.
+- This plan's STATUS table, with artifacts in every cell you can fill.
+- `HANDOFF.d/2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md`, closed.
+- Load `session-docs-update` and complete its documentation pass **now**, not
+  after the review.
+
+**One STATUS cell cannot be filled in advance:** the artifact for the final
+review itself, which does not exist until the review has run. Do not edit the
+plan afterwards to add it. Record that report path in the **commit message** and
+in the session's closing report instead. That is the only place it belongs.
+
+**Verification gate:** `git status --short` shows every intended change staged or
+present, and you can state plainly that no further tracked-file edit is planned.
+
+#### 5b — Prove the live behaviour
+
+**This is mandatory, and it spends money on a live provider call. Albert
+authorizes it.** Ask him in the implementing session before making the call. If
+he declines, stop and report — do not substitute the offline stub tests as proof
+and do not land the change as if this step had passed.
+
+Run one real `ai-muse` turn and trigger the rejection deliberately using § 3's
+reproduction, then paste the improved message into the closing report.
+
+**Run it in a disposable scratch Git repository, never in the `ai-devops`
+checkout.** The reproduction works by creating an untracked file mid-turn, which
+is exactly the kind of tracked-tree change that would invalidate the review you
+are about to run. Invoke the modified wrapper by absolute path from the scratch
+repo so you are testing this change and not an installed older copy.
+
+**Verification gate:** the pasted message names the changed path and names
+`reconcile`, and the `ai-devops` working tree is unchanged by this step.
+
+#### 5c — Test and review the exact final state
+
 ```bash
 bash tests/test-all.sh
 ```
@@ -338,20 +386,30 @@ ai-review claude diff-review
 ai-review codex diff-review
 ```
 
-Then — **required, not optional** — the independent exact-head review that
-`AGENTS.md:39-42` mandates for changes to reviewer wrappers:
+Then the independent exact-state review that `AGENTS.md:39-42` mandates for
+changes to reviewer wrappers:
 
 ```bash
 ai-review claude final-check
 ```
 
-Then update `docs/muse-opencode.md` to describe the improved failure message and
-the `reconcile` recovery path, update this plan's STATUS with artifacts, close
-the handoff, load `session-docs-update`, and commit on `main` (`AGENTS.md:20`).
+Reviewer reports are written under `.ai/reviews/`, which is Git-ignored and
+therefore does not disturb the source digest — running these reviews is safe.
+Editing a tracked file is not.
 
-**Optional, valuable:** run one real `ai-muse` turn and trigger the rejection
-deliberately (§ 3's reproduction), then paste the improved message into the
-closing report as proof.
+**Verification gate:** all three return APPROVE against the state you intend to
+publish.
+
+#### 5d — Publish, and change nothing else
+
+Commit on `main` (`AGENTS.md:20`), push, and confirm the commit reached
+`origin/main` (`AGENTS.md:114-115`). Name the final-check report path in the
+commit message.
+
+**If anything at all needs to change after 5c — a typo, a doc line, a STATUS
+cell — the review is void.** Make the change, then re-run 5c in full before
+publishing. Do not rationalise a "small" post-review edit; the digest does not
+distinguish small from large, and neither does the rule.
 
 ## 10. Tests required
 
@@ -410,13 +468,21 @@ disturbed by editing message text.
 - [ ] `tree_state`'s coverage and hash are byte-identical to before.
 - [ ] Every test in Step 4 exists and passes; `bash tests/test-all.sh` ends
       `failures=0`; no existing test weakened.
-- [ ] Both gate reviews APPROVE **and** the `AGENTS.md:39-42` exact-head
-      final review has run.
-- [ ] One real rejection triggered and its improved message pasted into the
-      closing report.
-- [ ] `docs/muse-opencode.md` updated; STATUS updated with artifacts; handoff
-      closed.
-- [ ] Committed on `main`, pushed, confirmed on `origin/main`.
+- [ ] `docs/muse-opencode.md` updated, STATUS updated with artifacts, handoff
+      closed, `session-docs-update` pass complete — **all before any review runs**
+      (Step 5a).
+- [ ] One real `ai-muse` rejection triggered in a disposable scratch repository
+      and its improved message pasted into the closing report. **Mandatory.**
+      It is a paid live provider call and **Albert authorizes it** — ask him
+      before spending; if he declines, stop and report rather than landing
+      (Step 5b).
+- [ ] Both gate reviews and the `AGENTS.md:39-42` exact-state final review
+      APPROVE, run **after** every tracked-file edit is complete (Step 5c).
+- [ ] Nothing changed after the final review except publishing. If anything did,
+      5c was re-run in full (Step 5d).
+- [ ] Committed on `main`, pushed, confirmed on `origin/main`, with the
+      final-check report path named in the commit message — **not** added to
+      this plan by a later edit.
 
 ### Risks and rollback
 
@@ -427,6 +493,8 @@ disturbed by editing message text.
 | Message edit breaks `tests/test-ai-muse.sh:25` | Low | Named in § 6 D and § 10 | Fix the string or update that test deliberately |
 | A large untracked tree makes the message unreadable | Low | D3 cap plus its test | Revert |
 | Path names leak something sensitive | Low | Paths only (D2), and they are repo-relative names the operator already has | Revert |
+| A tracked file is edited after the exact-state review, silently voiding it | **High** — the change lands unreviewed while appearing reviewed | Step 5's 5a/5c/5d split; the final-check artifact is recorded in the commit message rather than by a post-review edit; 5d requires re-running 5c if anything changes | Re-run 5c before publishing |
+| The live rejection proof is run inside the `ai-devops` checkout | Medium — its untracked file invalidates the review | Step 5b requires a disposable scratch repository and a clean working tree afterwards | Remove the stray file and re-run 5c |
 
 ### Open questions
 
