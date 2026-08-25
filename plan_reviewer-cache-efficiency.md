@@ -789,9 +789,13 @@ evidence about HEAD, not tokens.
 | 5 | GLM 5.3 — review of the fixes | **APPROVE**; one must-fix (the `TOKENS` type guarantee) plus four mis-cites introduced by the fix pass | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144141Z.md` |
 | 6 | GLM 5.3 — closing turn | **APPROVE**, no material objection remaining; two optional nits, both taken | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144623Z.md` |
 | 7 | Muse Spark 1.2 Contributor — third independent audit | **APPROVE** with three carry items | 107,025 tokens, 73,585 from cache | `ai-muse transcript reviewer-cache-plan-audit` (report unpublished — see below) |
+| 8 | Muse — review of the fixes | **APPROVE**; one spec nit (missing `reasoning` row, nested-cache guard) | provider footer | `.ai/reviews/muse-reviewer-cache-plan-audit-20260825T151804Z-68597-16872.md` |
+| 9 | Muse — closing turn | **APPROVE**, no material objection remaining | provider footer | `.ai/reviews/muse-reviewer-cache-plan-audit-20260825T152054Z-71681-17942.md` |
 
-Sessions: `ai-grok-review show cache-plan-audit`, `ai-glm show
-reviewer-cache-plan-audit`.
+**Three independent models, nine turns, all ending at APPROVE with no material
+objection outstanding.** Sessions: `ai-grok-review show cache-plan-audit`,
+`ai-glm show reviewer-cache-plan-audit`, `AI_MUSE_CALLER=claude ai-muse
+transcript reviewer-cache-plan-audit`.
 
 Every figure here is provider-returned, per this plan's own rule. Grok's costs
 and token counts come from the usage line `ai-grok-review` prints on stderr
