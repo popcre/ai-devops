@@ -422,10 +422,17 @@ reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROM
   dir="$(session_record_path "$upstream" "$CALLER" "$name")"; mkdir -p "$(dirname "$dir")"
   if [ ! -d "$dir" ]; then
     pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
-    printf '1\n' > "$pending/schema"; printf '%s\n' "$upstream" > "$pending/upstream"; printf '%s\n' "$CALLER" > "$pending/caller"
-    printf '%s\n' "$name" > "$pending/session"; printf '%s\n' "$contract" > "$pending/contract"
-    printf '%s\n' "$source_id" > "$pending/source_identity"; printf '%s\n' "$prompt_digest" > "$pending/prompt_digest"
-    date -u +%FT%TZ > "$pending/created"
+    if ! { printf '1\n' > "$pending/schema" \
+      && printf '%s\n' "$upstream" > "$pending/upstream" \
+      && printf '%s\n' "$CALLER" > "$pending/caller" \
+      && printf '%s\n' "$name" > "$pending/session" \
+      && printf '%s\n' "$contract" > "$pending/contract" \
+      && [ "${AI_GROK_TEST_RESERVATION_WRITE_FAILURE:-}" != session ] \
+      && printf '%s\n' "$source_id" > "$pending/source_identity" \
+      && printf '%s\n' "$prompt_digest" > "$pending/prompt_digest" \
+      && date -u +%FT%TZ > "$pending/created"; }; then
+      rm -rf -- "$pending"; return 1
+    fi
     mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
     return 0
   fi
@@ -453,10 +460,19 @@ reserve_session_turn() { # reserve_session_turn UPSTREAM NAME TURN CONTRACT SOUR
   fi
   if [ ! -d "$dir" ]; then
     pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
-    printf '1\n' > "$pending/schema"; printf '%s\n' "$upstream" > "$pending/upstream"; printf '%s\n' "$CALLER" > "$pending/caller"
-    printf '%s\n' "$$" > "$pending/pid"; printf '%s\n' "$name" > "$pending/session"; printf '%s\n' "$turn" > "$pending/turn"; printf '%s\n' "$contract" > "$pending/contract"
-    printf '%s\n' "$source_id" > "$pending/source_identity"; printf '%s\n' "$prompt_digest" > "$pending/prompt_digest"
-    date -u +%FT%TZ > "$pending/created"
+    if ! { printf '1\n' > "$pending/schema" \
+      && printf '%s\n' "$upstream" > "$pending/upstream" \
+      && printf '%s\n' "$CALLER" > "$pending/caller" \
+      && printf '%s\n' "$$" > "$pending/pid" \
+      && printf '%s\n' "$name" > "$pending/session" \
+      && printf '%s\n' "$turn" > "$pending/turn" \
+      && printf '%s\n' "$contract" > "$pending/contract" \
+      && [ "${AI_GROK_TEST_RESERVATION_WRITE_FAILURE:-}" != turn ] \
+      && printf '%s\n' "$source_id" > "$pending/source_identity" \
+      && printf '%s\n' "$prompt_digest" > "$pending/prompt_digest" \
+      && date -u +%FT%TZ > "$pending/created"; }; then
+      rm -rf -- "$pending"; return 1
+    fi
     mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
     return 0
   fi
