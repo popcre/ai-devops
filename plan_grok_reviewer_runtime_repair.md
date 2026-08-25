@@ -24,7 +24,8 @@ that plan remains the authoritative engineering detail where it is stricter.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
-Only one paid Grok review may run per upstream repository, everyone must see its
+Only the same exact Grok session/turn or idempotently identical provider call is
+serialized. Independent paid reviews may run concurrently in one upstream repository. Everyone must see its
 real state, and local interruption must never be misreported as remote
 cancellation. If any step conflicts with this goal, the goal wins — stop and
 flag it.

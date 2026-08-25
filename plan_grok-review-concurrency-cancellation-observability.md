@@ -14,6 +14,28 @@ Planning handoff: [`HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair
 
 ## STATUS
 
+### 2026-08-25 corrective scope repair
+
+The 2026-08-23 implementation correctly unified equivalent clones for duplicate
+detection but incorrectly made that identity a repository-wide semaphore. A
+stopped `shared-db-1498-seq325` review therefore blocked the unrelated
+`warner-1517-owner-decisions` workstream. The current repair supersedes the old
+serialization goal below without discarding its duplicate-send safeguards.
+
+| Corrective step | Status | Evidence |
+|---|---|---|
+| Split exact-session ownership from exact-work idempotency | 🟨 implemented locally | `session--*` mutexes and digest-keyed `work--*` protections in `bin/ai-grok-review` |
+| Preserve clone-equivalent duplicate detection and legacy state | 🟨 implemented locally | normalized upstream remains an identity input; evidence-bearing schema-2 locks protect only their exact caller/session; ambiguous legacy locks fail closed |
+| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 180/180, including concurrent `new`/`ask`, exact cross-clone retries, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
+| Full repository offline gates | ✅ complete | 53/53 Bash groups and 16/16 PowerShell groups pass on Windows |
+| Independent exact-head review, bounded installed live canary, push, and issue update | ⬜ open | required before completion |
+
+Corrected rule: **Grok reviews are not globally or repository-wide serialized.
+Only the same exact review session/turn or an idempotently identical submission
+is serialized. Independent reviews may run concurrently.** Historical sections
+below describe the superseded 2026-08-20 design and must not be used as current
+operating guidance.
+
 Read this table first. Source repairs, Windows installation, full offline
 verification, and bounded live qualification are complete; exact-head approval,
 push, Ubuntu installation, CI, and issue closure remain.
