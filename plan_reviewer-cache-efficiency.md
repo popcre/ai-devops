@@ -464,16 +464,18 @@ sessions it listed before the change.
   exclusive `set -C` staging, which is reserved before the provider runs
   (`:177-179`, `:318`, `:335`); more bytes on a held descriptor change no
   destination check.
-- Guard every `jq` read defensively: `bin/ai-muse:3` **does** use `set -e`, so a
-  failed command substitution in the report path would abort *after* the
-  provider already answered. Missing fields must yield `unavailable`, never a
-  failed command.
+- Guard every `jq` read defensively — including reads inside string
+  interpolations, `"…\(.input)…"`, which fail exactly the same way.
+  `bin/ai-muse:3` **does** use `set -e`, so a failed command substitution in the
+  report path would abort *after* the provider already answered. Missing fields
+  must yield `unavailable`, never a failed command.
 - **Use the optional-access operator, `.field? // "unavailable"`, or a
   type-guarded read.** An earlier revision of this plan claimed `TOKENS` is only
   ever an object or `null` because the capture at `bin/ai-muse:277` ends in
   `//null`. **That is wrong.** jq's `//` falls through only on `null` and
   `false`, so `TOKENS` is `null` *or the compact encoding of whatever
-  `.part.tokens` actually held* — an object in every case observed so far, but
+  `.part.tokens` actually held* (any value except `false`, which the capture's
+  own `//empty` collapses to `null`) — an object in every case observed so far, but
   nothing constrains it. The upstream validation at `:271-274` checks that each
   NDJSON line is an object with one session id; it says nothing about the type
   of `.part.tokens`.
