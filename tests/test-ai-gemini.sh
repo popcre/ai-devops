@@ -85,6 +85,8 @@ check 'missing qualification record causes no provider contact' "test ! -s '$MOC
 check 'quarantine exposes only the governed live qualification path without overstating denied-tool proof' "grep -q 'qualify-live' '$SCRIPT' && grep -q 'outside sentinel changed during live qualification' '$SCRIPT' && grep -q 'mutation-request=no-change' '$SCRIPT' && ! grep -q 'hostile-write=no-change' '$SCRIPT'"
 check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
 check 'doctor rejects unknown options instead of overstating a live check' "! '$SCRIPT' doctor --unknown"
+IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
+check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.7-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"

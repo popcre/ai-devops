@@ -165,7 +165,7 @@ qualify_gemini() {
   wrapper="$(provider_wrapper gemini)"; [ -x "$wrapper" ] || die "Gemini wrapper is not executable: $wrapper"
   file="$(qualification_file gemini)"; rm -f "$file"
   before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
-  set +e; before_doctor="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>/dev/null)"; set -e
+  set +e; before_doctor="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   before_agy="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; before_agy_sha="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"; before_model="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
   [ -n "$before_agy" ] && [ -n "$before_agy_sha" ] && [ -n "$before_model" ] || { printf 'ai-review-preflight: Gemini qualification could not identify the pre-canary runtime and model; quarantine remains.\n' >&2; return 1; }
   set +e; out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" qualify-live 2>&1)"; rc=$?; set -e
@@ -173,7 +173,7 @@ qualify_gemini() {
   count="$(printf '%s\n' "$out" | grep -Ec '^QUALIFIED session=[^ ]+ model=[^ ]+ exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.+$' || true)"
   [ "$count" -eq 1 ] || { printf 'ai-review-preflight: Gemini live qualification did not return one exact QUALIFIED contract; quarantine remains.\n' >&2; return 1; }
   model="$(printf '%s\n' "$out" | sed -n 's/^QUALIFIED session=[^ ]* model=\([^ ]*\) exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.*$/\1/p')"
-  set +e; doctor_out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>/dev/null)"; set -e
+  set +e; doctor_out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   agy_version="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; agy_sha="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
   [ -n "$agy_version" ] && [ -n "$model" ] || { printf 'ai-review-preflight: Gemini qualification could not bind the runtime version and model; quarantine remains.\n' >&2; return 1; }
   printf '%s\n' "$doctor_out" | grep -q " model=$model " || { printf 'ai-review-preflight: Gemini qualification model disagrees with the wrapper doctor; quarantine remains.\n' >&2; return 1; }
