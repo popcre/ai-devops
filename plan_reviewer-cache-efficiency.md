@@ -1,202 +1,168 @@
-# Implementation plan — reviewer cache and snapshot efficiency
+# Implementation plan — reviewer cache-hit reporting (items 1 and 2 withdrawn)
 
 **Repository:** `u2giants/ai-devops` (public)
 **Authored:** 2026-08-25 by Claude (Opus 5) on machine `edge-dev`
-**Authored from commit:** `4915adac90f7867b4475a3d146920f5e3480b0a4`
-**Handoff for this plan:** [`HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md`](HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md)
+**Rewritten:** 2026-08-25 after an adversarial audit by Grok 4.6 rejected two of
+the three original items on evidence. See § 7.
+**Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
+**Handoff:** [`HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md`](HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md)
 
 ---
 
 ## STATUS — read this first
 
-A fresh session starts at **Phase 1, Step 1.1**. Nothing below has been built.
-The only work done so far is the audit that produced this plan (read-only; no
-files were changed).
+**Two of the three items originally in this plan are WITHDRAWN. Do not
+implement them.** They were rejected on evidence by an independent review after
+the first draft was written, and the reasoning is preserved in § 6 and § 7
+precisely so nobody re-derives them. Only Phase 4 (cache-hit token reporting)
+remains, plus an optional read-only measurement spike.
 
 | # | Step | Status | Evidence |
 |---|---|---|---|
-| 0.1 | Audit of all nine reviewer wrappers | ✅ done 2026-08-25 | This plan, § 6 (findings carry `file:line` refs re-derivable from commit `4915ada`) |
-| 1.1 | Multi-reviewer review of THIS plan before any code | ⬜ open | — |
-| 1.2 | Resolve reviewer disagreements, update plan | ⬜ open | — |
-| 2.1 | `ai-review-sandbox`: digest-gated snapshot reuse | ⬜ open | — |
-| 2.2 | Tests for digest-gated reuse | ⬜ open | — |
-| 2.3 | Multi-reviewer review of the 2.1 diff | ⬜ open | — |
-| 3.1 | `ai-claude-review`: deterministic sandbox tag | ⬜ open | — |
-| 3.2 | `ai-codex-review`: deterministic sandbox tag | ⬜ open | — |
-| 3.3 | Reorder both gate prompts: invariant prefix first | ⬜ open | — |
-| 3.4 | Tests for deterministic tags and retained snapshots | ⬜ open | — |
-| 4.1 | DeepSeek: capture and report cache-hit tokens | ⬜ open | — |
-| 4.2 | Muse: break out cache-hit tokens in report + stderr | ⬜ open | — |
-| 4.3 | Tests for both usage reporters | ⬜ open | — |
-| 5.1 | Full offline suite green | ⬜ open | — |
-| 5.2 | Gate reviews (Claude + Codex `diff-review`) APPROVE | ⬜ open | — |
-| 5.3 | Commit, push, docs updated, handoff closed | ⬜ open | — |
+| 0.1 | Audit of all nine reviewer wrappers | ✅ done 2026-08-25 | § 6; findings re-derivable at commit `4915ada` |
+| 0.2 | Grok 4.6 adversarial audit of the first draft, 2 turns | ✅ done 2026-08-25 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md`, `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` — REJECT both turns; $0.246 total |
+| 0.3 | Claude verified Grok's load-bearing claims against source | ✅ done 2026-08-25 | § 6, every row cites `file:line` you can re-read |
+| 0.4 | Items 1 and 2 withdrawn; plan rewritten | ✅ done 2026-08-25 | This file |
+| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO** | § 7 R-A. The premise was wrong: the prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository arrives as tool results, not prompt prefix |
+| 1.2 | **Item 2 — digest-gated snapshot reuse** | ❌ **WON'T DO** | § 7 R-B. The digest cannot see what a reviewer can read; the unconditional wipe is an integrity boundary |
+| 2.1 | DeepSeek: capture and report cache-hit tokens | ⬜ open | — |
+| 2.2 | Muse: labelled cache rows, from a real fixture | ⬜ open | — |
+| 2.3 | Tests for both usage reporters | ⬜ open | — |
+| 3.1 | Optional: measurement spike (read-only, no code) | ⬜ open | — |
+| 4.1 | Suite green, gate reviews APPROVE, commit and push | ⬜ open | — |
 
-**Rule for this table:** a row moves to ✅ only with an artifact in the evidence
-cell — a commit SHA, a test file path, a saved report under `.ai/reviews/`, or
-the exact command to re-run. A bare "it passed" is not evidence.
+**A fresh session starts at Step 2.1.**
+
+**Rule for this table:** ✅ requires an artifact — a path, a commit SHA, or the
+exact command to re-run. Not a count, not a PR number.
 
 ---
 
 # Part 1 — Why
 
-## 1. The ultimate goal — what we are actually trying to achieve
+## 1. The ultimate goal
 
-**Albert pays for every token these reviewers read. Today a large share of that
-spend is buying the same thing over and over.**
+**Albert should be able to look at a reviewer's report and see how much of it
+was served from the provider's cache**, the way Grok's reports already show it.
+Today DeepSeek and Muse both receive that number from their provider and throw
+it away, so nobody can tell whether caching is working for them or what a review
+actually cost.
 
-When the governed pipeline runs its four review stages against one unchanged
-code state, each stage sends the reviewer a prompt whose opening bytes are
-different from the last one's — so the provider's prompt cache cannot recognise
-it, and the whole repository context is billed again at full price. Separately,
-every follow-up turn in every reviewer conversation re-clones the repository and
-rebuilds its evidence packet from scratch, even when not a single byte of source
-has moved, costing wall-clock time on every question. And for two reviewers we
-cannot even see whether caching is working, because the numbers the provider
-returns are thrown away.
+That is the whole goal now. It is smaller than the goal in the first draft,
+deliberately, because the two larger items turned out to be unsound.
 
-**When this work is done:**
+**What must not happen in exchange:** nothing about review safety, read-only
+boundaries, evidence integrity, or verdict trustworthiness may weaken. This item
+is pure observability — it changes what gets *printed*, never what a reviewer
+sees or reads.
 
-- Repeated review stages against the same code hit the provider's prompt cache
-  instead of paying full price for identical context.
-- A follow-up question to any reviewer is near-instant when the code has not
-  changed, instead of waiting on a full repository clone and packet rebuild.
-- Albert can look at a DeepSeek or Muse review report and see how many tokens
-  were served from cache — the same visibility Grok already gives.
-
-**Nothing about review safety, read-only boundaries, evidence integrity, or
-verdict trustworthiness may get weaker in exchange for any of this.** That is
-not a trade we are willing to make. A cheaper review that can approve stale code
-is worthless — it is worse than worthless, because it looks like a review.
-
-> **If a step in this plan conflicts with this goal, the goal wins — stop and
-> flag it.** In particular: if you find that a step would let a reviewer see
-> stale code, skip an integrity check, or report a cached-token number the
-> provider did not actually return, do not implement that step. Stop, write down
-> what you found, and raise it. Under-delivering on speed is acceptable.
-> Under-delivering on evidence integrity is not.
+> **If a step conflicts with this goal, the goal wins — stop and flag it.**
+> Concretely: if you find yourself about to report a token number the provider
+> did not actually return, or about to modify what a reviewer reads in order to
+> report something, stop. `unavailable` is a correct answer. A fabricated `0` is
+> not.
 
 ## 2. What this application is
 
-`ai-devops` is Albert Hazan's personal DevOps toolkit repository. It is not a
-customer-facing application — it is the machinery that lets AI sessions (Claude
-Code and Codex) work safely across his machines and projects.
+`ai-devops` is Albert Hazan's personal DevOps toolkit — the machinery that lets
+AI sessions work safely across his machines. It is not customer-facing.
 
-- **GitHub:** `u2giants/ai-devops`, **public**. No secret values may ever be
-  committed. Secrets live in the 1Password vault `vibe_coding` and are
-  referenced by item title only.
-- **Branch policy:** `AGENTS.md:20` — *"Work directly on `main`; do not create
-  feature branches for this repository."* This plan was authored inside a Git
-  worktree on branch `claude/reviewer-setup-audit-23cef2`; the implementer
-  should land the work on `main` per that rule, reconciling concurrent `main`
-  safely and confirming the commit is present on `origin/main`
-  (`AGENTS.md:114-115`).
-- **Stack:** POSIX shell (`bash`) for the `bin/ai-*` tools, PowerShell for
-  Windows setup scripts, `jq` for JSON, `git` for everything. There is no
-  server, no database, no deployment. "Deployed" here means *installed onto a
-  machine* by the repository's own installers.
-- **Where it runs:** developer machines. This work was planned on `edge-dev`
-  (Windows 11, Git Bash). The tools also run on Ubuntu hosts (`hetz`) and other
-  Windows boxes. **Both platforms must keep working** — Git Bash path quirks are
-  a recurring source of bugs in exactly the files this plan touches.
-- **Who uses it:** Albert, and the AI sessions acting on his behalf.
+- **GitHub:** `u2giants/ai-devops`, **public**. Never commit a secret value.
+  Secrets live in the 1Password vault `vibe_coding`, referenced by item title.
+- **Branch policy:** `AGENTS.md:20` — work directly on `main`, no feature
+  branches. Reconcile concurrent `main` without force and confirm the commit
+  reached `origin/main` (`AGENTS.md:114-115`).
+- **Stack:** `bash` for `bin/ai-*`, PowerShell for Windows setup, `jq`, `git`.
+  No server, no database, nothing to deploy.
+- **Platforms:** Windows 11 + Git Bash (planned on `edge-dev`) and Ubuntu
+  (`hetz`). Both must keep working.
 
-### The reviewer subsystem, in one paragraph
+### The reviewer subsystem
 
-Claude and Codex do not review their own work unsupervised. The repository ships
-a family of wrapper commands under `bin/` that hand a code change to an
-independent model for a read-only second opinion. Two of them —
-`bin/ai-claude-review` (Claude Opus 5) and `bin/ai-codex-review` (GPT-5.6) — are
-**gate reviewers**: they are the only reviewers permitted to satisfy an approval
-gate, enforced by the front door `bin/ai-review` (see `bin/ai-review:9-11`,
-which refuses every other provider with *"is advisory or quarantined and cannot
-satisfy an approval gate"*). The rest — Grok, GLM, Kimi, Qwen, Muse, DeepSeek,
-Gemini — are **advisory**: valuable second opinions that cannot approve
-anything. All of them share two pieces of plumbing:
+Claude and Codex do not review their own work unsupervised. `bin/ai-*` wrappers
+hand a change to an independent model for a read-only second opinion.
+`bin/ai-claude-review` and `bin/ai-codex-review` are the **approval gates** —
+`bin/ai-review:9-11` refuses every other provider as *"advisory or
+quarantined"*. Grok, GLM, Kimi, Qwen, Muse, DeepSeek and Gemini are advisory.
 
-- **`bin/ai-review-sandbox`** — builds a disposable, self-contained clone of the
-  code under review. It exists because every reviewer CLI accepts exactly one
-  directory as its boundary, and in a linked Git worktree the `.git` control
-  files live *outside* that boundary, so the reviewer's first git-adjacent read
-  is refused and the run dies before reading any code (observed 2026-08-17; see
-  the header of that file).
-- **`bin/ai-review-packet`** — writes a small `.ai-review/` directory inside the
-  boundary containing the facts a shell would have produced: base and head SHAs,
-  changed-file list, the patch, untracked inventory, test results. It exists
-  because a reviewer with no shell cannot run `git diff`, and without it
-  reviewers burned ~3,000,000 tokens over 20 turns producing no verdict, three
-  times over (see that file's header and `fix_reviewer_system.md`).
+Two shared pieces of plumbing matter to this plan's history:
+`bin/ai-review-sandbox` builds a disposable self-contained clone (needed because
+a linked worktree's `.git` is a file pointing outside the reviewer's
+single-directory boundary), and `bin/ai-review-packet` writes the facts a
+shell-less reviewer cannot get itself. **Neither is changed by this plan any
+more.**
+
+**The two reviewers this plan does touch:**
+
+- `bin/ai-deepseek-agent` — a freeform multi-turn conversation with DeepSeek.
+  There is no DeepSeek CLI with session resume, so the wrapper keeps the thread
+  in a local JSON transcript and **resends it as the request body every turn**.
+  That file is the request, not a log. This fact governs Step 2.1.
+- `bin/ai-muse` — persistent named Muse Spark reviews driven through OpenCode in
+  direct mode (one `opencode run` per turn, resuming an exact session id).
 
 ## 3. What triggered this work
 
-On 2026-08-25 Albert asked for an audit of all reviewer setups (wrappers and
-OpenCode harnesses) to confirm they were being used efficiently — maximising
-context and prompt caching and maintaining persistent per-subject sessions. The
-audit found the subsystem broadly healthy: seven of nine reviewers hold real
-named sessions with stable, cache-friendly prompt prefixes.
+On 2026-08-25 Albert asked for an audit of every reviewer setup to confirm they
+were being used efficiently — maximising caching and holding persistent
+per-subject sessions. The audit found the subsystem broadly healthy: seven of
+nine reviewers hold real named sessions with stable prompt prefixes.
 
-It found three specific defects, which are the entire content of this plan.
-**This is not a bug report from a user — it is a cost and latency finding, and
-there is no user-visible breakage today.** Nothing is currently failing. That
-matters for how you weigh risk: we are optimising a working system, so *any*
-regression in correctness is a net loss.
+It raised three candidate defects. An adversarial review by Grok 4.6, plus
+independent verification of its claims, established that **two of the three were
+based on incorrect mechanics** and that fixing them would have made the system
+less safe. Those two are now recorded as won't-do with their evidence. The
+third — discarded cache-hit numbers — is real, cheap, and safe.
 
-**How to see the problem for yourself** (read-only, safe, costs nothing):
+**Nothing is broken today.** Nobody is blocked. This is observability work on a
+system that is functioning, which is exactly why any regression would be a net
+loss.
 
-```bash
-grep -n 'RUN_ID=\|TAG=' bin/ai-claude-review bin/ai-codex-review
-```
-
-You will see the sandbox tag mixes in `$$` (process id) and `$RANDOM`, so the
-review directory has a different absolute path on every single run.
+**See the remaining defect for yourself** (read-only, free):
 
 ```bash
-sed -n '245,272p' bin/ai-review-sandbox
+sed -n '292,299p' bin/ai-deepseek-agent
 ```
 
-You will see `create_or_refresh` rebuild the clone unconditionally — it never
-consults the `source_digest=` value it wrote into the snapshot's own marker file
-on the previous run.
+The response body is parsed for `choices[0].message.content` and nothing else;
+`usage.prompt_cache_hit_tokens` arrives in that same JSON and is dropped.
+
+```bash
+sed -n '277p;306p' bin/ai-muse
+```
+
+The whole `tokens` object is captured, then printed into the report as one
+opaque cell.
 
 ## 4. Scope — in and out
 
 ### In scope
 
-1. **Deterministic snapshot paths for the two gate reviewers**, plus reordering
-   their prompts so the cacheable, invariant text comes first.
-2. **Digest-gated snapshot reuse in `bin/ai-review-sandbox`**, which removes the
-   redundant clone-and-packet rebuild for *every* reviewer, Muse included.
-3. **Cache-hit token capture and reporting for DeepSeek and Muse.**
-4. Tests for all of the above, and documentation updates.
+1. DeepSeek: capture usage from the response, print a summary to **stderr**, and
+   append it to a **sidecar** file.
+2. Muse: break the captured token object into labelled rows in the report, plus
+   a one-line stderr summary.
+3. Tests for both.
+4. Optionally, a read-only measurement spike (Step 3.1) that answers whether the
+   gate reviewers have any cacheable prefix at all. **No code change.**
 
 ### Explicitly NOT in this plan
 
-- **Do not move Muse from direct mode to OpenCode server mode.** This was
-  investigated and rejected on two independent grounds — server mode *failed
-  Meta authorization*, and one shared server would couple two credentials and
-  outage domains so a broken Muse config could take GLM down. See
-  `docs/muse-opencode.md` lines 3-6 and the "Why there is no Muse service"
-  section, and `plan_muse-opencode-harness.md` lines 19, 31-32, 160. **This is a
-  locked decision. Do not reopen it inside this plan.** The Node cold start on
-  each Muse turn is the accepted, documented price of the working path.
-- **Do not add cache reporting for Kimi or Qwen.** Their CLIs emit no usage,
-  token, cost, or model data in headless output at all. `bin/ai-kimi:888` and
-  `bin/ai-kimi:1504` say so explicitly and print `unavailable`. Inventing a
-  number there would be a lie in a report.
-- **Do not touch `bin/ai-gemini`.** Gemini is quarantined pending live safety
-  qualification (`QUARANTINED=1` at `bin/ai-gemini:41`). Leave it alone.
-- **Do not add cache reporting for GLM.** Out of the requested scope. If it is
-  easy, write it down as a follow-up; do not build it here.
-- **Do not change any reviewer's read-only tool boundary, permission map, agent
-  file, model pin, completion rule, or verdict format.**
-- **Do not refactor `bin/ai-review-packet`'s inclusion rule** or change what
-  goes into a packet.
-- **Do not change `bin/ai-review`'s gate policy** (which providers may approve).
-- **Do not merge, extract, or genericise the reviewer wrappers.** Copying or
-  unifying safety code across providers was considered and rejected in
-  `plan_muse-opencode-harness.md:145,161-162`.
-- **Do not change `bin/ai-review-scoreboard`.** Feeding new cache metrics into
-  the scoreboard is a possible follow-up, not this work.
+- **Deterministic snapshot paths for the gate reviewers.** Withdrawn — § 7 R-A.
+- **Digest-gated snapshot reuse in `ai-review-sandbox`.** Withdrawn — § 7 R-B.
+- **Any prompt reordering in either gate reviewer.** Withdrawn — § 7 R-C.
+- **Moving Muse to OpenCode server mode.** Server mode failed Meta
+  authorization, and a shared server was separately rejected for fault
+  isolation: a broken Muse config could take GLM down.
+  `docs/muse-opencode.md:3-6` and the "Why there is no Muse service" section;
+  `plan_muse-opencode-harness.md:19,31-32,160`. **Locked. Do not reopen.**
+- **Cache reporting for Kimi or Qwen.** Their CLIs emit no usage data at all in
+  headless output; `bin/ai-kimi:888,1504` prints `unavailable` and says why.
+- **Anything touching `bin/ai-gemini`.** Quarantined (`bin/ai-gemini:41`).
+- **Cache reporting for GLM.** Out of the requested scope; record as a follow-up
+  if it looks trivial, do not build it here.
+- **`source_digest`, `source_inventory`, packet inclusion rules, reviewer tool
+  boundaries, model pins, `bin/ai-review` gate policy, `ai-review-scoreboard`.**
 
 ---
 
@@ -204,232 +170,161 @@ on the previous run.
 
 ## 5. Current state of the code
 
-Everything described here is **committed and pushed** as of
-`4915adac90f7867b4475a3d146920f5e3480b0a4` on `main`. Nothing is half-done.
-There is no work-in-progress to pick up, no stashed changes, and no partially
-applied refactor. You are starting from a clean, working system.
+Everything is committed and pushed at `722c2a4`. Nothing is half-done; there is
+no work in progress to pick up.
 
-### The files you will change
-
-| File | Lines | What it does today |
+| File | Lines | Relevant today |
 |---|---|---|
-| `bin/ai-review-sandbox` | 343 | Builds/refreshes disposable review clones. `create_or_refresh` at line 245 always rebuilds. |
-| `bin/ai-claude-review` | 122 | Gate reviewer, Claude Opus 5. Random tag at line 61. |
-| `bin/ai-codex-review` | 271 | Gate reviewer, GPT-5.6. Random tag at lines 121/126. |
-| `bin/ai-deepseek-agent` | 600 | Freeform DeepSeek conversation. Response parsing at line 295. |
-| `bin/ai-muse` | 394 | Persistent Muse Spark reviews. Token capture at line 277, report at line 306. |
+| `bin/ai-deepseek-agent` | 600 | Response parsing ~292-299; transcript build 311-321; review boundary check 380-387; `list` globs sessions at 478 |
+| `bin/ai-muse` | 394 | Token capture at 277; report assembly at 306 |
+| `tests/test-ai-deepseek-agent.sh` | 215 | curl stub at ~31 emits **no** `usage` today |
+| `tests/test-ai-muse.sh` | 313 | success stub emits `tokens:{"total":3}` at ~112 |
 
-### The tests you will extend
-
-| File | Lines | Covers |
-|---|---|---|
-| `tests/test-ai-review-sandbox.sh` | 258 | Snapshot build, hostile races, managed-path refusals |
-| `tests/test-ai-claude-review.sh` | 77 | Gate reviewer command validation |
-| `tests/test-ai-codex-review.sh` | 149 | Gate reviewer command validation |
-| `tests/test-ai-deepseek-agent.sh` | 215 | Transcript shape, review boundary |
-| `tests/test-ai-muse.sh` | 313 | Session lifecycle, report publishing |
-
-Run the whole offline suite with:
+Run the offline suite:
 
 ```bash
 bash tests/test-all.sh
 ```
 
-It discovers every `tests/test-*.sh`, runs each, and prints
-`OFFLINE BASH SUMMARY tests=<n> failures=<n>`. It must end with `failures=0`.
+It must end `failures=0`.
 
-### Useful existing machinery you should reuse, not reinvent
-
-- **`AI_DEVOPS_TEST_MODE=1`** plus **`AI_REVIEW_SANDBOX_TEST_HOOK`** — a
-  deterministic hostile-test hook (`bin/ai-review-sandbox:150-155`). It is
-  invoked at named points (`after-copy`) with `(point, root, attempt)` and lets
-  a test mutate the source mid-build. It never evaluates text from an
-  environment variable. **Use this pattern for the new race tests.**
-- **`AI_REVIEW_SANDBOX_TEST_FAIL_DIFF=1`** — forces the diff step to fail
-  (`bin/ai-review-sandbox:207-209`).
-- **`ai-review-sandbox digest <dir>`** — the public subcommand that computes a
-  source digest for any directory (`bin/ai-review-sandbox:340`). Already used by
-  `bin/ai-claude-review:105` as the reviewer-write detector.
+**The model to copy:** `bin/ai-grok-review:858-864` (`report_usage`) prints
+total, uncached-in, cache-read, turns, cost and model to stderr. Copy its
+*shape* — **not** its `// 0` defaulting, which turns an absent field into a
+false zero (§ 8 D4).
 
 ## 6. Key findings and root cause
 
-### Finding A — the gate reviewers make their own prompt uncacheable
+### Finding A — the real, remaining defect
 
-`bin/ai-claude-review:61`:
+- **DeepSeek** (`bin/ai-deepseek-agent:292-299`): the embedded Python prints
+  `data["choices"][0]["message"]["content"]` and exits. The API returns
+  `usage.prompt_cache_hit_tokens` and `usage.prompt_cache_miss_tokens` in the
+  same body. They are discarded. The conversation shape is ideal for
+  caching — system message first, strictly append-only (`:311-321`) — so the hit
+  rate ought to be high, but it has never been observed.
+- **Muse** (`bin/ai-muse:277`): captures the entire `.part.tokens` object from
+  the terminal `step_finish` event, then `:306` prints it as a single opaque
+  cell. The cache numbers are in there, unlabelled.
 
-```bash
-RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="claude-${MODE}-${RUN_ID}"
-```
+### Finding B — why item 1 was withdrawn (my original mechanism was wrong)
 
-`bin/ai-codex-review:121,126` does the same with a `codex-` prefix. That `TAG`
-is passed to `ai-review-sandbox ensure-copy`, and `sandbox_id`
-(`bin/ai-review-sandbox:65-69`) turns it into the directory name
-`<tag>-<12 hex of repo root>`. So the review directory's **absolute path changes
-on every run**.
+The first draft claimed the gate reviewers' randomized snapshot path caused "the
+whole repository context" to be re-billed on each of the four pipeline stages.
+**That is false, and I verified it.** The user prompt sent to Claude is
+`bin/ai-claude-review:90-99` — **326 bytes, roughly 80 tokens.** The repository
+never appears in the prompt; it arrives as *tool results* from Read/Grep/Glob
+inside the session. A stable directory name therefore cannot make repository
+context cacheable, because repository context was never prompt prefix.
 
-That path is then written into the very first characters of the prompt
-(`bin/ai-claude-review:93-101`), which begins:
+Two further facts kill the idea independently:
 
-```
-You are performing a READ-ONLY $MODE. ...
-Read $PACKET_DIR/MANIFEST.md first. ...
-```
+- `bin/ai-claude-review:12` passes `--no-session-persistence`, so each stage is a
+  new session by design.
+- The packet path in the prompt must stay unique per run (see Finding C), so the
+  prefix cannot be byte-identical anyway.
 
-Two independent things therefore break prefix caching: the random path, **and**
-`$MODE` appearing in the opening line. The seven-stage pipeline
-(`bin/ai-model-call`) drives four review stages — `plan-review`, `diff-review`,
-`security`, `final` — against the same source. Every one is a cold, full-price
-read of the same repository. `bin/ai-claude-review:12` additionally passes
-`--no-session-persistence`, so there is no session to resume either.
+Even in the best case the cacheable text is tens of tokens, below the ~1024-token
+floor at which provider prefix caching typically engages.
 
-**Root cause:** one identifier is doing two jobs. `RUN_ID` legitimately needs to
-be unique — it names the report file (`bin/ai-claude-review:110`) and feeds
-lifecycle accounting. The *sandbox tag* has no such requirement and inherited
-the uniqueness by accident.
+### Finding C — why item 2 was withdrawn
 
-### Finding B — the snapshot is rebuilt even when nothing changed
+The proposed reuse gate compared `source_digest` values. `source_digest` cannot
+see most of what a reviewer can read:
 
-`bin/ai-review-sandbox:245-271`, `create_or_refresh`, always runs the full
-build: `git clone --no-hardlinks`, detach at base, apply `git diff HEAD --binary`,
-copy untracked files, validate links, write the marker. It then publishes with a
-before/after `source_digest` comparison to refuse mixed evidence.
+| Readable inside the review directory | Why the digest misses it | Evidence |
+|---|---|---|
+| Every `.gitignore`d file | `--exclude-standard` | `bin/ai-review-sandbox:114` |
+| `.ai-review*` evidence packets | explicit skip | `bin/ai-review-sandbox:120` |
+| `AI-REVIEW-SANDBOX.md` | same skip | `bin/ai-review-sandbox:120` |
+| The entire `.git/` — config, hooks, `info/exclude`, unreachable objects | never walked | `bin/ai-review-sandbox:110-135` |
+| Untracked executable bits | hashed as content + type + size only | `bin/ai-review-sandbox:125-135` |
+| Empty directories, submodule interiors | git does not list them | — |
 
-The snapshot already records the digest it was built from —
-`bin/ai-review-sandbox:200` writes `source_digest=<hash>` into the
-`.ai-review-sandbox` marker file. **Nothing ever reads that value back to decide
-whether a rebuild is needed.**
+This is not theoretical. `bin/ai-review-packet:287` runs `--tests` with
+`cd "$root"` — **inside the snapshot** for gate reviewers — so test artifacts
+land in exactly that digest-invisible space.
 
-Every wrapper pays this on every turn. `ai-muse` calls `prepare()` on both `new`
-and `ask` (`bin/ai-muse:132-139`); `ai-grok-review`'s `cmd_ask` calls
-`prepare_review` (`bin/ai-grok-review:1162`); `ai-kimi` does the same at
-`bin/ai-kimi:1106,1739`. **This is universal, not a Muse-specific defect** — an
-earlier draft of the audit wrongly claimed Grok and Kimi already skipped it.
-They do not. Fixing it once in the shared file fixes it for all of them.
+What currently contains the problem is the thing item 2 wanted to remove:
+`create_or_refresh` builds into a sibling directory and then **deletes and
+replaces** the old one (`bin/ai-review-sandbox:253-262`). Every turn wipes the
+slate. The same digest is also what the reviewer-write detectors use
+(`bin/ai-claude-review:107-108`, `bin/ai-codex-review:243`), so reuse would turn
+an undetectable write into the *next* review's tree with a matching digest.
 
-### Finding C — cache numbers the provider returns are discarded
+That is the definition of a reviewer approving a verdict against source it did
+not read. The clone is an integrity boundary, and item 2's only benefit was
+wall-clock.
 
-- **DeepSeek:** `bin/ai-deepseek-agent:295` extracts
-  `data["choices"][0]["message"]["content"]` and nothing else. The DeepSeek API
-  returns `usage.prompt_cache_hit_tokens` and `usage.prompt_cache_miss_tokens`
-  in the same response body. They are dropped on the floor. The conversation
-  shape is ideal for caching — system message first, strictly append-only
-  (`bin/ai-deepseek-agent:311-321`) — so the hit rate should be high, but nobody
-  can confirm it.
-- **Muse:** `bin/ai-muse:277` already captures the whole `tokens` object from
-  the terminal `step_finish` event as compact JSON, and `bin/ai-muse:306` prints
-  it into the report as a single opaque `| tokens | {...} |` cell. The cache
-  numbers are *in there*, unlabelled and unreadable at a glance.
-- **The good example to copy:** `bin/ai-grok-review:858-864`, `report_usage`,
-  which prints total, uncached-in, `cache_read_input_tokens`, turns, cost, and
-  model. `bin/ai-grok-review:954` puts the same in the session list.
+### Finding D — the concurrency contract that item 1 also violated
+
+`tests/test-ai-claude-review.sh:70-73` and `tests/test-ai-codex-review.sh:133-138`
+require two concurrent same-repo gate reviews to **both complete** with distinct
+reports. The first draft simultaneously forbade weakening existing tests and
+required a new test asserting concurrent reviews refuse. Those cannot both hold.
+
+Sharing one snapshot directory across runs also breaks the packet contract:
+`bin/ai-review-packet:243-257` deletes and rebuilds a same-tag packet — the hard
+refusal only fires when the recorded owner tag *differs*. Two concurrent runs
+sharing a tag would swap each other's evidence mid-review, which is the
+shared-db#1296 incident that packet naming exists to prevent, on an approval
+gate.
 
 ## 7. Approaches considered and REJECTED
 
-Read this section before you "improve" anything. Each item cost real
-investigation.
-
 | # | Approach | Why rejected |
 |---|---|---|
-| 1 | Run Muse on the GLM OpenCode **server** so the process stays warm | **Server mode failed Meta authorization.** Also rejected independently for fault isolation: one server means coupled credentials, restarts, logs, and outage domains, so a broken Muse config could take GLM down. `docs/muse-opencode.md:3-6,49-54`; `plan_muse-opencode-harness.md:19,31-32,160`. **Locked. Do not reopen.** |
-| 2 | Just make `ai-muse` skip its rebuild, since that is what Albert asked about | The defect is in shared plumbing and affects all seven advisory reviewers plus both gates. A Muse-local patch would leave the same waste everywhere else and create a second code path to drift. Fix `ai-review-sandbox` once. |
-| 3 | Give the gate reviewers a **per-mode** stable tag (`claude-diff-review`) | Repeated runs of the *same* stage would cache, but the four different stages still would not — and cross-stage reuse is where the actual money is. See design decision D2 for the accepted answer and its cost. |
-| 4 | Cache by comparing file modification times instead of content digests | Mtimes lie — Git checkouts, worktree operations, and Windows filesystems all produce misleading timestamps. The content digest already exists and is already trusted by the reviewer-write detector. Never introduce a second, weaker notion of "changed". |
-| 5 | Have the reuse path `die` when it detects a mutated snapshot | A reviewer that wrote into its snapshot is a real safety signal, but at *reuse* time the correct response is to rebuild, not to fail. The post-run write detector at `bin/ai-claude-review:105` is what must stay fail-closed. Reuse must be fail-*safe*: any doubt, rebuild. |
-| 6 | Add cache/token fields into the DeepSeek transcript JSON | The transcript **is the request body** — it is replayed verbatim as `messages` on every turn (`bin/ai-deepseek-agent:267-268`). Adding fields would change the cached prefix (destroying the very thing we are measuring) and would break the review-boundary check that asserts `messages[0]` is exactly the boundary system prompt (`bin/ai-deepseek-agent:380-387`). Usage must go in a **sidecar** file. |
-| 7 | Print DeepSeek usage on stdout with the reply | stdout is a contract: callers consume the reply text, and `send` already prints `SESSION_ID: <id>` there. Usage goes to **stderr**, matching `bin/ai-grok-review:858` (`report_usage` writes to `>&2`). |
-| 8 | Report `0` when a provider omits cache fields | Zero is a claim. Absent is a different fact. The repository convention is to print `unavailable` — `bin/ai-kimi:888,1504`. Follow it. |
-| 9 | Keep the snapshot AND the packet across runs | The packet embeds the per-stage `--decision` text in its manifest, so it genuinely differs per stage and its hash must be re-derived. Retain the snapshot; keep rebuilding the packet. |
+| **R-A** | **Deterministic snapshot paths for the gate reviewers** | The premise was wrong (Finding B): 326-byte prompt, repository arrives as tool results, `--no-session-persistence` on, packet path must stay unique. Nothing left to cache. |
+| **R-B** | **Digest-gated snapshot reuse** | The digest cannot see ignored files, packets, `.git`, exec bits, empty dirs, or submodule interiors (Finding C). The unconditional wipe is an integrity boundary. Benefit was wall-clock only. |
+| **R-C** | **Reordering the gate prompts so invariant text leads** | Fights both verdict parsers in opposite directions: Codex requires the verdict to be the **final two non-empty lines** with exactly one heading (`bin/ai-codex-review:245-247`); Claude takes the **first** heading (`bin/ai-claude-review:109`). It would also move the READ-ONLY instruction off the front for a cache benefit Finding B shows does not exist. |
+| **R-D** | **In-place refresh instead of reuse** (`git clean -fdx`, re-checkout, re-apply) | `git clean` never walks `.git/`, so config, hooks, `info/exclude` drift and unreachable objects survive; a single `-f` refuses to delete a nested repo, so submodule leftovers survive. Worse, it **mutates the published directory**: a mid-refresh failure leaves a half-wiped tree at the exact path the next turn will use, which is the mixed-evidence failure the sibling-build-then-`mv` publish was written to make impossible. On Windows it also invites EBUSY. Making it truly equivalent means re-cloning, which saves nothing. |
+| **R-E** | **A content-addressed immutable snapshot directory** | Not a one-line change: you must never delete it while a review may be running and never write into it, but Codex `--tests` writes into `$root`. Still machinery, still unmeasured. |
+| **R-F** | **Sharing one snapshot with a refcount or shared-read lock** | Adding a locking scheme to an approval gate to chase an unmeasured cache benefit is the wrong trade. Per-run directories are already lock-free and correct. |
+| **R-G** | **Muse on the GLM OpenCode server** | Server mode failed Meta authorization; a shared server was rejected for fault isolation. `docs/muse-opencode.md:3-6`, `plan_muse-opencode-harness.md:19,160`. **Locked.** |
+| **R-H** | **Adding usage fields to the DeepSeek transcript JSON** | The transcript **is the request body**, replayed verbatim as `messages` (`bin/ai-deepseek-agent:267-268`). New fields would change the cached prefix we are trying to measure and break the review-boundary assertion that `messages[0]` is exactly the boundary system prompt (`:380-387`). Usage goes in a sidecar. |
+| **R-I** | **Printing DeepSeek usage on stdout** | stdout is a contract: callers consume the reply, and `send` already prints `SESSION_ID:` there. stderr, matching `bin/ai-grok-review:858`. |
+| **R-J** | **Naming the sidecar `*.usage.json`** | `bin/ai-deepseek-agent:478` globs `*.json` (minus `*.meta.json`) to list sessions, so a `.usage.json` file would be listed as a session. Use `.usage.jsonl`. |
+| **R-K** | **Reporting `0` for an absent field** | Zero is a claim; absent is a different fact. `bin/ai-kimi:888,1504` sets the convention: `unavailable`. Do not copy Grok's `// 0` at `bin/ai-grok-review:861`. |
 
-## 8. Design decisions already made
+## 8. Design decisions
 
-**Locked** — implement as written; do not redesign. **Open** — your judgment,
-criteria given.
+### D1 — Items 1 and 2 are withdrawn, not deferred. **LOCKED.**
+*(2026-08-25, after three adversarial review turns and independent verification)*
+Do not resurrect either from the first draft.
 
-### D1 — Split "run identity" from "snapshot identity". **LOCKED.**
-*(2026-08-25)* `RUN_ID` keeps its `$$`/`$RANDOM` uniqueness and keeps naming the
-report file and lifecycle record. A new, separate variable names the sandbox and
-must contain no time, pid, or random component.
+**Item 1 and item 2 died of different causes, so they have different reopening
+bars. Do not let evidence for one revive the other.**
 
-### D2 — The gate sandbox tag is per-provider, not per-mode. **LOCKED.**
-*(2026-08-25)* Use `claude-review` and `codex-review` — the same tag for all five
-modes. The snapshot contents are identical across modes, so one tag lets all four
-pipeline stages reuse one warm directory and one cached prefix.
+- **Item 1 (caching) was a wrong mechanism.** Reopening it requires a **traced
+  provider request** showing a cacheable prefix actually exists (Step 3.1). But
+  a traced prefix is *not* a licence to share a snapshot directory or a packet
+  tag: Findings C and D forbid that independently of caching, and they would
+  still have to be satisfied. A traced prefix plus per-run directories and
+  per-run packets might justify a small prompt change and nothing more.
+- **Item 2 (snapshot reuse) was never a caching idea at all.** It was
+  wall-clock only, and it failed on evidence integrity. Reopening it requires a
+  Read-complete identity — one covering everything under the snapshot a reviewer
+  can read, including ignored files, packets and `.git` — **or** a publish path
+  that keeps the all-or-nothing wipe. A traced request is irrelevant to it.
 
-**Accepted cost, stated plainly:** two review modes running *concurrently* in the
-same repository will now contend for one snapshot directory.
-`create_or_refresh` takes a `<stage>.lock` directory and dies with *"snapshot is
-already being built for tag ..."* if one is already in progress
-(`bin/ai-review-sandbox:248`). The seven-stage pipeline runs its stages
-sequentially, so this does not affect it. A human running two gate reviews at
-once in one repo will get a clear refusal instead of two independent snapshots.
-**That refusal is acceptable and must be tested for** (Step 3.4). If review of
-this plan finds a real workflow that needs concurrent same-repo gate reviews,
-raise it in Phase 1 — do not silently switch to per-mode tags.
+If either bar is met, that is a **new plan** with its own review, not a
+resurrection of this one.
 
-### D3 — The reuse gate is a three-way digest equality. **LOCKED.**
-*(2026-08-25)* Reuse the existing snapshot only when **all** of these hold:
+### D2 — DeepSeek usage goes to stderr and a sidecar; stdout and the transcript are untouched. **LOCKED.**
+*(2026-08-25)* See R-H, R-I, R-J.
 
-1. The stage directory exists and passes `is_managed` (marker present **and**
-   physically under `$SANDBOX_DIR` — `bin/ai-review-sandbox:83-91`).
-2. The marker's recorded source root matches the requested root.
-3. The marker's recorded `source_digest=` equals `source_digest <root>` computed
-   now.
-4. `source_digest <stage>` — the snapshot's own current digest — also equals it.
+### D3 — Muse field names come from a real `step_finish`, never a guess. **LOCKED.**
+*(2026-08-25)* The existing test stub emits only `{"total":3}`, so an offline
+test cannot catch a wrong `jq` path against production field names. Capture a
+real event stream (or a saved one) before writing the paths, and **keep the raw
+object in the report** so nothing is lost if a field is renamed upstream.
 
-Condition 4 is what catches a reviewer that wrote into its snapshot, or a
-partially deleted directory. It is the same comparison
-`bin/ai-claude-review:105` already trusts as the reviewer-write detector, which
-is why it is sound: the snapshot is built to be byte-identical to the source for
-every review-visible file, so all three digests must agree.
+### D4 — Absent means `unavailable`, never `0`. **LOCKED.** *(2026-08-25)* See R-K.
 
-**Anything else → rebuild.** The reuse path must never `die`; a failure to
-*verify* reuse is simply a decision to rebuild.
-
-### D4 — Reuse must be silent to callers. **LOCKED.**
-*(2026-08-25)* `ensure-copy` / `refresh-copy` must still print the same directory
-path on stdout whether it rebuilt or reused. No caller may need to change. Say
-what happened on **stderr** only.
-
-### D5 — There must be a force-rebuild escape hatch. **LOCKED.**
-*(2026-08-25)* `AI_REVIEW_SANDBOX_FORCE_REBUILD=1` skips the reuse check
-entirely. This is the first thing to try when diagnosing anything odd, and the
-recovery instruction to put in the docs.
-
-### D6 — The gate reviewers stop deleting their snapshot on exit. **LOCKED.**
-*(2026-08-25)* A stable tag is pointless if `cleanup` removes the directory at
-the end of every run (`bin/ai-claude-review:64-67`,
-`bin/ai-codex-review:133`). Retain the snapshot; keep removing the packet.
-Snapshots remain disposable and safe to delete by hand at any time; document the
-manual cleanup command.
-
-### D7 — Prompt reordering: invariant text first. **LOCKED.**
-*(2026-08-25)* A stable path is necessary but not sufficient — `$MODE` currently
-sits in the opening line. Restructure both gate prompts so the mode-independent
-text (packet location, review boundary, tool restriction, verdict format) forms
-one identical opening block, and the mode-specific `$DECISION` comes **after**
-it. The *semantic content must not change* — same instructions, same verdict
-contract, same words wherever possible, only reordered.
-
-### D8 — Never report a number the provider did not return. **LOCKED.**
-*(2026-08-25)* Absent fields print `unavailable`, never `0`. See rejected
-approach 8.
-
-### D9 — Which reviewers review this work, and when. **LOCKED for item 2, open elsewhere.**
-*(2026-08-25, at Albert's explicit instruction)* The `ai-review-sandbox` change
-(item 2) is the highest-risk change in this plan — it touches shared evidence
-plumbing that every reviewer and both approval gates depend on. It **must** be
-reviewed by multiple independent models both at plan stage and at diff stage.
-See Steps 1.1 and 2.3 for exactly who and exactly what to ask. **Kimi and Gemini
-are excluded — both are quarantined** (`memory` entry "Kimi review failure
-recovery", issue #46; `bin/ai-gemini:41`).
-
-### D10 — Phase order. **OPEN, with criteria.**
-Phases 3 and 4 are independent of each other and of Phase 2. The order below
-puts Phase 2 first because it is the riskiest and benefits every reviewer. If
-you have a concrete reason to reorder — for example a reviewer is unavailable
-and Phase 2's review would block — you may do Phase 3 or 4 first. **Do not
-merge phases into one commit**; each phase lands separately so a rollback is
-surgical.
+### D5 — The measurement spike is optional and read-only. **OPEN.**
+*(2026-08-25)* Step 3.1 exists so a future session can settle the caching
+question with evidence instead of taste. It changes no code. Skip it if Albert
+does not want it; it does not block anything.
 
 ---
 
@@ -437,413 +332,212 @@ surgical.
 
 ## 9. The plan
 
-Phases are context cut points. **Re-read the downstream phases before starting
-each one** — the plan may have been updated by the previous phase's reviewers.
-Consider a fresh session at each boundary (`fresh-session` skill).
+### Phase 2 — Cache-hit reporting (the whole of the work)
 
----
+#### Step 2.1 — DeepSeek
 
-### Phase 1 — Review this plan before writing any code
+**File:** `bin/ai-deepseek-agent`, the response-parsing block at ~292-299 and its
+callers (~260-296, 518-520, 572).
 
-Albert asked specifically that item 2 be reviewed by multiple reviewers *in
-planning* as well as in implementation. This phase is not optional and it comes
-before the first line of code.
+**What to change:**
 
-#### Step 1.1 — Send this plan to three independent reviewers
+- In the embedded Python that reads the response (`bin/ai-deepseek-agent:292-296`),
+  also read the `usage` object and take `prompt_cache_hit_tokens`,
+  `prompt_cache_miss_tokens`, `prompt_tokens`, `completion_tokens`,
+  `total_tokens`. **The body is deleted at `:298`** (`rm -f` of the request,
+  response and status files), so extract before that line. The failure paths at
+  `:281-282` and `:288-289` delete the body with no parse — correct, there is no
+  usage to report.
+- **Do not write the sidecar inside `call_api`.** `call_api` has no session id,
+  and `doctor --live` calls it at `:472` while session setup is skipped for
+  `doctor` at `:158`. A write there would either break the existing
+  `live doctor leaves the repository byte state unchanged` test
+  (`tests/test-ai-deepseek-agent.sh:54`) or drop a stray file in the working
+  directory. **Return** the usage from `call_api` — a second output file is the
+  simplest route — and append the sidecar only in `send` (`:520`) and `reply`
+  (`:574`).
+- **Append the sidecar while the transcript lock is still held** — before
+  `release_lock` at `:544` and `:597` — so two concurrent replies cannot
+  interleave partial JSONL lines. Concurrent replies already serialize
+  (`tests/test-ai-deepseek-agent.sh:75-77`).
+- **A sidecar write failure must not fail the turn.** If the transcript has
+  already published, the turn succeeded; usage is observability. Warn on stderr
+  and carry on. This is explicitly *not* the attachment-ledger
+  `recovery-required` path at `:533-537`.
+- Use the wrapper's own `session_path` helper with a `.usage.jsonl` suffix so
+  the existing symlink and path-escape checks apply.
+- The reply file and stdout stay **byte-identical** to today.
+- Print one line to **stderr**, in the shape of `bin/ai-grok-review:858`:
+  `tokens: <total> (cache hit: <n>, miss: <n>) model: <model>`. Any field the
+  provider omitted prints `unavailable` (D4).
+- Append the usage object as one JSON line to a sidecar beside the transcript,
+  named `<session>.usage.jsonl` — **not** `.usage.json` (R-J).
+- Do not touch the transcript JSON (R-H).
 
-Run all three. Each gets the **same** brief. Use the repository's own skills so
-the session bookkeeping and read-only boundaries are handled for you:
+**Behaviour when done:** a `send` or `reply` prints exactly what it printed
+before on stdout, plus a usage line on stderr, and grows a sidecar by one line.
 
-| Reviewer | How to invoke | Skill |
-|---|---|---|
-| GLM 5.3 | `ai-glm new plan-cache-review --prompt-file <brief>` | `ask-glm` |
-| Grok | `ai-grok-review` via its skill | `grok-cli` |
-| Codex (GPT-5.6) | second-opinion flow | `codex-second-opinion` |
+**Verification gate:** `bash tests/test-ai-deepseek-agent.sh` passes including
+the new cases below, and `ai-deepseek-agent list` still lists exactly the
+sessions it listed before the change.
 
-Optionally add Muse (`ask-muse`) and Qwen (`qwen-code`) if you want more
-coverage; three is the floor, not the ceiling.
+#### Step 2.2 — Muse
 
-**The brief must ask these five questions explicitly.** Do not just say "review
-this plan" — a vague brief is how reviews burn their budget wandering
-(`bin/ai-grok-review:1147-1152`):
+**File:** `bin/ai-muse:277` (capture, already correct) and `:306` (report).
 
-1. Read `plan_reviewer-cache-efficiency.md` § 8 decision **D3**. Is the
-   three-way digest equality *sufficient* to guarantee a reused snapshot is
-   byte-identical to what a fresh rebuild would produce? Name any case where all
-   three digests match but the snapshot is materially different from a fresh
-   build. Consider at minimum: ignored files, submodules/gitlinks, symlinks,
-   file permission bits, the `.git/info/exclude` entries the builder appends,
-   `AI-REVIEW-SANDBOX.md`, empty directories, and case-insensitive filesystems.
-2. `source_digest` (`bin/ai-review-sandbox:140-148`) covers the HEAD tree hash,
-   the tracked diff bytes and its sha256, and every untracked non-ignored file's
-   path, type, byte count and sha256. Is anything a reviewer can *see* excluded
-   from that digest? If yes, reuse is unsound as designed — say so.
-3. Decision **D2** makes all five gate modes share one snapshot directory,
-   which serialises concurrent same-repo gate reviews. Is there a real workflow
-   in this repository that runs two gate reviews concurrently in one repo? Check
-   `bin/ai-model-call` and `bin/ai-review-lifecycle` before answering.
-4. Decision **D6** stops deleting the gate snapshot on exit. What is the worst
-   consequence of a retained snapshot on disk, and does anything in this
-   repository assume the directory is gone after a review?
-5. Is there anything in this plan that would let a reviewer approve a verdict
-   against source it did not actually read?
+**What to change:**
 
-**Verification gate:** three review reports exist under `.ai/reviews/`, each
-answering all five questions. Record their paths in the STATUS table.
+- Before writing any `jq` path, obtain a **real** OpenCode `step_finish` event
+  and record the actual field names (D3). `docs/muse-opencode.md` notes a
+  measured follow-up "reported a large cache read", so the field exists —
+  confirm its exact spelling rather than assuming.
+- Replace the single opaque `| tokens | {...} |` row with labelled rows: input,
+  output, cache read, cache write, total. Omitted fields print `unavailable`.
+- Keep the raw object as an additional row.
+- Print a one-line stderr summary per turn, same shape as DeepSeek's, matching
+  the existing session lines already written to stderr at `bin/ai-muse:326`.
+- `TOKENS` is initialised at `:235`, captured at `:277` and consumed **only** at
+  `:306`. Leave `preserve_failure` (`:284-288`) alone — it omits provider bodies
+  on purpose. Adding rows to the same staged-descriptor write is safe with the
+  exclusive `set -C` staging, which is reserved before the provider runs
+  (`:177-179`, `:318`, `:335`); more bytes on a held descriptor change no
+  destination check.
+- Guard every `jq` read defensively: `bin/ai-muse:3` **does** use `set -e`, so a
+  failed command substitution in the report path would abort *after* the
+  provider already answered. Missing fields must yield `unavailable`, never a
+  failed command.
 
-#### Step 1.2 — Resolve disagreements and update the plan
+**Verification gate:** `bash tests/test-ai-muse.sh` passes including the new
+cases; a published report shows labelled rows.
 
-Any reviewer identifying a case where the D3 gate is insufficient **blocks Phase
-2** until this plan is amended. Do not argue a finding away in chat and proceed
-— amend the plan file, note the change in the STATUS table with the date, and
-say which reviewer prompted it.
+#### Step 2.3 — Tests
 
-If reviewers disagree with each other, the conservative reading wins: a
-disputed reuse case becomes an unconditional rebuild.
-
-**Verification gate:** every reviewer finding is either incorporated into the
-plan or has a written reason recorded here for rejecting it. `git diff` on this
-plan file shows the amendments.
-
----
-
-### Phase 2 — Digest-gated snapshot reuse (the risky one)
-
-#### Step 2.1 — Add the reuse gate to `bin/ai-review-sandbox`
-
-**File:** `bin/ai-review-sandbox`, function `create_or_refresh` (line 245).
-
-Add a new helper — suggested name `snapshot_is_current` — and call it at the top
-of `create_or_refresh`, before the lock is taken and before the build loop.
-
-**Behaviour when done:**
-
-- Returns success only when all four D3 conditions hold.
-- On success, `create_or_refresh` returns 0 immediately without cloning, without
-  touching the existing directory, and without taking the build lock. The caller
-  prints the same stage path it always did (D4).
-- On any other outcome — directory missing, not managed, marker unreadable,
-  recorded root mismatch, digest mismatch, digest computation failing — it
-  returns non-zero and the existing build path runs **completely unchanged**.
-- It must never `die`. `source_digest` itself dies on an unreadable tree
-  (`bin/ai-review-sandbox:147`), so if you call it on the *snapshot* you must
-  invoke it in a way that a failure becomes a rebuild rather than an abort.
-  A subshell whose failure you catch is the straightforward approach.
-- Respect `AI_REVIEW_SANDBOX_FORCE_REBUILD=1` by returning non-zero immediately
-  (D5).
-- Emit one line to **stderr** on reuse, in the existing `warn`/message style,
-  naming the tag and saying the source is unchanged. Nothing on stdout (D4).
-
-**Do not change:** the marker format, `sandbox_id`, `sandbox_path`, `is_managed`,
-`remove_sandbox`, `source_digest`, `source_inventory`, the two-attempt
-before/after race protection, or any `die` message on the build path. The
-version string at `bin/ai-review-sandbox:45` should be bumped.
-
-**Also confirm** `cmd_refresh_copy` (line 285) benefits: it calls the same
-`create_or_refresh`, so it inherits reuse automatically. It must keep its
-existing pre-checks (managed path, recorded tag match) — those run *before*
-`create_or_refresh` and must not move.
-
-**Verification gate:**
-```bash
-bash tests/test-ai-review-sandbox.sh
-```
-still passes with the existing tests untouched, and a manual check shows reuse:
-build a snapshot in a scratch repo, note the directory's inode/creation time,
-run `ensure-copy` again with no source change, and confirm the directory was not
-rebuilt and the stderr line appeared.
-
-#### Step 2.2 — Tests for digest-gated reuse
-
-**File:** `tests/test-ai-review-sandbox.sh`. Add these cases by name:
+`tests/test-ai-deepseek-agent.sh` — note the curl stub currently emits **no**
+`usage`, so `missing_usage_reports_unavailable` is the default path and the
+stub must be *extended* for the positive case:
 
 | Test | Asserts |
 |---|---|
-| `reuse_when_source_unchanged` | Second `ensure-copy` does not rebuild; stdout path identical; a sentinel file placed inside the snapshot by the test survives |
-| `rebuild_when_tracked_file_modified` | Editing a tracked file forces a rebuild; the sentinel is gone |
-| `rebuild_when_untracked_file_added` | A new untracked, non-ignored file forces a rebuild |
-| `rebuild_when_untracked_file_removed` | Deleting one forces a rebuild |
-| `rebuild_when_head_moves` | A new commit forces a rebuild |
-| `rebuild_when_snapshot_mutated` | Writing into the *snapshot* forces a rebuild — this is the reviewer-write case |
-| `rebuild_when_marker_missing_or_corrupt` | A truncated/absent `.ai-review-sandbox` marker forces a rebuild, never a reuse and never a `die` |
-| `no_reuse_for_unmanaged_directory` | A directory outside `$SANDBOX_DIR` is never reused |
-| `force_rebuild_env_overrides_reuse` | `AI_REVIEW_SANDBOX_FORCE_REBUILD=1` always rebuilds |
-| `reuse_prints_nothing_extra_on_stdout` | stdout is exactly the path, byte for byte, on both the build and the reuse path |
-| `ignored_file_change_does_not_force_rebuild` | Changing a `.gitignore`d file reuses — correct, because it is not review-visible |
+| `usage_line_written_to_stderr` | Summary appears on stderr when the stub returns `usage` |
+| `stdout_reply_unchanged` | stdout byte-identical to pre-change output for a fixed stub |
+| `transcript_json_shape_unchanged` | No new keys; `messages[0]` is still exactly the boundary |
+| `usage_sidecar_appends_per_turn` | Two turns → two sidecar lines |
+| `usage_sidecar_not_listed_as_session` | `list` output is unchanged with a sidecar present (guards R-J) |
+| `missing_usage_reports_unavailable` | No `usage` in the response → `unavailable`, never `0`, turn still succeeds |
+| `doctor_live_creates_no_sidecar` | `doctor --live` writes no sidecar and no session directory (guards the `call_api` split) |
+| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds |
+| `stderr_usage_is_not_on_stdout` | The usage line is absent from a stdout capture (extends the existing `SESSION_ID` capture at `tests/test-ai-deepseek-agent.sh:58`) |
+| `usage_sidecar_appends_under_lock` | Two concurrent replies produce two well-formed JSONL lines (extends `tests/test-ai-deepseek-agent.sh:75-77`) |
 
-Use `AI_DEVOPS_TEST_MODE=1` and the existing `AI_REVIEW_SANDBOX_TEST_HOOK`
-pattern for anything needing a mid-build mutation. Follow the file's existing
-scratch-repo setup and assertion helpers rather than inventing new ones.
+`tests/test-ai-muse.sh` — the success stub emits only `tokens:{"total":3}`, so a
+richer fixture is needed:
+
+| Test | Asserts |
+|---|---|
+| `report_breaks_out_cache_tokens` | Labelled rows present with a rich fixture |
+| `missing_token_fields_report_unavailable` | Sparse fixture → `unavailable`, report still publishes |
+| `raw_token_object_retained` | Raw object still in the report |
+| `stderr_usage_line_on_new_and_ask` | Both `new` and `ask` print the summary |
+| `null_tokens_object_still_publishes` | A `step_finish` with no `tokens` (so `TOKENS` stays `null`, `bin/ai-muse:235`) still publishes a report |
+
+**Known limit, state it in the commit message:** these are offline stub tests.
+They cannot prove the `jq` paths match production field names — only D3's real
+fixture can. Do not claim otherwise.
 
 **Verification gate:** `bash tests/test-all.sh` ends `failures=0`.
 
-#### Step 2.3 — Multi-reviewer review of the Phase 2 diff
+---
 
-Same reviewer set as Step 1.1 — GLM, Grok, Codex — now reviewing the actual
-change, plus **both gate reviewers**:
+### Phase 3 — Optional measurement spike (read-only, no code)
 
-```bash
-ai-review claude diff-review
-```
-```bash
-ai-review codex diff-review
-```
+#### Step 3.1
 
-Advisory reviewers get this brief: *"This change makes a review snapshot
-reusable when a digest says the source is unchanged. Find any case where a
-reviewer could now be handed code that does not match the working tree. Assume
-the author is wrong."*
+Only if Albert wants the caching question settled. Trace what the Claude and
+Codex CLIs actually send for one gate review — whether a system prefix precedes
+the user prompt, whether it contains cwd, date, or git status, and what the
+provider reports as cached. Write the answer into `docs/` and update D1.
 
-**Verification gate:** both gate reviews return `## Verdict / APPROVE`, and no
-advisory reviewer has an unresolved finding. **A `REJECT` from either gate stops
-this phase** — fix and re-run; do not proceed with an outstanding rejection.
-
-Commit Phase 2 on its own.
+**Do not change any code in this phase.** Its output is knowledge, not a diff.
 
 ---
 
-### Phase 3 — Deterministic gate snapshot paths
+### Phase 4 — Land it
 
-#### Step 3.1 — `bin/ai-claude-review`
+#### Step 4.1
 
-At line 61, split the identifier (D1):
-
-- `RUN_ID` keeps `$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM` and keeps feeding the
-  lifecycle `--run-id` (line 70) and the report filename (line 110).
-- Add `SANDBOX_TAG="claude-review"` (D2) and use it for `ensure-copy` (line 71)
-  and for `ai-review-packet build` (line 91).
-- Update `cleanup` (lines 64-67): keep `"$PACKET" remove`, **delete** the
-  `"$SANDBOX" remove-copy` line (D6).
-
-Verify by eye that `TAG` has no other uses before removing it — `grep -n 'TAG'
-bin/ai-claude-review`.
-
-#### Step 3.2 — `bin/ai-codex-review`
-
-The same change at lines 121/126/133/182, with `SANDBOX_TAG="codex-review"`.
-Note this file has more structure around it (`--tests` handling, timeout,
-`secure_review_directory`); change only the tag and the cleanup line.
-
-#### Step 3.3 — Reorder both prompts (D7)
-
-**File:** `bin/ai-claude-review:93-101` and the equivalent block in
-`bin/ai-codex-review`.
-
-Restructure to: **(a)** an invariant opening block — packet manifest location,
-the review directory boundary, the Read/Grep/Glob-only restriction, the "do not
-edit, create, commit, push, merge, delete" instruction, and the `## Verdict`
-format contract; then **(b)** a separator; then **(c)** `You are performing a
-READ-ONLY $MODE.` and `$DECISION`.
-
-The instructions must be semantically identical to today's. Keep the same
-sentences wherever possible — this is a reordering, not a rewrite. `$DECISION`
-already carries any `AI_REVIEW_BRIEF_FILE` stage brief appended to it
-(`bin/ai-claude-review:84-90`), so it stays last naturally.
-
-**Behaviour when done:** for one repository at one source state, the first N
-characters of the prompt are byte-identical across all five modes, with N as
-large as the invariant block.
-
-#### Step 3.4 — Tests
-
-In `tests/test-ai-claude-review.sh` and `tests/test-ai-codex-review.sh`:
-
-| Test | Asserts |
-|---|---|
-| `sandbox_tag_is_deterministic` | The tag string contains no `$$`, `$RANDOM`, or timestamp — assert on the literal in the script and, if the harness allows, on two runs producing the same directory |
-| `run_id_remains_unique` | Two runs still produce different report filenames |
-| `snapshot_survives_exit` | After a completed run the snapshot directory still exists |
-| `packet_removed_on_exit` | The packet directory is gone |
-| `prompt_prefix_identical_across_modes` | The invariant block is byte-identical for two different modes |
-| `concurrent_same_repo_review_refuses_clearly` | A second concurrent review in the same repo fails with the existing "already being built" message rather than corrupting anything (D2's accepted cost) |
-
-**Verification gate:** `bash tests/test-all.sh` ends `failures=0`. Commit Phase 3
-separately.
-
----
-
-### Phase 4 — Cache-hit token reporting
-
-#### Step 4.1 — DeepSeek
-
-**File:** `bin/ai-deepseek-agent`, the embedded Python at line ~295 and its
-callers around lines 260-296, 518-520, 572.
-
-- Extend the extraction to also read `data.get("usage", {})` and pull
-  `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens`, `total_tokens`, and
-  `prompt_tokens`/`completion_tokens` if present.
-- Write the reply to the existing reply file **unchanged** — stdout must remain
-  byte-identical (rejected approach 7).
-- Print one line to **stderr** in the Grok style, e.g.
-  `tokens: <total> (cache hit: <n>, miss: <n>) model: <model>`; any absent field
-  prints `unavailable` (D8).
-- Append the usage object to a **sidecar** file beside the session transcript —
-  suggested `<session>.usage.jsonl`, one JSON object per turn. **Do not touch
-  the transcript JSON itself** (rejected approach 6): it is replayed verbatim as
-  the request body and is guarded by `review_system_present`
-  (`bin/ai-deepseek-agent:380-387`).
-
-#### Step 4.2 — Muse
-
-**File:** `bin/ai-muse:277` (capture) and `:306` (report).
-
-- `TOKENS` already holds the complete `.part.tokens` object. Keep capturing it.
-- In the report table, replace the single opaque `| tokens | {...} |` row with
-  labelled rows — input, output, cache read, cache write, total — reading the
-  fields OpenCode actually emits. **Check the real field names against a live
-  event stream or a saved fixture before writing the `jq` paths**; do not guess.
-  `docs/muse-opencode.md` records that a measured follow-up "reported a large
-  cache read", so the field exists; confirm its exact spelling.
-- Any field OpenCode omits prints `unavailable` (D8).
-- Also print a one-line stderr summary on each turn, matching Grok's shape.
-- Keep the raw object in the report as well, so nothing is lost if a field name
-  changes.
-
-#### Step 4.3 — Tests
-
-In `tests/test-ai-deepseek-agent.sh`:
-
-| Test | Asserts |
-|---|---|
-| `usage_line_written_to_stderr` | The summary appears on stderr |
-| `stdout_reply_unchanged` | stdout is byte-identical to before the change for a fixed stub response |
-| `transcript_json_shape_unchanged` | The messages file has no new keys and `messages[0]` is still exactly the boundary |
-| `usage_sidecar_appends_per_turn` | Two turns produce two sidecar lines |
-| `missing_usage_reports_unavailable` | A stub response with no `usage` prints `unavailable`, never `0`, and does not fail the turn |
-
-In `tests/test-ai-muse.sh`:
-
-| Test | Asserts |
-|---|---|
-| `report_breaks_out_cache_tokens` | The published report contains the labelled cache rows |
-| `missing_token_fields_report_unavailable` | A stub `step_finish` without token fields yields `unavailable` and still publishes |
-| `raw_token_object_retained` | The raw object is still present in the report |
-
-**Verification gate:** `bash tests/test-all.sh` ends `failures=0`. Commit Phase 4
-separately.
-
----
-
-### Phase 5 — Land it
-
-#### Step 5.1 — Full suite
 ```bash
 bash tests/test-all.sh
 ```
-Must end `failures=0`. On Windows also run the PowerShell suite per
-`docs/development.md`.
 
-#### Step 5.2 — Gate reviews of the complete change
+Then the gates:
+
 ```bash
 ai-review claude diff-review
 ```
 ```bash
 ai-review codex diff-review
 ```
-Both must return `APPROVE`. Then:
-```bash
-ai-review claude final-check
-```
 
-#### Step 5.3 — Documentation, commit, push
-
-- Update the verification header of `bin/ai-review-sandbox` to describe the
-  reuse gate and the `AI_REVIEW_SANDBOX_FORCE_REBUILD` escape hatch. That header
-  is load-bearing: `AGENTS.md:61` routes readers to it.
-- Update `docs/architecture.md` where the review sandbox is described.
-- Add a line to `docs/muse-opencode.md` noting the new cache reporting, and
-  reaffirming that direct mode is unchanged and deliberate.
-- Update this plan's STATUS table with artifacts.
-- Update the handoff file and mark it closed.
-- Load the `session-docs-update` skill — it carries a mandatory plan-file gate
-  for exactly this.
-- Commit on `main` (`AGENTS.md:20`), reconcile concurrent `main` without force,
-  push, and confirm the commit is present on `origin/main`.
+Both must return `APPROVE`. Then update `docs/muse-opencode.md` (note the new
+cache reporting; reaffirm direct mode is deliberate and unchanged), update this
+plan's STATUS with artifacts, close the handoff, load `session-docs-update`, and
+commit on `main` per `AGENTS.md:20`. One commit; this is one coherent change.
 
 ## 10. Tests required
 
-Every test named in Steps 2.2, 3.4 and 4.3 above must exist and pass. In
-addition, **the entire existing suite must stay green** — no test may be
-deleted, weakened, skipped, or have an assertion relaxed to accommodate this
-work. If an existing test now fails, that is a finding about your change, not
-about the test.
+Every test named in Step 2.3. Plus: **the entire existing suite stays green.**
+No test may be deleted, skipped, or relaxed. If an existing test fails, that is
+a finding about your change.
 
-Guarded properties that must still hold afterwards:
-
-- `tests/test-ai-review-packet.sh` — the packet stays *additive*; the reviewer
-  keeps full read access to the repository.
-- `tests/test-ai-glm.sh` — GLM's disposable-clone and `origin`-removal controls.
-- The read-only agent toolsets in `config/opencode/agent/glm-review.md`,
-  `config/opencode-muse/agent/muse-review.md`, `config/kimi/readonly-review.md`
-  are untouched by this work.
+Note especially that `tests/test-ai-review-sandbox.sh:250` asserts
+`ai-codex-review` still contains `remove-copy`. The withdrawn item 1 would have
+broken it. Nothing in the remaining work touches it — if it goes red, you have
+strayed out of scope.
 
 ## 11. Constraints, standing rules, and gotchas
 
-**Repository and process**
+**Process**
 
-- Work directly on `main`; no feature branches (`AGENTS.md:20`).
-- Before your first commit run `git var GIT_COMMITTER_IDENT`; it must show
+- Work directly on `main` (`AGENTS.md:20`).
+- Run `git var GIT_COMMITTER_IDENT` before your first commit; it must show
   `Albert Hazan <u2giants@users.noreply.github.com>`.
-- This checkout may be shared with other sessions. **Stage only your own
-  files** — never `git add -A`. Check for other sessions' changes before pull,
-  merge, or commit.
-- This repository is **public**. No secret values, ever.
-
-**Engineering**
-
-- Prefer permanent fixes with the fewest moving parts. No band-aids, no silent
-  failures, nothing hard-coded that belongs in configuration.
-- **Do not simplify a measured guardrail without reading its reason**
-  (`AGENTS.md:52`). The files in this plan are dense with comments explaining
-  incidents that cost real money. If a check looks redundant, find out why it
-  was added before touching it.
-- Test everything you create.
+- This checkout may be shared. **Stage only your own files** — never `git add -A`.
+- Public repository. No secret values, ever.
 
 **Traps specific to this work**
 
-- **Git Bash path spellings.** `ai-review-sandbox` already handles 8.3 vs long
-  paths and mount-point aliases (`bin/ai-review-sandbox:83-91`, `71-78`). Your
-  new comparisons must use the same `canon`/`canon_quiet` helpers, never raw
-  string equality on paths.
-- **`source_digest` dies on failure** (`bin/ai-review-sandbox:147`). In the
-  reuse path a failure must become a rebuild, not an abort.
 - **The DeepSeek transcript is the request body.** Never add fields to it.
-- **Tool names and field names are case-sensitive and fail silently** in this
-  ecosystem — the Kimi agent-file incident is the canonical example
-  (`config/kimi/readonly-review.md`). Verify Muse's token field names against
-  real output.
-- **`set -euo pipefail` is in force** in these scripts. An assignment from a
-  failing command substitution aborts the script; `ai-glm` has a comment about
-  exactly this costing every Windows run (`bin/ai-glm:52-55`).
-- **A snapshot must never be reused across different repository roots.** The
-  marker records the source root; check it (D3 condition 2).
-- **Reviewer quarantines:** Kimi (issue #46) and Gemini are quarantined. Do not
-  route review work to them.
-- **GPT-5.6 runs at `low` or `medium` reasoning only** — never `high`, `none`,
-  or `minimal`. The gate wrapper enforces this
-  (`bin/ai-codex-review:56`); do not weaken it.
+- **The sidecar must not be `*.json`** or `list` will treat it as a session
+  (`bin/ai-deepseek-agent:478`).
+- **stdout is a contract** for both wrappers. Usage goes to stderr only.
+- **Field names fail silently** in this ecosystem — the Kimi agent-file incident
+  is the canonical case (`config/kimi/readonly-review.md`). Verify Muse's token
+  field names against real output.
+- **The two files differ on `set -e`.** `bin/ai-deepseek-agent:36` is
+  `set -uo pipefail` — no `-e`; `bin/ai-muse:3` is `set -euo pipefail`. So a
+  failing command substitution aborts Muse and does not abort DeepSeek. Write
+  defensively for both (`bin/ai-glm:52-55` records this class of bug costing
+  every Windows run).
+- **Do not simplify a measured guardrail without reading its reason**
+  (`AGENTS.md:52`). These files are dense with comments recording incidents that
+  cost real money.
+- **GPT-5.6 runs at `low` or `medium` reasoning only.**
 
 ## 12. Access and environment
 
-- **Machine:** planned on `edge-dev` (Windows 11). Use **Git Bash** for the Bash
-  tools and suites; PowerShell for `.ps1` suites.
-- **Repository:** `C:\repos\ai-devops` (this plan was authored in the worktree
-  `C:\repos\ai-devops\.claude\worktrees\reviewer-setup-audit-23cef2`).
-- **Required commands:** `git`, `jq`, `bash`, `sha256sum`, `curl`, `python`.
-- **Reviewer CLIs:** Claude Code and Codex must be authenticated for the gate
-  reviews. Check with `ai-review doctor`, which runs both wrappers' doctors.
-- **Advisory reviewers:** `ai-glm doctor`, `AI_MUSE_CALLER=claude ai-muse
-  doctor`, `ai-grok-review` per its skill, `ai-deepseek-agent doctor`.
-- **Secrets — by location only, never by value.** 1Password vault
-  `vibe_coding`: the Muse key is item *"Meta ai Muse Spark API Key"*, field
-  *api key*; DeepSeek and other provider keys resolve through
-  `~/.config/ai-devops/mcp.env` and the service-account token file, handled by
-  the wrappers themselves. **Serialize 1Password access** and load the
-  `secrets-to-1password` skill before any 1Password write. Move secret values
-  only through pipes or 0600 files — never chat, command arguments, logs, or
-  commits.
-- **There is nothing to deploy or serve.** "Verify locally" means: run the test
-  suite, and run a real review against a scratch repository.
+- **Machine:** `edge-dev` (Windows 11). **Git Bash** for the Bash tools and
+  suites.
+- **Repository:** `C:\repos\ai-devops`.
+- **Commands needed:** `git`, `jq`, `bash`, `sha256sum`, `curl`, `python`.
+- **Reviewer health:** `ai-review doctor` (both gates),
+  `ai-deepseek-agent doctor`, `AI_MUSE_CALLER=claude ai-muse doctor`.
+- **Secrets — location only, never value.** 1Password vault `vibe_coding`:
+  Muse's key is item *"Meta ai Muse Spark API Key"*, field *api key*; DeepSeek's
+  resolves through `~/.config/ai-devops/mcp.env` and the service-account token,
+  handled by the wrapper. Serialize 1Password access; load
+  `secrets-to-1password` before any write; move values only through pipes or
+  0600 files.
+- **Nothing to deploy.** "Verify" means: run the suite, and run one real review.
 
 ---
 
@@ -853,111 +547,114 @@ Guarded properties that must still hold afterwards:
 
 ### Definition of done
 
-- [ ] All three work items implemented as specified in Phases 2, 3, 4.
-- [ ] Every named test in Steps 2.2, 3.4, 4.3 exists and passes.
-- [ ] `bash tests/test-all.sh` ends `failures=0`; no existing test weakened.
-- [ ] Phase 1 plan review completed by ≥3 independent reviewers, findings
-      resolved in writing.
-- [ ] Phase 2 diff reviewed by ≥3 advisory reviewers **and** both gates, all
-      APPROVE.
-- [ ] `ai-review claude final-check` returns APPROVE on the complete change.
-- [ ] Measured proof of the win, recorded with artifacts: a before/after
-      cache-read comparison for two consecutive gate stages on unchanged source,
-      and a before/after wall-clock timing for a second `ensure-copy` on
-      unchanged source.
-- [ ] `bin/ai-review-sandbox` header, `docs/architecture.md`, and
-      `docs/muse-opencode.md` updated.
-- [ ] This plan's STATUS table updated with real artifacts in every evidence
-      cell.
-- [ ] Three separate commits (one per phase) on `main`, pushed, confirmed
-      present on `origin/main`.
-- [ ] Handoff file updated and marked closed.
+- [ ] DeepSeek and Muse both report cache-hit tokens; absent fields say
+      `unavailable`.
+- [ ] Every test in Step 2.3 exists and passes; `bash tests/test-all.sh` ends
+      `failures=0`; no existing test weakened.
+- [ ] Muse's `jq` paths were written against a **real** `step_finish`, and the
+      fixture or a note naming it is recorded in the commit.
+- [ ] A real DeepSeek turn and a real Muse turn each show the stderr line and a
+      populated report — pasted into the closing report as proof.
+- [ ] Both gate reviews return APPROVE.
+- [ ] `docs/muse-opencode.md` updated; STATUS updated with artifacts; handoff
+      closed.
+- [ ] Committed on `main`, pushed, confirmed on `origin/main`.
 
 ### Risks and rollback
 
 | Risk | Severity | Mitigation | Rollback |
 |---|---|---|---|
-| Reuse gate wrongly reuses a stale snapshot → a reviewer approves code that is not the working tree | **Critical** — this is the one that matters | Three-way digest equality (D3); fail-safe-to-rebuild; the dedicated test list in 2.2; multi-reviewer review at plan *and* diff stage | Revert the Phase 2 commit; behaviour returns to always-rebuild |
-| Retained snapshots accumulate on disk | Low | They live under `$AI_REVIEW_SANDBOX_DIR` and are safe to delete at any time; document `ai-review-sandbox remove-copy` | Delete the directory |
-| Shared gate tag blocks a legitimate concurrent review | Low-medium | Explicitly tested (3.4); the failure is a clear refusal, not corruption | Switch that wrapper to a per-mode tag (rejected approach 3) — a one-line change |
-| Prompt reordering subtly changes reviewer behaviour | Medium | Semantics preserved; same sentences reordered; gate reviews must still produce valid verdicts in 5.2 | Revert Step 3.3 alone; the tag change in 3.1/3.2 stands independently |
-| Muse token field names guessed wrong → `unavailable` everywhere, or a wrong number | Medium | Verify against real output before writing `jq` paths; raw object retained | Revert Phase 4 commit |
-| DeepSeek change alters stdout and breaks a caller | Medium | `stdout_reply_unchanged` test | Revert Phase 4 commit |
+| Muse `jq` paths wrong → `unavailable` everywhere, or a wrong number | Medium | D3 real fixture; raw object retained so nothing is lost | Revert the commit |
+| DeepSeek change alters stdout and breaks a caller | Medium | `stdout_reply_unchanged` test | Revert the commit |
+| Sidecar pollutes `list` | Low | `.usage.jsonl` naming plus `usage_sidecar_not_listed_as_session` | Delete sidecars; revert |
+| A future session resurrects withdrawn items 1 or 2 from the first draft | **Medium and real** | § 7 R-A/R-B/R-C/R-D with evidence; D1 requires a traced request before reopening; the STATUS table marks them ❌ | — |
+
+Overall risk is low: this change alters what is printed, never what a reviewer
+reads.
+
+One path deserves naming. DeepSeek's `--review` mode parses `## Verdict` out of
+the **reply file** (`bin/ai-deepseek-agent:325-332`, used at `:523` and `:577`).
+If a botched extract ever wrote usage into that file, the parse would fail
+closed — or, if the text contained a heading, pick the wrong word. That is a
+broken extract rather than stale code, and the byte-identical reply-file
+requirement plus `stdout_reply_unchanged` and `transcript_json_shape_unchanged`
+close it. Muse's next turn resumes an OpenCode session id, not the markdown
+report, so labelled rows cannot change what Muse reads. **Do not feed usage into
+`write_review_metadata` (`bin/ai-deepseek-agent:391-414`)** — that JSON is
+evidence about HEAD, not tokens.
 
 ### Open questions
 
-1. **Exact Muse token field names.** Not verified during planning — no live Muse
-   call was made. Resolve by inspecting a real event stream or a saved fixture
-   before writing Step 4.2. **Do not guess.**
-2. **How much cache reuse the gate change actually buys.** Unknown until
-   measured; the definition of done requires measuring it. If the measured win
-   is negligible, say so plainly in the closing report rather than claiming a
-   victory — and consider whether Step 3.3's reordering is worth keeping.
-3. **Whether GLM should get the same cache reporting.** Out of scope by
-   instruction. If Phase 4 makes it trivial, record it as a follow-up item; do
-   not build it.
-4. **Whether reuse should also apply to the packet.** Currently no, because the
-   per-stage decision text changes its manifest (rejected approach 9). If a
-   reviewer in Phase 1 argues the decision text should move out of the manifest,
-   that is a larger change and belongs in its own plan.
+1. **Muse's exact token field names.** Unresolved; no live Muse call was made
+   during planning. Settle with a real `step_finish` before Step 2.2. **Do not
+   guess.**
+2. **Whether GLM should get the same reporting.** Out of scope by instruction.
+   Record as a follow-up if trivial.
+3. **Whether the gate reviewers have any cacheable prefix at all.** Finding B
+   says the premise is unsupported. Step 3.1 settles it with evidence if anyone
+   wants it settled.
+
+---
+
+## Review record
+
+| Turn | Reviewer | Verdict | Cost | Artifact |
+|---|---|---|---|---|
+| 1 | Grok 4.6 (`grok-4.6-build`) | REJECT | $0.1784 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md` |
+| 2 | Grok 4.6 | REJECT first draft; recommends Phase 4 only | $0.0679 | `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` |
+| 3 | Grok 4.6 — review of this rewrite | **APPROVE**; no material objection, four spec nits | $0.1927 | `.ai/reviews/grok-cache-plan-audit-20260825T135220Z-4523.md` |
+
+Session: `ai-grok-review show cache-plan-audit`. Running total: **$0.439** over
+three turns. Turn 3 read 1,414,014 tokens, of which 1,165,696 came from cache.
+
+All four of turn 3's nits were verified against the source and applied: the
+prompt line range (`:90-99`, not `:93-101`), the `call_api` versus `send`/`reply`
+split for the sidecar write, sidecar-failure semantics, and the `set -e`
+difference between the two files.
+
+Grok's conclusions are labelled as Grok's. Claude independently verified every
+load-bearing citation against the source before accepting it; the verification
+is what § 6 records, with `file:line` refs a reader can re-derive.
 
 ---
 
 ## Self-audit (required by `implementation-plan-writer`; preserved here)
 
-**1. Could a brand-new AI session with no project knowledge and no context from
-this conversation execute this plan to perfection, without asking anything?**
+**1. Could a brand-new session execute this without asking anything?**
 
-Yes. § 2 explains what the repository is, where it lives, its branch rule, its
-platforms, and — critically — what the reviewer subsystem *is* and why the
-sandbox and packet exist, since neither is guessable from the filenames. § 3
-gives two copy-pasteable read-only commands that reproduce both defects. § 5
-names every file with line counts and current line numbers, states plainly that
-nothing is half-done, and points at the existing test hooks
-(`AI_DEVOPS_TEST_MODE`, `AI_REVIEW_SANDBOX_TEST_HOOK`) so the implementer does
-not invent a new harness. § 9 names target files, functions, and line numbers
-for each step, with a verification gate on each. § 12 gives the commands, the
-authentication checks, and secret *locations*. The one genuine unknown — Muse's
-token field names — is called out twice, in Step 4.2 and open question 1, with
-the instruction not to guess.
+Yes. § 2 explains the repository, its branch rule, and specifically what the two
+wrappers being changed *are* — including the fact that DeepSeek's transcript is
+the request body, which is the single most dangerous thing to get wrong here.
+§ 3 gives two read-only commands that show the defect. § 5 names files and line
+numbers and warns that both test stubs need extending. § 9 gives per-step target
+files, behaviour, and verification gates. The one genuine unknown — Muse's field
+names — is flagged three times (D3, Step 2.2, open question 1) with an explicit
+"do not guess".
 
-**2. Does the plan carry every piece of background, nuance and reasoning I
-currently hold, including what was ruled out and why?**
+**2. Does the plan carry every piece of background and reasoning, including what
+was ruled out and why?**
 
-Yes. § 7 records nine rejected approaches with their reasons, including the two
-that a well-meaning implementer would otherwise walk straight into: putting Muse
-on the GLM server (which failed Meta authorization and was rejected for fault
-isolation — cited to `docs/muse-opencode.md:3-6` and
-`plan_muse-opencode-harness.md:19,160`), and patching `ai-muse` locally instead
-of the shared plumbing. § 6 Finding B explicitly records the audit's own
-mid-course correction — that an earlier draft wrongly claimed Grok and Kimi
-already skipped the rebuild — so the implementer does not inherit that error.
-§ 8 labels ten decisions locked or open with dates and reasoning, and D2 states
-its accepted cost (serialised concurrent gate reviews) rather than hiding it.
-§ 11 lists the environment-specific traps that cost time in this codebase: Git
-Bash path spellings, `source_digest` dying on failure, the DeepSeek transcript
-being the request body, silent case-sensitive field names, and `set -e`
-aborting on a failed command substitution.
+Yes, and this is now the plan's main value. § 7 records eleven rejected
+approaches. Four of them (R-A through R-D) are the plan's own withdrawn items,
+each with the evidence that killed it, so the next session cannot re-derive a
+design that two review turns and independent verification already refuted. § 6
+Findings B, C and D record the *mechanics* — the 326-byte prompt, the six
+categories of readable-but-undigested state, the concurrency tests — rather than
+just the conclusions, so a future session can tell whether changed circumstances
+would change the answer.
 
-**3. Is the ultimate goal stated clearly enough that the implementer could make
-a correct judgment call if a step turns out to be wrong?**
+**3. Is the goal clear enough to steer by if a step is wrong?**
 
-Yes. § 1 states the goal in business terms before any technical wording, names
-the three concrete outcomes, and then constrains them: no safety, boundary,
-evidence-integrity or verdict-trust property may weaken in exchange for speed or
-cost. It gives the tie-break instruction explicitly — *"if a step conflicts with
-this goal, the goal wins — stop and flag it"* — and, unusually, names the
-specific conflicts to watch for (stale code, skipped integrity checks, invented
-cache numbers) and states which direction to fail in: under-delivering on speed
-is acceptable, under-delivering on integrity is not. § 3 reinforces the weighting
-by noting nothing is currently broken, so any regression is a net loss.
+Yes. § 1 states the goal in one sentence, names what may not be traded for it,
+and gives the concrete tie-break: `unavailable` is a correct answer, a
+fabricated `0` is not. The scope is now small enough that the risk of a step
+being wrong is mostly confined to one `jq` path, which D3 addresses directly.
 
-**Gap found and fixed during the audit:** the first draft specified Phase 1's
-multi-reviewer review as "send the plan to three reviewers", which is exactly
-the vague brief this repository has measured as burning a review's whole budget.
-Step 1.1 now carries five specific adversarial questions, names the edge cases
-to consider (submodules, symlinks, permission bits, case-insensitive
-filesystems), and states that a reviewer finding blocks Phase 2 until the plan
-is amended in writing.
+**Gaps found and fixed in this rewrite:** the first draft failed audit question 2
+badly — it asserted a caching mechanism (repository context as prompt prefix)
+that the source contradicts, locked three decisions before the review that was
+supposed to test them, and specified a test that contradicted an existing test.
+All three are fixed: the mechanism is corrected in Finding B, nothing is locked
+that has not survived review, and the contradicting test is gone with its item.
 
 All comprehensiveness-checklist items pass.

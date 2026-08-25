@@ -1,36 +1,48 @@
 # HANDOFF — reviewer cache and snapshot efficiency
 
-- **Status:** OPEN
+- **Status:** OPEN (scope cut on 2026-08-25 after adversarial review)
 - **Written:** 2026-08-25 (UTC) on `edge-dev` by Claude (Opus 5)
+- **Review:** Grok 4.6, 3 turns, $0.439 — REJECT, REJECT, then APPROVE of the
+  rewritten plan with no material objection remaining
 - **Repository:** `u2giants/ai-devops`, branch `main` (authored from worktree
   branch `claude/reviewer-setup-audit-23cef2`)
-- **Base commit:** `4915adac90f7867b4475a3d146920f5e3480b0a4`
+- **Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
 - **The plan:** [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md)
 
-## 1. What this workstream is
+## 1. What this workstream is — SCOPE CUT TO ONE ITEM
 
-Three efficiency defects found by a read-only audit of all nine reviewer
-wrappers on 2026-08-25. Albert asked for the audit, then asked for an
-implementation plan covering the three fixes.
+**Read this before anything else: two of the three items this workstream started
+with are withdrawn.** Only cache-hit token reporting for DeepSeek and Muse
+remains, and it is observability only.
 
-1. The two **gate reviewers** (`bin/ai-claude-review`, `bin/ai-codex-review`)
-   build their review snapshot under a path containing `$$` and `$RANDOM`, and
-   put `$MODE` in the first line of the prompt. Both make the provider's prompt
-   cache useless, so all four pipeline review stages pay full price for
-   identical repository context.
-2. `bin/ai-review-sandbox`'s `create_or_refresh` **always rebuilds** the review
-   clone, even when the source is byte-identical to the last build — it writes a
-   `source_digest=` into the snapshot marker and never reads it back. This costs
-   wall-clock time on every follow-up turn for **every** reviewer.
-3. **DeepSeek and Muse discard cache-hit token data** the provider returns, so
-   nobody can confirm caching is working.
+An audit on 2026-08-25 of all nine reviewer wrappers raised three candidate
+defects. Grok 4.6 then audited the resulting plan over three turns and rejected
+two of them on evidence; Claude verified every load-bearing claim against the
+source before accepting it. What survived:
+
+- **Cache-hit reporting for DeepSeek and Muse — proceeds.** Both providers
+  return the number and both wrappers discard it. Changing what is printed can
+  never change what a reviewer reads.
+
+What did not, and why (the full mechanisms are in the plan, § 6 and § 7):
+
+- **Deterministic gate snapshot paths — won't do.** The premise was wrong. The
+  gate prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository
+  arrives as Read/Grep/Glob tool results, not as prompt prefix, so a stable path
+  cannot make it cacheable. The gates also pass `--no-session-persistence`, and
+  sharing a snapshot or packet tag would break `concurrent_reviews_both_complete`
+  and re-open the shared-db#1296 evidence swap on an approval gate.
+- **Digest-gated snapshot reuse — won't do.** `source_digest` cannot see ignored
+  files, evidence packets, `.git` state, untracked exec bits, empty directories
+  or submodule interiors, and `ai-review-packet` runs `--tests` inside the
+  snapshot. The unconditional wipe it would have removed is the integrity
+  boundary that keeps those leftovers out of the next review.
 
 ## 2. State right now
 
 **Nothing has been implemented.** The audit was read-only; no source file was
 changed. The only artifacts are the plan and this handoff. A fresh session
-starts at Phase 1, Step 1.1 of the plan (multi-reviewer review of the plan
-itself, before any code).
+starts at Step 2.1 of the plan (DeepSeek usage capture).
 
 ## 3. What was decided, and what must not be relitigated
 
@@ -38,36 +50,43 @@ itself, before any code).
   and was separately rejected for fault isolation. `docs/muse-opencode.md:3-6`
   and `plan_muse-opencode-harness.md:19,160`. The per-turn Node cold start is
   the accepted price. **Locked.**
-- **Fix the rebuild in the shared `ai-review-sandbox`, not in `ai-muse`.** The
-  defect is universal to all reviewers; a Muse-local patch would leave the waste
-  everywhere else.
-- **The gate sandbox tag becomes per-provider** (`claude-review` /
-  `codex-review`), not per-mode, so all stages share one warm snapshot. Accepted
-  cost: concurrent same-repo gate reviews now serialise with a clear refusal.
-- **Never report a token number the provider did not return** — absent prints
+- **The gate reviewers keep per-run snapshot directories and per-run evidence
+  packets.** Sharing either breaks `concurrent_reviews_both_complete`
+  (`tests/test-ai-claude-review.sh:70-73`) and re-opens the shared-db#1296
+  evidence swap on an approval gate (`bin/ai-review-packet:243-257`).
+- **The unconditional snapshot wipe stays.** It is the integrity boundary that
+  keeps digest-invisible leftovers — ignored files, evidence packets, `.git`
+  state — out of the next review.
+- **Never report a token number the provider did not return.** Absent prints
   `unavailable`, never `0`.
-- Full reasoning, ten labelled decisions and nine rejected approaches are in the
-  plan, § 7 and § 8.
+- Eleven rejected approaches with their evidence are in § 7 of the plan.
 
-## 4. Correction carried forward
+## 4. Corrections carried forward
 
-An earlier draft of the audit claimed Grok and Kimi already skip the rebuild
-when the source is unchanged. **That was wrong.** `create_or_refresh` rebuilds
-unconditionally for everyone; Grok's `cmd_ask` and Kimi's ask path both call
-`prepare_review` on every turn exactly as Muse does. The plan records this in
-§ 6 Finding B so a later session does not inherit the error.
+Two errors were made and corrected during this workstream. Both are recorded so
+a later session does not inherit them:
+
+1. An early draft of the audit claimed Grok and Kimi already skip the snapshot
+   rebuild when the source is unchanged. **Wrong** — `create_or_refresh`
+   rebuilds unconditionally for every reviewer.
+2. The first draft of the plan claimed a randomized snapshot path caused the
+   whole repository context to be re-billed on every gate stage. **Wrong** — the
+   gate prompt is 326 bytes and the repository arrives as tool results, not
+   prompt prefix. Verified directly; this is what withdrew item 1.
 
 ## 5. Next action
 
 Read [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md)
-STATUS table first, then execute Phase 1, Step 1.1 — send the plan to GLM, Grok
-and Codex with the five adversarial questions written out in that step. Do not
-start Phase 2 until their findings are resolved in writing.
+STATUS table first, then execute Step 2.1. Muse's token field names must come
+from a real OpenCode `step_finish` event, never a guess — that is the one open
+unknown.
 
 ## 6. Risks if this is picked up carelessly
 
-The Phase 2 change touches shared evidence plumbing that both approval gates
-depend on. A wrong reuse gate means a reviewer approving code that is not the
-working tree — a silent, high-consequence failure. The plan's § 13 risk table
-and the Step 2.2 test list exist specifically to prevent it. Do not compress
-Phase 1 or Phase 2.3 to save time.
+The main risk is now historical rather than technical: a future session finding
+the withdrawn items attractive and reviving them. Section 7 of the plan records
+eleven rejected approaches with the evidence that killed each one. Do not
+re-derive them. Reopening the caching idea requires a traced provider request
+showing a cacheable prefix exists, not an argument from first principles.
+
+The remaining work is observability only and cannot approve stale code.
