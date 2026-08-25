@@ -135,7 +135,7 @@ The map uses the four loading classes measured by the baseline above:
 
 `memory/<project>/MEMORY.md` is the whole game. A memory file that has no index
 line is invisible to every future session, and **only the first ~24 KB of an
-index is loaded** � everything past that is silently dropped. So an index must
+index is loaded** — everything past that is silently dropped. So an index must
 stay small and stay exactly one line per memory file.
 
 Two failure modes have produced oversized indexes, both found on 2026-08-25:
@@ -152,7 +152,7 @@ Two failure modes have produced oversized indexes, both found on 2026-08-25:
   and reported to stderr). Never reintroduce second-generation suffixing.
 - **Stranded corrections.** A conflict copy can hold the NEWER version. Two
   memories had their correction sitting in an unindexed side file while the
-  stale text stayed authoritative � including a superseded "preview could not be
+  stale text stayed authoritative — including a superseded "preview could not be
   used to de-risk" claim and an owner ruling recorded as still unanswered. When
   resolving a conflict, compare the dates in the body, not just the file names.
 
@@ -328,8 +328,7 @@ cannot be cut until Codex trigger evidence exists (plan step 4/6).
 
 - **Startup-routed: 50,729 → 35,972 bytes, a 29.1% cut**, 632 bytes above the
   35,340 target. `AGENTS.md` alone went 48,451 → 33,694 bytes. All figures are
-  CRLF measurements taken from `C:
-eposi-devops`, per the drift note above. Nothing was deleted: the ten "intentional quirks"
+  CRLF measurements taken from `C:\repos\ai-devops`, per the drift note above. Nothing was deleted: the ten "intentional quirks"
   narratives moved verbatim to [`design-decisions.md`](design-decisions.md), the
   two incident narratives moved verbatim to
   [`critical-incidents.md`](critical-incidents.md) (one paragraph that appeared
