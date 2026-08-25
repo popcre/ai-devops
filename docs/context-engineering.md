@@ -131,6 +131,36 @@ The map uses the four loading classes measured by the baseline above:
 | Forward work (phases, targets, gates, status) | A `plan_<slug>.md` at repo root | Nobody automatically | Task triggered | Goal, scope, per-step targets, verification gates, status table | `AGENTS.md` doc map or a handoff points to the active plan with a trigger. |
 | Active session state (what this session did, what is next) | `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (one write-once file per unfinished workstream); root `HANDOFF.md` is a static pointer | A later session continuing that work | When the request matches unfinished work, read the matching OPEN files newest-first | The full nine-section handoff per `templates/system/handoff-standard.md` | Root `HANDOFF.md` pointer plus the "How handoffs work" section of `AGENTS.md`. |
 
+### Memory: the index is the only thing that loads
+
+`memory/<project>/MEMORY.md` is the whole game. A memory file that has no index
+line is invisible to every future session, and **only the first ~24 KB of an
+index is loaded** — everything past that is silently dropped. So an index must
+stay small and stay exactly one line per memory file.
+
+Two failure modes have produced oversized indexes, both found on 2026-08-25:
+
+- **Conflict fan-out.** When a memory file differed between machines,
+  `copy_fact_union` in `bin/ai-sync-memory` copied it to `base--<machine>.md`.
+  That copy lived in the memory folder, so the next sync treated it as a fact of
+  its own and copied it again (`base--hetz--al8960ofc.md`, then `-2`, `-3`),
+  while `ensure_index_coverage` added a "Portable fact preserved by lossless
+  sync." line for each. Folder and index multiplied on every run: the
+  licensor-source-data index reached **4.9 MB** (31,078 lines, 24 unique) and
+  484 of 595 memory files across four projects were these artifacts. Fixed by
+  refusing to suffix an already-suffixed file (a conflict is now left in place
+  and reported to stderr). Never reintroduce second-generation suffixing.
+- **Stranded corrections.** A conflict copy can hold the NEWER version. Two
+  memories had their correction sitting in an unindexed side file while the
+  stale text stayed authoritative — including a superseded "preview could not be
+  used to de-risk" claim and an owner ruling recorded as still unanswered. When
+  resolving a conflict, compare the dates in the body, not just the file names.
+
+Practical rules: one index line per memory file; give every line a real
+description (a bare "Portable fact." tells a session nothing); and if an index
+is over ~17 KB, consolidate topics into fewer memory files rather than trimming
+entries.
+
 ### Decision table: where a new rule or fact goes
 
 Walk the questions top to bottom; the first yes wins. Each row is a different
@@ -298,7 +328,7 @@ cannot be cut until Codex trigger evidence exists (plan step 4/6).
 
 - **Startup-routed: 50,729 → 35,972 bytes, a 29.1% cut**, 632 bytes above the
   35,340 target. `AGENTS.md` alone went 48,451 → 33,694 bytes. All figures are
-  CRLF measurements taken from `C:eposi-devops`, per the drift note above. Nothing was deleted: the ten "intentional quirks"
+  CRLF measurements taken from `C:\repos\ai-devops`, per the drift note above. Nothing was deleted: the ten "intentional quirks"
   narratives moved verbatim to [`design-decisions.md`](design-decisions.md), the
   two incident narratives moved verbatim to
   [`critical-incidents.md`](critical-incidents.md) (one paragraph that appeared

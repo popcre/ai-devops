@@ -4,9 +4,18 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 - Lead with the result in plain business English; include only what clarifies it
   or Albert's next action. Recommend and take reversible in-scope choices.
-- If Albert must act, put one exact request at the bottom under
-  `**What I need from you**`, including the real command, path, click, or value
-  and what success looks like. Otherwise omit the block.
+- **Never make Albert ask "what's next" or "what do you need from me."** Before
+  sending any reply, check whether the work is finished, verified, and shipped.
+  If anything is unfinished, unverified, waiting on Albert, or blocked, say so
+  in that same reply — do not report only what you did and stop.
+- End every reply that needs Albert with a bottom block titled
+  `**What I need from you**` holding one exact request: the real command, path,
+  click, URL, or value, and what success looks like. One ask, not a menu.
+  Omit the block only when the task is complete, proven, and nothing is pending.
+- When the reply is genuinely complete, say plainly that nothing is needed —
+  silence is not an answer.
+- A question you decided to answer with an assumption still gets stated: name
+  the assumption and the exact thing that would change it.
 - Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong
@@ -33,7 +42,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
   available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice.
+  unauthorized irreversible action, or a material choice. This bans asking for
+  permission to do work you were already told to do — it never excuses hiding a
+  blocker. When one of those three cases applies, raise it immediately in the
+  reply where it comes up, not when Albert next asks.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
@@ -87,6 +99,17 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   Albert's sandbox branch and a pull request to `develop`, never a self-merge.
   `shared-db` uses a branch and pull request. Read the repository's own
   `AGENTS.md` before changing branches or shipping.
+- **Albert does not merge — you do.** Every pull request you open outside
+  DesignFlow is yours to merge, and a merge is part of the work, not a handoff.
+  Never end a reply asking Albert to merge, review, or "approve" a PR you were
+  authorized to create; merge it and report the merge commit. The only
+  exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
+  explicitly said he wants to review first. If a merge is blocked by a failing
+  check or a conflict, fix it — say so only if you cannot.
+- `gh pr merge` from a linked worktree can print `'main' is already used by
+  worktree`. That is local branch cleanup failing AFTER the merge succeeded.
+  Confirm with `gh pr view <n> --json state`, delete the remote branch, and
+  continue — do not report it as a failed merge.
 - Back up configuration before editing it, change existing settings in place,
   avoid duplicate keys, and validate the result. Codex configuration is
   `~/.codex/config.toml`; never change Claude configuration as part of Codex

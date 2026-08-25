@@ -32,7 +32,7 @@ file that is not listed, **stop and report** — see §8.
 |---|---|---|
 | <name> | <branch> | <files> |
 
-Migration-author assignments for this session (maximum three, unrelated exact objects):
+Migration-author assignments for this session (at most `MAX_AUTHOR_LANES`, five since 2026-08-25, unrelated exact objects):
 - author lane / claim / reserved version: **<agent / issue / 14-digit version>**
 - your exact database objects: **<parseable object list>**
 - preview lane owner: **<agent or NONE>**
