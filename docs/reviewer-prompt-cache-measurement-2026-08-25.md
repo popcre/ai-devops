@@ -6,9 +6,12 @@ settles, with numbers, whether the two approval-gate reviewers have any
 cacheable prompt prefix — the question that item 1 of that plan assumed the
 answer to and got wrong.
 
-**Result: they do not have one the wrapper can control. Item 1 is disproven, not
-merely unsupported.** A separate, real cost was measured and is recorded below;
-its only levers are outside this plan.
+**Result: they do not have one the wrapper can control.** For Claude that is
+disproven by measurement rather than merely unsupported. For Codex the CLI
+reports no cache data at all, so the conclusion there rests on the same
+mechanism plus the absence of any number — see the Codex section. A separate,
+real cost *was* measured and is recorded below; its only levers are outside the
+plan.
 
 Read-only. No source file was changed to produce these numbers.
 
@@ -41,11 +44,13 @@ from the `usage` object in the CLI's own JSON output.
 
 ### What these numbers say
 
-**1. The user prompt is negligible and the system prefix is not.** The prompt
-itself is 2 tokens of uncached input. Everything else — between 7,800 and 11,900
-tokens — is CLI-supplied prefix. The review prompt in `bin/ai-claude-review:90-99`
-is 326 bytes, so a real review's prefix is dominated by the same CLI content,
-not by anything the wrapper writes.
+**1. The user prompt is negligible and the system prefix is not.** The probe
+prompt is 2 tokens of uncached input. Everything else — between 7,800 and 11,900
+tokens — is CLI-supplied prefix. A real review's prompt is not much bigger: the
+template at `bin/ai-claude-review:90-99` is 409 bytes, and about 748 bytes
+(~190 tokens) once `$MODE`, `$PACKET_DIR`, `$REVIEW_DIR` and `$DECISION` are
+substituted for a representative `diff-review`. Either way the prefix is
+dominated by CLI content, not by anything the wrapper writes.
 
 **2. Cache reads are pinned at 2,800 tokens and never move.** Identical across
 every run, in three different working directories, on repeats seconds apart.
@@ -86,16 +91,26 @@ codex exec -m gpt-5.6-sol --skip-git-repo-check --sandbox read-only \
 | 2 | `tokens used 17,672` |
 
 `codex exec` reports **one total and no cache breakdown at all** — no hit/miss
-split, no creation figure. So for Codex the caching question cannot be answered
-from the CLI, and a ~17.7k-token floor exists for a two-token prompt.
+split, no creation figure. So for Codex the caching question **cannot be
+measured** from the CLI, and a ~17.7k-token floor exists for a two-token prompt.
+
+**State this precisely:** item 1 is *disproven by measurement* for Claude, and
+rests on *mechanism plus absence of data* for Codex. The mechanism is the same
+in both — a short prompt, a repository delivered as tool results, and a fresh
+process per stage — but no Codex number was observed, and this document should
+not be cited as if one had been.
 
 ## The real cost this found
 
 Item 1 aimed at the wrong thing, but the spike did quantify a genuine expense:
 **each gate invocation creates roughly 12,000 tokens of prefix that is never
-read back**, and the seven-stage pipeline invokes the gate four times. Cache
-*creation* is billed above the base input rate, and here it lands in the
-one-hour ephemeral tier without ever being redeemed.
+read back**, and the seven-stage pipeline invokes the gate four times. Here that
+creation lands in the one-hour ephemeral tier and is never redeemed.
+
+Cache *creation* is generally billed above the base input rate, and these runs
+report the one-hour ephemeral tier — but **the exact rate multipliers were not
+verified here** and should be re-checked against current provider pricing before
+anyone acts on the size of this cost.
 
 The only levers are:
 
@@ -115,13 +130,16 @@ The Codex probe emitted an MCP authentication error
 (`rmcp::transport::worker … AuthRequired … mcp.cloudflare.com`), which means the
 ad-hoc `codex exec` invocation loaded ambient MCP servers. Claude's governed
 command pins `--strict-mcp-config` with an empty server map; the governed Codex
-command (`bin/ai-codex-review:14`) has no equivalent. Whether a gate reviewer
+command (`bin/ai-codex-review:13`) has no equivalent. Whether a gate reviewer
 should be able to reach ambient MCP servers is a **safety** question, unrelated
 to caching, and out of scope here. It is written down so it is not lost.
 
 ## Bottom line
 
-Item 1 of the plan is closed on evidence: there is no wrapper-controllable
-cacheable prefix, cache reads are fixed at 2,800 tokens regardless of path or
-repetition, and the CLI's own prefix is not byte-stable between runs. Reopening
-it would require a change in CLI or provider behaviour, not a new argument.
+Item 1 of the plan is closed on evidence. For Claude: cache reads are fixed at
+2,800 tokens regardless of working directory or repetition, and the CLI's own
+prefix is not byte-stable between runs, so no wrapper-side change can produce a
+matching prefix. For Codex: no cache data is reported, so the same mechanism
+argument stands unmeasured. Reopening the item would require a change in CLI or
+provider behaviour — and, for Codex, a CLI that reports cache figures at all —
+not a new argument.
