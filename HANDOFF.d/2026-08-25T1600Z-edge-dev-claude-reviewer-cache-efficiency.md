@@ -2,8 +2,10 @@
 
 - **Status:** OPEN (scope cut on 2026-08-25 after adversarial review)
 - **Written:** 2026-08-25 (UTC) on `edge-dev` by Claude (Opus 5)
-- **Review:** Grok 4.6, 3 turns, $0.439 — REJECT, REJECT, then APPROVE of the
-  rewritten plan with no material objection remaining
+- **Review:** Grok 4.6, 3 turns, $0.439 — REJECT, REJECT, then APPROVE. GLM 5.3,
+  3 turns — APPROVE, with seven defects found and fixed. Both models
+  independently tried to argue the withdrawals back and could not.
+- **Measurement:** [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](../docs/reviewer-prompt-cache-measurement-2026-08-25.md)
 - **Repository:** `u2giants/ai-devops`, branch `main` (authored from worktree
   branch `claude/reviewer-setup-audit-23cef2`)
 - **Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
@@ -40,9 +42,15 @@ What did not, and why (the full mechanisms are in the plan, § 6 and § 7):
 
 ## 2. State right now
 
-**Nothing has been implemented.** The audit was read-only; no source file was
-changed. The only artifacts are the plan and this handoff. A fresh session
-starts at Step 2.1 of the plan (DeepSeek usage capture).
+**No source file has been changed.** Everything so far is documentation: the
+plan, this handoff, and the measurement. A fresh session starts at **Step 2.1**
+of the plan (DeepSeek usage capture).
+
+The measurement spike (Step 3.1) is **done** and does not need re-running unless
+the Claude or Codex CLI changes its prefix behaviour. It closed item 1 on
+evidence: `cache_read_input_tokens` was 2,800 in all six Claude probes across
+three working directories, the 7.8k–11.9k-token prefix is created and never read
+back, and the counts drift 1–3 tokens between byte-identical runs.
 
 ## 3. What was decided, and what must not be relitigated
 
