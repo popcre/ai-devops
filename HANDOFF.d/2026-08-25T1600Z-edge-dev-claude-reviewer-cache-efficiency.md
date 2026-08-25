@@ -2,46 +2,43 @@
 
 - **Status:** OPEN (scope cut on 2026-08-25 after adversarial review)
 - **Written:** 2026-08-25 (UTC) on `edge-dev` by Claude (Opus 5)
+- **Review:** Grok 4.6, 3 turns, $0.439 — REJECT, REJECT, then APPROVE of the
+  rewritten plan with no material objection remaining
 - **Repository:** `u2giants/ai-devops`, branch `main` (authored from worktree
   branch `claude/reviewer-setup-audit-23cef2`)
-- **Base commit:** `4915adac90f7867b4475a3d146920f5e3480b0a4`
+- **Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
 - **The plan:** [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md)
 
-## 1. What this workstream is
+## 1. What this workstream is — SCOPE CUT TO ONE ITEM
 
-Three efficiency defects found by a read-only audit of all nine reviewer
-wrappers on 2026-08-25. Albert asked for the audit, then asked for an
-implementation plan covering the three fixes.
+**Read this before anything else: two of the three items this workstream started
+with are withdrawn.** Only cache-hit token reporting for DeepSeek and Muse
+remains, and it is observability only.
 
-1. The two **gate reviewers** (`bin/ai-claude-review`, `bin/ai-codex-review`)
-   build their review snapshot under a path containing `$$` and `$RANDOM`, and
-   put `$MODE` in the first line of the prompt. Both make the provider's prompt
-   cache useless, so all four pipeline review stages pay full price for
-   identical repository context.
-2. `bin/ai-review-sandbox`'s `create_or_refresh` **always rebuilds** the review
-   clone, even when the source is byte-identical to the last build — it writes a
-   `source_digest=` into the snapshot marker and never reads it back. This costs
-   wall-clock time on every follow-up turn for **every** reviewer.
-3. **DeepSeek and Muse discard cache-hit token data** the provider returns, so
-   nobody can confirm caching is working.
+An audit on 2026-08-25 of all nine reviewer wrappers raised three candidate
+defects. Grok 4.6 then audited the resulting plan over three turns and rejected
+two of them on evidence; Claude verified every load-bearing claim against the
+source before accepting it. What survived:
 
-## 2. State right now — SCOPE CUT
+- **Cache-hit reporting for DeepSeek and Muse — proceeds.** Both providers
+  return the number and both wrappers discard it. Changing what is printed can
+  never change what a reviewer reads.
 
-**Two of the three items are WITHDRAWN.** Grok 4.6 audited the first draft over
-two turns ($0.246) and rejected items 1 and 2 on evidence; Claude verified every
-load-bearing claim against the source and agreed. The plan was rewritten. Only
-the cache-hit reporting for DeepSeek and Muse remains.
+What did not, and why (the full mechanisms are in the plan, § 6 and § 7):
 
-- **Item 1 (deterministic gate snapshot paths) — won't do.** The premise was
-  wrong: the gate prompt is 326 bytes and the repository arrives as tool
-  results, not prompt prefix, so a stable path cannot make it cacheable. The
-  gates also pass `--no-session-persistence`.
-- **Item 2 (digest-gated snapshot reuse) — won't do.** `source_digest` cannot
-  see ignored files, evidence packets, `.git`, exec bits, empty directories or
-  submodule interiors, and the unconditional wipe it would remove is an
-  integrity boundary.
-- **Item 3 (cache-hit reporting) — proceeds.** Observability only; it changes
-  what is printed, never what a reviewer reads.
+- **Deterministic gate snapshot paths — won't do.** The premise was wrong. The
+  gate prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository
+  arrives as Read/Grep/Glob tool results, not as prompt prefix, so a stable path
+  cannot make it cacheable. The gates also pass `--no-session-persistence`, and
+  sharing a snapshot or packet tag would break `concurrent_reviews_both_complete`
+  and re-open the shared-db#1296 evidence swap on an approval gate.
+- **Digest-gated snapshot reuse — won't do.** `source_digest` cannot see ignored
+  files, evidence packets, `.git` state, untracked exec bits, empty directories
+  or submodule interiors, and `ai-review-packet` runs `--tests` inside the
+  snapshot. The unconditional wipe it would have removed is the integrity
+  boundary that keeps those leftovers out of the next review.
+
+## 2. State right now
 
 **Nothing has been implemented.** The audit was read-only; no source file was
 changed. The only artifacts are the plan and this handoff. A fresh session

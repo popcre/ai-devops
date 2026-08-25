@@ -4,7 +4,7 @@
 **Authored:** 2026-08-25 by Claude (Opus 5) on machine `edge-dev`
 **Rewritten:** 2026-08-25 after an adversarial audit by Grok 4.6 rejected two of
 the three original items on evidence. See § 7.
-**Base commit:** `d14c48a2adf39e373e9a9a5c9178bc2fee78eb7b`
+**Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
 **Handoff:** [`HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md`](HANDOFF.d/2026-08-25T1600Z-edge-dev-claude-reviewer-cache-efficiency.md)
 
 ---
@@ -23,7 +23,7 @@ remains, plus an optional read-only measurement spike.
 | 0.2 | Grok 4.6 adversarial audit of the first draft, 2 turns | ✅ done 2026-08-25 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md`, `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` — REJECT both turns; $0.246 total |
 | 0.3 | Claude verified Grok's load-bearing claims against source | ✅ done 2026-08-25 | § 6, every row cites `file:line` you can re-read |
 | 0.4 | Items 1 and 2 withdrawn; plan rewritten | ✅ done 2026-08-25 | This file |
-| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO** | § 7 R-A. The premise was wrong: the prompt is 326 bytes and the repository arrives as tool results, not prompt prefix |
+| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO** | § 7 R-A. The premise was wrong: the prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository arrives as tool results, not prompt prefix |
 | 1.2 | **Item 2 — digest-gated snapshot reuse** | ❌ **WON'T DO** | § 7 R-B. The digest cannot see what a reviewer can read; the unconditional wipe is an integrity boundary |
 | 2.1 | DeepSeek: capture and report cache-hit tokens | ⬜ open | — |
 | 2.2 | Muse: labelled cache rows, from a real fixture | ⬜ open | — |
@@ -170,7 +170,7 @@ opaque cell.
 
 ## 5. Current state of the code
 
-Everything is committed and pushed at `d14c48a`. Nothing is half-done; there is
+Everything is committed and pushed at `722c2a4`. Nothing is half-done; there is
 no work in progress to pick up.
 
 | File | Lines | Relevant today |
@@ -212,7 +212,7 @@ false zero (§ 8 D4).
 The first draft claimed the gate reviewers' randomized snapshot path caused "the
 whole repository context" to be re-billed on each of the four pipeline stages.
 **That is false, and I verified it.** The user prompt sent to Claude is
-`bin/ai-claude-review:93-101` — **326 bytes, roughly 80 tokens.** The repository
+`bin/ai-claude-review:90-99` — **326 bytes, roughly 80 tokens.** The repository
 never appears in the prompt; it arrives as *tool results* from Read/Grep/Glob
 inside the session. A stable directory name therefore cannot make repository
 context cacheable, because repository context was never prompt prefix.
@@ -289,10 +289,26 @@ gate.
 ## 8. Design decisions
 
 ### D1 — Items 1 and 2 are withdrawn, not deferred. **LOCKED.**
-*(2026-08-25, after two adversarial review turns and independent verification)*
-Do not resurrect them from the first draft. If a future session believes the
-caching idea has merit, it must start from Finding B and produce a **traced
-request** showing a cacheable prefix exists — not from this plan's first draft.
+*(2026-08-25, after three adversarial review turns and independent verification)*
+Do not resurrect either from the first draft.
+
+**Item 1 and item 2 died of different causes, so they have different reopening
+bars. Do not let evidence for one revive the other.**
+
+- **Item 1 (caching) was a wrong mechanism.** Reopening it requires a **traced
+  provider request** showing a cacheable prefix actually exists (Step 3.1). But
+  a traced prefix is *not* a licence to share a snapshot directory or a packet
+  tag: Findings C and D forbid that independently of caching, and they would
+  still have to be satisfied. A traced prefix plus per-run directories and
+  per-run packets might justify a small prompt change and nothing more.
+- **Item 2 (snapshot reuse) was never a caching idea at all.** It was
+  wall-clock only, and it failed on evidence integrity. Reopening it requires a
+  Read-complete identity — one covering everything under the snapshot a reviewer
+  can read, including ignored files, packets and `.git` — **or** a publish path
+  that keeps the all-or-nothing wipe. A traced request is irrelevant to it.
+
+If either bar is met, that is a **new plan** with its own review, not a
+resurrection of this one.
 
 ### D2 — DeepSeek usage goes to stderr and a sidecar; stdout and the transcript are untouched. **LOCKED.**
 *(2026-08-25)* See R-H, R-I, R-J.
@@ -325,11 +341,31 @@ callers (~260-296, 518-520, 572).
 
 **What to change:**
 
-- In the embedded Python that reads the response, also read
-  `data.get("usage", {})` and take `prompt_cache_hit_tokens`,
+- In the embedded Python that reads the response (`bin/ai-deepseek-agent:292-296`),
+  also read the `usage` object and take `prompt_cache_hit_tokens`,
   `prompt_cache_miss_tokens`, `prompt_tokens`, `completion_tokens`,
-  `total_tokens`. **Do this before `$resp_file` is removed** — check the cleanup
-  order around line 292-299 first.
+  `total_tokens`. **The body is deleted at `:298`** (`rm -f` of the request,
+  response and status files), so extract before that line. The failure paths at
+  `:281-282` and `:288-289` delete the body with no parse — correct, there is no
+  usage to report.
+- **Do not write the sidecar inside `call_api`.** `call_api` has no session id,
+  and `doctor --live` calls it at `:472` while session setup is skipped for
+  `doctor` at `:158`. A write there would either break the existing
+  `live doctor leaves the repository byte state unchanged` test
+  (`tests/test-ai-deepseek-agent.sh:54`) or drop a stray file in the working
+  directory. **Return** the usage from `call_api` — a second output file is the
+  simplest route — and append the sidecar only in `send` (`:520`) and `reply`
+  (`:574`).
+- **Append the sidecar while the transcript lock is still held** — before
+  `release_lock` at `:544` and `:597` — so two concurrent replies cannot
+  interleave partial JSONL lines. Concurrent replies already serialize
+  (`tests/test-ai-deepseek-agent.sh:75-77`).
+- **A sidecar write failure must not fail the turn.** If the transcript has
+  already published, the turn succeeded; usage is observability. Warn on stderr
+  and carry on. This is explicitly *not* the attachment-ledger
+  `recovery-required` path at `:533-537`.
+- Use the wrapper's own `session_path` helper with a `.usage.jsonl` suffix so
+  the existing symlink and path-escape checks apply.
 - The reply file and stdout stay **byte-identical** to today.
 - Print one line to **stderr**, in the shape of `bin/ai-grok-review:858`:
   `tokens: <total> (cache hit: <n>, miss: <n>) model: <model>`. Any field the
@@ -358,7 +394,18 @@ sessions it listed before the change.
 - Replace the single opaque `| tokens | {...} |` row with labelled rows: input,
   output, cache read, cache write, total. Omitted fields print `unavailable`.
 - Keep the raw object as an additional row.
-- Print a one-line stderr summary per turn, same shape as DeepSeek's.
+- Print a one-line stderr summary per turn, same shape as DeepSeek's, matching
+  the existing session lines already written to stderr at `bin/ai-muse:326`.
+- `TOKENS` is initialised at `:235`, captured at `:277` and consumed **only** at
+  `:306`. Leave `preserve_failure` (`:284-288`) alone — it omits provider bodies
+  on purpose. Adding rows to the same staged-descriptor write is safe with the
+  exclusive `set -C` staging, which is reserved before the provider runs
+  (`:177-179`, `:318`, `:335`); more bytes on a held descriptor change no
+  destination check.
+- Guard every `jq` read defensively: `bin/ai-muse:3` **does** use `set -e`, so a
+  failed command substitution in the report path would abort *after* the
+  provider already answered. Missing fields must yield `unavailable`, never a
+  failed command.
 
 **Verification gate:** `bash tests/test-ai-muse.sh` passes including the new
 cases; a published report shows labelled rows.
@@ -377,6 +424,10 @@ stub must be *extended* for the positive case:
 | `usage_sidecar_appends_per_turn` | Two turns → two sidecar lines |
 | `usage_sidecar_not_listed_as_session` | `list` output is unchanged with a sidecar present (guards R-J) |
 | `missing_usage_reports_unavailable` | No `usage` in the response → `unavailable`, never `0`, turn still succeeds |
+| `doctor_live_creates_no_sidecar` | `doctor --live` writes no sidecar and no session directory (guards the `call_api` split) |
+| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds |
+| `stderr_usage_is_not_on_stdout` | The usage line is absent from a stdout capture (extends the existing `SESSION_ID` capture at `tests/test-ai-deepseek-agent.sh:58`) |
+| `usage_sidecar_appends_under_lock` | Two concurrent replies produce two well-formed JSONL lines (extends `tests/test-ai-deepseek-agent.sh:75-77`) |
 
 `tests/test-ai-muse.sh` — the success stub emits only `tokens:{"total":3}`, so a
 richer fixture is needed:
@@ -386,6 +437,8 @@ richer fixture is needed:
 | `report_breaks_out_cache_tokens` | Labelled rows present with a rich fixture |
 | `missing_token_fields_report_unavailable` | Sparse fixture → `unavailable`, report still publishes |
 | `raw_token_object_retained` | Raw object still in the report |
+| `stderr_usage_line_on_new_and_ask` | Both `new` and `ask` print the summary |
+| `null_tokens_object_still_publishes` | A `step_finish` with no `tokens` (so `TOKENS` stays `null`, `bin/ai-muse:235`) still publishes a report |
 
 **Known limit, state it in the commit message:** these are offline stub tests.
 They cannot prove the `jq` paths match production field names — only D3's real
@@ -460,9 +513,11 @@ strayed out of scope.
 - **Field names fail silently** in this ecosystem — the Kimi agent-file incident
   is the canonical case (`config/kimi/readonly-review.md`). Verify Muse's token
   field names against real output.
-- **`set -euo pipefail` is in force.** An assignment from a failing command
-  substitution aborts the script (`bin/ai-glm:52-55` records this costing every
-  Windows run).
+- **The two files differ on `set -e`.** `bin/ai-deepseek-agent:36` is
+  `set -uo pipefail` — no `-e`; `bin/ai-muse:3` is `set -euo pipefail`. So a
+  failing command substitution aborts Muse and does not abort DeepSeek. Write
+  defensively for both (`bin/ai-glm:52-55` records this class of bug costing
+  every Windows run).
 - **Do not simplify a measured guardrail without reading its reason**
   (`AGENTS.md:52`). These files are dense with comments recording incidents that
   cost real money.
@@ -517,6 +572,17 @@ strayed out of scope.
 Overall risk is low: this change alters what is printed, never what a reviewer
 reads.
 
+One path deserves naming. DeepSeek's `--review` mode parses `## Verdict` out of
+the **reply file** (`bin/ai-deepseek-agent:325-332`, used at `:523` and `:577`).
+If a botched extract ever wrote usage into that file, the parse would fail
+closed — or, if the text contained a heading, pick the wrong word. That is a
+broken extract rather than stale code, and the byte-identical reply-file
+requirement plus `stdout_reply_unchanged` and `transcript_json_shape_unchanged`
+close it. Muse's next turn resumes an OpenCode session id, not the markdown
+report, so labelled rows cannot change what Muse reads. **Do not feed usage into
+`write_review_metadata` (`bin/ai-deepseek-agent:391-414`)** — that JSON is
+evidence about HEAD, not tokens.
+
 ### Open questions
 
 1. **Muse's exact token field names.** Unresolved; no live Muse call was made
@@ -536,9 +602,15 @@ reads.
 |---|---|---|---|---|
 | 1 | Grok 4.6 (`grok-4.6-build`) | REJECT | $0.1784 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md` |
 | 2 | Grok 4.6 | REJECT first draft; recommends Phase 4 only | $0.0679 | `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` |
-| 3 | Grok 4.6 — review of THIS rewrite | pending | — | — |
+| 3 | Grok 4.6 — review of this rewrite | **APPROVE**; no material objection, four spec nits | $0.1927 | `.ai/reviews/grok-cache-plan-audit-20260825T135220Z-4523.md` |
 
-Session: `ai-grok-review show cache-plan-audit`. Running total: **$0.246**.
+Session: `ai-grok-review show cache-plan-audit`. Running total: **$0.439** over
+three turns. Turn 3 read 1,414,014 tokens, of which 1,165,696 came from cache.
+
+All four of turn 3's nits were verified against the source and applied: the
+prompt line range (`:90-99`, not `:93-101`), the `call_api` versus `send`/`reply`
+split for the sidecar write, sidecar-failure semantics, and the `set -e`
+difference between the two files.
 
 Grok's conclusions are labelled as Grok's. Claude independently verified every
 load-bearing citation against the source before accepting it; the verification
