@@ -29,11 +29,11 @@ gemini_live_qualified() {
   jq -e '.version==2 and .provider=="gemini" and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_version|type=="string" and length>0) and (.model|type=="string" and length>0) and (.qualified_epoch|type=="number")' "$file" >/dev/null 2>&1 || return 1
   expected="$(jq -r .wrapper_sha256 "$file")"; expected_agy="$(jq -r .agy_version "$file")"; expected_agy_sha="$(jq -r .agy_sha256 "$file")"; expected_model="$(jq -r .model "$file")"
   actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
-  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>/dev/null)"; rc=$?; set -e
+  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
   [ "$rc" -eq 0 ] || return 1
-  actual_agy="$(printf '%s\n' "$out" | sed -n 's/^PASS agy=\([^ ]*\) agy_sha256=.*/\1/p')"
-  actual_agy_sha="$(printf '%s\n' "$out" | sed -n 's/^PASS agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
-  actual_model="$(printf '%s\n' "$out" | sed -n 's/^PASS agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
+  actual_agy="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=\([^ ]*\) agy_sha256=.*/\1/p')"
+  actual_agy_sha="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
+  actual_model="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
   [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ] && [ "$expected_model" = "$actual_model" ]
 }
 qwen_live_qualified() {
