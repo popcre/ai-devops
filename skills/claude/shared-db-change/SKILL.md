@@ -34,7 +34,7 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > correct change; that one covers how a session is run — one orchestrator, all work
 > in isolated sub-agent worktrees, never background task chips (four of them once
 > wrote competing `CREATE OR REPLACE` migrations on the same function),
-> up to three isolated authors with atomic GitHub-backed reservations, and the two-part orchestrator
+> up to five isolated authors with atomic GitHub-backed reservations, and the two-part orchestrator
 > handoff. To end or hand over that session, use **`shared-db-handover`**.
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.

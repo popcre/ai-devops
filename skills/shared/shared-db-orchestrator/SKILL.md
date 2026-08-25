@@ -60,13 +60,13 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
-- Allow at most three migration authors simultaneously.
+- Allow at most `MAX_AUTHOR_LANES` migration authors simultaneously — five since 2026-08-25, three before it. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
 - Give each author an isolated worktree and branch.
 - Require exact, parseable database-object claims.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
 - Keep preview application, PR merges and production promotion strictly one at a time.
-- Do not count read-only analysis, application code, tests or planning against the three author lanes.
-- Maintain three dynamic queues grouped by exact object overlap. Recompute them after every merge.
+- Do not count read-only analysis, application code, tests or planning against the author lanes.
+- Maintain one dynamic queue per lane, grouped by exact object overlap. Recompute them after every merge.
 - Refill every free lane in the same turn. Never wait for Albert to request status or say start.
 - Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
 - Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
@@ -86,10 +86,10 @@ node scripts/manage-migration-author-lanes.mjs --claim \
   --objects "<every exact object written, comma-separated>"
 ```
 
-The command acquires GitHub-backed exact-object locks and one of three fixed
+The command acquires GitHub-backed exact-object locks and one of the fixed
 author slots across computers. It must include open pull requests and refuse
 unreadable claims, overlapping objects, unavailable GitHub state, failed version
-reservation, or a fourth author. Older claims count. Never choose a version
+reservation, or an author beyond the cap. Older claims count. Never choose a version
 manually and never hand-edit fenced claim blocks.
 
 Audit and cleanup:
