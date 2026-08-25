@@ -229,10 +229,22 @@ returns `403 request_blocked` at their end (§0.1).
   says so). Both gates this session touched pass locally and were re-verified
   independently by that session on its own checkout, including running the boundary
   tool's topology regex across all tracked files (0 matches).
-  **If that run lands red on `bin/ai-deepseek-agent`, `bin/ai-gemini`,
-  `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-gemini.sh`, or either file under
-  `tests/verification/reviewer-production-completion/`, it belongs to that session,
-  not this one — report it to Albert rather than fixing it blind.**
+  **Triage if it lands red** (paths confirmed by that session):
+  - **Theirs, do not touch:** `bin/ai-deepseek-agent`, `bin/ai-gemini`,
+    `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-gemini.sh`,
+    `tests/verification/reviewer-production-completion/2026-08-24-grok-deepseek.md`,
+    `tests/verification/reviewer-production-completion/2026-08-24-gemini-tag-limit.md`.
+    A failure in the **`windows-reviewer-safety`** job is almost certainly theirs.
+    Report it to Albert with the run URL, and point him at
+    [`HANDOFF.d/2026-08-24T1503Z-edge-dev-claude-gemini-qualification-record.md`](2026-08-24T1503Z-edge-dev-claude-gemini-qualification-record.md)
+    §3.3 — it already tells the next session in that workstream to confirm this
+    commit's CI passed before building on it.
+  - **Ambiguous:** `linux-offline` / `windows-offline` could be any session's.
+    Report as ambiguous unless the failing suite name points at one of the paths
+    above. **Do not guess at authorship** — a confident wrong attribution costs more
+    than an honest "not sure whose".
+  - **Mine:** anything touching `fix_stale_name.md`, this file, or
+    `bin/setup-machine.ps1` — fix it.
 - **The redacted address is still in public git history.** HEAD is clean, which
   limits further spread but does not un-publish it. The purge is Step 15 of
   `plan_full-strategy-remediation.md` and needs a GitHub Support request only Albert
