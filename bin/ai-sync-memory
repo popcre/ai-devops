@@ -104,7 +104,8 @@ merge_memory_index() {
     return 1
   fi
   if [[ -s "$additions" ]]; then
-    if ! { printf '\n## Local entries preserved during migration\n\n' >> "$tmp" &&
+    if ! { { grep -Fqx "## Local entries preserved during migration" "$tmp" ||
+        printf '\n## Local entries preserved during migration\n\n' >> "$tmp"; } &&
       cat "$additions" >> "$tmp"; }; then
       rm -f "$tmp" "$additions"
       return 1
@@ -130,6 +131,14 @@ copy_fact_union() {
     if [[ ! -e "$target" ]]; then
       run cp -a "$file" "$target"
     elif ! cmp -s "$file" "$target"; then
+      # A source file that already carries a machine suffix IS a conflict
+      # artifact from an earlier sync. Minting a second-generation suffix for
+      # it (base--hetz--al8960ofc.md, then -2, -3) makes every later sync
+      # multiply the folder and its index. Keep the destination copy instead.
+      if [[ "$base" == *--*.md ]]; then
+        echo "memory conflict left as-is (already machine-suffixed): $label/$base" >&2
+        continue
+      fi
       extension="${base##*.}"
       if [[ "$extension" == "$base" ]]; then extension=""; else extension=".$extension"; fi
       base="${base%$extension}"
@@ -158,7 +167,9 @@ ensure_index_coverage() {
       if [[ "$DRY_RUN" == "--dry-run" ]]; then
         echo "[dry-run] index $label/$base"
       else
-        if [[ "$added" -eq 0 ]]; then printf '\n## Recovered union entries\n\n' >> "$index"; fi
+        if [[ "$added" -eq 0 ]] && ! grep -Fqx "## Recovered union entries" "$index"; then
+          printf '\n## Recovered union entries\n\n' >> "$index"
+        fi
         printf -- '- [%s](%s) - Portable fact preserved by lossless sync.\n' "${base%.md}" "$base" >> "$index"
       fi
       added=$((added+1))
