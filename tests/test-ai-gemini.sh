@@ -23,7 +23,7 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- build) p="$2/.ai-review-$3"; mkdir -p "$p"; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; printf %s "$p" ;;
+ build) p="$2/.ai-review-$3"; mkdir -p "$p"; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify) test -s "$2/MANIFEST.sha256" ;;
  path) printf %s "$2/.ai-review-$3" ;;
  remove) rm -rf "$2/.ai-review-$3" ;;
@@ -84,14 +84,19 @@ check 'normal operation cannot bypass quarantine' "! '$SCRIPT' new blocked --pro
 check 'missing qualification record causes no provider contact' "test ! -s '$MOCK_AGY_CALLS'"
 check 'quarantine exposes only the governed live qualification path without overstating denied-tool proof' "grep -q 'qualify-live' '$SCRIPT' && grep -q 'outside sentinel changed during live qualification' '$SCRIPT' && grep -q 'mutation-request=no-change' '$SCRIPT' && ! grep -q 'hostile-write=no-change' '$SCRIPT'"
 check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
+check 'doctor rejects unknown options instead of overstating a live check' "! '$SCRIPT' doctor --unknown"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
-WRAPPER_SHA="$(sha256sum "$SCRIPT" | awk '{print $1}')"; AGY_SHA="$(sha256sum "$AI_GEMINI_BIN" | awk '{print $1}')"
+WRAPPER_SHA="$(sha256sum "$SCRIPT" | awk '{print $1}')"; AGY_SHA="$(sha256sum < "$AI_GEMINI_BIN" | awk '{print $1}')"
 write_qualification(){ jq -nc --arg sha "$WRAPPER_SHA" --arg agy "${1:-1.1.14}" --arg agy_sha "${3:-$AGY_SHA}" --arg model "${2:-gemini-3.7-flash-high}" '{version:2,provider:"gemini",wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:1}' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"; }
 write_qualification
 check 'valid governed record releases the wrapper gate' "$SCRIPT doctor | grep -q '^PASS'"
+RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"
+write_qualification 1.1.14 gemini-3.7-flash-high "$RACE_SHA"
+RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
+check 'runtime replacement after startup gate is refused before provider contact' "! (cd '$RACE_REPO' && AI_GEMINI_BIN='$RACE_AGY' MOCK_MUTATE_RUNTIME_AFTER_GATE=1 '$SCRIPT' new runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
 check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
