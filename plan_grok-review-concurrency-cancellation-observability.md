@@ -26,9 +26,15 @@ serialization goal below without discarding its duplicate-send safeguards.
 |---|---|---|
 | Split exact-session ownership from exact-work idempotency | 🟨 implemented locally | `session--*` mutexes and digest-keyed `work--*` protections in `bin/ai-grok-review` |
 | Preserve clone-equivalent duplicate detection and legacy state | 🟨 implemented locally | normalized upstream remains an identity input; evidence-bearing schema-2 locks protect only their exact caller/session; ambiguous legacy locks fail closed |
-| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 180/180, including concurrent `new`/`ask`, exact cross-clone retries, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
+| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 183/183, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
 | Full repository offline gates | ✅ complete | 53/53 Bash groups and 16/16 PowerShell groups pass on Windows |
 | Independent exact-head review, bounded installed live canary, push, and issue update | ⬜ open | required before completion |
+
+Independent review round 1 at `b5f7c76` returned `REJECT`: a changed prompt
+could bypass the exact-work digest after an uncertain continuation. The wrapper
+now also reserves the durable logical session turn independently of prompt
+identity; both the exact retry and a materially changed retry are refused while
+unrelated named sessions remain runnable. The three new regression cases pass.
 
 Corrected rule: **Grok reviews are not globally or repository-wide serialized.
 Only the same exact review session/turn or an idempotently identical submission

@@ -315,6 +315,10 @@ session_record_path() { # durable logical-name collision guard
   local id; id="$(printf 'grok\n%s\n%s\n%s' "$1" "$2" "$3" | sha256sum | cut -c1-24)"
   printf '%s/session-records/%s' "$STATE_DIR" "$id"
 }
+turn_record_path() { # durable next-turn collision guard, independent of prompt digest
+  local id; id="$(printf 'grok\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" | sha256sum | cut -c1-28)"
+  printf '%s/turn-records/%s' "$STATE_DIR" "$id"
+}
 work_lock_path() { printf '%s/locks/work--%s.lock.d' "$STATE_DIR" "$1"; }
 work_identity() { # immutable exact provider-call contract; never stores prompt text
   printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" | sha256sum | cut -c1-32
@@ -424,6 +428,21 @@ reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROM
   existing="$(cat "$dir/contract" 2>/dev/null || true)"
   [ "$existing" = "$contract" ] && return 0
   warn "session-name collision: '$name' is already reserved for a materially different new-review contract. Choose a different name; the existing conversation is not changed."
+  return 1
+}
+
+reserve_session_turn() { # reserve_session_turn UPSTREAM NAME TURN CONTRACT SOURCE PROMPT_DIGEST
+  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing
+  dir="$(turn_record_path "$upstream" "$CALLER" "$name" "$turn")"; mkdir -p "$(dirname "$dir")"
+  if mkdir "$dir" 2>/dev/null; then
+    printf '1\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"; printf '%s\n' "$CALLER" > "$dir/caller"
+    printf '%s\n' "$name" > "$dir/session"; printf '%s\n' "$turn" > "$dir/turn"; printf '%s\n' "$contract" > "$dir/contract"
+    printf '%s\n' "$source_id" > "$dir/source_identity"; printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
+    date -u +%FT%TZ > "$dir/created"; return 0
+  fi
+  existing="$(cat "$dir/contract" 2>/dev/null || true)"
+  [ "$existing" = "$contract" ] && return 0
+  warn "continuation-turn collision: session '$name' turn $turn is already reserved for materially different work. Its prior provider outcome may be unconfirmed; reconcile it before advancing this session."
   return 1
 }
 lock_release() { # only the creating wrapper may release it
@@ -1247,6 +1266,7 @@ $REVIEW_HEAD only."
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
+  if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
   if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate continuation."; fi
   if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" "$next_turn"; then
     lock_release "$sess_lock"
@@ -1376,6 +1396,13 @@ cmd_delete() {
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
+  for record in "$STATE_DIR"/turn-records/*; do
+    [ -d "$record" ] || continue
+    [ "$(cat "$record/upstream" 2>/dev/null || true)" = "$upstream" ] || continue
+    [ "$(cat "$record/caller" 2>/dev/null || true)" = "$CALLER" ] || continue
+    [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
+    rm -rf -- "$record"
+  done
   release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }

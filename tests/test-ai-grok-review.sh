@@ -625,6 +625,17 @@ check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_
 DUP_ASK="$(run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
 check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
+rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
+( cd "$REPO" && exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
+for _i in $(seq 1 30); do ASK_UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"; [ -n "$ASK_UNCERTAIN_LOCK" ] && [ -f "$TMP/hold-started" ] && break; sleep 1; done
+kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
+run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
+check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"
 check "delete removes the record"  "run delete t1 && ! run show t1"
 
 # 15 ------------------------------------------------------------------------
