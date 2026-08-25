@@ -6,10 +6,31 @@ Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](shared-db
 
 ## STATUS
 
+> **STALE ON ONE POINT, 2026-08-25 — the author-lane count. This plan is a
+> PROPOSAL, not an operating rule.** Every implementation step below except
+> step 6 (reviewer agreement on the plan text) is still open, so the 1+1 model
+> was never built. Meanwhile Albert raised the author-lane cap from three to
+> five on 2026-08-25 (u2giants/shared-db#1537), and `MAX_AUTHOR_LANES` in
+> `shared-db/scripts/manage-migration-author-lanes.mjs` is what the tooling
+> actually enforces.
+>
+> An automated repository review read this plan's "no automatic lane refill, no
+> utilization target" and the skill's five-lane refill rule as two live rules in
+> conflict. They are not: a 2026-08-25 owner instruction outranks an
+> unimplemented 2026-08-18 proposal. **Do not "reconcile" them by lowering the
+> cap or removing lane refill from the skills** — that would reverse an owner
+> instruction on the strength of a plan that predates it.
+>
+> Nothing else here is withdrawn. The diagnosis, the finish-first completion
+> definition, and the objection to treating "merged" as "delivered" all stand,
+> and a future 1+1 implementation would need a fresh owner instruction on the
+> lane count as its step 2. References to "three author lanes" below are the
+> 2026-08-18 state of the world, kept as written so the reasoning stays legible.
+
 | Step | State | Date | Evidence |
 |---|---|---|---|
 | 1. Freeze the old incentives and define the new outcome contract | ⬜ open | 2026-08-18 | Required edits and tests are in §9.1. |
-| 2. Replace three author lanes with the durable 1+1 delivery model | ⬜ open | 2026-08-18 | Required manager behavior and race tests are in §9.2. |
+| 2. Replace three author lanes with the durable 1+1 delivery model | ⬜ open — **premise superseded 2026-08-25**, see the note above; the cap is now five and needs a fresh owner instruction before any 1+1 work | 2026-08-18 | Required manager behavior and race tests are in §9.2. |
 | 3. Add the read-only health audit and early delivery preflight | ⬜ open | 2026-08-18 | Required audit classes and fixtures are in §9.3. |
 | 4. Rewrite the shared-db and installed operating rules | ⬜ open | 2026-08-18 | Required source, router, and drift checks are in §9.4. |
 | 5. Prove the complete model in disposable fixtures | ⬜ open | 2026-08-18 | End-to-end scenarios are in §9.5. |
@@ -121,7 +142,7 @@ The failure is architectural, not just reviewer latency: the system has no hard 
 
 ### What currently drives the failure
 
-- `shared-db/scripts/manage-migration-author-lanes.mjs:11,103,179` and tests enforce three author lanes.
+- `shared-db/scripts/manage-migration-author-lanes.mjs:11,103,179` and tests enforce three author lanes. *(As of 2026-08-18. The cap is five since 2026-08-25; read `MAX_AUTHOR_LANES` for the enforced value.)*
 - `--queue-audit` prints `REFILL REQUIRED NOW` when eligible issues exist (`manage-migration-author-lanes.mjs:989-993`).
 - `shared-db/AGENTS.md:646-712` requires up to three concurrent authors, immediate refill, and more safe preparation while authors wait.
 - `ai-devops/skills/shared/shared-db-orchestrator/SKILL.md` requires at most three authors, automatic same-turn refill, and a standing coordinating session.
