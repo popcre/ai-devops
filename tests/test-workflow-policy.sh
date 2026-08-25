@@ -9,4 +9,13 @@ case "$windows_timeout" in
 esac
 [ "$windows_timeout" -ge 75 ] || { printf 'FAIL: windows-offline needs at least 75 minutes of measured runtime headroom\n' >&2; exit 1; }
 
-printf 'PASS: complete Windows suite keeps measured runtime headroom\n'
+grep -Fq 'group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}' "$workflow" || {
+  printf 'FAIL: verification concurrency must be scoped to immutable event and source SHA\n' >&2
+  exit 1
+}
+grep -Fq 'cancel-in-progress: true' "$workflow" || {
+  printf 'FAIL: duplicate verification runs for the same source must still be cancellable\n' >&2
+  exit 1
+}
+
+printf 'PASS: complete Windows suite keeps measured runtime headroom and immutable runs survive newer commits\n'

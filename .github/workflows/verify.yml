@@ -7,7 +7,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.ref }}
+  # Keep each immutable commit's proof alive when newer work lands on main.
+  # Only a duplicate run for the same event and source SHA is superseded.
+  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
