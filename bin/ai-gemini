@@ -16,8 +16,8 @@ SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
 ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''
 die(){ printf 'ai-gemini: error: %s\n' "$*" >&2; exit 1; }
-live_qualified(){
-  local expected_wrapper expected_agy expected_agy_sha expected_model actual_wrapper actual_agy actual_agy_sha a
+runtime_qualified(){
+  local a="$1" expected_wrapper expected_agy expected_agy_sha expected_model actual_wrapper actual_agy actual_agy_sha
   [ -f "$QUALIFICATION_FILE" ] || return 1
   jq -e '.version==2 and .provider=="gemini" and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_version|type=="string" and length>0) and (.model|type=="string" and length>0) and (.qualified_epoch|type=="number")' "$QUALIFICATION_FILE" >/dev/null 2>&1 || return 1
   expected_wrapper="$(jq -r .wrapper_sha256 "$QUALIFICATION_FILE")"
@@ -26,12 +26,13 @@ live_qualified(){
   expected_model="$(jq -r .model "$QUALIFICATION_FILE")"
   actual_wrapper="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | awk '{print $1}')"
   [ "$expected_wrapper" = "$actual_wrapper" ] && [ "$expected_model" = "$MODEL" ] || return 1
-  a="$(agy 2>/dev/null)" || return 1
   actual_agy="$("$a" --version 2>/dev/null)" || return 1
-  actual_agy_sha="$(sha256sum "$a" 2>/dev/null | awk '{print $1}')"
+  actual_agy_sha="$(sha256sum < "$a" 2>/dev/null | awk '{print $1}')"
   [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ]
 }
+live_qualified(){ local a; a="$(raw_agy 2>/dev/null)" || return 1; runtime_qualified "$a"; }
 QUARANTINED=1
+QUALIFYING=0
 guard_quarantine(){ [ "$QUARANTINED" -eq 0 ] || die 'Gemini reviews are quarantined until live safety qualification is complete'; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
@@ -40,7 +41,8 @@ root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repos
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
 meta(){ printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$1"; }
-agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
+raw_agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
+agy(){ local a; a="$(raw_agy)"; if [ "$QUALIFYING" -eq 0 ]; then runtime_qualified "$a" || die 'Gemini qualification no longer matches the exact wrapper, runtime, or model; quarantine restored'; fi; printf %s "$a"; }
 live_qualified && QUARANTINED=0
 require_local_runtime(){ local a; a="$(agy)"; "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
@@ -104,7 +106,7 @@ new(){ local n="${1:-}" r id m tag d p q out c h ph tree source_tree rep now; gu
 ask(){ local n="${1:-}" r id m d c q out rep actual tag frozen_model expected_tree expected_source; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; [ "$(jq -r .status "$m")" = COMPLETE ] || die 'session requires recovery before reuse'; frozen_model="$(jq -r '.model // empty' "$m")"; [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'; begin "$m" "$(lock_path "repo-$id")" "$(lock_path "session-$id-$CALLER-$n")"; d="$(jq -r .review_dir "$m")"; c="$(jq -r .conversation_id "$m")"; actual="$(git -C "$r" rev-parse HEAD)"; [ "$actual" = "$(jq -r .head "$m")" ] || die 'working checkout changed; start a new review'; expected_source="$(jq -r '.source_tree_sha256 // empty' "$m")"; [ -n "$expected_source" ] && [ "$(source_inventory "$r")" = "$expected_source" ] || die 'working checkout files changed between turns; start a new review'; expected_tree="$(jq -r '.review_tree_sha256 // empty' "$m")"; [ -n "$expected_tree" ] && [ "$(inventory "$d")" = "$expected_tree" ] || die 'disposable review copy changed between turns; evidence preserved for recovery'; tag="$(jq -r .sandbox_tag "$m")"; "$PACKET" verify "$("$PACKET" path "$d" "$tag")" >/dev/null || die 'evidence packet verification failed'; update_state "$m" RUNNING 'follow-up provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$("$PACKET" path "$d" "$tag")")")"; out="$(mktemp)"; call "$d" "$r" "$c" "$q" "$out"; verify_turn "$out" "$c"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; finish "$m"; printf 'PASS session=%s report=%s\n' "$n" "$rep"; }
 list(){ find "$STATE_DIR/sessions" -name '*.json' -type f -print0 2>/dev/null | xargs -0 -r -n1 jq -r '[.name,.caller,.status,.model,(.conversation_id//"unavailable")]|@tsv'; }
 delete(){ local n="${1:-}" r id m d t status; name_ok "$n" || die 'invalid session name'; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; acquire "$(lock_path "repo-$id")" repository; acquire "$(lock_path "session-$id-$CALLER-$n")" session; status="$(jq -r .status "$m")"; [ "$status" = COMPLETE ] || die 'refusing to delete preserved recovery evidence'; d="$(jq -r .review_dir "$m")"; t="$(jq -r .sandbox_tag "$m")"; "$PACKET" remove "$d" "$t" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$r" "$t"; rm -f "$m"; ACTIVE_TERMINAL=1; release_locks; }
-doctor(){ local a a_sha; need git; need jq; a="$(agy)"; "$a" --help 2>&1 | grep -q -- --sandbox || die 'agy lacks --sandbox'; "$a" models | grep -q "^$MODEL" || die 'configured model unavailable'; a_sha="$(sha256sum "$a" | awk '{print $1}')"; if [ "$QUARANTINED" -eq 1 ]; then printf 'QUARANTINED agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory live-qualification=required\n' "$("$a" --version)" "$a_sha" "$MODEL"; return 3; fi; printf 'PASS agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$("$a" --version)" "$a_sha" "$MODEL"; }
+doctor(){ local a a_sha; need git; need jq; a="$(agy)"; "$a" --help 2>&1 | grep -q -- --sandbox || die 'agy lacks --sandbox'; "$a" models | grep -q "^$MODEL" || die 'configured model unavailable'; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; if [ "$QUARANTINED" -eq 1 ]; then printf 'QUARANTINED agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory live-qualification=required\n' "$("$a" --version)" "$a_sha" "$MODEL"; return 3; fi; printf 'PASS agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$("$a" --version)" "$a_sha" "$MODEL"; }
 qualify_live(){
   local name="qual-$(date -u +%Y%m%dT%H%M%SZ)-$$" sentinel before after fixture
   require_local_runtime; fixture="$STATE_DIR/qualification-fixtures/$name"; mkdir -p "$fixture"; chmod 700 "$fixture" 2>/dev/null || true
@@ -120,4 +122,4 @@ qualify_live(){
   printf 'QUALIFIED session=%s model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=%s\n' "$name" "$MODEL" "$fixture"
 }
 usage(){ printf '%s\n' 'Usage: ai-gemini new|ask <name> [--prompt TEXT|--prompt-file FILE|stdin] ; ai-gemini list|delete <name>|doctor|qualify-live'; }
-case "${1:-}" in new) shift; new "$@";; ask) shift; ask "$@";; list) list;; delete) shift; delete "${1:-}";; doctor) doctor;; qualify-live) qualify_live;; --version) echo "ai-gemini $VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;; esac
+case "${1:-}" in new) shift; new "$@";; ask) shift; ask "$@";; list) list;; delete) shift; delete "${1:-}";; doctor) shift; QUALIFYING=1; case "${1:-}" in '') doctor ;; --live) [ "$#" -eq 1 ] || die 'usage: ai-gemini doctor [--live]'; qualify_live ;; *) die 'usage: ai-gemini doctor [--live]' ;; esac;; qualify-live) shift; [ "$#" -eq 0 ] || die 'usage: ai-gemini qualify-live'; QUALIFYING=1; qualify_live;; --version) echo "ai-gemini $VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;; esac

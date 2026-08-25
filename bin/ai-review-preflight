@@ -219,7 +219,8 @@ check_provider() { # PROVIDER REPO LIVE BASE
     if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
   elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
-    out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    else out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
   else
     out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
   fi
