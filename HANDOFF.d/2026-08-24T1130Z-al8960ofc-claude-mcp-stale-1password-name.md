@@ -15,7 +15,20 @@ Put this whole list to Albert in ONE message before starting work.
 
 **BLOCKING**
 
-1. **Recall.ai is blocking the account — only Albert can pursue it** (issue #68). `recall-ai`
+1. **Delete the duplicate Vercel connector in Claude's UI.** A second Vercel
+   connector runs through `mcp-remote`, which Vercel will not issue renewable
+   credentials to, so it reopens a browser authorization window on every relaunch
+   and has never once completed sign-in (no tokens file exists for it). A separate
+   Vercel connector is already authorized and works — `list_teams` returned team
+   POP (`popcre`, pro) with no prompt — so deleting the broken one loses no
+   capability. *Recommendation: delete it in Settings > Connectors. It cannot be
+   removed from a file; it lives in the app's connector store.* **Do not delete
+   Codex's `[mcp_servers."vercel"]` block — that is Codex's real install.**
+   Background: [[vercel-mcp-never-via-mcp-remote]] in this machine's memory,
+   updated 2026-08-24 with the finding that the app's own connector store now
+   routes through mcp-remote too, so the previously-prescribed fix no longer works.
+
+2. **Recall.ai is blocking the account — only Albert can pursue it** (issue #68). `recall-ai`
    now passes every local check and is then refused by Recall.ai with
    `403 request_blocked`. A wrong token gets 401 and ours gets 403, so the
    credential is valid and authenticates; the block is an account/workspace
@@ -25,7 +38,7 @@ Put this whole list to Albert in ONE message before starting work.
 
 **RECOVERABLE**
 
-2. **`setup-machine.ps1` writes Codex's `config.toml` — is that intended?**
+3. **`setup-machine.ps1` writes Codex's `config.toml` — is that intended?**
    Established as fact this session: the 09:57 run reverted `~/.codex/config.toml`
    along with the Claude configs. (An earlier note in this handoff wrongly said it
    did not.) That sits awkwardly beside the standing rule that Claude setup must
@@ -35,7 +48,7 @@ Put this whole list to Albert in ONE message before starting work.
 
 **NOT PART OF THIS WORK, AND NOBODY IS ON IT**
 
-3. **CORRECTED — the NAS bearer was never missing, but its note still says it is.**
+4. **CORRECTED — the NAS bearer was never missing, but its note still says it is.**
    Albert asked for it to be copied from Coolify into 1Password. It is **already
    there**: Coolify's `MCP_BEARER_TOKEN` and the vault's `nas_token` field are the
    same value (identical SHA-256, verified 2026-08-24), so copying would have
@@ -46,7 +59,7 @@ Put this whole list to Albert in ONE message before starting work.
    name `op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token`, and the seven secret
    fields were verified unchanged afterwards. *No action needed; listed so a future
    session knows why that item's text changed.*
-4. **A known-leaked NAS token still sits in this PUBLIC repo's git history**, kept
+5. **A known-leaked NAS token still sits in this PUBLIC repo's git history**, kept
    on purpose so the leaked value stays identifiable. It is already rotated and
    returns Unauthorized, so this is a note, not an exposure. *Recommendation: no
    action; flagged only so nobody rediscovers it and panics.*
@@ -109,7 +122,21 @@ the launcher and started cleanly (exit 0, no validation error).
 **`recall-ai` is still down** — reference mismatch fixed (§5), but Recall.ai now
 returns `403 request_blocked` at their end (§0.1).
 
-**Not done:** clients need one more restart to pick up the corrected configs.
+**RESTART DONE AND VERIFIED (2026-08-24 evening).** From the client logs, **10 of 11
+MCP servers are connected**: 1password, ag-grid, chrome-devtools, codex-cli,
+devops-mcp, playwright, supabase, synology-monitor, trigger, vercel. Every server
+the outage took down is back. **`recall-ai` is the only one still disconnected**,
+for the Recall.ai account block in §0.2 — not for anything in this repo.
+
+**CI `verify` @ d152148: SUCCESS on all three jobs** (`linux-offline`,
+`windows-offline`, `windows-reviewer-safety`). That closes the §9 watch: nothing
+red, so nothing to attribute to either this session or the reviewer-repair
+session, and 78c8009 now has its first complete verification.
+
+**This session's worktree was removed by another session mid-wrap-up.** No work was
+lost — everything lives on `origin/claude/mcp-server-failures-8a59bd` and in the
+merged commits. If you need a checkout, `git worktree add` the branch fresh rather
+than hunting for the old path.
 
 ## 4. Everything we tried that did NOT work
 
@@ -181,13 +208,17 @@ returns `403 request_blocked` at their end (§0.1).
 
 1. ~~Fix the VPS~~ — **DONE 2026-08-24.** Issue #63 is closed; this file now tracks
    #68 (recall-ai) and is retired when that closes.
-2. **Restart Claude Desktop, Claude Code, and Codex on al8960ofc** (a full quit, not
-   a window close). *You'll know it worked when no new `Server disconnected` lines
-   appear in `AppData\Local\Claude\Logs` and all six servers respond.*
-3. **Restart the VPS clients** after step 1, same check.
+2. ~~Restart Claude Desktop, Claude Code, and Codex on al8960ofc~~ — **DONE and
+   verified:** 10 of 11 servers connected; `recall-ai` is the only holdout (§0.2).
+3. **Restart the VPS clients.** Not done — the hetz file was corrected but its
+   clients have not been restarted since. *You'll know it worked when no new
+   `Server disconnected` lines appear in that machine's logs.*
+3b. **Delete the duplicate Vercel connector** (§0.1). *You'll know it worked when
+   no authorization window reopens and Vercel tools still respond.*
 4. ~~Merge this branch to `main`~~ — **DONE**, and it is what stops the fix being
    overwritten again.
-5. **Close issue #63 and DELETE this handoff file** in the same pull request.
+5. **Close issue #68 and DELETE this handoff file** in the same pull request.
+   (#63 is already closed by the merge; #68 is what keeps this file open.)
 6. *(Optional, needs §0.2)* Teach `setup-machine.ps1` to write Codex's config, or
    record deliberately that it never will.
 
@@ -220,7 +251,10 @@ returns `403 request_blocked` at their end (§0.1).
 
 ## 9. Open questions and risks
 
-- **CI run `verify` on `main` @ d152148 had not finished when this session ended.**
+- **CI run `verify` on `main` @ d152148 — RESOLVED: SUCCESS on all three jobs**
+  (`linux-offline`, `windows-offline`, `windows-reviewer-safety`). Nothing to
+  attribute to anyone; the triage list below is retained only as a record of who
+  owns what if a later run goes red. Original note:
   It is the first *complete* verification of two sets of changes at once: this
   session's redaction, and the reviewer-repair session's commit 78c8009 (that
   session pushed with only its directly-affected suites run locally — three attempts
