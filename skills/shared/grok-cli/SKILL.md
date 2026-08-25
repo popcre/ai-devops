@@ -16,11 +16,16 @@ ai-grok-review list | show <name> | transcript <name> | delete <name>
 ai-grok-review doctor
 ```
 
-`list` shows paid Grok work across every clone owned by the current reviewer OS account, while completed
+`list` shows active Grok work and retained exact-work protections across every clone owned by the current reviewer OS account, while completed
 sessions remain limited to the current checkout. Equivalent GitHub HTTPS, SSH,
-case, `.git`, and local-clone origins share one paid-work lock. If a local wrapper
-is interrupted, do not start another review: provider cancellation is unconfirmed
-and the retained lock deliberately blocks another charge until a human reconciles it.
+case, `.git`, and local-clone origins share duplicate detection, but they do not
+share a repository-wide semaphore. **Grok reviews are not globally or
+repository-wide serialized. Only the same exact review session/turn or an
+idempotently identical submission is serialized. Independent reviews may run
+concurrently.** If a local wrapper is interrupted, do not retry that exact
+session/turn: provider cancellation is unconfirmed and its digest-keyed
+protection deliberately blocks another charge until reconciliation. Unrelated
+named sessions remain runnable.
 The configured wait ceiling also stops a hung local Grok process; because that
 still does not prove remote cancellation, the same paid-work block remains.
 `delete` refuses an active session and never deletes Grok's provider-side history.

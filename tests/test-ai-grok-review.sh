@@ -189,7 +189,7 @@ EOF
 echo ok > "$TMP/mode"
 
 # 16 ------------------------------------------------------------------------
-echo "== shared_upstream_lock_visibility_and_truthful_interrupt =="
+echo "== exact_work_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 # Keep this first review alive until this test explicitly releases it. A fixed
 # sleep made the assertions depend on how quickly Windows created repositories.
@@ -200,7 +200,7 @@ export AI_GROK_HEARTBEAT_INTERVAL=2
 # unintended timeout and leave a false remote-uncertain lock.
 ( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
 for _i in $(seq 1 60); do
-  [ -d "$AI_GROK_STATE_DIR/locks/repo--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
+  [ -d "$AI_GROK_STATE_DIR/locks/work--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
 if [ ! -f "$TMP/hold-started" ]; then
@@ -208,14 +208,21 @@ if [ ! -f "$TMP/hold-started" ]; then
   sed -n '1,80p' "$TMP/first.err" >&2 2>/dev/null || true
 fi
 check "slow_fixture_reached_the_provider_before_mode_changes" "test -f '$TMP/hold-started'"
-SECOND="$( cd "$CLONE" && bash "$SCRIPT" new other-clone --prompt x 2>&1 )"; SECOND_RC=$?
-[ "$SECOND_RC" -ne 0 ] && ok "equivalent_github_clones_share_one_paid_review_lock" || bad "equivalent_github_clones_share_one_paid_review_lock"
-DOCTOR_BLOCKED="$( cd "$REPO" && bash "$SCRIPT" doctor --live 2>&1 )"; DOCTOR_BLOCKED_RC=$?
-check "live doctor shares the repository paid-work lock" "test '$DOCTOR_BLOCKED_RC' -ne 0 && printf '%s' \"$DOCTOR_BLOCKED\" | grep -q 'already running'"
+rm -f "$TMP/hold-started"
+( cd "$CLONE" && AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new other-clone --prompt different >"$TMP/second.out" 2>"$TMP/second.err" ) & SECOND_PID=$!
+for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 2 ] && break; sleep 1; done
+check "same_repo_different_session_and_packet_run_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
+EXACT="$( cd "$CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; EXACT_RC=$?
+check "same_exact_session_and_turn_is_refused" "test '$EXACT_RC' -ne 0 && printf '%s' \"$EXACT\" | grep -Eq 'already has an owner|session-name collision|exact Grok'"
+CLAUDE_PID=''
+( cd "$CLONE" && AI_GROK_CALLER=claude AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new claude-independent --prompt caller-different >"$TMP/claude.out" 2>"$TMP/claude.err" ) & CLAUDE_PID=$!
+for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 3 ] && break; sleep 1; done
+check "same_repo_different_caller_and_work_run_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 3"
+check "lock_metadata_contains_digests_not_raw_prompts" "! grep -R -F 'caller-different' '$AI_GROK_STATE_DIR/locks'"
 SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
 git -C "$SSH_CLONE" remote set-url origin git@GitHub.com:EXAMPLE/Reviewer-Fixture.git
-SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new ssh-spelling --prompt x 2>&1 )"; SSH_RC=$?
-[ "$SSH_RC" -ne 0 ] && printf '%s' "$SSH_BLOCKED" | grep -q 'already running' && ok "https_ssh_dotgit_and_case_normalize_to_one_upstream" || bad "https_ssh_dotgit_and_case_normalize_to_one_upstream"
+SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; SSH_RC=$?
+[ "$SSH_RC" -ne 0 ] && ok "equivalent_origins_share_exact_session_duplicate_detection" || bad "equivalent_origins_share_exact_session_duplicate_detection"
 OTHER="$TMP/unrelated"; mkdir -p "$OTHER"; git -C "$OTHER" init -q
 git -C "$OTHER" config user.email t@example.com; git -C "$OTHER" config user.name T
 printf '.ai/\n' > "$OTHER/.gitignore"; echo x > "$OTHER/x"; git -C "$OTHER" add -A; git -C "$OTHER" commit -qm i
@@ -225,10 +232,12 @@ echo ok > "$TMP/mode"
 echo wait > "$TMP/mode"
 LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
 check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
-check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq '[0-9]+s.*alive'"
+check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq 'active.*[0-9]+s'"
 sleep 5
 touch "$TMP/release-grok"
 wait "$FIRST_PID"
+wait "$SECOND_PID"
+wait "$CLAUDE_PID"
 check "slow_turn_emits_truthful_bounded_heartbeats" "test \"\$(grep -c 'does not prove provider activity' '$TMP/first.err')\" -ge 2"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
 
@@ -239,7 +248,7 @@ rm -f "$TMP/release-grok" "$TMP/hold-child-pid" "$TMP/hold-child-terminated"; ec
 TIMEOUT_START="$(date +%s)"
 TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"; TIMED_OUT_RC=$?
 TIMEOUT_ELAPSED=$(( $(date +%s) - TIMEOUT_START ))
-TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured 3s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
 check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt 45"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
@@ -251,7 +260,7 @@ rm -rf "$TIMEOUT_LOCK"
 # still terminate the worker captured from the launcher's process tree.
 rm -f "$TMP/orphan-pid" "$TMP/orphan-terminated"; echo orphan > "$TMP/mode"
 ORPHANED="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new orphan-timeout --prompt x 2>&1 )"; ORPHANED_RC=$?
-ORPHAN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+ORPHAN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "launcher_exit_timeout_kills_the_tracked_orphan_worker" "test '$ORPHANED_RC' -ne 0 && test -s '$TMP/orphan-pid' && ! kill -0 \"\$(cat '$TMP/orphan-pid')\" 2>/dev/null"
 check "orphan_timeout_remains_fail_closed_for_remote_work" "test -f '$ORPHAN_LOCK/remote-uncertain'"
 rm -rf "$ORPHAN_LOCK"
@@ -260,12 +269,12 @@ LOCK_EQ="$AI_GROK_STATE_DIR/locks/repo--$(printf '%s' 'github.com/example/review
 mkdir -p "$LOCK_EQ"; printf '99999999\n' > "$LOCK_EQ/pid"; printf 'stale\n' > "$LOCK_EQ/label"
 echo ok > "$TMP/mode"
 DEAD="$( cd "$CLONE" && bash "$SCRIPT" new dead-owner --prompt x 2>&1 )"; DEAD_RC=$?
-[ "$DEAD_RC" -ne 0 ] && printf '%s' "$DEAD" | grep -q 'remote completion is unconfirmed' && ok "dead_owner_becomes_remote_uncertain" || bad "dead_owner_becomes_remote_uncertain"
-check "dead_owner_lock_is_preserved" "test -f '$LOCK_EQ/remote-uncertain'"
+[ "$DEAD_RC" -ne 0 ] && printf '%s' "$DEAD" | grep -q 'ambiguous legacy' && ok "dead_legacy_owner_remains_fail_closed" || bad "dead_legacy_owner_remains_fail_closed"
+check "dead_owner_lock_is_preserved" "test -d '$LOCK_EQ'"
 rm -rf "$LOCK_EQ"
 mkdir -p "$LOCK_EQ"; printf 'not-a-pid\n' > "$LOCK_EQ/pid"; printf 'malformed\n' > "$LOCK_EQ/label"
 MALFORMED="$( cd "$CLONE" && bash "$SCRIPT" new malformed --prompt x 2>&1 )"; MALFORMED_RC=$?
-[ "$MALFORMED_RC" -ne 0 ] && printf '%s' "$MALFORMED" | grep -q 'malformed lock' && ok "malformed_lock_is_not_reclaimed" || bad "malformed_lock_is_not_reclaimed"
+[ "$MALFORMED_RC" -ne 0 ] && printf '%s' "$MALFORMED" | grep -q 'ambiguous legacy' && ok "malformed_lock_is_not_reclaimed" || bad "malformed_lock_is_not_reclaimed"
 rm -rf "$LOCK_EQ"
 
 # During a mixed-version rollout, an older wrapper's checkout-keyed lock has no
@@ -284,7 +293,7 @@ echo hold > "$TMP/mode"
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
 for _i in $(seq 1 30); do
-  LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+  LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
   [ -n "$LOCK_NOW" ] && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
@@ -293,17 +302,22 @@ kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"
 check "directed signal terminates and reaps the owned local Grok child" "test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
-BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --prompt x 2>&1 )"; BLOCKED_RC=$?
-[ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_duplicate_paid_turn" || bad "remote_uncertainty_blocks_duplicate_paid_turn"
+BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new interrupted --prompt x 2>&1 )"; BLOCKED_RC=$?
+[ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_only_its_exact_duplicate" || bad "remote_uncertainty_blocks_only_its_exact_duplicate"
+echo ok > "$TMP/mode"
+UNRELATED_AFTER_STOP="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --prompt different 2>&1 )"; UNRELATED_RC=$?
+check "remote_uncertainty_allows_unrelated_review" "test '$UNRELATED_RC' -eq 0"
 rm -rf "$LOCK_NOW"
 echo empty > "$TMP/mode"
 UNCONFIRMED="$( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new no-terminal --prompt x 2>&1 )"; UNCONFIRMED_RC=$?
-UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 [ "$UNCONFIRMED_RC" -ne 0 ] && ok "missing_terminal_result_fails" || bad "missing_terminal_result_fails"
 check "missing_terminal_result_retains_uncertainty_lock" "test -f '$UNCERTAIN_LOCK/remote-uncertain'"
 echo ok > "$TMP/mode"
-AFTER_MISSING="$( cd "$CLONE" && bash "$SCRIPT" new after-missing --prompt x 2>&1 )"; AFTER_MISSING_RC=$?
-[ "$AFTER_MISSING_RC" -ne 0 ] && printf '%s' "$AFTER_MISSING" | grep -q 'unconfirmed provider state' && ok "missing_terminal_result_blocks_second_paid_turn" || bad "missing_terminal_result_blocks_second_paid_turn"
+AFTER_MISSING="$( cd "$CLONE" && bash "$SCRIPT" new no-terminal --prompt x 2>&1 )"; AFTER_MISSING_RC=$?
+[ "$AFTER_MISSING_RC" -ne 0 ] && ok "missing_terminal_result_blocks_exact_retry" || bad "missing_terminal_result_blocks_exact_retry"
+COLLISION="$( cd "$CLONE" && bash "$SCRIPT" new no-terminal --prompt materially-different 2>&1 )"; COLLISION_RC=$?
+check "same_session_name_with_different_new_contract_fails_clearly" "test '$COLLISION_RC' -ne 0 && printf '%s' \"$COLLISION\" | grep -q 'session-name collision'"
 rm -rf "$UNCERTAIN_LOCK"
 
 # Losing the uncertainty-marker write must still preserve the directory that
@@ -311,10 +325,10 @@ rm -rf "$UNCERTAIN_LOCK"
 # an explicit uncertainty marker and remains blocked.
 echo empty > "$TMP/mode"
 MARK_FAIL="$( cd "$REPO" && AI_GROK_TEST_MARK_FAILURE=1 AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; MARK_FAIL_RC=$?
-MARK_FAIL_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'repo--*.lock.d' -print -quit 2>/dev/null)"
+MARK_FAIL_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "marker_write_failure_preserves_paid_work_lock" "[ \"$MARK_FAIL_RC\" -ne 0 ] && test -d '$MARK_FAIL_LOCK' && test ! -f '$MARK_FAIL_LOCK/remote-uncertain'"
 echo ok > "$TMP/mode"
-AFTER_MARK_FAIL="$( cd "$CLONE" && bash "$SCRIPT" new after-marker-failure --prompt x 2>&1 )"; AFTER_MARK_FAIL_RC=$?
+AFTER_MARK_FAIL="$( cd "$CLONE" && bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; AFTER_MARK_FAIL_RC=$?
 check "marker_write_failure_still_blocks_second_paid_turn" "[ \"$AFTER_MARK_FAIL_RC\" -ne 0 ] && printf '%s' \"$AFTER_MARK_FAIL\" | grep -q 'remote completion is unconfirmed' && test -f '$MARK_FAIL_LOCK/remote-uncertain'"
 rm -rf "$MARK_FAIL_LOCK"
 echo ok > "$TMP/mode"
@@ -322,6 +336,13 @@ echo ok > "$TMP/mode"
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
 echo "ai-grok-review tests"
+
+SESSION_RECORDS_BEFORE="$(find "$AI_GROK_STATE_DIR/session-records" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+SESSION_WRITE_FAIL="$(AI_GROK_TEST_RESERVATION_WRITE_FAILURE=session run new session-write-fail --prompt x 2>&1)"; SESSION_WRITE_FAIL_RC=$?
+check "session_reservation_field_write_failure_is_nonzero" "test '$SESSION_WRITE_FAIL_RC' -ne 0"
+check "session_reservation_field_write_failure_publishes_nothing" "test '$SESSION_RECORDS_BEFORE' -eq \"\$(find '$AI_GROK_STATE_DIR/session-records' -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)\" && ! find '$AI_GROK_STATE_DIR/session-records' -name '*.pending.*' | grep -q ."
+run new session-write-fail --prompt x >/dev/null 2>&1
+check "session_reservation_retry_succeeds_after_write_failure" "test '$?' -eq 0"
 
 echo "== debate_contract_and_skill_guidance =="
 TEMPLATE="$REPO_ROOT/templates/delegation/debate-turn.md"
@@ -499,21 +520,15 @@ check "missing delimiter warns"        "printf '%s' \"\$ERR\" | grep -qi 'no .##
 cp "$TMP/fixture.bak" "$TMP/fixture.json"
 
 # 12 ------------------------------------------------------------------------
-echo "== duplicate_new_is_refused (per-repo in-flight lock) =="
-# Derive the repo id exactly as the script does — from git's own toplevel, which
-# on Windows is a C:/… path and not the mktemp path in $REPO.
+echo "== duplicate_new_is_refused (exact-session ownership lock) =="
 RROOT="$(git -C "$REPO" rev-parse --show-toplevel)"
-RREMOTE="$(git -C "$RROOT" config --get remote.origin.url 2>/dev/null || echo '')"
-RID_NEW="$(printf '%s' 'github.com/example/reviewer-fixture' | sha256sum | cut -c1-16)"
-LOCKDIR="$AI_GROK_STATE_DIR/locks/repo--$RID_NEW.lock.d"
-mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:other\n' > "$LOCKDIR/label"
-printf '2\n' > "$LOCKDIR/schema"; printf 'github.com/example/reviewer-fixture\n' > "$LOCKDIR/upstream"
-printf 'other\n' > "$LOCKDIR/session"; printf 'codex\n' > "$LOCKDIR/caller"
-printf '%s\n' "$RROOT" > "$LOCKDIR/source"; date -u +%FT%TZ > "$LOCKDIR/started"
+SESSION_ID_NEW="$(printf 'grok\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" t9 | sha256sum | cut -c1-24)"
+LOCKDIR="$AI_GROK_STATE_DIR/locks/session--$SESSION_ID_NEW.lock.d"
+mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:t9\n' > "$LOCKDIR/label"
 OUT="$(run new t9 --prompt x 2>&1)"; RC=$?
 rm -rf "$LOCKDIR"
 [ $RC -ne 0 ] && ok "a second concurrent review is refused" || bad "a second concurrent review is refused"
-check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'already running'"
+check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'already has an owner'"
 
 # 13 ------------------------------------------------------------------------
 echo "== reviews_dir_safety =="
@@ -588,6 +603,14 @@ SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
 SIGNAL_RC=$?
 check "on_paid_signal records remote uncertainty before any fallible cleanup"   "test -f '$SIGNAL_LOCK/remote-uncertain' && test '$SIGNAL_RC' -eq 99"
 check "on_paid_signal warns instead of trusting the uncertainty marker write"   "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'retaining the paid-work lock for manual reconciliation'"
+ABANDONED_WORK="$TMP/work--abandoned.lock.d"; mkdir -p "$ABANDONED_WORK"; printf '99999999\n' > "$ABANDONED_WORK/pid"; printf 'new:abandoned\n' > "$ABANDONED_WORK/label"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$ABANDONED_WORK" new:abandoned github.com/example/reviewer-fixture abandoned "$REPO" abandoned-work prompt-digest source-id 1 ) >"$TMP/abandoned.out" 2>&1
+check "genuinely_abandoned_pre_provider_work_lock_is_reclaimed" "test \"\$(cat '$ABANDONED_WORK/pid')\" != 99999999 && grep -q 'never contacted Grok' '$TMP/abandoned.out'"
+rm -rf "$ABANDONED_WORK"
+DURABLE_WORK="$TMP/work--durable.lock.d"; mkdir -p "$DURABLE_WORK"; printf '99999999\n' > "$DURABLE_WORK/pid"; printf 'new:durable\n' > "$DURABLE_WORK/label"; date -u +%FT%TZ > "$DURABLE_WORK/provider-contacted"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$DURABLE_WORK" new:durable github.com/example/reviewer-fixture durable "$REPO" durable-work prompt-digest source-id 1 ) >"$TMP/durable.out" 2>&1; DURABLE_RC=$?
+check "stale_local_owner_does_not_erase_durable_provider_record" "test '$DURABLE_RC' -ne 0 && test -f '$DURABLE_WORK/provider-contacted' && test -f '$DURABLE_WORK/remote-uncertain'"
+rm -rf "$DURABLE_WORK"
 check "unconfirmed stops drop only the temporary supervisor stop state"   "test \"\$(grep -c 'clear_active_stop_file' '$SCRIPT')\" -ge 6"
 check "the timeout path cleans orphaned stop state without releasing the paid lock"   "sed -n '/exceeded the configured/,/RUN_TURN_RC=124/p' '$SCRIPT' | grep -q 'clear_active_stop_file'"
 
@@ -596,10 +619,42 @@ check "installed symlink resolves the repository-owned process supervisor" "sed 
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
 check "POSIX supervisor escalates before the wrapper fallback" "grep -q 'time.monotonic() + 3' '$REPO_ROOT/bin/ai-process-supervisor'"
 run new stale-session --prompt x >/dev/null 2>&1
-STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_RID="$(basename "$(dirname "$STALE_META")")"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/$STALE_RID--claude--stale-session.lock.d"
+STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_SESSION_ID="$(printf 'grok\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" stale-session | sha256sum | cut -c1-24)"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--$STALE_SESSION_ID.lock.d"
 mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid"; printf 'ask:stale-session\n' > "$STALE_SESSION_LOCK/label"
 run ask stale-session --prompt x > "$TMP/stale-session.out" 2>&1; STALE_ASK_RC=$?
 check "dead local-only session lock is safely reclaimed without inventing paid uncertainty" "test '$STALE_ASK_RC' -eq 0 && grep -q 'reclaimed a stale local-only session lock' '$TMP/stale-session.out' && test ! -e '$STALE_SESSION_LOCK'"
+run new ask-a --prompt seed >/dev/null 2>&1; run new ask-b --prompt seed >/dev/null 2>&1
+TURN_RECORDS_BEFORE="$(find "$AI_GROK_STATE_DIR/turn-records" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+TURN_WRITE_FAIL="$(AI_GROK_TEST_RESERVATION_WRITE_FAILURE=turn run ask ask-a --prompt turn-write-fail 2>&1)"; TURN_WRITE_FAIL_RC=$?
+check "turn_reservation_field_write_failure_is_nonzero" "test '$TURN_WRITE_FAIL_RC' -ne 0"
+check "turn_reservation_field_write_failure_publishes_nothing" "test '$TURN_RECORDS_BEFORE' -eq \"\$(find '$AI_GROK_STATE_DIR/turn-records' -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)\" && ! find '$AI_GROK_STATE_DIR/turn-records' -name '*.pending.*' | grep -q ."
+PARTIAL_TURN_ID="$(printf 'grok\n%s\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" ask-a 2 | sha256sum | cut -c1-28)"
+PARTIAL_TURN_RECORD="$AI_GROK_STATE_DIR/turn-records/$PARTIAL_TURN_ID"; mkdir -p "$PARTIAL_TURN_RECORD"
+PARTIAL_RETRY="$(run ask ask-a --prompt recover-crash-window 2>&1)"; PARTIAL_RETRY_RC=$?
+check "partial_preprovider_turn_publication_is_reclaimable" "test '$PARTIAL_RETRY_RC' -eq 0 && printf '%s' \"$PARTIAL_RETRY\" | grep -q 'APPROVE'"
+PREPROVIDER_FAIL="$(AI_GROK_TEST_INSPECT_MODE=badshape run ask ask-a --prompt preprovider-original 2>&1)"; PREPROVIDER_FAIL_RC=$?
+check "preprovider_ask_failure_is_nonzero" "test '$PREPROVIDER_FAIL_RC' -ne 0 && printf '%s' \"$PREPROVIDER_FAIL\" | grep -q 'isolation inspection'"
+PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 2>&1)"; PREPROVIDER_RETRY_RC=$?
+check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
+rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
+( run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
+( run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 2 ] && break; sleep 1; done
+check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
+DUP_ASK="$(run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
+check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
+touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
+rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
+( cd "$REPO" && exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
+for _i in $(seq 1 30); do ASK_UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"; [ -n "$ASK_UNCERTAIN_LOCK" ] && [ -f "$TMP/hold-started" ] && break; sleep 1; done
+kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
+run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
+check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"
 check "delete removes the record"  "run delete t1 && ! run show t1"
 
 # 15 ------------------------------------------------------------------------

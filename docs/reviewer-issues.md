@@ -1,5 +1,19 @@
 # Reviewer issue recording
 
+## Grok lock scope
+
+Grok reviews are not globally or repository-wide serialized. Only the same
+exact named session/turn or an idempotently identical submission is serialized.
+Independent reviews may run concurrently in the same logical repository.
+
+When recording an interrupted or cancellation-uncertain Grok run, capture its
+caller, logical session name, durable provider identifier when available,
+source identity, prompt/packet digest prefix, timestamps, and cancellation
+confirmation state. A retained exact-work record protects only that provider
+call; it must never be interpreted as a repository-wide stop. Do not capture
+raw prompts, credentials, command lines, authentication files, or secret
+environment values.
+
 Use `ai-reviewer-issue` when a reviewer fails, returns no decision, reviews the
 wrong change, takes an unusual amount of time, or behaves differently from its
 documented contract. This supplements the numerical scoreboard with evidence

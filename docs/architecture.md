@@ -1,5 +1,20 @@
 # Architecture
 
+## Grok review concurrency safety
+
+Grok reviews are not globally or repository-wide serialized. The wrapper uses
+normalized upstream identity only as one input to two narrower controls:
+
+- an exact-session ownership lock serializes mutation, continuation,
+  cancellation, and finalization for one caller and named conversation;
+- a digest-keyed exact-work record deduplicates one immutable provider call
+  across equivalent clones and worktrees.
+
+Stopped or cancellation-uncertain calls retain only their exact-work protection.
+The metadata stores prompt and evidence digests, never raw prompt text, tokens,
+credentials, environment values, or process command lines. Independent reviews
+may run concurrently in the same logical repository.
+
 System design of the AI DevOps toolkit. For the canonical operating guide and
 documentation router, see [`../AGENTS.md`](../AGENTS.md).
 

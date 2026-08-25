@@ -14,6 +14,53 @@ Planning handoff: [`HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair
 
 ## STATUS
 
+### 2026-08-25 corrective scope repair
+
+The 2026-08-23 implementation correctly unified equivalent clones for duplicate
+detection but incorrectly made that identity a repository-wide semaphore. A
+stopped `shared-db-1498-seq325` review therefore blocked the unrelated
+`warner-1517-owner-decisions` workstream. The current repair supersedes the old
+serialization goal below without discarding its duplicate-send safeguards.
+
+| Corrective step | Status | Evidence |
+|---|---|---|
+| Split exact-session ownership from exact-work idempotency | 🟨 implemented locally | `session--*` mutexes and digest-keyed `work--*` protections in `bin/ai-grok-review` |
+| Preserve clone-equivalent duplicate detection and legacy state | 🟨 implemented locally | normalized upstream remains an identity input; evidence-bearing schema-2 locks protect only their exact caller/session; ambiguous legacy locks fail closed |
+| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 191/191, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, corrected retry after proven pre-provider failure and partial publication, fail-closed reservation writes, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
+| Full repository offline gates | ✅ complete | 53/53 Bash groups and 16/16 PowerShell groups pass on Windows |
+| Independent exact-head review, bounded installed live canary, push, and issue update | ⬜ open | required before completion |
+
+Independent review round 1 at `b5f7c76` returned `REJECT`: a changed prompt
+could bypass the exact-work digest after an uncertain continuation. The wrapper
+now also reserves the durable logical session turn independently of prompt
+identity; both the exact retry and a materially changed retry are refused while
+unrelated named sessions remain runnable. The three new regression cases pass.
+
+Independent review round 2 at `6c6f255` returned `REJECT`: a local isolation
+failure before provider launch could leave the new turn reservation stranded.
+Turn reservations now record their owner and the provider-contact boundary. A
+dead/no-contact reservation is reclaimed under the exact-session mutex, while
+any reservation that crossed the provider boundary remains durable and
+fail-closed. Both recovery shapes have offline regression coverage.
+
+Independent review round 3 at `90b21ea` returned `REJECT`: the turn directory
+could become visible just before its PID field was written. Session and turn
+reservations now build complete pending directories and publish them by rename
+while the exact-session mutex is held. An older no-contact partial turn record
+is quarantined and reclaimed; the explicit crash-window fixture passes.
+
+Independent review round 4 at `6ab6c0a` returned `REJECT`: Bash suppresses
+`errexit` inside helpers called under `if !`, so a field-write failure could
+have been ignored before rename. Every reservation field write is now joined
+into one explicitly checked transaction. Hostile session and turn write-failure
+fixtures prove neither a final record nor a pending directory is published.
+
+Corrected rule: **Grok reviews are not globally or repository-wide serialized.
+Only the same exact review session/turn or an idempotently identical submission
+is serialized. Independent reviews may run concurrently.** Historical sections
+below describe the superseded 2026-08-20 design and must not be used as current
+operating guidance.
+
 Read this table first. Source repairs, Windows installation, full offline
 verification, and bounded live qualification are complete; exact-head approval,
 push, Ubuntu installation, CI, and issue closure remain.

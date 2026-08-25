@@ -58,7 +58,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.4"
+VERSION="1.1.0"
 
 STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
 CALLER="${AI_GROK_CALLER:-claude}"
@@ -100,8 +100,10 @@ ACTIVE_ISOLATED_CWD=''
 ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
 ACTIVE_SESSION_LOCK=''
+ACTIVE_TURN_RECORD=''
 PENDING_REVIEW_BASE=''
 PENDING_REVIEW_DIR=''
+PROMPT_BODY_DIGEST=''
 
 die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
@@ -299,21 +301,46 @@ valid_name() {
 
 meta_path() { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
-# Per-session lock (serialises turns on one session).
+# Checkout-local legacy session lock path (read compatibility only).
 lock_path()      { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
-# Per-REPO in-flight lock. The most expensive symptom of the 2026-08-05 incident
-# was three concurrent full-price reviews of one repository, started because the
-# first "looked dead". A per-session lock does not stop that; this does.
+# Legacy repository-wide paid-work lock path (read compatibility only).
 repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+# Current locks deliberately separate mutable session ownership from exact-work
+# idempotency. Both identities retain normalized upstream equivalence across
+# clones; neither serializes unrelated work in one repository.
+session_lock_path() { # session_lock_path UPSTREAM CALLER NAME
+  local id; id="$(printf 'grok\n%s\n%s\n%s' "$1" "$2" "$3" | sha256sum | cut -c1-24)"
+  printf '%s/locks/session--%s.lock.d' "$STATE_DIR" "$id"
+}
+session_record_path() { # durable logical-name collision guard
+  local id; id="$(printf 'grok\n%s\n%s\n%s' "$1" "$2" "$3" | sha256sum | cut -c1-24)"
+  printf '%s/session-records/%s' "$STATE_DIR" "$id"
+}
+turn_record_path() { # durable next-turn collision guard, independent of prompt digest
+  local id; id="$(printf 'grok\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" | sha256sum | cut -c1-28)"
+  printf '%s/turn-records/%s' "$STATE_DIR" "$id"
+}
+work_lock_path() { printf '%s/locks/work--%s.lock.d' "$STATE_DIR" "$1"; }
+work_identity() { # immutable exact provider-call contract; never stores prompt text
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" | sha256sum | cut -c1-32
+}
 
-legacy_paid_lock_guard() { # legacy_paid_lock_guard NEW_LOCK
-  local new_lock="$1" lock schema
+legacy_paid_lock_guard() { # legacy_paid_lock_guard UPSTREAM CALLER SESSION
+  local wanted_upstream="$1" wanted_caller="$2" wanted_session="$3" lock schema upstream caller session
   for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
     [ -d "$lock" ] || continue
-    [ "$lock" != "$new_lock" ] || continue
     schema="$(cat "$lock/schema" 2>/dev/null || true)"
-    [ "$schema" = 2 ] && continue
-    warn "a legacy Grok paid-work lock is present: $(basename "$lock"). Its repository and remote completion cannot be proved safely, so no new paid review may start until it is manually reconciled."
+    upstream="$(cat "$lock/upstream" 2>/dev/null || true)"
+    caller="$(cat "$lock/caller" 2>/dev/null || true)"
+    session="$(cat "$lock/session" 2>/dev/null || true)"
+    if [ "$schema" = 2 ] && [ -n "$upstream" ] && [ -n "$caller" ] && [ -n "$session" ]; then
+      if [ "$upstream" = "$wanted_upstream" ] && [ "$caller" = "$wanted_caller" ] && [ "$session" = "$wanted_session" ]; then
+        warn "legacy Grok protection for this exact session is retained: $(basename "$lock"). Reconcile that session before retrying it."
+        return 1
+      fi
+      continue
+    fi
+    warn "an ambiguous legacy Grok paid-work lock is present: $(basename "$lock"). Its exact session/job cannot be proved safely, so paid work remains fail-closed until operator reconciliation."
     return 1
   done
   return 0
@@ -323,19 +350,23 @@ legacy_paid_lock_guard() { # legacy_paid_lock_guard NEW_LOCK
 # plus a pid file. A dead repository-lock owner does not prove the paid remote
 # turn stopped, so that lock is retained for manual reconciliation. Session
 # locks remain separately scoped and can be released by their owning wrapper.
-lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE]
-  local dir="$1" label="$2" upstream="${3:-}" session="${4:-}" source="${5:-}" owner
+lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID] [PROMPT_DIGEST] [SOURCE_ID] [TURN]
+  local dir="$1" label="$2" upstream="${3:-}" session="${4:-}" source="${5:-}" work_id="${6:-}" prompt_digest="${7:-}" source_id="${8:-}" turn="${9:-}" owner quarantine moved_owner
   mkdir -p "$(dirname "$dir")"
   if mkdir "$dir" 2>/dev/null; then
     printf '%s\n' "$$" > "$dir/pid"
     printf '%s\n' "$label" > "$dir/label"
     [ -z "$upstream" ] || {
-      printf '2\n' > "$dir/schema"
+      printf '3\n' > "$dir/schema"
       printf '%s\n' "$upstream" > "$dir/upstream"
       printf '%s\n' "$CALLER" > "$dir/caller"
       printf '%s\n' "$session" > "$dir/session"
       printf '%s\n' "$source" > "$dir/source"
       date -u +%FT%TZ > "$dir/started"
+      [ -z "$work_id" ] || printf '%s\n' "$work_id" > "$dir/work_id"
+      [ -z "$prompt_digest" ] || printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
+      [ -z "$source_id" ] || printf '%s\n' "$source_id" > "$dir/source_identity"
+      [ -z "$turn" ] || printf '%s\n' "$turn" > "$dir/turn"
     }
     return 0
   fi
@@ -351,8 +382,103 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE]
     warn "malformed lock $(basename "$dir") blocks paid work; inspect it manually."
     return 1
   fi
+  case "$(basename "$dir")" in
+    work--*.lock.d)
+      if [ ! -f "$dir/provider-contacted" ]; then
+        quarantine="$dir.abandoned.$$.$RANDOM"
+        mv "$dir" "$quarantine" 2>/dev/null || return 1
+        moved_owner="$(cat "$quarantine/pid" 2>/dev/null || true)"
+        if [ "$moved_owner" != "$owner" ] || kill -0 "$moved_owner" 2>/dev/null; then
+          [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
+          warn "exact-work lock ownership changed during pre-provider recovery: $(basename "$dir")"
+          return 1
+        fi
+        rm -rf -- "$quarantine"
+        warn "reclaimed a genuinely abandoned exact-work lock that never contacted Grok"
+        lock_acquire "$@"
+        return $?
+      fi ;;
+  esac
   warn "the local owner of $(basename "$dir") is gone, but remote completion is unconfirmed; paid work remains blocked pending manual reconciliation."
   date -u +%FT%TZ > "$dir/remote-uncertain"
+  return 1
+}
+
+logical_session_meta() { # logical_session_meta UPSTREAM CALLER NAME
+  local wanted_upstream="$1" wanted_caller="$2" wanted_name="$3" f remote identity
+  for f in "$STATE_DIR"/sessions/*/*.json; do
+    [ -f "$f" ] || continue
+    [ "$(jq -r '.caller // empty' "$f" 2>/dev/null)" = "$wanted_caller" ] || continue
+    [ "$(jq -r '.name // empty' "$f" 2>/dev/null)" = "$wanted_name" ] || continue
+    remote="$(jq -r '.repo_remote // empty' "$f" 2>/dev/null)"
+    identity="$(normalize_remote "$remote" 2>/dev/null || true)"
+    [ "$identity" = "$wanted_upstream" ] && { printf '%s' "$f"; return 0; }
+  done
+  return 1
+}
+
+reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROMPT_DIGEST
+  local upstream="$1" name="$2" contract="$3" source_id="$4" prompt_digest="$5" dir existing pending
+  dir="$(session_record_path "$upstream" "$CALLER" "$name")"; mkdir -p "$(dirname "$dir")"
+  if [ ! -d "$dir" ]; then
+    pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
+    if ! { printf '1\n' > "$pending/schema" \
+      && printf '%s\n' "$upstream" > "$pending/upstream" \
+      && printf '%s\n' "$CALLER" > "$pending/caller" \
+      && printf '%s\n' "$name" > "$pending/session" \
+      && printf '%s\n' "$contract" > "$pending/contract" \
+      && [ "${AI_GROK_TEST_RESERVATION_WRITE_FAILURE:-}" != session ] \
+      && printf '%s\n' "$source_id" > "$pending/source_identity" \
+      && printf '%s\n' "$prompt_digest" > "$pending/prompt_digest" \
+      && date -u +%FT%TZ > "$pending/created"; }; then
+      rm -rf -- "$pending"; return 1
+    fi
+    mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
+    return 0
+  fi
+  existing="$(cat "$dir/contract" 2>/dev/null || true)"
+  [ "$existing" = "$contract" ] && return 0
+  warn "session-name collision: '$name' is already reserved for a materially different new-review contract. Choose a different name; the existing conversation is not changed."
+  return 1
+}
+
+reserve_session_turn() { # reserve_session_turn UPSTREAM NAME TURN CONTRACT SOURCE PROMPT_DIGEST
+  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing owner quarantine pending
+  dir="$(turn_record_path "$upstream" "$CALLER" "$name" "$turn")"; mkdir -p "$(dirname "$dir")"
+  if [ -d "$dir" ] && [ ! -f "$dir/provider-contacted" ]; then
+    # The caller already owns the exact-session mutex. Therefore no legitimate
+    # creator of this same turn can still be running. Quarantine the whole
+    # no-contact record, including schema-1 crash-window records with no PID.
+    quarantine="$dir.preprovider.$$.$RANDOM"
+    mv "$dir" "$quarantine" 2>/dev/null || return 1
+    if [ -f "$quarantine/provider-contacted" ]; then
+      [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
+      return 1
+    fi
+    rm -rf -- "$quarantine"
+    warn "reclaimed a session-turn reservation that never contacted Grok"
+  fi
+  if [ ! -d "$dir" ]; then
+    pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
+    if ! { printf '1\n' > "$pending/schema" \
+      && printf '%s\n' "$upstream" > "$pending/upstream" \
+      && printf '%s\n' "$CALLER" > "$pending/caller" \
+      && printf '%s\n' "$$" > "$pending/pid" \
+      && printf '%s\n' "$name" > "$pending/session" \
+      && printf '%s\n' "$turn" > "$pending/turn" \
+      && printf '%s\n' "$contract" > "$pending/contract" \
+      && [ "${AI_GROK_TEST_RESERVATION_WRITE_FAILURE:-}" != turn ] \
+      && printf '%s\n' "$source_id" > "$pending/source_identity" \
+      && printf '%s\n' "$prompt_digest" > "$pending/prompt_digest" \
+      && date -u +%FT%TZ > "$pending/created"; }; then
+      rm -rf -- "$pending"; return 1
+    fi
+    mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
+    return 0
+  fi
+  existing="$(cat "$dir/contract" 2>/dev/null || true)"
+  [ "$existing" = "$contract" ] && return 0
+  warn "continuation-turn collision: session '$name' turn $turn is already reserved for materially different work. Its prior provider outcome may be unconfirmed; reconcile it before advancing this session."
   return 1
 }
 lock_release() { # only the creating wrapper may release it
@@ -764,6 +890,8 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   prepare_active_stop_file
+  [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
+  [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
   env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
@@ -906,6 +1034,7 @@ build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/st
     die "no prompt given. Use --prompt TEXT, --prompt-file FILE, or pipe it on stdin."
   fi
   [ -s "$dest" ] || die "the prompt is empty."
+  PROMPT_BODY_DIGEST="$(sha256sum "$dest" | awk '{print $1}')"
   cat "$dest" >> "${dest%.body}"
   rm -f "$dest"
   printf '%s' "$PROMPT_FOOTER" >> "${dest%.body}"
@@ -989,6 +1118,9 @@ Options:
 
 Reviews are read-only: Edit and Bash are denied and web search is disabled.
 Model, permissions and --no-memory are fixed and cannot be overridden per call.
+Reviews are not globally or repository-wide serialized. Only the same exact
+session/turn or an idempotently identical submission is serialized; independent
+reviews may run concurrently, including in the same logical repository.
 
 Environment:
   AI_GROK_CALLER       'claude' (default) or 'codex' — keeps sessions separate
@@ -1000,7 +1132,7 @@ EOF
 }
 
 cmd_doctor() {
-  local live=0 grok rc=0 repo upstream lockid live_lock
+  local live=0 grok rc=0 repo upstream workid live_lock
   [ "${1:-}" = "--live" ] && live=1
   need jq
   grok="$(resolve_grok)"
@@ -1026,9 +1158,10 @@ cmd_doctor() {
     rc=1
   fi
   if [ "$live" = 1 ]; then
-    repo="$(repo_root)"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"; live_lock="$(repolock_path "$lockid")"
-    legacy_paid_lock_guard "$live_lock" || die 'legacy Grok work may still be running; refusing a concurrent billable doctor.'
-    lock_acquire "$live_lock" doctor-live "$upstream" doctor-live "$repo" || die "another Grok review is already running in this repository: $(lock_info "$live_lock")"
+    repo="$(repo_root)"; upstream="$(require_upstream_identity "$repo")"
+    workid="$(work_identity "$upstream" "$CALLER" doctor doctor-live doctor-live doctor-live doctor-live 1)"; live_lock="$(work_lock_path "$workid")"
+    legacy_paid_lock_guard "$upstream" "$CALLER" doctor-live || die 'legacy Grok work may still be running; refusing a duplicate billable doctor.'
+    lock_acquire "$live_lock" doctor-live "$upstream" doctor-live "$repo" "$workid" doctor-live doctor-live 1 || die "this exact Grok live probe is already protected: $(lock_info "$live_lock")"
     ACTIVE_PAID_LOCK="$live_lock"; ACTIVE_SESSION_LOCK=''
     trap "lock_release '$live_lock'" EXIT
     trap 'on_paid_signal' INT TERM
@@ -1049,24 +1182,19 @@ cmd_doctor() {
 }
 
 cmd_new() {
-  local name="$1" repo rid upstream lockid meta pf out rid_lock sid rc turns
+  local name="$1" repo rid upstream meta existing pf out sess_lock rid_lock sid rc turns prompt_digest options_digest source_id workid
   valid_name "$name" || die "invalid session name '$name' (use letters, digits, . _ -)"
-  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(meta_path "$rid" "$name")"
   [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-grok-review ask $name"
+  existing="$(logical_session_meta "$upstream" "$CALLER" "$name" 2>/dev/null || true)"
+  [ -z "$existing" ] || die "session-name collision: '$name' already identifies a durable Grok conversation for this caller and logical repository. Continue it from its recorded checkout or choose a different name."
 
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
-  rid_lock="$(repolock_path "$lockid")"
-  legacy_paid_lock_guard "$rid_lock" || die "legacy Grok work may still be running; refusing a duplicate paid review."
-  if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo"; then
-    die "another Grok review is already running in this repository: $(lock_info "$rid_lock").
-  Do NOT start a second one — concurrent reviews are billed in full and were the most
-  expensive part of the 2026-08-05 incident. Wait for it, or continue it with 'ask'."
-  fi
+  sess_lock="$(session_lock_path "$upstream" "$CALLER" "$name")"
+  session_lock_acquire "$sess_lock" "new:$name" || die "session '$name' already has an owner: $(lock_info "$sess_lock")"
   # shellcheck disable=SC2064
-  trap "lock_release '$rid_lock'" EXIT
-  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK=''
-  trap 'on_paid_signal' INT TERM
+  trap "lock_release '$sess_lock'" EXIT
 
   pf="$(mktemp)"; out="$(mktemp)"
 
@@ -1074,9 +1202,21 @@ cmd_new() {
   preflight_review_file "$repo" "$name"
   prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   build_prompt_file "$pf"
+  prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
+  source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
+  workid="$(work_identity "$upstream" "$CALLER" new "$name" "$GROK_MODEL" "$source_id" "$prompt_digest" 1)"; rid_lock="$(work_lock_path "$workid")"
+  if ! reserve_new_session "$upstream" "$name" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
+  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate paid review."; fi
+  if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" 1; then
+    lock_release "$sess_lock"
+    die "this exact Grok review submission is already active or retained: $(lock_info "$rid_lock"). Status: ai-grok-review list"
+  fi
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
+  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
+  trap 'on_paid_signal' INT TERM
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
-    preserve_uncertain_paid_turn "$rid_lock"
+    preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
@@ -1111,8 +1251,8 @@ cmd_new() {
 }
 
 cmd_ask() {
-  local name="$1" repo rid upstream lockid meta pf out sid rc turns sess_lock rid_lock boundary
-  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
+  local name="$1" repo rid upstream meta pf out sid rc turns sess_lock rid_lock boundary prompt_digest options_digest source_id workid next_turn
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .grok_session_id "$meta")"
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
@@ -1125,21 +1265,10 @@ cmd_ask() {
   now: $got
   Continuing would silently discard the provider cache. Start a new session instead."
 
-  sess_lock="$(lock_path "$rid" "$name")"
-  rid_lock="$(repolock_path "$lockid")"
+  sess_lock="$(session_lock_path "$upstream" "$CALLER" "$name")"
   session_lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
-  if ! legacy_paid_lock_guard "$rid_lock"; then
-    lock_release "$sess_lock"
-    die "legacy Grok work may still be running; refusing a duplicate paid review."
-  fi
-  if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo"; then
-    lock_release "$sess_lock"
-    die "another Grok review is running in this repository: $(lock_info "$rid_lock")"
-  fi
   # shellcheck disable=SC2064
-  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
-  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
-  trap 'on_paid_signal' INT TERM
+  trap "lock_release '$sess_lock'" EXIT
 
   pf="$(mktemp)"; out="$(mktemp)"
 
@@ -1170,6 +1299,20 @@ rebuilt for the new head; treat any verdict from this session as applying to
 $REVIEW_HEAD only."
   fi
   build_prompt_file "$pf"
+  next_turn="$(( $(jq -r '.turns // 0' "$meta") + 1 ))"
+  prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
+  source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
+  workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
+  if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
+  ACTIVE_TURN_RECORD="$(turn_record_path "$upstream" "$CALLER" "$name" "$next_turn")"
+  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate continuation."; fi
+  if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" "$next_turn"; then
+    lock_release "$sess_lock"
+    die "this exact Grok continuation turn is already active or retained: $(lock_info "$rid_lock"). Status: ai-grok-review list"
+  fi
+  trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
+  ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
+  trap 'on_paid_signal' INT TERM
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
@@ -1226,11 +1369,11 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
 }
 
 cmd_list() {
-  local rid dir f lock upstream session caller source pid started state started_epoch now elapsed
+  local rid dir f lock upstream session caller source pid started state started_epoch now elapsed protection digest
   rid="$(repo_id "$(repo_root)")"
-  printf '%s\n' 'ACTIVE PAID GROK REVIEWS (all repositories for this OS account)'
-  printf '%-34s %-24s %-8s %-7s %-20s %-9s %s\n' REPOSITORY SESSION CALLER PID STARTED ELAPSED SOURCE
-  for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
+  printf '%s\n' 'ACTIVE REVIEWS AND RETAINED EXACT-WORK PROTECTIONS (all repositories for this OS account)'
+  printf '%-34s %-24s %-8s %-10s %-12s %-20s %-9s %s\n' REPOSITORY SESSION CALLER STATE DIGEST STARTED ELAPSED SOURCE
+  for lock in "$STATE_DIR"/locks/work--*.lock.d "$STATE_DIR"/locks/repo--*.lock.d; do
     [ -d "$lock" ] || continue
     upstream="$(cat "$lock/upstream" 2>/dev/null || true)"; session="$(cat "$lock/session" 2>/dev/null || true)"
     caller="$(cat "$lock/caller" 2>/dev/null || true)"; source="$(cat "$lock/source" 2>/dev/null || true)"
@@ -1239,12 +1382,14 @@ cmd_list() {
       warn "malformed active lock $(basename "$lock") is blocking paid work"
       continue
     fi
-    kill -0 "$pid" 2>/dev/null && state=alive || state=stopped
+    kill -0 "$pid" 2>/dev/null && state=active || state=stopped
+    [ ! -f "$lock/remote-uncertain" ] || state=retained
+    digest="$(cat "$lock/prompt_digest" 2>/dev/null || true)"; digest="${digest:0:12}"; [ -n "$digest" ] || digest=legacy
     elapsed='?'
     if started_epoch="$(date -d "$started" +%s 2>/dev/null)"; then
       now="$(date +%s)"; elapsed="$((now - started_epoch))s"
     fi
-    printf '%-34s %-24s %-8s %-7s %-20s %-9s %s (%s)\n' "$upstream" "$session" "$caller" "$pid" "$started" "$elapsed" "$source" "$state"
+    printf '%-34s %-24s %-8s %-10s %-12s %-20s %-9s %s (pid %s)\n' "$upstream" "$session" "$caller" "$state" "$digest" "$started" "$elapsed" "$source" "$pid"
   done
   printf '\n%s\n' 'COMPLETED SESSIONS (this checkout)'
   dir="$STATE_DIR/sessions/$rid"
@@ -1277,8 +1422,8 @@ cmd_transcript() {
 }
 
 cmd_delete() {
-  local rid meta name="$1" lock session caller source; rid="$(repo_id "$(repo_root)")"
-  for lock in "$STATE_DIR"/locks/repo--*.lock.d; do
+  local rid meta name="$1" lock session caller source upstream record; rid="$(repo_id "$(repo_root)")"; upstream="$(require_upstream_identity "$(repo_root)")"
+  for lock in "$STATE_DIR"/locks/work--*.lock.d "$STATE_DIR"/locks/repo--*.lock.d; do
     [ -d "$lock" ] || continue
     session="$(cat "$lock/session" 2>/dev/null || true)"; caller="$(cat "$lock/caller" 2>/dev/null || true)"; source="$(cat "$lock/source" 2>/dev/null || true)"
     if [ "$session" = "$name" ] && [ "$caller" = "$CALLER" ] && [ "$(cd "$source" 2>/dev/null && pwd -P || printf '%s' "$source")" = "$(cd "$(repo_root)" && pwd -P)" ]; then
@@ -1287,6 +1432,15 @@ cmd_delete() {
   done
   meta="$(find_meta "$rid" "$name")"
   rm -f "$meta"
+  record="$(session_record_path "$upstream" "$CALLER" "$name")"
+  [ ! -d "$record" ] || rm -rf -- "$record"
+  for record in "$STATE_DIR"/turn-records/*; do
+    [ -d "$record" ] || continue
+    [ "$(cat "$record/upstream" 2>/dev/null || true)" = "$upstream" ] || continue
+    [ "$(cat "$record/caller" 2>/dev/null || true)" = "$CALLER" ] || continue
+    [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
+    rm -rf -- "$record"
+  done
   release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }
