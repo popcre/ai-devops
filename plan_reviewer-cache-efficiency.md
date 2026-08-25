@@ -23,12 +23,12 @@ remains, plus an optional read-only measurement spike.
 | 0.2 | Grok 4.6 adversarial audit of the first draft, 2 turns | ✅ done 2026-08-25 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md`, `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` — REJECT both turns; $0.246 total |
 | 0.3 | Claude verified Grok's load-bearing claims against source | ✅ done 2026-08-25 | § 6, every row cites `file:line` you can re-read |
 | 0.4 | Items 1 and 2 withdrawn; plan rewritten | ✅ done 2026-08-25 | This file |
-| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO** | § 7 R-A. The premise was wrong: the prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository arrives as tool results, not prompt prefix |
+| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO — disproven by measurement for Claude; mechanism plus absence of data for Codex** | § 7 R-A and [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md). Claude: `cache_read_input_tokens` is 2,800 in every run regardless of directory or repetition, and the CLI's prefix drifts 1–3 tokens between identical runs. Codex: `codex exec` reports no cache split at all, so its disproof rests on the same mechanism, not on a measurement |
 | 1.2 | **Item 2 — digest-gated snapshot reuse** | ❌ **WON'T DO** | § 7 R-B. The digest cannot see what a reviewer can read; the unconditional wipe is an integrity boundary |
 | 2.1 | DeepSeek: capture and report cache-hit tokens | ⬜ open | — |
 | 2.2 | Muse: labelled cache rows, from a real fixture | ⬜ open | — |
 | 2.3 | Tests for both usage reporters | ⬜ open | — |
-| 3.1 | Optional: measurement spike (read-only, no code) | ⬜ open | — |
+| 3.1 | Measurement spike (read-only, no code) | ✅ done 2026-08-25 | [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md) — 6 Claude probes across 3 directories: cache reads pinned at 2,800 tokens in every one. 2 Codex probes: no cache data reported |
 | 4.1 | Suite green, gate reviews APPROVE, commit and push | ⬜ open | — |
 
 **A fresh session starts at Step 2.1.**
@@ -143,8 +143,10 @@ opaque cell.
 2. Muse: break the captured token object into labelled rows in the report, plus
    a one-line stderr summary.
 3. Tests for both.
-4. Optionally, a read-only measurement spike (Step 3.1) that answers whether the
-   gate reviewers have any cacheable prefix at all. **No code change.**
+4. ~~A read-only measurement spike answering whether the gate reviewers have any
+   cacheable prefix.~~ **Done 2026-08-25** — see
+   [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+   No code changed.
 
 ### Explicitly NOT in this plan
 
@@ -211,11 +213,26 @@ false zero (§ 8 D4).
 
 The first draft claimed the gate reviewers' randomized snapshot path caused "the
 whole repository context" to be re-billed on each of the four pipeline stages.
-**That is false, and I verified it.** The user prompt sent to Claude is
-`bin/ai-claude-review:90-99` — **326 bytes, roughly 80 tokens.** The repository
-never appears in the prompt; it arrives as *tool results* from Read/Grep/Glob
-inside the session. A stable directory name therefore cannot make repository
-context cacheable, because repository context was never prompt prefix.
+**That is false, and I verified it.** The user prompt sent to Claude is the
+template at `bin/ai-claude-review:90-99` — **409 bytes unexpanded, and about 748
+bytes (~190 tokens) once `$MODE`, `$PACKET_DIR`, `$REVIEW_DIR` and `$DECISION`
+are substituted** for a representative `diff-review`. The repository never
+appears in the prompt; it arrives as *tool results* from Read/Grep/Glob inside
+the session. A stable directory name therefore cannot make repository context
+cacheable, because repository context was never prompt prefix.
+
+Re-derive the unexpanded figure with:
+
+```bash
+sed -n '90,99p' bin/ai-claude-review | tr -d '\r' | wc -c
+```
+
+*(An earlier revision of this plan said "326 bytes". That was measured over the
+wrong line range — `:93-101` instead of `:90-99`, which picks up two later,
+unrelated lines — and is corrected here. Treat both figures as approximate; line
+endings shift them by a few bytes. The conclusion never depended on either: the
+measurement in Finding E used a **two-token** prompt and still created 7,832
+tokens of prefix, so prompt size is a rounding error regardless.)*
 
 Two further facts kill the idea independently:
 
@@ -241,7 +258,7 @@ see most of what a reviewer can read:
 | Untracked executable bits | hashed as content + type + size only | `bin/ai-review-sandbox:125-135` |
 | Empty directories, submodule interiors | git does not list them | — |
 
-This is not theoretical. `bin/ai-review-packet:287` runs `--tests` with
+This is not theoretical. `bin/ai-review-packet:288` runs `--tests` with
 `cd "$root"` — **inside the snapshot** for gate reviewers — so test artifacts
 land in exactly that digest-invisible space.
 
@@ -255,6 +272,35 @@ an undetectable write into the *next* review's tree with a matching digest.
 That is the definition of a reviewer approving a verdict against source it did
 not read. The clone is an integrity boundary, and item 2's only benefit was
 wall-clock.
+
+### Finding E — the measurement, which closes item 1 for good
+
+Run 2026-08-25 with the exact governed gate command; full table in
+[`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+
+- **`cache_read_input_tokens` = 2,800 in all six Claude probes** — repository
+  worktree, empty directory A, empty directory B, and immediate repeats in the
+  same directory. The working directory does not move it. Repetition does not
+  move it.
+- **The large prefix is re-created and never read back.** Byte-identical repeat
+  runs each created ~11.9k tokens (in the repo) or ~7.8k (in an empty directory)
+  and still read only 2,800.
+- **The prefix is not byte-stable even with everything the wrapper controls held
+  fixed** — counts drift 1–3 tokens between consecutive identical runs
+  (11,879 → 11,878 → 11,877), so something in the CLI's own system content
+  varies per invocation. This is what makes item 1 *impossible* rather than
+  merely unhelpful.
+- **The repository adds ~4,045 tokens of context** over an empty directory
+  (11,877 vs 7,832) — real, but cache-neutral.
+- **Codex reports no cache data at all**: `codex exec` prints one
+  `tokens used 17,672` total for a two-token prompt, with no hit/miss split.
+
+**A real cost the spike did find:** each gate invocation creates ~12,000 tokens
+of prefix that is never redeemed, four times per pipeline run. The only levers
+are session reuse (dropping `--no-session-persistence`, which would trade away
+the stage independence that makes a gate a gate) and fewer gate invocations (a
+pipeline scope decision). Neither is a wrapper change and neither belongs in
+this plan; both are recorded in the measurement doc.
 
 ### Finding D — the concurrency contract that item 1 also violated
 
@@ -274,8 +320,8 @@ gate.
 
 | # | Approach | Why rejected |
 |---|---|---|
-| **R-A** | **Deterministic snapshot paths for the gate reviewers** | The premise was wrong (Finding B): 326-byte prompt, repository arrives as tool results, `--no-session-persistence` on, packet path must stay unique. Nothing left to cache. |
-| **R-B** | **Digest-gated snapshot reuse** | The digest cannot see ignored files, packets, `.git`, exec bits, empty dirs, or submodule interiors (Finding C). The unconditional wipe is an integrity boundary. Benefit was wall-clock only. |
+| **R-A** | **Deterministic snapshot paths for the gate reviewers** | The premise was wrong (Finding B): ~748-byte rendered prompt, repository arrives as tool results, `--no-session-persistence` on, packet path must stay unique. **Now measured and disproven for Claude** (Finding E): cache reads are fixed at 2,800 tokens in every directory and on every repeat, and the CLI's prefix is not byte-stable between runs, so no wrapper-side change can produce a matching prefix. |
+| **R-B** | **Digest-gated snapshot reuse** | The digest cannot see ignored files, packets, `.git`, exec bits, empty dirs, or submodule interiors (Finding C). The unconditional wipe is an integrity boundary. Benefit was wall-clock only. **And for the gate reviewers there is normally nothing to reuse at all:** each run gets a unique `TAG` (`bin/ai-claude-review:61`) and `trap cleanup EXIT` removes the snapshot when the run ends (`:64-67`). Reuse would therefore require inventing a snapshot *retention* lifecycle first — with its own staleness, accumulation, and shared-directory problems, the last of which Finding D shows is already forbidden. |
 | **R-C** | **Reordering the gate prompts so invariant text leads** | Fights both verdict parsers in opposite directions: Codex requires the verdict to be the **final two non-empty lines** with exactly one heading (`bin/ai-codex-review:245-247`); Claude takes the **first** heading (`bin/ai-claude-review:109`). It would also move the READ-ONLY instruction off the front for a cache benefit Finding B shows does not exist. |
 | **R-D** | **In-place refresh instead of reuse** (`git clean -fdx`, re-checkout, re-apply) | `git clean` never walks `.git/`, so config, hooks, `info/exclude` drift and unreachable objects survive; a single `-f` refuses to delete a nested repo, so submodule leftovers survive. Worse, it **mutates the published directory**: a mid-refresh failure leaves a half-wiped tree at the exact path the next turn will use, which is the mixed-evidence failure the sibling-build-then-`mv` publish was written to make impossible. On Windows it also invites EBUSY. Making it truly equivalent means re-cloning, which saves nothing. |
 | **R-E** | **A content-addressed immutable snapshot directory** | Not a one-line change: you must never delete it while a review may be running and never write into it, but Codex `--tests` writes into `$root`. Still machinery, still unmeasured. |
@@ -295,12 +341,17 @@ Do not resurrect either from the first draft.
 **Item 1 and item 2 died of different causes, so they have different reopening
 bars. Do not let evidence for one revive the other.**
 
-- **Item 1 (caching) was a wrong mechanism.** Reopening it requires a **traced
-  provider request** showing a cacheable prefix actually exists (Step 3.1). But
-  a traced prefix is *not* a licence to share a snapshot directory or a packet
-  tag: Findings C and D forbid that independently of caching, and they would
-  still have to be satisfied. A traced prefix plus per-run directories and
-  per-run packets might justify a small prompt change and nothing more.
+- **Item 1 (caching) was a wrong mechanism, and the measurement has now been
+  taken.** Step 3.1 ran on 2026-08-25 and the answer was no. **For Claude that
+  is a direct disproof:** cache reads are fixed at 2,800 tokens regardless of
+  working directory or repetition, and the CLI's own prefix drifts between
+  identical runs. **For Codex it is mechanism plus absence of data** — `codex
+  exec` reports no cache split at all, so no Codex number was ever observed.
+  Reopening therefore requires a **change in CLI or provider behaviour** — a new
+  measurement showing reads that move with something the wrapper controls, and
+  for Codex a CLI that reports cache figures at all — not a new argument. Even then,
+  Findings C and D independently forbid sharing a snapshot directory or a packet
+  tag, so a favourable measurement would license a prompt change at most.
 - **Item 2 (snapshot reuse) was never a caching idea at all.** It was
   wall-clock only, and it failed on evidence integrity. Reopening it requires a
   Read-complete identity — one covering everything under the snapshot a reviewer
@@ -321,10 +372,12 @@ object in the report** so nothing is lost if a field is renamed upstream.
 
 ### D4 — Absent means `unavailable`, never `0`. **LOCKED.** *(2026-08-25)* See R-K.
 
-### D5 — The measurement spike is optional and read-only. **OPEN.**
-*(2026-08-25)* Step 3.1 exists so a future session can settle the caching
-question with evidence instead of taste. It changes no code. Skip it if Albert
-does not want it; it does not block anything.
+### D5 — The measurement spike is done. **CLOSED 2026-08-25.**
+*(Was "optional and open" until the spike ran the same day.)* Step 3.1 settled
+the caching question with evidence instead of taste, changed no code, and
+produced [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+Nothing here needs re-running unless the Claude or Codex CLI changes its prefix
+behaviour.
 
 ---
 
@@ -337,7 +390,7 @@ does not want it; it does not block anything.
 #### Step 2.1 — DeepSeek
 
 **File:** `bin/ai-deepseek-agent`, the response-parsing block at ~292-299 and its
-callers (~260-296, 518-520, 572).
+callers (~260-296, 518-520, 574).
 
 **What to change:**
 
@@ -366,6 +419,15 @@ callers (~260-296, 518-520, 572).
   `recovery-required` path at `:533-537`.
 - Use the wrapper's own `session_path` helper with a `.usage.jsonl` suffix so
   the existing symlink and path-escape checks apply.
+- **Clean up the extra temp file on every path.** If `call_api` returns usage in
+  a second file, `doctor --live` at `:472` must delete it too — it currently
+  removes only its message and reply files — and the new path must be covered by
+  `ACTIVE_API_TMP` (`:264`) so the interrupt handler's `rm -f` at `:226` catches
+  it. Otherwise every doctor run and every interrupted turn leaks one temp file.
+- **The sidecar is observability, not a completion record.** Do not give it
+  attachment-ledger semantics: nothing may later treat a present or absent
+  sidecar line as evidence that a turn did or did not publish
+  (`bin/ai-deepseek-agent:533-537` is the ledger path; the sidecar is not it).
 - The reply file and stdout stay **byte-identical** to today.
 - Print one line to **stderr**, in the shape of `bin/ai-grok-review:858`:
   `tokens: <total> (cache hit: <n>, miss: <n>) model: <model>`. Any field the
@@ -402,10 +464,37 @@ sessions it listed before the change.
   exclusive `set -C` staging, which is reserved before the provider runs
   (`:177-179`, `:318`, `:335`); more bytes on a held descriptor change no
   destination check.
-- Guard every `jq` read defensively: `bin/ai-muse:3` **does** use `set -e`, so a
-  failed command substitution in the report path would abort *after* the
-  provider already answered. Missing fields must yield `unavailable`, never a
-  failed command.
+- Guard every `jq` read defensively — including reads inside string
+  interpolations, `"…\(.input)…"`, which fail exactly the same way.
+  `bin/ai-muse:3` **does** use `set -e`, so a failed command substitution in the
+  report path would abort *after* the provider already answered. Missing fields
+  must yield `unavailable`, never a failed command.
+- **Use the optional-access operator, `.field? // "unavailable"`, or a
+  type-guarded read.** An earlier revision of this plan claimed `TOKENS` is only
+  ever an object or `null` because the capture at `bin/ai-muse:277` ends in
+  `//null`. **That is wrong.** jq's `//` falls through only on `null` and
+  `false`, so `TOKENS` is `null` *or the compact encoding of whatever
+  `.part.tokens` actually held* (any value except `false`, which the capture's
+  own `//empty` collapses to `null`) — an object in every case observed so far, but
+  nothing constrains it. The upstream validation at `:271-274` checks that each
+  NDJSON line is an object with one session id; it says nothing about the type
+  of `.part.tokens`.
+
+  This matters because the naive form fails exactly where the guard is needed.
+  Verified at the shell:
+
+  ```bash
+  echo '5' | jq -r '.input // "unavailable"'
+  ```
+
+  errors with `Cannot index number with string ("input")` and exits non-zero,
+  which under `set -e` aborts the report *after* Muse has already answered.
+  `echo '5' | jq -r '.input? // "unavailable"'` prints `unavailable`. A single
+  type-guarded expression is better still:
+  `if type=="object" then (.input? // "unavailable") else "unavailable" end`.
+- **Do not rename the existing `reviewed commit` or `evidence fingerprint` report
+  labels.** `tests/test-ai-muse.sh:254` greps for those exact strings. Add the
+  new rows; leave the existing ones alone.
 
 **Verification gate:** `bash tests/test-ai-muse.sh` passes including the new
 cases; a published report shows labelled rows.
@@ -419,13 +508,14 @@ stub must be *extended* for the positive case:
 | Test | Asserts |
 |---|---|
 | `usage_line_written_to_stderr` | Summary appears on stderr when the stub returns `usage` |
-| `stdout_reply_unchanged` | stdout byte-identical to pre-change output for a fixed stub |
+| `stdout_reply_unchanged` | stdout unchanged for a fixed stub. **Assert on `reply`, or mask the `SESSION_ID:` line** — `send`'s stdout embeds a date/pid/random id (`new_id` at `bin/ai-deepseek-agent:180`, collision loop at `:515-516`), so literal byte-identity is impossible there. `tests/test-ai-deepseek-agent.sh:58` already shows the masking idiom |
 | `transcript_json_shape_unchanged` | No new keys; `messages[0]` is still exactly the boundary |
 | `usage_sidecar_appends_per_turn` | Two turns → two sidecar lines |
 | `usage_sidecar_not_listed_as_session` | `list` output is unchanged with a sidecar present (guards R-J) |
 | `missing_usage_reports_unavailable` | No `usage` in the response → `unavailable`, never `0`, turn still succeeds |
 | `doctor_live_creates_no_sidecar` | `doctor --live` writes no sidecar and no session directory (guards the `call_api` split) |
-| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds |
+| `doctor_live_leaves_no_temp_files` | `doctor --live` leaves no stray temp file behind (guards the extra-file cleanup in Step 2.1) |
+| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds. **Inject the failure by pre-creating a _directory_ at the sidecar path** (`session_path` rejects symlinks but not directories), not with `chmod` — `chmod` is unreliable on Git Bash/Windows, which is the machine in § 12. **Target `reply` on an existing session**: `send`'s id is unpredictable (`bin/ai-deepseek-agent:180`, `:515-516`), so there is no path to pre-create |
 | `stderr_usage_is_not_on_stdout` | The usage line is absent from a stdout capture (extends the existing `SESSION_ID` capture at `tests/test-ai-deepseek-agent.sh:58`) |
 | `usage_sidecar_appends_under_lock` | Two concurrent replies produce two well-formed JSONL lines (extends `tests/test-ai-deepseek-agent.sh:75-77`) |
 
@@ -439,6 +529,7 @@ richer fixture is needed:
 | `raw_token_object_retained` | Raw object still in the report |
 | `stderr_usage_line_on_new_and_ask` | Both `new` and `ask` print the summary |
 | `null_tokens_object_still_publishes` | A `step_finish` with no `tokens` (so `TOKENS` stays `null`, `bin/ai-muse:235`) still publishes a report |
+| `scalar_tokens_value_still_publishes` | A `step_finish` carrying `"tokens":5` — a scalar, not an object — still publishes, with `unavailable` rows. This is the case the naive `// "unavailable"` form fails |
 
 **Known limit, state it in the commit message:** these are offline stub tests.
 They cannot prove the `jq` paths match production field names — only D3's real
@@ -448,16 +539,18 @@ fixture can. Do not claim otherwise.
 
 ---
 
-### Phase 3 — Optional measurement spike (read-only, no code)
+### Phase 3 — Measurement spike — ✅ DONE 2026-08-25, no code changed
 
-#### Step 3.1
+#### Step 3.1 — complete
 
-Only if Albert wants the caching question settled. Trace what the Claude and
-Codex CLIs actually send for one gate review — whether a system prefix precedes
-the user prompt, whether it contains cwd, date, or git status, and what the
-provider reports as cached. Write the answer into `docs/` and update D1.
+Ran the exact governed gate command with a trivial prompt, six times for Claude
+across three working directories and twice for Codex, and read the CLI's own
+reported usage. Result and full table:
+[`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
 
-**Do not change any code in this phase.** Its output is knowledge, not a diff.
+The answer closed item 1 permanently (Finding E) and updated D1's reopening bar.
+**Nothing here needs re-running** unless the Claude or Codex CLI changes its
+prefix behaviour.
 
 ---
 
@@ -478,10 +571,23 @@ ai-review claude diff-review
 ai-review codex diff-review
 ```
 
-Both must return `APPROVE`. Then update `docs/muse-opencode.md` (note the new
-cache reporting; reaffirm direct mode is deliberate and unchanged), update this
-plan's STATUS with artifacts, close the handoff, load `session-docs-update`, and
-commit on `main` per `AGENTS.md:20`. One commit; this is one coherent change.
+Both must return `APPROVE`.
+
+**Then the independent exact-head review that `AGENTS.md:39-42` requires.** That
+rule says changes to *reviewer wrappers* need one read-only exact-head final
+review before merge — and Phase 2 changes two of them, `bin/ai-deepseek-agent`
+and `bin/ai-muse`. The docs-only commits in this workstream did not trigger it
+("ordinary plans, analysis notes, and documentation-router wording do not"), but
+the implementation does:
+
+```bash
+ai-review claude final-check
+```
+
+Then update `docs/muse-opencode.md` (note the new cache reporting; reaffirm
+direct mode is deliberate and unchanged), update this plan's STATUS with
+artifacts, close the handoff, load `session-docs-update`, and commit on `main`
+per `AGENTS.md:20`. One commit; this is one coherent change.
 
 ## 10. Tests required
 
@@ -555,7 +661,8 @@ strayed out of scope.
       fixture or a note naming it is recorded in the commit.
 - [ ] A real DeepSeek turn and a real Muse turn each show the stderr line and a
       populated report — pasted into the closing report as proof.
-- [ ] Both gate reviews return APPROVE.
+- [ ] Both gate reviews return APPROVE, **and** the `AGENTS.md:39-42`
+      independent exact-head final review has run against the implementation.
 - [ ] `docs/muse-opencode.md` updated; STATUS updated with artifacts; handoff
       closed.
 - [ ] Committed on `main`, pushed, confirmed on `origin/main`.
@@ -590,9 +697,19 @@ evidence about HEAD, not tokens.
    guess.**
 2. **Whether GLM should get the same reporting.** Out of scope by instruction.
    Record as a follow-up if trivial.
-3. **Whether the gate reviewers have any cacheable prefix at all.** Finding B
-   says the premise is unsupported. Step 3.1 settles it with evidence if anyone
-   wants it settled.
+3. ~~Whether the gate reviewers have any cacheable prefix at all.~~
+   **Settled 2026-08-25.** They do not have one the wrapper can influence — see
+   Finding E and the measurement doc. What remains genuinely open is whether the
+   ~12k-token unredeemed prefix per gate invocation is worth attacking through
+   session reuse or fewer invocations. Both trade something real (stage
+   independence, or review coverage) and both are out of scope here.
+
+4. **Should the governed Codex command pin an empty MCP configuration?** The
+   spike incidentally showed `codex exec` loading ambient MCP servers, where
+   Claude's governed command pins `--strict-mcp-config` with no servers
+   (`bin/ai-claude-review:12`). That is a safety question, not a caching one,
+   and it is out of scope for this plan — but it should not be lost. Raised with
+   Albert 2026-08-25.
 
 ---
 
@@ -604,8 +721,31 @@ evidence about HEAD, not tokens.
 | 2 | Grok 4.6 | REJECT first draft; recommends Phase 4 only | $0.0679 | `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` |
 | 3 | Grok 4.6 — review of this rewrite | **APPROVE**; no material objection, four spec nits | $0.1927 | `.ai/reviews/grok-cache-plan-audit-20260825T135220Z-4523.md` |
 
-Session: `ai-grok-review show cache-plan-audit`. Running total: **$0.439** over
-three turns. Turn 3 read 1,414,014 tokens, of which 1,165,696 came from cache.
+| 4 | GLM 5.3 — independent audit of the plan and the measurement | **APPROVE**; six defects found in the Phase 2 spec | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T143401Z.md` |
+| 5 | GLM 5.3 — review of the fixes | **APPROVE**; one must-fix (the `TOKENS` type guarantee) plus four mis-cites introduced by the fix pass | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144141Z.md` |
+
+Sessions: `ai-grok-review show cache-plan-audit`, `ai-glm show
+reviewer-cache-plan-audit`.
+
+Every figure here is provider-returned, per this plan's own rule. Grok's costs
+and token counts come from the usage line `ai-grok-review` prints on stderr
+(`tokens: … cached: … cost: $…`): **$0.439** over three turns, and turn 3 read
+1,414,014 tokens of which 1,165,696 were cached. GLM reports no cost at all; its
+per-turn footer carries `tokens.cache.read`, which was 100,480 on turn 1 and
+103,808 on turn 2.
+
+GLM independently tried to argue both withdrawals back and could not, which is
+the useful part: two models with different evidence reached the same conclusion.
+It also caught two errors that had survived Grok's three turns and my own
+checking — the "326 bytes" prompt figure, measured over the wrong line range,
+and a false claim about jq's `//` operator that would have told an implementer a
+defensive guard was unnecessary in exactly the case that needs it.
+
+**A process lesson, recorded because it recurred:** every wrong citation in this
+plan came from prose written from a previous reviewer's line numbers without
+re-deriving them. Four more were introduced while *fixing* the first batch.
+Re-grep every `file:line` you write before committing it — this repository's
+whole review method depends on those citations being re-derivable.
 
 All four of turn 3's nits were verified against the source and applied: the
 prompt line range (`:90-99`, not `:93-101`), the `call_api` versus `send`/`reply`
@@ -638,7 +778,7 @@ Yes, and this is now the plan's main value. § 7 records eleven rejected
 approaches. Four of them (R-A through R-D) are the plan's own withdrawn items,
 each with the evidence that killed it, so the next session cannot re-derive a
 design that two review turns and independent verification already refuted. § 6
-Findings B, C and D record the *mechanics* — the 326-byte prompt, the six
+Findings B, C, D and E record the *mechanics* — the ~748-byte prompt, the six
 categories of readable-but-undigested state, the concurrency tests — rather than
 just the conclusions, so a future session can tell whether changed circumstances
 would change the answer.
