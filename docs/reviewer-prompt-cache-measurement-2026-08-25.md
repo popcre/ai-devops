@@ -42,6 +42,20 @@ from the `usage` object in the CLI's own JSON output.
 | 5 | empty scratch dir A (repeat) | 2 | 7,832 | 2,800 |
 | 6 | empty scratch dir B | 2 | 7,833 | 2,800 |
 
+Runs 1 and 2 were captured with the complete `usage` object. Their nested
+cache-creation breakdown was:
+
+```json
+"cache_creation":{"ephemeral_1h_input_tokens":11879,"ephemeral_5m_input_tokens":0}
+"cache_creation":{"ephemeral_1h_input_tokens":11878,"ephemeral_5m_input_tokens":0}
+```
+
+so **for runs 1 and 2** the creation figure sits entirely in the one-hour
+ephemeral tier, with the five-minute tier at zero. **Runs 3–6 recorded only the three headline fields**
+in the table above; their tier split was not captured. The raw probe JSON was
+written to a session scratchpad and is not retained in the repository, so treat
+the tier observation as sound for runs 1–2 and unverified for the rest.
+
 ### What these numbers say
 
 **1. The user prompt is negligible and the system prefix is not.** The probe
@@ -103,6 +117,23 @@ in both — a short prompt, a repository delivered as tool results, and a fresh
 process per stage — but no Codex number was observed, and this document should
 not be cited as if one had been.
 
+## What this measurement does not establish
+
+Stated precisely, because a third reviewer correctly pushed on it: the probes
+used a **two-token prompt and never executed a `Read`**. They measure
+*cross-invocation prefix reuse* and nothing else.
+
+They say nothing about caching *inside* one review's multi-turn tool loop, where
+the conversation grows with every tool result and the CLI may set breakpoints on
+that history. That is a real and unmeasured question.
+
+It does not reopen item 1. Within a single invocation the snapshot path is
+constant however it was generated, so path determinism *across runs* cannot
+affect intra-invocation caching; and across invocations there is no session to
+resume, while the CLI's own prefix drifts regardless. Intra-invocation cost
+would need its own experiment — a prompt forcing a known number of reads, with
+per-turn usage captured — and its own plan.
+
 ## The real cost this found
 
 Item 1 aimed at the wrong thing, but the spike did quantify a genuine expense:
@@ -110,9 +141,9 @@ Item 1 aimed at the wrong thing, but the spike did quantify a genuine expense:
 read back**, and the seven-stage pipeline invokes the gate four times. Here that
 creation lands in the one-hour ephemeral tier and is never redeemed.
 
-The tier is provider-reported: the usage object carries
+The tier is provider-reported: for runs 1 and 2 the usage object carries
 `cache_creation.ephemeral_1h_input_tokens` equal to the full creation figure and
-`ephemeral_5m_input_tokens` of zero in every run. Cache *creation* is generally
+`ephemeral_5m_input_tokens` of zero, quoted verbatim above. Cache *creation* is generally
 billed above the base input rate, but **the exact rate multipliers were not
 verified here** and should be re-checked against current provider pricing before
 anyone acts on the size of this cost.

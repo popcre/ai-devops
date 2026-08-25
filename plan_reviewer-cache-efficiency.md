@@ -295,6 +295,18 @@ Run 2026-08-25 with the exact governed gate command; full table in
 - **Codex reports no cache data at all**: `codex exec` prints one
   `tokens used 17,672` total for a two-token prompt, with no hit/miss split.
 
+**What the spike does NOT establish.** The probes used a two-token prompt and
+never executed a `Read`, so they measure *cross-invocation prefix reuse* and
+nothing else. They say nothing about how caching behaves inside one review's
+multi-turn tool loop, where the conversation grows with every tool result. That
+limit was raised by the third reviewer and is worth stating precisely — but it
+does not reopen item 1, for a reason worth writing down: within a single
+invocation the snapshot path is constant no matter how it was generated, so
+path *determinism across runs* cannot affect intra-invocation caching. And
+across invocations there is no session to resume and the CLI's own prefix drifts
+anyway. Intra-invocation cost is a real question; it is simply a different one,
+and no wrapper-side naming change addresses it.
+
 **A real cost the spike did find:** each gate invocation creates ~12,000 tokens
 of prefix that is never redeemed, four times per pipeline run. The only levers
 are session reuse (dropping `--no-session-persistence`, which would trade away
@@ -364,11 +376,30 @@ resurrection of this one.
 ### D2 — DeepSeek usage goes to stderr and a sidecar; stdout and the transcript are untouched. **LOCKED.**
 *(2026-08-25)* See R-H, R-I, R-J.
 
-### D3 — Muse field names come from a real `step_finish`, never a guess. **LOCKED.**
+### D3 — Muse field names come from a real `step_finish`, never a guess. **LOCKED — and the fixture now exists.**
 *(2026-08-25)* The existing test stub emits only `{"total":3}`, so an offline
-test cannot catch a wrong `jq` path against production field names. Capture a
-real event stream (or a saved one) before writing the paths, and **keep the raw
-object in the report** so nothing is lost if a field is renamed upstream.
+test cannot catch a wrong `jq` path against production field names. **Keep the
+raw object in the report** so nothing is lost if a field is renamed upstream.
+
+**Observed shape**, captured from a real Muse Spark 1.2 Contributor turn on
+2026-08-25 (session `reviewer-cache-plan-audit`, message
+`msg_0397b54cb001IM3ZlOAz7JdTzU`), read from the `step_finish` event in
+`ai-muse transcript`:
+
+```json
+{"total":107025,"input":21643,"output":6424,"reasoning":5373,
+ "cache":{"write":0,"read":73585}}
+```
+
+So the paths are `.total`, `.input`, `.output`, `.reasoning`, `.cache.read`
+and `.cache.write` — note **cache figures are nested one level under
+`.cache`**, not flat. `.reasoning` has no equivalent in the DeepSeek shape and
+should get its own row.
+
+This is one observation from one provider version. It is what D3 asked for and
+it unblocks Step 2.2, but it is not a contract: keep the raw object row, keep
+the type guard, and re-check the shape if the report ever prints `unavailable`
+across the board.
 
 ### D4 — Absent means `unavailable`, never `0`. **LOCKED.** *(2026-08-25)* See R-K.
 
@@ -449,12 +480,16 @@ sessions it listed before the change.
 
 **What to change:**
 
-- Before writing any `jq` path, obtain a **real** OpenCode `step_finish` event
-  and record the actual field names (D3). `docs/muse-opencode.md` notes a
-  measured follow-up "reported a large cache read", so the field exists —
-  confirm its exact spelling rather than assuming.
-- Replace the single opaque `| tokens | {...} |` row with labelled rows: input,
-  output, cache read, cache write, total. Omitted fields print `unavailable`.
+- **The fixture already exists — do not re-prove it.** D3 records a real
+  OpenCode `step_finish` token object captured on 2026-08-25, with its
+  provenance. Use those paths. Re-capture only if the provider or OpenCode
+  version changes, or if the report starts printing `unavailable` across the
+  board.
+- Replace the single opaque `| tokens | {...} |` row with labelled rows:
+  **input, output, reasoning, cache read, cache write, total** — six rows, from
+  the shape D3 recorded. `reasoning` is easy to miss because DeepSeek has no
+  equivalent; it is present in real Muse output and must get its own row.
+  Omitted fields print `unavailable`.
 - Keep the raw object as an additional row.
 - Print a one-line stderr summary per turn, same shape as DeepSeek's, matching
   the existing session lines already written to stderr at `bin/ai-muse:326`.
@@ -492,6 +527,26 @@ sessions it listed before the change.
   `echo '5' | jq -r '.input? // "unavailable"'` prints `unavailable`. A single
   type-guarded expression is better still:
   `if type=="object" then (.input? // "unavailable") else "unavailable" end`.
+- **For the nested cache fields, the `?` must go on the FIRST index, not only
+  the last.** `.cache.read?` is not safe; `.cache?.read?` is. Measured at the
+  shell against every value `TOKENS` can take:
+
+  | `TOKENS` | `.cache.read? // "unavailable"` | `.cache?.read? // "unavailable"` |
+  |---|---|---|
+  | `{"cache":{"read":7}}` | `7` | `7` |
+  | `{}` | `unavailable` | `unavailable` |
+  | `{"cache":5}` | `unavailable` | `unavailable` |
+  | `{"cache":null}` | `unavailable` | `unavailable` |
+  | `null` | `unavailable` | `unavailable` |
+  | `5` | **error, exit 5** | `unavailable` |
+  | `"str"` | **error, exit 5** | `unavailable` |
+  | `[1,2]` | **error, exit 5** | `unavailable` |
+
+  Note *why*, because the obvious reason is the wrong one: a **missing**
+  `.cache` is harmless — indexing `null` yields `null` in jq. The failure is
+  when `TOKENS` **itself** is a scalar, string, or array, which is exactly the
+  case this guard exists for. A trailing `?` cannot rescue an index that already
+  threw. Use `.cache?.read?` / `.cache?.write?`, or the type-guarded form.
 - **Do not rename the existing `reviewed commit` or `evidence fingerprint` report
   labels.** `tests/test-ai-muse.sh:254` greps for those exact strings. Add the
   new rows; leave the existing ones alone.
@@ -628,6 +683,14 @@ strayed out of scope.
   (`AGENTS.md:52`). These files are dense with comments recording incidents that
   cost real money.
 - **GPT-5.6 runs at `low` or `medium` reasoning only.**
+- **Never redirect output into the repository while a reviewer turn is running.**
+  `ai-muse` snapshots the tree before and after each turn and rejects the
+  response if the source moved — and an untracked file is a move. This cost a
+  full Muse turn on 2026-08-25: a `2>muse1.err` redirect in the repository root
+  made the wrapper reject an otherwise complete review. Send scratch output to
+  the session scratchpad instead. The turn is recoverable — the answer is in
+  `ai-muse transcript`, and `ai-muse reconcile <name>` returns the session to
+  `active` — but the report is not published.
 
 ## 12. Access and environment
 
@@ -692,9 +755,10 @@ evidence about HEAD, not tokens.
 
 ### Open questions
 
-1. **Muse's exact token field names.** Unresolved; no live Muse call was made
-   during planning. Settle with a real `step_finish` before Step 2.2. **Do not
-   guess.**
+1. ~~Muse's exact token field names.~~ **Settled 2026-08-25** — captured from a
+   real turn and recorded in D3: `.total`, `.input`, `.output`, `.reasoning`,
+   and `.cache.read` / `.cache.write` nested under `.cache`. Still write the
+   type guard and keep the raw object row; one observation is not a contract.
 2. **Whether GLM should get the same reporting.** Out of scope by instruction.
    Record as a follow-up if trivial.
 3. ~~Whether the gate reviewers have any cacheable prefix at all.~~
@@ -723,9 +787,15 @@ evidence about HEAD, not tokens.
 
 | 4 | GLM 5.3 — independent audit of the plan and the measurement | **APPROVE**; six defects found in the Phase 2 spec | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T143401Z.md` |
 | 5 | GLM 5.3 — review of the fixes | **APPROVE**; one must-fix (the `TOKENS` type guarantee) plus four mis-cites introduced by the fix pass | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144141Z.md` |
+| 6 | GLM 5.3 — closing turn | **APPROVE**, no material objection remaining; two optional nits, both taken | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144623Z.md` |
+| 7 | Muse Spark 1.2 Contributor — third independent audit | **APPROVE** with three carry items | 107,025 tokens, 73,585 from cache | `ai-muse transcript reviewer-cache-plan-audit` (report unpublished — see below) |
+| 8 | Muse — review of the fixes | **APPROVE**; one spec nit (missing `reasoning` row, nested-cache guard) | provider footer | `.ai/reviews/muse-reviewer-cache-plan-audit-20260825T151804Z-68597-16872.md` |
+| 9 | Muse — closing turn | **APPROVE**, no material objection remaining | provider footer | `.ai/reviews/muse-reviewer-cache-plan-audit-20260825T152054Z-71681-17942.md` |
 
-Sessions: `ai-grok-review show cache-plan-audit`, `ai-glm show
-reviewer-cache-plan-audit`.
+**Three independent models, nine turns, all ending at APPROVE with no material
+objection outstanding.** Sessions: `ai-grok-review show cache-plan-audit`,
+`ai-glm show reviewer-cache-plan-audit`, `AI_MUSE_CALLER=claude ai-muse
+transcript reviewer-cache-plan-audit`.
 
 Every figure here is provider-returned, per this plan's own rule. Grok's costs
 and token counts come from the usage line `ai-grok-review` prints on stderr
@@ -740,6 +810,14 @@ It also caught two errors that had survived Grok's three turns and my own
 checking — the "326 bytes" prompt figure, measured over the wrong line range,
 and a false claim about jq's `//` operator that would have told an implementer a
 defensive guard was unnecessary in exactly the case that needs it.
+
+Muse's turn was rejected by its own wrapper's source-changed guard, because a
+stray `.err` redirect appeared in the repository root while it was running. The
+review itself completed and is in the transcript; the session was reconciled
+back to `active`. Its most useful contributions were the limit-of-evidence note
+on the measurement (now in the measurement doc) and — from the token block of
+its own `step_finish` event — the real Muse field shape that D3 had been waiting
+for.
 
 **A process lesson, recorded because it recurred:** every wrong citation in this
 plan came from prose written from a previous reviewer's line numbers without
