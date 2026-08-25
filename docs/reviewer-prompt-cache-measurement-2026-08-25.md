@@ -47,10 +47,13 @@ from the `usage` object in the CLI's own JSON output.
 **1. The user prompt is negligible and the system prefix is not.** The probe
 prompt is 2 tokens of uncached input. Everything else — between 7,800 and 11,900
 tokens — is CLI-supplied prefix. A real review's prompt is not much bigger: the
-template at `bin/ai-claude-review:90-99` is 409 bytes, and about 748 bytes
-(~190 tokens) once `$MODE`, `$PACKET_DIR`, `$REVIEW_DIR` and `$DECISION` are
-substituted for a representative `diff-review`. Either way the prefix is
-dominated by CLI content, not by anything the wrapper writes.
+template at `bin/ai-claude-review:90-99` is about 400 bytes, and roughly 750
+bytes (~190 tokens) once `$MODE`, `$PACKET_DIR`, `$REVIEW_DIR` and `$DECISION`
+are substituted for a representative `diff-review`. Re-derive the unexpanded
+figure with `sed -n '90,99p' bin/ai-claude-review | tr -d '\r' | wc -c`; line
+endings move it by a few bytes, which is why it is quoted approximately. Either
+way the prefix is dominated by CLI content, not by anything the wrapper
+writes.
 
 **2. Cache reads are pinned at 2,800 tokens and never move.** Identical across
 every run, in three different working directories, on repeats seconds apart.
@@ -107,8 +110,10 @@ Item 1 aimed at the wrong thing, but the spike did quantify a genuine expense:
 read back**, and the seven-stage pipeline invokes the gate four times. Here that
 creation lands in the one-hour ephemeral tier and is never redeemed.
 
-Cache *creation* is generally billed above the base input rate, and these runs
-report the one-hour ephemeral tier — but **the exact rate multipliers were not
+The tier is provider-reported: the usage object carries
+`cache_creation.ephemeral_1h_input_tokens` equal to the full creation figure and
+`ephemeral_5m_input_tokens` of zero in every run. Cache *creation* is generally
+billed above the base input rate, but **the exact rate multipliers were not
 verified here** and should be re-checked against current provider pricing before
 anyone acts on the size of this cost.
 

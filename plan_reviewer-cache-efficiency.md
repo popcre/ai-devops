@@ -221,11 +221,18 @@ appears in the prompt; it arrives as *tool results* from Read/Grep/Glob inside
 the session. A stable directory name therefore cannot make repository context
 cacheable, because repository context was never prompt prefix.
 
+Re-derive the unexpanded figure with:
+
+```bash
+sed -n '90,99p' bin/ai-claude-review | tr -d '\r' | wc -c
+```
+
 *(An earlier revision of this plan said "326 bytes". That was measured over the
-wrong line range — `:93-101` instead of `:90-99` — and is corrected here. The
-conclusion never depended on the figure: the measurement in Finding E used a
-**two-token** prompt and still created 7,832 tokens of prefix, so prompt size is
-a rounding error either way.)*
+wrong line range — `:93-101` instead of `:90-99`, which picks up two later,
+unrelated lines — and is corrected here. Treat both figures as approximate; line
+endings shift them by a few bytes. The conclusion never depended on either: the
+measurement in Finding E used a **two-token** prompt and still created 7,832
+tokens of prefix, so prompt size is a rounding error regardless.)*
 
 Two further facts kill the idea independently:
 
@@ -335,11 +342,14 @@ Do not resurrect either from the first draft.
 bars. Do not let evidence for one revive the other.**
 
 - **Item 1 (caching) was a wrong mechanism, and the measurement has now been
-  taken.** Step 3.1 ran on 2026-08-25 and the answer was no: cache reads are
-  fixed at 2,800 tokens regardless of working directory or repetition, and the
-  CLI's own prefix drifts between identical runs. Reopening therefore requires a
-  **change in CLI or provider behaviour** — a new measurement showing reads that
-  move with something the wrapper controls — not a new argument. Even then,
+  taken.** Step 3.1 ran on 2026-08-25 and the answer was no. **For Claude that
+  is a direct disproof:** cache reads are fixed at 2,800 tokens regardless of
+  working directory or repetition, and the CLI's own prefix drifts between
+  identical runs. **For Codex it is mechanism plus absence of data** — `codex
+  exec` reports no cache split at all, so no Codex number was ever observed.
+  Reopening therefore requires a **change in CLI or provider behaviour** — a new
+  measurement showing reads that move with something the wrapper controls, and
+  for Codex a CLI that reports cache figures at all — not a new argument. Even then,
   Findings C and D independently forbid sharing a snapshot directory or a packet
   tag, so a favourable measurement would license a prompt change at most.
 - **Item 2 (snapshot reuse) was never a caching idea at all.** It was
@@ -362,10 +372,12 @@ object in the report** so nothing is lost if a field is renamed upstream.
 
 ### D4 — Absent means `unavailable`, never `0`. **LOCKED.** *(2026-08-25)* See R-K.
 
-### D5 — The measurement spike is optional and read-only. **OPEN.**
-*(2026-08-25)* Step 3.1 exists so a future session can settle the caching
-question with evidence instead of taste. It changes no code. Skip it if Albert
-does not want it; it does not block anything.
+### D5 — The measurement spike is done. **CLOSED 2026-08-25.**
+*(Was "optional and open" until the spike ran the same day.)* Step 3.1 settled
+the caching question with evidence instead of taste, changed no code, and
+produced [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+Nothing here needs re-running unless the Claude or Codex CLI changes its prefix
+behaviour.
 
 ---
 
@@ -410,7 +422,7 @@ callers (~260-296, 518-520, 574).
 - **Clean up the extra temp file on every path.** If `call_api` returns usage in
   a second file, `doctor --live` at `:472` must delete it too — it currently
   removes only its message and reply files — and the new path must be covered by
-  `ACTIVE_API_TMP` (`:265`) so the interrupt handler's `rm -f` at `:225` catches
+  `ACTIVE_API_TMP` (`:264`) so the interrupt handler's `rm -f` at `:226` catches
   it. Otherwise every doctor run and every interrupted turn leaks one temp file.
 - **The sidecar is observability, not a completion record.** Do not give it
   attachment-ledger semantics: nothing may later treat a present or absent
@@ -455,8 +467,29 @@ sessions it listed before the change.
 - Guard every `jq` read defensively: `bin/ai-muse:3` **does** use `set -e`, so a
   failed command substitution in the report path would abort *after* the
   provider already answered. Missing fields must yield `unavailable`, never a
-  failed command. `TOKENS` is only ever a JSON object or the literal `null` (the
-  capture at `:277` ends `//null`), so `// "unavailable"` reads are safe.
+  failed command.
+- **Use the optional-access operator, `.field? // "unavailable"`, or a
+  type-guarded read.** An earlier revision of this plan claimed `TOKENS` is only
+  ever an object or `null` because the capture at `bin/ai-muse:277` ends in
+  `//null`. **That is wrong.** jq's `//` falls through only on `null` and
+  `false`, so `TOKENS` is `null` *or the compact encoding of whatever
+  `.part.tokens` actually held* — an object in every case observed so far, but
+  nothing constrains it. The upstream validation at `:271-274` checks that each
+  NDJSON line is an object with one session id; it says nothing about the type
+  of `.part.tokens`.
+
+  This matters because the naive form fails exactly where the guard is needed.
+  Verified at the shell:
+
+  ```bash
+  echo '5' | jq -r '.input // "unavailable"'
+  ```
+
+  errors with `Cannot index number with string ("input")` and exits non-zero,
+  which under `set -e` aborts the report *after* Muse has already answered.
+  `echo '5' | jq -r '.input? // "unavailable"'` prints `unavailable`. A single
+  type-guarded expression is better still:
+  `if type=="object" then (.input? // "unavailable") else "unavailable" end`.
 - **Do not rename the existing `reviewed commit` or `evidence fingerprint` report
   labels.** `tests/test-ai-muse.sh:254` greps for those exact strings. Add the
   new rows; leave the existing ones alone.
@@ -473,14 +506,14 @@ stub must be *extended* for the positive case:
 | Test | Asserts |
 |---|---|
 | `usage_line_written_to_stderr` | Summary appears on stderr when the stub returns `usage` |
-| `stdout_reply_unchanged` | stdout unchanged for a fixed stub. **Assert on `reply`, or mask the `SESSION_ID:` line** — `send`'s stdout embeds a date/pid/random id (`new_id` at `bin/ai-deepseek-agent:184`, collision loop at `:518-519`), so literal byte-identity is impossible there. `tests/test-ai-deepseek-agent.sh:58` already shows the masking idiom |
+| `stdout_reply_unchanged` | stdout unchanged for a fixed stub. **Assert on `reply`, or mask the `SESSION_ID:` line** — `send`'s stdout embeds a date/pid/random id (`new_id` at `bin/ai-deepseek-agent:180`, collision loop at `:515-516`), so literal byte-identity is impossible there. `tests/test-ai-deepseek-agent.sh:58` already shows the masking idiom |
 | `transcript_json_shape_unchanged` | No new keys; `messages[0]` is still exactly the boundary |
 | `usage_sidecar_appends_per_turn` | Two turns → two sidecar lines |
 | `usage_sidecar_not_listed_as_session` | `list` output is unchanged with a sidecar present (guards R-J) |
 | `missing_usage_reports_unavailable` | No `usage` in the response → `unavailable`, never `0`, turn still succeeds |
 | `doctor_live_creates_no_sidecar` | `doctor --live` writes no sidecar and no session directory (guards the `call_api` split) |
 | `doctor_live_leaves_no_temp_files` | `doctor --live` leaves no stray temp file behind (guards the extra-file cleanup in Step 2.1) |
-| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds. **Inject the failure by pre-creating a _directory_ at the sidecar path** (`session_path` rejects symlinks but not directories), not with `chmod` — `chmod` is unreliable on Git Bash/Windows, which is the machine in § 12 |
+| `sidecar_write_failure_does_not_fail_the_turn` | An unwritable sidecar path warns but the turn still succeeds. **Inject the failure by pre-creating a _directory_ at the sidecar path** (`session_path` rejects symlinks but not directories), not with `chmod` — `chmod` is unreliable on Git Bash/Windows, which is the machine in § 12. **Target `reply` on an existing session**: `send`'s id is unpredictable (`bin/ai-deepseek-agent:180`, `:515-516`), so there is no path to pre-create |
 | `stderr_usage_is_not_on_stdout` | The usage line is absent from a stdout capture (extends the existing `SESSION_ID` capture at `tests/test-ai-deepseek-agent.sh:58`) |
 | `usage_sidecar_appends_under_lock` | Two concurrent replies produce two well-formed JSONL lines (extends `tests/test-ai-deepseek-agent.sh:75-77`) |
 
@@ -494,6 +527,7 @@ richer fixture is needed:
 | `raw_token_object_retained` | Raw object still in the report |
 | `stderr_usage_line_on_new_and_ask` | Both `new` and `ask` print the summary |
 | `null_tokens_object_still_publishes` | A `step_finish` with no `tokens` (so `TOKENS` stays `null`, `bin/ai-muse:235`) still publishes a report |
+| `scalar_tokens_value_still_publishes` | A `step_finish` carrying `"tokens":5` — a scalar, not an object — still publishes, with `unavailable` rows. This is the case the naive `// "unavailable"` form fails |
 
 **Known limit, state it in the commit message:** these are offline stub tests.
 They cannot prove the `jq` paths match production field names — only D3's real
@@ -685,18 +719,31 @@ evidence about HEAD, not tokens.
 | 2 | Grok 4.6 | REJECT first draft; recommends Phase 4 only | $0.0679 | `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` |
 | 3 | Grok 4.6 — review of this rewrite | **APPROVE**; no material objection, four spec nits | $0.1927 | `.ai/reviews/grok-cache-plan-audit-20260825T135220Z-4523.md` |
 
-| 4 | GLM 5.3 — independent audit of the plan and the measurement | **APPROVE** of the measurement commit; six defects found in the Phase 2 spec | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T143401Z.md` |
+| 4 | GLM 5.3 — independent audit of the plan and the measurement | **APPROVE**; six defects found in the Phase 2 spec | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T143401Z.md` |
+| 5 | GLM 5.3 — review of the fixes | **APPROVE**; one must-fix (the `TOKENS` type guarantee) plus four mis-cites introduced by the fix pass | not reported by provider | `.ai/reviews/glm-reviewer-cache-plan-audit-20260825T144141Z.md` |
 
 Sessions: `ai-grok-review show cache-plan-audit`, `ai-glm show
-reviewer-cache-plan-audit`. Grok total: **$0.439** over three turns; turn 3 read
-1,414,014 tokens, of which 1,165,696 came from cache. GLM does not report cost;
-its turn read 100,480 tokens from cache.
+reviewer-cache-plan-audit`.
+
+Every figure here is provider-returned, per this plan's own rule. Grok's costs
+and token counts come from the usage line `ai-grok-review` prints on stderr
+(`tokens: … cached: … cost: $…`): **$0.439** over three turns, and turn 3 read
+1,414,014 tokens of which 1,165,696 were cached. GLM reports no cost at all; its
+per-turn footer carries `tokens.cache.read`, which was 100,480 on turn 1 and
+103,808 on turn 2.
 
 GLM independently tried to argue both withdrawals back and could not, which is
 the useful part: two models with different evidence reached the same conclusion.
-It also caught a factual error both Grok and I missed — the "326 bytes" prompt
-figure was measured over the wrong line range — plus five spec defects in the
-remaining work, all verified against source and applied.
+It also caught two errors that had survived Grok's three turns and my own
+checking — the "326 bytes" prompt figure, measured over the wrong line range,
+and a false claim about jq's `//` operator that would have told an implementer a
+defensive guard was unnecessary in exactly the case that needs it.
+
+**A process lesson, recorded because it recurred:** every wrong citation in this
+plan came from prose written from a previous reviewer's line numbers without
+re-deriving them. Four more were introduced while *fixing* the first batch.
+Re-grep every `file:line` you write before committing it — this repository's
+whole review method depends on those citations being re-derivable.
 
 All four of turn 3's nits were verified against the source and applied: the
 prompt line range (`:90-99`, not `:93-101`), the `call_api` versus `send`/`reply`
