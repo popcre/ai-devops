@@ -23,12 +23,12 @@ remains, plus an optional read-only measurement spike.
 | 0.2 | Grok 4.6 adversarial audit of the first draft, 2 turns | ✅ done 2026-08-25 | `.ai/reviews/grok-cache-plan-audit-20260825T133222Z-2115436.md`, `.ai/reviews/grok-cache-plan-audit-20260825T134332Z-2123838.md` — REJECT both turns; $0.246 total |
 | 0.3 | Claude verified Grok's load-bearing claims against source | ✅ done 2026-08-25 | § 6, every row cites `file:line` you can re-read |
 | 0.4 | Items 1 and 2 withdrawn; plan rewritten | ✅ done 2026-08-25 | This file |
-| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO** | § 7 R-A. The premise was wrong: the prompt is 326 bytes (`bin/ai-claude-review:90-99`) and the repository arrives as tool results, not prompt prefix |
+| 1.1 | **Item 1 — deterministic gate snapshot paths** | ❌ **WON'T DO — now disproven by measurement** | § 7 R-A and [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md). `cache_read_input_tokens` is 2,800 in every run regardless of directory or repetition, and the CLI's own prefix drifts 1–3 tokens between identical runs |
 | 1.2 | **Item 2 — digest-gated snapshot reuse** | ❌ **WON'T DO** | § 7 R-B. The digest cannot see what a reviewer can read; the unconditional wipe is an integrity boundary |
 | 2.1 | DeepSeek: capture and report cache-hit tokens | ⬜ open | — |
 | 2.2 | Muse: labelled cache rows, from a real fixture | ⬜ open | — |
 | 2.3 | Tests for both usage reporters | ⬜ open | — |
-| 3.1 | Optional: measurement spike (read-only, no code) | ⬜ open | — |
+| 3.1 | Measurement spike (read-only, no code) | ✅ done 2026-08-25 | [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md) — 6 Claude probes + 2 Codex probes; cache reads pinned at 2,800 tokens in every configuration |
 | 4.1 | Suite green, gate reviews APPROVE, commit and push | ⬜ open | — |
 
 **A fresh session starts at Step 2.1.**
@@ -143,8 +143,10 @@ opaque cell.
 2. Muse: break the captured token object into labelled rows in the report, plus
    a one-line stderr summary.
 3. Tests for both.
-4. Optionally, a read-only measurement spike (Step 3.1) that answers whether the
-   gate reviewers have any cacheable prefix at all. **No code change.**
+4. ~~A read-only measurement spike answering whether the gate reviewers have any
+   cacheable prefix.~~ **Done 2026-08-25** — see
+   [`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+   No code changed.
 
 ### Explicitly NOT in this plan
 
@@ -256,6 +258,35 @@ That is the definition of a reviewer approving a verdict against source it did
 not read. The clone is an integrity boundary, and item 2's only benefit was
 wall-clock.
 
+### Finding E — the measurement, which closes item 1 for good
+
+Run 2026-08-25 with the exact governed gate command; full table in
+[`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
+
+- **`cache_read_input_tokens` = 2,800 in all six Claude probes** — repository
+  worktree, empty directory A, empty directory B, and immediate repeats in the
+  same directory. The working directory does not move it. Repetition does not
+  move it.
+- **The large prefix is re-created and never read back.** Byte-identical repeat
+  runs each created ~11.9k tokens (in the repo) or ~7.8k (in an empty directory)
+  and still read only 2,800.
+- **The prefix is not byte-stable even with everything the wrapper controls held
+  fixed** — counts drift 1–3 tokens between consecutive identical runs
+  (11,879 → 11,878 → 11,877), so something in the CLI's own system content
+  varies per invocation. This is what makes item 1 *impossible* rather than
+  merely unhelpful.
+- **The repository adds ~4,045 tokens of context** over an empty directory
+  (11,877 vs 7,832) — real, but cache-neutral.
+- **Codex reports no cache data at all**: `codex exec` prints one
+  `tokens used 17,672` total for a two-token prompt, with no hit/miss split.
+
+**A real cost the spike did find:** each gate invocation creates ~12,000 tokens
+of prefix that is never redeemed, four times per pipeline run. The only levers
+are session reuse (dropping `--no-session-persistence`, which would trade away
+the stage independence that makes a gate a gate) and fewer gate invocations (a
+pipeline scope decision). Neither is a wrapper change and neither belongs in
+this plan; both are recorded in the measurement doc.
+
 ### Finding D — the concurrency contract that item 1 also violated
 
 `tests/test-ai-claude-review.sh:70-73` and `tests/test-ai-codex-review.sh:133-138`
@@ -274,7 +305,7 @@ gate.
 
 | # | Approach | Why rejected |
 |---|---|---|
-| **R-A** | **Deterministic snapshot paths for the gate reviewers** | The premise was wrong (Finding B): 326-byte prompt, repository arrives as tool results, `--no-session-persistence` on, packet path must stay unique. Nothing left to cache. |
+| **R-A** | **Deterministic snapshot paths for the gate reviewers** | The premise was wrong (Finding B): 326-byte prompt, repository arrives as tool results, `--no-session-persistence` on, packet path must stay unique. **Now measured and disproven** (Finding E): cache reads are fixed at 2,800 tokens in every directory and on every repeat, and the CLI's prefix is not byte-stable between runs, so no wrapper-side change can produce a matching prefix. |
 | **R-B** | **Digest-gated snapshot reuse** | The digest cannot see ignored files, packets, `.git`, exec bits, empty dirs, or submodule interiors (Finding C). The unconditional wipe is an integrity boundary. Benefit was wall-clock only. |
 | **R-C** | **Reordering the gate prompts so invariant text leads** | Fights both verdict parsers in opposite directions: Codex requires the verdict to be the **final two non-empty lines** with exactly one heading (`bin/ai-codex-review:245-247`); Claude takes the **first** heading (`bin/ai-claude-review:109`). It would also move the READ-ONLY instruction off the front for a cache benefit Finding B shows does not exist. |
 | **R-D** | **In-place refresh instead of reuse** (`git clean -fdx`, re-checkout, re-apply) | `git clean` never walks `.git/`, so config, hooks, `info/exclude` drift and unreachable objects survive; a single `-f` refuses to delete a nested repo, so submodule leftovers survive. Worse, it **mutates the published directory**: a mid-refresh failure leaves a half-wiped tree at the exact path the next turn will use, which is the mixed-evidence failure the sibling-build-then-`mv` publish was written to make impossible. On Windows it also invites EBUSY. Making it truly equivalent means re-cloning, which saves nothing. |
@@ -295,12 +326,14 @@ Do not resurrect either from the first draft.
 **Item 1 and item 2 died of different causes, so they have different reopening
 bars. Do not let evidence for one revive the other.**
 
-- **Item 1 (caching) was a wrong mechanism.** Reopening it requires a **traced
-  provider request** showing a cacheable prefix actually exists (Step 3.1). But
-  a traced prefix is *not* a licence to share a snapshot directory or a packet
-  tag: Findings C and D forbid that independently of caching, and they would
-  still have to be satisfied. A traced prefix plus per-run directories and
-  per-run packets might justify a small prompt change and nothing more.
+- **Item 1 (caching) was a wrong mechanism, and the measurement has now been
+  taken.** Step 3.1 ran on 2026-08-25 and the answer was no: cache reads are
+  fixed at 2,800 tokens regardless of working directory or repetition, and the
+  CLI's own prefix drifts between identical runs. Reopening therefore requires a
+  **change in CLI or provider behaviour** — a new measurement showing reads that
+  move with something the wrapper controls — not a new argument. Even then,
+  Findings C and D independently forbid sharing a snapshot directory or a packet
+  tag, so a favourable measurement would license a prompt change at most.
 - **Item 2 (snapshot reuse) was never a caching idea at all.** It was
   wall-clock only, and it failed on evidence integrity. Reopening it requires a
   Read-complete identity — one covering everything under the snapshot a reviewer
@@ -448,16 +481,18 @@ fixture can. Do not claim otherwise.
 
 ---
 
-### Phase 3 — Optional measurement spike (read-only, no code)
+### Phase 3 — Measurement spike — ✅ DONE 2026-08-25, no code changed
 
-#### Step 3.1
+#### Step 3.1 — complete
 
-Only if Albert wants the caching question settled. Trace what the Claude and
-Codex CLIs actually send for one gate review — whether a system prefix precedes
-the user prompt, whether it contains cwd, date, or git status, and what the
-provider reports as cached. Write the answer into `docs/` and update D1.
+Ran the exact governed gate command with a trivial prompt, six times for Claude
+across three working directories and twice for Codex, and read the CLI's own
+reported usage. Result and full table:
+[`docs/reviewer-prompt-cache-measurement-2026-08-25.md`](docs/reviewer-prompt-cache-measurement-2026-08-25.md).
 
-**Do not change any code in this phase.** Its output is knowledge, not a diff.
+The answer closed item 1 permanently (Finding E) and updated D1's reopening bar.
+**Nothing here needs re-running** unless the Claude or Codex CLI changes its
+prefix behaviour.
 
 ---
 
@@ -590,9 +625,19 @@ evidence about HEAD, not tokens.
    guess.**
 2. **Whether GLM should get the same reporting.** Out of scope by instruction.
    Record as a follow-up if trivial.
-3. **Whether the gate reviewers have any cacheable prefix at all.** Finding B
-   says the premise is unsupported. Step 3.1 settles it with evidence if anyone
-   wants it settled.
+3. ~~Whether the gate reviewers have any cacheable prefix at all.~~
+   **Settled 2026-08-25.** They do not have one the wrapper can influence — see
+   Finding E and the measurement doc. What remains genuinely open is whether the
+   ~12k-token unredeemed prefix per gate invocation is worth attacking through
+   session reuse or fewer invocations. Both trade something real (stage
+   independence, or review coverage) and both are out of scope here.
+
+4. **Should the governed Codex command pin an empty MCP configuration?** The
+   spike incidentally showed `codex exec` loading ambient MCP servers, where
+   Claude's governed command pins `--strict-mcp-config` with no servers
+   (`bin/ai-claude-review:12`). That is a safety question, not a caching one,
+   and it is out of scope for this plan — but it should not be lost. Raised with
+   Albert 2026-08-25.
 
 ---
 
