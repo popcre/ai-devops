@@ -418,13 +418,16 @@ logical_session_meta() { # logical_session_meta UPSTREAM CALLER NAME
 }
 
 reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROMPT_DIGEST
-  local upstream="$1" name="$2" contract="$3" source_id="$4" prompt_digest="$5" dir existing
+  local upstream="$1" name="$2" contract="$3" source_id="$4" prompt_digest="$5" dir existing pending
   dir="$(session_record_path "$upstream" "$CALLER" "$name")"; mkdir -p "$(dirname "$dir")"
-  if mkdir "$dir" 2>/dev/null; then
-    printf '1\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"; printf '%s\n' "$CALLER" > "$dir/caller"
-    printf '%s\n' "$name" > "$dir/session"; printf '%s\n' "$contract" > "$dir/contract"
-    printf '%s\n' "$source_id" > "$dir/source_identity"; printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
-    date -u +%FT%TZ > "$dir/created"; return 0
+  if [ ! -d "$dir" ]; then
+    pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
+    printf '1\n' > "$pending/schema"; printf '%s\n' "$upstream" > "$pending/upstream"; printf '%s\n' "$CALLER" > "$pending/caller"
+    printf '%s\n' "$name" > "$pending/session"; printf '%s\n' "$contract" > "$pending/contract"
+    printf '%s\n' "$source_id" > "$pending/source_identity"; printf '%s\n' "$prompt_digest" > "$pending/prompt_digest"
+    date -u +%FT%TZ > "$pending/created"
+    mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
+    return 0
   fi
   existing="$(cat "$dir/contract" 2>/dev/null || true)"
   [ "$existing" = "$contract" ] && return 0
@@ -433,23 +436,29 @@ reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROM
 }
 
 reserve_session_turn() { # reserve_session_turn UPSTREAM NAME TURN CONTRACT SOURCE PROMPT_DIGEST
-  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing owner quarantine
+  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing owner quarantine pending
   dir="$(turn_record_path "$upstream" "$CALLER" "$name" "$turn")"; mkdir -p "$(dirname "$dir")"
   if [ -d "$dir" ] && [ ! -f "$dir/provider-contacted" ]; then
-    owner="$(cat "$dir/pid" 2>/dev/null || true)"
-    if [ "$owner" = "$$" ] || { [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; }; then
-      quarantine="$dir.preprovider.$$.$RANDOM"
-      mv "$dir" "$quarantine" 2>/dev/null || return 1
-      [ "$(cat "$quarantine/pid" 2>/dev/null || true)" = "$owner" ] || { [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true; return 1; }
-      rm -rf -- "$quarantine"
-      warn "reclaimed a session-turn reservation that never contacted Grok"
+    # The caller already owns the exact-session mutex. Therefore no legitimate
+    # creator of this same turn can still be running. Quarantine the whole
+    # no-contact record, including schema-1 crash-window records with no PID.
+    quarantine="$dir.preprovider.$$.$RANDOM"
+    mv "$dir" "$quarantine" 2>/dev/null || return 1
+    if [ -f "$quarantine/provider-contacted" ]; then
+      [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
+      return 1
     fi
+    rm -rf -- "$quarantine"
+    warn "reclaimed a session-turn reservation that never contacted Grok"
   fi
-  if mkdir "$dir" 2>/dev/null; then
-    printf '1\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"; printf '%s\n' "$CALLER" > "$dir/caller"
-    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$name" > "$dir/session"; printf '%s\n' "$turn" > "$dir/turn"; printf '%s\n' "$contract" > "$dir/contract"
-    printf '%s\n' "$source_id" > "$dir/source_identity"; printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
-    date -u +%FT%TZ > "$dir/created"; return 0
+  if [ ! -d "$dir" ]; then
+    pending="$dir.pending.$$.$RANDOM"; mkdir "$pending" || return 1
+    printf '1\n' > "$pending/schema"; printf '%s\n' "$upstream" > "$pending/upstream"; printf '%s\n' "$CALLER" > "$pending/caller"
+    printf '%s\n' "$$" > "$pending/pid"; printf '%s\n' "$name" > "$pending/session"; printf '%s\n' "$turn" > "$pending/turn"; printf '%s\n' "$contract" > "$pending/contract"
+    printf '%s\n' "$source_id" > "$pending/source_identity"; printf '%s\n' "$prompt_digest" > "$pending/prompt_digest"
+    date -u +%FT%TZ > "$pending/created"
+    mv "$pending" "$dir" 2>/dev/null || { rm -rf -- "$pending"; return 1; }
+    return 0
   fi
   existing="$(cat "$dir/contract" 2>/dev/null || true)"
   [ "$existing" = "$contract" ] && return 0

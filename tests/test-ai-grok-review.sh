@@ -617,6 +617,10 @@ mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid";
 run ask stale-session --prompt x > "$TMP/stale-session.out" 2>&1; STALE_ASK_RC=$?
 check "dead local-only session lock is safely reclaimed without inventing paid uncertainty" "test '$STALE_ASK_RC' -eq 0 && grep -q 'reclaimed a stale local-only session lock' '$TMP/stale-session.out' && test ! -e '$STALE_SESSION_LOCK'"
 run new ask-a --prompt seed >/dev/null 2>&1; run new ask-b --prompt seed >/dev/null 2>&1
+PARTIAL_TURN_ID="$(printf 'grok\n%s\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" ask-a 2 | sha256sum | cut -c1-28)"
+PARTIAL_TURN_RECORD="$AI_GROK_STATE_DIR/turn-records/$PARTIAL_TURN_ID"; mkdir -p "$PARTIAL_TURN_RECORD"
+PARTIAL_RETRY="$(run ask ask-a --prompt recover-crash-window 2>&1)"; PARTIAL_RETRY_RC=$?
+check "partial_preprovider_turn_publication_is_reclaimable" "test '$PARTIAL_RETRY_RC' -eq 0 && printf '%s' \"$PARTIAL_RETRY\" | grep -q 'APPROVE'"
 PREPROVIDER_FAIL="$(AI_GROK_TEST_INSPECT_MODE=badshape run ask ask-a --prompt preprovider-original 2>&1)"; PREPROVIDER_FAIL_RC=$?
 check "preprovider_ask_failure_is_nonzero" "test '$PREPROVIDER_FAIL_RC' -ne 0 && printf '%s' \"$PREPROVIDER_FAIL\" | grep -q 'isolation inspection'"
 PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 2>&1)"; PREPROVIDER_RETRY_RC=$?

@@ -26,7 +26,7 @@ serialization goal below without discarding its duplicate-send safeguards.
 |---|---|---|
 | Split exact-session ownership from exact-work idempotency | 🟨 implemented locally | `session--*` mutexes and digest-keyed `work--*` protections in `bin/ai-grok-review` |
 | Preserve clone-equivalent duplicate detection and legacy state | 🟨 implemented locally | normalized upstream remains an identity input; evidence-bearing schema-2 locks protect only their exact caller/session; ambiguous legacy locks fail closed |
-| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 185/185, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, corrected retry after proven pre-provider failure, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
+| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 186/186, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, corrected retry after proven pre-provider failure and partial publication, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
 | Full repository offline gates | ✅ complete | 53/53 Bash groups and 16/16 PowerShell groups pass on Windows |
 | Independent exact-head review, bounded installed live canary, push, and issue update | ⬜ open | required before completion |
 
@@ -42,6 +42,12 @@ Turn reservations now record their owner and the provider-contact boundary. A
 dead/no-contact reservation is reclaimed under the exact-session mutex, while
 any reservation that crossed the provider boundary remains durable and
 fail-closed. Both recovery shapes have offline regression coverage.
+
+Independent review round 3 at `90b21ea` returned `REJECT`: the turn directory
+could become visible just before its PID field was written. Session and turn
+reservations now build complete pending directories and publish them by rename
+while the exact-session mutex is held. An older no-contact partial turn record
+is quarantined and reclaimed; the explicit crash-window fixture passes.
 
 Corrected rule: **Grok reviews are not globally or repository-wide serialized.
 Only the same exact review session/turn or an idempotently identical submission
