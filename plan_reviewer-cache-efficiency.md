@@ -480,12 +480,16 @@ sessions it listed before the change.
 
 **What to change:**
 
-- Before writing any `jq` path, obtain a **real** OpenCode `step_finish` event
-  and record the actual field names (D3). `docs/muse-opencode.md` notes a
-  measured follow-up "reported a large cache read", so the field exists —
-  confirm its exact spelling rather than assuming.
-- Replace the single opaque `| tokens | {...} |` row with labelled rows: input,
-  output, cache read, cache write, total. Omitted fields print `unavailable`.
+- **The fixture already exists — do not re-prove it.** D3 records a real
+  OpenCode `step_finish` token object captured on 2026-08-25, with its
+  provenance. Use those paths. Re-capture only if the provider or OpenCode
+  version changes, or if the report starts printing `unavailable` across the
+  board.
+- Replace the single opaque `| tokens | {...} |` row with labelled rows:
+  **input, output, reasoning, cache read, cache write, total** — six rows, from
+  the shape D3 recorded. `reasoning` is easy to miss because DeepSeek has no
+  equivalent; it is present in real Muse output and must get its own row.
+  Omitted fields print `unavailable`.
 - Keep the raw object as an additional row.
 - Print a one-line stderr summary per turn, same shape as DeepSeek's, matching
   the existing session lines already written to stderr at `bin/ai-muse:326`.
@@ -523,6 +527,26 @@ sessions it listed before the change.
   `echo '5' | jq -r '.input? // "unavailable"'` prints `unavailable`. A single
   type-guarded expression is better still:
   `if type=="object" then (.input? // "unavailable") else "unavailable" end`.
+- **For the nested cache fields, the `?` must go on the FIRST index, not only
+  the last.** `.cache.read?` is not safe; `.cache?.read?` is. Measured at the
+  shell against every value `TOKENS` can take:
+
+  | `TOKENS` | `.cache.read? // "unavailable"` | `.cache?.read? // "unavailable"` |
+  |---|---|---|
+  | `{"cache":{"read":7}}` | `7` | `7` |
+  | `{}` | `unavailable` | `unavailable` |
+  | `{"cache":5}` | `unavailable` | `unavailable` |
+  | `{"cache":null}` | `unavailable` | `unavailable` |
+  | `null` | `unavailable` | `unavailable` |
+  | `5` | **error, exit 5** | `unavailable` |
+  | `"str"` | **error, exit 5** | `unavailable` |
+  | `[1,2]` | **error, exit 5** | `unavailable` |
+
+  Note *why*, because the obvious reason is the wrong one: a **missing**
+  `.cache` is harmless — indexing `null` yields `null` in jq. The failure is
+  when `TOKENS` **itself** is a scalar, string, or array, which is exactly the
+  case this guard exists for. A trailing `?` cannot rescue an index that already
+  threw. Use `.cache?.read?` / `.cache?.write?`, or the type-guarded form.
 - **Do not rename the existing `reviewed commit` or `evidence fingerprint` report
   labels.** `tests/test-ai-muse.sh:254` greps for those exact strings. Add the
   new rows; leave the existing ones alone.

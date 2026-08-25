@@ -50,8 +50,8 @@ cache-creation breakdown was:
 "cache_creation":{"ephemeral_1h_input_tokens":11878,"ephemeral_5m_input_tokens":0}
 ```
 
-so the creation figure sits entirely in the one-hour ephemeral tier, with the
-five-minute tier at zero. **Runs 3–6 recorded only the three headline fields**
+so **for runs 1 and 2** the creation figure sits entirely in the one-hour
+ephemeral tier, with the five-minute tier at zero. **Runs 3–6 recorded only the three headline fields**
 in the table above; their tier split was not captured. The raw probe JSON was
 written to a session scratchpad and is not retained in the repository, so treat
 the tier observation as sound for runs 1–2 and unverified for the rest.
