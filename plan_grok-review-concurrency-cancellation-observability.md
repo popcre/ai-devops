@@ -26,7 +26,7 @@ serialization goal below without discarding its duplicate-send safeguards.
 |---|---|---|
 | Split exact-session ownership from exact-work idempotency | 🟨 implemented locally | `session--*` mutexes and digest-keyed `work--*` protections in `bin/ai-grok-review` |
 | Preserve clone-equivalent duplicate detection and legacy state | 🟨 implemented locally | normalized upstream remains an identity input; evidence-bearing schema-2 locks protect only their exact caller/session; ambiguous legacy locks fail closed |
-| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 183/183, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
+| Prove unrelated concurrency and exact retry refusal offline | ✅ complete | Windows Git Bash suite passes 185/185, including concurrent `new`/`ask`, exact cross-clone retries, changed-prompt refusal for an uncertain continuation turn, corrected retry after proven pre-provider failure, retained uncertainty, stale-provider preservation, pre-provider reclamation, legacy locks, and metadata secrecy |
 | Full repository offline gates | ✅ complete | 53/53 Bash groups and 16/16 PowerShell groups pass on Windows |
 | Independent exact-head review, bounded installed live canary, push, and issue update | ⬜ open | required before completion |
 
@@ -35,6 +35,13 @@ could bypass the exact-work digest after an uncertain continuation. The wrapper
 now also reserves the durable logical session turn independently of prompt
 identity; both the exact retry and a materially changed retry are refused while
 unrelated named sessions remain runnable. The three new regression cases pass.
+
+Independent review round 2 at `6c6f255` returned `REJECT`: a local isolation
+failure before provider launch could leave the new turn reservation stranded.
+Turn reservations now record their owner and the provider-contact boundary. A
+dead/no-contact reservation is reclaimed under the exact-session mutex, while
+any reservation that crossed the provider boundary remains durable and
+fail-closed. Both recovery shapes have offline regression coverage.
 
 Corrected rule: **Grok reviews are not globally or repository-wide serialized.
 Only the same exact review session/turn or an idempotently identical submission

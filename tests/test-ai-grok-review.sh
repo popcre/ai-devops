@@ -617,6 +617,10 @@ mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid";
 run ask stale-session --prompt x > "$TMP/stale-session.out" 2>&1; STALE_ASK_RC=$?
 check "dead local-only session lock is safely reclaimed without inventing paid uncertainty" "test '$STALE_ASK_RC' -eq 0 && grep -q 'reclaimed a stale local-only session lock' '$TMP/stale-session.out' && test ! -e '$STALE_SESSION_LOCK'"
 run new ask-a --prompt seed >/dev/null 2>&1; run new ask-b --prompt seed >/dev/null 2>&1
+PREPROVIDER_FAIL="$(AI_GROK_TEST_INSPECT_MODE=badshape run ask ask-a --prompt preprovider-original 2>&1)"; PREPROVIDER_FAIL_RC=$?
+check "preprovider_ask_failure_is_nonzero" "test '$PREPROVIDER_FAIL_RC' -ne 0 && printf '%s' \"$PREPROVIDER_FAIL\" | grep -q 'isolation inspection'"
+PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 2>&1)"; PREPROVIDER_RETRY_RC=$?
+check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 ( run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
 ( run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!

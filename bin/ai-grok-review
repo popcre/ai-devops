@@ -100,6 +100,7 @@ ACTIVE_ISOLATED_CWD=''
 ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
 ACTIVE_SESSION_LOCK=''
+ACTIVE_TURN_RECORD=''
 PENDING_REVIEW_BASE=''
 PENDING_REVIEW_DIR=''
 PROMPT_BODY_DIGEST=''
@@ -432,11 +433,21 @@ reserve_new_session() { # reserve_new_session UPSTREAM NAME CONTRACT SOURCE PROM
 }
 
 reserve_session_turn() { # reserve_session_turn UPSTREAM NAME TURN CONTRACT SOURCE PROMPT_DIGEST
-  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing
+  local upstream="$1" name="$2" turn="$3" contract="$4" source_id="$5" prompt_digest="$6" dir existing owner quarantine
   dir="$(turn_record_path "$upstream" "$CALLER" "$name" "$turn")"; mkdir -p "$(dirname "$dir")"
+  if [ -d "$dir" ] && [ ! -f "$dir/provider-contacted" ]; then
+    owner="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [ "$owner" = "$$" ] || { [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; }; then
+      quarantine="$dir.preprovider.$$.$RANDOM"
+      mv "$dir" "$quarantine" 2>/dev/null || return 1
+      [ "$(cat "$quarantine/pid" 2>/dev/null || true)" = "$owner" ] || { [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true; return 1; }
+      rm -rf -- "$quarantine"
+      warn "reclaimed a session-turn reservation that never contacted Grok"
+    fi
+  fi
   if mkdir "$dir" 2>/dev/null; then
     printf '1\n' > "$dir/schema"; printf '%s\n' "$upstream" > "$dir/upstream"; printf '%s\n' "$CALLER" > "$dir/caller"
-    printf '%s\n' "$name" > "$dir/session"; printf '%s\n' "$turn" > "$dir/turn"; printf '%s\n' "$contract" > "$dir/contract"
+    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$name" > "$dir/session"; printf '%s\n' "$turn" > "$dir/turn"; printf '%s\n' "$contract" > "$dir/contract"
     printf '%s\n' "$source_id" > "$dir/source_identity"; printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
     date -u +%FT%TZ > "$dir/created"; return 0
   fi
@@ -855,6 +866,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   : > "$out"
   prepare_active_stop_file
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
+  [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
   env "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
@@ -1267,6 +1279,7 @@ $REVIEW_HEAD only."
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
   if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
+  ACTIVE_TURN_RECORD="$(turn_record_path "$upstream" "$CALLER" "$name" "$next_turn")"
   if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate continuation."; fi
   if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" "$next_turn"; then
     lock_release "$sess_lock"
