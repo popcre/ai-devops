@@ -99,6 +99,17 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   Albert's sandbox branch and a pull request to `develop`, never a self-merge.
   `shared-db` uses a branch and pull request. Read the repository's own
   `AGENTS.md` before changing branches or shipping.
+- **Albert does not merge — you do.** Every pull request you open outside
+  DesignFlow is yours to merge, and a merge is part of the work, not a handoff.
+  Never end a reply asking Albert to merge, review, or "approve" a PR you were
+  authorized to create; merge it and report the merge commit. The only
+  exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
+  explicitly said he wants to review first. If a merge is blocked by a failing
+  check or a conflict, fix it — say so only if you cannot.
+- `gh pr merge` from a linked worktree can print `'main' is already used by
+  worktree`. That is local branch cleanup failing AFTER the merge succeeded.
+  Confirm with `gh pr view <n> --json state`, delete the remote branch, and
+  continue — do not report it as a failed merge.
 - Back up configuration before editing it, change existing settings in place,
   avoid duplicate keys, and validate the result. Codex configuration is
   `~/.codex/config.toml`; never change Claude configuration as part of Codex
