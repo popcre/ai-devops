@@ -51,6 +51,39 @@ Check 'transcripts still accept only u2giants' {
     $t.Count -eq 1 -and $t[0] -ceq 'github.com/u2giants/ai-devops-transcripts'
 }
 
+# Canonicalisation is now shared. Both Windows callers previously inlined an
+# ssh://-blind copy, so a fresh clone taken with ssh://git@github.com/... would
+# have been refused on Windows while the Bash reader accepted it -- exactly the
+# post-transfer failure this change exists to prevent.
+$canonCases = @{
+    'https://github.com/popcre/ai-devops.git'     = 'github.com/popcre/ai-devops'
+    'https://github.com/popcre/ai-devops.git/'    = 'github.com/popcre/ai-devops'
+    'git@github.com:popcre/ai-devops.git'         = 'github.com/popcre/ai-devops'
+    'ssh://git@github.com/popcre/ai-devops.git'   = 'github.com/popcre/ai-devops'
+    '  https://github.com/u2giants/ai-devops  '   = 'github.com/u2giants/ai-devops'
+    'https://github.com/attacker/ai-devops.git'   = 'github.com/attacker/ai-devops'
+}
+foreach ($case in $canonCases.GetEnumerator()) {
+    Check "canonicalises $($case.Key)" ([scriptblock]::Create(
+        "(Get-AiDevOpsCanonicalRemote -Url '$($case.Key)') -ceq '$($case.Value)'"))
+}
+
+# Every URL form the Bash reader accepts must pass the PowerShell assertion too.
+foreach ($u in @(
+    'https://github.com/popcre/ai-devops.git',
+    'ssh://git@github.com/popcre/ai-devops.git',
+    'git@github.com:u2giants/ai-devops.git')) {
+    Check "assertion accepts $u" ([scriptblock]::Create(@"
+        Assert-AiDevOpsRepoIdentity -Key 'ai-devops' ``
+            -Identity (Get-AiDevOpsCanonicalRemote -Url '$u') -Message 'x'
+        `$true
+"@))
+}
+Refused 'assertion still rejects an attacker URL' {
+    Assert-AiDevOpsRepoIdentity -Key 'ai-devops' `
+        -Identity (Get-AiDevOpsCanonicalRemote -Url 'https://github.com/attacker/ai-devops.git') -Message 'x'
+}
+
 # A broken table must reject, never wave a machine through.
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $tmp | Out-Null
