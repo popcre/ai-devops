@@ -81,11 +81,22 @@ check 'comment rows are not identities' \
 # --- no script may quietly re-introduce a seventh literal ------------------
 # Every hard-coded ai-devops identity left in bin/ must be one the table lists.
 missing=0
-{ "$SCRIPT" list ai-devops; "$SCRIPT" list ai-devops-memory; "$SCRIPT" list ai-devops-transcripts; } > "$TMP/listed"
+# Every repository identity literal in bin/ must be one the table lists, in
+# either the full github.com/<owner>/<repo> form or the bare <owner>/<repo>
+# form. bin/ai-facts and bin/ai-private-config once compared the bare form,
+# which a github.com-only pattern never saw -- changing either literal to
+# another owner would not have turned this check red.
+: > "$TMP/listed"
+for key in ai-devops ai-devops-memory ai-devops-transcripts ai-devops-private-config; do "$SCRIPT" list "$key" >> "$TMP/listed"; done
+sed -E "s#^github[.]com/##" "$TMP/listed" > "$TMP/listed.bare"
+cat "$TMP/listed.bare" >> "$TMP/listed"
 while IFS= read -r found; do
   grep -Fqx "${found%.git}" "$TMP/listed" ||
     { printf '       unlisted identity in bin/: %s\n' "$found"; missing=1; }
-done < <(grep -rhoE 'github\.com/[A-Za-z0-9._-]+/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" | LC_ALL=C sort -u)
+# Filtered out: filesystem paths that merely end in an ai-devops* directory
+# name, and `gh api repos/<owner>/<repo>` calls, which are API requests rather
+# than identity comparisons.
+done < <(grep -rhoE '(github\.com/)?[A-Za-z0-9._-]+/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" --exclude-dir=.git | grep -vE '^([.]|repos/|api/|share/|state/|worksp/|local/|bin/|opt/|var/|etc/|cache/|lib/|log/|tmp/|run/)' | LC_ALL=C sort -u)
 [ "$missing" -eq 0 ] && ok 'every ai-devops identity literal in bin/ is listed in the table' \
                      || bad 'every ai-devops identity literal in bin/ is listed in the table'
 
@@ -96,7 +107,19 @@ check 'the Windows installer uses the shared allow-list' \
   "grep -Fq 'Assert-AiDevOpsRepoIdentity' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check 'the public-hub memory guard uses the shared allow-list' \
   "grep -Fq 'ai-repo-identity' '$ROOT/bin/ai-sync-memory'"
-check 'no identity guard was softened into a warning' \
-  "! grep -nE 'Assert-AiDevOpsRepoIdentity.*(-WarningAction|Write-Warning)' '$ROOT/bin/bootstrap-windows-dev.ps1' '$ROOT/bin/install-ai-devops-windows.ps1'"
+# A same-line grep cannot see `try { Assert-... } catch { Write-Warning }`, so
+# inspect a window around every call site instead, and require the helper itself
+# to still throw. Proven by injecting each softening and watching this go red.
+soften_re="-WarningAction|Write-Warning|-ErrorAction[[:space:]]+(SilentlyContinue|Continue)"
+for f in "$ROOT/bin/bootstrap-windows-dev.ps1" "$ROOT/bin/install-ai-devops-windows.ps1"; do
+  check "no identity guard was softened in $(basename "$f")" \
+    "! grep -nE -A4 -B4 'Assert-AiDevOpsRepoIdentity' '$f' | grep -qE -- \"$soften_re\""
+done
+check 'the assertion helper still throws on an unlisted identity' \
+  "grep -Fq 'throw' '$ROOT/bin/repo-identity.ps1'"
+check 'the assertion helper never downgrades to a warning' \
+  "! grep -qE \"Write-Warning|-WarningAction\" '$ROOT/bin/repo-identity.ps1'"
+check 'the public-hub memory guard still refuses rather than warns' \
+  "grep -qE 'BLOCKED' '$ROOT/bin/ai-sync-memory'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

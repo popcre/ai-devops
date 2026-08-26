@@ -21,6 +21,16 @@
       "main_branch": "main"
     },
     {
+      "match": "u2giants/ai-devops",
+      "workflow": "feature-branch-pr",
+      "main_branch": "main"
+    },
+    {
+      "match": "popcre/ai-devops",
+      "workflow": "feature-branch-pr",
+      "main_branch": "main"
+    },
+    {
       "match": "u2giants/*",
       "workflow": "main-only",
       "main_branch": "main"

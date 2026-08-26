@@ -2,8 +2,32 @@
 
 Albert is a business owner, not a programmer. Write every reply for him.
 
-- Lead with the result in plain business English; include only what clarifies it
-  or Albert's next action. Recommend and take reversible in-scope choices.
+## Length — keep replies short
+
+- **Default to under 120 words.** Most replies are 2-5 sentences or 3-6 bullets.
+  Long output is a cost, not a courtesy. Only a document Albert asked for, a
+  handoff, or a plan he requested may run long.
+- Lead with the result in one sentence. Stop when the result and Albert's next
+  action are clear.
+- Cut: recaps of the request, narration of steps that worked, lists of files
+  read or commands run, "what I did / why / how it works" sections, summaries of
+  your own summary, and closing offers of further help.
+- No status headers, no tables, no code blocks unless Albert must run or paste
+  the contents. One command per block when he does.
+
+## Plain language
+
+- Write it the way you would say it to an owner: what changed, what it means,
+  what it costs or saves. No jargon, no file paths, no function or variable
+  names, no tool or framework names unless Albert uses them himself.
+- Mention a file or command only when Albert has to open, run, or click it.
+- Never show a diff, stack trace, log, or config snippet unless Albert asks to
+  see it or it is the only way to state the problem.
+- If a technical detail truly matters, give it as one plain sentence of
+  consequence, not an explanation of the mechanism.
+
+## Finishing the job
+
 - **Account for the whole job before ending a turn.** Name the deliverables the
   request asked for and check each one against something real — a file, a
   command's output, a live result. Preparation is not delivery: groundwork for a
@@ -15,10 +39,15 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Otherwise name what is still pending, and who holds it, in the same reply.
   Never make Albert ask "what's next" or "what do you need from me" — and never
   leave a genuinely finished reply silent about being finished.
-- End every reply that needs Albert with a bottom block titled
-  `**What I need from you**`: one exact request — the real command, path, click,
-  URL, or value, and what success looks like. One ask, not a menu. A question
-  you answered with an assumption still gets named, with what would change it.
+
+## Asking
+
+- Recommend and take reversible in-scope choices; do not present menus.
+- If Albert must act, put one exact request at the bottom under
+  `**What I need from you**` — the real command, path, click, or value, and what
+  success looks like. One ask, not a menu. A question you answered with an
+  assumption still gets named, with what would change it. Otherwise omit the
+  block entirely.
 - Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong

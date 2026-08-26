@@ -2,9 +2,9 @@
 
 **Issue:** [#84](https://github.com/u2giants/ai-devops/issues/84)
 **Written:** 2026-08-25 (edge-dev / claude)
-**Status:** **Phases A–D DONE** (2026-08-26). The repository **has been
+**Status:** **Phases A–E DONE** (2026-08-26). The repository **has been
 transferred** and now lives at `popcre/ai-devops`, public. Phase D proved there is
-no flag-day. Phase E is in progress. Phase F has not started.
+no flag-day. The merge queue is live. Only Phase F remains.
 
 ---
 
@@ -379,6 +379,93 @@ and five `SKILL.md` files.
 
 These all resolve through GitHub's redirect, so nothing is broken by leaving
 them.
+
+#### Phase E completion — the merge queue is live
+
+**DONE 2026-08-26.** Ruleset **`main: pull request + merge queue`** (id
+`21564317`) is `active` on `popcre/ai-devops`. A second, pre-existing ruleset
+`Protect main history` (id `21183703`) supplies `deletion` and
+`non_fast_forward` and was left alone.
+
+| Setting | Value |
+|---|---|
+| `merge_method` | `SQUASH` (matches existing practice) |
+| `grouping_strategy` | `ALLGREEN` |
+| `max_entries_to_build` / `max_entries_to_merge` | 5 / 5 |
+| `min_entries_to_merge` | 1 (a solo PR never waits for a second) |
+| `min_entries_to_merge_wait_minutes` | 0 |
+| `check_response_timeout_minutes` | **120** |
+| required approvals | 0 (sessions self-merge) |
+| **required checks** | **`linux-offline` + `windows-offline` only** |
+
+`check_response_timeout_minutes` must exceed `windows-offline`'s 75-minute
+`timeout-minutes` **plus** runner-queue wait. Too low and a healthy 70-minute job
+that waited 20 minutes for a runner is declared failed, requeued and rebuilt — a
+retry storm. 120 gives 75 + ~45 minutes of margin.
+
+**One default had to be turned off.** GitHub set
+`require_extra_approval_for_unattributed_changes: true` on the `pull_request`
+rule without being asked. With 0 required approvals that can still demand an
+approval for commits it considers unattributed — and every commit here carries a
+`Co-Authored-By` trailer. It is now `false`. Left on, it would have silently
+blocked self-merges.
+
+##### Why `windows-reviewer-safety` is NOT a required check
+
+This was reviewed by GLM (`glm-5.3`) and the reasoning it produced overturned
+the two options that were on the table. **Verified independently before
+acting**, so do not undo it on intuition:
+
+- `windows-reviewer-safety` runs exactly `tests/test-ai-codex-review.sh` and
+  `tests/test-ai-grok-review.sh` through Git Bash (`verify.yml`, "Focused
+  Windows reviewer safety suites").
+- `windows-offline` runs `tests/test-all.ps1`, which invokes `tests/test-all.sh`,
+  which **auto-discovers every `tests/test-*.sh`** (`test-all.sh:6`, a `find`
+  glob) — including both of those, on the same `windows-2025` runner through the
+  same Git Bash.
+
+So `windows-reviewer-safety` is a strict **subset** of `windows-offline`.
+Requiring it adds failure surface and **zero** coverage. It stays in the
+workflow as a fast early signal; it is simply not required.
+
+**The corollary matters more than the decision.** Both flaky suites from issue
+**#89** are inside `windows-offline` via that same glob, so they are in the
+required path **under every possible configuration**. Excluding
+`windows-reviewer-safety` does *not* dodge the flake — an earlier draft of this
+plan assumed it did, and that was wrong. The only thing that actually removes
+the risk is fixing them, which is Phase F.
+
+A flake costs **latency, not a deadlock**: a failed batch returns its entries to
+the queue and retries. Do not respond to a first flake by stripping required
+checks; re-queue.
+
+##### Traps to guard — these block the queue SILENTLY
+
+1. **Required checks are matched by check-run name.** These three job names are
+   frozen. Renaming a job — or the workflow's `name:` — leaves a permanently
+   "expected" check that never reports, with no error pointing at the stale name.
+   Change a name and the ruleset in the same commit.
+2. **Any workflow contributing a required check MUST subscribe to `merge_group:`.**
+   That was the bug fixed in this phase; the next workflow anyone adds will
+   reintroduce it.
+3. **Do not add `paths:` / `paths-ignore:` / `branches:` filters or `if:` skips to
+   a required job.** A required check filtered out of a merge group parks the
+   queue until `check_response_timeout_minutes` expires. `pull_request:` and
+   `merge_group:` are deliberately bare — keep them bare.
+4. **No job matrices.** Matrix-expanded check names multiply every trap above.
+
+##### The practical cost, stated plainly
+
+Every PR now runs `windows-offline` (~62 min) **twice** — once on
+`pull_request`, once on `merge_group` — plus a third full run on `push: main`.
+Open-to-merged is roughly **2–2.5 hours even with an empty queue**. Sessions
+that previously opened and merged a PR within minutes must not sit polling for
+hours; that is a workflow change, not a settings knob.
+
+Note also that `verify.yml`'s `concurrency` group keys on event name + SHA, so
+superseded merge-group builds are **not** cancelled (a new merge commit is a new
+SHA). Queue churn therefore leaves ~62-minute orphan builds consuming runner
+slots.
 ### Phase F — the flaky reviewer suites (AFTER the move is fully done)
 
 **Do not start this until Phases A–E are complete and the transfer is verified.**
@@ -406,6 +493,27 @@ CI stays green, and the check counts are unchanged or higher (191 Grok, 203
 Kimi).
 
 ---
+
+## 5b. Carried forward when this plan's handoff was retired
+
+These were in `HANDOFF.d/2026-08-26T1149Z-...-gh-org-move.md` §0 as "not part of
+this work, and nobody is on it". That file is deleted with issue #84, so they are
+preserved here rather than lost. **Neither belongs to this plan; both still need
+an owner.**
+
+1. **The shared working copy `C:\repos\ai-devops` carries another session's
+   uncommitted work.** As of 2026-08-26 13:00 UTC: seven modified files
+   (`bin/ai-deepseek-agent`, `bin/ai-muse`, `docs/muse-opencode.md`,
+   `plan_reviewer-cache-efficiency.md`, `tests/test-ai-deepseek-agent.sh`,
+   `tests/test-ai-muse.sh`, and one `HANDOFF.d/` file) plus one untracked Codex
+   handoff. Local `main` had **no** unpushed commits, which is why the transfer
+   was safe. This is the reviewer-cache workstream; nobody in the move sessions
+   ever owned those files and none of them was touched.
+2. **Live git worktrees registered against `ai-devops`**, several apparently
+   abandoned, including two under `C:\Users\ahazan\AppData\Local\Temp\` and two
+   detached-HEAD clones named `ai-devops-gemini-qualification-final`(`-v2`).
+   **Recommendation: run the `cleanup-worktree` skill in its own session.** Age
+   alone is not proof any of them is safe to delete.
 
 ## 6. What will NOT break
 

@@ -37,7 +37,7 @@ failure silently destroys data.
 
 The public skill contains procedure only. Read the current private contract before acting:
 
-- Repository: `C:\repos\licensor-source-data-disney`
+- Repository: `C:\repos\licensor-source-data`
 - OPA: `disney-opa/README.md` and `disney-opa/opa-characters.csv`
 - DCP: `disney-dcpvault/README.md`, `disney-dcpvault/PLAN.md`, and open files under `disney-dcpvault/HANDOFF.d/`, newest first
 - DCP loader: `disney-dcpvault/scripts/load-collected-to-supabase.mjs`
@@ -59,11 +59,54 @@ Pull the private repository safely before a new capture or load. Preserve other 
 
 OPA loads the complete Property-to-Character tree into the product-create page. Do not build a per-Property crawler.
 
+### Licensor (Studio) -> Property hierarchy is a direct capture surface
+
+The existing 2026-08-06 CSV captured Disney Home Standard only. Authenticated
+read-only inspection on 2026-08-26 proved that North America has separate
+top-level **Disney** and **Lucas** create-product branches. Disney Home Standard
+uses `lob=200`, `templateId=21`, `workflowId=49`; Lucas Home Standard uses
+`lob=200`, `templateId=462`, `workflowId=50`.
+
+The live trees contained 1,451 unique Disney-route Property IDs and 74 unique
+Lucas-route Property IDs with exactly one ID in both. The private 1,445-row
+capture was wholly within the Disney route and contained only that overlap, so
+73 directly Lucas-scoped Properties were omitted. Capture each branch separately
+and preserve branch membership as many-to-many source evidence with stable
+region, branch, LOB, product type, template, workflow, and capture identity.
+
+Prior authenticated inspection already found three higher-level signals that
+the flat CSV omitted: separate form fields for `LicensedProperty` and branded
+`Property`; Disney's own `openCharacterPopup` wording, "LicensedProperty and
+(Branded) Property"; and a licensee-entitlement endpoint that returns contracted
+Property IDs. These prove additional relationship surfaces exist even though
+their parent labels were not captured. Reinspect and capture them; do not dismiss
+them because the product-create jsTree itself starts at Property.
+
+Treat direct latest-approved Disney/Lucas branch membership as authoritative
+OPA studio scope before considering title patterns. Capture the visible parent
+label, route IDs, child Property ID, and exact direct relationship. Check page
+models and same-origin responses as well as visible controls. Preserve the
+hierarchy as source evidence;
+do not join `brandPropertyID` to `licensedPropertyID` or reinterpret
+`optionSourceID` as the parent. Those two fields have unproven meanings in the
+current extract.
+
+Also inspect the same-origin licensee-entitlement response and any page model
+that supplies the `LicensedProperty` and branded `Property` fields. Record field
+names, stable IDs, labels, cardinality, and direct relationships, but never log
+the licensee number, account identity, cookies, headers, or raw entitled rows.
+
+If authentication prevents a refresh, retain the last approved branch evidence
+with its capture date and mark the refresh unverified. Do not substitute a
+keyword classifier or landing-table family for source authority. Marvel
+submissions remain under Disney OPA by business rule; Marvel Creative is ASGARD
+only.
+
 ### Capture
 
 1. Ask the user to sign in to `https://opa.disney.com` and complete MFA in Chrome.
-2. Open the Home-line-of-business product-create URL recorded in `disney-opa/README.md`. Do not fill any field or click Save or Submit.
-3. Run `showAllProperties()` in the authenticated page, wait for the tree, then read the current jsTree model. The jsTree element ID changes on every page load; resolve it from `document.querySelector('.jstree').id`.
+2. Open both Disney and Lucas Home Standard routes recorded in `disney-opa/README.md`. Do not fill any field or click Save or Submit.
+3. Wait for each tree, then select the Property tree by the presence of `li[licensedpropertyid]`; never use the first `.jstree`, because the page also contains a category tree and generated jsTree IDs change on every load.
 4. Extract exactly these fields:
    - `property`
    - `licensedPropertyID`
@@ -91,10 +134,35 @@ DCP Vault is a paged Adobe Experience Manager asset library. The current private
 ### Studio boundary
 
 DCP Vault being one website does not make its content one database source. Keep
-**Disney, Lucasfilm, Marvel, and 20th Century** in separate capture outputs,
+**Disney, Lucasfilm, Marvel, and 20th Century** in separate raw capture outputs,
 separate table families, and separate crawl histories. A portal tile or
 discriminator inside shared tables is not enough separation. If a studio-specific
 landing family is not live, checkpoint locally and stop before the database write.
+
+Raw capture separation is not presentation authority. Effective 2026-08-26,
+Marvel Creative Assets are authoritative only in ASGARD. DCP Vault's
+Marvel-tagged slice came from a mixed guide whose assets were indiscriminately
+tagged across Disney, Lucasfilm, and Marvel. Retain those DCP rows as private raw
+evidence, but ignore them for Marvel Creative classification, relationships, and
+the Scraped Properties review presentation. Never infer a licensor from the
+`disney_dcpvault`, `lucasfilm_dcpvault`, or `marvel_dcpvault` landing family.
+
+User-facing source-purpose labels must distinguish submission vocabulary from
+creative metadata:
+
+- `Licensor - Submissions (OPA)` for Disney OPA Property vocabulary, including
+  Marvel submissions handled through Disney OPA;
+- `Licensor - Creative (DCP Vault)` for evidence-backed Disney or
+  Lucasfilm/Star Wars DCP metadata;
+- `Marvel - Creative (ASGARD)` for Marvel Creative Assets.
+
+Ambiguous, conflicting, or unresolved review rows must show the specific reason,
+evidence basis, candidate studios when known, and the decision needed. A bare
+bucket label is not sufficient for Licensing review. `DCP Vault - authority
+conflict` means independent accepted authorities point to different licensors;
+the system must fail closed, retain both evidence pointers, and require a
+recorded controlling-authority decision rather than choosing by table family or
+title guess.
 
 **The loader is shared, not per-studio** (owner ruling, 2026-08-13). One guarded
 loader serves every studio; it takes the studio as an explicit required input and
