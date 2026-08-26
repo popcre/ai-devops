@@ -27,3 +27,21 @@ and private-repository contents remain outside this public repository.
 Use `ai-memory-health --repo-root <private-hub> --hub-only --index-only` for a
 read-only coverage check. Automatic memory writers remain disabled. A manual,
 explicitly initiated private-hub union is the qualified production policy.
+
+## Index size, and why you must not trim it by hand
+
+Each project's `MEMORY.md` index is loaded into **every** session, so it carries a
+size budget: `ai-memory-health` fails at **12KB** or 200 lines (lowered from 25KB
+on 2026-08-26). That check now runs in `--coverage-only` too — the mode
+`bin/ai-memory-sync` gates on — because before then it was skipped there, so the
+budget existed and never blocked a single sync.
+
+**Do not shrink an index by rewriting its lines.** `bin/ai-sync-memory` unions the
+index keyed on **full line text**, so a rewritten line is not recognised as the
+same entry: it is appended beside the original and the index *grows*. A 2026-08-26
+proposal to trim ~48 lines would have roughly doubled the index on every machine,
+with no line-grained way back — tombstones (`ai-memory-sync forget`) are
+file-grained by design, and would remove both versions along with the memory file.
+
+Reduce an index by retiring entries that are genuinely dead, through the tombstone
+path. Shorten a line only after the union is keyed on the filename instead.

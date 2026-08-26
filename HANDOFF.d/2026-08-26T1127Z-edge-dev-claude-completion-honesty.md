@@ -1,6 +1,14 @@
+---
+issue: 108
+status: OPEN
+owner: claude/completion-honesty-implement
+---
+
 # HANDOFF — false completion: sessions report "nothing is needed" while authorized work is pending (2026-08-26 11:27 UTC, edge-dev/claude)
 
-- **Status:** OPEN — planning only. No implementation work has been done.
+- **Status:** OPEN — the plan was implemented on 2026-08-26 except the new-text
+  measurement and the machine rollout. Read the plan's STATUS table for exactly
+  what is proven and what is not.
 - **The plan is the brief:** [`plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md)
   — read its STATUS table first. Every row is open; a fresh session starts at
   step 0. Do not re-derive or re-plan.
@@ -88,13 +96,28 @@ session with authorized work left must keep working rather than end the turn.
 
 ## 3. Current state — what is true right now
 
-- **Done this session:** diagnosis (six findings, section 5 below) and the
-  implementation plan file. Nothing else.
-- **Not started:** every one of the plan's twelve steps.
-- **Files added on this branch:** `plan_completion-honesty-enforcement.md` and
-  this handoff. No instruction file, tool, test, or wrapper was modified.
-- **Committed/pushed:** see the PR referenced in the final session report; the
-  branch is `claude/fix-misleading-instructions-f5be3d` off `eeb510f`.
+**Done and proven (steps 0-9, evidence in the plan's STATUS table):** the
+rewritten closeout contract is byte-identical in both globals; `context-audit.py`
+enforces it as a safety marker plus three parity rules and demonstrably fails
+when either global loses it; `bin/ai-completion-check-hook` and its installer
+exist with 33 passing assertions; `skills/codex/codex-session-closeout` carries
+the Codex pointer; `tools/completion-eval/` exists with old-text baselines.
+
+**Live on `edge-dev` only:** the Stop hook is installed and returns
+`decision: block` on a false completion through its installed copy. Nothing else
+on this machine changed — the settings diff shows only the added Stop entry.
+
+**NOT done, and nobody may claim otherwise:**
+
+1. **The rewritten globals are not adopted on ANY machine.** The repo has the new
+   text; every machine still runs the old. `bin/ai-adopt-globals` is the route.
+2. **There is no new-text measurement.** Only old-text baselines exist. The
+   rewrite rests on the owner ruling and observed behaviour, not on a measured
+   improvement.
+3. **The eval's scorer is not trustworthy yet** — see section 9.
+
+**Committed:** on branch `claude/completion-honesty-implement`; see the PR in the
+session report.
 
 ## 4. Everything we tried that did NOT work
 
@@ -150,37 +173,59 @@ reason each fails. Read it before "improving" the plan.
 
 ## 6. Exact next steps
 
-The plan file holds all twelve steps with their verification gates. In short:
+**Read the plan's STATUS table and its numbered remaining-work block first.**
+This section is the short form of it; the plan governs.
 
-1. **Step 0** — run the two diagnostic commands on the machine Albert's failure
-   came from and record the answer in this handoff.
-   *You'll know it worked when:* the grep output and a one-line verdict
-   ("current text" vs "stale text") are written down.
-2. **Step 1 — same-day stopgap.** Claude has no completion rule at all right
-   now; copy the existing text into `CLAUDE-global.md` verbatim. One commit, no
-   wording debate.
-3. **Step 2 — the rewrite. REQUIRED, and the heart of the work.** Restructure
-   the rule per the constraints in the plan (account for the named deliverables,
-   not a self-report; say outright that ending the turn with authorized work
-   left is the error; attach a test to "genuinely complete"). Weight it toward
-   Codex — the worse offender, and the client with no hook.
-4. **Steps 3, 4** — `context-audit.py` safety category + parity rule, and the
-   matching `tests/test-context-audit.ps1` fixtures.
-5. **Steps 9–10** — build the eval and score the OLD text before step 2 lands,
-   then the new text. The eval proves the rewrite worked; it does not decide
-   whether to do it. **Capture the old-text baseline before step 2 merges or
-   the comparison is gone.**
-6. **Steps 5–7** — build `bin/ai-completion-check-hook` (Claude `Stop` hook,
-   `stop_hook_active` loop guard mandatory, silent exit 0 on the common path),
-   its installer, and its test.
-7. **Step 8** — the Codex compensating pointer.
-8. **Steps 11–12** — reconcile installed globals on every machine via
-   `bin/ai-adopt-globals`, then docs, router row, memory entry, and delete this
-   handoff once every STATUS row cites an artifact.
+1. **Merge the PR on branch `claude/completion-honesty-implement`** (six
+   commits). It was queued behind ~12 other org CI runs for 2+ hours on
+   2026-08-26 — Actions contention, not a branch fault. One earlier run passed;
+   one hit a transient runner `startup_failure`, so rerun rather than debug.
+   The repo now has a **merge queue**: `--squash --delete-branch` is refused, so
+   run plain `gh pr merge <n>` and let the queue take it. Delete the remote
+   branch afterwards. Albert does not merge — the session does.
+   *You'll know it worked when:* `gh pr view <n> --json state` says MERGED and
+   the merge commit is reported to Albert.
 
-Do not start at step 5 because it looks like the real fix. Step 0 is two
-commands, step 1 is one commit, and step 0 can still correct part of the
-diagnosis.
+2. **Adopt the globals on every machine** — `bin/ai-adopt-globals`, never
+   `--adopt-globals` by hand. Nothing has adopted them: the repo carries the
+   rewritten closeout rule, every machine still runs the old text. Verify with
+   `grep -c "Account for the whole job" ~/.claude/CLAUDE.md ~/.codex/AGENTS.md`
+   — both must return >= 1. `installed source drift: 2` is SUCCESS on a machine
+   that has a machine section. Machines: `edge-dev`, `al8960ofc`, `albt16`,
+   `hetz`. Name any you cannot reach rather than implying full coverage.
+
+3. **Close out:** tick step 11's STATUS row with the machines actually reached,
+   then delete this handoff file. Do not hunt for eval results — step 10 is
+   closed by owner ruling.
+
+**Not in this workstream, and nobody is on either:** the one-sided-rule sweep
+(section 0 item 3) and the reviewer wrappers' own false-completion history
+(section 0 item 4). Both are separate sessions.
+
+## 6b. What this session did AFTER the plan was written
+
+The plan was written first, then most of it was implemented the same day, so the
+prose sections below (7-9) describe the planning state. What actually landed:
+
+- The rewritten closeout contract in **both** globals, byte-identical.
+- `completion honesty` as a safety marker + 3 parity rules in
+  `tools/context-audit/context-audit.py`, proven by deletion.
+- `bin/ai-completion-check-hook` + installer + 36 tests. **It shipped with two
+  defects that were caught in use within the hour and fixed:** it only knew the
+  phrase "nothing is needed", so real closings like "Nothing right now" passed
+  silently; and it scanned the whole message, so a reply *quoting* the phrase
+  tripped it. It now judges the closing paragraphs. Both cases are locked in
+  tests.
+- `tools/completion-eval/` + old-text baselines. **Its finding matters: the
+  scenarios cannot reproduce the failure** — they tell the model what is
+  unfinished, while the real failure is not noticing. Codex on the old text and
+  Claude with no rule both scored zero. Owner then closed measuring.
+- **Unrelated but landed in the same branch:** `bin/ai-memory-health`'s index
+  size check now runs in `--coverage-only` (the only mode `bin/ai-memory-sync`
+  gates on) and the limit dropped 25KB -> 12KB. This came out of a GLM 5.3
+  review that REJECTED a proposal to trim the memory index: `bin/ai-sync-memory`
+  keys its union on full line text, so rewritten lines are appended, not
+  replaced — a trim would have doubled the index. Do not retry that trim.
 
 ## 7. Constraints and gotchas in force
 
@@ -213,6 +258,28 @@ tests/test-all.ps1` from the repo root. Nothing here is deployed; "shipped"
 means merged to `main` with suites green and the installed globals updated.
 
 ## 9. Open questions and risks
+
+**The eval scorer is the weak link, and it is proven weak.** Its keyword
+classifier misclassified 6 of 24 replies on the first baselines — a correct
+"Nothing outstanding on this one" read as hedging, and a correct "The fix is not
+finished yet, I am merging it now" read as a false completion. Five are fixed
+and locked in `tests/test-completion-eval.sh`; one remains (a pending word inside
+unrelated mid-answer prose). The plan's own criterion was to escalate to a
+rubric-scored model judge if the cheap scorer misclassified a hand-labelled
+sample. It did. **Escalate before quoting any number from this tool.**
+
+**Floor effect on the Claude arm.** With NO closeout rule installed, Claude
+produced zero false completions across all eight pending scenarios. Either the
+narrated proxy is too easy on that client or its base behaviour is already
+correct there. Either way the Claude arm cannot show improvement, so do not read
+a flat Claude score as "the rewrite did nothing". The Codex arm is the one that
+carries signal — Codex is where the failure was observed.
+
+**Budget warning, worsened deliberately.** The always-loaded globals were already
+over their 12449-byte warning budget before this work (14754 bytes) and are now
+16340. Budgets warn only, never fail. Claude gained a rule it never had, which is
+most of the increase.
+
 
 - **Did the failing session run current or stale global text?** Step 0 decides
   it. If stale, finding F1 is partly wrong and the weight shifts to rollout

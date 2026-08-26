@@ -198,6 +198,17 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   `templates/system/AGENTS-global-codex.md` → `~/.codex/AGENTS.md`;
   `templates/system/machine-atlas.md` → each machine's environment atlas section.
   Installed **only if absent** — never clobbers local edits.
+- **Claude hooks:** two, both installed into the user-level
+  `~/.claude/settings.json` by their own idempotent, strictly additive scripts,
+  and both pointing at a stable copy under `~/.config/ai-devops/` rather than
+  into a repo checkout that might move.
+  `bin/ai-install-memory-hook` registers the `PostToolUse` memory-index hook;
+  `bin/ai-install-completion-check-hook` registers the `Stop` closeout hook
+  (`bin/ai-completion-check-hook`), which stops a turn that claims completion
+  until the session has accounted for every deliverable — see
+  [`../plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md).
+  Each refuses to write if `settings.json` does not parse, and neither ever
+  removes the other. Verify with `--check`.
 - **Workflow config:** `config/*.env.example` seeds `/etc/ai-devops/` without
   overwriting existing machine-local values.
 - **Portable-memory tooling:** public `memory/` contains only the architecture

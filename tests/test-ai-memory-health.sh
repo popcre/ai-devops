@@ -92,6 +92,32 @@ mk_memory x "$BIG" solo "one fact"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "oversized index detected" "printf '%s' \"\$out\" | grep -q 'INDEX TOO LONG'"
 
+# --- the index size gate must fire in --coverage-only ------------------------
+# That is the ONLY mode bin/ai-memory-sync gates on. Before 2026-08-26 the size
+# limit was skipped in that mode, so an index could grow past it for weeks
+# without ever blocking a sync - the budget existed and never bit.
+FAT="$(mk_project fat)"
+mk_memory x "$FAT" solo "one fact"
+{ printf '# Memory index\n\n- [Solo](solo.md) - hook\n'
+  for i in $(seq 1 120); do
+    printf -- '- [Entry %s](entry%s.md) - %s\n' "$i" "$i" "$(printf 'x%.0s' $(seq 1 140))"
+  done
+} > "$FAT/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" --coverage-only 2>&1)"; rc=$?
+check "index size is checked in --coverage-only (the sync gate)" \
+  "printf '%s' \"\$out\" | grep -q 'INDEX TOO BIG'"
+check "an oversized index fails the run, so sync is gated" "[ $rc -ne 0 ]"
+
+# The limit must be low enough to matter: a real 9.3KB index sat at 36% of the
+# old 25KB limit and would never have warned.
+{ printf '# Memory index\n\n- [Solo](solo.md) - hook\n'
+  for i in $(seq 1 90); do
+    printf -- '- [Entry %s](entry%s.md) - %s\n' "$i" "$i" "$(printf 'y%.0s' $(seq 1 140))"
+  done
+} > "$FAT/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" --coverage-only 2>&1)"
+check "a 14KB index is over the limit too" "printf '%s' \"\$out\" | grep -q 'INDEX TOO BIG'"
+
 # --- stale threshold is configurable ----------------------------------------
 touch -d '2020-01-01' "$CLEAN/beta.md" 2>/dev/null || touch -t 202001010000 "$CLEAN/beta.md"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" --stale-days 30 2>&1)"
