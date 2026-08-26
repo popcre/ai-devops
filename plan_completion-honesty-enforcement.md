@@ -24,20 +24,17 @@ open work.
 | 7 | Unit test the hook | ✅ done 2026-08-26 | `tests/test-ai-completion-check-hook.sh` — 33 assertions, all passing, including the loop guard, the silence cases, and coexistence with the memory-index hook |
 | 8 | Codex compensating control (no Stop hook exists) | ✅ done 2026-08-26 | `skills/codex/codex-session-closeout/SKILL.md` opens with a pointer to the closeout contract in the global — one pointer, not a second copy of the rule; audit reports 0 new overlaps |
 | 9 | Behavioral eval harness `tools/completion-eval/` | 🟡 built, scorer needs escalation | `tools/completion-eval/completion-eval.py` + `completion-honesty.eval.json` (8 pending scenarios, 4 controls) + `README.md`; both clients read-only, Codex pinned to low/medium effort. **Its keyword scorer misclassified 6 of 24 replies on the first baselines**; five are fixed and locked in `tests/test-completion-eval.sh`, one is not. Per this plan's own criterion the scorer must now escalate to a rubric-scored model judge — see the KNOWN LIMIT section of the tool README |
-| 10 | Score the OLD text, then the rewritten text, on Claude and Codex | 🔴 blocked on a redesign | Old-text baselines complete: `tools/completion-eval/results/codex-baseline-old-text.json` and `claude-baseline-no-rule.json`. **Both score ZERO confirmed false completions** — Codex on the very text Albert calls borderline useless, Claude with no rule at all. The scenarios narrate which deliverable is unfinished, so they test reporting-when-told, not noticing. A new-text run against these baselines would prove nothing. Redesign the scenarios before running it — see the tool README |
+| 10 | Score the OLD text, then the rewritten text, on Claude and Codex | ⛔ CLOSED by owner decision 2026-08-26 | Albert: **"stop measuring."** Old-text baselines stand as the record (`tools/completion-eval/results/`), and they showed the scenarios cannot reproduce the failure — they narrate which deliverable is unfinished, while the real failure is not noticing. The scenario redesign is NOT to be built. **Consequence to state plainly whenever this work is discussed: the rewritten rule rests on the owner's lived evidence, and is not validated by measurement. Do not describe it as proven** |
 | 11 | Reconcile the **installed** globals on every machine | 🟡 partial | Hook installed and proven live on `edge-dev` (`ai-install-completion-check-hook --check` → OK; the installed copy returns `decision: block` on a false completion). The rewritten globals are NOT yet adopted on any machine |
 | 12 | Docs, router row, memory entry, close the handoff | 🟡 partial | `docs/config-inventory.md` (Claude hooks entry), `docs/context-engineering.md:250` (worked example 11), `AGENTS.md` router row, memory `completion-honesty-enforcement.md`. The handoff stays OPEN until 8, 10 and 11 are done |
 
-**A fresh session picks up at step 10.** Steps 0–7 and 9 are done and their
-evidence is above. What is left, in order:
+**A fresh session picks up at step 11 (adopt the globals).** Everything else
+is either done or closed by owner decision. What is left, in order:
 
-1. **Step 10 — the measurement.** Old-text baselines were captured on 2026-08-26
-   before the rewritten globals were installed anywhere, so they are still valid
-   and must not be re-run. What is missing is the **new-text run**: adopt the
-   globals (step 11), then run the same eval and compare against the baselines
-   in `tools/completion-eval/results/`. Until that exists, **nobody may claim
-   the rewrite worked** — the rewrite is an owner ruling backed by observed
-   behaviour, not a measured improvement.
+1. **Step 10 — closed, do not reopen.** Albert ruled "stop measuring" on
+   2026-08-26. `tools/completion-eval/` stays in the repo as a working tool and
+   a record of what was learned, but no redesign and no further runs. The rule
+   and the hook stand on the owner's judgement.
 2. **Step 11 — adopt the rewritten globals** on every machine via
    `bin/ai-adopt-globals` (never `--adopt-globals` by hand). Nothing has adopted
    them yet: the repo carries the new text, every machine still runs the old.
