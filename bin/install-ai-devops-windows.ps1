@@ -103,6 +103,14 @@ function Assert-ReadyRepository([string]$Path) {
     if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops origin.' }
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) {
         $expectedIdentity = Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+        # The test override exists so a suite can point the installer at a local
+        # bare-repo fixture. It must never be able to substitute a REAL GitHub
+        # identity for the allow-list -- a stale pair of variables left in a
+        # shell profile would otherwise be a complete bypass of the guard.
+        # Every fixture in tests/ uses a filesystem path, so this costs nothing.
+        if ($expectedIdentity -match '^github[.]com/') {
+            throw "AI_DEVOPS_TEST_EXPECTED_REMOTE may not name a github.com identity ($expectedIdentity); the allow-list governs those."
+        }
         if ((Get-CanonicalRemote $origin) -ne $expectedIdentity) { throw "Noncanonical ai-devops origin: $origin" }
     } else {
         Assert-AiDevOpsRepoIdentity -Key 'ai-devops' -Identity (Get-CanonicalRemote $origin) `

@@ -81,11 +81,22 @@ check 'comment rows are not identities' \
 # --- no script may quietly re-introduce a seventh literal ------------------
 # Every hard-coded ai-devops identity left in bin/ must be one the table lists.
 missing=0
-{ "$SCRIPT" list ai-devops; "$SCRIPT" list ai-devops-memory; "$SCRIPT" list ai-devops-transcripts; } > "$TMP/listed"
+# Every repository identity literal in bin/ must be one the table lists, in
+# either the full github.com/<owner>/<repo> form or the bare <owner>/<repo>
+# form. bin/ai-facts and bin/ai-private-config once compared the bare form,
+# which a github.com-only pattern never saw -- changing either literal to
+# another owner would not have turned this check red.
+: > "$TMP/listed"
+for key in ai-devops ai-devops-memory ai-devops-transcripts ai-devops-private-config; do "$SCRIPT" list "$key" >> "$TMP/listed"; done
+sed -E "s#^github[.]com/##" "$TMP/listed" > "$TMP/listed.bare"
+cat "$TMP/listed.bare" >> "$TMP/listed"
 while IFS= read -r found; do
   grep -Fqx "${found%.git}" "$TMP/listed" ||
     { printf '       unlisted identity in bin/: %s\n' "$found"; missing=1; }
-done < <(grep -rhoE 'github\.com/[A-Za-z0-9._-]+/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" | LC_ALL=C sort -u)
+# Filtered out: filesystem paths that merely end in an ai-devops* directory
+# name, and `gh api repos/<owner>/<repo>` calls, which are API requests rather
+# than identity comparisons.
+done < <(grep -rhoE '(github\.com/)?[A-Za-z0-9._-]+/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" --exclude-dir=.git | grep -vE '^([.]|repos/|api/|share/|state/|worksp/|local/|bin/|opt/|var/|etc/|cache/|lib/|log/|tmp/|run/)' | LC_ALL=C sort -u)
 [ "$missing" -eq 0 ] && ok 'every ai-devops identity literal in bin/ is listed in the table' \
                      || bad 'every ai-devops identity literal in bin/ is listed in the table'
 
