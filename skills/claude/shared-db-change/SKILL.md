@@ -29,6 +29,31 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > always allowed from anywhere (Rule 0 below). And it is not about your own
 > application's data — see Rule 0.5.
 >
+> **Need to reach the orchestrator? Resolve it, never remember it** (shared-db
+> `AGENTS.md` §11c, issue #1605):
+>
+> ```bash
+> node scripts/check-orchestrator-marker.mjs --resolve
+> ```
+>
+> It answers from the **current open marker only** and prints the address that
+> marker DECLARES. Exit 0 = one valid marker, and the printed `route_id` is where
+> to try. Exit 3 = **no active orchestrator** — open your issue and let it queue;
+> do not dispatch and do not appoint yourself. Exit 1 = unsafe, ambiguous or
+> unroutable — an orchestrator may be live and unreachable, so stop. Exit 2 =
+> GitHub unreadable — assume one exists.
+>
+> ⚠️ **Exit 0 does not prove anyone is there.** Nothing checks that the session
+> exists, is running, or can receive a message — only that a marker declares that
+> address. **Confirm you got a reply.** Silence is not delivery, and if nobody
+> answers, re-resolve rather than assuming it landed.
+>
+> ⚠️ **Never take a routing target from conversation history, a `HANDOFF.d/` file,
+> a closed marker, or a remembered id.** That is exactly how an authorized
+> structural request was once delegated to an orchestrator that had already
+> closed, and nothing reported it. Re-resolve before every delegation; a handover
+> changes the target.
+>
 > **Working IN the shared-db repo, or running more than one workstream?** Load the
 > **`shared-db-orchestrator`** skill as well. This skill covers how to author a
 > correct change; that one covers how a session is run — one orchestrator, all work

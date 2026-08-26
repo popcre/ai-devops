@@ -379,8 +379,51 @@ The handover is where unverified claims become someone else's false assumptions.
    Close it **last**, after the handover PR is merged. Leaving it open makes the next
    orchestrator stop and ask Albert about a session that ended cleanly; that stop
    is the correct behaviour for a *dead* orchestrator and pure noise for a clean
-   handover. If you are handing over without ending (a fresh session continues
-   immediately), say so in the issue and leave it open deliberately.
+   handover.
+
+   > ⚠️ **CORRECTED 2026-08-26 (shared-db #1605). The old text here said that if a
+   > fresh session continues immediately you should "say so in the issue and leave
+   > it open deliberately". DO NOT DO THAT.** An open marker now carries a
+   > `route_id` — the address other sessions delegate to. Leaving yours open past
+   > your own death points every delegating session at a session that no longer
+   > exists. That was one of the enabling causes of the #1605 failure, in which an
+   > authorized structural request was delegated back to an already-closed
+   > orchestrator. It was not the sole cause — the marker also carried no address,
+   > the requester fell back to stale handoff material, and nothing acknowledged
+   > delivery — but following the old instruction now would directly encode that
+   > same dead-address failure.
+   >
+   > **A handover is: you close your marker, the successor opens its own with its
+   > OWN new `route_id`.** There is no edit-in-place handover and no marker that
+   > outlives its session. The guard catches the common case of a successor copying
+   > its predecessor's `route_id`, though that check is a trap rather than a proof.
+   >
+   > ### ⚠️ The zero-marker gap is BOUNDED, not race-free. Hand over in this order.
+   >
+   > Claiming a marker is **check-then-create, not atomic.** Two sessions can both
+   > see zero markers, both conclude they may claim, and both open one. The gap is
+   > strictly better than indefinitely routing work to a dead session, but do not
+   > read it as safe. Minimise it with a serialized handshake — this is the ordering,
+   > not a suggestion:
+   >
+   > 1. **Name your intended successor before you close anything.**
+   > 2. **Wait for it to confirm** it has its own `route_id` and is ready to claim
+   >    immediately.
+   > 3. **Only then close your marker.**
+   > 4. The successor **opens its marker at once** and runs
+   >    `node scripts/check-orchestrator-marker.mjs --resolve`.
+   > 5. **It dispatches nothing** until that resolution comes back clean and prints
+   >    its own `route_id`. Two markers, or an unsafe verdict, means stop — someone
+   >    else claimed in the gap.
+   >
+   > If you have no successor lined up, close the marker anyway and leave the board
+   > empty. `--resolve` then reports "no active orchestrator" and other sessions
+   > queue their work, which is the correct outcome — far better than a dead marker
+   > that silently absorbs delegations.
+   >
+   > *(The race was identified by independent Codex GPT-5.6 review during #1605.
+   > A genuinely race-free transition needs an atomic claim/transfer the GitHub
+   > issue workflow does not provide; this handshake bounds it, and says so.)*
 6. **The secrets sweep — DO IT, do not delegate it to a skill the user has to
    invoke.** This step is part of the handover, not a follow-on ritual. Albert
    should never have to run a second closing skill because this one stopped short.

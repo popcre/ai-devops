@@ -31,6 +31,30 @@ Verification on 2026-08-21 against the exact combined tree on current
 the strict context audit, and `git diff --check` all pass. The audit reports zero
 missing safety markers and zero cross-client parity mismatches.
 
+## Reply verbosity and jargon correction on 2026-08-26
+
+Albert reported that replies were too long and too technical, wasting tokens and
+forcing him to read programmer language he does not use. The always-loaded
+"Response Style" section in `templates/system/CLAUDE-global.md` and
+`templates/system/AGENTS-global-codex.md` stated the goal ("plain business
+English") but set no enforceable limit, so sessions produced step-by-step
+narration, file paths, and code blocks by default.
+
+The section now carries three concrete rules: a default ceiling of 120 words
+with the result stated first, an explicit cut list (request recaps, step
+narration, lists of files read or commands run, "what I did / why / how it
+works" sections, closing offers of help), and a plain-language rule barring
+jargon, file paths, function names, diffs, logs, and config snippets unless
+Albert must act on them or asks to see them. The existing Codex-only completion
+honesty and assumption-naming rules were condensed, not dropped.
+
+Verification on 2026-08-26: installer parity, safe global adoption, and
+shared-db routing suites pass; the context audit reports zero installed source
+drift, zero parity differences, zero missing safety markers, and zero
+global-versus-skill-description overlaps. Always-loaded global text measures
+15,980 bytes, still over the 12,449-byte warning budget that predates this
+change.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at
