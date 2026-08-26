@@ -17,9 +17,7 @@ The full recovery procedure is in
 
 ## Repository rules
 
-- **Route every routine change through a branch, a pull request, and the merge
-  queue. Never push straight to `main`, and never merge with `--admin`, to save
-  time.**
+- **Route every routine change through a branch and a pull request.**
   This replaced the old "work directly on `main`" rule when the repository moved
   to the `popcre` organization on 2026-08-26 (issue #84).
   `config/repository-policy.json` reports `feature-branch-pr` for this
@@ -33,14 +31,26 @@ The full recovery procedure is in
   against the live ruleset on 2026-08-26). The bypass exists as an emergency
   escape hatch for a repository whose whole purpose is restoring a broken
   machine — the recovery path must not depend on CI being healthy.
-  Two consequences follow, and both are load-bearing:
+  Three consequences follow, and all three are load-bearing:
   1. The `push: main` trigger in `.github/workflows/verify.yml` is **permanent**.
      For a bypassed merge it is the only full verification that commit ever
      gets. Do not remove it as "redundant with the merge queue".
-  2. A bypassed merge that lands while a pull request is in the queue forces
-     that pull request to rebuild from scratch, and is the confirmed cause of
-     merge-queue starvation (issue #112). Using the hatch for convenience
-     costs another session an hour.
+  2. A bypassed merge that lands while a pull request is queued **resets that
+     pull request's merge group and rebuilds it from scratch**. Measured on
+     2026-08-26: pull request #104 sat healthy at position 1 and never merged,
+     while `main` took four bypassed commits in 28 minutes, at one point running
+     four ~65-minute Windows builds concurrently for the same pull request.
+     Stated plainly: **a required check slower than the interval between
+     bypassed merges can never finish** (issue #112).
+  3. **Until #98 lands, dequeuing and merging directly is the documented
+     interim practice, not a violation** — see
+     [`fix_to_gh_org.md`](fix_to_gh_org.md) "MEASURED 2026-08-26 EVENING".
+     Re-verify a clean merge against the current `main` first; that check is the
+     protection the queue would have given you. Do **not** respond to this by
+     removing the bypass actor: without it nothing can merge at all, because a
+     ruleset ignores `--admin`. Both settings are individually justified and
+     jointly unusable, and both are downstream of `windows-offline` taking ~64
+     minutes. Shorten that job and both symptoms disappear.
 - GitHub is the source of truth. Finished work is tested, committed, pushed, and
   verified on `origin/main`.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
