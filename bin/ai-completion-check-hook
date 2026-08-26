@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# ai-completion-check-hook — Claude Code Stop hook: the closeout gate.
+#
+# Why this exists: on 2026-08-26 Albert reported sessions telling him a job was
+# finished while authorized work had not been started — "Nothing is needed from
+# you now" while a scrape had not begun. The always-loaded rule that was supposed
+# to prevent it had been rewritten twice already (#50, #72) and was live on Codex
+# when it failed. Wording alone has not held.
+#
+# This is the mechanical half. When a turn ends on a completion claim, it stops
+# once and makes the session account for the deliverables the request named. It
+# does not veto: the session answers the question and ends the turn normally.
+#
+# Deliberately cheap and fail-open:
+#   * every turn end runs it, so the no-match path does nothing and exits 0
+#   * ANY internal error exits 0 — a broken hook must never wedge a session
+#   * it fires at most once per user prompt (see the re-entry guard below), so it
+#     cannot loop
+#
+# Full context: plan_completion-honesty-enforcement.md in u2giants/ai-devops.
+
+set -u
+
+payload="$(cat 2>/dev/null || true)"
+[[ -n "$payload" ]] || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+
+event="$(printf '%s' "$payload" | jq -r '.hook_event_name // empty' 2>/dev/null || true)"
+case "$event" in
+  Stop|SubagentStop|"") ;;
+  *) exit 0 ;;
+esac
+
+# Claude Code sets this while the session is already continuing because of a stop
+# hook. Older builds may not send it; the per-prompt guard below covers those.
+active="$(printf '%s' "$payload" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
+[[ "$active" == "true" ]] && exit 0
+
+# The final assistant text of THIS turn. Documented as the field to use — the
+# transcript file is written asynchronously and lags the live conversation.
+message="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
+[[ -n "$message" ]] || exit 0
+
+# Closing claims that assert the ball is in nobody's court. Kept in one list so
+# the set is auditable; matched case-insensitively anywhere in the final message.
+COMPLETION_CLAIMS=(
+  "nothing is needed"
+  "nothing needed from you"
+  "nothing further is needed"
+  "nothing is pending"
+  "no action needed"
+  "no action is needed"
+  "no further action"
+  "you're all set"
+  "you are all set"
+  "all set"
+  "everything is done"
+  "everything is complete"
+  "fully complete"
+  "work is complete"
+  "task is complete"
+)
+
+matched=""
+lower="$(printf '%s' "$message" | tr '[:upper:]' '[:lower:]')"
+for claim in "${COMPLETION_CLAIMS[@]}"; do
+  if [[ "$lower" == *"$claim"* ]]; then matched="$claim"; break; fi
+done
+[[ -n "$matched" ]] || exit 0
+
+# Re-entry guard. One block per user prompt: after firing, the same prompt_id is
+# recorded and never blocked again, so the session's next turn ends normally even
+# if it repeats the phrase. This is what makes a stop loop impossible on builds
+# that do not send stop_hook_active.
+session="$(printf '%s' "$payload" | jq -r '.session_id // "nosession"' 2>/dev/null || echo nosession)"
+prompt="$(printf '%s' "$payload" | jq -r '.prompt_id // empty' 2>/dev/null || true)"
+[[ -n "$prompt" ]] || prompt="$(printf '%s' "$message" | cksum 2>/dev/null | tr -d ' \n' || true)"
+[[ -n "$prompt" ]] || exit 0
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ai-devops/completion-check"
+mkdir -p "$state_dir" 2>/dev/null || exit 0
+# Session ids are opaque; keep only characters that are safe in a filename.
+safe_session="$(printf '%s' "$session" | tr -c 'A-Za-z0-9._-' '_')"
+state_file="$state_dir/$safe_session"
+
+if [[ -f "$state_file" ]] && grep -qxF "$prompt" "$state_file" 2>/dev/null; then
+  exit 0
+fi
+printf '%s\n' "$prompt" >>"$state_file" 2>/dev/null || exit 0
+# Keep the file small; only the recent turns of this session matter.
+tail -n 50 "$state_file" >"$state_file.tmp" 2>/dev/null && mv "$state_file.tmp" "$state_file" 2>/dev/null || true
+
+reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
+
+# Three shapes, one message: hookSpecificOutput is the documented Stop decision
+# control, decision/reason is the older form still honored by installed builds,
+# and systemMessage surfaces the text either way. Extra keys are ignored.
+jq -nc --arg r "$reason" '{
+  decision: "block",
+  reason: $r,
+  systemMessage: $r,
+  hookSpecificOutput: {
+    hookEventName: "Stop",
+    permissionDecision: "deny",
+    permissionDecisionReason: $r
+  }
+}' 2>/dev/null || exit 0
+
+exit 0

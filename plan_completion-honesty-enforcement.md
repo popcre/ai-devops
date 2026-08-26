@@ -3,9 +3,10 @@
 Open handoff for this plan:
 [`HANDOFF.d/2026-08-26T1127Z-edge-dev-claude-completion-honesty.md`](HANDOFF.d/2026-08-26T1127Z-edge-dev-claude-completion-honesty.md)
 
-Created 2026-08-26 by a Claude session on `edge-dev`, branch
-`claude/fix-misleading-instructions-f5be3d`. **No implementation work has been
-done.** Every STATUS row below is open.
+Created 2026-08-26 by a Claude session on `edge-dev`. **Most of it was then
+implemented the same day** — see the STATUS table for what is done, what is
+partial, and what is still open. Step 8 and the new-text measurement are the
+open work.
 
 ---
 
@@ -13,22 +14,38 @@ done.** Every STATUS row below is open.
 
 | # | Step | State | Evidence (artifact, never a bare number) |
 |---|------|-------|------------------------------------------|
-| 0 | Confirm the diagnosis on the machine that failed | ⬜ open | — |
-| 1 | Land the existing rule verbatim in the Claude global — **stopgap only**, do it the same day | ⬜ open | — |
-| 2 | **Rewrite the rule and land it in both globals — REQUIRED** | ⬜ open | — |
-| 3 | Teach `context-audit.py` the new safety + parity category | ⬜ open | — |
-| 4 | Extend `tests/test-context-audit.ps1` fixtures | ⬜ open | — |
-| 5 | Build the Claude `Stop` hook `bin/ai-completion-check-hook` | ⬜ open | — |
-| 6 | Installer + `--check` support for the hook | ⬜ open | — |
-| 7 | Unit test the hook (`tests/test-ai-completion-check-hook.sh`) | ⬜ open | — |
-| 8 | Codex compensating control (no Stop hook exists) | ⬜ open | — |
-| 9 | Behavioral eval harness `tools/completion-eval/` | ⬜ open | — |
-| 10 | Score the OLD text, then the rewritten text, on Claude and Codex | ⬜ open | — |
-| 11 | Reconcile the **installed** globals on every machine | ⬜ open | — |
-| 12 | Docs, router row, memory entry, close the handoff | ⬜ open | — |
+| 0 | Confirm the diagnosis on the machine that failed | ✅ done 2026-08-26 | `grep -c "Never make Albert ask" ~/.codex/AGENTS.md ~/.claude/CLAUDE.md` → `1` / `0`: the failure happened under CURRENT Codex text, and Claude had no rule at all |
+| 1 | Land the existing rule verbatim in the Claude global — stopgap | ✅ superseded 2026-08-26 | Step 2 landed the same day, so the stopgap was never needed; Claude went straight to the rewritten rule |
+| 2 | **Rewrite the rule and land it in both globals** | ✅ done 2026-08-26 | `templates/system/CLAUDE-global.md:7-21` and `templates/system/AGENTS-global-codex.md:7-21`, byte-identical; the Response-Style `diff` in step 2's gate prints nothing |
+| 3 | Teach `context-audit.py` the new safety + parity category | ✅ done 2026-08-26 | `tools/context-audit/context-audit.py:33-43` (`CLOSEOUT_CONTRACT_PATTERNS`), `:51`, `:80-84`, `:103-105`. Proven by deletion: removing the block from Claude only → 3 parity mismatches naming Claude; removing it from both → `missing safety markers: 1` with the plain-English reason |
+| 4 | Extend `tests/test-context-audit.ps1` fixtures | ✅ done 2026-08-26 | `tests/test-context-audit.ps1:17` and `:26-28`; `pwsh tests/test-context-audit.ps1` passes, and fails naming `completion honesty` when the marker is deliberately broken |
+| 5 | Build the Claude `Stop` hook `bin/ai-completion-check-hook` | ✅ done 2026-08-26 | `bin/ai-completion-check-hook`; payload contract confirmed against the current hooks documentation (`last_assistant_message`); re-entry guard is per `prompt_id`, so a stop loop is impossible even on builds that omit `stop_hook_active` |
+| 6 | Installer + `--check` support for the hook | ✅ done 2026-08-26 | `bin/ai-install-completion-check-hook`, modelled on `bin/ai-install-memory-hook`: idempotent, additive, refuses an unparseable `settings.json` |
+| 7 | Unit test the hook | ✅ done 2026-08-26 | `tests/test-ai-completion-check-hook.sh` — 33 assertions, all passing, including the loop guard, the silence cases, and coexistence with the memory-index hook |
+| 8 | Codex compensating control (no Stop hook exists) | ✅ done 2026-08-26 | `skills/codex/codex-session-closeout/SKILL.md` opens with a pointer to the closeout contract in the global — one pointer, not a second copy of the rule; audit reports 0 new overlaps |
+| 9 | Behavioral eval harness `tools/completion-eval/` | 🟡 built, scorer needs escalation | `tools/completion-eval/completion-eval.py` + `completion-honesty.eval.json` (8 pending scenarios, 4 controls) + `README.md`; both clients read-only, Codex pinned to low/medium effort. **Its keyword scorer misclassified 6 of 24 replies on the first baselines**; five are fixed and locked in `tests/test-completion-eval.sh`, one is not. Per this plan's own criterion the scorer must now escalate to a rubric-scored model judge — see the KNOWN LIMIT section of the tool README |
+| 10 | Score the OLD text, then the rewritten text, on Claude and Codex | 🟡 partial | Old-text baselines captured before the new text was installed: `tools/completion-eval/results/`. The new-text runs are NOT done — see the STATUS note below |
+| 11 | Reconcile the **installed** globals on every machine | 🟡 partial | Hook installed and proven live on `edge-dev` (`ai-install-completion-check-hook --check` → OK; the installed copy returns `decision: block` on a false completion). The rewritten globals are NOT yet adopted on any machine |
+| 12 | Docs, router row, memory entry, close the handoff | 🟡 partial | `docs/config-inventory.md` (Claude hooks entry), `docs/context-engineering.md:250` (worked example 11), `AGENTS.md` router row, memory `completion-honesty-enforcement.md`. The handoff stays OPEN until 8, 10 and 11 are done |
 
-**A fresh session starts at step 0.** Steps 0–4 are one sitting. Steps 5–7 are a
-second. Steps 8–12 are a third. Re-read the downstream steps at each cut point.
+**A fresh session picks up at step 10.** Steps 0–7 and 9 are done and their
+evidence is above. What is left, in order:
+
+1. **Step 10 — the measurement.** Old-text baselines were captured on 2026-08-26
+   before the rewritten globals were installed anywhere, so they are still valid
+   and must not be re-run. What is missing is the **new-text run**: adopt the
+   globals (step 11), then run the same eval and compare against the baselines
+   in `tools/completion-eval/results/`. Until that exists, **nobody may claim
+   the rewrite worked** — the rewrite is an owner ruling backed by observed
+   behaviour, not a measured improvement.
+2. **Step 11 — adopt the rewritten globals** on every machine via
+   `bin/ai-adopt-globals` (never `--adopt-globals` by hand). Nothing has adopted
+   them yet: the repo carries the new text, every machine still runs the old.
+   The Claude `Stop` hook IS live on `edge-dev`.
+3. **Step 12 — finish**: record the new-text results here by path, then delete
+   the handoff.
+
+Re-read the downstream steps before starting each one.
 
 ### Order history, 2026-08-26 — read this before changing the order again
 

@@ -229,7 +229,7 @@ no longer matches its trigger is a defect.
   task-triggered; only the name/description manifest loads at startup. Do not
   treat the sum of all skill bodies as a per-turn cost.
 
-### Worked examples (ten real rules, classified)
+### Worked examples (eleven real rules, classified)
 
 These exist in the repo today. Each has exactly one canonical owner; anything in
 the last column is a pointer or adapter, not a second owner. A second reviewer
@@ -247,6 +247,7 @@ applying the decision table above reaches the same owner for each row.
 | 8 | "Step 1 is done and corrected; step 2 is the open row; the parser fix was implemented and verified" | Handoff (`HANDOFF.d/2026-08-12T1552Z-al8960ofc-claude-context-audit-parser-fix.md`) | Root `HANDOFF.md` is the static pointer |
 | 9 | Git silently invents a committer identity from the OS/AD account when none is configured (this put 231 wrong-identity commits in merged history) | Memory (`memory/ai-devops/git-identity-silent-guess.md`) | The standing rule "verify identity before first commit" is a Global rule |
 | 10 | New skills are authored in `skills/shared/` by default; a name may live in `shared/` or a client tree, never both | Repo router (`AGENTS.md`, docs map plus skills-map note) | `CLAUDE.md` restates it for Claude; `docs/skills-map.md` and `docs/skills-usage-guide.md` carry pointers |
+| 11 | A session must account for every deliverable before ending a turn, and keep working when one is unfinished (the closeout contract) | Global (`CLAUDE-global.md` / `AGENTS-global-codex.md`, Response Style) | Enforced as a safety marker AND a cross-client parity rule in `tools/context-audit/context-audit.py`; mechanically backstopped on Claude by the `Stop` hook `bin/ai-completion-check-hook`; measured by `tools/completion-eval/`. Plan: `plan_completion-honesty-enforcement.md` |
 
 ## Enforcement (step 3)
 

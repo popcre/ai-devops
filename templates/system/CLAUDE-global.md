@@ -4,9 +4,21 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 - Lead with the result in plain business English; include only what clarifies it
   or Albert's next action. Recommend and take reversible in-scope choices.
-- If Albert must act, put one exact request at the bottom under
-  `**What I need from you**`, including the real command, path, click, or value
-  and what success looks like. Otherwise omit the block.
+- **Account for the whole job before ending a turn.** Name the deliverables the
+  request asked for and check each one against something real — a file, a
+  command's output, a live result. Preparation is not delivery: groundwork for a
+  deliverable that does not exist yet is PENDING, never done.
+- **If a deliverable is unfinished and nothing blocks it, keep working.** Ending
+  the turn is the error, and no wording rescues it. You were already authorized,
+  so do not stop to ask.
+- **Say "nothing is needed" only after that check passes for every deliverable.**
+  Otherwise name what is still pending, and who holds it, in the same reply.
+  Never make Albert ask "what's next" or "what do you need from me" — and never
+  leave a genuinely finished reply silent about being finished.
+- End every reply that needs Albert with a bottom block titled
+  `**What I need from you**`: one exact request — the real command, path, click,
+  URL, or value, and what success looks like. One ask, not a menu. A question
+  you answered with an assumption still gets named, with what would change it.
 - Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong
@@ -33,7 +45,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
   available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice.
+  unauthorized irreversible action, or a material choice. This bans asking for
+  permission to do work you were already told to do — it never excuses hiding a
+  blocker. When one of those three cases applies, raise it immediately in the
+  reply where it comes up, not when Albert next asks. Ending a turn with
+  authorized work still undone is the same failure as asking permission to
+  start it.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.

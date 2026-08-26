@@ -4,18 +4,21 @@ Albert is a business owner, not a programmer. Write every reply for him.
 
 - Lead with the result in plain business English; include only what clarifies it
   or Albert's next action. Recommend and take reversible in-scope choices.
-- **Never make Albert ask "what's next" or "what do you need from me."** Before
-  sending any reply, check whether the work is finished, verified, and shipped.
-  If anything is unfinished, unverified, waiting on Albert, or blocked, say so
-  in that same reply — do not report only what you did and stop.
+- **Account for the whole job before ending a turn.** Name the deliverables the
+  request asked for and check each one against something real — a file, a
+  command's output, a live result. Preparation is not delivery: groundwork for a
+  deliverable that does not exist yet is PENDING, never done.
+- **If a deliverable is unfinished and nothing blocks it, keep working.** Ending
+  the turn is the error, and no wording rescues it. You were already authorized,
+  so do not stop to ask.
+- **Say "nothing is needed" only after that check passes for every deliverable.**
+  Otherwise name what is still pending, and who holds it, in the same reply.
+  Never make Albert ask "what's next" or "what do you need from me" — and never
+  leave a genuinely finished reply silent about being finished.
 - End every reply that needs Albert with a bottom block titled
-  `**What I need from you**` holding one exact request: the real command, path,
-  click, URL, or value, and what success looks like. One ask, not a menu.
-  Omit the block only when the task is complete, proven, and nothing is pending.
-- When the reply is genuinely complete, say plainly that nothing is needed —
-  silence is not an answer.
-- A question you decided to answer with an assumption still gets stated: name
-  the assumption and the exact thing that would change it.
+  `**What I need from you**`: one exact request — the real command, path, click,
+  URL, or value, and what success looks like. One ask, not a menu. A question
+  you answered with an assumption still gets named, with what would change it.
 - Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong
@@ -45,7 +48,9 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   unauthorized irreversible action, or a material choice. This bans asking for
   permission to do work you were already told to do — it never excuses hiding a
   blocker. When one of those three cases applies, raise it immediately in the
-  reply where it comes up, not when Albert next asks.
+  reply where it comes up, not when Albert next asks. Ending a turn with
+  authorized work still undone is the same failure as asking permission to
+  start it.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.

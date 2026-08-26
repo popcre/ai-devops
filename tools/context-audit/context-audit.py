@@ -30,12 +30,25 @@ CAPABILITY_REPAIR_PATTERNS = {
     r"symptom suppression": "symptom suppression is not a fix",
 }
 
+# The closeout contract. Each pattern is one INDEPENDENT half of the rule, so
+# losing any half is reported rather than being masked by the others: account for
+# the deliverables, keep working when one is unfinished, and do not claim
+# completion until that check passes. Split out for the same reason
+# CAPABILITY_REPAIR_PATTERNS is: a rule can rot one clause at a time.
+CLOSEOUT_CONTRACT_PATTERNS = {
+    r"Account for the whole job|deliverables the\s+request asked for": "a session must account for every deliverable before ending a turn",
+    r"Preparation is not delivery": "preparation must not be reported as delivery",
+    r"keep working|Ending\s+the turn is the error": "unfinished authorized work means keep working, not end the turn",
+    r"nothing is needed.{0,80}every deliverable|name what is still pending": "completion may only be claimed once every deliverable checks out",
+}
+
 SAFETY_MARKERS = {
     "production mutation": [r"production", r"terraform apply|mutating.*gcloud|read-only"],
     "shared database routing": [r"shared[- ]db|shared database", r"shared-db|branch.*PR|authored"],
     "secret handling": [r"secret", r"1Password|never.*secret|vault"],
     "destructive actions": [r"destructive", r"delete|overwrite|recover"],
     "capability preservation": list(CAPABILITY_REPAIR_PATTERNS),
+    "completion honesty": list(CLOSEOUT_CONTRACT_PATTERNS),
     "Git identity": [r"GIT_COMMITTER_IDENT|Git identity", r"Albert Hazan|users\.noreply\.github\.com"],
     "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
     "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting"],
@@ -64,6 +77,11 @@ SAFETY_REASONS = {
         "no always-loaded rule requires a repair to preserve the original "
         "capability, so a session could suppress a symptom by removing what broke"
     ),
+    "completion honesty": (
+        "no always-loaded rule requires a session to account for every "
+        "deliverable before ending a turn, so a job can be reported finished "
+        "while authorized work is still pending"
+    ),
     "Git identity": (
         "no always-loaded rule requires verifying GIT_COMMITTER_IDENT, so Git can "
         "silently invent a wrong commit identity"
@@ -82,6 +100,9 @@ SAFETY_REASONS = {
 # different entry files, so identical behavior has to be asserted, not assumed.
 PARITY_RULES = {
     "response style contract": r"^# Response Style",
+    "closeout contract: account for deliverables": r"Account for the whole job",
+    "closeout contract: preparation is not delivery": r"Preparation is not delivery",
+    "closeout contract: keep working when unfinished": r"Ending\s+the turn is the error",
     "GPT-5.6 low or medium only": r"GPT-5\.6",
     "production infrastructure safety": r"production infrastructure safety",
     "no terraform apply against prod": r"terraform apply",
@@ -617,6 +638,11 @@ def run(args: argparse.Namespace) -> dict:
                     CAPABILITY_REPAIR_PATTERNS[pattern] for pattern in missing_patterns
                 )
                 reason = f"the repair contract is missing this protection: {missing}"
+            if category == "completion honesty":
+                missing = "; ".join(
+                    CLOSEOUT_CONTRACT_PATTERNS[pattern] for pattern in missing_patterns
+                )
+                reason = f"the closeout contract is missing this protection: {missing}"
             safety_issues.append({
                 "category": category,
                 "reason": f"Missing safety marker '{category}': {reason}.",
