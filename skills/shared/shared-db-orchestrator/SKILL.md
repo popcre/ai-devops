@@ -52,6 +52,39 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 ## Start
 
 1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
+
+   **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. A bare `gh issue list --label orchestrator-marker` has printed empty while a marker existed, and an empty result reads as permission to start.
+
+1a. **Claim your marker with a routing block, and name your session `shared-db.orch…`** (shared-db `AGENTS.md` §11c, issue #1605, owner instruction 2026-08-26). The marker is how every other session finds you; without a routable address it proves only that *someone* is running, and a session with no address falls back to a handoff or conversation history — which is how an authorized request reached an orchestrator that had already closed.
+
+   Set your session display name to begin with `shared-db.orch`, then open the marker containing:
+
+   ````
+   ```orchestrator-routing
+   status: active
+   identifier: shared-db.orch
+   engine: codex            # or `claude`
+   session_name: shared-db.orch <machine> <short label>
+   route_id: <YOUR OWN routable id — see below>
+   owner: u2giants
+   machine: <MACHINE>
+   started: <ISO-8601, e.g. 2026-08-26T14:39:25Z>
+   handover_issue: <predecessor marker number, or `none`>
+   briefing: <HANDOFF.d/... path, or `none`>
+   ```
+   ````
+
+   `route_id` is **your own** id, never the predecessor's — the guard rejects an inherited one:
+   - **Codex:** your thread UUID, the `session_id` in your rollout under `~/.codex/sessions/…`. Another session reaches you with `codex-reply` on that `threadId`.
+   - **Claude:** your own `sessionId` (e.g. `local_<uuid>`), which another Claude session messages directly.
+
+   Every field is required and **blank is never a default** — state a value or `none`. Verify before you dispatch anything:
+
+   ```bash
+   node scripts/check-orchestrator-marker.mjs --resolve
+   ```
+
+   It must print **your** `route_id`. If it does not, other sessions cannot reach you and you are not ready to run.
 2. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of orchestrator ownership.
 3. Record every active workstream and exact claimed database objects.
 4. Warn if more than five open handoffs exist.

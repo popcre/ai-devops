@@ -379,8 +379,25 @@ The handover is where unverified claims become someone else's false assumptions.
    Close it **last**, after the handover PR is merged. Leaving it open makes the next
    orchestrator stop and ask Albert about a session that ended cleanly; that stop
    is the correct behaviour for a *dead* orchestrator and pure noise for a clean
-   handover. If you are handing over without ending (a fresh session continues
-   immediately), say so in the issue and leave it open deliberately.
+   handover.
+
+   > ⚠️ **CORRECTED 2026-08-26 (shared-db #1605). The old text here said that if a
+   > fresh session continues immediately you should "say so in the issue and leave
+   > it open deliberately". DO NOT DO THAT.** An open marker now carries a
+   > `route_id` — the address other sessions delegate to. Leaving yours open past
+   > your own death points every delegating session at a session that no longer
+   > exists, which is exactly the failure #1605 was filed for: an authorized
+   > structural request was delegated back to an already-closed orchestrator.
+   >
+   > **A handover is: you close your marker, the successor opens its own with its
+   > OWN new `route_id`.** There is no edit-in-place handover and no marker that
+   > outlives its session. The guard rejects a successor that copies its
+   > predecessor's `route_id`, so inheriting one is not an available shortcut.
+   >
+   > A brief gap where zero markers are open is CORRECT and safe: `--resolve`
+   > reports "no active orchestrator" and other sessions queue their work until the
+   > successor starts. That is the intended behaviour, not an outage to paper over
+   > by leaving a dead marker open.
 6. **The secrets sweep — DO IT, do not delegate it to a skill the user has to
    invoke.** This step is part of the handover, not a follow-on ritual. Albert
    should never have to run a second closing skill because this one stopped short.
