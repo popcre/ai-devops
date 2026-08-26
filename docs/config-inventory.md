@@ -34,11 +34,29 @@ An identity that is not in the table is refused, and a missing or emptied table
 refuses everything -- widening the table is the only supported way to accept a
 new owner, and every added row is a deliberate security decision.
 
-`ai-devops` currently accepts **both** `u2giants` and `popcre` so that existing
-clones and clones taken after the organization move both pass on the same
-commit (issue #84, [`../fix_to_gh_org.md`](../fix_to_gh_org.md)). The two
-private siblings, `ai-devops-memory` and `ai-devops-transcripts`, are not
-moving and accept `u2giants` only.
+`ai-devops` accepts **both** `u2giants` and `popcre` so that existing clones and
+clones taken after the organization move both pass on the same commit (issue
+#84, now closed; [`../fix_to_gh_org.md`](../fix_to_gh_org.md)). The three
+private siblings -- `ai-devops-memory`, `ai-devops-transcripts` and
+`ai-devops-private-config` -- did not move and accept `u2giants` only.
+
+**The exit codes are part of the contract.** `ai-repo-identity accepts` returns
+`0` accepted, `1` the allow-list is intact and this identity is not on it, and
+`2` the allow-list could not be used at all -- missing, unreadable, or the key
+has zero rows. Never conflate `1` and `2`. Most callers are positive guards
+where both mean abort, but `bin/ai-sync-memory` is **inverted**: it refuses to
+use any accepted `ai-devops` identity as a private memory hub, so it reads `1`
+as "not the public repo, proceed". On 2026-08-26 a `1` from an emptied table
+caused it to copy a private memory file into a checkout whose origin was the
+public repository. A broken allow-list must stay an error.
+
+**Every guard compares the full `host/owner/repo` identity.** `bin/ai-facts` and
+`bin/ai-private-config` once stripped the host along with the scheme, so any
+server answering the right path was accepted; `bin/ai-devops`'s doctor used a
+trailing glob with the same weakness. All three now route through the shared
+table. `tests/test-ai-repo-identity.sh` fails if any identity literal in `bin/`
+is missing from it, in either the `github.com/<owner>/<repo>` or the bare
+`<owner>/<repo>` form.
 
 **One-line summary:** config is spread across **three overlapping sync systems
 plus several things synced by nothing**. `ai-devops` (this repo) is the intended
