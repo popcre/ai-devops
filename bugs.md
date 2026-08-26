@@ -466,6 +466,12 @@ Claude Opus 5 debate.
 
 - **Current severity: MEDIUM**
 
+**Repair status (2026-08-25): partially repaired. Gemini now has a governed,
+hash-bound qualification record on `main` at `f26d5eb`; Windows is qualified and
+available, and exact-head CI is green. Ubuntu remains quarantined pending
+installation of current source and its own qualification. Muse and the other
+provider-specific gaps below remain separate work.**
+
 - Files: `bin/ai-review-preflight:137-150`,
   `bin/ai-muse:93-99`, `bin/ai-muse:136-177`, `bin/ai-glm:1568-1604`,
   `bin/ai-reviewer-issue:116-205`
@@ -644,9 +650,10 @@ evidence is absent.**
 
 ### 3. Gemini's read-only proof can miss real writes
 
-**Repair status (2026-08-21): source repaired with whole-copy, protected-source,
-and outside-sentinel identity checks. Gemini remains quarantined until live
-hostile qualification passes on Windows and Ubuntu.**
+**Repair status (2026-08-25): source repaired with whole-copy, protected-source,
+and outside-sentinel identity checks. Cross-platform containment canaries passed;
+Windows is currently qualified and available. Ubuntu remains quarantined until
+exact source `f26d5eb` is installed and independently qualifies.**
 
 - Files: `bin/ai-gemini:21-26`
 - Confidence: high
@@ -656,13 +663,14 @@ hostile qualification passes on Windows and Ubuntu.**
   covered.
 - User-visible failure: Gemini can alter code or review evidence and still be
   reported as read-only.
-- Existing tracker: issue #38. The required hostile-write qualification remains
-  open in `plan_ai-gemini-wrapper.md`.
+- Existing tracker: issue #38. Current production-closeout state is in
+  `plan_gemini_reviewer_safety_repair.md`.
 
 ### 4. Gemini can report success when no report was saved
 
-**Repair status (2026-08-21): source repaired; report publication is atomic and
-failure leaves recovery-required evidence. Gemini remains quarantined.**
+**Repair status (2026-08-25): source repaired; report publication is atomic and
+failure leaves recovery-required evidence. Windows is available; Ubuntu remains
+quarantined pending current-source installation and qualification.**
 
 - Files: `bin/ai-gemini:35-37`
 - Confidence: high; matches the bare-PASS/empty-report trial evidence
@@ -674,8 +682,9 @@ failure leaves recovery-required evidence. Gemini remains quarantined.**
 
 ### 5. Gemini can accept the wrong resumed conversation
 
-**Repair status (2026-08-21): source repaired; conversation, frozen model, and
-between-turn private-copy identity must all match. Gemini remains quarantined.**
+**Repair status (2026-08-25): source repaired; conversation, frozen model, and
+between-turn private-copy identity must all match. Windows is available; Ubuntu
+remains quarantined pending current-source installation and qualification.**
 
 - Files: `bin/ai-gemini:24`, `bin/ai-gemini:37`
 - Confidence: high
@@ -687,8 +696,10 @@ between-turn private-copy identity must all match. Gemini remains quarantined.**
 
 ### 6. Gemini has no in-progress record, lock, or failed-run recovery
 
-**Repair status (2026-08-21): source repaired with pre-call state, repository and
-session locks, and preserved recovery evidence. Gemini remains quarantined.**
+**Repair status (2026-08-25): source repaired with pre-call state, repository and
+session locks, preserved recovery evidence, and a hash-bound qualification
+record. Windows is available; Ubuntu remains quarantined pending current-source
+installation and qualification.**
 
 - Files: `bin/ai-gemini:36-39`
 - Confidence: high
@@ -956,8 +967,12 @@ active providers are registered and unsupported facts remain unknown.**
 
 ### 25. Gemini's plan, standing instruction, and actual code contradict each other
 
-**Repair status (2026-08-21): reconciled; the wrapper exists but is explicitly
-quarantined, and `plan_gemini_reviewer_safety_repair.md` owns current status.**
+**Repair status (2026-08-25): reconciled. The governed wrapper and qualification
+path are on `main` at `f26d5eb`; targeted suites, exact-source APPROVE, and the
+single full master gate passed. Windows is qualified and available. Ubuntu and
+issue #38 remain open until Ubuntu install/qualification and a
+durable real-issue review pass. `plan_gemini_reviewer_safety_repair.md` owns the
+current status.**
 
 - Files: `plan_ai-gemini-wrapper.md:13-26`,
   `plan_ai-gemini-wrapper.md:116-128`, `AGENTS.md:69`, `bin/ai-gemini`
