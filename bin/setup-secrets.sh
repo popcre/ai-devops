@@ -396,13 +396,96 @@ if codex:
         "env": {"MCP_TOOL_TIMEOUT": "3600000"},
     }
 
+# --------------------------------------------------------------------------
+# PROJECT-SCOPED SERVERS  (mirrors bin/setup-machine.ps1 steps 5d-2 and 7b)
+#
+# Claude Code starts every GLOBAL server in EVERY session, in every repository.
+# Measured on edge-dev 2026-08-26: 11 global servers x 22 open sessions = 416
+# node processes holding 18.1 GB on a 32 GB machine. A server only one project
+# uses must not be global.
+#
+# The authority is the .mcp.json COMMITTED IN EACH PROJECT REPO - that is what
+# reaches extra clones, linked worktrees and other machines. This step only
+# seeds it, and never overwrites an entry the repo already owns.
+#
+# Keep this map identical to $McpProjectScope in bin/setup-machine.ps1.
+PROJECT_SCOPE = {
+    "trigger":          "oracle",
+    "recall-ai":        "oracle",
+    "railway":          "popdam3",
+    "ag-grid":          "designflow-frontend",
+    "devops-mcp":       "synology-monitor",
+    "synology-monitor": "synology-monitor",
+}
+
+# Checkout roots differ per machine; probe rather than assume one.
+PROJECT_ROOTS = [
+    os.path.expanduser("~/repos"),
+    "/worksp",
+    "/srv",
+    os.path.expanduser("~"),
+]
+
+def _find_project(name):
+    for root in PROJECT_ROOTS:
+        for candidate in (os.path.join(root, name),
+                          os.path.join(root, "dflow_plm", name)):
+            if os.path.isdir(os.path.join(candidate, ".git")) or os.path.isdir(candidate):
+                if os.path.isdir(candidate):
+                    return candidate
+    return None
+
+by_project = {}
+for _name, _proj in PROJECT_SCOPE.items():
+    if _name in servers:
+        by_project.setdefault(_proj, []).append(_name)
+
+# Names that genuinely reached a project file. ONLY these may be pruned from the
+# global config. A project that is not cloned here keeps its servers global -
+# removing them would take away a working capability with nowhere to put it.
+_scoped = set()
+
+for _proj, _names in sorted(by_project.items()):
+    _dir = _find_project(_proj)
+    if not _dir:
+        print("  -- %s not cloned here; %s left global" % (_proj, ", ".join(sorted(_names))))
+        continue
+    _file = os.path.join(_dir, ".mcp.json")
+    _cfg = {}
+    if os.path.exists(_file):
+        try:
+            with open(_file) as fh:
+                _cfg = json.load(fh)
+        except Exception as exc:
+            print("  !! %s is not valid JSON (%s); left alone" % (_file, exc))
+            continue
+    _existing = _cfg.setdefault("mcpServers", {})
+    _write = [n for n in sorted(_names) if n not in _existing]
+    if not _write:
+        print("  ok %s already carries: %s" % (_proj, ", ".join(sorted(_names))))
+    else:
+        for n in _write:
+            _existing[n] = servers[n]
+        with open(_file, "w") as fh:
+            json.dump(_cfg, fh, indent=2)
+            fh.write("\n")
+        print("  ok %s <- %s" % (_file, ", ".join(_write)))
+    # Whether seeded now or already committed, it must not also be global.
+    for n in _names:
+        servers.pop(n, None)
+        _scoped.add(n)
+
 cfg.setdefault("mcpServers", {}).update(servers)
+# A server that reached a project file must be actively removed from a config
+# written before this change, or the old global entry survives forever.
+for _name in _scoped:
+    cfg.get("mcpServers", {}).pop(_name, None)
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
 with open(os.environ["AI_DEVOPS_OWNED_OUT"], "w") as fh:
     fh.write(",".join(sorted(servers)))
-print("  ok wired: " + ", ".join(servers))
+print("  ok wired global: " + ", ".join(sorted(servers)))
 PY
   rc=$?
   if [ "$rc" -eq 0 ]; then
