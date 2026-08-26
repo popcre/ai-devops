@@ -8,6 +8,16 @@ default_root(){
     printf '%s/.local/share/ai-devops-memory' "$(cygpath -u "$USERPROFILE")"
   else printf '%s/.local/share/ai-devops-memory' "${HOME:?HOME is unavailable}"; fi
 }
+# Resolve through symlinks: install-machine-tools.sh links this command into
+# /usr/local/bin on Ubuntu, where a naive dirname/.. points at /usr/local
+# instead of the repository and the shared allow-list would never be found.
+_ai_self="${BASH_SOURCE[0]}"
+while [ -L "$_ai_self" ]; do
+  _ai_target="$(readlink "$_ai_self")"
+  case "$_ai_target" in /*) _ai_self="$_ai_target" ;; *) _ai_self="$(dirname "$_ai_self")/$_ai_target" ;; esac
+done
+AI_TOOL_ROOT="$(cd "$(dirname "$_ai_self")/.." && pwd)"
+AI_REPO_IDENTITY="$AI_TOOL_ROOT/bin/ai-repo-identity"
 ROOT="$(default_root)"
 [ -d "$ROOT" ] || die "private memory hub not found: $ROOT (run ai-sync-memory first)."
 ROOT="$(cd "$ROOT" && pwd -P)"
@@ -15,9 +25,14 @@ FACTS_TMP=""
 cleanup(){ [ -z "$FACTS_TMP" ] || rm -f -- "$FACTS_TMP"; }
 trap cleanup EXIT INT TERM
 if [ "${AI_FACTS_ALLOW_FIXTURE:-0}" != 1 ]; then
+  # This used to strip the HOST as well as the scheme, so
+  # https://evil.example/u2giants/ai-devops-memory.git was accepted as the
+  # private hub. Route through the shared allow-list, which compares the
+  # full host/owner/repo identity and is fail-closed on a broken table.
+  [ -x "$AI_REPO_IDENTITY" ] || die "identity helper is unavailable: $AI_REPO_IDENTITY"
   remote="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
-  identity="$(printf '%s' "$remote" | sed -E -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##')"
-  [ "$identity" = "u2giants/ai-devops-memory" ] || die 'refusing a memory root that is not the canonical private hub.'
+  "$AI_REPO_IDENTITY" accepts ai-devops-memory "$remote" ||
+    die 'refusing a memory root that is not the canonical private hub.'
 fi
 
 markdown_files() {
