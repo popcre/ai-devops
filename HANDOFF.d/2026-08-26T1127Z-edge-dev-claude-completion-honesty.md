@@ -1,6 +1,8 @@
 # HANDOFF — false completion: sessions report "nothing is needed" while authorized work is pending (2026-08-26 11:27 UTC, edge-dev/claude)
 
-- **Status:** OPEN — planning only. No implementation work has been done.
+- **Status:** OPEN — the plan was implemented on 2026-08-26 except the new-text
+  measurement and the machine rollout. Read the plan's STATUS table for exactly
+  what is proven and what is not.
 - **The plan is the brief:** [`plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md)
   — read its STATUS table first. Every row is open; a fresh session starts at
   step 0. Do not re-derive or re-plan.
@@ -88,13 +90,28 @@ session with authorized work left must keep working rather than end the turn.
 
 ## 3. Current state — what is true right now
 
-- **Done this session:** diagnosis (six findings, section 5 below) and the
-  implementation plan file. Nothing else.
-- **Not started:** every one of the plan's twelve steps.
-- **Files added on this branch:** `plan_completion-honesty-enforcement.md` and
-  this handoff. No instruction file, tool, test, or wrapper was modified.
-- **Committed/pushed:** see the PR referenced in the final session report; the
-  branch is `claude/fix-misleading-instructions-f5be3d` off `eeb510f`.
+**Done and proven (steps 0-9, evidence in the plan's STATUS table):** the
+rewritten closeout contract is byte-identical in both globals; `context-audit.py`
+enforces it as a safety marker plus three parity rules and demonstrably fails
+when either global loses it; `bin/ai-completion-check-hook` and its installer
+exist with 33 passing assertions; `skills/codex/codex-session-closeout` carries
+the Codex pointer; `tools/completion-eval/` exists with old-text baselines.
+
+**Live on `edge-dev` only:** the Stop hook is installed and returns
+`decision: block` on a false completion through its installed copy. Nothing else
+on this machine changed — the settings diff shows only the added Stop entry.
+
+**NOT done, and nobody may claim otherwise:**
+
+1. **The rewritten globals are not adopted on ANY machine.** The repo has the new
+   text; every machine still runs the old. `bin/ai-adopt-globals` is the route.
+2. **There is no new-text measurement.** Only old-text baselines exist. The
+   rewrite rests on the owner ruling and observed behaviour, not on a measured
+   improvement.
+3. **The eval's scorer is not trustworthy yet** — see section 9.
+
+**Committed:** on branch `claude/completion-honesty-implement`; see the PR in the
+session report.
 
 ## 4. Everything we tried that did NOT work
 
@@ -213,6 +230,28 @@ tests/test-all.ps1` from the repo root. Nothing here is deployed; "shipped"
 means merged to `main` with suites green and the installed globals updated.
 
 ## 9. Open questions and risks
+
+**The eval scorer is the weak link, and it is proven weak.** Its keyword
+classifier misclassified 6 of 24 replies on the first baselines — a correct
+"Nothing outstanding on this one" read as hedging, and a correct "The fix is not
+finished yet, I am merging it now" read as a false completion. Five are fixed
+and locked in `tests/test-completion-eval.sh`; one remains (a pending word inside
+unrelated mid-answer prose). The plan's own criterion was to escalate to a
+rubric-scored model judge if the cheap scorer misclassified a hand-labelled
+sample. It did. **Escalate before quoting any number from this tool.**
+
+**Floor effect on the Claude arm.** With NO closeout rule installed, Claude
+produced zero false completions across all eight pending scenarios. Either the
+narrated proxy is too easy on that client or its base behaviour is already
+correct there. Either way the Claude arm cannot show improvement, so do not read
+a flat Claude score as "the rewrite did nothing". The Codex arm is the one that
+carries signal — Codex is where the failure was observed.
+
+**Budget warning, worsened deliberately.** The always-loaded globals were already
+over their 12449-byte warning budget before this work (14754 bytes) and are now
+16340. Budgets warn only, never fail. Claude gained a rule it never had, which is
+most of the increase.
+
 
 - **Did the failing session run current or stale global text?** Step 0 decides
   it. If stale, finding F1 is partly wrong and the weight shifts to rollout
