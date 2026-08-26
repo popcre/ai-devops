@@ -10,8 +10,14 @@
 # code or provider sessions.
 set -euo pipefail
 
-VERSION="1.3.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="1.4.0"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+  SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+  case "$SCRIPT_SOURCE" in /*|[A-Za-z]:[\\/]*) ;; *) SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISSUE_DIR="${AI_REVIEWER_ISSUE_DIR:-$TOOLKIT_ROOT/.ai/reviewer-issues}"
 STATE_BASE="${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}"
@@ -26,6 +32,11 @@ Usage:
                            [--command TEXT] [--repo PATH] [--error-file PATH]
                            [--run-id ID] [--session-id ID] [--caller NAME]
                            [--lifecycle-state PATH]
+  ai-reviewer-issue resolve <issue-id> --status resolved|partially-resolved
+                           --summary "repair outcome" --repair-commit SHA
+                           --evidence PATH-OR-URL [--repair-commit SHA ...]
+                           [--evidence PATH-OR-URL ...]
+                           [--details TEXT | --details-file PATH]
   ai-reviewer-issue list
   ai-reviewer-issue show <issue-id>
   ai-reviewer-issue path
@@ -34,12 +45,14 @@ The record command captures complete matching review reports, recent provider
 logs, reviewer metadata, scoreboard outcome, repository state, and machine facts.
 Details and error files are copied in full after common credentials are redacted.
 Reports remain local under the ai-devops checkout and are never committed.
+Resolve appends a separate, immutable repair record; it never edits the original
+incident package. Use partially-resolved whenever any recorded symptom remains.
 EOF
 }
 
 safe_provider(){
   case "$1" in
-    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -263,26 +276,113 @@ record_issue(){
 }
 
 list_issues(){
-  local f found=0
+  local f found=0 issue_dir resolution status
   [ -d "$ISSUE_DIR" ] || { note "no recorded issues"; return 0; }
   for f in "$ISSUE_DIR"/*/issue.json; do
     [ -f "$f" ] || continue; found=1
-    jq -r '[.id,.created_at,.provider,.summary]|@tsv' "$f"
+    issue_dir="${f%/issue.json}"
+    resolution=""
+    [ ! -d "$issue_dir/resolutions" ] || resolution="$(find "$issue_dir/resolutions" -maxdepth 1 -type f -name '*.json' -print | sort | tail -n 1)"
+    status="open"
+    [ -z "$resolution" ] || status="$(jq -r '.status' "$resolution")"
+    jq -r --arg status "$status" '[.id,.created_at,.provider,$status,.summary]|@tsv' "$f"
   done
   [ "$found" -eq 1 ] || note "no recorded issues"
 }
 
 show_issue(){
-  local id="$1" file
+  local id="$1" file issue_dir resolution
   safe_provider "$id" || die "invalid issue id."
   file="$ISSUE_DIR/$id/issue.json"
   [ -f "$file" ] || die "issue not found: $id"
-  jq . "$file"
+  issue_dir="${file%/issue.json}"
+  resolution=""
+  [ ! -d "$issue_dir/resolutions" ] || resolution="$(find "$issue_dir/resolutions" -maxdepth 1 -type f -name '*.json' -print | sort | tail -n 1)"
+  if [ -n "$resolution" ]; then
+    jq --slurpfile resolution "$resolution" '. + {resolution:$resolution[0]}' "$file"
+  else
+    jq '. + {resolution:null}' "$file"
+  fi
+}
+
+resolve_issue(){
+  local id="${1:-}" status="" summary="" safe_summary="" details="" details_file="" arg
+  local file issue_dir issue_parent resolved_issue resolution_dir resolved_resolution timestamp destination tmp details_tmp commit full reference
+  local -a commits=() evidence=() full_commits=()
+  [ -n "$id" ] || die "resolve requires one issue id."
+  shift || true
+  safe_provider "$id" || die "invalid issue id."
+  while [ "$#" -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --status) [ "$#" -gt 0 ] || die "--status requires a value."; status="$1"; shift ;;
+      --summary) [ "$#" -gt 0 ] || die "--summary requires a value."; summary="$1"; shift ;;
+      --details) [ "$#" -gt 0 ] || die "--details requires a value."; details="$1"; shift ;;
+      --details-file) [ "$#" -gt 0 ] || die "--details-file requires a path."; details_file="$1"; shift ;;
+      --repair-commit) [ "$#" -gt 0 ] || die "--repair-commit requires a SHA."; commits+=("$1"); shift ;;
+      --evidence) [ "$#" -gt 0 ] || die "--evidence requires a path or URL."; evidence+=("$1"); shift ;;
+      *) die "unknown resolve option: $arg" ;;
+    esac
+  done
+  case "$status" in resolved|partially-resolved) ;; *) die "--status must be resolved or partially-resolved." ;; esac
+  [ -n "$summary" ] || die "--summary is required."
+  safe_summary="$(printf '%s' "$summary" | redact_text)"
+  [ "${#commits[@]}" -gt 0 ] || die "at least one --repair-commit is required."
+  [ "${#evidence[@]}" -gt 0 ] || die "at least one --evidence reference is required."
+  [ -z "$details" ] || [ -z "$details_file" ] || die "use --details or --details-file, not both."
+  [ -z "$details_file" ] || [ -f "$details_file" ] || die "details file not found: $details_file"
+  file="$ISSUE_DIR/$id/issue.json"
+  [ -f "$file" ] || die "issue not found: $id"
+  issue_dir="${file%/issue.json}"
+  [ ! -L "$issue_dir" ] && [ ! -L "$file" ] || die "refusing linked incident evidence: $id"
+  issue_parent="$(boundary_dir "$ISSUE_DIR")" || die "cannot resolve reviewer issue directory."
+  resolved_issue="$(boundary_dir "$issue_dir")" || die "cannot resolve incident directory: $id"
+  [ "$(dirname "$resolved_issue")" = "$issue_parent" ] || die "incident directory escapes reviewer issue storage: $id"
+  for commit in "${commits[@]}"; do
+    [[ "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || die "invalid repair commit: $commit"
+    full="$(git -C "$TOOLKIT_ROOT" rev-parse --verify "$commit^{commit}" 2>/dev/null)" || die "repair commit not found in toolkit history: $commit"
+    full_commits+=("$full")
+  done
+  for reference in "${evidence[@]}"; do
+    case "$reference" in
+      https://*|http://*) ;;
+      /*|[A-Za-z]:[\\/]*) [ -e "$reference" ] || die "evidence path not found: $reference" ;;
+      *) [ -e "$TOOLKIT_ROOT/$reference" ] || die "evidence path not found in toolkit: $reference" ;;
+    esac
+  done
+  resolution_dir="$issue_dir/resolutions"
+  [ ! -L "$resolution_dir" ] || die "refusing linked resolution storage: $id"
+  mkdir -p "$resolution_dir"
+  [ ! -L "$resolution_dir" ] || die "resolution storage became a linked path: $id"
+  resolved_resolution="$(boundary_dir "$resolution_dir")" || die "cannot resolve resolution storage: $id"
+  [ "$(dirname "$resolved_resolution")" = "$resolved_issue" ] || die "resolution storage escapes its incident directory: $id"
+  timestamp="$(date -u +%Y%m%dT%H%M%S%N)"
+  destination="$resolution_dir/$timestamp-$$-$RANDOM.json"
+  tmp="$destination.tmp.$$"
+  details_tmp="$resolution_dir/.details.tmp.$$"
+  if [ -n "$details_file" ]; then redact_text < "$details_file" > "$details_tmp"
+  else printf '%s' "$details" | redact_text > "$details_tmp"; fi
+  jq -n --arg status "$status" --arg summary "$safe_summary" --arg resolved_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --rawfile details "$details_tmp" \
+    --argjson commits "$(printf '%s\n' "${full_commits[@]}" | jq -R . | jq -s .)" \
+    --argjson evidence "$(printf '%s\n' "${evidence[@]}" | jq -R . | jq -s .)" \
+    '{schema_version:1,status:$status,summary:$summary,resolved_at:$resolved_at,
+      repair_commits:$commits,evidence:$evidence,details:(if $details=="" then null else $details end)}' > "$tmp"
+  rm -f "$details_tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  if ! ln "$tmp" "$destination" 2>/dev/null; then
+    rm -f "$tmp" "$details_tmp"
+    die "could not atomically append the resolution record."
+  fi
+  rm -f "$tmp"
+  note "marked $id $status"
+  note "saved to $destination"
 }
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
   record) record_issue "$@" ;;
+  resolve) resolve_issue "$@" ;;
   list) [ "$#" -eq 0 ] || die "list takes no arguments."; list_issues ;;
   show) [ "$#" -eq 1 ] || die "show requires one issue id."; show_issue "$1" ;;
   path) [ "$#" -eq 0 ] || die "path takes no arguments."; printf '%s\n' "$ISSUE_DIR" ;;

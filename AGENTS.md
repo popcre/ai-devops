@@ -40,6 +40,10 @@ The full recovery procedure is in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
+- A reviewer repair is not complete until every affected local reviewer-issue
+  record is marked resolved or partially resolved with exact repair evidence.
+  Preserve the original incident package; follow `log-reviewer-issue` for the
+  closure audit before reporting success.
 
 ## Documentation router
 
