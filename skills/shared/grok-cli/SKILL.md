@@ -5,7 +5,7 @@ description: Use xAI Grok Build through ai-grok-review for repository analysis, 
 
 # Grok CLI
 
-While [ai-devops issue #56](https://github.com/u2giants/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
+While [ai-devops issue #56](https://github.com/popcre/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
 
 ## Use `ai-grok-review`. Never call `grok` directly for a review.
 

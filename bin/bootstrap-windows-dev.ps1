@@ -6,7 +6,7 @@ delegates secret-backed machine configuration to setup-machine.ps1.
 [CmdletBinding(SupportsShouldProcess)]
 param(
   [string]$RepoPath = 'C:\repos\ai-devops',
-  [string]$RepoUrl = 'https://github.com/u2giants/ai-devops.git',
+  [string]$RepoUrl = 'https://github.com/popcre/ai-devops.git',
   [string]$AnsibleRepoPath = 'C:\repos\ansible',
   [string]$AnsibleRepoUrl = 'https://github.com/u2giants/ansible.git',
   [switch]$SkipMachineSetup,

@@ -2,9 +2,9 @@
 
 **Issue:** [#84](https://github.com/u2giants/ai-devops/issues/84)
 **Written:** 2026-08-25 (edge-dev / claude)
-**Status:** **Phases A and B DONE** (2026-08-26). Phases C–E not started; the
-repository has **not** been transferred. Phase C is the first irreversible step
-and needs Albert to say go.
+**Status:** **Phases A–D DONE** (2026-08-26). The repository **has been
+transferred** and now lives at `popcre/ai-devops`, public. Phase D proved there is
+no flag-day. Phase E is in progress. Phase F has not started.
 
 ---
 
@@ -244,6 +244,36 @@ is verified.
 *You will know Phase C worked when:* `gh repo view popcre/ai-devops` returns the
 repo as PUBLIC and `git fetch` from an old clone still succeeds via redirect.
 
+
+#### Phase C evidence
+
+> **DONE 2026-08-26.** Albert gave the go after being shown the pre-flight.
+
+- **Pre-flight (step 2 of the handoff):** local `main` in `C:eposi-devops` had
+  **no unpushed commits** — the one non-recoverable risk, and it was clear. Seven
+  modified files and one untracked file belonged to another session; a transfer
+  does not touch a local clone, so they were left alone. Six `verify` runs were
+  in flight and three `push` events had landed on `main` in the preceding 30
+  minutes (those are squash-merges, which register as pushes). Albert was shown
+  this and said go.
+- **Pre-transfer inventory re-run:** 0 secrets, 0 variables, 0 environments,
+  `404 Branch not protected`, one collaborator (`u2giants`). Confirms §2.
+- **Transfer executed** via `gh api -X POST repos/u2giants/ai-devops/transfer
+  -f new_owner=popcre`. GitHub processes this asynchronously and echoes the old
+  name in the response; `gh api repos/u2giants/ai-devops --jq .full_name`
+  returned **`popcre/ai-devops`** on the first poll.
+- **Gates met:** `gh repo view popcre/ai-devops` reports `visibility: PUBLIC`,
+  `isInOrganization: true`, default branch `main`. An existing clone whose
+  `origin` still reads `github.com/u2giants/ai-devops.git` **fetched
+  successfully** through the redirect. Issue **#84 kept its number**.
+- **Post-transfer inventory is identical** to pre-transfer: 0 secrets, 0
+  variables, 0 environments, `404 Branch not protected`. **Nothing needed
+  restoring**, exactly as §2 predicted.
+- **Step 13 (repo access) is settled:** Albert removed `VaibhavBarot` from the
+  org entirely before the transfer. Remaining members are `u2giants` and
+  `devopswithkube`, both org owners, so the org default grants nothing to a
+  third party and no explicit repository permission was needed.
+
 ### Phase D — prove it on a real machine
 
 14. Clone fresh from `https://github.com/popcre/ai-devops.git` into a scratch
@@ -255,6 +285,54 @@ repo as PUBLIC and `git fetch` from an old clone still succeeds via redirect.
 
 *You will know Phase D worked when:* the doctor passes from BOTH a new-URL clone
 and an old-URL clone, on the same commit.
+
+
+#### Phase D evidence
+
+> **DONE 2026-08-26.** Both directions proven on the same commit, `e92e6dc`.
+
+**Step 14 — new-URL clone.** A fresh `git clone
+https://github.com/popcre/ai-devops.git` records `origin` as `popcre/ai-devops`.
+
+**Step 16 — old-URL clone.** A fresh clone from the *old* URL still records
+`origin` as `u2giants/ai-devops` (git keeps the URL you typed, it does not
+rewrite it on a redirect) — which is exactly the state of every machine already
+set up. Pinned to the same commit.
+
+**The controlling comparison.** `bin/ai-devops doctor` produced **byte-identical**
+output from both clones at `e92e6dc` (verified by `diff` after stripping ANSI
+colour). The move changed nothing.
+
+> **Read this before repeating the test.** The doctor exits **1** on this Windows
+> workstation, from *both* clones. Every failing check is an *installed-machine*
+> path (`/worksp/ai-devops`, `/etc/ai-devops/models.env`, install manifest) that
+> only exists on a Linux-installed host. **None of them is identity-related**, and
+> the failures are identical on both sides. Do not read that exit code as a Phase
+> D failure — the equality of the two outputs is the evidence, not the exit code.
+
+**Step 15 — the installer source gate.** `install-ai-devops-windows.ps1` takes a
+`-SourceGateOnly` switch that runs the identity gate and changes nothing:
+
+| Clone `origin` | Result |
+|---|---|
+| `github.com/popcre/ai-devops` | **Source gate passed** |
+| `github.com/u2giants/ai-devops` | **Source gate passed** |
+| `github.com/attacker/ai-devops` | **Refused**, exit 1: `Noncanonical ai-devops origin: ... (accepted: github.com/u2giants/ai-devops, github.com/popcre/ai-devops)` |
+
+The hostile case is the one that matters: the guard is still **fail-closed**. An
+earlier attempt at this negative control passed a bad value to `-RepoUrl` and
+wrongly reported a pass — with an existing `-RepoPath` the gate reads `origin`,
+**not** `-RepoUrl`. Set the clone's actual `origin` to the hostile value.
+
+**Suites re-run from the `popcre` clone:** `tests/test-ai-repo-identity.sh`
+**29/29**, `tests/test-repo-identity.ps1` **12/12**.
+
+**A false alarm, recorded so nobody re-raises it.**
+`install-ai-devops-windows.ps1:109` still compares against a hard-coded
+`$expectedIdentity` and looks like a leftover flag-day bug sitting *before* the
+allow-list call at `:111`. It is not — it is inside an
+`AI_DEVOPS_INSTALL_TEST_MODE -eq '1'` branch. The production path uses the
+allow-list.
 
 ### Phase E — merge queue and cleanup
 
@@ -268,6 +346,39 @@ and an old-URL clone, on the same commit.
     `sync-dotfiles`, `claude-transcript-backup`, `grok-cli`,
     `kimi-code-delegation` (in `C:\Users\ahazan\.claude\skills\`).
 
+
+#### Phase E progress
+
+**Step 17 has a prerequisite the plan did not name: `verify.yml` had no
+`merge_group:` trigger.** GitHub only runs a workflow against a queued merge
+group if the workflow subscribes to that event. Enabling the queue first would
+have produced a queue that accepts pull requests and then waits forever for
+checks that never start. The trigger is added in this change and must be on
+`main` **before** the queue is switched on.
+
+**Step 18 — the sweep is surgical, never a bulk `sed`.** 27 references were
+rewritten across 19 files: the clone URLs and installer defaults that decide
+where a new machine actually clones from (`README.md`, `bin/setup-machine.ps1`,
+`bin/bootstrap-windows-dev.ps1`, `bin/install-ai-devops-windows.ps1`,
+`docs/restore-from-zero.md`, `docs/development.md`,
+`docs/codex-skills-usage-guide.md`,
+`templates/prompts/install-ai-devops-windows-codex.md`), plus live identity
+prose in `AGENTS.md`, `templates/system/`, `docs/windows-winget-configuration.md`
+and five `SKILL.md` files.
+
+**What was deliberately left as `u2giants`, and why — do not "finish" this:**
+
+- `config/repo-identities.tsv` — the old owner is an *intended* allow-list entry.
+  Removing it recreates the flag-day this whole plan exists to prevent.
+- **All of `tests/`** — several suites assert that the old owner is still
+  accepted. Rewriting them would delete the regression test for the move.
+- **Every `ai-devops-memory`, `ai-devops-transcripts` and
+  `ai-devops-private-config` reference** — those repositories did not move.
+- **`HANDOFF.d/`, `plan_*.md`, and dated incident/audit/verification documents**
+  — write-once records of what was true when they were written.
+
+These all resolve through GitHub's redirect, so nothing is broken by leaving
+them.
 ### Phase F — the flaky reviewer suites (AFTER the move is fully done)
 
 **Do not start this until Phases A–E are complete and the transfer is verified.**

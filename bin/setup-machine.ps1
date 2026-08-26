@@ -255,7 +255,7 @@ if (Test-Path $existingInstaller) {
 } else {
   # Repo not present yet: clone, then run its installer.
   Note "Repo not found at $RepoPath; cloning."
-  git clone https://github.com/u2giants/ai-devops.git $RepoPath
+  git clone https://github.com/popcre/ai-devops.git $RepoPath
   & powershell -ExecutionPolicy Bypass -File (Join-Path $RepoPath "bin\install-ai-devops-windows.ps1") -RepoPath $RepoPath
 }
 

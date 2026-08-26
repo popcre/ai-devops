@@ -67,7 +67,7 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   command without Albert naming the exact resource and action in the current
   chat. Never gain broader credentials to bypass this rule. Before production
   trigger or Terraform-state work, read
-  `u2giants/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
+  `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
@@ -125,5 +125,5 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Create a HANDOFF only for unfinished work or when Albert asks. Never rewrite
   the root `HANDOFF.md` or another session's file. Before writing one, load the
   `handoff-writer` skill; it owns naming, required sections, audit, and cleanup.
-- Procedures belong in skills/docs. Machine facts live in `u2giants/ai-devops/templates/system/machine-atlas.md`;
+- Procedures belong in skills/docs. Machine facts live in `popcre/ai-devops/templates/system/machine-atlas.md`;
   read only the current machine's section.
