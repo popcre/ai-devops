@@ -454,6 +454,53 @@ checks; re-queue.
    `merge_group:` are deliberately bare — keep them bare.
 4. **No job matrices.** Matrix-expanded check names multiply every trap above.
 
+##### MEASURED 2026-08-26 EVENING — the queue did not converge, and why
+
+**This is the most important paragraph in this section. Read it before changing
+anything about the queue.**
+
+Pull request #104 was queued at **position 1**, `AWAITING_CHECKS`, and **never
+merged on its own**. It was dequeued and merged directly instead.
+
+What happened, from the run and commit records:
+
+- Only **three** `merge_group` builds have ever completed on this repository, all
+  for one pull request.
+- Meanwhile `main` received commits at **18:26, 18:37, 18:51 and 18:54 UTC** that
+  produced **no** completed `merge_group` build — they did not go through the
+  queue.
+- Each of those advanced `main`, which **invalidates the queued pull request and
+  rebuilds its merge group from scratch**. Four ~65-minute Windows builds for the
+  same pull request were running **concurrently** at one point, because superseded
+  merge-group builds are **not** cancelled (Finding 4 above, now observed rather
+  than predicted).
+
+**The mechanism, stated plainly: a required check that takes longer than the
+interval between bypassed merges can never finish.** The queued entry is reset
+every time someone merges around the queue. It is not a deadlock and not a flake —
+the entry stays healthy at position 1 forever.
+
+**The cause is the `OrganizationAdmin` bypass actor**, added earlier the same day
+(§5 Finding 8). It was necessary: without any bypass actor **nothing could merge
+at all**, not even a one-file documentation change, because a ruleset ignores
+`--admin` entirely. So both settings are individually justified and jointly
+unusable:
+
+| Bypass actor | Consequence |
+|---|---|
+| **absent** | nothing can merge until a 64-minute job finishes; `--admin` does not help |
+| **present** | anyone using it starves every pull request that uses the queue |
+
+**Neither is the real problem.** Both are downstream of `windows-offline` taking
+~64 minutes. Shorten that job and both symptoms disappear — which is exactly
+issue **#98**. Do **not** "fix" this by removing the bypass actor, and do not
+conclude the merge queue was a mistake; the queue caught a genuine collision the
+same afternoon (another session had edited `tests/test-ai-repo-identity.sh`
+concurrently, and a blind merge would have risked reverting it).
+
+Until #98 lands, expect to dequeue and merge directly. Re-verify a clean merge
+against the current `main` first — that is the protection the queue would have
+given you.
 ##### The practical cost, stated plainly
 
 Every PR now runs `windows-offline` (~62 min) **twice** — once on
