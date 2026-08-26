@@ -21,10 +21,11 @@ be executed end to end without a ruling.
    twice. It can be noisy. *Recommendation: yes* — it is additive, reversible by
    deleting one settings entry, and step 9's control scenarios measure the noise
    before rollout. Ask only if Albert has said he dislikes hooks.
-2. **If the before/after eval (step 10) shows no improvement, does the
-   instruction change still land?** *Recommendation: yes, land it* — the
-   Claude/Codex divergence (finding F3) is a real defect on its own — but report
-   the flat score plainly rather than as a success.
+2. **If the eval (step 10) shows the existing wording works once Claude actually
+   has it, is that the end of the workstream?** *Recommendation: no — keep the
+   audit coverage, the eval, and the machine reconciliation (steps 3, 4, 9, 11).*
+   Those are what let anyone tell whether a rule is in force and working; their
+   absence is the proven root cause. Only the rewrite (step 2) gets dropped.
 
 **NOT PART OF THIS WORK, AND NOBODY IS ON IT:**
 
@@ -46,9 +47,12 @@ be executed end to end without a ruling.
 
 **Already settled — do NOT re-ask:**
 
-- 2026-08-26 — the fix is a package (instruction + audit enforcement + Claude
-  hook + behavioral eval), not another prose rewrite. Albert's own report is
-  that "the instructions are not working"; a third rewrite alone is not a fix.
+- 2026-08-26 — the fix is a package (get the existing rule into both clients +
+  audit enforcement + Claude hook + behavioral eval), not another prose rewrite.
+- 2026-08-26 — **measure before rewording.** Albert challenged the first draft:
+  Claude never had the rule, so its wording is untested there. Any rewrite is
+  now step 2 and is conditional on the step-10 measurement. The default is **no
+  rewrite**. See the plan's "Order correction" note — do not reverse it.
 - 2026-08-26 — no approval loops. Nothing in this work may make a session ask
   permission to do work it was already told to do.
 - 2026-08-26 — no Codex hook system will be built.
@@ -139,20 +143,25 @@ The plan file holds all twelve steps with their verification gates. In short:
    came from and record the answer in this handoff.
    *You'll know it worked when:* the grep output and a one-line verdict
    ("current text" vs "stale text") are written down.
-2. **Steps 1–4** — write the Closeout Contract, land it byte-identically in both
-   globals, add it to `context-audit.py` as a safety category **and** a parity
-   rule, extend `tests/test-context-audit.ps1` fixtures.
-3. **Steps 5–7** — build `bin/ai-completion-check-hook` (Claude `Stop` hook,
+2. **Steps 1, 3, 4** — copy the **existing** rule text verbatim into
+   `CLAUDE-global.md` (no rewrite), add it to `context-audit.py` as a safety
+   category **and** a parity rule, extend `tests/test-context-audit.ps1`
+   fixtures. **Step 2 (any rewrite) is skipped for now** — it is conditional on
+   step 10.
+3. **Steps 9–10 come next, before any rewrite** — build the eval and score the
+   existing wording on both clients. That measurement decides whether step 2
+   ever happens.
+4. **Steps 5–7** — build `bin/ai-completion-check-hook` (Claude `Stop` hook,
    `stop_hook_active` loop guard mandatory, silent exit 0 on the common path),
    its installer, and its test.
-4. **Steps 8–10** — Codex compensating pointer, build `tools/completion-eval/`,
-   run it before and after with `--runs 3` and record the spread by file path.
-5. **Steps 11–12** — reconcile installed globals on every machine via
+5. **Step 8** — the Codex compensating pointer.
+6. **Steps 11–12** — reconcile installed globals on every machine via
    `bin/ai-adopt-globals`, then docs, router row, memory entry, and delete this
    handoff once every STATUS row cites an artifact.
 
-Do not start at step 5 because it looks like the real fix. Steps 0–4 are cheap,
-and step 0 can invalidate part of the diagnosis.
+Do not start at step 5 because it looks like the real fix, and do not start with
+a rewrite because the text reads improvably. Step 1 is nearly free, and step 0
+can invalidate part of the diagnosis.
 
 ## 7. Constraints and gotchas in force
 

@@ -14,8 +14,8 @@ done.** Every STATUS row below is open.
 | # | Step | State | Evidence (artifact, never a bare number) |
 |---|------|-------|------------------------------------------|
 | 0 | Confirm the diagnosis on the machine that failed | ⬜ open | — |
-| 1 | Write the canonical Closeout Contract text | ⬜ open | — |
-| 2 | Land it identically in both client globals | ⬜ open | — |
+| 1 | Land the EXISTING rule text verbatim in the Claude global (no rewrite) | ⬜ open | — |
+| 2 | Rewrite the text — **CONDITIONAL**, only if step 10's eval shows the existing wording failing | ⬜ open | — |
 | 3 | Teach `context-audit.py` the new safety + parity category | ⬜ open | — |
 | 4 | Extend `tests/test-context-audit.ps1` fixtures | ⬜ open | — |
 | 5 | Build the Claude `Stop` hook `bin/ai-completion-check-hook` | ⬜ open | — |
@@ -29,6 +29,32 @@ done.** Every STATUS row below is open.
 
 **A fresh session starts at step 0.** Steps 0–4 are one sitting. Steps 5–7 are a
 second. Steps 8–12 are a third. Re-read the downstream steps at each cut point.
+
+### Order correction, 2026-08-26 (Albert's ruling — do not reverse)
+
+The first draft of this plan opened with a rewrite of the rule. Albert
+challenged it: *"You said 'Claude never got the rule at all' — so maybe we
+didn't need a rewrite at all. Maybe the previous one was OK, we just weren't
+using it."*
+
+He is right about the larger half, and the plan is reordered accordingly:
+
+- On **Claude**, the current rule was **never in force** (finding F3). Its
+  wording has therefore never been tested there, and rewriting untested text is
+  a guess. Step 1 now installs the **existing** text verbatim — no new wording.
+- On **Codex**, the rule *was* in force and the failure Albert reported still
+  happened (finding F0 below). That is real evidence against the wording — but
+  it is **one instance**, and this repo's own standing lesson is that a single
+  observation is not a verdict.
+- Therefore: **measure first, rewrite only on evidence.** Build the eval
+  (step 9) and run it against the *existing* text on both clients (step 10). A
+  rewrite (step 2) happens only if that measurement shows the current wording
+  failing on Claude too.
+
+**Practical execution order is now: 0 → 1 → 3 → 4 → 9 → 10 → then 2 (only if
+needed) → 5 → 8 → 11 → 12.** The step numbers below are kept stable so the
+STATUS table, the handoff, and any commit message that cites a step number all
+keep meaning the same thing.
 
 ---
 
@@ -204,7 +230,23 @@ behavioral eval harness in the repo today.
 
 ## 6. Key findings and root cause
 
-Five findings. Each cost real time to establish; do not re-derive them.
+Six findings. Each cost real time to establish; do not re-derive them.
+
+**F0 — what the evidence about the *wording* actually supports, and what it does
+not.** Be precise here, because the whole order of this plan turns on it:
+
+- The reply Albert pasted came from **Codex**, which **did** have the rule
+  installed and current. So the wording was in force and the failure happened
+  anyway. That is genuine evidence against it.
+- It is **one instance**. This repo's own standing lesson from the skill-trigger
+  evals is that a single observation is not a verdict.
+- On **Claude** the wording has never been tested at all (F3), so there is
+  **zero** evidence about it there.
+
+Conclusion: install the existing text on Claude first and measure both clients
+before rewriting anything. F1 and F2 below remain the best *explanation* of the
+Codex failure, but they are a hypothesis awaiting the step-10 measurement — not
+an established fact.
 
 **F1 — The current rule is disclosure-shaped, but the failure is a
 belief failure.** The live text says: *check whether the work is finished … if
@@ -234,18 +276,28 @@ prose. The failure recurred within a day of #72. **Wording a third time is not a
 fix.** The plan therefore adds a mechanical gate on the client that supports one
 (Claude `Stop` hooks) and a measurable eval on both.
 
-**Root cause statement.** False completion persists because the standing rule
-asks a session to *report* its own completion belief rather than to *reconcile*
-its output against the request's deliverables and continue when work remains;
-and because nothing in the toolchain checks either the rule's presence in both
-globals or the behavior it is supposed to produce.
+**Root cause statement (revised 2026-08-26 after Albert's challenge).** The
+*proven* root cause is the second half: **nothing in the toolchain checks either
+the rule's presence in both globals or the behavior it is supposed to produce**,
+which is why a rule could be absent from Claude for a day and why two prior
+"fixes" shipped with no way to tell whether they worked. The *suspected*
+additional cause — that the rule asks a session to report its own completion
+belief rather than reconcile against the deliverables (F1, F2) — explains the
+Codex instance but is unmeasured. Fix the proven cause first (steps 1, 3, 4, 9,
+10); act on the suspected one only if the measurement supports it (step 2).
 
 ## 7. Approaches considered and REJECTED, and why
 
-- **Rewrite the response-style prose harder / add more emphasis.** Rejected:
-  this is the third rewrite (F5). Prose alone has a measured failure rate of
-  "recurred the next day." The prose still gets rewritten in step 1, but only as
-  *part* of a package with a hook and an eval — never as the whole fix.
+- **Rewrite the response-style prose harder / add more emphasis, as the opening
+  move.** Rejected 2026-08-26 on Albert's challenge — see the *Order correction*
+  note under STATUS. Claude never had the rule, so its wording is untested
+  there; rewriting untested text is a guess dressed as a fix. Any rewrite is now
+  step 2, conditional on the step-10 measurement.
+- **Assume the existing wording is fine and only fix the rollout.** Not
+  rejected, but not assumed either — it is the working hypothesis the plan is
+  now built to test. It cannot simply be adopted, because the one failure Albert
+  actually reported happened on Codex *with* the rule live (F0). Steps 1, 9, and
+  10 settle it with evidence instead of assertion.
 - **Make sessions end every turn with a checklist in the reply.** Rejected:
   Albert's global response-style contract exists to keep replies short and in
   business English. A mandatory visible ledger on every reply is noise on the
@@ -281,11 +333,14 @@ Decisions dated 2026-08-26 by the planning session, on Albert's report.
 
 **LOCKED — do not relitigate:**
 
-1. The fix is a **package**: instruction + parity/safety enforcement + a Claude
-   mechanical gate + a behavioral eval. Shipping the instruction alone is a
-   failed fix by definition (F5).
-2. The rule is stated as an **action** ("continue the work" / "name what is
-   pending"), not only as a disclosure duty.
+1. The fix is a **package**: get the existing rule into both clients + parity/
+   safety enforcement + a Claude mechanical gate + a behavioral eval. Shipping a
+   rule change with no way to tell whether it worked is a failed fix by
+   definition (F5).
+2. **Measure before rewording** (added 2026-08-26, Albert's ruling). No new
+   wording lands until the eval has scored the existing wording on both clients.
+   If a rewrite does become justified, the rule is stated as an **action**
+   ("continue the work" / "name what is pending"), not only as a disclosure duty.
 3. The rule text is **identical in both globals** and is added to `PARITY_RULES`
    so it can never again exist in one and not the other.
 4. **No approval loops.** The rule must never produce a request for permission
@@ -297,8 +352,9 @@ Decisions dated 2026-08-26 by the planning session, on Albert's report.
 
 **OPEN — implementer's judgment, with criteria:**
 
-- Exact wording of the Closeout Contract, within the constraints in step 1. The
-  criterion is the eval score in step 10, not taste.
+- Whether a rewrite happens at all, and its exact wording (step 2). The
+  criterion is the eval score in step 10, not taste. **The default is no
+  rewrite.**
 - Whether the hook is Bash or Python. Criterion: match `bin/ai-memory-index-hook`
   so one test harness style covers both; prefer whatever that file already is.
 - Whether the eval judge is a rubric-scored model call (`bin/ai-model-call`) or
@@ -340,9 +396,45 @@ section 6 would then be partly wrong and Albert must know.
 
 ---
 
-**Step 1 — Write the canonical Closeout Contract text.**
+**Step 1 — Land the EXISTING rule verbatim in the Claude global. Do not rewrite
+anything.**
 
-Draft the replacement block for the Response Style section. Hard constraints:
+This is the cheap, high-confidence half of the whole plan: Claude has been
+running without the rule for a day (F3), so the first thing to do is give it the
+rule that already exists, unchanged, and see what happens.
+
+- Copy the four bullets at `templates/system/AGENTS-global-codex.md:7-18`
+  ("Never make Albert ask…" through "A question you decided to answer with an
+  assumption…") into `templates/system/CLAUDE-global.md`, replacing the single
+  "If Albert must act …" bullet at line ~7. **Byte-identical. No improvements,
+  no re-wording, no additions.**
+- Do the same for the Owner-and-execution clause: Codex carries "This bans
+  asking for permission to do work you were already told to do — it never
+  excuses hiding a blocker…" (`AGENTS-global-codex.md:41-48`) and Claude does
+  not. Copy it verbatim.
+- Change nothing else in either file. The remaining differences are correct
+  (Codex references `codex-shared-db-change` and `~/.codex/config.toml`; Claude
+  references `shared-db-change`).
+
+*You'll know it worked when:*
+
+```bash
+diff <(sed -n '/^# Response Style/,/^## When something goes wrong/p' templates/system/CLAUDE-global.md) <(sed -n '/^# Response Style/,/^## When something goes wrong/p' templates/system/AGENTS-global-codex.md)
+```
+
+prints nothing, and `git diff templates/system/AGENTS-global-codex.md` is empty
+— the Codex file must not be touched in this step at all.
+
+---
+
+**Step 2 — CONDITIONAL: rewrite the contract text. Do this only if step 10's
+eval shows the existing wording failing on Claude as well.**
+
+Skip this step entirely if the measurement says the existing text works. Do not
+do it "while you're in there."
+
+If the evidence does call for a rewrite, draft the replacement block for the
+Response Style section under these hard constraints:
 
 - **≤ 10 lines**, wrapped at 80 columns, matching the surrounding style.
 - Contains, in substance:
@@ -361,32 +453,21 @@ Draft the replacement block for the Response Style section. Hard constraints:
 Reuse the strongest existing sentences rather than inventing a new vocabulary;
 the aim is a tighter contract, not a longer one.
 
-*You'll know it worked when:* the drafted block satisfies every bullet above and
-`python3 tools/context-audit/context-audit.py` (default invocation, before any
-tool change) still reports the globals within their warning budget in
-`tools/context-audit/budgets.json`. Budgets warn only — a warning is not a
-failure, but a new warning must be mentioned to Albert.
+Land the new block in **both** globals, byte-identical: replace the four bullets
+at `AGENTS-global-codex.md:7-18` and the matching block in `CLAUDE-global.md`
+(which step 1 has already brought into parity). Keep every other difference
+between the two files exactly as it is. Do not "harmonize" anything else.
 
----
+If the rewrite adds the "keep working" clause (F2), add it to the
+Owner-and-execution bullet in both files in the same edit:
+*"Ending a turn with authorized work still undone is the same failure as asking
+permission to start it."*
 
-**Step 2 — Land it identically in both globals.**
-
-- `templates/system/CLAUDE-global.md` — replace the single
-  "If Albert must act …" bullet (line ~7) with the step-1 block.
-- `templates/system/AGENTS-global-codex.md` — replace the four bullets at
-  lines ~7-18 with the same block, byte-identical.
-- In **both** files, extend the "Start immediately / No approval loops" bullet
-  under *Owner and execution* with the sentence that closes F2:
-  *"Ending a turn with authorized work still undone is the same failure as
-  asking permission to start it."* Codex already carries the "never excuses
-  hiding a blocker" sentence; Claude does not — bring Claude up to it in the
-  same edit.
-
-Keep every other difference between the two files exactly as it is (Codex
-references `codex-shared-db-change` and `~/.codex/config.toml`; Claude
-references `shared-db-change`). Do not "harmonize" anything else.
-
-*You'll know it worked when:*
+*You'll know it worked when:* the drafted block satisfies every constraint
+above; `python3 tools/context-audit/context-audit.py` still reports the globals
+within their `tools/context-audit/budgets.json` warning budget (budgets warn
+only — but a **new** warning must be reported to Albert); the step-3 parity
+pattern is updated to match the new wording; and
 
 ```bash
 diff <(sed -n '/^# Response Style/,/^## When something goes wrong/p' templates/system/CLAUDE-global.md) <(sed -n '/^# Response Style/,/^## When something goes wrong/p' templates/system/AGENTS-global-codex.md)
@@ -401,9 +482,11 @@ prints nothing.
 In `tools/context-audit/context-audit.py`:
 
 - Add to `SAFETY_MARKERS` (line 33) a `"completion honesty"` entry whose
-  patterns match the distinctive phrases chosen in step 1 (at least two
-  independent patterns, mirroring how `"capability preservation"` is built from
-  `CAPABILITY_REPAIR_PATTERNS`).
+  patterns match distinctive phrases from the rule text that step 1 put into
+  both globals — e.g. `Never make Albert ask` and `silence is not an answer`
+  (at least two independent patterns, mirroring how `"capability preservation"`
+  is built from `CAPABILITY_REPAIR_PATTERNS`). If step 2 later changes the
+  wording, update these patterns in the same commit.
 - Add the matching `SAFETY_REASONS` entry (line 46) in plain English, e.g. *"no
   always-loaded rule requires a session to account for every deliverable before
   ending a turn, so a session could report a job finished while authorized work
@@ -568,18 +651,34 @@ flagged) — a harness that flags everything proves nothing.
 
 **Step 10 — Run before and after; record it.**
 
-- Baseline: run the eval against the **pre-change** globals (use git stash-free
-  method — check out the previous text into a temp file the runner points at, or
-  run the baseline before merging Phase A).
-- After: run against the new text, with the hook installed for the Claude side.
+- **Baseline — the decisive run.** Score both clients against the **existing**
+  rule text: Claude with it newly installed by step 1, Codex exactly as it is
+  today. This is the run that answers Albert's question — *was the wording
+  already fine and we simply weren't using it?* If Claude now behaves correctly,
+  the answer is yes and step 2 never happens.
+- **Pre-rule control.** Also score Claude against the *old* Claude text (check
+  the previous version out into a temp file the runner points at — never a bare
+  `git stash`, the stack is shared across worktrees). Without this control there
+  is nothing for the baseline to be better than.
+- **After.** If step 2 or the hook lands, re-run and compare against the
+  baseline.
 - Record both, `--runs 3`, in `tools/completion-eval/` as a results file **and**
   in the STATUS table above, citing the results file path — not a bare number.
 
-*You'll know it worked when:* the after-score beats the baseline on the failure
-scenarios without regressing the controls. **If it does not, say so plainly and
-do not merge the instruction change as if it worked** — that would be exactly
-the failure this plan exists to kill. Report the numbers to Albert and stop for
-a decision.
+*You'll know it worked when:* the baseline is scored on both clients with the
+spread across three runs, and it produces a clear verdict:
+
+- **Baseline good on both clients** → the existing wording was fine and the real
+  defect was rollout plus the missing checks. **Skip step 2 entirely**, report
+  that plainly, and finish with steps 5, 8, 11, 12.
+- **Baseline good on Codex but bad on Claude, or bad on both** → the wording is
+  implicated. Do step 2, then re-run and compare.
+- **No measurable difference either way** → the eval is not discriminating.
+  Fix the eval (step 9) before drawing any conclusion about the wording.
+
+**Whatever the numbers say, report them as they are.** Never merge a change as
+if it worked when the measurement did not show it — that would be exactly the
+failure this plan exists to kill.
 
 ---
 
@@ -710,7 +809,7 @@ machine.
 
 **Done means all of:**
 
-- [ ] Both globals carry the byte-identical closeout contract (step 2 diff empty).
+- [ ] Both globals carry the byte-identical closeout rule (step 1 diff empty).
 - [ ] `context-audit.py` enforces it as a safety category **and** a parity rule,
       and demonstrably fails when either global loses it.
 - [ ] `tests/test-context-audit.ps1` covers the new category and fails for the
@@ -719,7 +818,7 @@ machine.
       additive, and are covered by `tests/test-ai-completion-check-hook.sh`.
 - [ ] `tools/completion-eval/` exists, runs against both clients, and its
       controls do not false-positive.
-- [ ] Before/after eval results recorded in the repo with `--runs 3` and the
+- [ ] Baseline (and after, if step 2 ran) eval results recorded in the repo with `--runs 3` and the
       spread, cited by path in the STATUS table.
 - [ ] Full Bash and PowerShell suites green; which machine ran them is stated.
 - [ ] Committed, pushed, PR opened **and merged by the session**, merge commit
