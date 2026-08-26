@@ -5,7 +5,7 @@ file is a router and repository contract, not the complete operating manual.
 
 ## What this repository is
 
-`u2giants/ai-devops` is Albert's backup-and-restore toolkit for a multi-model AI
+`popcre/ai-devops` is Albert's backup-and-restore toolkit for a multi-model AI
 coding workflow. It contains Bash and PowerShell command-line tools, prompt
 templates, documentation, machine setup, Claude/Codex skills, and an offline
 verification workflow. It is not a web application, hosted service, database,

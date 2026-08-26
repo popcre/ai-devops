@@ -3,7 +3,7 @@ Internal/advanced skill installer for Albert's AI DevOps toolkit on Windows.
 The public restore entry point is bin\bootstrap-windows-dev.ps1.
 
 What this does:
-- Clones https://github.com/u2giants/ai-devops.git if missing.
+- Clones https://github.com/popcre/ai-devops.git if missing.
 - Pulls the latest main branch if the repo already exists.
 - Installs Claude skills to $HOME\.claude\skills.
 - Installs Codex skills to $HOME\.codex\skills.
@@ -18,7 +18,7 @@ For complete setup, run:
 
 [CmdletBinding()]
 param(
-    [string]$RepoUrl = "https://github.com/u2giants/ai-devops.git",
+    [string]$RepoUrl = "https://github.com/popcre/ai-devops.git",
     [string]$InstallRoot = "C:\repos",
     [string]$RepoPath = "",
     [switch]$SkipGitInstall,

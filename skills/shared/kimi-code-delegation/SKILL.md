@@ -51,7 +51,7 @@ make evidence stale; they are not attributed to read-only Kimi.
 
 Read [`plan_kimi-windows-execution-reliability.md`](../../../plan_kimi-windows-execution-reliability.md)
 and its STATUS table before changing or relying on Windows Kimi execution while
-`u2giants/ai-devops#31` is open.
+`popcre/ai-devops#31` is open.
 
 The main Codex task and delegated collaboration tasks can have different Windows
 permissions even when the main task says Full Access. Kimi's own data root contains

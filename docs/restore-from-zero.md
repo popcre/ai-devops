@@ -13,7 +13,7 @@ provider identifiers. Secrets are restored at runtime from 1Password vault
    so it must run from inside a checkout, not as a lone saved file:
 
 ```powershell
-git clone https://github.com/u2giants/ai-devops.git C:\repos\ai-devops
+git clone https://github.com/popcre/ai-devops.git C:\repos\ai-devops
 ```
 
 2. Run the bootstrap from an elevated-capable PowerShell session; it installs
@@ -57,7 +57,7 @@ sudo apt-get install -y git gh
 ```bash
 sudo mkdir -p /worksp
 sudo chown "$USER":"$USER" /worksp
-git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+git clone https://github.com/popcre/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ```
 

@@ -6,7 +6,7 @@ description: Sync this machine's public ai-devops configuration and its separate
 # codex-sync-dotfiles
 
 Codex twin of the Claude `sync-dotfiles` skill. Keeps this machine's AI config in
-step with the public `u2giants/ai-devops` configuration hub and the separate
+step with the public `popcre/ai-devops` configuration hub and the separate
 private `u2giants/ai-devops-memory` portable-memory hub: skills, global
 instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 `ai-devops/docs/config-consolidation-proposal.md`, shipped 2026-07-14).

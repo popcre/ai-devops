@@ -15,7 +15,7 @@ see [`architecture.md`](architecture.md); for the canonical guide see
 ## Local setup
 
 ```bash
-git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+git clone https://github.com/popcre/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ./install.sh          # seeds /etc/ai-devops, symlinks bin/*, runs doctor
 ```

@@ -18,7 +18,7 @@ gates pass. The bootstrap may change anything listed under "Owned state"; it
 does not preserve working but noncompliant owned settings.
 
 The only public Windows setup entry point is `bin/bootstrap-windows-dev.ps1`.
-It updates the public `u2giants/ai-devops` checkout, applies the declarative
+It updates the public `popcre/ai-devops` checkout, applies the declarative
 `.config/configuration.winget` file, and then calls `bin/setup-machine.ps1` for
 Albert-specific configuration.
 
@@ -52,7 +52,7 @@ The bootstrap is authoritative for:
 - WinRM service/listener/firewall removal;
 - WSL, Ubuntu, Ansible, `ansible-lint`, required Galaxy collections, and the
   `u2giants/ansible` checkout;
-- the `u2giants/ai-devops` checkout when clean and fast-forwardable;
+- the `popcre/ai-devops` checkout when clean and fast-forwardable;
 - AI DevOps-managed Claude/Codex skills, global instructions, managed
   dotfiles/includes, SSH aliases/keys, MCP launchers/configuration, and scoped
   1Password runtime wiring.

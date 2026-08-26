@@ -266,7 +266,7 @@ apply_tombstones() {
 case "$DIRECTION" in
   push)
     if public_ai_devops_hub; then
-      echo "[BLOCKED] Refusing to copy machine memory into the public u2giants/ai-devops repository." >&2
+      echo "[BLOCKED] Refusing to copy machine memory into the public popcre/ai-devops repository." >&2
       echo "[BLOCKED] Configure the governed private memory hub before enabling uploads." >&2
       exit 1
     fi
