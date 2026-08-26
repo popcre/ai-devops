@@ -37,7 +37,7 @@ failure silently destroys data.
 
 The public skill contains procedure only. Read the current private contract before acting:
 
-- Repository: `C:\repos\licensor-source-data-disney`
+- Repository: `C:\repos\licensor-source-data`
 - OPA: `disney-opa/README.md` and `disney-opa/opa-characters.csv`
 - DCP: `disney-dcpvault/README.md`, `disney-dcpvault/PLAN.md`, and open files under `disney-dcpvault/HANDOFF.d/`, newest first
 - DCP loader: `disney-dcpvault/scripts/load-collected-to-supabase.mjs`
@@ -58,6 +58,41 @@ Pull the private repository safely before a new capture or load. Preserve other 
 ## OPA workflow
 
 OPA loads the complete Property-to-Character tree into the product-create page. Do not build a per-Property crawler.
+
+### Licensor (Studio) -> Property hierarchy is a required capture surface
+
+The existing 2026-08-06 CSV proves only the product-create page's
+Property-to-Character jsTree. It does **not** prove that OPA lacks a higher
+Licensor/Studio-to-Property relationship elsewhere in the submission flow.
+Never turn "not present in this extract" into "not present on the site."
+
+Prior authenticated inspection already found three higher-level signals that
+the flat CSV omitted: separate form fields for `LicensedProperty` and branded
+`Property`; Disney's own `openCharacterPopup` wording, "LicensedProperty and
+(Branded) Property"; and a licensee-entitlement endpoint that returns contracted
+Property IDs. These prove additional relationship surfaces exist even though
+their parent labels were not captured. Reinspect and capture them; do not dismiss
+them because the product-create jsTree itself starts at Property.
+
+Before classifying OPA Properties by title patterns, inspect the authenticated
+submission workflow for the upstream Licensor, Studio, Brand, Business Unit, or
+equivalent selector that scopes the Property dropdown. Capture the visible
+parent label, its stable source ID, the child Property ID, and the exact direct
+relationship. Check page models and same-origin responses as well as the visible
+controls because OPA renders the known Property-to-Character hierarchy in
+jsTree rather than native selects. Preserve the hierarchy as source evidence;
+do not join `brandPropertyID` to `licensedPropertyID` or reinterpret
+`optionSourceID` as the parent. Those two fields have unproven meanings in the
+current extract.
+
+Also inspect the same-origin licensee-entitlement response and any page model
+that supplies the `LicensedProperty` and branded `Property` fields. Record field
+names, stable IDs, labels, cardinality, and direct relationships, but never log
+the licensee number, account identity, cookies, headers, or raw entitled rows.
+
+If authentication prevents this inspection, mark Studio-to-Property capture
+as **open and unverified**. Do not substitute a keyword classifier and call the
+source hierarchy unavailable.
 
 ### Capture
 
@@ -91,10 +126,35 @@ DCP Vault is a paged Adobe Experience Manager asset library. The current private
 ### Studio boundary
 
 DCP Vault being one website does not make its content one database source. Keep
-**Disney, Lucasfilm, Marvel, and 20th Century** in separate capture outputs,
+**Disney, Lucasfilm, Marvel, and 20th Century** in separate raw capture outputs,
 separate table families, and separate crawl histories. A portal tile or
 discriminator inside shared tables is not enough separation. If a studio-specific
 landing family is not live, checkpoint locally and stop before the database write.
+
+Raw capture separation is not presentation authority. Effective 2026-08-26,
+Marvel Creative Assets are authoritative only in ASGARD. DCP Vault's
+Marvel-tagged slice came from a mixed guide whose assets were indiscriminately
+tagged across Disney, Lucasfilm, and Marvel. Retain those DCP rows as private raw
+evidence, but ignore them for Marvel Creative classification, relationships, and
+the Scraped Properties review presentation. Never infer a licensor from the
+`disney_dcpvault`, `lucasfilm_dcpvault`, or `marvel_dcpvault` landing family.
+
+User-facing source-purpose labels must distinguish submission vocabulary from
+creative metadata:
+
+- `Licensor - Submissions (OPA)` for Disney OPA Property vocabulary, including
+  Marvel submissions handled through Disney OPA;
+- `Licensor - Creative (DCP Vault)` for evidence-backed Disney or
+  Lucasfilm/Star Wars DCP metadata;
+- `Marvel - Creative (ASGARD)` for Marvel Creative Assets.
+
+Ambiguous, conflicting, or unresolved review rows must show the specific reason,
+evidence basis, candidate studios when known, and the decision needed. A bare
+bucket label is not sufficient for Licensing review. `DCP Vault - authority
+conflict` means independent accepted authorities point to different licensors;
+the system must fail closed, retain both evidence pointers, and require a
+recorded controlling-authority decision rather than choosing by table family or
+title guess.
 
 **The loader is shared, not per-studio** (owner ruling, 2026-08-13). One guarded
 loader serves every studio; it takes the studio as an explicit required input and
