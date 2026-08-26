@@ -7,6 +7,24 @@
 # why widening it is a deliberate security decision. A missing, unreadable or
 # empty table must reject every identity, never accept one.
 
+# The ONE canonicaliser for both Windows callers. Previously bootstrap and the
+# installer each inlined their own copy, and both were blind to ssh:// URLs --
+# so a fresh clone taken with ssh://git@github.com/... would have been refused
+# on Windows while the Bash reader accepted it. That is the post-transfer
+# failure this whole change exists to prevent.
+function Get-AiDevOpsCanonicalRemote {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Url)
+    if (-not $Url) { return '' }
+    $value = $Url.Trim()
+    $value = $value -creplace '^git@github[.]com:', 'github.com/'
+    $value = $value -creplace '^ssh://git@github[.]com/', 'github.com/'
+    $value = $value -creplace '^https?://github[.]com/', 'github.com/'
+    $value = $value.TrimEnd('/')
+    $value = $value -creplace '[.]git$', ''
+    return $value.TrimEnd('/')
+}
+
 function Get-AiDevOpsRepoIdentityTable {
     [CmdletBinding()]
     param([string]$Path)

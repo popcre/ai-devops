@@ -49,13 +49,32 @@ check 'an unknown key accepts nothing' "! '$SCRIPT' accepts not-a-repo 'https://
 
 # --- a broken table must reject, never wave things through -----------------
 : > "$TMP/empty.tsv"
-check 'an emptied table accepts nothing' \
-  "! AI_REPO_IDENTITY_FILE='$TMP/empty.tsv' '$SCRIPT' accepts ai-devops 'https://github.com/u2giants/ai-devops.git'"
-check 'a missing table is a hard error, not a pass' \
-  "! AI_REPO_IDENTITY_FILE='$TMP/absent.tsv' '$SCRIPT' accepts ai-devops 'https://github.com/u2giants/ai-devops.git'"
-AI_REPO_IDENTITY_FILE="$TMP/absent.tsv" "$SCRIPT" accepts ai-devops 'https://github.com/u2giants/ai-devops.git' >/dev/null 2>&1
-[ "$?" -eq 2 ] && ok 'a missing table exits 2 so callers can tell error from refusal' \
-               || bad 'a missing table exits 2 so callers can tell error from refusal'
+printf '# no rows at all
+' > "$TMP/comments.tsv"
+printf 'ai-devops github.com/u2giants/ai-devops
+' > "$TMP/spaces.tsv"
+chmod 0000 "$TMP/empty.tsv" 2>/dev/null; chmod 0644 "$TMP/empty.tsv" 2>/dev/null
+
+# A broken allow-list must be an ERROR (exit 2), never an ordinary refusal
+# (exit 1). bin/ai-sync-memory's guard is INVERTED -- it reads exit 1 as "not
+# the public repo, proceed" -- so returning 1 here publishes private memory
+# into a public clone. Verified 2026-08-26 that it did exactly that.
+for broken in empty comments spaces absent; do
+  status=0
+  AI_REPO_IDENTITY_FILE="$TMP/$broken.tsv" "$SCRIPT" accepts ai-devops     'https://github.com/u2giants/ai-devops.git' >/dev/null 2>&1 || status=$?
+  [ "$status" -eq 2 ] && ok "broken allow-list ($broken) is an error, not a refusal"                       || bad "broken allow-list ($broken) must exit 2, got $status"
+done
+
+# An intact table plus an unknown identity is an ordinary refusal, exit 1.
+status=0
+"$SCRIPT" accepts ai-devops 'https://github.com/attacker/ai-devops.git' >/dev/null 2>&1 || status=$?
+[ "$status" -eq 1 ] && ok 'an intact table refusing an identity exits 1, not 2'                     || bad "an intact table refusing an identity must exit 1, got $status"
+
+# URL forms that must still resolve to an accepted identity.
+for url in   'https://github.com/popcre/ai-devops.git/'   '  https://github.com/popcre/ai-devops.git  '   'ssh://git@github.com/popcre/ai-devops' ; do
+  check "URL form accepted: $url" "'$SCRIPT' accepts ai-devops '$url'"
+done
+
 check 'comment rows are not identities' \
   "! '$SCRIPT' accepts ai-devops '#'"
 

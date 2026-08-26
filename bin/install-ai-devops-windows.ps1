@@ -48,12 +48,9 @@ function Write-Note {
     Write-Host "    $Message"
 }
 
-function Get-CanonicalRemote([string]$Url) {
-    return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
-        '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
-}
-
 . (Join-Path $PSScriptRoot 'repo-identity.ps1')
+
+function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 
 function Invoke-GitCommand {
     param([string[]]$Arguments)

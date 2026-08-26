@@ -4,13 +4,24 @@
 # Usage:
 #   ai-repo-identity list <key>              print every accepted identity
 #   ai-repo-identity canonical <url>         print the canonical form of a URL
-#   ai-repo-identity accepts <key> <url>     exit 0 if accepted, 1 if refused
+#   ai-repo-identity accepts <key> <url>     exit 0 accepted, 1 refused, 2 error
 #
-# The table lives in config/repo-identities.tsv. A key with no rows is a
-# refusal, never a pass: callers must be able to treat a missing or emptied
-# table as "reject everything".
+# EXIT CODES ARE PART OF THE SECURITY CONTRACT.
+#
+#   0  accepted
+#   1  the allow-list is intact and this identity is NOT on it
+#   2  the allow-list could not be used: missing, unreadable, or the requested
+#      key has zero rows
+#
+# 1 and 2 must never be conflated. Most callers are POSITIVE guards, where both
+# mean "abort". But bin/ai-sync-memory is an INVERTED caller: it refuses to use
+# any accepted ai-devops identity as a private memory hub, so it reads exit 1 as
+# "not the public repo, proceed". If a broken allow-list returned 1, that guard
+# would FAIL OPEN and copy private memory into a public clone. Verified on
+# 2026-08-26 that it did exactly that when the table was emptied. Keep a broken
+# or empty allow-list an error.
 set -euo pipefail
-# Resolve through symlinks: install-machine-tools links this command into
+# Resolve through symlinks: a catalogued command can be linked into
 # /usr/local/bin, where a naive dirname/.. would point outside the repository.
 SELF="${BASH_SOURCE[0]}"
 while [ -L "$SELF" ]; do
@@ -23,17 +34,28 @@ die(){ printf 'ai-repo-identity: error: %s\n' "$*" >&2; exit 2; }
 
 canonical() {
   printf '%s' "$1" | sed -E \
+    -e 's#^[[:space:]]+##' -e 's#[[:space:]]+$##' \
     -e 's#^git@github\.com:#github.com/#' \
-    -e 's#^https?://github\.com/#github.com/#' \
     -e 's#^ssh://git@github\.com/#github.com/#' \
-    -e 's#\.git$##' -e 's#/$##'
+    -e 's#^https?://github\.com/#github.com/#' \
+    -e 's#/+$##' -e 's#\.git$##' -e 's#/+$##'
+}
+
+require_table() {
+  [ -f "$TABLE" ] || die "identity table not found: $TABLE"
+  [ -r "$TABLE" ] || die "identity table is not readable: $TABLE"
 }
 
 identities_for() {
   local want="$1" key value
-  [ -f "$TABLE" ] || die "identity table not found: $TABLE"
+  require_table
   while IFS=$'\t' read -r key value; do
     key="${key%$'\r'}"; value="${value%$'\r'}"
+    # The PowerShell reader trims; match it. Without this a stray space on a
+    # table value silently stops matching, which is a refusal for a positive
+    # guard and a fail-open for an inverted one.
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
     case "$key" in ''|'#'*) continue ;; esac
     [ "$key" = "$want" ] || continue
     [ -n "$value" ] || continue
@@ -52,15 +74,21 @@ case "${1:-}" in
     ;;
   accepts)
     [ $# -eq 3 ] || die 'usage: ai-repo-identity accepts <key> <url>'
-    # Prove the table is readable BEFORE the lookup. identities_for runs inside
-    # a process substitution, so a die() in there would be swallowed and the
-    # caller would see an ordinary refusal instead of a broken allow-list.
-    [ -f "$TABLE" ] || die "identity table not found: $TABLE"
+    # Materialise the allow-list in THIS shell before comparing. identities_for
+    # in a process substitution runs in a child, so a die() there is swallowed
+    # and the caller sees an ordinary refusal instead of a broken allow-list.
+    require_table
+    accepted_list="$(identities_for "$2")" ||
+      die "could not read the identity table: $TABLE"
+    [ -n "$accepted_list" ] ||
+      die "no accepted identity is configured for '$2' in $TABLE"
     actual="$(canonical "$3")"
     [ -n "$actual" ] || exit 1
     while IFS= read -r accepted; do
       [ "$accepted" = "$actual" ] && exit 0
-    done < <(identities_for "$2")
+    done <<ACCEPTED_LIST
+$accepted_list
+ACCEPTED_LIST
     exit 1
     ;;
   *) die 'usage: ai-repo-identity list|canonical|accepts ...' ;;
