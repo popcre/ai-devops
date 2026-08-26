@@ -10,9 +10,16 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Keep each immutable commit's proof alive when newer work lands on main.
-  # Only a duplicate run for the same event and source SHA is superseded.
-  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+  # push and pull_request: keep each immutable commit's proof alive when newer
+  # work lands on main. Only a duplicate run for the same event and source SHA
+  # is superseded.
+  #
+  # merge_group: the opposite rule applies. When a pull request merges ahead of
+  # the queue, GitHub forms a NEW merge group and the previous candidate is
+  # dead - but its ~66-minute windows-offline job keeps a windows-2025 runner
+  # for the full timeout and starves the live candidate. Group merge_group runs
+  # by the target branch so only the current candidate holds a runner.
+  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -58,6 +65,12 @@ jobs:
 
   windows-reviewer-safety:
     runs-on: windows-2025
+    # Never a required check, and a strict subset of windows-offline. Inside a
+    # merge group it starts alongside the required job rather than ahead of it,
+    # so it is not an early warning there - it only takes a second windows-2025
+    # runner and reports failures that block nothing. It stays on pull_request,
+    # where it is the fast signal docs/development.md asks for.
+    if: github.event_name != 'merge_group'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

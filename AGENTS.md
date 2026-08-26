@@ -17,13 +17,30 @@ The full recovery procedure is in
 
 ## Repository rules
 
-- **Work on a branch and open a pull request. Do not push to `main`.**
-  `main` is protected by a ruleset with a merge queue, so a direct push is
-  rejected. This replaced the old "work directly on `main`" rule when the
-  repository moved to the `popcre` organization on 2026-08-26 (issue #84).
+- **Route every routine change through a branch, a pull request, and the merge
+  queue. Never push straight to `main`, and never merge with `--admin`, to save
+  time.**
+  This replaced the old "work directly on `main`" rule when the repository moved
+  to the `popcre` organization on 2026-08-26 (issue #84).
   `config/repository-policy.json` reports `feature-branch-pr` for this
   repository under **both** owner names, so an old `u2giants` clone and a new
   `popcre` clone behave identically.
+- **A direct push is NOT rejected, and that is deliberate. Do not write or rely
+  on the claim that it is.**
+  Ruleset `21564317` (`main: pull request + merge queue`) grants
+  `OrganizationAdmin` a `bypass_mode: always` exemption, and every session
+  authenticates as `u2giants`, who holds `admin` on this repository (verified
+  against the live ruleset on 2026-08-26). The bypass exists as an emergency
+  escape hatch for a repository whose whole purpose is restoring a broken
+  machine — the recovery path must not depend on CI being healthy.
+  Two consequences follow, and both are load-bearing:
+  1. The `push: main` trigger in `.github/workflows/verify.yml` is **permanent**.
+     For a bypassed merge it is the only full verification that commit ever
+     gets. Do not remove it as "redundant with the merge queue".
+  2. A bypassed merge that lands while a pull request is in the queue forces
+     that pull request to rebuild from scratch, and is the confirmed cause of
+     merge-queue starvation (issue #112). Using the hatch for convenience
+     costs another session an hour.
 - GitHub is the source of truth. Finished work is tested, committed, pushed, and
   verified on `origin/main`.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
