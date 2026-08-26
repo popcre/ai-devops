@@ -336,7 +336,7 @@ else
   mkdir -p "$(dirname "$CLAUDE_MCP_CONFIG")"
   [ -f "$CLAUDE_MCP_CONFIG" ] && cp "$CLAUDE_MCP_CONFIG" "$CLAUDE_MCP_CONFIG.aidevops.bak"
   AI_DEVOPS_OWNED_OUT="$OWNED_FILE" python3 - "$CLAUDE_MCP_CONFIG" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
-import json, os, sys
+import json, os, subprocess, sys
 
 path, launch, remote, supa_ref, codex = sys.argv[1:6]
 
@@ -470,6 +470,21 @@ for _proj, _names in sorted(by_project.items()):
     if not _dir:
         print("  -- %s not cloned here; %s left global" % (_proj, ", ".join(sorted(_names))))
         continue
+    # A GITIGNORED .mcp.json can never travel. Seeding it would work on THIS
+    # machine while every other clone, worktree and machine has the server
+    # nowhere - the authority is the COMMITTED file. Found live on the hetz VPS
+    # 2026-08-26: synology-monitor ignores .mcp.json at .gitignore:54, and the
+    # servers had already been pruned from the global config.
+    # Fail safe: leave them global, which works, and say why.
+    _ignored = subprocess.call(
+        ["git", "-C", _dir, "check-ignore", "-q", ".mcp.json"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    if _ignored:
+        print("  !! %s ignores .mcp.json - a seed there would never be committed." % _proj)
+        print("     %s left GLOBAL so every clone keeps working." % ", ".join(sorted(_names)))
+        print("     Un-ignore .mcp.json in that repo to scope them properly.")
+        continue
+
     _file = os.path.join(_dir, ".mcp.json")
     _cfg = {}
     if os.path.exists(_file):

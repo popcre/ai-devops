@@ -726,6 +726,19 @@ foreach ($proj in $McpByProject.Keys) {
     continue
   }
 
+  # A GITIGNORED .mcp.json can never travel. Seeding it would work on THIS
+  # machine while every other clone, worktree and machine has the server
+  # nowhere - the authority is the COMMITTED file. Found live on the hetz VPS
+  # 2026-08-26: synology-monitor ignores .mcp.json at .gitignore:54.
+  # Fail safe: leave the servers global, which works, and say why.
+  & git -C $projDir check-ignore -q ".mcp.json" 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    Warn "$proj ignores .mcp.json - a seed there would never be committed."
+    Warn "  $($names -join ', ') left GLOBAL so every clone keeps working."
+    Warn "  Un-ignore .mcp.json in that repo to scope them properly."
+    continue
+  }
+
   $projCfg = Join-Path $projDir ".mcp.json"
 
   # Never overwrite an entry the repo already owns: it may have been made
@@ -773,15 +786,6 @@ foreach ($proj in $McpByProject.Keys) {
   Ok "$projCfg <- $($toWrite -join ', ')"
   if ($projResult.Backup) { Note "  protected prior JSON: $($projResult.Backup)" }
 
-  # The committed file is the authority. A seed that git ignores will never
-  # travel, so every extra clone and every other machine would have the server
-  # nowhere. Warn loudly rather than fail: this machine still works.
-  & git -C $projDir check-ignore -q ".mcp.json" 2>$null
-  if ($LASTEXITCODE -eq 0) {
-    Warn "$proj ignores .mcp.json - the seed will NEVER be committed."
-    Warn "  Other clones and machines will not get $($toWrite -join ', ')."
-    Warn "  Un-ignore it, or these must go back in the global set."
-  }
 }
 
 if ($McpScopedDone) { Ok "Project-scoped and safe to prune globally: $($McpScopedDone -join ', ')" }

@@ -48,8 +48,10 @@ Check ($src -match 'is not valid JSON - left alone') `
   'invalid project JSON is skipped, not overwritten'
 Check ($src -match 'Join-Path \$candidate "\.git"') `
   'a project must be a real git checkout, not just a directory of that name'
-Check ($src -match 'check-ignore') `
-  'a gitignored seed is reported (it would never travel to other clones)'
+Check ($src -match 'ignores \.mcp\.json - a seed there would never be committed') `
+  'a gitignored .mcp.json is detected'
+Check ($src -match '(?s)ignores \.mcp\.json.*?left GLOBAL so every clone keeps working.*?continue') `
+  'a gitignored project is SKIPPED and its servers stay global (not just warned)'
 
 Write-Host "contract: portability of the seeded file"
 Check ($src -match 'function ConvertTo-AiDevOpsPortableMcp') `
