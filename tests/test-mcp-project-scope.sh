@@ -49,7 +49,8 @@ def run(clone_synology):
     os.makedirs(os.path.join(repos, "oracle"))
     if clone_synology:
         os.makedirs(os.path.join(repos, "synology-monitor"))
-    b = block.replace('os.path.expanduser("~/repos")', repr(repos))
+    os.environ["AI_DEVOPS_MCP_PROJECT_ROOTS"] = repos
+    b = block
     sys.argv = ["x", cfgp, "/launch.sh", "/remote.sh", "REF", "/usr/bin/codex"]
     os.environ["AI_DEVOPS_OWNED_OUT"] = os.path.join(tmp, "owned")
     import contextlib, io as _io
@@ -85,7 +86,8 @@ repos = os.path.join(tmp, "repos"); os.makedirs(os.path.join(repos, "oracle"))
 # a hand-made portable (Linux) definition already committed by the project
 json.dump({"mcpServers": {"trigger": {"command": "HAND-MADE-PORTABLE"}}},
           open(os.path.join(repos, "oracle", ".mcp.json"), "w"))
-b = block.replace('os.path.expanduser("~/repos")', repr(repos))
+os.environ["AI_DEVOPS_MCP_PROJECT_ROOTS"] = repos
+b = block
 sys.argv = ["x", cfgp, "/launch.sh", "/remote.sh", "REF", "/usr/bin/codex"]
 os.environ["AI_DEVOPS_OWNED_OUT"] = os.path.join(tmp, "owned")
 import contextlib, io as _io
@@ -96,6 +98,36 @@ check(kept.get("command") == "HAND-MADE-PORTABLE",
       "a committed entry is left untouched (would clobber a Linux-portable file)")
 check("trigger" not in json.load(open(cfgp))["mcpServers"],
       "an already-committed project server is still pruned from global")
+
+print("case D: an UNWRITABLE project directory must not kill the whole wiring")
+# Found live on the hetz VPS 2026-08-26: /worksp/designflow-frontend exists and is
+# owned by another account. The write raised OSError, the exception escaped, and
+# NO servers at all were wired - total capability loss from one bad directory.
+tmp = tempfile.mkdtemp()
+cfgp = os.path.join(tmp, "claude.json"); json.dump({"mcpServers": {}}, open(cfgp, "w"))
+repos = os.path.join(tmp, "repos")
+blocked = os.path.join(repos, "oracle")
+os.makedirs(blocked)
+# Simulate "cannot write here" portably: put a DIRECTORY where .mcp.json goes, so
+# open(..., "w") raises OSError on every platform including Windows.
+os.makedirs(os.path.join(blocked, ".mcp.json"))
+os.environ["AI_DEVOPS_MCP_PROJECT_ROOTS"] = repos
+sys.argv = ["x", cfgp, "/launch.sh", "/remote.sh", "REF", "/usr/bin/codex"]
+os.environ["AI_DEVOPS_OWNED_OUT"] = os.path.join(tmp, "owned")
+crashed = False
+try:
+    with contextlib.redirect_stdout(_io.StringIO()):
+        exec(compile(block, "embedded", "exec"), {"__name__": "__main__"})
+except Exception as exc:
+    crashed = True
+    print("       (raised %s: %s)" % (type(exc).__name__, exc))
+check(not crashed, "an unwritable project directory does not raise")
+if not crashed:
+    g = json.load(open(cfgp))["mcpServers"]
+    check("trigger" in g and "recall-ai" in g,
+          "servers it could not write stay GLOBAL so they keep working")
+    check("supabase" in g and "1password" in g,
+          "every OTHER server is still wired (no total wiring loss)")
 
 if fails:
     print("\n%d failed" % len(fails))

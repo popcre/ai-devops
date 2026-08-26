@@ -419,12 +419,20 @@ PROJECT_SCOPE = {
 }
 
 # Checkout roots differ per machine; probe rather than assume one.
-PROJECT_ROOTS = [
-    os.path.expanduser("~/repos"),
-    "/worksp",
-    "/srv",
-    os.path.expanduser("~"),
-]
+# AI_DEVOPS_MCP_PROJECT_ROOTS (os.pathsep-separated) overrides the list entirely.
+# The regression test sets it so it can never touch a real checkout: on hetz,
+# /worksp/designflow-frontend exists and is owned by another account, and an
+# earlier version of this test tried to write there.
+_roots_env = os.environ.get("AI_DEVOPS_MCP_PROJECT_ROOTS")
+if _roots_env:
+    PROJECT_ROOTS = [p for p in _roots_env.split(os.pathsep) if p]
+else:
+    PROJECT_ROOTS = [
+        os.path.expanduser("~/repos"),
+        "/worksp",
+        "/srv",
+        os.path.expanduser("~"),
+    ]
 
 def _find_project(name):
     for root in PROJECT_ROOTS:
@@ -464,11 +472,22 @@ for _proj, _names in sorted(by_project.items()):
     if not _write:
         print("  ok %s already carries: %s" % (_proj, ", ".join(sorted(_names))))
     else:
-        for n in _write:
-            _existing[n] = servers[n]
-        with open(_file, "w") as fh:
-            json.dump(_cfg, fh, indent=2)
-            fh.write("\n")
+        # FAIL SAFE, NEVER FAIL CLOSED. A project directory can be unwritable
+        # (on hetz /worksp/designflow-frontend is owned by another account), the
+        # disk can be full, or the path can be read-only. Before this guard the
+        # exception escaped and killed the whole wiring step, so NO server at all
+        # was configured - a total capability loss from one unwritable directory.
+        # On any failure the servers stay GLOBAL, which still works.
+        try:
+            for n in _write:
+                _existing[n] = servers[n]
+            with open(_file, "w") as fh:
+                json.dump(_cfg, fh, indent=2)
+                fh.write("\n")
+        except OSError as exc:
+            print("  !! could not write %s (%s)" % (_file, exc))
+            print("     %s left GLOBAL so they keep working." % ", ".join(sorted(_names)))
+            continue
         print("  ok %s <- %s" % (_file, ", ".join(_write)))
     # Whether seeded now or already committed, it must not also be global.
     for n in _names:
