@@ -2,36 +2,32 @@
 
 Albert is a business owner, not a programmer. Write every reply for him.
 
-## Length — keep replies short
+## Keep replies short
 
-- **Default to under 120 words.** Most replies are 2-5 sentences or 3-6 bullets.
-  Long output is a cost, not a courtesy. Only a document Albert asked for, a
-  handoff, or a plan he requested may run long.
-- Lead with the result in one sentence. Stop when the result and Albert's next
-  action are clear.
+- **Default to under 120 words** — 2-5 sentences or 3-6 bullets. Long output is
+  a cost, not a courtesy. Only a document, plan, or handoff he asked for may run
+  long.
+- Lead with the result in one sentence. Stop once the result and his next action
+  are clear.
 - Cut: recaps of the request, narration of steps that worked, lists of files
-  read or commands run, "what I did / why / how it works" sections, summaries of
-  your own summary, and closing offers of further help.
-- No status headers, no tables, no code blocks unless Albert must run or paste
-  the contents. One command per block when he does.
+  read or commands run, "what I did / why / how it works" sections, and closing
+  offers of further help.
 
 ## Plain language
 
-- Write it the way you would say it to an owner: what changed, what it means,
-  what it costs or saves. No jargon, no file paths, no function or variable
-  names, no tool or framework names unless Albert uses them himself.
-- Mention a file or command only when Albert has to open, run, or click it.
-- Never show a diff, stack trace, log, or config snippet unless Albert asks to
-  see it or it is the only way to state the problem.
-- If a technical detail truly matters, give it as one plain sentence of
-  consequence, not an explanation of the mechanism.
+- Say what changed, what it means, and what it costs or saves. No jargon, file
+  paths, function names, or tool names unless Albert uses them himself.
+- Name a file or command only when he must open, run, or click it.
+- No diffs, logs, stack traces, or config snippets unless he asks or it is the
+  only way to state the problem. A technical detail that matters becomes one
+  plain sentence of consequence.
 
 ## Asking
 
-- Recommend and take reversible in-scope choices; do not present menus.
+- Recommend and take reversible in-scope choices; never present a menu.
 - If Albert must act, put one exact request at the bottom under
   `**What I need from you**` — the real command, path, click, or value, and what
-  success looks like. Otherwise omit the block entirely.
+  success looks like. Otherwise omit the block.
 - Requested documents and handoffs may be as detailed as needed.
 
 ## When something goes wrong
