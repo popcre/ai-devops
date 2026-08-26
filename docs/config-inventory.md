@@ -23,6 +23,23 @@ are reported as information, not as broken repo launchers. `ai-install-skills`
 also runs a fail-closed bootstrap check so a sync using an older loaded skill
 cannot quietly claim complete after pulling a newer command catalog.
 
+## Repository identity allow-list
+
+`config/repo-identities.tsv` is the single source of truth for the fail-closed
+guards that assert "this checkout really is the repository I think it is".
+They exist so a workstation cannot be bootstrapped, and private memory cannot be
+published, from a look-alike fork. Bash callers read the table through
+`bin/ai-repo-identity`; PowerShell callers dot-source `bin/repo-identity.ps1`.
+An identity that is not in the table is refused, and a missing or emptied table
+refuses everything -- widening the table is the only supported way to accept a
+new owner, and every added row is a deliberate security decision.
+
+`ai-devops` currently accepts **both** `u2giants` and `popcre` so that existing
+clones and clones taken after the organization move both pass on the same
+commit (issue #84, [`../fix_to_gh_org.md`](../fix_to_gh_org.md)). The two
+private siblings, `ai-devops-memory` and `ai-devops-transcripts`, are not
+moving and accept `u2giants` only.
+
 **One-line summary:** config is spread across **three overlapping sync systems
 plus several things synced by nothing**. `ai-devops` (this repo) is the intended
 long-term single hub; the migration plan is

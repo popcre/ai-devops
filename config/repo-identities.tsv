@@ -1,0 +1,20 @@
+# Single source of truth for the fail-closed repository identity guards.
+#
+# Every script that asserts "this checkout really is the repository I think it
+# is" reads this table instead of hard-coding an owner. The guards exist to stop
+# a workstation being bootstrapped, or private memory being published, from a
+# look-alike fork. They are fail-closed by contract: an identity that is not
+# listed here MUST be refused. Widening this table is the only supported way to
+# accept a new owner, and every added row is a deliberate security decision.
+#
+# ai-devops accepts BOTH owners during the move to the popcre organization
+# (issue #84, fix_to_gh_org.md). Existing clones keep the u2giants origin string
+# and a fresh clone from the new URL records popcre; both must pass on the same
+# commit, so there is no flag-day. The two PRIVATE siblings are deliberately NOT
+# moving (Albert, 2026-08-25) and accept u2giants only.
+#
+# key<TAB>accepted canonical identity (host/owner/repo, no scheme, no .git)
+ai-devops	github.com/u2giants/ai-devops
+ai-devops	github.com/popcre/ai-devops
+ai-devops-memory	github.com/u2giants/ai-devops-memory
+ai-devops-transcripts	github.com/u2giants/ai-devops-transcripts

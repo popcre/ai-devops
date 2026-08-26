@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Resolve and enforce the fail-closed repository identity allow-list.
+#
+# Usage:
+#   ai-repo-identity list <key>              print every accepted identity
+#   ai-repo-identity canonical <url>         print the canonical form of a URL
+#   ai-repo-identity accepts <key> <url>     exit 0 if accepted, 1 if refused
+#
+# The table lives in config/repo-identities.tsv. A key with no rows is a
+# refusal, never a pass: callers must be able to treat a missing or emptied
+# table as "reject everything".
+set -euo pipefail
+# Resolve through symlinks: install-machine-tools links this command into
+# /usr/local/bin, where a naive dirname/.. would point outside the repository.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  target="$(readlink "$SELF")"
+  case "$target" in /*) SELF="$target" ;; *) SELF="$(dirname "$SELF")/$target" ;; esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+TABLE="${AI_REPO_IDENTITY_FILE:-$ROOT/config/repo-identities.tsv}"
+die(){ printf 'ai-repo-identity: error: %s\n' "$*" >&2; exit 2; }
+
+canonical() {
+  printf '%s' "$1" | sed -E \
+    -e 's#^git@github\.com:#github.com/#' \
+    -e 's#^https?://github\.com/#github.com/#' \
+    -e 's#^ssh://git@github\.com/#github.com/#' \
+    -e 's#\.git$##' -e 's#/$##'
+}
+
+identities_for() {
+  local want="$1" key value
+  [ -f "$TABLE" ] || die "identity table not found: $TABLE"
+  while IFS=$'\t' read -r key value; do
+    key="${key%$'\r'}"; value="${value%$'\r'}"
+    case "$key" in ''|'#'*) continue ;; esac
+    [ "$key" = "$want" ] || continue
+    [ -n "$value" ] || continue
+    printf '%s\n' "$value"
+  done < "$TABLE"
+}
+
+case "${1:-}" in
+  list)
+    [ $# -eq 2 ] || die 'usage: ai-repo-identity list <key>'
+    identities_for "$2"
+    ;;
+  canonical)
+    [ $# -eq 2 ] || die 'usage: ai-repo-identity canonical <url>'
+    canonical "$2"
+    ;;
+  accepts)
+    [ $# -eq 3 ] || die 'usage: ai-repo-identity accepts <key> <url>'
+    # Prove the table is readable BEFORE the lookup. identities_for runs inside
+    # a process substitution, so a die() in there would be swallowed and the
+    # caller would see an ordinary refusal instead of a broken allow-list.
+    [ -f "$TABLE" ] || die "identity table not found: $TABLE"
+    actual="$(canonical "$3")"
+    [ -n "$actual" ] || exit 1
+    while IFS= read -r accepted; do
+      [ "$accepted" = "$actual" ] && exit 0
+    done < <(identities_for "$2")
+    exit 1
+    ;;
+  *) die 'usage: ai-repo-identity list|canonical|accepts ...' ;;
+esac
