@@ -42,7 +42,14 @@ message="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty' 2>/
 [[ -n "$message" ]] || exit 0
 
 # Closing claims that assert the ball is in nobody's court. Kept in one list so
-# the set is auditable; matched case-insensitively anywhere in the final message.
+# the set is auditable.
+#
+# The last five were added on 2026-08-26 after this hook missed the real thing
+# twice in one session: a turn closed with "Nothing right now" and another with
+# "nothing is waiting on you", and neither matched. It fired on that turn only
+# because the reply happened to QUOTE the phrase "nothing is needed" while
+# explaining the hook itself. A guard that passes the real case and trips on a
+# mention of itself is worse than none, so both halves are fixed here.
 COMPLETION_CLAIMS=(
   "nothing is needed"
   "nothing needed from you"
@@ -59,10 +66,23 @@ COMPLETION_CLAIMS=(
   "fully complete"
   "work is complete"
   "task is complete"
+  "nothing right now"
+  "nothing is waiting"
+  "nothing waiting on you"
+  "nothing else is waiting"
+  "nothing from you"
 )
 
+# Judge how the reply CLOSES, not the whole essay. A completion claim is a way of
+# ENDING a turn; the same words in the middle of an explanation are prose. This
+# is why the mention-of-itself false positive happened, and it is the same fix
+# already applied to the eval's classifier — the two must not drift apart.
+closing="$(printf '%s' "$message" | awk 'BEGIN{RS=""} {block[NR]=$0} END{start=(NR>1?NR-1:1); for(i=start;i<=NR;i++) print block[i]}' 2>/dev/null || printf '%s' "$message")"
+# Never judge less than the tail: a one-paragraph reply IS its own closing.
+[[ -n "$closing" ]] || closing="$message"
+
 matched=""
-lower="$(printf '%s' "$message" | tr '[:upper:]' '[:lower:]')"
+lower="$(printf '%s' "$closing" | tr '[:upper:]' '[:lower:]')"
 for claim in "${COMPLETION_CLAIMS[@]}"; do
   if [[ "$lower" == *"$claim"* ]]; then matched="$claim"; break; fi
 done

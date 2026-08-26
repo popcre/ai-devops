@@ -23,6 +23,10 @@ export XDG_STATE_HOME="$TMP/state"
 # fire <prompt_id> <message> [extra_json_fields]
 fire() {
   local pid="$1" msg="$2" extra="${3:-}"
+  # %b so a literal backslash-n in a test case becomes a real paragraph
+  # break: the hook judges the CLOSING paragraphs, so paragraph structure
+  # is part of the input being tested.
+  msg="$(printf '%b' "$msg")"
   jq -nc --arg p "$pid" --arg m "$msg" --argjson e "${extra:-null}" \
     '{hook_event_name:"Stop", session_id:"sess-1", prompt_id:$p, last_assistant_message:$m}
      + (if $e == null then {} else $e end)' \
@@ -45,6 +49,19 @@ out2="$(fire p1 "Nothing is needed from you now, really.")"
 check "the same prompt is never blocked twice" "[ -z \"\$out2\" ]"
 check "a LATER prompt is still checked" "[ -n \"\$(fire p2 'You are all set.')\" ]"
 check "stop_hook_active short-circuits immediately" "[ -z \"\$(fire p3 'all set' '{\"stop_hook_active\":true}')\" ]"
+
+# --- the phrasings this hook MISSED on 2026-08-26 -------------------------------
+# It shipped catching "nothing is needed" and nothing else, so two real false
+# completions closed with "Nothing right now" and "nothing is waiting on you" and
+# passed silently. It fired on that turn only because the reply QUOTED its own
+# trigger phrase while explaining the hook. Both halves are locked below.
+check "'Nothing right now' at the close is caught" \
+  "[ -n \"\$(fire m1 'Here is the state.\n\nNothing right now, the two open items are mine.')\" ]"
+check "'nothing is waiting on you' at the close is caught" \
+  "[ -n \"\$(fire m2 'Three things are running.\n\nNothing else is waiting on me, and nothing is waiting on you.')\" ]"
+mention_msg="A turn ending on the phrase nothing is needed gets stopped once.\n\nHere is the diff; two tests fail on line 40.\n\nFixing them now."
+mention_out="$(fire m3 "$mention_msg")"
+check "a MENTION of the trigger phrase mid-reply is NOT caught" "[ -z \"\$mention_out\" ]"
 
 # --- silence where silence is correct ------------------------------------------
 check "an ordinary reply is silent" "[ -z \"\$(fire p4 'Here is the diff. Two tests fail on line 40.')\" ]"
