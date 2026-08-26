@@ -434,6 +434,18 @@ else:
         os.path.expanduser("~"),
     ]
 
+_HOME = os.path.expanduser("~")
+
+def _portable(obj):
+    """Replace this machine's home directory with ${HOME}, recursively."""
+    if isinstance(obj, str):
+        return obj.replace(_HOME, "${HOME}") if _HOME and _HOME != "/" else obj
+    if isinstance(obj, list):
+        return [_portable(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _portable(v) for k, v in obj.items()}
+    return obj
+
 def _find_project(name):
     for root in PROJECT_ROOTS:
         for candidate in (os.path.join(root, name),
@@ -480,7 +492,16 @@ for _proj, _names in sorted(by_project.items()):
         # On any failure the servers stay GLOBAL, which still works.
         try:
             for n in _write:
-                _existing[n] = servers[n]
+                # PORTABILITY: this file is COMMITTED and then read on other
+                # machines and by other user accounts, so it must not carry this
+                # machine's literal home directory. Claude Code expands ${HOME}
+                # in .mcp.json. Verified live on hetz 2026-08-26, where the
+                # launcher resolved to /home/ai/.config/... before this.
+                #
+                # Substitute on the STRINGS, not on the JSON text: a Windows home
+                # path is backslash-escaped once encoded, so a text replace
+                # silently matches nothing and the literal path ships anyway.
+                _existing[n] = _portable(servers[n])
             with open(_file, "w") as fh:
                 json.dump(_cfg, fh, indent=2)
                 fh.write("\n")

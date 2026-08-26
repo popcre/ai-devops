@@ -99,6 +99,26 @@ check(kept.get("command") == "HAND-MADE-PORTABLE",
 check("trigger" not in json.load(open(cfgp))["mcpServers"],
       "an already-committed project server is still pruned from global")
 
+print("case E: a seeded file must not carry this machine's home directory")
+# The file is committed and read by other accounts on other machines. Found live
+# on hetz: the launcher was written as /home/ai/.config/... which only works for
+# the user named "ai".
+tmp = tempfile.mkdtemp()
+cfgp = os.path.join(tmp, "claude.json"); json.dump({"mcpServers": {}}, open(cfgp, "w"))
+repos = os.path.join(tmp, "repos"); os.makedirs(os.path.join(repos, "oracle"))
+os.environ["AI_DEVOPS_MCP_PROJECT_ROOTS"] = repos
+_home = os.path.expanduser("~")
+sys.argv = ["x", cfgp, os.path.join(_home, ".config/ai-devops/mcp-launch.sh"),
+            os.path.join(_home, ".config/ai-devops/mcp-remote-launch.sh"),
+            "REF", "/usr/bin/codex"]
+os.environ["AI_DEVOPS_OWNED_OUT"] = os.path.join(tmp, "owned")
+with contextlib.redirect_stdout(_io.StringIO()):
+    exec(compile(block, "embedded", "exec"), {"__name__": "__main__"})
+seeded = io.open(os.path.join(repos, "oracle", ".mcp.json"), encoding="utf-8").read()
+check(_home not in seeded,
+      "seeded .mcp.json contains no literal home path (%s)" % _home)
+check("${HOME}" in seeded, "seeded .mcp.json uses ${HOME} instead")
+
 print("case D: an UNWRITABLE project directory must not kill the whole wiring")
 # Found live on the hetz VPS 2026-08-26: /worksp/designflow-frontend exists and is
 # owned by another account. The write raised OSError, the exception escaped, and
