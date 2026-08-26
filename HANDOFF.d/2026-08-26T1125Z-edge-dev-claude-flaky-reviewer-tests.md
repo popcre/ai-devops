@@ -9,12 +9,20 @@ owner: claude/github-org-move-handoff-d576f2
 **The diagnosis itself lives in [`fix_test_ai.md`](../fix_test_ai.md) at the repo
 root. Read that first — this file is the session context around it.**
 
+**STATUS UPDATE 2026-08-26 (later the same day).** The organization move is
+**finished**: issue #84 is CLOSED, the repository is now `popcre/ai-devops`, the
+merge queue is live, and the move's handoff was retired by the session that
+closed it. **This work (issue #89) was sequenced as Phase F, "after the move is
+fully done" — it is therefore UNBLOCKED and may start now.**
+
+Two rounds of security fixes landed after Phase A, driven by an adversarial
+Grok 4.6 review. See the **addendum at the end of this file**.
+
+**Issue #98 (`windows-offline` CI latency) is owned by another session** and has
+its own handoff. Do not touch it, and do not fold it into this work.
+
 This session also finished **Phase A of the `popcre` organization move**
-(issue [#84](https://github.com/u2giants/ai-devops/issues/84)). That is a
-separate, still-open workstream with its own handoff
-(`HANDOFF.d/2026-08-25T2012Z-edge-dev-claude-ai-devops-gh-org-move.md`). See §3
-for exactly what landed, and §0 item 6 for the one thing that is now stale in
-that predecessor file.
+(issue #84). See §3 for exactly what landed.
 
 ## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
 
@@ -55,6 +63,7 @@ rule, not a choice.
    tests are entirely at fault.** Nobody is on this.
 
 4. **Six `HANDOFF.d/` files are STALE — their issues are already closed.**
+   (Re-verified 2026-08-26 against `popcre/ai-devops`; still six.)
    The target for stale files is zero. None of them is mine, and the retirement
    rule needs the retiring session to confirm each file's obligations were
    carried forward, which I cannot do for workstreams I did not run:
@@ -82,13 +91,8 @@ rule, not a choice.
    **Recommendation: same session as item 4 — open an issue for each or retire
    it.** Not urgent, but they are permanently un-retirable as they stand.
 
-6. **The `#84` handoff is now partly stale and I must not edit it.**
-   `HANDOFF.d/2026-08-25T2012Z-edge-dev-claude-ai-devops-gh-org-move.md` still
-   says Phase A is "not started". It is done and merged (§3). Its plan document
-   `fix_to_gh_org.md` **is** up to date, and that is what it tells you to read
-   first, so a reader following its own instructions gets the truth. It stays
-   open because Phases B–E remain. **No action needed — just do not be confused
-   by it.** Editing another session's handoff is forbidden.
+6. ~~The `#84` handoff is stale.~~ **RESOLVED 2026-08-26:** the session that
+   closed #84 retired that file. Nothing to do.
 
 ### Already settled — do NOT re-ask
 
@@ -471,3 +475,43 @@ Full detail is in `fix_to_gh_org.md` §5 and the `#84` handoff.
    anywhere else → §0.4 and §0.5), and the now-stale `#84` handoff (§3 → §0.6)
    all appear in §0. Items 3, 4 and 5 are outside this workstream and are in §0
    precisely because nobody else is raising them.
+
+---
+
+## Addendum 2026-08-26 — what an adversarial Grok 4.6 review changed after Phase A
+
+Grok reviewed the Phase A identity guards (session `identity-guard-review`,
+960,577 tokens, $0.19, grok-4.6-build) and **rejected** them. It was right on
+every count that mattered, and two rounds of fixes followed.
+
+**Round 1 (`52ec229`) — a verified fail-open.** `bin/ai-sync-memory`'s guard is
+inverted: it reads exit 1 as "not the public repo, proceed". `ai-repo-identity`
+returned 2 only when the table FILE was missing, so an empty, comments-only or
+space-delimited table returned 1 and the guard permitted the push. **Reproduced:
+a private memory file landed in a checkout whose origin was the public
+repository.** A key with zero rows is now an error, matching the PowerShell
+reader. Canonicalisation also moved into `bin/repo-identity.ps1` — both Windows
+callers had been blind to `ssh://`, so a fresh clone taken that way would have
+been refused on Windows while Bash accepted it.
+
+**Round 2 (`2e1089d`) — three host-stripping holes.** `bin/ai-facts` and
+`bin/ai-private-config` stripped the HOST along with the scheme, so
+`https://evil.example/u2giants/ai-devops-memory.git` was accepted as the private
+memory hub, and the same shape was accepted as the protected machine-topology
+repository. `bin/ai-devops`'s doctor used a trailing glob with the same
+weakness. Grok named two of them; **`ai-private-config` was not in the reviewed
+set and had the identical defect** — found while fixing the others.
+
+**Two Phase A claims in this file were overstated and are now corrected.** The
+drift test only matched the `github.com/` form, so changing the bare
+`u2giants/ai-devops-memory` literal that `ai-facts` actually used would not have
+turned it red — §5 Finding 7's "drift is prevented by a test" was not true as
+written. And the symlink argument for leaving the siblings as literals was
+weaker than claimed: `bin/ai-repo-identity` already carried the five-line
+`readlink` loop that solves it, and every sibling now uses it. Both are fixed;
+the finding is left in place so the reasoning error is visible.
+
+**Lesson worth carrying.** $0.19 of adversarial review found a live path that
+published private data. Both fixes were verified by reproducing the defect
+first, then confirming the new test fails against the old code — not by
+assuming the fix worked.
