@@ -525,7 +525,7 @@ $McpProjectScope = [ordered]@{
   "trigger"          = "oracle"
   "recall-ai"        = "oracle"
   "railway"          = "popdam3"
-  "ag-grid"          = "dflow_plm/designflow-frontend"
+  "ag-grid"          = "designflow-frontend"
   "devops-mcp"       = "synology-monitor"
   "synology-monitor" = "synology-monitor"
 }
@@ -550,7 +550,16 @@ $McpProjectRoots = @(
   "/worksp"
 ) | Where-Object { Test-Path -LiteralPath $_ }
 
-# Servers that stay global: needed from any repository.
+# Projects whose servers must NOT be seeded from Windows. synology-monitor is
+# worked on ~90% of the time from the hetz Ubuntu VPS; the Windows definitions
+# point at .cmd launchers that do not exist there, and a committed Windows seed
+# would break the machine that repo is actually used from.
+$McpProjectWindowsSkip = @("synology-monitor")
+
+# Servers that stay global: needed from any repository. NOTE this is the
+# INTENTION, not the outcome - a project-scoped server still stays global if its
+# checkout is missing or unwritable. The actual prune list is $McpScopedDone,
+# computed in step 5d-3.
 $McpGlobalNames = @($McpServers.Keys | Where-Object { -not $McpProjectScope.Contains($_) })
 
 $McpServerList = ($McpGlobalNames -join ", ")
@@ -634,6 +643,151 @@ if ((Test-Path $knownHostsTmpl) -and (Test-Path $knownHostsSync)) {
 } else { Warn "Managed SSH server-key source is missing - skipping it." }
 
 # --------------------------------------------------------------------------
+# 5d-3. Seed project-scoped MCP servers into each project's own .mcp.json
+#
+# THIS MUST RUN BEFORE THE GLOBAL CONFIGS ARE WRITTEN. Claude Code may only drop
+# a server from the global config once that server actually reached a project
+# file. Pruning unconditionally is how a server ends up configured NOWHERE -
+# found by review 2026-08-26 after the same bug was fixed on the Linux side.
+#
+# Claude Code reads .mcp.json from the repository root and starts those servers
+# ONLY in sessions opened there. Claude Desktop and Codex have no equivalent, so
+# they keep the FULL set (see step 5d-2).
+#
+# The AUTHORITY is the .mcp.json committed in the project repo; this only seeds
+# it. Entries the repo already owns are never overwritten, and any project this
+# cannot write is reported and its servers stay global.
+# --------------------------------------------------------------------------
+Step "Project-scoped MCP servers (per-repo .mcp.json)"
+
+# Names that genuinely reached a project file. ONLY these may be pruned from the
+# Claude Code global config.
+$McpScopedDone = @()
+
+# Replace this machine's profile path with ${USERPROFILE}, recursively.
+#
+# Substitute on the STRINGS, not on ConvertTo-Json output: PowerShell encodes
+# C:\Users\foo as C:\\Users\\foo, so a literal .Replace on the JSON text matches
+# nothing and the real path ships. Confirmed empirically 2026-08-26.
+function ConvertTo-AiDevOpsPortableMcp {
+  param($Value)
+  if ($Value -is [string]) {
+    if ($env:USERPROFILE) { return $Value.Replace($env:USERPROFILE, '${USERPROFILE}') }
+    return $Value
+  }
+  if ($Value -is [System.Collections.IDictionary]) {
+    $out = @{}
+    foreach ($k in $Value.Keys) { $out[$k] = ConvertTo-AiDevOpsPortableMcp $Value[$k] }
+    return $out
+  }
+  if ($Value -is [System.Collections.IEnumerable]) {
+    return @($Value | ForEach-Object { ConvertTo-AiDevOpsPortableMcp $_ })
+  }
+  return $Value
+}
+
+$McpByProject = @{}
+foreach ($name in $McpProjectScope.Keys) {
+  $proj = $McpProjectScope[$name]
+  if (-not $McpByProject.ContainsKey($proj)) { $McpByProject[$proj] = @() }
+  $McpByProject[$proj] += $name
+}
+
+foreach ($proj in $McpByProject.Keys) {
+  $names   = $McpByProject[$proj]
+  $projDir = $null
+  foreach ($root in $McpProjectRoots) {
+    # Some projects live one level down inside a parent checkout
+    # (dflow_plm/designflow-frontend). Probe both, exactly like the Linux script.
+    foreach ($candidate in @((Join-Path $root $proj), (Join-Path $root (Join-Path "dflow_plm" $proj)))) {
+    # Require a real git checkout. A bare directory of the same name - a leftover
+    # folder, or a coincidental name in the home directory - would otherwise get
+    # a seeded .mcp.json that is never committed, while the server is pruned from
+    # the global config. `.git` is a FILE in a linked worktree, so test both.
+      if (Test-Path -LiteralPath (Join-Path $candidate ".git")) { $projDir = $candidate; break }
+    }
+    if ($projDir) { break }
+  }
+
+  if (-not $projDir) {
+    Warn "No git checkout found under any known root, skipped: $proj"
+    Warn "  owns: $($names -join ', ') - these STAY GLOBAL so they keep working."
+    Warn "  roots probed: $($McpProjectRoots -join ', ')"
+    continue
+  }
+
+  # A project whose servers only work on another OS must never be seeded here:
+  # the Windows definitions point at .cmd launchers that do not exist on Linux,
+  # and committing them would break the machine that repo is actually used from.
+  if ($McpProjectWindowsSkip -contains $proj) {
+    Warn "Seeding $proj from Windows is not allowed; left GLOBAL."
+    Warn "  owns: $($names -join ', ')"
+    Warn "  Its .mcp.json must be authored on Linux (see docs/mcp-server-scope.md)."
+    continue
+  }
+
+  $projCfg = Join-Path $projDir ".mcp.json"
+
+  # Never overwrite an entry the repo already owns: it may have been made
+  # portable by hand for a non-Windows machine (the hetz Ubuntu VPS).
+  $alreadyOwned = @()
+  if (Test-Path -LiteralPath $projCfg) {
+    try {
+      $existing = Get-Content -LiteralPath $projCfg -Raw | ConvertFrom-Json
+    } catch {
+      Warn "$projCfg is not valid JSON - left alone."
+      Warn "  $($names -join ', ') STAY GLOBAL so they keep working."
+      continue
+    }
+    if ($existing.mcpServers) {
+      $alreadyOwned = @($names | Where-Object { $existing.mcpServers.PSObject.Properties.Name -contains $_ })
+    }
+  }
+  if ($alreadyOwned) {
+    Note "$proj already carries: $($alreadyOwned -join ', ') - left untouched"
+    $McpScopedDone += $alreadyOwned
+  }
+  $toWrite = @($names | Where-Object { $alreadyOwned -notcontains $_ })
+  if (-not $toWrite) { continue }
+
+  # FAIL SAFE, NEVER FAIL CLOSED: an unwritable directory, a full disk or a
+  # read-only checkout must not cost the capability. On failure the servers stay
+  # global, where they still work.
+  try {
+    if (-not (Test-Path -LiteralPath $projCfg)) { '{}' | Set-Content -LiteralPath $projCfg -Encoding utf8 }
+    $projResult = Update-AiDevOpsJsonFileAtomic -Path $projCfg -Depth 12 -Update {
+      param($cfg)
+      if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
+      foreach ($n in $toWrite) {
+        $cfg["mcpServers"][$n] = ConvertTo-AiDevOpsPortableMcp $McpServers[$n]
+      }
+      return $cfg
+    }
+  } catch {
+    Warn "Could not write $projCfg ($($_.Exception.Message))"
+    Warn "  $($toWrite -join ', ') STAY GLOBAL so they keep working."
+    continue
+  }
+
+  $McpScopedDone += $toWrite
+  Ok "$projCfg <- $($toWrite -join ', ')"
+  if ($projResult.Backup) { Note "  protected prior JSON: $($projResult.Backup)" }
+
+  # The committed file is the authority. A seed that git ignores will never
+  # travel, so every extra clone and every other machine would have the server
+  # nowhere. Warn loudly rather than fail: this machine still works.
+  & git -C $projDir check-ignore -q ".mcp.json" 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    Warn "$proj ignores .mcp.json - the seed will NEVER be committed."
+    Warn "  Other clones and machines will not get $($toWrite -join ', ')."
+    Warn "  Un-ignore it, or these must go back in the global set."
+  }
+}
+
+if ($McpScopedDone) { Ok "Project-scoped and safe to prune globally: $($McpScopedDone -join ', ')" }
+else                { Note "Nothing reached a project file; every server stays global." }
+
+# --------------------------------------------------------------------------
 # 6. Best-effort: wire MCP servers into Claude Desktop config
 # --------------------------------------------------------------------------
 if ($SkipDesktopMcp) {
@@ -654,9 +808,13 @@ if ($SkipDesktopMcp) {
     $desktopResult = Update-AiDevOpsJsonFileAtomic -Path $cfgPath -Depth 12 -Update {
       param($cfg)
       if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-      foreach ($name in $McpGlobalNames) { $cfg["mcpServers"][$name] = $McpServers[$name] }
-      # Project-scoped servers must never live in the global config (step 5d-2).
-      foreach ($name in $McpProjectScope.Keys) { $null = $cfg["mcpServers"].Remove($name) }
+      # CLAUDE DESKTOP GETS THE FULL SET, INCLUDING PROJECT-SCOPED NAMES.
+      #
+      # .mcp.json is a Claude CODE mechanism. Claude Desktop has no per-project
+      # scope at all, so removing a name here does not move it anywhere - it
+      # deletes the capability outright. Same reasoning as Codex (step 5d-2).
+      # Desktop therefore keeps every server; only Claude Code is scoped.
+      foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
       $null = $cfg["mcpServers"].Remove("vercel")
       return $cfg
     }
@@ -790,122 +948,16 @@ if (-not (Test-Path $ccConfig)) {
 $ccResult = Update-AiDevOpsJsonFileAtomic -Path $ccConfig -Depth 12 -Update {
   param($cc)
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
-  foreach ($name in $McpGlobalNames) { $cc["mcpServers"][$name] = $McpServers[$name] }
-  # Project-scoped servers must never live in the global config (step 5d-2).
-  foreach ($name in $McpProjectScope.Keys) { $null = $cc["mcpServers"].Remove($name) }
+  # Write every server, then remove ONLY the ones that actually reached a project
+  # file in step 5d-3. Pruning a name whose project is missing, unwritable or
+  # holds invalid JSON would leave that server configured NOWHERE.
+  foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
+  foreach ($name in $McpScopedDone)   { $null = $cc["mcpServers"].Remove($name) }
   $null = $cc["mcpServers"].Remove("vercel")
   return $cc
 }
 Ok "Claude Code wired token-free: $McpServerList"
 
-# --------------------------------------------------------------------------
-# 7b. Write project-scoped MCP servers into each project's own .mcp.json
-#
-# Claude Code reads .mcp.json from the repository root and starts those servers
-# ONLY in sessions opened there. This is the mechanism that keeps a single-project
-# server out of all the other sessions (see step 5d-2 for the measurement that
-# forced this).
-#
-# Existing entries in a project's .mcp.json are preserved; only the names this
-# script owns are rewritten. A project that is not cloned on this machine is
-# reported and skipped - never silently dropped.
-# --------------------------------------------------------------------------
-Step "Project-scoped MCP servers (per-repo .mcp.json)"
-
-$McpByProject = @{}
-foreach ($name in $McpProjectScope.Keys) {
-  $proj = $McpProjectScope[$name]
-  if (-not $McpByProject.ContainsKey($proj)) { $McpByProject[$proj] = @() }
-  $McpByProject[$proj] += $name
-}
-
-foreach ($proj in $McpByProject.Keys) {
-  $names   = $McpByProject[$proj]
-  $projDir = $null
-  foreach ($root in $McpProjectRoots) {
-    $candidate = Join-Path $root $proj
-    if (Test-Path -LiteralPath $candidate) { $projDir = $candidate; break }
-  }
-
-  if (-not $projDir) {
-    Warn "Not cloned under any known root on this machine, skipped: $proj"
-    Warn "  owns: $($names -join ', ')"
-    Warn "  roots probed: $($McpProjectRoots -join ', ')"
-    Warn "  NOT a failure if the repo already carries its own committed"
-    Warn "  .mcp.json - that file is the authority and travels with git."
-    continue
-  }
-
-  # Never overwrite an entry the repo already owns: it may have been made
-  # portable by hand for a non-Windows machine (the hetz Ubuntu VPS).
-  $projCfg = Join-Path $projDir ".mcp.json"
-  if (Test-Path -LiteralPath $projCfg) {
-    $existing = Get-Content -LiteralPath $projCfg -Raw | ConvertFrom-Json
-    if ($existing.mcpServers) {
-      $owned = @($names | Where-Object { $existing.mcpServers.PSObject.Properties.Name -contains $_ })
-      if ($owned) {
-        Note "$proj already carries: $($owned -join ', ') - left untouched"
-        $names = @($names | Where-Object { $owned -notcontains $_ })
-      }
-    }
-  }
-  if (-not $names) { continue }
-
-  if (-not (Test-Path -LiteralPath $projCfg)) { '{}' | Set-Content -LiteralPath $projCfg -Encoding utf8 }
-
-  $projResult = Update-AiDevOpsJsonFileAtomic -Path $projCfg -Depth 12 -Update {
-    param($cfg)
-    if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-    foreach ($n in $names) {
-      # PORTABILITY: a project file is committed and then read on OTHER machines
-      # with different user names, so it must never carry THIS machine's literal
-      # profile path. Claude Code expands ${USERPROFILE} in .mcp.json (Claude
-      # Desktop does NOT, which is why the global config keeps literal paths).
-      $def = ($McpServers[$n] | ConvertTo-Json -Depth 12).Replace($env:USERPROFILE, '${USERPROFILE}')
-      $cfg["mcpServers"][$n] = ($def | ConvertFrom-Json -AsHashtable)
-    }
-    return $cfg
-  }
-  Ok "$projCfg <- $($names -join ', ')"
-  if ($projResult.Backup) { Note "  protected prior JSON: $($projResult.Backup)" }
-}
-
-if ($ccResult.Backup) {
-  Ok "  protected prior JSON: $($ccResult.Backup)"
-  Note "  recovery: Copy-Item -LiteralPath '$($ccResult.Backup)' -Destination '$ccConfig' -Force"
-}
-
-# Strip the stale copy out of settings.json. Leaving it behind is worse than
-  # useless - a plainly-present block in a plainly-ignored file is exactly what
-  # made this undiagnosable. Only the keys we own are removed; permissions,
-  # hooks, theme, plugins and foreign servers stay exactly as found.
-  $ccSettings = Join-Path $HOME ".claude\settings.json"
-  if (Test-Path $ccSettings) {
-    $removed = @()
-    $legacyResult = Update-AiDevOpsJsonFileAtomic -Path $ccSettings -Depth 12 -Update {
-      param($legacy)
-      if ($legacy.ContainsKey("mcpServers")) {
-        $script:removed = @($McpServers.Keys | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
-        foreach ($name in $script:removed) { $legacy["mcpServers"].Remove($name) }
-        if ($legacy["mcpServers"].Count -eq 0) { $legacy.Remove("mcpServers") }
-      }
-      return $legacy
-    }
-    if ($removed.Count -gt 0) {
-      Ok "Removed the stale (ignored) MCP block from settings.json: $($removed -join ', ')"
-      if ($legacyResult.Backup) {
-        Ok "  protected prior JSON: $($legacyResult.Backup)"
-        Note "  recovery: Copy-Item -LiteralPath '$($legacyResult.Backup)' -Destination '$ccSettings' -Force"
-      }
-    }
-  }
-
-# --------------------------------------------------------------------------
-# 8. Memory auto-sync - keep Claude memories in sync across machines
-# --------------------------------------------------------------------------
-# ai-memory-sync owns a private clone, privacy proof, union, health gate, and
-# commit. Seed incoming facts now, but keep unattended publishing disabled until
-# qualification explicitly opts in with -EnableMemorySyncSchedule.
 Step "Private memory sync"
 if (Test-Path $gitBash) {
   # Windows path -> Git-bash POSIX path: C:\a\b -> /c/a/b
