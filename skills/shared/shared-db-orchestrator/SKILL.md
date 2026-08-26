@@ -25,14 +25,21 @@ index, constraint, extension, publication, storage policy, or a migration shippi
 
 - **Yes -> accept.** Queue it as `work_type: structural`, `route: shared-db-orchestrator`, and
   dispatch it to a sub-agent in an isolated worktree.
-- **No -> two exits only, and `accept` is never one of them.**
+- **No -> FOUR exits, and `accept` is never one of them.** (Corrected 2026-08-26 to match the
+  owner ruling of 2026-08-21 now recorded in `AGENTS.md` §0.0-C, which **wins**. This skill still
+  taught the superseded three-exit model where repository maintenance, documentation and security
+  settings all exited by FORK — i.e. as orchestrator assignments. The ruling made them **not**
+  orchestrator work at all. Found by independent Codex GPT-5.6 review during shared-db #1605.)
   - **REJECT** — `application-data`, `source-data`. The work belongs to another repository and
     must leave this queue, forwarded to it (see below).
-  - **FORK** — `repo-maintenance`, `documentation`, `security-settings`, and `curated-master-data`.
-    Real shared-db work, but not shape work: hand it to a FRESH sub-agent with an empty context
-    window, exactly as a migration is dispatched. Do not read the code, debug it, or "just fix it
-    quickly" here. Curated Master Data forks rather than leaves because AGENTS.md 6.4 governs it
-    inside this repo.
+  - **FORK** — **`curated-master-data` ONLY.** Genuinely this repo's work, dispatched to a FRESH
+    sub-agent with an empty context window, exactly as a migration is. It forks rather than leaves
+    because `AGENTS.md` §6.4 governs it inside this repo, and forks rather than being accepted
+    because it must not occupy a migration-author lane. Do not extend this exit to anything else.
+  - **REPO-SESSION** — `repo-maintenance`, `documentation`. **Not an orchestrator assignment.**
+    An independent repository session owns these; the orchestrator neither implements nor
+    dispatches them.
+  - **RETURN-TO-OWNER** — `security-settings`. It needs authority the orchestrator does not have.
 
 **A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
 `return_to: owner/repo` in its scope block. Return it with
@@ -42,7 +49,7 @@ step leaves the issue open rather than losing the task. Never close a rejected i
 reject with no `return_to` is reported as `NO RETURN ADDRESS` and makes `--queue-audit` exit 2.
 FORK items are not lost either: they stay open and dispatched until the work is done.
 
-No third exit and no size exemption. `db-work` is an intake label, never proof that an item passed
+No fifth exit and no size exemption. `db-work` is an intake label, never proof that an item passed
 this test. Your own window is for triage, dispatch, review, merge and promotion — nothing else.
 `--queue-audit` prints a `NOT ORCHESTRATOR WORK` block listing every open issue that fails the
 test, stamped REJECT or FORK; clear it, do not carry it.
@@ -74,7 +81,11 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
    ```
    ````
 
-   `route_id` is **your own** id, never the predecessor's — the guard rejects an inherited one:
+   `route_id` is **your own** id, never the predecessor's. The guard catches the common copy — a
+   numeric `handover_issue` whose marker is readable and carries the same id — but it is a **trap,
+   not a proof**: it cannot catch an id reused from an older ancestor, a wrong predecessor number,
+   a `handover_issue: none` that is a lie, or a fabricated id of the right shape. Recording your
+   real id is your obligation.
    - **Codex:** your thread UUID, the `session_id` in your rollout under `~/.codex/sessions/…`. Another session reaches you with `codex-reply` on that `threadId`.
    - **Claude:** your own `sessionId` (e.g. `local_<uuid>`), which another Claude session messages directly.
 
@@ -84,7 +95,9 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
    node scripts/check-orchestrator-marker.mjs --resolve
    ```
 
-   It must print **your** `route_id`. If it does not, other sessions cannot reach you and you are not ready to run.
+   It must print **your** `route_id`. If it does not, no other session can even ADDRESS you, and
+   you are not ready to run. Printing it proves only that the marker declares your address — not
+   that anyone can reach you. Nothing here can prove liveness or delivery.
 2. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of orchestrator ownership.
 3. Record every active workstream and exact claimed database objects.
 4. Warn if more than five open handoffs exist.
