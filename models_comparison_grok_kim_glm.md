@@ -1190,3 +1190,84 @@ underlying fragility; id-based references survive a rename.
 - Final outcome at recording time: APPROVE with nothing blocking merge. Preview
   rehearsal, required checks and the guarded merge remain the orchestrator's
   separate steps.
+
+## 2026-08-24 review rotation evidence
+
+### shared-db #1400 / PR #1406, sequence 287 (post-update, post-supersession head)
+
+- Reviewer: glm-5.3, assigned by the durable round robin
+  (`--assign-reviewer --issue 1400 --pr 1406`), run through the manager-returned
+  `ai-glm` wrapper. `ai-glm doctor` passed all checks and
+  `--reviewer-preflight` returned `ready: true` before the run.
+- Exact reviewed head: `8f178a9411daab6f2f8592feecf870ae9c579f18`.
+- Verdict: APPROVE. No Critical, High or Medium finding. Four Low findings.
+- Context supplied, not inherited: a prior glm-5.3 review at `e1bc5792`
+  (sequence 272) had returned APPROVE (provisional) with no Critical/High/Medium.
+  That was a `codex`-caller session; session keys include the caller, so sequence
+  287 ran as a genuinely fresh `claude` session with no shared state and re-derived
+  every conclusion from the tree.
+- Scope: the security correctness of `api.db_data_admin_licensor_property_tree`
+  plus the delta introduced by updating the branch from `main` and by the governed
+  migration-version supersession `20260824002041` -> `20260824151714`.
+- Confirmed: the supersession is a content-identical rename (git `R100`, zero
+  insertions/deletions); the new version sorts after every version in the
+  repository so `check-sql.sh` Guard B is genuinely satisfied rather than silently
+  quiet; zero stale references to the old version survive on any decision-making
+  surface, including every `2026082*` entry in `scripts/production_migration_guard.py`
+  (the issue #1182 failure mode is absent here); the merge left the function, the
+  contract test and `universe_a_empty_character_drop_contracts.sql` coherent against
+  the post-#1377 catalog; the authorization gate is the first executable statement
+  ahead of every `core.*` read; `security definer` with a pinned `search_path` and
+  fully schema-qualified relations; constant error messages on both the gate and the
+  cursor-decode handler, so no error path acts as an oracle for an unauthorized
+  caller; keyset paging is collation-consistent and tie-unique with correct
+  `limit +1` termination; `revoke from public` / `grant to authenticated` leaves
+  `anon` without EXECUTE.
+- Findings: four, all Low and none blocking. (1) The refusal assertion in
+  `supabase/tests/db_data_admin_licensor_property_tree.sql` runs before the
+  `licensing`/`plm` fixture deletes, so a borrowed live profile already holding that
+  pair produces a spurious failure — fail-safe, it can only fail the test and can
+  never mask a gate defect. (2) `property_count` is derived from search-matching
+  properties rather than all properties, unreachable from the shipped caller, which
+  passes `p_search: null`. (3) `active_property_count` mirrors `property_count` and
+  `status` is hardcoded because Universe B has no per-property status — intentional
+  and documented. (4) Guard B2's live-ledger comparison is not observable from a
+  read-only packet.
+- Defects caught: 0. False positives: 0. Finding (1) was independently reproduced
+  by the orchestrating session by reading the fixture ordering directly, and is
+  accurate as described.
+- Policy/tool adherence: read-only review agent with no bash, edit or write tool,
+  run against the wrapper's private snapshot. No database call, secret, licensed
+  row, push, preview or production action occurred. The reviewer stated plainly
+  what it could not verify — live ledger contents, the GitHub-side lane
+  re-reservation, blob-level hashing, and that no tests were executed in-run.
+- Coverage statement: supplied and specific, naming every file and line range read,
+  every tree-wide search run (including a positive control validating that the
+  `20260824002041` zero-hit result was a real absence rather than a broken search),
+  the ordering globs used to establish Guard B, and an explicit
+  "could not verify" list. This is the shape issue #1220 requires; it is not a bare
+  verdict.
+- Continuity: one named persistent session, `shared-db-pr1406-seq287`. Initial
+  review only; no rebuttal turn was needed, so the bounded-debate limit of three
+  was not approached.
+- Reported usage: 228 input, 2,412 output, 6,825 reasoning tokens, cache read
+  75,136, cache write 0. GLM does not report cost and none is estimated.
+- Final outcome at recording time: all 13 required checks green at
+  `8f178a9411daab6f2f8592feecf870ae9c579f18`, including the ephemeral-database
+  contract suite and the migration-author lease. Nothing merged, no preview apply,
+  no production action.
+
+### Operational note — a branch update can strand a reserved migration version
+
+PR #1406 had to be updated because `guarded-migration-merge.yml` asserts
+`git merge-base HEAD origin/main == origin/main` before minting its status, so a
+behind head can never merge through the guarded path. Updating it is what pushed
+the reserved version behind `main`'s newest migration and tripped Guard B, which
+compares against the base branch permanently. The two rules interact: satisfying
+the merge guard can invalidate the version reservation, and the governed
+supersession command is the only exit. Worth expecting on any PR that sits long
+enough to fall behind.
+
+The command's flag is `--claim-number`, not `--claim`; passing `--claim` fails with
+`REFUSED: unknown argument`, which reads like a permission or state problem and is
+not one.
