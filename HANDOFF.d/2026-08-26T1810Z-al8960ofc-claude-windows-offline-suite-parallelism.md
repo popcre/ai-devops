@@ -380,6 +380,13 @@ change in the same pull request as the parallelisation.
    one-sentence answer on item 1.
 
 2. **Fix issue [#89](https://github.com/popcre/ai-devops/issues/89) — FIRST.**
+   ⚠️ **#89 has its OWN handoff — read it before starting:**
+   `HANDOFF.d/2026-08-26T1125Z-edge-dev-claude-flaky-reviewer-tests.md` (open,
+   owner `claude/github-org-move-handoff-d576f2`). It is a separate workstream
+   with its own §0 owner decisions. **Do not merge the two handoffs and do not
+   edit that file** — it belongs to another session. This step and that handoff
+   describe the same work from two directions; that one is authoritative on
+   *how* to fix the flakes, this one on *why it now blocks #98*.
    Title: *"test-ai-grok-review.sh and test-ai-kimi.sh are non-deterministic: they
    assert on wall-clock timing."* The four failing assertions are named in §3.
    Replace wall-clock assertions with explicit synchronization (a marker file, a
