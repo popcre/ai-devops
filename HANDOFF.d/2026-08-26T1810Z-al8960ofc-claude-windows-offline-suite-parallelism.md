@@ -421,6 +421,20 @@ change in the same pull request as the parallelisation.
 
 8. **Close #98 and DELETE this handoff file in the same pull request.**
 
+### At the END of every step above, before you stop
+
+**Re-read steps 1-8 through to the end and report any drift** — anything you did
+or learned that changes a later step's assumptions, target, ordering or approach.
+Write it into this file (or into the closing report, if you are the session
+retiring this file), and say so explicitly even when the answer is "no drift".
+
+This is not boilerplate, and this session is the proof. Measurement in step 2
+disproved the predecessor's Finding 1, closed one of its open uncertainties, and
+**reordered the remaining work** by promoting #89 from a parallel track to a hard
+prerequisite (Finding 6). None of that was foreseeable when those steps were
+written. A session that executes its own step and stops without re-reading the
+rest hands the next session a plan that is quietly wrong.
+
 ## 7. Constraints and gotchas in force
 
 ### Retirement of the predecessor
