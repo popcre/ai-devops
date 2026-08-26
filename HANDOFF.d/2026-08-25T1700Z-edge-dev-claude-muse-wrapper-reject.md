@@ -66,3 +66,31 @@ merge — beyond the two gate reviews. `bin/ai-muse:3` is `set -euo pipefail`, s
 a failing command substitution in the new inventory code would abort *after* the
 provider answered, losing the report; the plan requires the inventory step to be
 survivable and tests it.
+
+## 7. The landing step was corrected after an independent review
+
+An independent Codex final-check (run `20260825T182726-448910-20250`, against
+`a42e415`) rejected this plan's original Step 5 on two counts. Both were fixed
+in `c87fe624df4e65140f07c5dd685cce4aaa1d5285`. Read Step 5 in full before
+landing anything — its ordering is not optional:
+
+- **The exact-state review must run after every tracked-file edit.** The first
+  draft ran it before the final docs, STATUS and handoff updates, which change
+  the whole-source digest and silently void the review. Step 5 is now 5a (finish
+  every edit, including the `session-docs-update` pass) → 5b (live proof) → 5c
+  (suite, both gates, final-check on the publishable state) → 5d (publish only;
+  re-run 5c if anything changes at all).
+- **The final-check report path goes in the commit message, not into this plan
+  by a later edit.** That circularity — a STATUS cell that cannot exist until
+  after the review — is what created the contradiction.
+- **The live Muse rejection proof is mandatory, not optional**, and it is a paid
+  provider call that **Albert authorizes**. Ask before spending; if he declines,
+  stop and report rather than substituting the offline stub tests.
+- **Run the live reproduction in a disposable scratch repository**, never in the
+  `ai-devops` checkout — it works by creating an untracked file mid-turn, which
+  inside this checkout would itself invalidate the review about to run.
+
+A re-run of the same gate on the corrected plan (run
+`20260825T190544-629546-5295`, against `d97cf0a`) raised no finding against this
+file. That run returned REJECT for unrelated reasons in another workstream's
+files, since `final-check` binds the whole repository state rather than a diff.
