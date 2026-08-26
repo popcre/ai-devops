@@ -23,13 +23,22 @@ open work.
 | 6 | Installer + `--check` support for the hook | ✅ done 2026-08-26 | `bin/ai-install-completion-check-hook`, modelled on `bin/ai-install-memory-hook`: idempotent, additive, refuses an unparseable `settings.json` |
 | 7 | Unit test the hook | ✅ done 2026-08-26 | `tests/test-ai-completion-check-hook.sh` — 33 assertions, all passing, including the loop guard, the silence cases, and coexistence with the memory-index hook |
 | 8 | Codex compensating control (no Stop hook exists) | ✅ done 2026-08-26 | `skills/codex/codex-session-closeout/SKILL.md` opens with a pointer to the closeout contract in the global — one pointer, not a second copy of the rule; audit reports 0 new overlaps |
-| 9 | Behavioral eval harness `tools/completion-eval/` | 🟡 built, scorer needs escalation | `tools/completion-eval/completion-eval.py` + `completion-honesty.eval.json` (8 pending scenarios, 4 controls) + `README.md`; both clients read-only, Codex pinned to low/medium effort. **Its keyword scorer misclassified 6 of 24 replies on the first baselines**; five are fixed and locked in `tests/test-completion-eval.sh`, one is not. Per this plan's own criterion the scorer must now escalate to a rubric-scored model judge — see the KNOWN LIMIT section of the tool README |
+| 9 | Behavioral eval harness `tools/completion-eval/` | 🟡 built, scorer needs escalation | `tools/completion-eval/completion-eval.py` + `completion-honesty.eval.json` (8 pending scenarios, 4 controls) + `README.md`; both clients read-only, Codex pinned to low/medium effort. **Its keyword scorer misclassified 6 of 24 replies on the first baselines**; five are fixed and locked in `tests/test-completion-eval.sh`, one is not. Per this plan's own criterion the scorer would have escalated to a rubric-scored model judge — **but step 10 was closed by owner decision on 2026-08-26 ("stop measuring"), so do NOT build that judge.** This row stays amber as an honest record of a known-imperfect tool, not as open work — see the KNOWN LIMIT section of the tool README |
 | 10 | Score the OLD text, then the rewritten text, on Claude and Codex | ⛔ CLOSED by owner decision 2026-08-26 | Albert: **"stop measuring."** Old-text baselines stand as the record (`tools/completion-eval/results/`), and they showed the scenarios cannot reproduce the failure — they narrate which deliverable is unfinished, while the real failure is not noticing. The scenario redesign is NOT to be built. **Consequence to state plainly whenever this work is discussed: the rewritten rule rests on the owner's lived evidence, and is not validated by measurement. Do not describe it as proven** |
 | 11 | Reconcile the **installed** globals on every machine | 🟡 partial | Hook installed and proven live on `edge-dev` (`ai-install-completion-check-hook --check` → OK; the installed copy returns `decision: block` on a false completion). The rewritten globals are NOT yet adopted on any machine |
 | 12 | Docs, router row, memory entry, close the handoff | 🟡 partial | `docs/config-inventory.md` (Claude hooks entry), `docs/context-engineering.md:250` (worked example 11), `AGENTS.md` router row, memory `completion-honesty-enforcement.md`. The handoff stays OPEN until 8, 10 and 11 are done |
 
-**A fresh session picks up at step 11 (adopt the globals).** Everything else
-is either done or closed by owner decision. What is left, in order:
+**A fresh session starts by merging the open pull request, then does step 11.**
+Everything else is done or closed by owner decision. What is left, in order:
+
+0. **Merge the open PR on branch `claude/completion-honesty-implement`** — it
+   carries every change this plan describes. On 2026-08-26 it sat queued behind
+   ~12 other org CI runs for over two hours; that is shared Actions contention,
+   not a fault in the branch. One earlier run passed and one hit a runner
+   `startup_failure` (transient — rerun it). The repo uses a **merge queue**, so
+   `gh pr merge <n> --squash --delete-branch` is refused: use
+   `gh pr merge <n>` and let the queue take it. Albert does not merge; the
+   session does. **Nothing downstream can happen until this lands.**
 
 1. **Step 10 — closed, do not reopen.** Albert ruled "stop measuring" on
    2026-08-26. `tools/completion-eval/` stays in the repo as a working tool and
@@ -39,10 +48,16 @@ is either done or closed by owner decision. What is left, in order:
    `bin/ai-adopt-globals` (never `--adopt-globals` by hand). Nothing has adopted
    them yet: the repo carries the new text, every machine still runs the old.
    The Claude `Stop` hook IS live on `edge-dev`.
-3. **Step 12 — finish**: record the new-text results here by path, then delete
-   the handoff.
+3. **Step 12 — finish**: tick step 11's STATUS row with the machines actually
+   reached, name any machine that was not reachable, then delete the handoff.
+   Do **not** look for new-text eval results to record — step 10 is closed and
+   there will not be any.
 
-Re-read the downstream steps before starting each one.
+**Before starting each remaining step, re-read every step after it, and report
+any drift** — anything done or discovered that changes a later step's
+assumptions. That is what catches the kind of staleness found on 2026-08-26,
+when this block still told a reader to record measurement results hours after
+the owner had closed measuring.
 
 ### Order history, 2026-08-26 — read this before changing the order again
 
