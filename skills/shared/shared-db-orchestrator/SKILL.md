@@ -53,7 +53,7 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
 
-   **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. A bare `gh issue list --label orchestrator-marker` has printed empty while a marker existed, and an empty result reads as permission to start.
+   **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. Hand-querying the label has printed empty while a marker existed, and an empty result reads as permission to start.
 
 1a. **Claim your marker with a routing block, and name your session `shared-db.orch…`** (shared-db `AGENTS.md` §11c, issue #1605, owner instruction 2026-08-26). The marker is how every other session finds you; without a routable address it proves only that *someone* is running, and a session with no address falls back to a handoff or conversation history — which is how an authorized request reached an orchestrator that had already closed.
 
