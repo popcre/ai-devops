@@ -21,11 +21,11 @@ be executed end to end without a ruling.
    twice. It can be noisy. *Recommendation: yes* — it is additive, reversible by
    deleting one settings entry, and step 9's control scenarios measure the noise
    before rollout. Ask only if Albert has said he dislikes hooks.
-2. **If the eval (step 10) shows the existing wording works once Claude actually
-   has it, is that the end of the workstream?** *Recommendation: no — keep the
-   audit coverage, the eval, and the machine reconciliation (steps 3, 4, 9, 11).*
-   Those are what let anyone tell whether a rule is in force and working; their
-   absence is the proven root cause. Only the rewrite (step 2) gets dropped.
+2. **If two successive rewrites fail to move a working eval, does Codex get a
+   mechanical backstop after all?** Decision 6 (no Codex hook) was made while
+   the wording still looked salvageable; Albert has since called Codex
+   "borderline useless" on this. *Recommendation: ask only if it actually
+   happens* — do not pre-emptively reopen it.
 
 **NOT PART OF THIS WORK, AND NOBODY IS ON IT:**
 
@@ -47,12 +47,17 @@ be executed end to end without a ruling.
 
 **Already settled — do NOT re-ask:**
 
-- 2026-08-26 — the fix is a package (get the existing rule into both clients +
-  audit enforcement + Claude hook + behavioral eval), not another prose rewrite.
-- 2026-08-26 — **measure before rewording.** Albert challenged the first draft:
-  Claude never had the rule, so its wording is untested there. Any rewrite is
-  now step 2 and is conditional on the step-10 measurement. The default is **no
-  rewrite**. See the plan's "Order correction" note — do not reverse it.
+- 2026-08-26 — the fix is a package (rewritten rule in both clients + audit
+  enforcement + Claude hook + behavioral eval). The rewrite is required, but it
+  never ships alone — that is what failed twice.
+- 2026-08-26 — **the rewrite is required.** Two rulings landed the same day and
+  the second governs: Albert first asked whether the wording was fine and merely
+  unused (true for Claude, where it was never installed), then supplied the
+  frequency evidence — the rule *was* live on Codex and Codex was "the much
+  worse offender, to the point it was borderline useless." Sustained failure
+  under live text is a failure of the text. Step 2 is not conditional. Read the
+  plan's "Order history" note before touching the order — a session that sees
+  only the first ruling will wrongly re-suspend the rewrite.
 - 2026-08-26 — no approval loops. Nothing in this work may make a session ask
   permission to do work it was already told to do.
 - 2026-08-26 — no Codex hook system will be built.
@@ -83,7 +88,7 @@ session with authorized work left must keep working rather than end the turn.
 
 ## 3. Current state — what is true right now
 
-- **Done this session:** diagnosis (five findings, section 5 below) and the
+- **Done this session:** diagnosis (six findings, section 5 below) and the
   implementation plan file. Nothing else.
 - **Not started:** every one of the plan's twelve steps.
 - **Files added on this branch:** `plan_completion-honesty-enforcement.md` and
@@ -113,6 +118,14 @@ reason each fails. Read it before "improving" the plan.
 
 ## 5. Root causes and key findings
 
+- **F0 — the wording is established as inadequate on Codex, not merely
+  suspected.** The rule was live and current there, and Albert's frequency
+  report is that Codex was "the much worse offender, to the point it was
+  borderline useless." A sustained pattern under live text convicts the text.
+  Claude, by contrast, never had the rule at all (F3), so nothing is known about
+  the wording there — keep a Claude arm in the eval and do not assume the Codex
+  diagnosis transfers wholesale. Codex also gets no mechanical backstop, so on
+  that client the wording is the only defense there is.
 - **F1 — the rule is disclosure-shaped; the failure is a belief failure.**
   `AGENTS-global-codex.md:7-11` asks a session to check whether the work is
   finished and say so if not. The failing session did that and sincerely
@@ -143,25 +156,31 @@ The plan file holds all twelve steps with their verification gates. In short:
    came from and record the answer in this handoff.
    *You'll know it worked when:* the grep output and a one-line verdict
    ("current text" vs "stale text") are written down.
-2. **Steps 1, 3, 4** — copy the **existing** rule text verbatim into
-   `CLAUDE-global.md` (no rewrite), add it to `context-audit.py` as a safety
-   category **and** a parity rule, extend `tests/test-context-audit.ps1`
-   fixtures. **Step 2 (any rewrite) is skipped for now** — it is conditional on
-   step 10.
-3. **Steps 9–10 come next, before any rewrite** — build the eval and score the
-   existing wording on both clients. That measurement decides whether step 2
-   ever happens.
-4. **Steps 5–7** — build `bin/ai-completion-check-hook` (Claude `Stop` hook,
+2. **Step 1 — same-day stopgap.** Claude has no completion rule at all right
+   now; copy the existing text into `CLAUDE-global.md` verbatim. One commit, no
+   wording debate.
+3. **Step 2 — the rewrite. REQUIRED, and the heart of the work.** Restructure
+   the rule per the constraints in the plan (account for the named deliverables,
+   not a self-report; say outright that ending the turn with authorized work
+   left is the error; attach a test to "genuinely complete"). Weight it toward
+   Codex — the worse offender, and the client with no hook.
+4. **Steps 3, 4** — `context-audit.py` safety category + parity rule, and the
+   matching `tests/test-context-audit.ps1` fixtures.
+5. **Steps 9–10** — build the eval and score the OLD text before step 2 lands,
+   then the new text. The eval proves the rewrite worked; it does not decide
+   whether to do it. **Capture the old-text baseline before step 2 merges or
+   the comparison is gone.**
+6. **Steps 5–7** — build `bin/ai-completion-check-hook` (Claude `Stop` hook,
    `stop_hook_active` loop guard mandatory, silent exit 0 on the common path),
    its installer, and its test.
-5. **Step 8** — the Codex compensating pointer.
-6. **Steps 11–12** — reconcile installed globals on every machine via
+7. **Step 8** — the Codex compensating pointer.
+8. **Steps 11–12** — reconcile installed globals on every machine via
    `bin/ai-adopt-globals`, then docs, router row, memory entry, and delete this
    handoff once every STATUS row cites an artifact.
 
-Do not start at step 5 because it looks like the real fix, and do not start with
-a rewrite because the text reads improvably. Step 1 is nearly free, and step 0
-can invalidate part of the diagnosis.
+Do not start at step 5 because it looks like the real fix. Step 0 is two
+commands, step 1 is one commit, and step 0 can still correct part of the
+diagnosis.
 
 ## 7. Constraints and gotchas in force
 
