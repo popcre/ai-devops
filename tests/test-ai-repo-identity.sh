@@ -107,7 +107,19 @@ check 'the Windows installer uses the shared allow-list' \
   "grep -Fq 'Assert-AiDevOpsRepoIdentity' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check 'the public-hub memory guard uses the shared allow-list' \
   "grep -Fq 'ai-repo-identity' '$ROOT/bin/ai-sync-memory'"
-check 'no identity guard was softened into a warning' \
-  "! grep -nE 'Assert-AiDevOpsRepoIdentity.*(-WarningAction|Write-Warning)' '$ROOT/bin/bootstrap-windows-dev.ps1' '$ROOT/bin/install-ai-devops-windows.ps1'"
+# A same-line grep cannot see `try { Assert-... } catch { Write-Warning }`, so
+# inspect a window around every call site instead, and require the helper itself
+# to still throw. Proven by injecting each softening and watching this go red.
+soften_re="-WarningAction|Write-Warning|-ErrorAction[[:space:]]+(SilentlyContinue|Continue)"
+for f in "$ROOT/bin/bootstrap-windows-dev.ps1" "$ROOT/bin/install-ai-devops-windows.ps1"; do
+  check "no identity guard was softened in $(basename "$f")" \
+    "! grep -nE -A4 -B4 'Assert-AiDevOpsRepoIdentity' '$f' | grep -qE -- \"$soften_re\""
+done
+check 'the assertion helper still throws on an unlisted identity' \
+  "grep -Fq 'throw' '$ROOT/bin/repo-identity.ps1'"
+check 'the assertion helper never downgrades to a warning' \
+  "! grep -qE \"Write-Warning|-WarningAction\" '$ROOT/bin/repo-identity.ps1'"
+check 'the public-hub memory guard still refuses rather than warns' \
+  "grep -qE 'BLOCKED' '$ROOT/bin/ai-sync-memory'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

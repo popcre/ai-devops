@@ -17,7 +17,13 @@ The full recovery procedure is in
 
 ## Repository rules
 
-- Work directly on `main`; do not create feature branches for this repository.
+- **Work on a branch and open a pull request. Do not push to `main`.**
+  `main` is protected by a ruleset with a merge queue, so a direct push is
+  rejected. This replaced the old "work directly on `main`" rule when the
+  repository moved to the `popcre` organization on 2026-08-26 (issue #84).
+  `config/repository-policy.json` reports `feature-branch-pr` for this
+  repository under **both** owner names, so an old `u2giants` clone and a new
+  `popcre` clone behave identically.
 - GitHub is the source of truth. Finished work is tested, committed, pushed, and
   verified on `origin/main`.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
