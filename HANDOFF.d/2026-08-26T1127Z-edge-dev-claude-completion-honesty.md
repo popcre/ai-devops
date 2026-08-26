@@ -1,3 +1,9 @@
+---
+issue: 108
+status: OPEN
+owner: claude/completion-honesty-implement
+---
+
 # HANDOFF — false completion: sessions report "nothing is needed" while authorized work is pending (2026-08-26 11:27 UTC, edge-dev/claude)
 
 - **Status:** OPEN — the plan was implemented on 2026-08-26 except the new-text
