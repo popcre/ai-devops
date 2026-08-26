@@ -49,9 +49,59 @@ Defined once in `bin/setup-machine.ps1` step 5d. Step 5d-2 assigns scope.
 
 Ownership decided by Albert, 2026-08-26.
 
+**`synology-monitor` is worked on ~90% of the time from the hetz Ubuntu VPS, and
+is not cloned on `edge-dev`.** Its two servers therefore remain in the Windows
+global set for now. They must be scoped by committing a `.mcp.json` **in that
+repo, authored on Linux** — the current Windows definitions point at
+`.config/ai-devops/mcp-remote-launch.cmd`, which does not exist there. Do not
+seed that project from a Windows machine.
+
 **Codex-only:** `vercel`, via Codex's native HTTP transport. Deliberately absent
 from Claude — behind `mcp-remote` it returns a 1-hour token with no refresh
 token and re-opens a browser login every hour.
+
+## The committed `.mcp.json` is the authority — not the setup script
+
+A project is tied to its servers by the **`.mcp.json` committed in that project's
+repository**, not by any path on any one machine. This matters because:
+
+- **Extra clones.** Claude routinely creates a second or third checkout of the
+  same repo (`shared-db-worktrees/`, `ai-devops-docs-1599/`,
+  `licensor-source-data-sega-load/`). A committed file is present in all of them
+  automatically. A machine-local list could never enumerate them.
+- **Linked worktrees.** `.mcp.json` is a tracked file, so every
+  `.claude/worktrees/<name>/` checkout has it too.
+- **Other machines, including Linux.** The file travels with git to the hetz
+  Ubuntu VPS and to every other workstation.
+
+`bin/setup-machine.ps1` step 7b is therefore only a **bootstrap convenience** —
+it seeds the file once so it can be committed. It probes several candidate roots
+(`%USERPROFILE%\repos`, `C:\repos`, `D:\repos`, `/worksp`) rather than assuming
+one, it never overwrites an entry the repo already owns, and a project it cannot
+find is reported, not silently dropped.
+
+### Portability rules for a committed `.mcp.json`
+
+- **Never write a literal profile path.** Use `${USERPROFILE}` — Claude Code
+  expands it in `.mcp.json`. (Claude *Desktop* does **not** expand variables in
+  its own config, which is why the global config still carries literal paths.)
+- **A Windows `.cmd` launcher path does not work on Linux.** A project worked on
+  from both Windows and the hetz Ubuntu VPS needs entries that resolve on both,
+  or a per-OS launcher. Check this before assuming a committed file is portable.
+- First use in a project shows **"Pending approval"**. That is the safety
+  mechanism that stops a repository from adding servers behind your back —
+  approve it once per project.
+
+## Codex is different
+
+Codex reads MCP servers from `~/.codex/config.toml` (global) with optional
+`--profile` layering. **It has no project-scoped equivalent of `.mcp.json`**, so
+this rule cannot be applied to it.
+
+In practice Codex does not have the same problem: it does not keep a parked
+session per task the way Claude Desktop does. Measured alongside the 416-process
+Claude figure above, Codex accounted for 20 processes and 1.2 GB. If long-lived
+Codex sessions ever accumulate, `--profile` is the only lever available.
 
 ## How to add a server
 

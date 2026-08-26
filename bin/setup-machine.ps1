@@ -530,9 +530,25 @@ $McpProjectScope = [ordered]@{
   "synology-monitor" = "synology-monitor"
 }
 
-# Repo root that holds the project checkouts. Projects that are not cloned on
-# this machine are reported and skipped, never silently dropped.
-$McpProjectRoot = "C:\repos"
+# WHERE THE PROJECT FILE COMES FROM
+#
+# The authority is the .mcp.json COMMITTED IN EACH PROJECT REPO. That file travels
+# with git, so it reaches every machine (Windows and the hetz Ubuntu VPS), every
+# fresh clone, every EXTRA clone that lands in a sibling directory, and every
+# linked worktree - none of which this script knows about or could enumerate.
+#
+# This step is therefore a BOOTSTRAP CONVENIENCE only: it seeds the file on this
+# machine so it can be committed once. Do NOT make it the source of truth, and
+# never hardcode a single repo root - checkouts live under different roots on
+# different machines.
+#
+# Candidate roots are probed in order; the first that contains the project wins.
+$McpProjectRoots = @(
+  (Join-Path $env:USERPROFILE "repos"),
+  "C:\repos",
+  "D:\repos",
+  "/worksp"
+) | Where-Object { Test-Path -LiteralPath $_ }
 
 # Servers that stay global: needed from any repository.
 $McpGlobalNames = @($McpServers.Keys | Where-Object { -not $McpProjectScope.Contains($_) })
@@ -804,22 +820,50 @@ foreach ($name in $McpProjectScope.Keys) {
 }
 
 foreach ($proj in $McpByProject.Keys) {
-  $projDir = Join-Path $McpProjectRoot $proj
   $names   = $McpByProject[$proj]
+  $projDir = $null
+  foreach ($root in $McpProjectRoots) {
+    $candidate = Join-Path $root $proj
+    if (Test-Path -LiteralPath $candidate) { $projDir = $candidate; break }
+  }
 
-  if (-not (Test-Path -LiteralPath $projDir)) {
-    Warn "Not cloned on this machine, skipped: $projDir"
-    Warn "  owns: $($names -join ', ') - clone it and re-run to wire them."
+  if (-not $projDir) {
+    Warn "Not cloned under any known root on this machine, skipped: $proj"
+    Warn "  owns: $($names -join ', ')"
+    Warn "  roots probed: $($McpProjectRoots -join ', ')"
+    Warn "  NOT a failure if the repo already carries its own committed"
+    Warn "  .mcp.json - that file is the authority and travels with git."
     continue
   }
 
+  # Never overwrite an entry the repo already owns: it may have been made
+  # portable by hand for a non-Windows machine (the hetz Ubuntu VPS).
   $projCfg = Join-Path $projDir ".mcp.json"
+  if (Test-Path -LiteralPath $projCfg) {
+    $existing = Get-Content -LiteralPath $projCfg -Raw | ConvertFrom-Json
+    if ($existing.mcpServers) {
+      $owned = @($names | Where-Object { $existing.mcpServers.PSObject.Properties.Name -contains $_ })
+      if ($owned) {
+        Note "$proj already carries: $($owned -join ', ') - left untouched"
+        $names = @($names | Where-Object { $owned -notcontains $_ })
+      }
+    }
+  }
+  if (-not $names) { continue }
+
   if (-not (Test-Path -LiteralPath $projCfg)) { '{}' | Set-Content -LiteralPath $projCfg -Encoding utf8 }
 
   $projResult = Update-AiDevOpsJsonFileAtomic -Path $projCfg -Depth 12 -Update {
     param($cfg)
     if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-    foreach ($n in $names) { $cfg["mcpServers"][$n] = $McpServers[$n] }
+    foreach ($n in $names) {
+      # PORTABILITY: a project file is committed and then read on OTHER machines
+      # with different user names, so it must never carry THIS machine's literal
+      # profile path. Claude Code expands ${USERPROFILE} in .mcp.json (Claude
+      # Desktop does NOT, which is why the global config keeps literal paths).
+      $def = ($McpServers[$n] | ConvertTo-Json -Depth 12).Replace($env:USERPROFILE, '${USERPROFILE}')
+      $cfg["mcpServers"][$n] = ($def | ConvertFrom-Json -AsHashtable)
+    }
     return $cfg
   }
   Ok "$projCfg <- $($names -join ', ')"
