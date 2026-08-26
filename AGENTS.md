@@ -53,6 +53,7 @@ The full recovery procedure is in
 | Install, update, uninstall, or restore | [`docs/deployment.md`](docs/deployment.md), [`docs/restore-from-zero.md`](docs/restore-from-zero.md), affected lifecycle scripts | Preserve machine-local configuration |
 | Windows machine setup | [`docs/windows-winget-configuration.md`](docs/windows-winget-configuration.md), `bin/bootstrap-windows-dev.ps1`, `bin/setup-machine.ps1`, `bin/verify-windows-dev.ps1` | Transitional setup scripts are not the primary path |
 | Secrets, MCP tokens, or 1Password | [`docs/onboarding-secrets.md`](docs/onboarding-secrets.md), [`docs/config-inventory.md`](docs/config-inventory.md), affected setup script | Serialize 1Password access; never commit secret values |
+| Add or move an MCP server | [`docs/mcp-server-scope.md`](docs/mcp-server-scope.md), `bin/setup-machine.ps1` steps 5d / 5d-2 / 7b | A server only one project uses is **project-scoped, never global** — every global server starts in every session |
 | Model commands or settings | [`docs/configuration.md`](docs/configuration.md), [`docs/model-setup.md`](docs/model-setup.md) | Per-machine commands stay outside source code |
 | Prompt templates | `templates/prompts/`, [`docs/architecture.md`](docs/architecture.md) | Change only the affected workflow stages |
 | Skill creation, placement, or trigger quality | [`docs/skills-map.md`](docs/skills-map.md), [`docs/skills-usage-guide.md`](docs/skills-usage-guide.md), [`docs/skill-trigger-eval.md`](docs/skill-trigger-eval.md) | Shared is the default; never keep duplicate client copies |
