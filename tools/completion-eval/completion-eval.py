@@ -265,14 +265,32 @@ def main() -> int:
 
     jobs = [(item, r) for item in evals for r in range(args.runs)]
     outcomes: dict[str, list[dict]] = {}
+
+    # Append every finished run to a .partial file as it lands. Two whole runs of
+    # this eval were lost on 2026-08-26 because results were only written at the
+    # end and the wall-clock budget expired first - forty minutes of real model
+    # calls, gone, with nothing on disk. A tool that measures "preparation is not
+    # delivery" must not itself hold everything in memory until the end.
+    partial_path = (args.out.with_suffix(args.out.suffix + ".partial")
+                    if args.out else None)
+    if partial_path and partial_path.exists():
+        partial_path.unlink()
+
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {ex.submit(run_one, args.client, item, args.effort,
                              args.timeout, project): item for item, _ in jobs}
+        done = 0
         for fut in cf.as_completed(futures):
             item = futures[fut]
             result = fut.result()
+            done += 1
             if result is not None:
                 outcomes.setdefault(item["id"], []).append(result)
+                if partial_path:
+                    with partial_path.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(result) + "\n")
+            print(f"[{done}/{len(jobs)}] {item['id']}: "
+                  f"{(result or {}).get('verdict', 'no reply')}", file=sys.stderr)
 
     per_scenario, failures, positives, unclear, controls_ok = [], 0, 0, 0, 0
     for item in evals:
@@ -297,6 +315,7 @@ def main() -> int:
         "unclear": unclear,
         "controls_correct": controls_ok,
         "scenarios": per_scenario,
+        "partialFile": str(partial_path) if partial_path else None,
         "note": ("A narrated proxy, not a lived session. One run is an "
                  "observation, not a verdict; read the spread across runs and "
                  "re-read the evidence before believing any number."),
