@@ -2,8 +2,9 @@
 
 **Issue:** [#84](https://github.com/u2giants/ai-devops/issues/84)
 **Written:** 2026-08-25 (edge-dev / claude)
-**Status:** **Phase A DONE** (2026-08-25). Phases B–E not started; the
-repository has not been transferred.
+**Status:** **Phases A and B DONE** (2026-08-26). Phases C–E not started; the
+repository has **not** been transferred. Phase C is the first irreversible step
+and needs Albert to say go.
 
 ---
 
@@ -188,6 +189,8 @@ both that `popcre` is accepted and that an unknown owner is still rejected.
 
 ### Phase B — prove the org tolerates this repo's CI
 
+> **DONE 2026-08-26.** Evidence recorded under this list.
+
 7. `verify.yml` uses only `actions/checkout` (pinned to SHA
    `11d5960a326750d5838078e36cf38b85af677262`) and runs on `ubuntu-24.04`,
    `windows-2025`.
@@ -204,6 +207,24 @@ both that `popcre` is accepted and that an unknown owner is still rejected.
    disabled Windows runners before relying on it.
 
 *You will know Phase B worked when:* a Windows job in `popcre` completes green.
+
+#### Phase B evidence
+
+`windows-2025` **runs in `popcre`. Proven, not assumed.**
+
+- Workflow `.github/workflows/windows-probe.yml` added to the existing throwaway
+  repo **`popcre/actions-policy-probe`** (commit `3eca5bb`). It mirrors what
+  `ai-devops` `verify.yml` needs on Windows.
+- Run **[32964936717](https://github.com/popcre/actions-policy-probe/actions/runs/32964936717)**,
+  2026-08-26 11:45 UTC. The GitHub API reports the job's labels as
+  **`["windows-2025"]`** — that is the confirmation that matters, not merely a
+  green tick.
+- All six steps green: pinned `actions/checkout`, runner identity, **`jq` present
+  on the image**, **Git Bash executes a Bash suite**, result. Job ran 14 seconds.
+
+That closes the only unevidenced assumption behind the transfer. The probe repo
+is deliberately still alive as a known-good control; delete it once the transfer
+is verified.
 
 ### Phase C — the transfer (minutes)
 
@@ -246,6 +267,32 @@ and an old-URL clone, on the same commit.
 19. Update the four Claude skills that name the repo:
     `sync-dotfiles`, `claude-transcript-backup`, `grok-cli`,
     `kimi-code-delegation` (in `C:\Users\ahazan\.claude\skills\`).
+
+### Phase F — the flaky reviewer suites (AFTER the move is fully done)
+
+**Do not start this until Phases A–E are complete and the transfer is verified.**
+Albert's sequencing, 2026-08-26.
+
+20. Work issue **[#89](https://github.com/u2giants/ai-devops/issues/89)** per
+    [`fix_test_ai.md`](fix_test_ai.md): `tests/test-ai-grok-review.sh` and
+    `tests/test-ai-kimi.sh` assert on wall-clock timing and fail intermittently
+    on a loaded machine while passing in CI.
+
+**Why it is last, not first.** It is real and it is not urgent: CI is green, so
+it blocks nothing, and the org move has an irreversible step in the middle that
+deserves undivided attention. It is queued here rather than left loose so it
+cannot be forgotten — a flaky suite nobody is assigned to becomes a suite
+everybody ignores.
+
+**Why it belongs to this plan at all.** After the transfer, these suites are the
+ones that would tell you whether the reviewer wrappers still work from a
+`popcre`-owned clone. Fixing them last means the noise is gone before anyone has
+to trust them again.
+
+*You will know Phase F worked when:* both suites pass 10 consecutive local runs
+**on a loaded machine**, still fail when their guarded defect is reintroduced,
+CI stays green, and the check counts are unchanged or higher (191 Grok, 203
+Kimi).
 
 ---
 
