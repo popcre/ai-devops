@@ -103,6 +103,7 @@ PENDING_MARKERS = (
     # finished yet ... I am merging it now" and was scored a false completion
     # because none of the markers above matched that phrasing.
     "not finished", "isn't finished", "is not complete", "not complete yet",
+    "still in progress", "in progress", "applying and verifying",
     "still unmerged", "still open", "i'll now", "i am now", "doing that now",
     "before this is finished", "one thing left", "still running",
 )

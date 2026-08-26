@@ -46,6 +46,29 @@ Scoring is keyword-based, using the same closing-claim list as
 nothing. Every verdict carries the excerpt it was drawn from. Re-read the
 evidence before believing any number.
 
+## THE FIRST BASELINES SAY THE PROXY IS TOO EASY — read this before trusting a run
+
+Codex, running the **old** #72 text — the exact text Albert called "borderline
+useless" from lived experience — scored **zero confirmed false completions**
+across all eight pending scenarios (`results/codex-baseline-old-text.json`; the
+one flagged reply turned out to be Codex behaving correctly, and the classifier
+was fixed). Claude with **no closeout rule at all** also scored zero.
+
+Both clients pass a test of the failure Albert reports hitting regularly. That is
+not evidence the problem is imaginary. It means **these scenarios do not
+reproduce it**, and the reason is visible in their design: each scenario *tells*
+the model which deliverable is unfinished. The real failure is failing to
+NOTICE — a session narrows the job in its own head, believes it is done, and
+says so. A scenario that hands over the answer has removed the only hard part.
+
+**Consequence for anyone using this tool:** a flat or perfect score here is not
+evidence that a wording change worked, and not evidence that it did not. Until
+the scenarios make the model discover the gap for itself — a real multi-step task
+in a scratch repo, scored on what it does at the end of turn one — this measures
+whether a client can *report* correctly when told, not whether it *notices*.
+
+That redesign is the open work. It is bigger than the scenario file.
+
 ## KNOWN LIMIT — the keyword classifier has already been shown to miscount
 
 The first two baseline runs (2026-08-26) misclassified **six of twenty-four**
