@@ -59,7 +59,17 @@ run() { if [[ "$DRY_RUN" == "--dry-run" ]]; then echo "[dry-run] $*"; else "$@";
 public_ai_devops_hub() {
   local origin
   origin="$(git -C "$HUB_ROOT" config --get remote.origin.url 2>/dev/null || true)"
-  [[ "$origin" =~ github\.com[:/]u2giants/ai-devops(\.git)?$ ]]
+  # Every accepted ai-devops identity is a PUBLIC repository, so any of them is
+  # an illegal memory hub. Reading the shared allow-list keeps this guard true
+  # for the popcre owner too; a hard-coded owner would silently have allowed it.
+  local status=0
+  "$TOOL_ROOT/bin/ai-repo-identity" accepts ai-devops "$origin" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) echo "[BLOCKED] Could not read the repository identity allow-list; refusing to proceed." >&2
+       exit 1 ;;
+  esac
 }
 
 # MEMORY.md is a recall index written independently by every machine. During

@@ -2,7 +2,8 @@
 
 **Issue:** [#84](https://github.com/u2giants/ai-devops/issues/84)
 **Written:** 2026-08-25 (edge-dev / claude)
-**Status:** PLAN ONLY — nothing has been executed.
+**Status:** **Phase A DONE** (2026-08-25). Phases B–E not started; the
+repository has not been transferred.
 
 ---
 
@@ -119,13 +120,18 @@ benefit. The parameterisation in §5 must therefore keep working with siblings
 that stay put — which it does, since each repo's accepted owners are configured
 independently.
 
-**This is an owner decision. It is listed in the handoff's section 0.**
+**DECIDED 2026-08-25 (Albert): no — both private siblings stay under
+`u2giants`.** Phase A implements exactly that: their keys in
+`config/repo-identities.tsv` accept `u2giants` only, and a test proves a
+`popcre`-owned sibling is refused. Do not re-ask.
 
 ---
 
 ## 5. Execution plan
 
 ### Phase A — code first (safe, reversible, no downtime)
+
+> **DONE 2026-08-25.** What actually shipped is recorded under this list.
 
 1. Introduce a single source of truth for accepted repository identities, e.g. a
    small table in one place that each script reads, rather than six literals.
@@ -143,6 +149,42 @@ independently.
 
 *You will know Phase A worked when:* `verify.yml` passes, and the new test proves
 both that `popcre` is accepted and that an unknown owner is still rejected.
+
+#### What Phase A actually shipped
+
+- **`config/repo-identities.tsv`** — the single source of truth. `ai-devops`
+  lists both `github.com/u2giants/ai-devops` and `github.com/popcre/ai-devops`;
+  `ai-devops-memory` and `ai-devops-transcripts` list `u2giants` only.
+- **`bin/ai-repo-identity`** (Bash) and **`bin/repo-identity.ps1`**
+  (dot-sourced PowerShell) read that table. Both refuse an unlisted identity,
+  and both refuse *everything* when the table is missing or empty. The Bash
+  helper exits **2** on a broken table and **1** on an ordinary refusal, so a
+  caller can never mistake "cannot read the allow-list" for "not the public
+  repo".
+- **Rewired guards:** `bin/bootstrap-windows-dev.ps1` (both sites),
+  `bin/install-ai-devops-windows.ps1` (both sites), and
+  `bin/ai-sync-memory`'s public-hub guard.
+- **A seventh site the plan did not list:** `bin/ai-sync-memory` refuses to use
+  the public `ai-devops` repo as a private memory hub. Its owner check was
+  *inverted* — hard-coding `u2giants` there would have silently **permitted**
+  publishing private memory into a `popcre`-owned clone. It now reads the same
+  allow-list, so every accepted `ai-devops` identity is rejected as a hub.
+- **The sibling guards were deliberately left literal.**
+  `bin/ai-facts`, `bin/ai-devops`, `bin/ai-memory-sync` and
+  `bin/ai-transcript-destination-check` still compare literals, because their
+  values do not change in this move and several of them are installed as
+  symlinks on Ubuntu, where adding a runtime lookup is avoidable risk. Drift is
+  prevented instead by a test that fails if any `github.com/*/ai-devops*`
+  literal in `bin/` is absent from the table — so the table stays authoritative
+  and nobody can add an eighth literal unnoticed.
+- **Tests:** `tests/test-ai-repo-identity.sh` (29 checks) and
+  `tests/test-repo-identity.ps1` (12 checks). Both suites auto-register with
+  `tests/test-all.sh` / `tests/test-all.ps1`.
+- **Docs:** `docs/config-inventory.md` gains a "Repository identity allow-list"
+  section. `docs/restore-from-zero.md` now says to clone before running the
+  Windows bootstrap — the bootstrap reads the allow-list from the checkout, so
+  it is no longer supported as a lone saved file. That was always the README's
+  documented path; the restore doc had drifted.
 
 ### Phase B — prove the org tolerates this repo's CI
 
@@ -233,9 +275,9 @@ it does not need reverting and is safe to leave in place either way.
 
 Consolidated here and repeated in the handoff's section 0.
 
-1. **Move the two private sibling repos too?** Recommendation: **no** — they are
-   private, gain nothing, and add risk.
+1. ~~**Move the two private sibling repos too?**~~ **DECIDED 2026-08-25: no.**
+   Both stay under `u2giants`. Implemented in Phase A. Do not re-ask.
 2. **`VaibhavBarot` read access** on arrival in `popcre`. Recommendation: set
    shared repo permission explicitly rather than inherit the org default.
-3. **Timing.** Phase A is safe now. Phases C–E need a quiet moment when no other
-   session is mid-push on `ai-devops`.
+3. **Timing.** ~~Phase A is safe now.~~ Phase A is done. Phases C–E still need a
+   quiet moment when no other session is mid-push on `ai-devops`.
