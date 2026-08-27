@@ -49,12 +49,37 @@ Defined once in `bin/setup-machine.ps1` step 5d. Step 5d-2 assigns scope.
 
 Ownership decided by Albert, 2026-08-26.
 
-**`synology-monitor` is worked on ~90% of the time from the hetz Ubuntu VPS, and
-is not cloned on `edge-dev`.** Its two servers therefore remain in the Windows
-global set for now. They must be scoped by committing a `.mcp.json` **in that
-repo, authored on Linux** — the current Windows definitions point at
-`.config/ai-devops/mcp-remote-launch.cmd`, which does not exist there. Do not
-seed that project from a Windows machine.
+### `synology-monitor` cannot be scoped, and that is deliberate
+
+Its two servers stay **global on every machine**. Do not "fix" this.
+
+On hetz the repo is at `/worksp/monitor/app` (not a folder of its own name — see
+`PROJECT_ALIASES`). It **gitignores `.mcp.json`**, and its own `.gitignore:53-58`
+records why:
+
+> MCP client config — holds the nas-mcp bearer token in plaintext. It was only
+> ever covered by `.git/info/exclude`, which is local to one clone and does not
+> travel; a fresh clone would have happily committed the token. That already
+> happened once: `006c059` committed a live token in `ROO_MCP_GUIDE.md` and
+> `11f5d5e` removed the file, but the value stayed in history and had to be
+> rotated.
+
+That ignore rule is an incident-driven safeguard, not a default someone forgot to
+remove. **Removing it re-opens a leak that already cost a credential rotation.**
+It is belt-and-braces: `.git/info/exclude:7` lists the file too.
+
+Verified 2026-08-26: no `.mcp.json` exists in that checkout and none appears
+anywhere in its history — the safeguard is working.
+
+Scoping those two servers would require that repo to first adopt a `.mcp.json`
+convention holding only `op://` references, which is a change for that repo to
+make deliberately. Until then the setup scripts detect the ignore rule, refuse to
+seed, and leave both servers global — where they work. That trade is correct: a
+little RAM against a repeat credential leak.
+
+The Windows definitions also point at `mcp-remote-launch.cmd`, which does not
+exist on Linux, so `$McpProjectWindowsSkip` blocks Windows from seeding it
+regardless.
 
 **Codex-only:** `vercel`, via Codex's native HTTP transport. Deliberately absent
 from Claude — behind `mcp-remote` it returns a 1-hour token with no refresh
