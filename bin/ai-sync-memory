@@ -158,6 +158,19 @@ superset_lines() {
   ' "$1" "$2"
 }
 
+# A disposable working directory is not a project. Claude opens a project folder
+# for whatever directory it runs in, so every reviewer sandbox, worktree
+# scratchpad and skill-eval temp dir became its own "memory project" and was
+# published to the hub - 62 of them, none holding a single memory, each still
+# carrying an index. They can never be useful: the directory is deleted minutes
+# later and its name never recurs.
+disposable_project() {
+  case "$1" in
+    *review-sandboxes*|*scratchpad*|*skill-trigger-eval*|    *-worktrees-*|*AppData-Local-Temp*|*-Temp-claude-*) return 0 ;;
+  esac
+  return 1
+}
+
 copy_fact_union() {
   local source="$1" destination="$2" label="$3" file target base extension safe candidate suffix
   safe="$(printf '%s' "$label" | sed 's/[^A-Za-z0-9._-]/-/g')"
@@ -313,9 +326,14 @@ case "$DIRECTION" in
     fi
     run mkdir -p "$MEM_REPO"
     n=0
+    skipped_disposable=0
     for md in "$CLAUDE_HOME"/projects/*/memory; do
       [[ -d "$md" ]] || continue
       slug="$(basename "$(dirname "$md")")"
+      if disposable_project "$slug"; then
+        skipped_disposable=$((skipped_disposable + 1))
+        continue
+      fi
       proj="$(canonical "$slug")"
       dest="$MEM_REPO/$proj"
       run mkdir -p "$dest"
@@ -365,6 +383,8 @@ case "$DIRECTION" in
       n=$((n+1))
     done
     echo "$n project memory folder(s) copied into the repo. Review, then commit+push ai-devops."
+    ((skipped_disposable > 0)) &&
+      echo "  skipped $skipped_disposable disposable working director(ies) — sandboxes, scratchpads and temp dirs are not projects."
     # Finding nothing is almost never legitimate: any machine running this has
     # used Claude Code at least once. Silence here previously read as success.
     if [[ "$n" -eq 0 ]]; then
