@@ -90,6 +90,26 @@ merge_memory_index() {
     rm -f "$tmp" "$additions"
     return 1
   fi
+  # Repair a duplicate-storm index in place. Earlier versions of this merge
+  # appended a local entry that was already present, so several indexes grew to
+  # tens of thousands of identical link lines (shared-db reached 20 MB) and the
+  # health gate then blocked every outgoing sync. Keep the first occurrence of
+  # each entry line and drop later exact repeats; other lines are untouched.
+  if ! awk '
+    { value = $0; sub(/\r$/, "", value) }
+    value ~ /^- \[.*\]\(.*\).*/ {
+      if (value in kept_entry) next
+      kept_entry[value] = 1
+    }
+    { print }
+  ' "$tmp" > "$tmp.dedupe"; then
+    rm -f "$tmp" "$tmp.dedupe" "$additions"
+    return 1
+  fi
+  if ! mv -f "$tmp.dedupe" "$tmp"; then
+    rm -f "$tmp" "$tmp.dedupe" "$additions"
+    return 1
+  fi
   # Load the hub entries once, then test every local entry against that in-memory
   # set. The former grep-per-line loop became quadratic on a duplicate-storm
   # index (a 20 MB index required hours). Canonicalize CRLF on both sides for the
