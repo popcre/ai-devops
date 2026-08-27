@@ -9,8 +9,27 @@ case "$windows_timeout" in
 esac
 [ "$windows_timeout" -ge 75 ] || { printf 'FAIL: windows-offline needs at least 75 minutes of measured runtime headroom\n' >&2; exit 1; }
 
-grep -Fq 'group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}' "$workflow" || {
-  printf 'FAIL: verification concurrency must be scoped to immutable event and source SHA\n' >&2
+grep -Fq "group: verify-\${{ github.workflow }}-\${{ github.event_name }}-\${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.event.pull_request.head.sha || github.sha }}" "$workflow" || {
+  printf 'FAIL: push and pull_request verification must stay scoped to immutable event and source SHA, and merge_group must be scoped to the target branch
+' >&2
+  exit 1
+}
+
+# A dead merge-group candidate must not hold a windows-2025 runner for its
+# full timeout while the live candidate waits. Guard the merge_group half
+# explicitly so a future edit cannot quietly restore per-SHA pinning there.
+grep -Fq "github.event_name == 'merge_group' && github.event.merge_group.base_ref" "$workflow" || {
+  printf 'FAIL: superseded merge_group runs must be cancellable (key merge_group concurrency on the target branch, not the candidate SHA)
+' >&2
+  exit 1
+}
+
+# windows-reviewer-safety is never a required check and is a strict subset of
+# windows-offline. Inside a merge group it costs a second Windows runner and
+# blocks nothing, so it must be skipped there and kept on pull requests.
+awk '/^  windows-reviewer-safety:/,/^      - /' "$workflow" | grep -Fq "if: github.event_name != 'merge_group'" || {
+  printf 'FAIL: windows-reviewer-safety must not consume a windows-2025 runner inside a merge group
+' >&2
   exit 1
 }
 grep -Fq 'cancel-in-progress: true' "$workflow" || {
