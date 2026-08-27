@@ -114,6 +114,26 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - **Synology:** for a broad NAS read expected to exceed 25 seconds, load
   `synology-long-running-operations`; never increase the production timeout or
   treat a timed-out partial result as complete.
+## Cost discipline — delegate before you grind
+
+The weekly allowance is consumed by long single turns that make hundreds of
+model calls, not by the number of sessions. Every extra step in a turn re-sends
+the whole turn so far, so cost grows faster than the work does.
+
+- **Split before you start.** If a task plausibly needs more than ~30 steps,
+  break it into independent pieces and `spawn_agent` one per piece. A subagent
+  carries its own context; work it does is not re-sent through your turn.
+- **Delegate any wide read.** Repository surveys, "find every place that…",
+  multi-file audits, and log sweeps go to a subagent that returns the answer,
+  never the raw material.
+- **Return conclusions, not transcripts.** A subagent's reply should be the
+  finding and the evidence for it, not the files or output it read to get there.
+- **Do not fan out for small work.** A task under ~10 steps costs more to
+  delegate than to do. Spawning is a tool for breadth, not a reflex.
+- **Stop and report at natural boundaries.** A turn that has run long is more
+  expensive per unit of progress than a fresh one; hand back and continue rather
+  than pushing one turn further.
+
 ## Model, engineering, and Git rules
 
 - **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or

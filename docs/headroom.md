@@ -222,11 +222,13 @@ sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 
 | Metric | Value |
 |---|---|
-| Requests handled (lifetime) | 845 |
-| Tokens saved (lifetime) | 1,997,341 of 35,298,425 input tokens (**~5.7%**) |
-| $ saved (lifetime) | ~$9.99 |
-| Last real session (2026-08-12) | 872,525 saved of 5,727,745 (**13.22%**), ~$4.36 |
-| Last real activity | **2026-08-12** |
+| Requests handled (lifetime) | 1,020 |
+| Tokens saved (lifetime) | 2,328,077 of 41,771,171 input tokens (**~5.6%**) |
+| $ saved (lifetime) | ~$11.52 |
+| Most recent session | 60,423 saved of 1,285,497 (**4.49%**) |
+| Last real activity | **2026-08-26** |
+
+Read live with the commands above; these are a snapshot, re-checked 2026-08-27.
 
 > ⚠️ **Traffic, not health, is the thing to check.** On 2026-08-21 the service
 > was `active`, `enabled`, 16 days uptime, `NRestarts=0`, `/health` green — and
@@ -241,7 +243,24 @@ sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 |---|---|---|
 | hetz VPS `ai` user (Workflow A) | ✅ yes (repaired 2026-08-21) | `.bashrc` export moved above the non-interactive guard. Was half-broken before: interactive terminals were proxied, Claude Code SSH sessions were not. |
 | **edge-dev** (Workflow B) | ✅ yes (2026-08-21) | persistent USER environment variable, set by `ai-headroom on`; proven routing (proxy count 362 → 366) |
-| AL8960OFC, other Windows boxes | ❓ assume NOT wired | they were only ever wired via the inert `settings.json`. Run `ai-headroom status` on each; wire with `ai-headroom on`. |
+| 4837 (this Windows box) | ✅ yes (verified 2026-08-27) | `ai-headroom status` shows the persistent Windows user env var routing to the proxy; proxy healthy. |
+| AL8960OFC, other Windows boxes | ❓ unknown | run `ai-headroom status` on each; wire with `ai-headroom on`. Do not assume unwired — 4837 turned out to be wired despite this table. |
+
+### What Headroom does NOT explain (measured 2026-08-27)
+
+Headroom is a ~5% effect and cannot account for large differences between
+tools or plans. Measured over the same two-day window on 4837:
+
+- Claude handled ~1.9B tokens of context and produced 5.4M output tokens.
+- Codex handled ~1.5B tokens of context and produced 2.0M output tokens.
+- Codex was nonetheless at **61% of its weekly allowance** after those two days
+  (full limit in ~3.2 days of a 7-day window).
+
+Claude did more work and was not the thing running out. The gap is plan
+allowance, not compression. Separately, Codex cost concentrates in long turns:
+the 20% of sessions with the most model calls account for **88%** of all input
+tokens, **67%** of full-price tokens and **72%** of output. Session *count* is
+not the driver — session *turn depth* is.
 
 The ground truth for total spend is always the Anthropic Console / Claude usage
 screen — Headroom's own ledger only counts what actually flowed through it.
