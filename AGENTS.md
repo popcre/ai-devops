@@ -74,7 +74,7 @@ The full recovery procedure is in
 | `ai-muse` stale-turn rejection diagnostics | [`fix_muse_wrapper_reject.md`](fix_muse_wrapper_reject.md) STATUS | The guard is correct; never narrow what `tree_state` covers to stop it firing |
 | Shared database structure or business rules | Load the matching `shared-db` or `pop-business-rules` skill and follow its router | Reading is open; structural changes go through `u2giants/shared-db`; licensed private data stays private |
 | Repository or worktree cleanup | Load `cleanup-worktree`; read relevant open handoffs and [`docs/critical-incidents.md`](docs/critical-incidents.md) | Preserve every unique change before removing anything |
-| Implement concurrent-session work claims | [`plan_ai-devops-work-claims.md`](plan_ai-devops-work-claims.md) STATUS, issue #131 | Lightweight GitHub leases only; do not introduce a full orchestrator or committed claims file |
+| Implement concurrent-session work claims | [`plan_ai-devops-work-claims.md`](plan_ai-devops-work-claims.md) STATUS, issue #131 | Lightweight GitHub claims only; do not introduce a full orchestrator or committed claims file |
 | Continue unfinished work | The matching OPEN file in `HANDOFF.d/`, newest relevant first, and documents it names | Do not load unrelated handoffs |
 | Write a handoff | `handoff-writer`, [`templates/system/handoff-standard.md`](templates/system/handoff-standard.md) | Root `HANDOFF.md` is a static pointer; never rewrite another session's file |
 | Write an implementation plan | `implementation-plan-writer`, [`templates/system/implementation-plan-standard.md`](templates/system/implementation-plan-standard.md) | Write for a new session with no chat context |
