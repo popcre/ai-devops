@@ -152,11 +152,14 @@ is not, and the tool that installs that rule must actually run on his machines.
   work exists to kill. Do not reintroduce it.
 - **A per-file `git show HEAD:<file> | grep $'\r'` loop.** Correct but slow —
   about 90 seconds on Windows for 111 files, on a suite that runs on every push.
-- **`ssh hetz`** — `Host key verification failed`; the known-hosts entry is
-  under the IP and `hetz.coho-banded.ts.net`. Key auth then failed from
-  `edge-dev` for every user tried (`ahazan`, `ai`, `root`). **hetz was reached
-  through the `devops-mcp` MCP instead** (`run_command`), which has root access.
-- **`ssh t16`, `ssh 100.96.221.71`, `ssh t16.coho-banded.ts.net`** — all
+- **`ssh hetz`** — `Host key verification failed`: the bare alias is not what
+  the known-hosts entry is recorded under. Key auth then failed from `edge-dev`
+  for every user tried (`ahazan`, `ai`, `root`). **hetz was reached through the
+  `devops-mcp` MCP instead** (`run_command`), which has root access. Resolve the
+  exact alias from the private machine atlas (`ai-private-config path
+  machine_atlas`), never from this file — concrete topology must not be written
+  into this public repo.
+- **`ssh t16`** — tried by alias, by address, and by fully-qualified name; all
   `Connection timed out`. t16 runs no SSH server. Only `al8960ofc` (host alias
   `4837`) accepts SSH between dev machines.
 - **Quoting `bash -lc "…"` inside single quotes over SSH to Windows.** The
