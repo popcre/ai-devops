@@ -807,7 +807,7 @@ what it asserts today. If one cannot be made deterministic without weakening it,
 
 **The core defect to remove, stated once:** today, when a poll expires, the
 assertion simply runs against unsettled state and reports an ordinary `FAIL`,
-indistinguishable from a real regression. **That indistinguishability is the bug.**
+indistinguishable from a real regression. **That ambiguity is the bug.**
 Every rewrite must make a timeout say so.
 
 **Access note:** this step needs live `gh` to read PR #123's diff first — see
@@ -1098,7 +1098,22 @@ in this plan.
 7. **`grok --worktree` is silently ignored in headless mode.** Never
    hand-compose a provider command; use the `ai-*` wrappers. Recorded because
    this class of shortcut has already cost real money.
-8. **PR #123 conflicts with step 1.1.** See § 13.
+8. **PR #123 conflicts with step 1.1.** See § 13. (Resolved 2026-08-27: taken
+   over and adopted — see the STATUS table.)
+9. **`tests/test-public-boundary.sh` rejects any run of 20 consecutive lowercase
+   letters**, because that is the shape of a Supabase project identifier. It has
+   one hard-coded exemption. **Ordinary English words of exactly 20 letters trip
+   it** — this plan's own first version was rejected by CI for the 20-letter noun
+   form of *indistinguishable*, and the failure surfaces only as "protected
+   project-shaped identifier found", naming no file. (Writing that word out here
+   tripped the gate a second time. Describe it; do not spell it.) Find it with:
+   ```bash
+   git grep -nIE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh'
+   ```
+   **Reword the prose. Do not widen the pattern** — it is a credential-leak gate
+   on a public repository, and decision **B** applies to it like any other test.
+   Worth a follow-up issue to make its diagnostic name the offending file and
+   line, which it already computes but discards.
 
 ---
 
