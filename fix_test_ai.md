@@ -1,9 +1,28 @@
 # fix_test_ai — the AI reviewer test suites were non-deterministic
 
 **Written:** 2026-08-26 (edge-dev / claude) — diagnosis
-**Updated:** 2026-08-27 (edge-dev / claude) — FIXED. Section 3 rewritten: the
-original attribution was inferred from code inspection and was wrong on both
-suites. The causes below are measured.
+**Updated:** 2026-08-27 (edge-dev / claude) — **PARTIALLY FIXED. Do not read this
+file as closing issue #89.** Section 3 rewritten: the original attribution was
+inferred from code inspection and was wrong on both suites. The causes below are
+measured, and the fix below is real but insufficient.
+
+**What the fix achieved, measured over six local runs:** the blast radius of a
+failure shrank from four checks to one, and the surviving failure now names
+itself as a fixture problem with its ceiling and baseline instead of appearing as
+an anonymous `FAIL`. That was the single most expensive property of #89.
+
+**What it did not achieve:** the suite still failed once in six runs (~17%, down
+from ~33%). The remaining cause is confirmed, not suspected: the timing baseline
+is measured exactly once at `tests/test-ai-grok-review.sh:216` and every later
+ceiling is derived from that one frozen number, while the failing wait sits
+several hundred seconds further down the file. A machine that degrades after the
+measurement is judged against a computer that no longer exists.
+
+**Do not fix this by raising the multiplier.** A ceiling large enough for a
+degraded machine no longer detects a genuine hang, which is what these checks
+exist to catch. The correct fix is a progress-sensitive wait. See
+`tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md`, which is
+the evidence any later claim of "fixed" must be measured against.
 **Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`, and — after
 a sweep — `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-muse.sh`,
 `tests/test-ai-gemini.sh`, `tests/test-ai-qwen.sh`, `tests/test-ai-glm.sh`.
