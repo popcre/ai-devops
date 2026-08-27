@@ -25,14 +25,21 @@ index, constraint, extension, publication, storage policy, or a migration shippi
 
 - **Yes -> accept.** Queue it as `work_type: structural`, `route: shared-db-orchestrator`, and
   dispatch it to a sub-agent in an isolated worktree.
-- **No -> two exits only, and `accept` is never one of them.**
+- **No -> FOUR exits, and `accept` is never one of them.** (Corrected 2026-08-26 to match the
+  owner ruling of 2026-08-21 now recorded in `AGENTS.md` §0.0-C, which **wins**. This skill still
+  taught the superseded three-exit model where repository maintenance, documentation and security
+  settings all exited by FORK — i.e. as orchestrator assignments. The ruling made them **not**
+  orchestrator work at all. Found by independent Codex GPT-5.6 review during shared-db #1605.)
   - **REJECT** — `application-data`, `source-data`. The work belongs to another repository and
     must leave this queue, forwarded to it (see below).
-  - **FORK** — `repo-maintenance`, `documentation`, `security-settings`, and `curated-master-data`.
-    Real shared-db work, but not shape work: hand it to a FRESH sub-agent with an empty context
-    window, exactly as a migration is dispatched. Do not read the code, debug it, or "just fix it
-    quickly" here. Curated Master Data forks rather than leaves because AGENTS.md 6.4 governs it
-    inside this repo.
+  - **FORK** — **`curated-master-data` ONLY.** Genuinely this repo's work, dispatched to a FRESH
+    sub-agent with an empty context window, exactly as a migration is. It forks rather than leaves
+    because `AGENTS.md` §6.4 governs it inside this repo, and forks rather than being accepted
+    because it must not occupy a migration-author lane. Do not extend this exit to anything else.
+  - **REPO-SESSION** — `repo-maintenance`, `documentation`. **Not an orchestrator assignment.**
+    An independent repository session owns these; the orchestrator neither implements nor
+    dispatches them.
+  - **RETURN-TO-OWNER** — `security-settings`. It needs authority the orchestrator does not have.
 
 **A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
 `return_to: owner/repo` in its scope block. Return it with
@@ -42,7 +49,7 @@ step leaves the issue open rather than losing the task. Never close a rejected i
 reject with no `return_to` is reported as `NO RETURN ADDRESS` and makes `--queue-audit` exit 2.
 FORK items are not lost either: they stay open and dispatched until the work is done.
 
-No third exit and no size exemption. `db-work` is an intake label, never proof that an item passed
+No fifth exit and no size exemption. `db-work` is an intake label, never proof that an item passed
 this test. Your own window is for triage, dispatch, review, merge and promotion — nothing else.
 `--queue-audit` prints a `NOT ORCHESTRATOR WORK` block listing every open issue that fails the
 test, stamped REJECT or FORK; clear it, do not carry it.
@@ -52,6 +59,45 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 ## Start
 
 1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
+
+   **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. Hand-querying the label has printed empty while a marker existed, and an empty result reads as permission to start.
+
+1a. **Claim your marker with a routing block, and name your session `shared-db.orch…`** (shared-db `AGENTS.md` §11c, issue #1605, owner instruction 2026-08-26). The marker is how every other session finds you; without a routable address it proves only that *someone* is running, and a session with no address falls back to a handoff or conversation history — which is how an authorized request reached an orchestrator that had already closed.
+
+   Set your session display name to begin with `shared-db.orch`, then open the marker containing:
+
+   ````
+   ```orchestrator-routing
+   status: active
+   identifier: shared-db.orch
+   engine: codex            # or `claude`
+   session_name: shared-db.orch <machine> <short label>
+   route_id: <YOUR OWN routable id — see below>
+   owner: u2giants
+   machine: <MACHINE>
+   started: <ISO-8601, e.g. 2026-08-26T14:39:25Z>
+   handover_issue: <predecessor marker number, or `none`>
+   briefing: <HANDOFF.d/... path, or `none`>
+   ```
+   ````
+
+   `route_id` is **your own** id, never the predecessor's. The guard catches the common copy — a
+   numeric `handover_issue` whose marker is readable and carries the same id — but it is a **trap,
+   not a proof**: it cannot catch an id reused from an older ancestor, a wrong predecessor number,
+   a `handover_issue: none` that is a lie, or a fabricated id of the right shape. Recording your
+   real id is your obligation.
+   - **Codex:** your thread UUID, the `session_id` in your rollout under `~/.codex/sessions/…`. Another session reaches you with `codex-reply` on that `threadId`.
+   - **Claude:** your own `sessionId` (e.g. `local_<uuid>`), which another Claude session messages directly.
+
+   Every field is required and **blank is never a default** — state a value or `none`. Verify before you dispatch anything:
+
+   ```bash
+   node scripts/check-orchestrator-marker.mjs --resolve
+   ```
+
+   It must print **your** `route_id`. If it does not, no other session can even ADDRESS you, and
+   you are not ready to run. Printing it proves only that the marker declares your address — not
+   that anyone can reach you. Nothing here can prove liveness or delivery.
 2. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of orchestrator ownership.
 3. Record every active workstream and exact claimed database objects.
 4. Warn if more than five open handoffs exist.
@@ -60,13 +106,13 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
-- Allow at most three migration authors simultaneously.
+- Allow at most `MAX_AUTHOR_LANES` migration authors simultaneously — five since 2026-08-25, three before it. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
 - Give each author an isolated worktree and branch.
 - Require exact, parseable database-object claims.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
 - Keep preview application, PR merges and production promotion strictly one at a time.
-- Do not count read-only analysis, application code, tests or planning against the three author lanes.
-- Maintain three dynamic queues grouped by exact object overlap. Recompute them after every merge.
+- Do not count read-only analysis, application code, tests or planning against the author lanes.
+- Maintain one dynamic queue per lane, grouped by exact object overlap. Recompute them after every merge.
 - Refill every free lane in the same turn. Never wait for Albert to request status or say start.
 - Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
 - Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
@@ -86,10 +132,10 @@ node scripts/manage-migration-author-lanes.mjs --claim \
   --objects "<every exact object written, comma-separated>"
 ```
 
-The command acquires GitHub-backed exact-object locks and one of three fixed
+The command acquires GitHub-backed exact-object locks and one of the fixed
 author slots across computers. It must include open pull requests and refuse
 unreadable claims, overlapping objects, unavailable GitHub state, failed version
-reservation, or a fourth author. Older claims count. Never choose a version
+reservation, or an author beyond the cap. Older claims count. Never choose a version
 manually and never hand-edit fenced claim blocks.
 
 Audit and cleanup:

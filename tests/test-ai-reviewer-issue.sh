@@ -18,6 +18,7 @@ git -C "$TMP/repo" config user.email test@example.com
 printf 'base\n' > "$TMP/repo/file.txt"
 git -C "$TMP/repo" add file.txt && git -C "$TMP/repo" commit -qm base
 HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
+TOOLKIT_HEAD="$(git -C "$ROOT" rev-parse HEAD)"
 REPO_CANON="$(git -C "$TMP/repo" rev-parse --show-toplevel)"
 STATE_PROVIDER_CANON="$(cd "$TMP/state/grok" && { pwd -W 2>/dev/null || pwd -P; })"
 printf 'complete review output\ntoken=report-secret\n' > "$TMP/repo/.ai/reviews/grok-x-example.md"
@@ -54,6 +55,55 @@ check "unrestricted details are captured" "grep -q 'returned empty output twice'
 check "exact command is recorded" "jq -e '.reported_command==\"ai-grok-review ask test\"' '$report/issue.json'"
 check "list finds the recorded issue" "$SCRIPT list | grep -q '$id'"
 check "show returns the recorded issue" "$SCRIPT show '$id' | jq -e '.id==\"$id\"'"
+check "new issues are listed as open" "$SCRIPT list | awk -F '\\t' '\$1==\"$id\" && \$4==\"open\" {found=1} END {exit !found}'"
+check "resolve requires a repair commit" "! $SCRIPT resolve '$id' --status resolved --summary repaired --evidence tests/test-ai-reviewer-issue.sh"
+check "resolve requires evidence" "! $SCRIPT resolve '$id' --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD'"
+check "resolve rejects unsupported status" "! $SCRIPT resolve '$id' --status closed --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+check "resolve rejects missing evidence paths" "! $SCRIPT resolve '$id' --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/not-present.md"
+check "resolve rejects parent traversal as an issue id" "! $SCRIPT resolve .. --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+resolve_output="$($SCRIPT resolve "$id" --status partially-resolved --summary 'One symptom remains token=summary-secret.' --repair-commit "$TOOLKIT_HEAD" --evidence tests/test-ai-reviewer-issue.sh --details 'token=repair-secret Remaining symptom is named.')"
+resolution="$(find "$report/resolutions" -type f -name '*.json' -print -quit)"
+check "resolve appends a separate resolution record" "test -f '$resolution' && jq -e '.status==\"partially-resolved\" and .repair_commits[0]==\"$TOOLKIT_HEAD\"' '$resolution'"
+check "resolve redacts its details" "grep -q 'Remaining symptom is named' '$resolution' && ! grep -q 'repair-secret' '$resolution'"
+check "resolve redacts its summary" "jq -e '.summary|contains(\"[REDACTED]\")' '$resolution' && ! grep -q 'summary-secret' '$resolution'"
+check "resolve leaves original incident immutable" "jq -e 'has(\"resolution\")|not' '$report/issue.json'"
+check "list surfaces the latest resolution status" "$SCRIPT list | awk -F '\\t' '\$1==\"$id\" && \$4==\"partially-resolved\" {found=1} END {exit !found}'"
+check "show joins the latest resolution without rewriting the issue" "$SCRIPT show '$id' | jq -e '.resolution.status==\"partially-resolved\"'"
+mkdir -p "$TMP/installed"
+ln -s "$SCRIPT" "$TMP/installed/ai-reviewer-issue"
+symlink_issue="$($SCRIPT record --provider grok --summary 'Installed path regression.' --repo "$TMP/repo")"
+symlink_id="$(printf '%s\n' "$symlink_issue" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+if [ -L "$TMP/installed/ai-reviewer-issue" ]; then
+  check "installed symlink resolves toolkit commit and evidence paths" "$TMP/installed/ai-reviewer-issue resolve '$symlink_id' --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+else
+  ok "installed symlink regression is exercised where symlinks are supported"
+fi
+mkdir -p "$TMP/outside-issue"
+cp "$report/issue.json" "$TMP/outside-issue/issue.json"
+ln -s "$TMP/outside-issue" "$AI_REVIEWER_ISSUE_DIR/linked-incident"
+if [ -L "$AI_REVIEWER_ISSUE_DIR/linked-incident" ]; then
+  check "resolve refuses a linked incident directory" "! $SCRIPT resolve linked-incident --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+  check "linked incident refusal writes nothing outside storage" "test ! -e '$TMP/outside-issue/resolutions'"
+else
+  ok "linked incident regression is exercised where symlinks are supported"
+  ok "linked incident outside-write check is exercised where symlinks are supported"
+fi
+linked_resolution_id="$(printf '%s\n' "$($SCRIPT record --provider grok --summary 'Linked resolution regression.' --repo "$TMP/repo")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+mkdir -p "$TMP/outside-resolutions"
+ln -s "$TMP/outside-resolutions" "$AI_REVIEWER_ISSUE_DIR/$linked_resolution_id/resolutions"
+if [ -L "$AI_REVIEWER_ISSUE_DIR/$linked_resolution_id/resolutions" ]; then
+  check "resolve refuses linked resolution storage" "! $SCRIPT resolve '$linked_resolution_id' --status resolved --summary repaired --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+  check "linked resolution refusal writes nothing outside storage" "test -z \"\$(find '$TMP/outside-resolutions' -type f -print -quit)\""
+else
+  ok "linked resolution regression is exercised where symlinks are supported"
+  ok "linked resolution outside-write check is exercised where symlinks are supported"
+fi
+concurrent_id="$(printf '%s\n' "$($SCRIPT record --provider grok --summary 'Concurrent resolution regression.' --repo "$TMP/repo")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+$SCRIPT resolve "$concurrent_id" --status partially-resolved --summary first --repair-commit "$TOOLKIT_HEAD" --evidence tests/test-ai-reviewer-issue.sh >/dev/null & first_pid=$!
+$SCRIPT resolve "$concurrent_id" --status resolved --summary second --repair-commit "$TOOLKIT_HEAD" --evidence tests/test-ai-reviewer-issue.sh >/dev/null & second_pid=$!
+wait "$first_pid"; first_rc=$?; wait "$second_pid"; second_rc=$?
+check "concurrent resolution writers both append successfully" "test '$first_rc' -eq 0 && test '$second_rc' -eq 0"
+check "concurrent resolution writers preserve both records" "test \"\$(find '$AI_REVIEWER_ISSUE_DIR/$concurrent_id/resolutions' -type f -name '*.json' | wc -l | tr -d ' ')\" -eq 2"
 check "path returns the configured directory" "test \"$($SCRIPT path)\" = '$AI_REVIEWER_ISSUE_DIR'"
 uncorrelated="$($SCRIPT record --provider grok --summary 'Identifiers unavailable.' --repo "$TMP/repo")"
 uncorrelated_id="$(printf '%s\n' "$uncorrelated" | sed -n 's/^ai-reviewer-issue: recorded //p')"

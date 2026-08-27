@@ -146,12 +146,23 @@ for mem in "${project_glob[@]}"; do
       [[ -f "$mem/$target" ]] || note "BROKEN INDEX LINE: MEMORY.md points at missing $target."
     done < <(grep -oE '\]\([A-Za-z0-9._-]+\.md\)' "$index" 2>/dev/null | sed 's/^](//; s/)$//' | sort -u)
 
-    if (( ! coverage_only )); then
-      lines="$(wc -l < "$index" | tr -d ' ')"
-      bytes="$(wc -c < "$index" | tr -d ' ')"
-      (( lines > 200 ))   && note "INDEX TOO LONG: $lines lines (limit 200) — it is loaded every session."
-      (( bytes > 25600 )) && note "INDEX TOO BIG: $bytes bytes (limit ~25KB) — it is loaded every session."
-    fi
+    # The index size check runs in EVERY mode, including --coverage-only,
+    # because that is the mode `bin/ai-memory-sync` gates on. Before
+    # 2026-08-26 the limit existed but only ever fired in a manual or weekly
+    # full run, so an index could grow past it for weeks without blocking a
+    # single sync.
+    #
+    # Deliberately NOT done: making the sync gate run the FULL check. Health
+    # exits nonzero on ANY finding, and three harmless dangling cross-links
+    # exist today, so a full gate would have blocked memory sync on every
+    # machine — trading a size warning for a broken sync. Only this moved.
+    #
+    # 12KB, lowered from 25KB on 2026-08-26: every real index measured
+    # between 1KB and 9.3KB, so the old limit allowed 2.7x growth in silence.
+    lines="$(wc -l < "$index" | tr -d ' ')"
+    bytes="$(wc -c < "$index" | tr -d ' ')"
+    (( lines > 200 ))   && note "INDEX TOO LONG: $lines lines (limit 200) - it is loaded every session."
+    (( bytes > 12288 )) && note "INDEX TOO BIG: $bytes bytes (limit 12KB) - it is loaded every session, so this is a per-session cost on every machine."
   fi
 
   if (( index_only )); then

@@ -8,12 +8,19 @@ provider identifiers. Secrets are restored at runtime from 1Password vault
 
 ## Windows 11
 
-1. Save `bootstrap-windows-dev.ps1` from this repository to a local file.
-2. Run it from an elevated-capable PowerShell session; it installs Git when
-   needed and owns the canonical `C:\repos\ai-devops` clone:
+1. Clone this repository first. The bootstrap reads the repository identity
+   allow-list in `config/repo-identities.tsv` through `bin/repo-identity.ps1`,
+   so it must run from inside a checkout, not as a lone saved file:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-windows-dev.ps1 -RepoPath C:\repos\ai-devops
+git clone https://github.com/popcre/ai-devops.git C:\repos\ai-devops
+```
+
+2. Run the bootstrap from an elevated-capable PowerShell session; it installs
+   Git when needed and owns the canonical `C:\repos\ai-devops` clone:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File C:\repos\ai-devops\bin\bootstrap-windows-dev.ps1 -RepoPath C:\repos\ai-devops
 ```
 
 The bootstrap proves the source is clean canonical `main` exactly equal to
@@ -50,7 +57,7 @@ sudo apt-get install -y git gh
 ```bash
 sudo mkdir -p /worksp
 sudo chown "$USER":"$USER" /worksp
-git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+git clone https://github.com/popcre/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ```
 

@@ -33,7 +33,7 @@
 # while nothing is. That mistake cost this project nine days of believing
 # Headroom was in use when it carried no traffic at all.
 #
-# See docs/headroom.md in u2giants/ai-devops for the full picture.
+# See docs/headroom.md in popcre/ai-devops for the full picture.
 
 set -euo pipefail
 

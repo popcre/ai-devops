@@ -2,6 +2,15 @@
 # Resolve protected machine topology without publishing it in ai-devops.
 set -euo pipefail
 REPOSITORY="u2giants/ai-devops-private-config"
+# Resolve through symlinks: a catalogued command is linked into /usr/local/bin
+# on Ubuntu, where a naive dirname/.. points at /usr/local, not the repository.
+_ai_self="${BASH_SOURCE[0]}"
+while [ -L "$_ai_self" ]; do
+  _ai_target="$(readlink "$_ai_self")"
+  case "$_ai_target" in /*) _ai_self="$_ai_target" ;; *) _ai_self="$(dirname "$_ai_self")/$_ai_target" ;; esac
+done
+AI_TOOL_ROOT="$(cd "$(dirname "$_ai_self")/.." && pwd)"
+AI_REPO_IDENTITY="$AI_TOOL_ROOT/bin/ai-repo-identity"
 die(){ printf 'ai-private-config: error: %s\n' "$*" >&2; exit 1; }
 default_root(){
   if [ -n "${AI_PRIVATE_CONFIG_HOME:-}" ]; then printf '%s' "$AI_PRIVATE_CONFIG_HOME"; return; fi
@@ -13,9 +22,14 @@ ROOT="$(default_root)"; MANIFEST="$ROOT/manifest.json"
 validate(){
   [ -d "$ROOT/.git" ] && [ -f "$MANIFEST" ] || die "protected configuration is not installed at $ROOT; run: ai-private-config sync"
   remote="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
-  identity="$(printf '%s' "$remote" | sed -E -e 's#^[a-z]+://([^/@]+(:[^/@]*)?@)?[^/]+/##' -e 's#^[^@]+@[^:]+:##' -e 's#\.git$##')"
   if [ "${AI_PRIVATE_CONFIG_ALLOW_FIXTURE:-0}" != 1 ]; then
-    [ "$identity" = "$REPOSITORY" ] || die 'protected configuration has the wrong upstream.'
+    # This used to strip the HOST as well as the scheme, so
+    # https://evil.example/u2giants/ai-devops-private-config.git was accepted
+    # as the protected machine-topology repository. Route through the shared
+    # allow-list, which compares the full host/owner/repo identity.
+    [ -x "$AI_REPO_IDENTITY" ] || die "identity helper is unavailable: $AI_REPO_IDENTITY"
+    "$AI_REPO_IDENTITY" accepts ai-devops-private-config "$remote" ||
+      die 'protected configuration has the wrong upstream.'
   fi
   jq -e --arg repo "$REPOSITORY" '.schema_version==1 and .repository==$repo and (.files|type=="object")' "$MANIFEST" >/dev/null || die 'protected manifest is invalid.'
 }

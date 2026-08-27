@@ -8,6 +8,14 @@ description: One-phrase Codex end-of-session closer. Use when the user says "wra
 Close the session in one pass. Do not make the user paste the long docs prompt,
 ask whether the handoff is good enough, or separately ask for git/deploy status.
 
+**Before any of that, run the closeout contract in the always-loaded global
+(`~/.codex/AGENTS.md`, Response Style):** name the deliverables the request asked
+for and check each against something real. Preparation is not delivery. If one is
+unfinished and nothing blocks it, keep working — closing a session is not a way
+to end a turn with authorized work outstanding. Codex has no mechanical backstop
+for this the way Claude does, so on this client the contract is the only check
+there is.
+
 ## Procedure
 
 1. **Summarize durable knowledge.** Update only markdown files that future

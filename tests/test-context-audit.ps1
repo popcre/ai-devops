@@ -14,6 +14,7 @@ $safetyLines = [ordered]@{
     "secret handling"         = "Never expose a secret. Use the 1Password vault."
     "destructive actions"     = "Destructive actions such as delete or overwrite must be recoverable."
     "capability preservation" = "Preserve the capability. A repair is complete only when the problem is gone and the original capability still works; removal is symptom suppression."
+    "completion honesty"      = "Account for the whole job before ending a turn. Preparation is not delivery, so if a deliverable is unfinished keep working: Ending the turn is the error. Say nothing is needed only after that check passes for every deliverable."
     "Git identity"            = "Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com."
     "GPT-5.6 effort"          = "GPT-5.6 must use low or medium effort."
     "system binaries"         = "Never replace operating-system binaries or overwrite system commands."
@@ -23,6 +24,9 @@ $safetyLines = [ordered]@{
 # safety lines so a safety deletion does not accidentally decide parity.
 $parityLines = @(
     "# Response Style",
+    "Account for the whole job",
+    "Preparation is not delivery",
+    "Ending the turn is the error",
     "Production infrastructure safety is absolute.",
     "Serialize every 1Password read.",
     "Synology long reads use the managed long-running skill.",
@@ -231,7 +235,7 @@ try {
             throw "Strict mode did not print a plain reason for the missing '$category' rule."
         }
     }
-    Write-Host "PASS: all eight locked safety categories fail individually with a plain-English reason"
+    Write-Host "PASS: all nine locked safety categories fail individually with a plain-English reason"
 
     # A repair has two independent success conditions. Remove each condition
     # alone from both clients (safety failure), then from Codex alone (parity

@@ -37,4 +37,24 @@ diagnose the failure first.
 - Do not reduce the details to one sentence.
 - Do not invent a log path, command, duration, or retry.
 - Do not include secrets. The recorder also redacts common credential forms.
-- Do not run `ai-reviewer-issue list` or `show`; those are maintenance actions.
+- Do not run `ai-reviewer-issue list` or `show` while recording a new failure;
+  those are maintenance actions.
+
+## Required repair closure
+
+Recording the failure is only the first half of the lifecycle. Whenever you
+claim that reviewer behavior was repaired, close every affected incident in the
+same workflow with `ai-reviewer-issue resolve` before reporting completion.
+
+Use `resolved` only when the repair evidence covers every symptom recorded in
+that incident. Use `partially-resolved` when any symptom remains, and name the
+remaining problem in the resolution details. Leave the incident open when the
+available evidence does not prove a repair. Each resolution requires the exact
+repair commit and at least one test, review, installation, or live-production
+evidence reference.
+
+The resolution command appends a separate immutable record beneath the issue;
+it never rewrites or deletes the original evidence package. Run
+`ai-reviewer-issue list` and inspect every affected record before making the
+final repair claim. This closure audit is standard operating procedure for all
+reviewer repairs.

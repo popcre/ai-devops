@@ -38,9 +38,15 @@ records. Do not allocate while any malformed claim or lock exists.
 
 ## Author locks
 
-Albert's 2026-08-14 ruling allows no more than three unrelated migration authors.
-The manager acquires GitHub-backed object locks and one of three fixed author
-slots across all computers. The readable GitHub issue mirrors the lock; it does
+Albert's 2026-08-14 ruling allowed no more than three unrelated migration
+authors; he raised it to five on 2026-08-25. The manager acquires GitHub-backed
+object locks and one of `MAX_AUTHOR_LANES` fixed author slots across all
+computers. Read the constant in
+`scripts/manage-migration-author-lanes.mjs` rather than trusting a number
+written in prose. The cap is throughput only: isolation comes from the exact
+object lock, the acquisition mutex, the permanent version reservation, and the
+single-holder preview/merge/production refs, and preview, merge and production
+stay serial at any cap. The readable GitHub issue mirrors the lock; it does
 not create the lock.
 
 ```bash
@@ -90,7 +96,7 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
-components form serial queues; unrelated components fill the three lanes.
+components form serial queues; unrelated components fill the available lanes.
 Dispatch every `REFILL REQUIRED NOW` issue in the same turn. Do not ask Albert
 to approve dispatch. Ask only for a genuine owner decision or material business
 risk.
@@ -151,16 +157,61 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates Grok 4.6, GLM 5.2, Kimi K3, Qwen 3.8 Max, then
-repeats across machines and restarts. Retrying the same issue/PR/head returns the
-same assignment. Use only the returned persistent wrapper: `ai-grok-review`,
-`ai-glm`, `ai-kimi`, or `ai-qwen`. Never override its model or reasoning pin;
-record Qwen High as requested if applicable, while using the wrapper's qualified
-fixed configuration.
+The GitHub-backed cursor rotates Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2
+Contributor, then repeats across machines and restarts. Retrying the same
+issue/PR/head returns the same assignment. Use only the returned wrapper:
+`ai-grok-review`, `ai-glm`, `ai-kimi`, `ai-muse`, or — for the overflow provider
+below — `ai-codex-review`. Never override its model or reasoning pin.
+
+The four rotation wrappers are **persistent**: they hold named sessions, so the
+same session can be reused for rebuttals. `ai-codex-review` is **not**. It
+exposes five one-shot modes only — `plan-review`, `diff-review`,
+`security-review`, `visual-review`, `final-check` — with no session, resume, or
+continuation of any kind, and `bin/ai-review` whitelists exactly those five.
+
+**Codex is overflow, not rotation.** `codex-gpt-5.6-sol` is assigned only when
+every rotation provider is already holding live review work in shared-db, or
+when all of them have already failed on the exact head. It never takes an
+ordinary turn. The busy probe fails open, so an unreadable GitHub keeps the
+ordinary rotation rather than diverting reviews to a provider that costs real
+money per run.
+
+**A Codex verdict cannot be debated, and that constrains when to spend one.**
+Because the wrapper is one-shot, the rebuttal rule below has no compliant path
+for Codex: there is no named session to reuse and nothing to continue. Do not
+invent one, and do not treat a fresh one-shot run as a continuation of an
+earlier verdict — it is a new review of whatever the repository looks like now.
+
+So when a Codex overflow verdict is disputed on the merits, the debate moves to
+a persistent reviewer as soon as one frees up, and that reviewer reviews the
+exact head from scratch rather than arbitrating a transcript it never saw. A
+Codex `REVISE` whose findings the author accepts needs no debate at all; fix the
+code, and re-review at the new exact head under the ordinary rotation.
+
+Prefer waiting for a free rotation provider over spending an overflow review on
+work you expect to argue about. Overflow exists to keep five lanes moving when
+every reviewer is genuinely busy, not to review the contentious change.
+
+**Qwen 3.8 Max and the retired `glm-5.2` label receive no new work** until an
+explicit owner instruction restores them. Their historical assignments,
+failures, and replacement evidence stay readable and must be recovered through
+`scripts/manage-migration-author-lanes.mjs`, never hand-edited.
+
+**A Grok review running in another repository never blocks one here.**
+`ai-grok-review`'s locking is scoped to work, not to the reviewer: whatever it
+serializes, it does not serialize across repositories, so five repositories with
+work can run five Grok reviews at once. Never skip Grok here because Grok is
+busy elsewhere, and never read a busy Grok as a Grok outage. What it serializes
+*within* one repository changed in `ai-grok-review` 1.1.0 — check
+`ai-grok-review doctor` and `skills/shared/grok-cli/SKILL.md` for the installed
+wrapper's exact rule instead of assuming either the old repository-wide lock or
+none at all.
 
 Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
-session for rebuttals and relay them with `templates/delegation/debate-turn.md`.
+session for rebuttals and relay them with `templates/delegation/debate-turn.md`
+— this applies to the four persistent rotation wrappers; see the Codex exception
+above.
 Stop at evidence-backed agreement or after the initial review plus three
 rebuttals. If a material disagreement remains, the merge stays stopped and the
 dispute goes to a THIRD independent reviewer, or to an engineer. Do NOT ask

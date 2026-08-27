@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Required for the merge queue: without this trigger a queued pull request
+  # waits forever for checks that never start.
+  merge_group:
   workflow_dispatch:
 
 concurrency:

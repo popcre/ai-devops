@@ -6,7 +6,7 @@ description: Sync this machine's public ai-devops configuration and its separate
 # sync-dotfiles
 
 One phrase keeps every machine's public AI configuration in step with
-`u2giants/ai-devops` and portable Markdown memory in the separate private
+`popcre/ai-devops` and portable Markdown memory in the separate private
 `u2giants/ai-devops-memory` hub: skills, global instructions, memory, gcloud
 defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 `ai-devops/docs/config-consolidation-proposal.md`, shipped 2026-07-14).

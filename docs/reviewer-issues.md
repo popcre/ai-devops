@@ -92,3 +92,30 @@ redacted proof is in
 [`tests/verification/kimi-review-issue-46/2026-08-23-live.md`](../tests/verification/kimi-review-issue-46/2026-08-23-live.md).
 Original local evidence packages remain historical records and must not be
 rewritten.
+
+## Closing a repaired incident
+
+A reviewer repair is not complete merely because its tests pass or a wrapper is
+installed. Every local incident whose recorded symptoms the repair addresses
+must receive an explicit resolution record before completion is reported:
+
+```text
+ai-reviewer-issue resolve <issue-id> --status resolved \
+  --summary "What is now fixed" \
+  --repair-commit <exact-commit> \
+  --evidence <test-review-install-or-live-proof>
+```
+
+Use `resolved` only when every symptom in the original package is proven fixed.
+Use `partially-resolved` and state what remains when the proof covers only part
+of a multi-symptom report. With no adequate proof, leave the incident open.
+
+Resolution files are append-only records under the incident's `resolutions/`
+directory. The original `issue.json`, logs, and captured evidence remain
+unchanged. `list` reports the latest status (`open`, `partially-resolved`, or
+`resolved`), and `show` joins the latest resolution into its displayed JSON.
+
+Before the final repair claim, audit `ai-reviewer-issue list`, resolve every
+affected record, and cite the exact commit plus test, independent-review,
+installation, or live-production evidence. This is the standard operating
+procedure for reviewer repairs.

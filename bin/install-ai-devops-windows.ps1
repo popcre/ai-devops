@@ -3,7 +3,7 @@ Internal/advanced skill installer for Albert's AI DevOps toolkit on Windows.
 The public restore entry point is bin\bootstrap-windows-dev.ps1.
 
 What this does:
-- Clones https://github.com/u2giants/ai-devops.git if missing.
+- Clones https://github.com/popcre/ai-devops.git if missing.
 - Pulls the latest main branch if the repo already exists.
 - Installs Claude skills to $HOME\.claude\skills.
 - Installs Codex skills to $HOME\.codex\skills.
@@ -18,7 +18,7 @@ For complete setup, run:
 
 [CmdletBinding()]
 param(
-    [string]$RepoUrl = "https://github.com/u2giants/ai-devops.git",
+    [string]$RepoUrl = "https://github.com/popcre/ai-devops.git",
     [string]$InstallRoot = "C:\repos",
     [string]$RepoPath = "",
     [switch]$SkipGitInstall,
@@ -48,10 +48,9 @@ function Write-Note {
     Write-Host "    $Message"
 }
 
-function Get-CanonicalRemote([string]$Url) {
-    return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
-        '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
-}
+. (Join-Path $PSScriptRoot 'repo-identity.ps1')
+
+function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 
 function Invoke-GitCommand {
     param([string[]]$Arguments)
@@ -102,11 +101,21 @@ function Assert-ReadyRepository([string]$Path) {
     if ($dirty) { throw 'The ai-devops checkout is dirty; refusing to install from mixed source.' }
     $origin = Invoke-GitCommand @('-C', $Path, 'remote', 'get-url', 'origin')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops origin.' }
-    $expectedIdentity = 'github.com/u2giants/ai-devops'
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) {
         $expectedIdentity = Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+        # The test override exists so a suite can point the installer at a local
+        # bare-repo fixture. It must never be able to substitute a REAL GitHub
+        # identity for the allow-list -- a stale pair of variables left in a
+        # shell profile would otherwise be a complete bypass of the guard.
+        # Every fixture in tests/ uses a filesystem path, so this costs nothing.
+        if ($expectedIdentity -match '^github[.]com/') {
+            throw "AI_DEVOPS_TEST_EXPECTED_REMOTE may not name a github.com identity ($expectedIdentity); the allow-list governs those."
+        }
+        if ((Get-CanonicalRemote $origin) -ne $expectedIdentity) { throw "Noncanonical ai-devops origin: $origin" }
+    } else {
+        Assert-AiDevOpsRepoIdentity -Key 'ai-devops' -Identity (Get-CanonicalRemote $origin) `
+            -Message "Noncanonical ai-devops origin: $origin"
     }
-    if ((Get-CanonicalRemote $origin) -ne $expectedIdentity) { throw "Noncanonical ai-devops origin: $origin" }
     $branch = Invoke-GitCommand @('-C', $Path, 'branch', '--show-current')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops branch.' }
     if ($branch.Trim() -ne 'main') { throw "ai-devops must be on main; found '$branch'." }
@@ -546,7 +555,8 @@ if ($SkillsDryRun) {
         throw "$RepoPath exists but is not a git repo. Move it aside or pass -RepoPath to a different folder."
     } else {
         Write-Note "Repo missing; cloning from $RepoUrl."
-        if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') { throw "Noncanonical RepoUrl: $RepoUrl" }
+        Assert-AiDevOpsRepoIdentity -Key 'ai-devops' -Identity (Get-CanonicalRemote $RepoUrl) `
+            -Message "Noncanonical RepoUrl: $RepoUrl"
         Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
         if ($script:LastGitExitCode -ne 0) { throw 'Cloning ai-devops failed.' }
         Assert-ReadyRepository $RepoPath

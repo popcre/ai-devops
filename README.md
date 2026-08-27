@@ -44,7 +44,7 @@ Open the built-in **PowerShell** and paste this one line. The bootstrap requests
 Administrator permission itself and installs PowerShell 7 as part of the run:
 
 ```powershell
-if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p}; powershell -NoProfile -ExecutionPolicy Bypass -File "$p\bin\bootstrap-windows-dev.ps1" -RepoPath $p
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p}; powershell -NoProfile -ExecutionPolicy Bypass -File "$p\bin\bootstrap-windows-dev.ps1" -RepoPath $p
 ```
 
 This is the normal entrypoint for a **new Windows computer**. It may also
@@ -69,7 +69,7 @@ is not automated or stored by AI DevOps.
 ### Ubuntu server (hetz and others) — Claude Code
 
 ```bash
-git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+git clone https://github.com/popcre/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ./install.sh
 ```
@@ -192,7 +192,7 @@ ai-devops sessions can use `ai-reviewer-issue list` and `show <issue-id>`.
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-git clone https://github.com/u2giants/ai-devops.git /worksp/ai-devops
+git clone https://github.com/popcre/ai-devops.git /worksp/ai-devops
 cd /worksp/ai-devops
 ./install.sh
 gh auth login
@@ -209,7 +209,7 @@ On any Windows vibe-coding computer, run this in PowerShell. It handles both
 new computers and computers where the repo already exists:
 
 ```powershell
-if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/u2giants/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
 ```
 
 Codex prompt version:

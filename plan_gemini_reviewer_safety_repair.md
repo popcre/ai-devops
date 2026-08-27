@@ -11,9 +11,13 @@ Handoff: [`HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md`](
 | 3 | Durable locked lifecycle | ✅ done 2026-08-21 | `bin/ai-gemini`; locks precede snapshot/state creation; concurrent-new, interruption, follow-up/delete, and recovery cases pass |
 | 4 | Exact completion and report contract | ✅ done 2026-08-21 | empty/wrong-model/unsafe-report/stale-head cases in `tests/test-ai-gemini.sh` |
 | 5 | Cross-platform live qualification | ✅ done 2026-08-24 | Both platforms passed the governed `qualify-live` canary on 2026-08-24 after the owner authenticated Antigravity on each: Windows `qualification-20260824T141942Z-52931` and Ubuntu `qual-20260824T144252Z-3062625`, each proving exact model, exact resume, mutation-request/no-change, unchanged outside sentinel, and durable reports. The Ubuntu run also exposed and fixed a 64-character sandbox tag overflow caused by wider Linux PIDs. Deterministic hostile mutation detection is offline-proven; the live result does not claim the model attempted a denied tool call. Evidence: `tests/verification/reviewer-production-completion/2026-08-24-gemini-tag-limit.md`. |
-| 6 | Governed qualification record, unquarantine, and close issue #38 | 🟨 remaining work | Steps 1-5 are landed on GitHub `main` and installed. Gemini still refuses `new`/`ask` because `bin/ai-gemini` hard-codes `QUARANTINED=1` and `bin/ai-review-preflight:static_status` reports Gemini quarantined with no qualification check. Build the hash-bound record Qwen already has (`qwen_live_qualified`, `qualify_qwen`), add hostile tests for missing/stale/tampered records, land through the full safety route, install, then run one real open-issue review before clearing quarantine. |
+| 6 | Governed qualification record, unquarantine, and close issue #38 | 🟨 implementation landed; production closeout pending | The hash-bound qualification record, fail-closed runtime checks, and true live-preflight path are on `origin/main` at `f26d5eb`. Targeted suites passed (62 Gemini + 51 preflight), exact-source review returned APPROVE, and the one full master gate passed (53 Bash suites + 16 PowerShell suites, zero failures). Exact-head CI run `32891794146` completed successfully across Linux offline, Windows reviewer-safety, and Windows offline. Windows is qualified and reports `available`. Ubuntu remains safely `quarantined` on older source until current `main` is installed and independently qualified, followed by one real issue #38 review and final issue/docs/handoff closeout. Evidence: `tests/verification/reviewer-production-completion/2026-08-25-gemini-governed-qualification-progress.md`. |
 
-Fresh session starts at Step 6 and must preserve quarantine until the governed record exists and a real open-issue review has passed. This plan supersedes conflicting current-state
+Fresh session resumes Step 6 with exact-head CI run `32891794146` already green;
+do not rerun the full master gate. Install current `main` on Ubuntu as `ai`,
+qualify that machine, and run the real issue #38 review. Preserve
+Ubuntu quarantine until its own exact wrapper/runtime/model qualification passes.
+This plan supersedes conflicting current-state
 text in `plan_ai-gemini-wrapper.md`; retain that file as investigation history.
 The write-once `2026-08-21T1233Z` Gemini handoff is a pre-integration snapshot;
 its old checkout and "uncommitted" statements are historical. This STATUS table
@@ -49,14 +53,18 @@ permission bypass flags, other providers, databases/production.
 
 ## 5. Current state of the code
 
-As of 2026-08-21, `bin/ai-gemini` records state before provider contact, uses
+As of 2026-08-25, `bin/ai-gemini` records state before provider contact, uses
 repository/session locks, inventories the disposable copy and protected source
 before and after both review and model-verification calls, freezes the complete
 source-file state across turns, matches resumed conversation IDs, and treats
-report failure as fatal. The offline hostile suite
-passes. Live containment is still unproven on Windows and Ubuntu, so the command
-and shared skill remain explicitly quarantined. `plan_ai-gemini-wrapper.md` is
-retained as dated investigation history and points here for current status.
+report failure as fatal. A version-2 qualification record binds the exact wrapper
+bytes, `agy` bytes/version, configured model, provider, and qualification epoch;
+the wrapper validates local identity immediately before provider execution.
+Windows passed the governed qualification and reports `available`. Ubuntu passed
+the earlier containment canary but remains `quarantined` until the current
+`f26d5eb` source passes exact-head CI, is installed, and writes its own current
+qualification record. `plan_ai-gemini-wrapper.md` is retained as dated
+investigation history and points here for current status.
 
 ## 6. Key findings and root cause
 
@@ -74,7 +82,8 @@ the disposable copy on uncertainty is rejected because it destroys evidence.
 
 ## 8. Design decisions already made (2026-08-21)
 
-LOCKED: keep Gemini quarantined; disposable self-contained copy; `--sandbox` and
+LOCKED: keep each machine quarantined until its own current qualification;
+disposable self-contained copy; `--sandbox` and
 plan mode; before/after byte identity including protected sentinels; exact model,
 conversation, verdict and durable report; fail closed. OPEN: whether installed
 Antigravity now exposes a safer dedicated permission profile—adopt only after
@@ -102,12 +111,17 @@ hostile canaries prove it on both operating systems.
    canaries with bounded spend, and save redacted evidence under
    `docs/verification/ai-gemini/<UTC>/`. You'll know it worked when both systems
    prove exact model/resume/read-only/report behavior.
-6. Run all suites, exact-head independent review, install, commit/push, prove
-   remote and installed hashes, close #38 only after all gates, and update plans,
-   skills and handoff. You'll know it worked when Gemini can be unquarantined
-   without relying on provider-success text alone.
+6. The implementation, targeted tests, exact-head APPROVE, one full master gate,
+   push, and Windows qualification are complete at `f26d5eb`. Finish exact-head
+   CI run `32891794146`; install current `main` on Ubuntu as `ai`; prove installed
+   hashes; qualify Ubuntu; run one real open-issue review; then close #38 and
+   retire superseded Gemini handoffs only after their obligations are retained.
+   You'll know it worked when both machines report `available`, issue #38 has a
+   durable exact-head Gemini report, the final documentation commit is green on
+   GitHub, and no stale Gemini continuation handoff remains.
 
-Natural cut point after Step 4; invoke `fresh-session`, then re-read Steps 5–6.
+Current cut point is within Step 6: exact-head CI is green; continue with Ubuntu
+installation and qualification. Do not repeat the already-passed master gate.
 
 ## 10. Tests required
 

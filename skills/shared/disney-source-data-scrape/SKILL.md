@@ -59,12 +59,20 @@ Pull the private repository safely before a new capture or load. Preserve other 
 
 OPA loads the complete Property-to-Character tree into the product-create page. Do not build a per-Property crawler.
 
-### Licensor (Studio) -> Property hierarchy is a required capture surface
+### Licensor (Studio) -> Property hierarchy is a direct capture surface
 
-The existing 2026-08-06 CSV proves only the product-create page's
-Property-to-Character jsTree. It does **not** prove that OPA lacks a higher
-Licensor/Studio-to-Property relationship elsewhere in the submission flow.
-Never turn "not present in this extract" into "not present on the site."
+The existing 2026-08-06 CSV captured Disney Home Standard only. Authenticated
+read-only inspection on 2026-08-26 proved that North America has separate
+top-level **Disney** and **Lucas** create-product branches. Disney Home Standard
+uses `lob=200`, `templateId=21`, `workflowId=49`; Lucas Home Standard uses
+`lob=200`, `templateId=462`, `workflowId=50`.
+
+The live trees contained 1,451 unique Disney-route Property IDs and 74 unique
+Lucas-route Property IDs with exactly one ID in both. The private 1,445-row
+capture was wholly within the Disney route and contained only that overlap, so
+73 directly Lucas-scoped Properties were omitted. Capture each branch separately
+and preserve branch membership as many-to-many source evidence with stable
+region, branch, LOB, product type, template, workflow, and capture identity.
 
 Prior authenticated inspection already found three higher-level signals that
 the flat CSV omitted: separate form fields for `LicensedProperty` and branded
@@ -74,13 +82,11 @@ Property IDs. These prove additional relationship surfaces exist even though
 their parent labels were not captured. Reinspect and capture them; do not dismiss
 them because the product-create jsTree itself starts at Property.
 
-Before classifying OPA Properties by title patterns, inspect the authenticated
-submission workflow for the upstream Licensor, Studio, Brand, Business Unit, or
-equivalent selector that scopes the Property dropdown. Capture the visible
-parent label, its stable source ID, the child Property ID, and the exact direct
-relationship. Check page models and same-origin responses as well as the visible
-controls because OPA renders the known Property-to-Character hierarchy in
-jsTree rather than native selects. Preserve the hierarchy as source evidence;
+Treat direct latest-approved Disney/Lucas branch membership as authoritative
+OPA studio scope before considering title patterns. Capture the visible parent
+label, route IDs, child Property ID, and exact direct relationship. Check page
+models and same-origin responses as well as visible controls. Preserve the
+hierarchy as source evidence;
 do not join `brandPropertyID` to `licensedPropertyID` or reinterpret
 `optionSourceID` as the parent. Those two fields have unproven meanings in the
 current extract.
@@ -90,15 +96,17 @@ that supplies the `LicensedProperty` and branded `Property` fields. Record field
 names, stable IDs, labels, cardinality, and direct relationships, but never log
 the licensee number, account identity, cookies, headers, or raw entitled rows.
 
-If authentication prevents this inspection, mark Studio-to-Property capture
-as **open and unverified**. Do not substitute a keyword classifier and call the
-source hierarchy unavailable.
+If authentication prevents a refresh, retain the last approved branch evidence
+with its capture date and mark the refresh unverified. Do not substitute a
+keyword classifier or landing-table family for source authority. Marvel
+submissions remain under Disney OPA by business rule; Marvel Creative is ASGARD
+only.
 
 ### Capture
 
 1. Ask the user to sign in to `https://opa.disney.com` and complete MFA in Chrome.
-2. Open the Home-line-of-business product-create URL recorded in `disney-opa/README.md`. Do not fill any field or click Save or Submit.
-3. Run `showAllProperties()` in the authenticated page, wait for the tree, then read the current jsTree model. The jsTree element ID changes on every page load; resolve it from `document.querySelector('.jstree').id`.
+2. Open both Disney and Lucas Home Standard routes recorded in `disney-opa/README.md`. Do not fill any field or click Save or Submit.
+3. Wait for each tree, then select the Property tree by the presence of `li[licensedpropertyid]`; never use the first `.jstree`, because the page also contains a category tree and generated jsTree IDs change on every load.
 4. Extract exactly these fields:
    - `property`
    - `licensedPropertyID`

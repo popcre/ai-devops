@@ -5,7 +5,7 @@ file is a router and repository contract, not the complete operating manual.
 
 ## What this repository is
 
-`u2giants/ai-devops` is Albert's backup-and-restore toolkit for a multi-model AI
+`popcre/ai-devops` is Albert's backup-and-restore toolkit for a multi-model AI
 coding workflow. It contains Bash and PowerShell command-line tools, prompt
 templates, documentation, machine setup, Claude/Codex skills, and an offline
 verification workflow. It is not a web application, hosted service, database,
@@ -17,7 +17,13 @@ The full recovery procedure is in
 
 ## Repository rules
 
-- Work directly on `main`; do not create feature branches for this repository.
+- **Work on a branch and open a pull request. Do not push to `main`.**
+  `main` is protected by a ruleset with a merge queue, so a direct push is
+  rejected. This replaced the old "work directly on `main`" rule when the
+  repository moved to the `popcre` organization on 2026-08-26 (issue #84).
+  `config/repository-policy.json` reports `feature-branch-pr` for this
+  repository under **both** owner names, so an old `u2giants` clone and a new
+  `popcre` clone behave identically.
 - GitHub is the source of truth. Finished work is tested, committed, pushed, and
   verified on `origin/main`.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
@@ -40,6 +46,10 @@ The full recovery procedure is in
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
   need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
+- A reviewer repair is not complete until every affected local reviewer-issue
+  record is marked resolved or partially resolved with exact repair evidence.
+  Preserve the original incident package; follow `log-reviewer-issue` for the
+  closure audit before reporting success.
 
 ## Documentation router
 
@@ -48,6 +58,7 @@ The full recovery procedure is in
 | Implement the 2026-08-21 full repository audit | [`plan_full-strategy-remediation.md`](plan_full-strategy-remediation.md) STATUS, [`bugs.md`](bugs.md) current audit | Incident-first; preserve capabilities; all 30 findings must reach production evidence |
 | Quick orientation | `README.md`, this file | Do not load deep docs without a task reason |
 | Context size, ownership, routing, or trigger quality | [`docs/context-spec.md`](docs/context-spec.md), [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) STATUS | Globals contain only universal rules; measurements come from audit JSON |
+| False completion, closeout honesty, or "the instructions are not working" | [`plan_completion-honesty-enforcement.md`](plan_completion-honesty-enforcement.md) STATUS, the Response Style block in both `templates/system/*global*.md` | Read its STATUS table first. The rule is enforced in three places that must move together: the globals, `context-audit.py` (safety marker + parity rule), and the Claude `Stop` hook `bin/ai-completion-check-hook`. Never weaken one to quiet another, and never claim a wording change worked without a `tools/completion-eval/` run |
 | Change a standing Claude/Codex behavior rule | Both files under `templates/system/*global*.md`, [`templates/system/machine-atlas.md`](templates/system/machine-atlas.md), affected shared skill | Keep shared behavior aligned across clients; install with `bin/ai-adopt-globals` |
 | Change a `bin/` tool or workflow | [`docs/architecture.md`](docs/architecture.md), [`docs/development.md`](docs/development.md), the tool's verification header and tests | Do not simplify a measured guardrail without reading its reason |
 | Install, update, uninstall, or restore | [`docs/deployment.md`](docs/deployment.md), [`docs/restore-from-zero.md`](docs/restore-from-zero.md), affected lifecycle scripts | Preserve machine-local configuration |
@@ -61,6 +72,7 @@ The full recovery procedure is in
 | Delegated reviewer work | [`bugs.md`](bugs.md) status, the linked provider plan, [`docs/reviewer-issues.md`](docs/reviewer-issues.md), affected wrapper header/skill/tests | Preserve read-only boundaries, completion proof, exact-head evidence, and provider-specific restrictions |
 | Reviewer evidence packet or sandbox | Header of `bin/ai-review-packet` or `bin/ai-review-sandbox`, matching tests | A reviewer keeps full repository read access; linked worktrees need self-contained snapshots |
 | Reviewer caching, snapshot reuse, or token/cost reporting | [`plan_reviewer-cache-efficiency.md`](plan_reviewer-cache-efficiency.md) STATUS | Read its STATUS table first; never trade evidence integrity for speed, and never report a token number the provider did not return |
+| `ai-muse` stale-turn rejection diagnostics | [`fix_muse_wrapper_reject.md`](fix_muse_wrapper_reject.md) STATUS | The guard is correct; never narrow what `tree_state` covers to stop it firing |
 | Shared database structure or business rules | Load the matching `shared-db` or `pop-business-rules` skill and follow its router | Reading is open; structural changes go through `u2giants/shared-db`; licensed private data stays private |
 | Repository or worktree cleanup | Load `cleanup-worktree`; read relevant open handoffs and [`docs/critical-incidents.md`](docs/critical-incidents.md) | Preserve every unique change before removing anything |
 | Continue unfinished work | The matching OPEN file in `HANDOFF.d/`, newest relevant first, and documents it names | Do not load unrelated handoffs |

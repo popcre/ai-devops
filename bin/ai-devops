@@ -11,6 +11,17 @@
 
 set -uo pipefail
 
+# Resolve through symlinks: install-machine-tools.sh links this command into
+# /usr/local/bin on Ubuntu, where a naive dirname/.. points at /usr/local
+# instead of the repository and the shared allow-list would never be found.
+_ai_self="${BASH_SOURCE[0]}"
+while [ -L "$_ai_self" ]; do
+  _ai_target="$(readlink "$_ai_self")"
+  case "$_ai_target" in /*) _ai_self="$_ai_target" ;; *) _ai_self="$(dirname "$_ai_self")/$_ai_target" ;; esac
+done
+AI_TOOL_ROOT="$(cd "$(dirname "$_ai_self")/.." && pwd)"
+AI_REPO_IDENTITY="$AI_TOOL_ROOT/bin/ai-repo-identity"
+
 AI_DEVOPS_VERSION="0.1.0"
 AI_DEVOPS_HOME_DEFAULT="${AI_DEVOPS_HOME_DEFAULT:-/worksp/ai-devops}"
 AI_DEVOPS_ETC="${AI_DEVOPS_ETC:-/etc/ai-devops}"
@@ -106,7 +117,12 @@ check_memory_and_schedule() {
   local hub="${AI_MEMORY_HUB:-$HOME/.cache/ai-devops-memory-private}" remote
   if [ -d "$hub/.git" ]; then
     remote="$(git -C "$hub" config --get remote.origin.url 2>/dev/null || true)"
-    case "$remote" in *github.com/u2giants/ai-devops-memory.git) c_ok "private memory hub present ($hub)" ;; *) c_fail 'private memory hub has noncanonical origin'; FAILED=1 ;; esac
+    # A glob on the URL tail accepted https://evil.example/github.com/... —
+    # compare the full canonical identity through the shared allow-list.
+    if [ -x "$AI_REPO_IDENTITY" ] && "$AI_REPO_IDENTITY" accepts ai-devops-memory "$remote"; then
+      c_ok "private memory hub present ($hub)"
+    else c_fail 'private memory hub has noncanonical origin'; FAILED=1
+    fi
   else c_warn "private memory hub not cloned yet ($hub)"
   fi
   if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q 'ai-memory-sync'; then

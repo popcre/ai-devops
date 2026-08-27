@@ -23,6 +23,41 @@ are reported as information, not as broken repo launchers. `ai-install-skills`
 also runs a fail-closed bootstrap check so a sync using an older loaded skill
 cannot quietly claim complete after pulling a newer command catalog.
 
+## Repository identity allow-list
+
+`config/repo-identities.tsv` is the single source of truth for the fail-closed
+guards that assert "this checkout really is the repository I think it is".
+They exist so a workstation cannot be bootstrapped, and private memory cannot be
+published, from a look-alike fork. Bash callers read the table through
+`bin/ai-repo-identity`; PowerShell callers dot-source `bin/repo-identity.ps1`.
+An identity that is not in the table is refused, and a missing or emptied table
+refuses everything -- widening the table is the only supported way to accept a
+new owner, and every added row is a deliberate security decision.
+
+`ai-devops` accepts **both** `u2giants` and `popcre` so that existing clones and
+clones taken after the organization move both pass on the same commit (issue
+#84, now closed; [`../fix_to_gh_org.md`](../fix_to_gh_org.md)). The three
+private siblings -- `ai-devops-memory`, `ai-devops-transcripts` and
+`ai-devops-private-config` -- did not move and accept `u2giants` only.
+
+**The exit codes are part of the contract.** `ai-repo-identity accepts` returns
+`0` accepted, `1` the allow-list is intact and this identity is not on it, and
+`2` the allow-list could not be used at all -- missing, unreadable, or the key
+has zero rows. Never conflate `1` and `2`. Most callers are positive guards
+where both mean abort, but `bin/ai-sync-memory` is **inverted**: it refuses to
+use any accepted `ai-devops` identity as a private memory hub, so it reads `1`
+as "not the public repo, proceed". On 2026-08-26 a `1` from an emptied table
+caused it to copy a private memory file into a checkout whose origin was the
+public repository. A broken allow-list must stay an error.
+
+**Every guard compares the full `host/owner/repo` identity.** `bin/ai-facts` and
+`bin/ai-private-config` once stripped the host along with the scheme, so any
+server answering the right path was accepted; `bin/ai-devops`'s doctor used a
+trailing glob with the same weakness. All three now route through the shared
+table. `tests/test-ai-repo-identity.sh` fails if any identity literal in `bin/`
+is missing from it, in either the `github.com/<owner>/<repo>` or the bare
+`<owner>/<repo>` form.
+
 **One-line summary:** config is spread across **three overlapping sync systems
 plus several things synced by nothing**. `ai-devops` (this repo) is the intended
 long-term single hub; the migration plan is
@@ -163,6 +198,17 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   `templates/system/AGENTS-global-codex.md` → `~/.codex/AGENTS.md`;
   `templates/system/machine-atlas.md` → each machine's environment atlas section.
   Installed **only if absent** — never clobbers local edits.
+- **Claude hooks:** two, both installed into the user-level
+  `~/.claude/settings.json` by their own idempotent, strictly additive scripts,
+  and both pointing at a stable copy under `~/.config/ai-devops/` rather than
+  into a repo checkout that might move.
+  `bin/ai-install-memory-hook` registers the `PostToolUse` memory-index hook;
+  `bin/ai-install-completion-check-hook` registers the `Stop` closeout hook
+  (`bin/ai-completion-check-hook`), which stops a turn that claims completion
+  until the session has accounted for every deliverable — see
+  [`../plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md).
+  Each refuses to write if `settings.json` does not parse, and neither ever
+  removes the other. Verify with `--check`.
 - **Workflow config:** `config/*.env.example` seeds `/etc/ai-devops/` without
   overwriting existing machine-local values.
 - **Portable-memory tooling:** public `memory/` contains only the architecture

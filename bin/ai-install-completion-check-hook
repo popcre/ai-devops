@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# ai-install-completion-check-hook — install the closeout Stop hook on this machine.
+#
+# Copies bin/ai-completion-check-hook to ~/.config/ai-devops/completion-check-hook
+# (a stable per-machine path, so the settings entry never points into a repo
+# checkout that might move) and registers it as a Stop hook in the USER-level
+# ~/.claude/settings.json.
+#
+# Idempotent, strictly additive: it never removes an existing hook — including the
+# memory-index hook installed by its sibling script — never touches any other
+# setting, and backs the settings file up before its first change. Refuses to write
+# if the settings file is not valid JSON, because a broken settings.json silently
+# disables EVERY setting in it.
+#
+# Why a Stop hook: the always-loaded rule against reporting unfinished work as
+# finished had already been rewritten twice and was live when it failed again on
+# 2026-08-26. See plan_completion-honesty-enforcement.md.
+#
+# Exit status: 0 = installed or already present, 1 = failure, 2 = usage.
+set -u
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+claude_home=""
+check_only=0
+
+while (($#)); do
+  case "$1" in
+    --claude-home) claude_home="$2"; shift 2 ;;
+    --repo-root) repo_root="$2"; shift 2 ;;
+    --check) check_only=1; shift ;;
+    -h|--help) echo "usage: ai-install-completion-check-hook [--check] [--claude-home DIR] [--repo-root DIR]"; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$claude_home" ]]; then
+  case "${OSTYPE:-}" in
+    msys*|cygwin*)
+      profile="${USERPROFILE:-}"
+      [[ -n "$profile" ]] || { echo "ERROR USERPROFILE is unset" >&2; exit 1; }
+      command -v cygpath >/dev/null 2>&1 && profile="$(cygpath -u "$profile")"
+      claude_home="$profile/.claude" ;;
+    *) claude_home="$HOME/.claude" ;;
+  esac
+fi
+
+src="$repo_root/bin/ai-completion-check-hook"
+[[ -f "$src" ]] || { echo "ERROR not found: $src" >&2; exit 1; }
+
+cfg_dir="$HOME/.config/ai-devops"
+dest="$cfg_dir/completion-check-hook"
+settings="$claude_home/settings.json"
+marker='completion-check-hook'
+
+if (( check_only )); then
+  [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
+  [[ -f "$settings" ]] || { echo "ERROR no $settings"; exit 1; }
+  if grep -qF "$marker" "$settings"; then echo "OK completion-check hook already registered"; exit 0; fi
+  echo "ERROR completion-check hook not registered in $settings"; exit 1
+fi
+
+mkdir -p "$cfg_dir"
+cp "$src" "$dest" || { echo "ERROR could not install $dest" >&2; exit 1; }
+chmod +x "$dest" 2>/dev/null || true
+
+[[ -f "$settings" ]] || printf '{}\n' > "$settings"
+
+command -v jq >/dev/null 2>&1 || { echo "ERROR jq is required to edit settings.json safely" >&2; exit 1; }
+
+# Never touch a settings file we cannot parse: a broken settings.json silently
+# disables EVERY setting in it, so a blind rewrite could cost more than it fixes.
+if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+  echo "ERROR $settings is not a valid JSON object - refusing to touch it" >&2
+  exit 1
+fi
+
+if jq -e --arg m "$marker" '(.hooks.Stop // []) | map(.hooks // []) | flatten
+      | map(.command // "") | any(contains($m))' "$settings" >/dev/null 2>&1; then
+  echo "OK completion-check hook already registered"
+  exit 0
+fi
+
+backup="$settings.aidevops.bak"
+[[ -f "$backup" ]] || cp "$settings" "$backup"
+
+cmd='bash "$HOME/.config/ai-devops/completion-check-hook" 2>/dev/null || true'
+tmp="$settings.tmp.$$"
+if ! jq --arg cmd "$cmd" '
+      .hooks //= {} |
+      .hooks.Stop //= [] |
+      .hooks.Stop += [{
+        hooks: [{ type: "command", command: $cmd, timeout: 15,
+                  statusMessage: "checking the closeout" }]
+      }]' "$settings" > "$tmp"; then
+  rm -f "$tmp"; echo "ERROR could not build the updated settings" >&2; exit 1
+fi
+
+# Prove the replacement parses before it becomes the live file.
+if ! jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+  rm -f "$tmp"; echo "ERROR refused to install a settings file that does not parse" >&2; exit 1
+fi
+mv "$tmp" "$settings"
+echo "OK completion-check hook registered in $settings"

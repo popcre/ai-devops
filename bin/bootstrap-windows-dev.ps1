@@ -6,7 +6,7 @@ delegates secret-backed machine configuration to setup-machine.ps1.
 [CmdletBinding(SupportsShouldProcess)]
 param(
   [string]$RepoPath = 'C:\repos\ai-devops',
-  [string]$RepoUrl = 'https://github.com/u2giants/ai-devops.git',
+  [string]$RepoUrl = 'https://github.com/popcre/ai-devops.git',
   [string]$AnsibleRepoPath = 'C:\repos\ansible',
   [string]$AnsibleRepoUrl = 'https://github.com/u2giants/ansible.git',
   [switch]$SkipMachineSetup,
@@ -24,10 +24,8 @@ function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
     [Environment]::GetEnvironmentVariable('Path','User')
 }
-function Get-CanonicalRemote([string]$Url) {
-  return (($Url.Trim() -replace '^git@github\.com:', 'github.com/' -replace
-      '^https?://github\.com/', 'github.com/') -replace '\.git$', '').TrimEnd('/')
-}
+. (Join-Path $PSScriptRoot 'repo-identity.ps1')
+function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 function Invoke-GitCommand {
   param([string[]]$Arguments)
 
@@ -51,9 +49,8 @@ function Assert-ReadyRepository([string]$Path) {
 
   $origin = Invoke-GitCommand @('-C', $Path, 'remote', 'get-url', 'origin')
   if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops origin remote.' }
-  if ((Get-CanonicalRemote $origin) -ne 'github.com/u2giants/ai-devops') {
-    throw "The ai-devops origin is not canonical: $origin"
-  }
+  Assert-AiDevOpsRepoIdentity -Key 'ai-devops' -Identity (Get-CanonicalRemote $origin) `
+    -Message "The ai-devops origin is not canonical: $origin"
 
   $branch = Invoke-GitCommand @('-C', $Path, 'branch', '--show-current')
   if ($script:LastGitExitCode -ne 0) { throw 'Could not read the ai-devops branch.' }
@@ -117,9 +114,8 @@ try {
     throw "Repository is absent at $RepoPath; TestOnly never clones."
   } else {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $RepoPath) | Out-Null
-    if ((Get-CanonicalRemote $RepoUrl) -ne 'github.com/u2giants/ai-devops') {
-      throw "RepoUrl is not the canonical ai-devops repository: $RepoUrl"
-    }
+    Assert-AiDevOpsRepoIdentity -Key 'ai-devops' -Identity (Get-CanonicalRemote $RepoUrl) `
+      -Message "RepoUrl is not the canonical ai-devops repository: $RepoUrl"
     Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
     if ($script:LastGitExitCode -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
     $sourceSha = Assert-ReadyRepository $RepoPath
