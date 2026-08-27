@@ -4,13 +4,19 @@ set -uo pipefail
 
 MODE="${1:-sync}"
 shift || true
-[[ "$MODE" == "sync" || "$MODE" == "pull" || "$MODE" == "forget" || "$MODE" == "--dry-run" ]] || {
-  echo "usage: ai-memory-sync [sync|pull|--dry-run]" >&2
+[[ "$MODE" == "sync" || "$MODE" == "pull" || "$MODE" == "forget" ||
+   "$MODE" == "sync-if-stale" || "$MODE" == "--dry-run" ]] || {
+  echo "usage: ai-memory-sync [sync|sync-if-stale|pull|--dry-run]" >&2
   echo "       ai-memory-sync forget <project> <file.md> \"<reason>\"" >&2
   exit 2
 }
-if [[ "$MODE" == "forget" && "$#" -lt 3 ]]; then
+if [[ "$MODE" == "forget" && "${1:-}" == "--batch" && "$#" -ne 2 ]]; then
+  echo "usage: ai-memory-sync forget --batch <list-file>" >&2
+  exit 2
+fi
+if [[ "$MODE" == "forget" && "${1:-}" != "--batch" && "$#" -lt 3 ]]; then
   echo "usage: ai-memory-sync forget <project> <file.md> \"<reason>\"" >&2
+  echo "       ai-memory-sync forget --batch <list-file>" >&2
   exit 2
 fi
 
@@ -38,6 +44,26 @@ DRY=""
 mkdir -p "$(dirname "$LOG")"
 log() { printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST" "$*" | tee -a "$LOG"; }
 fail() { log "FAILED: $*" >&2; exit 1; }
+
+# Memory is the slow half of a dotfiles sync: it fetches the private hub, unions
+# every project both ways, audits health, then commits and pushes. Nothing about
+# it needs to run several times an hour. `sync-if-stale` runs a real sync only
+# when the last successful one is older than AI_MEMORY_MAX_AGE_HOURS (default
+# 24), so an ordinary sync stays fast and memory still converges daily.
+STAMP="${AI_MEMORY_STAMP:-$BASE_HOME/.cache/ai-memory-sync.last-success}"
+MAX_AGE_HOURS="${AI_MEMORY_MAX_AGE_HOURS:-24}"
+if [[ "$MODE" == "sync-if-stale" ]]; then
+  MODE="sync"
+  if [[ -f "$STAMP" ]]; then
+    last="$(cat "$STAMP" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    if [[ "$last" =~ ^[0-9]+$ ]] && (( now - last < MAX_AGE_HOURS * 3600 )); then
+      log "memory sync skipped; last success was $(( (now - last) / 60 )) minute(s) ago (threshold ${MAX_AGE_HOURS}h). Run 'ai-memory-sync sync' to force one."
+      exit 0
+    fi
+  fi
+fi
+stamp_success() { date +%s > "$STAMP" 2>/dev/null || true; }
 
 canonical_remote() {
   printf '%s' "$1" | sed -E \
@@ -147,7 +173,11 @@ if [[ "$machine_memory_found" -eq 0 && "$MODE" != "forget" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" != "forget" ]]; then
+# A forget run publishes the machine's memory too, when this machine has any.
+# Skipping the outgoing union left the hub holding whatever it already had, so a
+# forget could never repair an index the machine had already healed - and the
+# health gate then rejected the very transaction meant to fix it.
+if [[ "$MODE" != "forget" || "$machine_memory_found" -eq 1 ]]; then
   log "union machine into private hub"
   AI_MEMORY_HUB_ROOT="$HUB" bash "$SYNC" push $DRY || fail "outgoing union failed"
 fi
@@ -173,6 +203,7 @@ bash "$HEALTH" --repo-root "$HUB" --hub-only --coverage-only --ignore-sync-state
   fail "private hub health rejected the outgoing union"
 
 if git -C "$HUB" diff --quiet -- memory && ((${#untracked[@]} == 0)); then
+  stamp_success
   log "sync complete; union already converged"
   exit 0
 fi
@@ -188,4 +219,5 @@ fi
 
 bash "$HEALTH" --repo-root "$HUB" --hub-only --coverage-only >/dev/null ||
   fail "post-push private hub health failed"
+stamp_success
 log "sync complete at $commit_sha"

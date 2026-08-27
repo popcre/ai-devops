@@ -97,7 +97,8 @@ clone + `./install.sh` on Ubuntu).
      unavailable until the token is in place. Never skip silently.
    `config/opencode/version` pins OpenCode, so a pull that bumps it is installed here.
 
-3. `bin/ai-memory-sync pull` — lay private hub memory onto this machine (only existing
+3. Memory is one transaction and runs at most once a day — step 6 does the whole
+   round trip, there is no separate pull step (only existing
    local projects update; a skip for a project this machine doesn't have is
    normal). **But if EVERY project skips, or `push` reports 0 folders, the
    script now exits non-zero — that is a real failure, not "expected". It means
@@ -187,8 +188,9 @@ clone + `./install.sh` on Ubuntu).
    say so and offer to register it. Never schedule anything that EDITS memory
    unattended: tombstoned deletions propagate to every machine and survive a later
    pull, so a wrong automated delete cannot be undone.
-6. `bin/ai-memory-sync sync` — union local memory into the private hub and pull
-   the verified union back. This command owns privacy verification, health,
+6. `bin/ai-memory-sync sync-if-stale` — union local memory into the private hub and
+   pull the verified union back, skipping when the last success is under 24 hours
+   old (memory was 2m18s of a 3m10s sync). Use plain `sync` to force one. This command owns privacy verification, health,
    commit, push, and recovery; never stage memory in public `ai-devops`.
    **Deleting a memory needs `forget`, not `rm`.** Sync copies, never mirrors, so
    a plain delete does not propagate — the next `pull` restores it and any

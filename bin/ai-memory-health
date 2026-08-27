@@ -98,6 +98,7 @@ head1() { printf '\n## %s\n\n' "$1" >> "$report"; }
 
 total_files=0
 total_projects=0
+total_index_bytes=0
 
 if (( hub_only )); then
   project_glob=("$repo_root"/memory/*)
@@ -130,6 +131,9 @@ for mem in "${project_glob[@]}"; do
   ((${#files[@]} == 0)) && continue
   total_projects=$((total_projects + 1))
   total_files=$((total_files + ${#files[@]}))
+  if [[ -f "$index" ]]; then
+    total_index_bytes=$((total_index_bytes + $(wc -c < "$index" | tr -d ' ')))
+  fi
 
   head1 "$project (${#files[@]} memories)"
   before=$findings
@@ -223,10 +227,44 @@ else
   printf '  - no hub memory directory at %s/memory\n' "$repo_root" >> "$report"
 fi
 
+# Trend. One week's totals say nothing; the direction does. The 2026-08-27
+# consolidation found single memories forked into dozens of copies and 62
+# phantom projects, all of which had been growing for weeks - every weekly
+# report listed the symptoms and none showed the trajectory, so nobody read it
+# as a problem. Counts are recorded per machine and per mode; a first run says
+# so rather than inventing a baseline.
+index_kb=$(( (total_index_bytes + 1023) / 1024 ))
+trend_state="${AI_MEMORY_HEALTH_STATE:-$HOME/.cache/ai-memory-health.trend}"
+trend_key="$(hostname)|$hub_only"
+# $3 is an optional unit, appended only when there is a number to attach it to,
+# so a flat week reads "index no change" and never "index no changeKB".
+delta() {
+  local d=$(( $1 - $2 ))
+  if   (( d > 0 )); then printf '+%s%s' "$d" "${3:-}"
+  elif (( d < 0 )); then printf '%s%s' "$d" "${3:-}"
+  else printf 'no change'; fi
+}
+previous="$(grep -F "$trend_key|" "$trend_state" 2>/dev/null | tail -1)"
+if [[ -n "$previous" ]]; then
+  prev_date="$(printf '%s' "$previous" | cut -d'|' -f3)"
+  prev_projects="$(printf '%s' "$previous" | cut -d'|' -f4)"
+  prev_files="$(printf '%s' "$previous" | cut -d'|' -f5)"
+  prev_kb=$(( ($(printf '%s' "$previous" | cut -d'|' -f6) + 1023) / 1024 ))
+  prev_findings="$(printf '%s' "$previous" | cut -d'|' -f7)"
+  trend_line="  - since $prev_date: projects $(delta "$total_projects" "$prev_projects"), files $(delta "$total_files" "$prev_files"), index $(delta "$index_kb" "$prev_kb" KB), findings $(delta "$findings" "$prev_findings")"
+else
+  trend_line="  - no earlier report to compare against; this run is the baseline"
+fi
+mkdir -p "$(dirname "$trend_state")" 2>/dev/null || true
+printf '%s|%s|%s|%s|%s|%s\n' "$trend_key" "$(date -u '+%Y-%m-%d')" \
+  "$total_projects" "$total_files" "$total_index_bytes" "$findings" >> "$trend_state" 2>/dev/null || true
+
 {
   printf '\n## Summary\n\n'
-  printf '  - %s project(s), %s memory file(s)\n' "$total_projects" "$total_files"
+  printf '  - %s project(s), %s memory file(s), %s KB of index loaded per session\n' \
+    "$total_projects" "$total_files" "$index_kb"
   printf '  - %s finding(s) to review\n' "$findings"
+  printf '%s\n' "$trend_line"
   if (( findings > 0 )); then
     printf '\nNothing was changed. Open Claude Code in the affected project and say\n'
     printf '"consolidate my memory" to act on any of the above.\n'

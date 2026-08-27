@@ -155,7 +155,14 @@ clone + `./install.sh` (Ubuntu) first.
    it, the setup script installs the new build and doctor verifies the running server
    matches. That is why this step runs on every sync and not only on a fresh machine.
 
-3. **Lay down memory** from the private hub: `bin/ai-memory-sync pull`. Only projects
+3. **Memory is one transaction, and it runs at most once a day.** Step 7 does the
+   whole round trip; there is no separate pull step. Memory is the slow half of a
+   sync — it fetches the private hub, unions every project both ways, audits
+   health, then commits and pushes — and on 2026-08-27 it measured 2m18s of a
+   3m10s sync. `sync-if-stale` skips it when the last success is under 24 hours
+   old, so an ordinary sync costs about 50 seconds and memory still converges
+   daily. Force one at any time with `bin/ai-memory-sync sync`.
+   When it does run, only projects that already exist locally are updated, so a skip for a project
    that already exist locally are updated, so a skip for a project this machine
    doesn't have is normal. **A skip for EVERY project is not** — nor is `push`
    reporting `0 project memory folder(s)`. Both now exit non-zero, because they
@@ -272,9 +279,13 @@ clone + `./install.sh` (Ubuntu) first.
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
    reports; a human approves every change.
-7. **Capture and publish local memory transactionally:** `bin/ai-memory-sync sync`.
-   This command alone owns the private clone, privacy proof, union, health gate,
-   commit, push, retry state, and success message. Never stage memory in the
+7. **Capture and publish local memory transactionally:**
+   `bin/ai-memory-sync sync-if-stale`. This command alone owns the private clone,
+   privacy proof, union, health gate, commit, push, retry state, and success
+   message. It prints `memory sync skipped` when the last success is under 24
+   hours old — say that verdict out loud rather than implying memory moved. Use
+   plain `sync` instead when the user asks for memory specifically, when a memory
+   was just written that another machine needs, or after any `forget`. Never stage memory in the
    public `ai-devops` checkout and never hand-compose a memory commit.
 8. **Verify public separation:** `git status --short -- memory/` in `ai-devops`
    must show no operational fact change. Only `memory/README.md` and the
