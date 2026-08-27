@@ -735,7 +735,9 @@ foreach ($proj in $McpByProject.Keys) {
   if ($LASTEXITCODE -eq 0) {
     Warn "$proj ignores .mcp.json - a seed there would never be committed."
     Warn "  $($names -join ', ') left GLOBAL so every clone keeps working."
-    Warn "  Un-ignore .mcp.json in that repo to scope them properly."
+    Warn "  Do NOT just un-ignore it: that rule can be a deliberate safeguard."
+    Warn "  synology-monitor ignores it because the file has held a raw NAS"
+    Warn "  token and one already leaked. See docs/mcp-server-scope.md."
     continue
   }
 

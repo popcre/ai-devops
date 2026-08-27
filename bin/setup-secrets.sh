@@ -492,7 +492,9 @@ for _proj, _names in sorted(by_project.items()):
     if _ignored:
         print("  !! %s ignores .mcp.json - a seed there would never be committed." % _proj)
         print("     %s left GLOBAL so every clone keeps working." % ", ".join(sorted(_names)))
-        print("     Un-ignore .mcp.json in that repo to scope them properly.")
+        print("     Do NOT just un-ignore it: that rule can be a deliberate")
+        print("     safeguard. synology-monitor ignores it because the file has held")
+        print("     a raw NAS token and one already leaked. See docs/mcp-server-scope.md.")
         continue
 
     _file = os.path.join(_dir, ".mcp.json")
