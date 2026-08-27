@@ -69,13 +69,27 @@ all activity but 66% of all input tokens; turns past 400 were 19% of activity
 and 40% of tokens, at an average 488,000 tokens of context each. Fifty-nine
 sessions (17% of the total) carried 73% of all turns, and they almost never
 compacted, because a very large context window means nothing forces a reset.
-That is a client-settings problem, not a repository one, and it is handled by
-`autoCompactWindow` plus a turn counter in the status line on each machine.
+Two fixes follow. `autoCompactEnabled` and `autoCompactWindow: 200000` in
+`~/.claude/settings.json` cap the growth automatically. `bin/ai-claude-statusline`
+covers the judgement call the setting cannot: it renders a context gauge and a
+live turn count that goes amber at 150 turns and red at 250, so the moment to
+hand off to a fresh session is visible rather than guessed. Wire it up with
+`"statusLine": "ai-claude-statusline"` and restart Claude Code.
 
-**Tool output is not the problem here.** Everything every tool printed across
-all 338 Claude sessions came to 25 MB, roughly six million tokens, or 0.07% of
-input. The popular token-saving projects compress exactly that, so none of them
-apply to this setup.
+**Tool traffic is most of what accumulates.** Of the conversation body across
+all 338 sessions - 54.2 MB of message content - tool results are 46.9% and the
+tool calls that produced them are another 36.2%. Assistant prose is 10.9% and
+Albert's own messages 6.1%. So roughly **83% of what a session accumulates is
+tool traffic**, and that is the part Headroom compresses.
+
+An earlier draft of this analysis put tool output at 0.07% and concluded that
+Headroom could not help. That was an arithmetic error - unique tool-output bytes
+were compared against total re-read tokens, which counts the same content once
+on one side and once per turn on the other. Corrected, the measurement supports
+the Headroom trial rather than undermining it, and is consistent with the 13.2%
+single-session and 5.7% lifetime savings recorded in
+[`headroom.md`](headroom.md). Nothing in that trial's standing decision changes
+on this evidence.
 
 What *is* a repository problem is the skill index. Of 46 installed skills, 23
 were invoked in the ten-day window. Fourteen of the unused ones are rare
