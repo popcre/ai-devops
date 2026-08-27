@@ -1,6 +1,7 @@
 ---
 name: item-description-taxonomy
 description: Parse product descriptions into item type, size, licensor, property, and artwork wording. Use for item-master cleanup, merchandise recategorization, product-type normalization, phrase dictionaries, deduplication, or inferring products from free text.
+disable-model-invocation: true
 ---
 
 # Item description taxonomy

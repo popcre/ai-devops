@@ -1,6 +1,7 @@
 ---
 name: repo-docs-overhaul
 description: Full documentation-system rebuild for a repo — the "AI TASK SPEC Repository Documentation Maintenance" spec. Use for NEW applications, after BIG changes, or when the user says "do a full documentation overhaul", "make AGENTS.md the canonical operating guide", or pastes the AI TASK SPEC. For routine end-of-session updates use session-docs-update instead.
+disable-model-invocation: true
 ---
 
 # repo-docs-overhaul

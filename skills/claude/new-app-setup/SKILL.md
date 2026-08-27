@@ -1,6 +1,7 @@
 ---
 name: new-app-setup
 description: One-time briefing and setup ritual for a brand-new software project. Use when starting a new project, spinning up a new application/repo from scratch, or when the user says "new project", "new application", "set up a brand new app", "starting a new project", or pastes the "POP Creations — New Project Standard" prompt. Covers access-first credential requests, container naming, docs/CI-CD standards, DB choice, and the initial file-count-and-cleanup pass. For an existing repo that just needs Coolify/GHCR CI/CD hardened, use cicd-rules-audit instead; for rebuilding docs on an existing repo, use repo-docs-overhaul instead.
+disable-model-invocation: true
 ---
 
 # new-app-setup

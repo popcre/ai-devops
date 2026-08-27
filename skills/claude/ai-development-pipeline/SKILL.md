@@ -4,6 +4,7 @@ description: >-
   Run a code change through the governed seven-stage plan, review,
   implementation, test, security, and final-review workflow. Use when a task
   needs the complete multi-model pipeline rather than one isolated review.
+disable-model-invocation: true
 ---
 
 # AI Development Pipeline
