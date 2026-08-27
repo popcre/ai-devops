@@ -1,12 +1,11 @@
 # Implementation plan — stop AI sessions from declaring work complete while authorized work is still pending
 
-Open handoff for this plan:
-[`HANDOFF.d/2026-08-26T1127Z-edge-dev-claude-completion-honesty.md`](HANDOFF.d/2026-08-26T1127Z-edge-dev-claude-completion-honesty.md)
+**CLOSED 2026-08-27.** No handoff is open for this plan; its handoff was
+retired when the last step landed. See the CLOSED section below the STATUS
+table for what shipped and for the two machines still on the old text.
 
-Created 2026-08-26 by a Claude session on `edge-dev`. **Most of it was then
-implemented the same day** — see the STATUS table for what is done, what is
-partial, and what is still open. Step 8 and the new-text measurement are the
-open work.
+Created 2026-08-26 by a Claude session on `edge-dev` and implemented the same
+day; merged and rolled out 2026-08-27. The STATUS table is the record.
 
 ---
 
@@ -25,39 +24,28 @@ open work.
 | 8 | Codex compensating control (no Stop hook exists) | ✅ done 2026-08-26 | `skills/codex/codex-session-closeout/SKILL.md` opens with a pointer to the closeout contract in the global — one pointer, not a second copy of the rule; audit reports 0 new overlaps |
 | 9 | Behavioral eval harness `tools/completion-eval/` | 🟡 built, scorer needs escalation | `tools/completion-eval/completion-eval.py` + `completion-honesty.eval.json` (8 pending scenarios, 4 controls) + `README.md`; both clients read-only, Codex pinned to low/medium effort. **Its keyword scorer misclassified 6 of 24 replies on the first baselines**; five are fixed and locked in `tests/test-completion-eval.sh`, one is not. Per this plan's own criterion the scorer would have escalated to a rubric-scored model judge — **but step 10 was closed by owner decision on 2026-08-26 ("stop measuring"), so do NOT build that judge.** This row stays amber as an honest record of a known-imperfect tool, not as open work — see the KNOWN LIMIT section of the tool README |
 | 10 | Score the OLD text, then the rewritten text, on Claude and Codex | ⛔ CLOSED by owner decision 2026-08-26 | Albert: **"stop measuring."** Old-text baselines stand as the record (`tools/completion-eval/results/`), and they showed the scenarios cannot reproduce the failure — they narrate which deliverable is unfinished, while the real failure is not noticing. The scenario redesign is NOT to be built. **Consequence to state plainly whenever this work is discussed: the rewritten rule rests on the owner's lived evidence, and is not validated by measurement. Do not describe it as proven** |
-| 11 | Reconcile the **installed** globals on every machine | 🟡 partial | Hook installed and proven live on `edge-dev` (`ai-install-completion-check-hook --check` → OK; the installed copy returns `decision: block` on a false completion). The rewritten globals are NOT yet adopted on any machine |
-| 12 | Docs, router row, memory entry, close the handoff | 🟡 partial | `docs/config-inventory.md` (Claude hooks entry), `docs/context-engineering.md:250` (worked example 11), `AGENTS.md` router row, memory `completion-honesty-enforcement.md`. The handoff stays OPEN until 8, 10 and 11 are done |
+| 11 | Reconcile the **installed** globals on every machine | ✅ done 2026-08-27 | Adopted with `bin/ai-adopt-globals` on **edge-dev**, **al8960ofc**, and **hetz** (both the `ai` and `root` accounts, which keep separate copies); each run verified `installed body matches the repo template exactly` and `grep -c "Account for the whole job"` returns 1 for both globals on every one. The Claude Stop hook remains installed and live on `edge-dev`. **NOT reached, and not to be implied otherwise: `albt16`/`t16` — online on Tailscale but runs no SSH server, so it can only be adopted by someone sitting at it; and `916` — offline.** Both still run the old text |
+| 12 | Docs, router row, memory entry, close the handoff | ✅ done 2026-08-27 | `docs/config-inventory.md` (Claude hooks entry), `docs/context-engineering.md:250` (worked example 11), `AGENTS.md` router row, memory `completion-honesty-enforcement.md`. PR #101 merged as `e29ef92`; the handoff file is deleted with this commit |
 
-**A fresh session starts by merging the open pull request, then does step 11.**
-Everything else is done or closed by owner decision. What is left, in order:
+## CLOSED 2026-08-27
 
-0. **Merge the open PR on branch `claude/completion-honesty-implement`** — it
-   carries every change this plan describes. On 2026-08-26 it sat queued behind
-   ~12 other org CI runs for over two hours; that is shared Actions contention,
-   not a fault in the branch. One earlier run passed and one hit a runner
-   `startup_failure` (transient — rerun it). The repo uses a **merge queue**, so
-   `gh pr merge <n> --squash --delete-branch` is refused: use
-   `gh pr merge <n>` and let the queue take it. Albert does not merge; the
-   session does. **Nothing downstream can happen until this lands.**
+Every step is done or closed by owner decision. PR #101 merged to `main` as
+`e29ef92`, and the rewritten globals are adopted on `edge-dev`, `al8960ofc` and
+`hetz`.
 
-1. **Step 10 — closed, do not reopen.** Albert ruled "stop measuring" on
-   2026-08-26. `tools/completion-eval/` stays in the repo as a working tool and
-   a record of what was learned, but no redesign and no further runs. The rule
-   and the hook stand on the owner's judgement.
-2. **Step 11 — adopt the rewritten globals** on every machine via
-   `bin/ai-adopt-globals` (never `--adopt-globals` by hand). Nothing has adopted
-   them yet: the repo carries the new text, every machine still runs the old.
-   The Claude `Stop` hook IS live on `edge-dev`.
-3. **Step 12 — finish**: tick step 11's STATUS row with the machines actually
-   reached, name any machine that was not reachable, then delete the handoff.
-   Do **not** look for new-text eval results to record — step 10 is closed and
-   there will not be any.
+**Two machines still run the old text and nobody is on them:** `albt16`/`t16`
+(online over Tailscale but with no SSH server, so it needs someone at the
+keyboard running `bin/ai-adopt-globals` in Git Bash from that machine's
+own `ai-devops` checkout) and `916` (offline). Adopting them is one command
+each; it is not blocked by anything in this plan.
 
-**Before starting each remaining step, re-read every step after it, and report
-any drift** — anything done or discovered that changes a later step's
-assumptions. That is what catches the kind of staleness found on 2026-08-26,
-when this block still told a reader to record measurement results hours after
-the owner had closed measuring.
+**State plainly whenever this work is discussed:** step 10 was closed by owner
+ruling ("stop measuring"), so the rewritten rule rests on Albert's lived
+evidence, not on a measured improvement. Do not describe it as proven. Step 9's
+eval scorer is known-imperfect and stays that way by the same ruling.
+
+**Do not reopen step 10, and do not re-derive the order** — see the order
+history below.
 
 ### Order history, 2026-08-26 — read this before changing the order again
 
