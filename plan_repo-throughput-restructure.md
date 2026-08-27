@@ -30,7 +30,7 @@ not start a follow-on until Phase 3′ has landed.
 | 0.1 | Growth rule **and CI-waiting conduct rule** into `AGENTS.md` | ⬜ open | — |
 | 1.1 | Replace all seven poll loops in `tests/test-ai-grok-review.sh` | ⬜ open | — |
 | 1.2 | Prove it: 10 consecutive green reviewer runs on Windows CI | ⬜ open | — |
-| 0.2 | Turn on branch protection **(after 1.2, not before)** | ⬜ open | — |
+| 0.2 | Re-point required checks at the new CI shape **(last)** | ⬜ open | — |
 | 3′.1 | Fast lane in its **own workflow file**, under 3 minutes | ⬜ open | — |
 | 3′.2 | Coarse path filtering — docs-only changes skip the matrix | ⬜ open | — |
 | 3′.3 | Stop re-running the Linux-only Bash suites on Windows | ⬜ open | — |
@@ -262,18 +262,52 @@ Two details that matter and are easy to miss:
   its place. The first draft of this work deleted it; that was one of Grok's
   strongest objections.
 
-### 5.3 Branch protection
+### 5.3 Branch protection — CORRECTED, and this changes the priority
 
-**There is none.** Verified during planning:
+> **Earlier versions of this plan said "there is none," citing a 404 from
+> `gh api .../branches/main/protection`. That was wrong, and `bugs.md:203`
+> records the same wrong conclusion.** The 404 only means there is no *classic*
+> branch-protection object. `main` is protected by **rulesets**, which that
+> endpoint does not report. Grok 4.6 and GLM 5.3 both accepted the false claim
+> because they were shown the 404. Verify rulesets, not branch protection:
+> ```bash
+> gh api repos/popcre/ai-devops/rulesets
+> gh api repos/popcre/ai-devops/rulesets/<id>
+> ```
 
-```
-gh api repos/popcre/ai-devops/branches/main/protection
-→ 404 {"message":"Branch not protected"}
-```
+**Two active rulesets on `main`** (verified 2026-08-27):
 
-`bugs.md` already records this. Consequence: **CI is advisory today.** Nothing
-stops a red change from landing on `main`. Any plan that assumes a "required
-check" is meaningful is wrong until step 0.2 is done.
+| Ruleset | Rules |
+|---|---|
+| `Protect main history` (21183703) | `deletion`, `non_fast_forward`. No bypass actors. |
+| `main: pull request + merge queue` (21564317) | `deletion`, `non_fast_forward`, `pull_request` (0 approvals required), `merge_queue`, `required_status_checks` |
+
+- **Required status checks: `linux-offline` and `windows-offline`.**
+- **Merge queue:** `SQUASH`, `grouping_strategy: ALLGREEN`, up to 5 entries
+  built at once, `check_response_timeout_minutes: 120`.
+- **Bypass actors:** `OrganizationAdmin`, `bypass_mode: always`. So the § 11
+  trap-1 lockout risk is already mitigated — do not "fix" it by adding more.
+
+#### Why this makes Phase 1 more urgent, not less
+
+**`windows-offline` is a required check, and it runs the flaky grok suite** —
+`test-all.ps1:10` invokes `test-all.sh`, which runs `test-ai-grok-review.sh`.
+
+GLM 5.3's strongest objection to an earlier draft was that turning on protection
+before fixing the races would gate every merge on a 1-in-3 coin flip. **That is
+not a future risk to avoid. It is the current state of the repository.** Every
+merge already depends on the flake, and the merge queue's `ALLGREEN` grouping
+means one flaky failure can eject an entire batch of up to five unrelated pull
+requests, each of which then re-runs the ~62-minute matrix.
+
+This is a better explanation of the § 3 symptoms than the one this plan was
+originally built on. It also explains the § 5.5 backlog: five pull requests with
+no commit for 3+ days, in a repository where every merge must first win a coin
+flip and then survive a shared queue.
+
+**Consequence for the plan:** step 0.2 is no longer "turn protection on." It is a
+small verification-and-tightening step, and it is no longer the thing standing
+between the repo and gated merges. Phase 1 is.
 
 ### 5.4 The provider wrappers
 
@@ -339,8 +373,10 @@ A session therefore cannot close the loop. That is the whole problem.
 
 This is the finding that matters most operationally. The chain:
 
-1. Nine checks in `tests/test-ai-grok-review.sh` fail intermittently for timing
-   reasons (§ 6.4).
+0. **`windows-offline` is a required status check** on `main`, and it runs the
+   grok suite (§ 5.3). So this is not a nuisance — it is a merge gate.
+1. Seven poll loops in `tests/test-ai-grok-review.sh` give up silently under load
+   (§ 6.4), so checks that depend on them fail intermittently.
 2. `windows-reviewer-safety` therefore fails on `main` itself about **1 run in 3**
    — measured at 2 of 6 by session `local_14c80f71`.
 3. A session sees red on its own PR and **cannot attribute it.**
@@ -348,7 +384,10 @@ This is the finding that matters most operationally. The chain:
    its jobs finish**, and the run contains a ~62-minute job.
 5. So the session waits, or re-runs, or stress-tests locally. All three cost
    hours and none of them resolves the ambiguity.
-6. Repeat.
+6. If it does reach the merge queue, `grouping_strategy: ALLGREEN` means one
+   flaky entry ejects a batch of up to five — including up to four pull requests
+   that did nothing wrong, each of which re-runs the ~62-minute matrix.
+7. Repeat.
 
 **Fixing the races is not cosmetic. It is the step that unblocks everything
 else,** because every other improvement still leaves a session unable to trust
@@ -616,14 +655,18 @@ line 148 as well. Verified with
 - **F. A fast Windows reviewer lane must exist at all times.** It may be
   replaced by something faster; it may not be removed and back-filled later.
   *(2026-08-27, § 7.B reason 5.)*
-- **G. Branch protection is turned on as soon as the signal is trustworthy —
-  after step 1.2, never before.** *(2026-08-27; AMENDED the same day after GLM
-  5.3's review.)* The original wording said "early, not at the end," and that was
-  dangerous: `windows-offline` runs the flaky grok suite, so requiring it while
-  the races are live would gate **every merge in the repository on a 1-in-3 coin
-  flip that no session can attribute** — this plan's own worst failure mode,
-  given merge-blocking teeth. If protection must go on sooner for another reason,
-  require **`linux-offline` only** until 1.2 passes.
+- **G. Ruleset changes come last, after 1.2 and after Phase 3′.**
+  *(2026-08-27; AMENDED TWICE the same day.)*
+  The first wording said "turn protection on early." GLM 5.3 correctly called that
+  harmful: `windows-offline` runs the flaky grok suite, so requiring it while the
+  races are live gates **every merge on a 1-in-3 coin flip nobody can attribute.**
+  Then verification showed something worse — **that is already the live state**
+  (§ 5.3). `main` has had rulesets, required checks, and a merge queue all along;
+  the 404 that said otherwise was from the wrong endpoint. So there is nothing to
+  turn on, the harm GLM warned about is a bug to fix rather than a mistake to
+  avoid, and the only remaining ruleset work is re-pointing required contexts
+  after Phase 3′ renames jobs. **Never leave a required context naming a job that
+  no longer reports** — that blocks every merge forever.
 - **M. A session never polls CI in a loop.** It blocks once
   (`gh run watch --exit-status`) or it does something else and comes back. Ten
   minutes of shell timeout per turn, all day, is what one of the two triggering
@@ -788,25 +831,43 @@ rests on this.
 
 ### Phase 0 (part 2) — Now make the signal binding
 
-#### Step 0.2 — Turn on branch protection
+#### Step 0.2 — Re-point the required checks at the new CI shape
 
-**Runs after 1.2. Not before** — decision **G**, and read its amendment note.
+**Runs after 1.2 and after Phase 3′. Not before** — decision **G**.
 
-**Change:** enable branch protection on `popcre/ai-devops` `main` requiring the CI
-check to pass.
+**This step is much smaller than earlier drafts said.** Protection already
+exists; § 5.3 has the corrected picture. `main` already requires `linux-offline`
+and `windows-offline`, already has a merge queue, and already has an
+`OrganizationAdmin` bypass actor. Nothing needs turning on.
 
-**Critical trap.** A previously recorded failure on this account: a ruleset with
-**no `bypass_actors`** blocks *everything* from merging, and `gh pr merge --admin`
-does **not** bypass a ruleset. Cancelling the run does not help. Configure the
-bypass actor for Albert's identity **at the same time** you create the rule.
+**Change:** after Phase 3′ reshapes CI, update ruleset `21564317`'s
+`required_status_checks` so it names the jobs that still exist. If 3′ renames or
+splits `linux-offline` / `windows-offline`, a stale required context **blocks
+every merge forever waiting for a check that will never report.**
+
+**Also decide, and record the reasoning:** whether the fast lane from step 3′.1
+should be a required check. It probably should — it is the one that runs on
+every change.
+
+**Critical trap, still in force.** A ruleset with **no `bypass_actors`** blocks
+everything, and `gh pr merge --admin` does **not** bypass a ruleset; cancelling
+the run does not help either. Ruleset `21564317` currently has the bypass actor.
+**Do not remove it.** Note that ruleset `21183703` has none — that is fine,
+because it only forbids deletion and force-push.
+
+**Second trap, specific to the merge queue.** `grouping_strategy: ALLGREEN` with
+up to 5 entries means one failing entry ejects the whole batch. Until Phase 1
+lands, that is a flake ejecting up to four innocent pull requests, each then
+re-running the full matrix. Do not raise `max_entries_to_merge` to compensate;
+that multiplies the blast radius.
 
 **Verification gate:**
 ```bash
-gh api repos/popcre/ai-devops/branches/main/protection
+gh api repos/popcre/ai-devops/rulesets/21564317
 ```
-returns 200 with the expected required check, **and** a throwaway PR with a
-deliberately failing check cannot be merged, **and** a throwaway PR with passing
-checks can. Both proven, not assumed.
+lists only status-check contexts that the current workflows actually emit, **and**
+a throwaway PR with a deliberately failing check cannot merge, **and** a throwaway
+PR with passing checks can. Both proven on real PRs, not assumed.
 
 **This step changes repository settings — see § 13.**
 
@@ -1064,8 +1125,9 @@ cited in the STATUS table:
       loudly with a diagnostic.
 - [ ] 10 consecutive green Windows reviewer runs, run ids recorded in
       `tests/verification/reviewer-flake-fix/`.
-- [ ] Branch protection is on, proven by a throwaway PR that could **not** merge
-      red and could merge green.
+- [ ] Ruleset `21564317`'s required status checks name only jobs the current
+      workflows emit, proven by a throwaway PR that could **not** merge red and
+      could merge green. The `OrganizationAdmin` bypass actor is still present.
 - [ ] The fast lane lives in its own workflow file and concludes with readable
       logs while the matrix is still running.
 - [ ] A pull request touching only Markdown completes CI in **under 5 minutes**,
@@ -1111,8 +1173,9 @@ Secondary: open PRs with no commit in 3+ days, currently **5 of 9**.
 | Coarse path filtering skips a suite that mattered | Medium | The scheduled full matrix catches it within a day and opens an issue; the filter is `paths-ignore` on prose only, and `skills/` is deliberately excluded from it |
 | Step 3′.3's platform split opens a silent gap as a suite later becomes Windows-sensitive | Medium | The scheduled matrix runs the **complete unsplit** Windows Bash set — this is why that is pinned rather than left as "full matrix" |
 | Phase 1 collides with PR #123 | High | Open question 1; read its diff before writing any code |
-| Branch protection locks everyone out | Low but severe | `bypass_actors` configured at creation; proven with a throwaway PR before relying on it (§ 11 trap 1) |
-| Branch protection lands before the flakes are fixed | Was **certain** in the first draft | Step 0.2 now runs after 1.2; decision **G** carries the reasoning so it is not re-ordered back |
+| A required status check names a job Phase 3′ renamed | **High** — this is the likely way to break the repo | Step 0.2 runs last, after the job names are final, and its gate is a real throwaway PR. A stale required context blocks every merge forever, waiting for a check that will never report |
+| Ruleset change locks everyone out | Low but severe | `bypass_actors` (`OrganizationAdmin`, always) already exists on `21564317` — **do not remove it**; prove with a throwaway PR before relying on anything (§ 11 trap 1) |
+| Merges gated on a 1-in-3 flake | **Already happening** (§ 5.3) | Not a risk to avoid — a live defect. Phase 1 is the fix, which is why it runs first |
 | The scheduled matrix becomes the new ignored red | Medium | It must open an issue on failure — a definition-of-done item, not a suggestion |
 | This plan itself stalls and becomes plan #35 | Medium | Decision **N**: every step here ships value on its own, and the expensive work is in § 14 behind a gate |
 
@@ -1223,7 +1286,9 @@ Yes, with one deliberate exception.
 § 2 defines the repository, its machines, its identities, and why the wrappers
 are safety-critical. § 3 quotes the triggering report verbatim and names both
 stalled sessions and their PRs. § 5 gives the current state with line numbers,
-measured counts, and the verified 404 proving there is no branch protection.
+measured counts, and — after a third verification pass — the **corrected**
+account of `main`'s rulesets, replacing a claim that both reviewers had accepted
+because it came from the wrong API endpoint.
 § 9 names concrete files and line numbers per step with a verification gate on
 each. § 11 carries the traps a newcomer cannot know — the ruleset bypass trap,
 CRLF invisibility, the worktree stash hazard, the `gh pr merge` false negative,
@@ -1288,6 +1353,28 @@ already requires (docs-only and `bin/`-only CI wall clock; landed-commit versus
 handoff ratio) and demotes stalled PRs to a secondary smell, with today's figure
 recorded as 5 of 9. § 13 repeats them and states plainly that if the wall-clock
 numbers have not moved, the restructure failed regardless of ticked boxes.
+
+**3b. (Added) Did anything survive review that should not have?**
+
+Yes, and it was caught late. Both reviewers accepted "there is no branch
+protection," because the evidence shown to them was a 404 from
+`gh api .../branches/main/protection`. That endpoint only reports *classic*
+protection. `main` is in fact governed by two active rulesets, with
+`linux-offline` and `windows-offline` as required checks and a merge queue using
+`ALLGREEN` grouping (§ 5.3, verified 2026-08-27).
+
+The correction inverts one conclusion and strengthens another. Step 0.2 shrinks
+from "turn protection on" to "re-point required contexts after Phase 3′ renames
+jobs" — and gains a new high-likelihood risk, since a required context naming a
+deleted job blocks every merge forever. Meanwhile GLM's warning that requiring a
+flaky job would gate every merge on a coin flip turns out to describe the
+**present state**, not a mistake to avoid: it is a live defect, and it is the
+best available explanation for both the 24-hour sessions and the five stalled
+pull requests.
+
+Recorded here rather than quietly fixed, because the lesson generalises: a
+negative result from one API endpoint is not proof of absence, and two
+independent model reviews reproduced the error rather than catching it.
 
 **4. (Added) Is this plan actually completable?**
 

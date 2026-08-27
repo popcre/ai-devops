@@ -80,9 +80,9 @@ before acceptance:
   poll loops** in that suite (lines 148, 202, 213, 219, 295, 642, 649), affecting
   more than a dozen checks. Verified with
   `grep -n 'for _i in $(seq' tests/test-ai-grok-review.sh`.
-- `gh api repos/popcre/ai-devops/branches/main/protection` returns **404 — the
-  main branch has no protection at all**, so the proposed "single required check"
-  would have gated nothing.
+- The third claim — that `main` has no protection, from a 404 on
+  `gh api .../branches/main/protection` — **was itself wrong, and both reviewers
+  repeated it.** See the correction below.
 
 Full reasoning is in § 7 of the plan. **Do not resurrect either approach**
 without reading it.
@@ -106,6 +106,38 @@ Do not restore any of these; § 7.F of the plan carries the full record.
   with three deliberate policies (`:265`, `:284`, `:343`). Verified.
 - "Stalled open PRs go to zero" as the success measure — gameable, since this
   repo works directly on `main` and the plan mandates self-merge.
+
+## The one thing both reviewers got wrong — read this before Phase 1
+
+`main` **is** protected. The 404 from
+`gh api repos/popcre/ai-devops/branches/main/protection` only means there is no
+*classic* branch-protection object; `main` is governed by **rulesets**, which
+that endpoint does not report. `bugs.md:203` records the same wrong conclusion.
+Check rulesets instead:
+
+```bash
+gh api repos/popcre/ai-devops/rulesets
+```
+
+Verified 2026-08-27 — two active rulesets on `main`:
+
+- **Required status checks: `linux-offline` and `windows-offline`.**
+- **Merge queue:** SQUASH, `grouping_strategy: ALLGREEN`, up to 5 entries,
+  120-minute check timeout.
+- **Bypass actor:** `OrganizationAdmin`, always. Already present — do not remove.
+
+**Why this matters more than the correction itself:** `windows-offline` runs the
+flaky grok suite. So every merge in this repository is *already* gated on a
+1-in-3 coin flip, and `ALLGREEN` grouping means one flaky entry ejects a batch of
+up to five — including pull requests that did nothing wrong, each then re-running
+the ~62-minute matrix. That is a better explanation of the 24-hour sessions and
+the five stalled PRs than the one the plan was originally built on, and it makes
+Phase 1 the priority rather than any CI restructuring.
+
+Step 0.2 shrank accordingly: from "turn protection on" to "re-point required
+check contexts after Phase 3′ renames jobs" — with a new high-likelihood risk,
+since a required context naming a job that no longer reports blocks every merge
+forever.
 
 ## Verified facts worth not re-deriving
 
