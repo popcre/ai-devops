@@ -32,10 +32,26 @@ fixing one session's bug.**
 
 ## What was produced
 
-- `plan_repo-throughput-restructure.md` — a 13-section implementation plan
-  covering six phases: make red trustworthy, build one test foundation, verify
-  only what changed, unify the duplicated wrapper infrastructure, and close the
-  plan backlog. It passed the plan-standard self-audit.
+`plan_repo-throughput-restructure.md` — an implementation plan taken through
+**two adversarial reviews**, both by independent models, both incorporated:
+
+| Reviewer | Verdict | Cost | Report |
+|---|---|---|---|
+| Grok 4.6 | **REJECT** (of the pre-plan design) | $0.14 | `.ai/reviews/grok-test-infra-redesign-20260827T161400Z-1644185.md` |
+| GLM 5.3 | **ACCEPT WITH CHANGES** (7 required) | not reported by provider | `.ai/reviews/glm-repo-throughput-restructure-20260827T164602Z.md` |
+
+All seven of GLM's required changes are applied and recorded in § 7.F of the
+plan. The two that most change the shape of the work:
+
+1. **Branch protection was scheduled before the flake fix.** GLM called this the
+   one actively harmful item: the required Windows job runs the flaky suite, so
+   it would have gated every merge in the repo on a 1-in-3 coin flip. Reordered.
+2. **The plan was ~3× its own minimum viable subset**, with nothing user-visible
+   landing until well into it. **Split**: this plan now ends at Phase 3′ (~3–4
+   sessions, every step shipping value on its own), and the three expensive
+   pieces became named follow-on plans in § 14, gated on it landing.
+
+The plan's self-audit was re-run against the revised document and passes.
 
 ## What was NOT produced
 
@@ -59,7 +75,10 @@ before acceptance:
 
 - 24 test suites print failures as `FAIL: <message>`, a format the proposed
   parser could not see — so it could have silently excused a real regression.
-- The quarantine list named 4 checks; the same race affects 9.
+- The quarantine list named 4 checks; the same class of race runs through **seven
+  poll loops** in that suite (lines 148, 202, 213, 219, 295, 642, 649), affecting
+  more than a dozen checks. Verified with
+  `grep -n 'for _i in $(seq' tests/test-ai-grok-review.sh`.
 - `gh api repos/popcre/ai-devops/branches/main/protection` returns **404 — the
   main branch has no protection at all**, so the proposed "single required check"
   would have gated nothing.
@@ -71,14 +90,34 @@ The drafted files were written into this worktree and have since been reverted
 with `git checkout --`. If any trace of `tests/quarantine.txt` or a sharded
 `verify.yml` reappears, it is the rejected design.
 
+## Also rejected — by GLM, on the plan itself
+
+Do not restore any of these; § 7.F of the plan carries the full record.
+
+- Branch protection before the flake fix (harmful — see above).
+- The shared test harness before change-scoped CI. GLM established that suite
+  *selection* never reads suite *output*, so the stated dependency was false —
+  and the harness migration's own gate would have cost 16–24 hours of Windows
+  runtime, in a plan triggered by a session re-running the full suite for a day.
+- "Adopt Grok's `lock_acquire` everywhere." **This would have broken
+  `bin/ai-glm`**: GLM's lock *waits* with a timeout, Grok's *refuses
+  immediately*, the signatures differ, and `bin/ai-glm` has three lock functions
+  with three deliberate policies (`:265`, `:284`, `:343`). Verified.
+- "Stalled open PRs go to zero" as the success measure — gameable, since this
+  repo works directly on `main` and the plan mandates self-merge.
+
 ## Verified facts worth not re-deriving
 
 - CI has no path filtering; a one-line Markdown edit runs the full ~62-minute
   Windows matrix.
-- `lock_acquire` is independently implemented four times across `bin/ai-glm`,
-  `bin/ai-kimi`, `bin/ai-qwen`, and `bin/ai-grok-review`. Kimi's and Qwen's are
-  byte-identical; **only Grok's carries the paid-work `remote-uncertain`
-  protection.**
+- `lock_acquire` is independently implemented four times and the copies have
+  **incompatible policies**, not merely different lengths: Grok refuses
+  immediately (nine-arg signature, honours `remote-uncertain`), GLM waits with a
+  timeout (two-arg signature, user-visible "busy" error) and has two more lock
+  functions besides, Kimi and Qwen are byte-identical to each other.
+  **Only Grok carries the paid-work `remote-uncertain` protection** —
+  `grep remote-uncertain bin/*` hits Grok alone. Whether the other three can
+  double-bill today is an open money question, plan § 13 question 2.
 - ~25 helper functions are reimplemented across those four wrappers. There is no
   `bin/lib/` and no shared sourced file anywhere in `bin/`.
 - `ok`/`bad`/`skip`/`check` are copy-pasted into ~24 test suites in divergent forms.
@@ -101,4 +140,5 @@ The plan gives decision criteria so an implementer can proceed without him
 
 ## Where a fresh session starts
 
-`plan_repo-throughput-restructure.md`, **Phase 0, step 1**.
+`plan_repo-throughput-restructure.md`, **Phase 0, step 0.1** — then straight to
+Phase 1. Do NOT stop at step 0.2; it now runs after 1.2.
