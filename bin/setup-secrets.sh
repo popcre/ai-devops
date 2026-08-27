@@ -446,10 +446,20 @@ def _portable(obj):
         return {k: _portable(v) for k, v in obj.items()}
     return obj
 
+# Machine-shaped locations where a repo is not in a folder of its own name.
+PROJECT_ALIASES = {
+    "synology-monitor": os.path.join("monitor", "app"),
+}
+
 def _find_project(name):
     for root in PROJECT_ROOTS:
+        # A checkout is not always a directory named after the repo. On hetz the
+        # synology-monitor repo lives at /worksp/monitor/app (verified
+        # 2026-08-26); designflow-* live under a dflow_plm parent. Probe the
+        # known shapes rather than assuming the repo name is the folder name.
         for candidate in (os.path.join(root, name),
-                          os.path.join(root, "dflow_plm", name)):
+                          os.path.join(root, "dflow_plm", name),
+                          os.path.join(root, PROJECT_ALIASES.get(name, name))):
             if os.path.isdir(os.path.join(candidate, ".git")) or os.path.isdir(candidate):
                 if os.path.isdir(candidate):
                     return candidate
