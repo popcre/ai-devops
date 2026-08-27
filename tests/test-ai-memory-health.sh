@@ -142,5 +142,28 @@ check "unknown option exits 2" "[ $rc -eq 2 ]"
 "$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/does-not-exist" >/dev/null 2>&1; rc=$?
 check "missing projects dir exits 2" "[ $rc -eq 2 ]"
 
+# --- trend reporting ---------------------------------------------------------
+# The weekly report listed symptoms for weeks without showing the trajectory, so
+# nobody read a growing hub as a problem. The summary must state the direction.
+TREND="$TMP/trend.state"
+rm -f "$TREND"
+out="$(AI_MEMORY_HEALTH_STATE="$TREND" "$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "first run declares itself the baseline" "printf '%s' \"\$out\" | grep -q 'this run is the baseline'"
+check "summary reports index weight" "printf '%s' \"\$out\" | grep -q 'KB of index loaded per session'"
+check "first run records state" "[ -s \"$TREND\" ]"
+
+out="$(AI_MEMORY_HEALTH_STATE="$TREND" "$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "an unchanged week reports no change" "printf '%s' \"\$out\" | grep -q 'files no change'"
+check "a flat index carries no stray unit" "! printf '%s' \"\$out\" | grep -q 'no changeKB'"
+
+printf '%s|0|2020-01-01|1|1|1024|0\n' "$(hostname)" > "$TREND"
+out="$(AI_MEMORY_HEALTH_STATE="$TREND" "$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "growth since the last report is stated" "printf '%s' \"\$out\" | grep -qE 'since 2020-01-01: projects \+'"
+
+before_trend="$(find "$TMP/home" -type f -printf '%p %s %T@\n' | sort | md5sum)"
+AI_MEMORY_HEALTH_STATE="$TREND" "$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" >/dev/null 2>&1
+after_trend="$(find "$TMP/home" -type f -printf '%p %s %T@\n' | sort | md5sum)"
+check "trend tracking still changes no memory" "[ \"$before_trend\" = \"$after_trend\" ]"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
