@@ -73,8 +73,11 @@ Two fixes follow. `autoCompactEnabled` and `autoCompactWindow: 200000` in
 `~/.claude/settings.json` cap the growth automatically. `bin/ai-claude-statusline`
 covers the judgement call the setting cannot: it renders a context gauge and a
 live turn count that goes amber at 150 turns and red at 250, so the moment to
-hand off to a fresh session is visible rather than guessed. Wire it up with
-`"statusLine": "ai-claude-statusline"` and restart Claude Code.
+hand off to a fresh session is visible rather than guessed. `statusLine` takes
+an object, not a string, and the command runs through Git Bash on Windows, so
+the path needs forward slashes or the `~` shorthand. Wire it up with
+`"statusLine": {"type": "command", "command": "ai-claude-statusline"}` and
+restart Claude Code fully - the setting is only read at startup.
 
 **Tool traffic is most of what accumulates.** Of the conversation body across
 all 338 sessions - 54.2 MB of message content - tool results are 46.9% and the
