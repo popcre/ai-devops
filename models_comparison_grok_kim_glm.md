@@ -1190,3 +1190,32 @@ underlying fragility; id-based references survive a rename.
 - Final outcome at recording time: APPROVE with nothing blocking merge. Preview
   rehearsal, required checks and the guarded merge remain the orchestrator's
   separate steps.
+
+## 2026-08-27 review rotation evidence
+
+### shared-db #1631 / PR #1634 — review sequence 401
+
+- Reviewer: Grok 4.6, assigned by the durable round-robin and run through the
+  manager-assigned `ai-grok-review` wrapper. The returned model was
+  `grok-4.6-build`; no model or reasoning override was used.
+- Exact reviewed head: `0112ef1d8ddf8b51282553181d37dd8e0bcae38e`.
+- Change under review: migration `20260827012253` and the DB Data Admin Scraped
+  Properties presentation/tests for #1631. The correction normalizes approved
+  Disney and Lucasfilm DCP headings, sources Marvel Creative only from ASGARD,
+  and exposes sanitized conflict/unresolved reason, evidence, and guidance.
+- Verdict: **APPROVE**, with no blocking finding. The reviewer confirmed the
+  exact-identity authority rules, no name or landing-table fallback, restricted
+  execution grants, append-only decision history, and sanitized public evidence.
+- Defects caught by the final review: 0. An earlier Kimi review of predecessor
+  head `2dc9...` correctly requested revision for an unguarded rewrite, missing
+  derivation metadata, a stale fixture, ambiguous note text, and a React key;
+  those findings were fixed before this exact-head review.
+- Policy/tool adherence: read-only wrapper, isolated exact-head worktree, no
+  database mutation, no preview/production contact, no secrets, and no licensed
+  rows in the recorded evidence.
+- Reported usage: 1,897,446 total tokens, including 1,444,608 cached tokens;
+  19 internal turns; cost **$0.30106524**.
+- Final outcome: APPROVE. Required checks, preview, guarded merge, production
+  apply, direct catalog verification, deployment, and authenticated live UI
+  acceptance subsequently passed; PR #1634 merged as
+  `b2fee568dd544944be60e182a679f0b643362f79`.
