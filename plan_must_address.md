@@ -49,6 +49,120 @@ The findings below are about **sequencing, scale, and four specific harms.**
 
 ---
 
+# PART 0 — the measurement that decides the sequencing
+
+Added 2026-08-27 after finding 1 was challenged. Finding 1 argued from the two
+stalled sessions. This is the repository-wide number, and it is stronger.
+
+## The merge queue is the bottleneck for everything, and it is not a slow queue — it is an unreliable one
+
+**Measured 2026-08-27 on `popcre/ai-devops`, from the last 13 merge-queue runs:**
+
+| Outcome | Count |
+|---|---|
+| success | **7** |
+| failure | **4** |
+| cancelled | 2 |
+
+**Median duration of a completed verification run: 59–73 minutes** (sampled
+across the last 9 completed pull-request runs: 73, 73, 62, 65, 59, 65, 56, 65,
+68).
+
+Eight changes did land on `main` on 2026-08-27, so the claim "nothing ever
+merges" is false and should not be used to justify anything. **The true shape is
+worse than slow: it is just over a coin flip, resolved one hour at a time.**
+
+**Why that specific shape is what destroys throughput.** A queue that is reliably
+slow is survivable — you batch your work and wait. A queue that succeeds ~54% of
+the time, an hour per attempt, produces:
+
+- A typical change needing ~2 attempts, landing in 2–3 hours.
+- Failures arriving an hour after the author stopped watching.
+- No way to distinguish "I am blocked" from "I was unlucky" without reading logs
+  that GitHub withholds until the slowest job in the run finishes.
+- **Ejection of unrelated work.** The queue groups up to 5 entries with `ALLGREEN`
+  semantics, so one flaky failure discards the batch and every author in it pays
+  another hour. Observed directly: run `33100525687`, a merge-group run headed by
+  PR #127 (a skills-index change), failing the four issue-#89 reviewer checks by
+  name.
+
+**This is measurably the largest single tax on the repository.** Every plan,
+every fix, every document — including this review — pays it. No other inefficiency
+in `ai-devops` is charged against 100% of changes.
+
+## What this means for the work-claims plan specifically
+
+Two consequences, and the second is the one to act on.
+
+**First, it settles the sequencing dispute in finding 1.** The work-claims plan
+addresses duplicated *intent*, which is real (8 duplicate reviewer repair plans, 2
+sessions on issue #89 at once) but is charged against a minority of work. The
+queue is charged against all of it. Fix the thing every change pays for first.
+
+**Second, and this is the harmful part: the plan proposes to add a third required
+check to this exact queue** (finding 5). At a 54% pass rate with `ALLGREEN`
+grouping, another required check is another independent way for a batch to be
+discarded — and `work-claim-guard` as specified fails closed on GitHub API
+ambiguity, malformed trailers, moved head SHAs, and closed task issues. Adding it
+as *required* while the queue is in this state is not a marginal cost. It is a
+direct multiplier on the repository's largest existing tax.
+
+## The proposed fix — one change, already diagnosed, roughly an hour of work
+
+The dominant failure in the queue is the issue-#89 reviewer flake. It is **not** an
+open investigation. The cause is confirmed with line numbers:
+
+- `tests/test-ai-grok-review.sh:216` calls `ai_test_measure_baseline` **exactly
+  once**, near the top of the suite, and sets a global.
+- `budget FACTOR FLOOR` returns `max(AI_TEST_BASELINE * FACTOR, FLOOR)`, so
+  **every** ceiling in the file derives from that single frozen sample.
+- The failing wait sits around line 730 — several hundred seconds later.
+
+A machine that degrades after the measurement is judged against a computer that
+no longer exists. Confirmed by the run series: the one failing run of six was the
+**slowest in the series** (990s against 728–834s), with a 12s baseline giving a
+180s ceiling, while the library's own header documents a wrapper round trip at
+~15s idle, 26–42s with two suites, and 82s under a four-suite storm. The
+concurrency block needs **two** round trips to overlap, making it the most exposed
+assertion in the file.
+
+**The fix: make the wait progress-sensitive rather than deadline-sensitive.** Keep
+waiting while the observed state is still advancing — one lock has appeared, the
+second has not — and fail only when nothing has changed for N seconds. This
+preserves exactly what the check exists to detect (a genuine hang) while
+tolerating a slow machine, which is the distinction a fixed ceiling cannot make at
+any value. Re-measuring the baseline immediately before the concurrency block is a
+cheaper stopgap that treats the symptom.
+
+**Do not raise the multiplier, add retries, or mark the check allowed-to-fail.** A
+ceiling large enough for a degraded machine no longer detects the hang the check
+exists to catch, and this test guards paid-work locking. Decision **B** of
+`plan_repo-throughput-restructure.md` forbids weakening a test to make a lane
+green.
+
+**Expected effect.** The flake already fell from ~33% to ~17% of runs when the
+budgets became measured rather than fixed, and the blast radius fell from four
+checks to one. Removing the frozen-baseline dependency addresses the confirmed
+cause of the remainder. Verification is the run series taken to ten, not a single
+green run — a single green run is precisely what made this look finished the first
+time.
+
+## Recommended order of work
+
+1. **Make the reviewer suite deterministic** (above). One change, ~1 hour, closes
+   the dominant queue failure.
+2. **Cut the verification cost** — path filtering so docs-only changes skip the
+   matrix, and stop Windows re-running the Linux-only Bash suites. Phase 3′ of
+   `plan_repo-throughput-restructure.md`.
+3. **Then build work claims**, smaller, with findings 5–9 applied — and add
+   `work-claim-guard` as an **advisory** check, promoting it to required only
+   after the queue's pass rate is measured and stable.
+
+Doing 3 before 1 spends effort on a minority tax while increasing the majority
+one.
+
+---
+
 # PART A — what is missing
 
 ## 1. BLOCKING — the plan is second in line, and it competes for the scarce resource
@@ -319,6 +433,7 @@ the most confidently asserted.
 
 | # | Severity | Kind | Change |
 |---|---|---|---|
+| 0 | BLOCKING | missing | Sequence behind the queue fix — measured 54% merge-queue pass rate at ~1 hour per attempt, charged against 100% of changes (Part 0) |
 | 1 | BLOCKING | missing | State sequencing against the flake and CI-cost work |
 | 2 | BLOCKING | missing | Replace unciteable transcript counts; state the expected saving |
 | 3 | BLOCKING | missing | Add a 30-day measurement gate; completeness is not success |
