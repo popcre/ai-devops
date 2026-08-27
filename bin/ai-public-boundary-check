@@ -39,12 +39,36 @@ if [ -n "$public_ip_matches" ]; then
   echo 'BOUNDARY FAIL: protected endpoint address found' >&2; failed=1
 fi
 
-# Supabase project references are stable infrastructure identifiers. One
-# application field name happens to share the same shape and is explicitly not
-# a project identifier.
-project_matches="$(git -C "$root" grep -nIE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' 2>/dev/null | grep -vF 'wilassetcatfranchise' || true)"
+# Supabase project references are stable infrastructure identifiers. They carry
+# no prefix to key on, unlike ghp_/sk-/AKIA, so shape is all there is: exactly
+# 20 lowercase letters. That is deliberately blunt and it catches ordinary long
+# English words too. Clearing a false positive is a reviewed allowlist entry in
+# tools/public-boundary-allowlist.txt, never a widening of this pattern.
+#
+# The allowlist is applied per matched WORD, not per line, so an allowlisted
+# word sharing a line with a real identifier still fails.
+allowlist="$root/tools/public-boundary-allowlist.txt"
+project_matches=''
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  line_text="${hit#*:*:}"
+  unexplained=0
+  while IFS= read -r word; do
+    [ -n "$word" ] || continue
+    if [ -f "$allowlist" ] && grep -qxF "$word" "$allowlist" 2>/dev/null; then continue; fi
+    unexplained=1; break
+  done < <(printf '%s
+' "$line_text" | grep -oE '[a-z]{20}' | grep -vE '[a-z]{21}')
+  [ "$unexplained" -eq 1 ] && project_matches="$project_matches$hit
+"
+done < <(git -C "$root" grep -nIE '(^|[^a-z])[a-z]{20}([^a-z]|$)' -- ':!tests/fixtures/**' ':!tests/test-public-boundary.sh' ':!tools/public-boundary-allowlist.txt' 2>/dev/null || true)
 if [ -n "$project_matches" ]; then
-  echo 'BOUNDARY FAIL: protected project-shaped identifier found' >&2; failed=1
+  # Name the file and line. The old message named neither, which cost one
+  # session twenty minutes of bisecting a documentation-only change.
+  echo 'BOUNDARY FAIL: protected project-shaped identifier found' >&2
+  printf '%s' "$project_matches" | sed 's/^/  /' >&2
+  echo '  If that is an ordinary English word, add it to tools/public-boundary-allowlist.txt with a justification, or reword the prose. Do not widen the pattern.' >&2
+  failed=1
 fi
 [ "$failed" -eq 0 ] || exit 1
 echo 'PASS: public path, credential, and topology boundary'
