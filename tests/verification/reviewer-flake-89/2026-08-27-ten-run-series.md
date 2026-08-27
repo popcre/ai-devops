@@ -52,7 +52,7 @@ where **four** checks failed together:
 than the ~33% measured pre-fix, but nowhere near a gate you can trust, and CI
 runners are slower and busier than this box.
 
-## Probable cause, and the concrete next action
+## Confirmed cause, and the concrete next action
 
 Run 4 was the **slowest run in the series** — 990s against 728–834s for the
 others — so the machine degraded partway through.
