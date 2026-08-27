@@ -8,64 +8,83 @@ owner: codex/ai-devops-work-claims-plan-131
 
 ## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
 
-None — nothing in this workstream needs Albert before implementation. Already settled on 2026-08-27: use lightweight GitHub-backed work claims, not a full orchestrator or committed claims file; keep unrelated work concurrent; treat reviewer-code consolidation as separate work. Do not re-ask these questions.
+### No owner decision blocks advisory v1
+
+Work-units, takeover, shared Git hooks, and required-check promotion were removed from v1. Any future addition needs a measured incident, the 30-day v1 evidence, a plan amendment, and—where applicable—Albert's exact current-chat authorization. Do not ask for those choices during v1.
+
+### Already settled — do NOT re-ask
+
+- 2026-08-27: use lightweight cross-machine claims, not a permanent orchestrator or committed claims file.
+- 2026-08-27: unrelated/read-only work remains concurrent; copied reviewer-code consolidation is separate.
+- 2026-08-27: feature branch + PR + merge queue is mandatory; never use organization-admin bypass for normal ai-devops work.
+- 2026-08-27: stale claims remain protective until explicit reconciliation; timeout alone never transfers ownership.
+- 2026-08-27: stabilize and shorten the merge queue before claims implementation.
+- 2026-08-27: v1 is task-only, has owner-appendable path diagnostics and separate fast advisory CI, with no exact-head binding, push wrapper, hooks, takeover, or required-check change.
+
+No ruleset mutation is part of v1.
 
 ## 1. What this application is
 
-`popcre/ai-devops` is POP Creations’ public toolkit for restoring and operating Albert’s multi-model AI workflow. It contains commands, setup, global Claude/Codex rules, skills, and offline tests. It has no hosted application or database. Work lands directly on `main`; local installation is deployment.
+`popcre/ai-devops` is POP Creations’ public toolkit for restoring and operating Albert’s multi-model AI workflow. It contains commands, setup, global Claude/Codex rules, skills, reviewer wrappers, and offline tests. It has no hosted application or database. Installation from the repository is deployment.
+
+Live `main` is protected by ruleset `21564317`: feature branch, pull request, Linux/Windows checks, squash merge queue. Admin bypass exists technically but is prohibited for ordinary work.
 
 ## 2. What we set out to do this session, and why
 
-Albert asked for an implementation plan for the right way to prevent concurrent ai-devops sessions from colliding or duplicating work. The plan had to preserve useful parallel work and avoid importing shared-db’s full orchestrator overhead.
+Albert asked for the work-claims implementation plan to be fully revised after Grok challenged it, then reviewed by GLM 5.3 with the entire collision history.
 
-The complete build specification is [`../plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md). GitHub issue [#131](https://github.com/popcre/ai-devops/issues/131) is the completion contract.
+The authoritative build specification is [`../plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md). Issue [#131](https://github.com/popcre/ai-devops/issues/131) is the completion contract.
 
 ## 3. Current state — what is true right now
 
-Planning is complete; implementation has not started. The plan specifies a two-phase GitHub issue lease, deterministic lowest-issue-number winner, task/work-unit duplicate identity, protected-path overlap, expiry/renewal/release, mocked concurrency tests, aligned Claude/Codex routing, live qualification, independent exact-head review, installation, and origin/CI proof.
+The first plan was published at `ac72d40798d3867feef83b3d4de1bcc49acf045c`; no claim code exists. Grok 4.6 returned `REVISE`. Its branch-policy finding was independently confirmed from live `origin/main`, `config/repository-policy.json`, merged PR #104, and ruleset `21564317`. The earlier direct push worked only because organization admins can bypass the rule; it was not the correct workflow.
 
-This checkout contains unrelated dirty reviewer-cache and taxonomy work. Preserve it and stage only issue #131 artifacts. The new plan and this handoff are not committed or pushed at the instant this file is written; the planning session owns landing them on `main`.
+Two execution-heavy sessions then added Parts A, B, and C to [`../plan_must_address.md`](../plan_must_address.md). Their evidence changed the plan materially: the unreliable hour-long merge queue is the first-order tax, and four locked choices would have worsened throughput. The revised v1 is now task-only, owner paths are append-only, exact-head binding and push wrapping are deferred, ordinary `git commit` and `git push` stay unwrapped, CI is advisory, and units/hooks/takeover/required-check promotion are deferred. It adds reproducible baseline and 30-day effectiveness gates. Grok reviewed the full evidence, rejected two intermediate drafts, and then returned `APPROVE` with no blocking findings. No claim implementation has started.
 
 ## 4. Everything we tried that did NOT work
 
-- A full orchestrator was rejected because it would serialize intentional independent work.
-- A committed claims file was rejected because worktrees/branches see stale copies and the file becomes a new collision point.
-- A simple GitHub query-then-create claim was rejected because simultaneous sessions can both win the check.
-- Local locks, one mutable registry issue, Git refs, broad malformed-record freezes, and a scheduled closer were considered and rejected with full reasoning in plan §7.
+- Full orchestrator: excessive serialization and overhead for recoverable Git work.
+- Committed claims file/index: stale across branches/worktrees and a new shared hot file.
+- GitHub claim issue + five-second settlement + lowest issue number: not atomic under delayed visibility/retries/partial listings.
+- Automatic lease expiry: permits an old disconnected writer and new owner to work simultaneously.
+- Required claim check on the unstable `ALLGREEN` queue: adds another batch-ejection path before the existing queue is reliable.
+- Network-dependent commit hooks: a measured secondary-limit window would stop every session from making reversible local commits.
+- Shared-git-directory hooks: one broken dispatcher can affect every linked worktree on the machine.
+- Fixed paths and issue-close blocking: issue #89 correctly expanded from two files to ten and continued after merges.
+- Direct-to-main landing: stale instruction superseded by PR #104 and active ruleset.
+- REST PATCH treated as compare-and-swap: GitHub offers no expected-old-SHA parameter; ownership mutation now uses Git force-with-lease.
+- Component refs in v1: added partial-acquisition/livelock/orphan machinery without evidence that cross-issue component contention justified it.
 
-No implementation attempt was made, so there are no failed code changes to recover.
+Full rejected-approach reasoning is in plan §7.
 
 ## 5. Root causes and key findings
 
-The transcript review found that visible merge conflicts cluster around shared operating files, while duplicate diagnosis/implementation costs more and can occur with no Git conflict. Therefore the claim key must include the task/work-unit, not only files. GitHub must be the live authority across machines. The plan closes the simultaneous-acquisition race by forbidding edits until a settlement re-query selects the lowest server-assigned issue number.
+Duplicate implementation is an intent collision, so ownership is task-wide. Read-only diagnosis remains non-blocking. Optional paths are owner-appendable diagnostics because debugging scope is discovered, not known in advance. Git-ref atomicity remains a Phase 1 hypothesis to prove on both platforms. Lost responses re-adopt only an exact token hash/object; later mutations use force-with-lease. Stale remains protective, with exact Albert-authorized manual reconciliation. Publication remains ordinary Git; a separate workflow reports advisory PR/merge-group evidence quickly without hooks or exact-head claims.
 
-Current repository anchors and evidence are recorded in plan §5–6, including `AGENTS.md:20-27,65,120`, `install.sh:201-206`, `tests/test-all.sh:6`, and existing local reviewer mutex examples.
+The selected custom/branch ref namespace remains evidence-driven: Phase 1 must prove REST create/read/list, Git force-with-lease update/delete, and cleanup before code is built.
 
 ## 6. Exact next steps
 
-1. Read [`../plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) completely, beginning with STATUS. You’ll know this is done when every locked decision, rejected approach, and Phase 1 gate is understood without using this chat.
-2. Re-derive live `main`, issue #131, dirty-tree, and concurrent-session state. You’ll know it worked when the intended base and every unrelated dirty path are named before editing.
-3. Execute plan Steps 9.1–9.4, updating STATUS with artifacts as each gate passes. You’ll know Phase 1 worked when deterministic mocked acquisition yields exactly one winner and ownership lifecycle tests pass.
-4. At the marked context cut, use `fresh-session`, re-read downstream phases, then execute Steps 9.5–9.7. You’ll know Phase 2 worked when focused/full tests pass and aligned global instructions are previewed safely.
-5. Execute Steps 9.8–9.10: live race qualification, frozen-tree review, full suite, commit/push/CI/install proof. You’ll know the workstream is complete only when issue #131 is closed, the exact commit is on `origin/main`, CI is green, live smoke succeeds, and this handoff is deleted.
+1. Commit/push the revised plan/handoff/review record on `codex/revise-work-claims-plan-131`, refresh PR #136, and land through the merge queue without bypass.
+2. A fresh implementation session begins plan Step 9.1 by completing the separate throughput prerequisite. Claims code starts only after that plan's STATUS gates pass.
 
 ## 7. Constraints and gotchas in force
 
-Work directly on `main`; verify Albert’s Git identity before commit; never broad-stage or disturb unrelated dirty files. Use Git Bash explicitly on Windows. This public repository must contain no transcript excerpts, secrets, owner tokens, or private paths. GitHub/network failure must fail closed for write claims. Read-only work stays exempt. The claim tool cannot expand authority for destructive, production, or shared-db actions. Exact-head independent review is required for this concurrency-safety routing change.
+Feature branch + PR + merge queue only. Preserve unrelated dirty work; stage only issue #131 files. Public repo: no transcript excerpts, secrets, raw tokens, or private paths. Stabilize the queue first. V1 has no Git hook or ruleset mutation. Stale/malformed claims remain protective. Use explicit Git Bash on Windows. Exact-head independent review is required for implementation.
 
 ## 8. Access and environment
 
-Checkout: `C:\repos\ai-devops` on `edge-dev`. Canonical live repository: `popcre/ai-devops`, branch `main`. GitHub CLI is authenticated and issue #131 is open. Windows Bash is `C:\Program Files\Git\bin\bash.exe`. No database, hosted deployment, test account, new secret, or 1Password item is required.
+Canonical repo: `popcre/ai-devops`; target `main`; revision branch `codex/revise-work-claims-plan-131`. Discover the worktree locally; do not copy a machine path. GitHub CLI is authenticated. Windows Bash is `C:\Program Files\Git\bin\bash.exe`. Grok review uses `ai-grok-review` with `AI_GROK_CALLER=codex`. No database, hosted app, test login, or new secret is involved.
 
 ## 9. Open questions and risks
 
-The only measured design question is whether five seconds is enough for GitHub indexing; ten live simultaneous trials decide it, using the smallest passing value. The implementation must reuse the established cross-platform user-state convention rather than inventing repository-local state. If GitHub issue settlement cannot reliably produce one winner within a bounded interval, stop and report the evidence on #131 before changing authority design.
+The only implementation-time choice is custom versus branch ref namespace, decided by two-platform evidence. Units, takeover, exact-head binding, push wrappers, hooks, and required checks are not open v1 choices.
 
-Risks, mitigations, rollback, and the exact definition of done are in plan §13.
+Main risks: queue instability, lost create response, crash blockage, unclaimed ordinary `git push` visible only through advisory CI, ref clutter, selective GitHub throttling, and machinery costing more than it saves. The plan assigns a gate and a 30-day keep/change/remove decision.
 
 ## Handoff self-audit
 
-1. **Fresh developer can continue without context: yes.** Sections 1–3 establish the system, goal, issue, plan, and exact current state.
-2. **They can continue as effectively as this session: yes.** Sections 4–5 preserve rejected designs and the central race/root-cause reasoning; the linked plan holds the full build specification.
-3. **Every execution detail is included: yes.** Section 6 gives ordered actions and gates; Sections 7–9 give constraints, access, risks, and stopping criteria.
-4. **Section 0 contains every owner decision: yes.** Sections 1–9 were swept; none requires Albert. Settled decisions are explicitly listed so they are not re-asked.
+1. **Fresh developer can continue without context: yes.** Sections 1–3 identify the repo, live workflow, issue, revision, and exact current state; the linked plan is the complete build spec.
+2. **They can continue as effectively as this session: yes.** Sections 4–5 preserve every rejected design and the atomicity/split-brain/fencing reasoning.
+3. **Every execution detail is included: yes.** Section 6 gives ordered actions and gates; Sections 7–9 give constraints, access, risks, and open criteria.
+4. **Section 0 contains every owner decision: yes.** Sections 1–9 were swept. No owner decision blocks advisory v1; post-v1 escalation is explicitly deferred.
