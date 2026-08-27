@@ -140,6 +140,11 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
   explicitly said he wants to review first. If a merge is blocked by a failing
   check or a conflict, fix it — say so only if you cannot.
+- **A documentation-only pull request does not wait for checks.** When every
+  changed file is prose - Markdown, docs, plans, handoffs - merge it the moment
+  it is open with `gh pr merge --squash --admin`, and report the merge commit.
+  Waiting an hour for CI to lint prose is wasted time. Any change touching code,
+  tests, workflows, or configuration waits for its checks, however small.
 - `gh pr merge` from a linked worktree can print `'main' is already used by
   worktree`. That is local branch cleanup failing AFTER the merge succeeded.
   Confirm with `gh pr view <n> --json state`, delete the remote branch, and
