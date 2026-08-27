@@ -54,10 +54,34 @@ plan. The two that most change the shape of the work:
 
 The plan's self-audit was re-run against the revised document and passes.
 
-## What was NOT produced
+## What was produced after this handoff was first written
 
-**No code changes. Nothing was implemented, committed, or pushed** beyond the
-plan and this handoff. The STATUS table in the plan is correct: every row is open.
+**Correction, 2026-08-27.** This section originally read "No code changes.
+Nothing was implemented, committed, or pushed." That was true when written and is
+now false. The session continued past the plan and shipped:
+
+- **PR [#123](https://github.com/popcre/ai-devops/pull/123)** — taken over from
+  the stalled session. Timing budgets now derive from a measured baseline, and
+  the last two silent waits became loud `poll_until` calls. Its `fix_test_ai.md`
+  heading was corrected from "FIXED" to "PARTIALLY FIXED", because six local runs
+  contradicted it.
+- **PR [#129](https://github.com/popcre/ai-devops/pull/129)** — the
+  public-boundary gate now names the file and line it rejected and points at a
+  documented allowlist, instead of failing anonymously. Detection is unchanged.
+- **PR [#130](https://github.com/popcre/ai-devops/pull/130)** — two evidence
+  files under `tests/verification/reviewer-flake-89/`: the flake failing a
+  merge-queue run on unrelated work, and the six-run post-fix series.
+
+**Read the plan's STATUS table, not this list.** Step 1.1 is partial and step 1.2
+is **not satisfied**: the reviewer suite still fails roughly one run in six. The
+remaining work is handed back to issue
+[#89](https://github.com/popcre/ai-devops/issues/89) as one specific change —
+make the concurrency wait progress-sensitive rather than deadline-sensitive — not
+as an open investigation.
+
+**Iteration on the flake stopped by owner decision** after it had consumed two
+sessions for roughly 24 hours. A successor should implement that one change and
+re-run the series; it should not resume iterating.
 
 ## Dead ends — do not repeat these
 
