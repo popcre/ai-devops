@@ -9,8 +9,13 @@ shift || true
   echo "       ai-memory-sync forget <project> <file.md> \"<reason>\"" >&2
   exit 2
 }
-if [[ "$MODE" == "forget" && "$#" -lt 3 ]]; then
+if [[ "$MODE" == "forget" && "${1:-}" == "--batch" && "$#" -ne 2 ]]; then
+  echo "usage: ai-memory-sync forget --batch <list-file>" >&2
+  exit 2
+fi
+if [[ "$MODE" == "forget" && "${1:-}" != "--batch" && "$#" -lt 3 ]]; then
   echo "usage: ai-memory-sync forget <project> <file.md> \"<reason>\"" >&2
+  echo "       ai-memory-sync forget --batch <list-file>" >&2
   exit 2
 fi
 
@@ -147,7 +152,11 @@ if [[ "$machine_memory_found" -eq 0 && "$MODE" != "forget" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" != "forget" ]]; then
+# A forget run publishes the machine's memory too, when this machine has any.
+# Skipping the outgoing union left the hub holding whatever it already had, so a
+# forget could never repair an index the machine had already healed - and the
+# health gate then rejected the very transaction meant to fix it.
+if [[ "$MODE" != "forget" || "$machine_memory_found" -eq 1 ]]; then
   log "union machine into private hub"
   AI_MEMORY_HUB_ROOT="$HUB" bash "$SYNC" push $DRY || fail "outgoing union failed"
 fi

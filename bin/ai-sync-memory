@@ -148,6 +148,16 @@ merge_memory_index() {
   fi
 }
 
+# True when every non-blank line of $2 also appears in $1, i.e. $1 contains all
+# of $2's content. Used to treat an extended memory as an update, not a fork.
+superset_lines() {
+  awk '
+    FILENAME == ARGV[1] { line = $0; sub(/$/, "", line); if (line ~ /[^ 	]/) have[line] = 1; next }
+    { line = $0; sub(/$/, "", line); if (line ~ /[^ 	]/ && !(line in have)) { missing = 1; exit } }
+    END { exit (missing ? 1 : 0) }
+  ' "$1" "$2"
+}
+
 copy_fact_union() {
   local source="$1" destination="$2" label="$3" file target base extension safe candidate suffix
   safe="$(printf '%s' "$label" | sed 's/[^A-Za-z0-9._-]/-/g')"
@@ -161,6 +171,17 @@ copy_fact_union() {
     if [[ ! -e "$target" ]]; then
       run cp -a "$file" "$target"
     elif ! cmp -s "$file" "$target"; then
+      # A memory that one side has EXTENDED is an update, not a conflict. Forking
+      # it created a second file that no later sync could ever reconcile, so a
+      # single edited memory multiplied into a copy per machine (ai-devops
+      # reached 262 files for 47 distinct memories). When one side's content
+      # contains every line of the other, take the longer one and do not fork.
+      if superset_lines "$file" "$target"; then
+        run cp -a "$file" "$target"
+        continue
+      elif superset_lines "$target" "$file"; then
+        continue
+      fi
       # A source file that already carries a machine suffix IS a conflict
       # artifact from an earlier sync. Minting a second-generation suffix for
       # it (base--hetz--al8960ofc.md, then -2, -3) makes every later sync
@@ -435,8 +456,54 @@ case "$DIRECTION" in
     ;;
   forget)
     # ai-sync-memory forget <project> <file> "<reason>"
+    # ai-sync-memory forget --batch <list-file>
     # Records a deletion so it propagates, instead of a bare `rm` that the next
-    # sync silently undoes.
+    # sync silently undoes. The batch form takes one
+    # "project<TAB>file<TAB>reason" record per line, because a consolidation
+    # retires hundreds of files and every single-file run would be its own
+    # transaction - and a run that fails its health gate keeps none of them.
+    if [[ "${2:-}" == "--batch" ]]; then
+      batch="${3:-}"
+      [[ -f "$batch" ]] || { echo "No such batch file: $batch" >&2; exit 2; }
+      batch_count=0
+      while IFS=$'	' read -r b_proj b_file b_reason; do
+        [[ -n "$b_proj" && -n "$b_file" ]] || continue
+        [[ "$b_proj" == \#* ]] && continue
+        if [[ "$b_file" == "--prune-index" ]]; then
+          # Drop index lines whose memory file no longer exists, and keep only
+          # the first entry for each memory. A consolidation leaves dead lines
+          # behind, and machines that worded the same entry differently left one
+          # line each, so a 25-memory project carried a 105-line index. Both are
+          # pure per-session cost on every machine.
+          prune_dir="$MEM_REPO/$b_proj"
+          prune_index="$prune_dir/MEMORY.md"
+          [[ -f "$prune_index" ]] || continue
+          prune_tmp="$prune_index.tombstone.$$"
+          awk -v dir="$prune_dir" '
+            {
+              line = $0
+              sub(/$/, "", line)
+              if (match(line, /\]\([^)]+\.md\)/)) {
+                target = substr(line, RSTART + 2, RLENGTH - 3)
+                if ((getline probe < (dir "/" target)) < 0) next
+                close(dir "/" target)
+                if (target in listed) next
+                listed[target] = 1
+              }
+              print
+            }
+          ' "$prune_index" > "$prune_tmp" || { rm -f "$prune_tmp"; exit 1; }
+          mv -f "$prune_tmp" "$prune_index"
+          echo "  pruned dead index entries in memory/$b_proj"
+          continue
+        fi
+        bash "$0" forget "$b_proj" "$b_file" "$b_reason" > /dev/null || exit 1
+        batch_count=$((batch_count + 1))
+      done < "$batch"
+      echo "  tombstoned $batch_count memory file(s) from $batch"
+      echo "  The ai-memory-sync parent commits and pushes this private-hub change."
+      exit 0
+    fi
     proj="${2:-}"; file="${3:-}"; reason="${4:-}"
     [[ -n "$proj" && -n "$file" ]] || {
       echo "usage: ai-sync-memory forget <project> <file.md> \"<reason>\"" >&2; exit 2; }
