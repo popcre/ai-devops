@@ -8,12 +8,18 @@ ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
+# Timing budgets are measured, not guessed: a constant that is generous on an
+# idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md
+# and tests/lib-test-timing.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_spawn_baseline
+
 mkdir -p "$REPO_ROOT/.ai"
 TMP="$(mktemp -d "$REPO_ROOT/.ai/qwen-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 export AI_QWEN_STATE_DIR="$TMP/state"
 export AI_QWEN_CALLER=codex
 export AI_QWEN_POLL_INTERVAL=1
-export AI_QWEN_WAIT_TIMEOUT=2
+export AI_QWEN_WAIT_TIMEOUT="$(budget 2 2)"
 export TMPDIR_FOR_TEST="$TMP"
 export AI_QWEN_TEST_DIR="$TMP" AI_QWEN_HOME="$TMP/qwen-home"
 export AI_QWEN_SANITIZER_ROOT="$TMP/qwen-install"
@@ -213,7 +219,7 @@ rm -f "$REPO/untracked-fifo"
 
 CALLS_BEFORE_PREPARE_DRIFT="$(wc -l < "$TMP/argv.txt")"; rm -f "$TMP/pre-snapshot"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_QWEN_TEST_PRE_SNAPSHOT_MARKER="$TMP/pre-snapshot" AI_QWEN_TEST_PRE_SNAPSHOT_DELAY=2 "$SCRIPT" new prepare-drift --prompt review >/dev/null 2>&1) & PREPARE_PID=$!
-for _ in $(seq 1 100); do [ -f "$TMP/pre-snapshot" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -f "$TMP/pre-snapshot" ] && break; sleep .05; done
 printf 'changed during evidence preparation\n' >> "$REPO/a.txt"; PREPARE_RC=0; wait "$PREPARE_PID" || PREPARE_RC=$?
 [ "$PREPARE_RC" -ne 0 ] && [ "$CALLS_BEFORE_PREPARE_DRIFT" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'source drift during snapshot preparation blocks before provider contact' || bad 'source drift during snapshot preparation blocks before provider contact'
 git -C "$REPO" checkout -q -- a.txt
@@ -221,7 +227,7 @@ git -C "$REPO" checkout -q -- a.txt
 echo review > "$TMP/mode"; run new followup-prepare-drift --prompt review >/dev/null 2>&1
 CALLS_BEFORE_FOLLOWUP_PREPARE="$(wc -l < "$TMP/argv.txt")"; rm -f "$TMP/pre-followup-packet"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER="$TMP/pre-followup-packet" AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY=2 "$SCRIPT" ask followup-prepare-drift --prompt followup >/dev/null 2>&1) & FOLLOWUP_PREPARE_PID=$!
-for _ in $(seq 1 100); do [ -f "$TMP/pre-followup-packet" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -f "$TMP/pre-followup-packet" ] && break; sleep .05; done
 printf 'changed during follow-up evidence preparation\n' >> "$REPO/a.txt"; FOLLOWUP_PREPARE_RC=0; wait "$FOLLOWUP_PREPARE_PID" || FOLLOWUP_PREPARE_RC=$?
 [ "$FOLLOWUP_PREPARE_RC" -ne 0 ] && [ "$CALLS_BEFORE_FOLLOWUP_PREPARE" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'follow-up source drift during packet rebuild blocks before provider contact' || bad 'follow-up source drift during packet rebuild blocks before provider contact'
 git -C "$REPO" checkout -q -- a.txt
@@ -248,7 +254,7 @@ cp "$TMP/a-before-live-drift" "$REPO/a.txt"
 
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" new crash-new --prompt wait >/dev/null 2>&1) & CRASH_NEW_PID=$!
-for _ in $(seq 1 200); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
 CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
 check 'new paid turn is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_NEW_META'"
 kill -KILL "$CRASH_NEW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_NEW_PID" 2>/dev/null || true
@@ -258,7 +264,7 @@ CALLS_AFTER_CRASH_NEW="$(wc -l < "$TMP/argv.txt")"; run new crash-new --prompt r
 echo review > "$TMP/mode"; run new crash-followup --prompt review >/dev/null 2>&1
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask crash-followup --prompt wait >/dev/null 2>&1) & CRASH_FOLLOW_PID=$!
-for _ in $(seq 1 200); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
 CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
 check 'follow-up is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_FOLLOW_META'"
 kill -KILL "$CRASH_FOLLOW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_FOLLOW_PID" 2>/dev/null || true
@@ -268,7 +274,7 @@ CALLS_AFTER_CRASH_FOLLOW="$(wc -l < "$TMP/argv.txt")"; run ask crash-followup --
 echo review > "$TMP/mode"; run new interrupt-followup --prompt review >/dev/null 2>&1
 echo slow > "$TMP/mode"; CALLS_BEFORE_INTERRUPT="$(wc -l < "$TMP/argv.txt")"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask interrupt-followup --prompt wait >/dev/null 2>&1) & INTERRUPT_FOLLOWUP_PID=$!
-for _ in $(seq 1 200); do [ "$(wc -l < "$TMP/argv.txt")" -gt "$CALLS_BEFORE_INTERRUPT" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 200)"); do [ "$(wc -l < "$TMP/argv.txt")" -gt "$CALLS_BEFORE_INTERRUPT" ] && break; sleep .05; done
 kill -TERM "$INTERRUPT_FOLLOWUP_PID" 2>/dev/null || true; wait "$INTERRUPT_FOLLOWUP_PID" 2>/dev/null || true
 INTERRUPT_META="$(find "$TMP/state/sessions" -name 'codex--interrupt-followup.json' -print -quit)"
 check 'interrupted follow-up becomes recovery-required with a preserved stream' "jq -e '.status==\"recovery-required\" and .failure_reason==\"interrupted-provider-turn\"' '$INTERRUPT_META' && test -e \"\$(jq -r .recovery_stream '$INTERRUPT_META')\""
@@ -402,7 +408,7 @@ check 'hostile shell startup hooks cannot observe managed credentials' "test ! -
 check 'credentialed Qwen boundary uses only prevalidated absolute executables' "grep -q 'trusted absolute Bash/env executables are required' '$SCRIPT' && grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q '\"\$bash_bin\" --noprofile --norc' '$SCRIPT'"
 echo slow > "$TMP/mode"; rm -f "$TMP/op-env-source"
 (cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
-for _ in $(seq 1 200); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
 QWEN_TEMP_ENV="$(cat "$TMP/op-env-source" 2>/dev/null || true)"; kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted managed turn removes its temporary credential-reference file' "test -n '$QWEN_TEMP_ENV' && test ! -e '$QWEN_TEMP_ENV'"
 echo review > "$TMP/mode"
