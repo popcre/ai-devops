@@ -1,0 +1,39 @@
+# Line endings are a correctness problem in this repo, not a style preference.
+#
+# Every Windows machine here runs with `core.autocrlf=true`, so without this
+# file Git rewrites LF to CRLF on checkout. A Bash script checked out that way
+# fails on its own second line under WSL's bash and under any other strict
+# bash, with the misleading error:
+#
+#     : invalid option name line 42: set: pipefail
+#
+# That is what broke `bin/ai-adopt-globals` on t16 on 2026-08-27. The scripts
+# themselves were fine; the checkout was not. Pin the endings by content type
+# so the shell always receives LF no matter which machine cloned the repo.
+
+# Let Git decide for anything not named below, and normalise to LF in history.
+* text=auto
+
+# Anything the shell executes must keep LF. `bin/` and `tests/` are listed as
+# whole trees because most of their executables are deliberately
+# extensionless, so a `*.sh` rule alone would miss them.
+*.sh          text eol=lf
+bin/**        text eol=lf
+tests/**      text eol=lf
+mcp/**        text eol=lf
+
+# Windows-native scripts keep CRLF. These rules come last on purpose: a later
+# match wins, so `.ps1` and `.cmd` files inside `bin/` are not caught by the
+# `bin/**` rule above.
+*.ps1         text eol=crlf
+*.bat         text eol=crlf
+*.cmd         text eol=crlf
+
+# Never touch binary content.
+*.png         binary
+*.jpg         binary
+*.gif         binary
+*.ico         binary
+*.pdf         binary
+*.zip         binary
+*.gz          binary
