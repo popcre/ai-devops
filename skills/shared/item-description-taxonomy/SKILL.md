@@ -12,8 +12,9 @@ and display evidence. They may not decide the taxonomy.
 
 For each description, distinguish:
 
-- **Item type:** what physical product this is, including material, construction,
-  or treatment only when those facts distinguish real product families.
+- **Item type:** what physical product this is. For merchandise-group work also
+  record three independent axes: MG01 physical form, MG02's family-specific
+  subtype or material, and MG03 explicit embellishment.
 - **Item size:** all physical dimensions and units, including depth when stated.
 - **Licensor:** license owner wording present in the description.
 - **Property:** franchise, character, or property wording present in the description.
@@ -40,8 +41,9 @@ product concept plus its observed variants.
    packaging instructions, manufacturing specifications, and incidental contents
    from the canonical item type unless they define the sold product itself.
 7. When the business gives a reliable category-change date, build three independent
-   association maps from rows on and after that date: MG01, MG01+MG02, and
-   MG01+MG02+MG03. Each map associates its key with the accepted physical-product
+  association maps from rows on and after that date: MG01, MG01+MG02, and
+  MG01+MG02+MG03. Validate each row independently at each depth against the
+  definition workbook. Each map associates its key with the accepted axis
    meanings observed under that key. Match older products deepest-first, then fall
    back one level at a time. Do not use earlier MG codes to define or choose results.
 8. Never call an automated phrase list final. A model must review every proposed
@@ -74,9 +76,11 @@ product concept plus its observed variants.
   every MG01+MG02+MG03 and all accepted product signatures observed under each.
   Require every component through that depth to be present.
 - For each historical accepted product, try an exact reviewed
-  product+construction+treatment association at MG01+MG02+MG03. If unsupported,
-  try the reviewed product+construction association at MG01+MG02. If unsupported,
-  try its approved broad physical format at MG01.
+  form+family-subtype/material+embellishment association at MG01+MG02+MG03. If
+  unsupported, try form+family-subtype/material at MG01+MG02. If unsupported,
+  try its approved broad physical form at MG01. Missing embellishment is
+  `unreadable`, not `none`; map explicit `none` to code `0` only when that code
+  is defined for the pair and at least two qualifying later rows support it.
 - Require at least two supporting later rows, a dominant winning share, and a
   clear lead over the runner-up before populating MG02 or MG03. Store support,
   total evidence, winning share, and the complete competing distribution.
