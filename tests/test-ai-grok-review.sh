@@ -371,11 +371,8 @@ echo hold > "$TMP/mode"
 # A locally interrupted wrapper must not claim or assume that the paid remote
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
-for _i in $(seq 1 "$(budget 15 30)"); do
-  LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
-  [ -n "$LOCK_NOW" ] && [ -f "$TMP/hold-started" ] && break
-  sleep 1
-done
+poll_until "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub'   "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || true
+LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '$TMP/hold-started'"
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
@@ -740,7 +737,13 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # a self-timeout leaves different lock state than an interrupt, and the two
 # retries that follow assert on the interrupt case.
 ( cd "$REPO" && AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
-for _i in $(seq 1 "$(budget 15 30)"); do ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"; [ -n "$ASK_UNCERTAIN_LOCK" ] && [ -f "$TMP/hold-started" ] && break; sleep 1; done
+# This wait is load-bearing in a way the others are not: the TERM below is the
+# whole point of the next three checks. If the ask never reached the stub, we
+# terminate a process that holds no lock, and the retries then assert against
+# state an interrupt never produced - reporting a wrapper defect that does not
+# exist. Say so instead.
+poll_until "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub'   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
+ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
 check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
