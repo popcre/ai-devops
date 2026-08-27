@@ -263,3 +263,54 @@ Every destructive reset in this script must also fail closed; otherwise a
 damaged hidden clone can look healthy. Regression coverage:
 `tests/test-ai-memory-sync.sh`.
 
+## A memory that one side extended is an update, not a conflict
+
+Looks like:
+Two machines that both hold a memory file with different bytes disagree, so the
+safe move is to keep both copies under distinct names.
+
+Actually:
+The union in `bin/ai-sync-memory` now compares line sets. When one copy contains
+every non-blank line of the other plus more, the longer copy wins outright and
+replaces the shorter one. Only a genuine divergence — each side holding lines
+the other lacks — still forks.
+
+Why:
+On 2026-08-27 the old fork-on-any-difference rule had turned normal edits into
+per-machine copies named `<base>--<label>.md`, and the duplicate index lines
+those copies generated grew one index to 19.9 MB and blocked every outgoing
+sync for every machine.
+
+Do not change because:
+Reverting to a byte comparison silently multiplies files again, and the health
+gate then blocks the whole fleet rather than one machine. Related: the hub index
+merge keeps only the first occurrence of each entry line, `forget --batch`
+tombstones many files in one transaction (per-file forget could not scale, and a
+failed health gate kept none of them), and the push loop skips disposable
+working directories — worktrees, scratchpads, temp folders — so throwaway paths
+never become published memory projects again.
+
+## The everyday sync runs the memory round trip at most once a day
+
+Looks like:
+Memory should sync on every dotfiles sync so no machine is ever behind.
+
+Actually:
+`bin/ai-memory-sync sync-if-stale` records each success and exits immediately
+when the last one was under `AI_MEMORY_MAX_AGE_HOURS` (24) ago. The dotfiles
+skills call that mode; plain `sync` is still used when memory is the point of
+the run, when another machine needs a just-written memory, and after any
+`forget`.
+
+Why:
+The full round trip measured 2m18s of a 3m10s dotfiles sync on 2026-08-27. The
+work is a fetch, reset, union and push of documents that change a few times a
+week, so paying it every sync bought nothing.
+
+Do not change because:
+Removing the gate puts the multi-minute round trip back into every routine sync;
+removing the escape hatch instead strands a fresh memory on one machine for up
+to a day. Both modes must stay. The weekly `ai-memory-health` audit now also
+reports the direction of travel — projects, files, index kilobytes and findings
+against the previous report — so growth is visible before it becomes a block.
+
