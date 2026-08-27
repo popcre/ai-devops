@@ -152,8 +152,8 @@ merge_memory_index() {
 # of $2's content. Used to treat an extended memory as an update, not a fork.
 superset_lines() {
   awk '
-    FILENAME == ARGV[1] { line = $0; sub(/$/, "", line); if (line ~ /[^ 	]/) have[line] = 1; next }
-    { line = $0; sub(/$/, "", line); if (line ~ /[^ 	]/ && !(line in have)) { missing = 1; exit } }
+    FILENAME == ARGV[1] { line = $0; sub(/\r$/, "", line); if (line ~ /[^ 	]/) have[line] = 1; next }
+    { line = $0; sub(/\r$/, "", line); if (line ~ /[^ 	]/ && !(line in have)) { missing = 1; exit } }
     END { exit (missing ? 1 : 0) }
   ' "$1" "$2"
 }
@@ -482,7 +482,7 @@ case "$DIRECTION" in
           awk -v dir="$prune_dir" '
             {
               line = $0
-              sub(/$/, "", line)
+              sub(/\r$/, "", line)
               if (match(line, /\]\([^)]+\.md\)/)) {
                 target = substr(line, RSTART + 2, RLENGTH - 3)
                 if ((getline probe < (dir "/" target)) < 0) next
