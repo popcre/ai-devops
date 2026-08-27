@@ -457,3 +457,218 @@ shared-git-directory hooks that can break four worktrees at once, and halt
 ordinary follow-up work the moment a pull request closes its issue.
 
 Fix the queue first. Then build this, smaller, with those four changed.
+
+---
+
+# PART C — second reviewer, from inside a live collision (issue #89)
+
+**Reviewer:** Claude (Opus 5), session `flaky-reviewer-tests-timing-c1ba63` on
+`edge-dev`, 2026-08-27.
+**Standing:** this reviewer spent the preceding day executing issue
+[#89](https://github.com/popcre/ai-devops/issues/89) — the flaky reviewer test
+timing fix — end to end: diagnosis, ten-file change across seven suites, CI,
+merge queue. Findings below come from that execution, not from reading the plan.
+Where they agree with Part A/B they are independent corroboration; where they are
+new they are labelled C-1 … C-6.
+
+**Verdict from this seat: the plan solves a collision that actually happened
+here, and would not have touched five of the six failures that actually cost
+time.** One of its locked decisions (§8 fail-closed) would have locked this
+session out of its own work during a measured GitHub outage window.
+
+---
+
+## C-0. The one thing the plan gets right, from live evidence
+
+Mid-execution, peer session `pull-latest-repo-d96ee2-06` messaged this session
+asking whether it owned #89 — because it was about to start the same work. That
+is precisely the §6.1 intent collision: two clean worktrees, disjoint initial
+files, same task. It was resolved by a cross-session message that happened to be
+sent. Nothing mechanical would have caught it.
+
+**This is the plan's justifying incident, and it is real.** It is also the only
+one of six failures in this workstream that the plan addresses.
+
+---
+
+## C-1. HARMFUL — declared-path fencing punishes exactly the work it is aimed at
+
+§8 locks: *"Every write claim declares intended repository-relative paths"*, §9.4
+requires them at `acquire` time, and §8 adds that changing scope while a claim is
+active **fails closed**.
+
+**Measured against this workstream:**
+
+| | Files |
+|---|---|
+| Named in issue #89 | **2** (`tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`) |
+| Actually changed at merge (`b9734cac..a5e5f7f3`) | **10** |
+| Discovered *after* the first day of measurement | **8** |
+
+The eight were not scope creep. `tests/lib-test-timing.sh` did not exist until the
+shared helper was extracted; the five other reviewer suites (`deepseek-agent`,
+`gemini`, `glm`, `muse`, `qwen`) entered scope only once the sweep proved the same
+defect class in them; `fix_test_ai.md` was the diagnosis record. **A correct fix
+went from two declared files to ten because the diagnosis was correct** — and
+under §9.4 that is five successive re-declarations against a rule that fails
+closed on scope change.
+
+**The plan optimises for work whose file set is knowable in advance. Debugging is
+the case where it is not** — and §3.2's own evidence, "separate sessions
+independently diagnosing the same flaky reviewer tests", *is* debugging.
+
+**Required change:** the declared-path set must be **append-only and extendable by
+the owner without reconciliation**. Fail closed on *another* session's overlap,
+never on the owner widening its own scope. Keep the fail-closed rule for the
+scope block (units), where it governs admission; drop it for paths, where it
+governs publication.
+
+---
+
+## C-2. HARMFUL — fail-closed on network ambiguity, with a measured outage this session
+
+This corroborates finding 6 with a specific, dated incident, and raises its
+severity.
+
+§8 locks: *"Network/API ambiguity fails closed for acquire, renew, verification,
+release, and takeover"*, and §9.6 makes the local guard block commit and push when
+*"network verification unavailable"*.
+
+**Measured, this workstream:** concurrent `gh run watch` invocations tripped a
+GitHub **secondary rate limit** that returned 403 on every Actions API call —
+while `gh api rate_limit` simultaneously reported `5000/5000 remaining`. The
+condition is recorded in this reviewer's memory as
+`gh-run-watch-burns-the-api-quota`, and it lasted long enough to derail CI polling
+for a substantial part of an afternoon.
+
+**Under §9.6 as written, that window would have blocked every `git commit` in
+every session on this machine**, with no local override, for a reason unrelated to
+ownership — and the standard diagnostic (`gh api rate_limit`) would have reported
+the API as healthy.
+
+This is worse than finding 6 states, because the failure mode is *not* GitHub
+being down. It is GitHub being selectively unavailable **while reporting
+availability**, triggered by ordinary tooling this repository already runs.
+
+**Required change:** `commit` never requires network. Fence at `push` and in CI,
+where a claim is actually being published and where a retry costs nothing.
+
+---
+
+## C-3. MISSING — every hazard in this workstream except one was *within* a single owner
+
+The plan's threat model is session-versus-session. Six failures cost real time
+here. **Five were one owner colliding with its own concurrent processes**, and a
+per-task ref cannot see any of them:
+
+1. **Editing a test script while copies of it were running.** Bash reads scripts
+   incrementally from disk, so three concurrent runs died with a syntax error at
+   line 315 of a file that was already valid on disk. Worked around only by
+   running from in-repo snapshots (`tests/.snap-grok.sh`) that dodge the
+   `test-*.sh` discovery glob.
+2. **A `git stash` on a stack shared by every worktree and every other session.**
+   Recovered by SHA, but the stack held another session's entry at the time.
+3. **An orphaned background run writing into a log a new run was also writing**,
+   producing an interleaved file and a bogus 155-failure result that was believed
+   for a while.
+4. **CRLF corruption** from a checkout predating `.gitattributes` — 96 files,
+   invisible to `git grep`, fatal only under WSL bash.
+5. **The merge queue** — Part 0's finding, independently reached here at roughly
+   3.5–4.5 hours lost on one pull request.
+
+Only the peer-session ping (C-0) was cross-session.
+
+**This does not argue against the plan.** It argues that the benefit must not be
+stated as "prevents collisions" when the measured collision population in the most
+recent multi-hour workstream was **1 of 6**. Finding 2 asks for an expected
+saving; this is the denominator for it.
+
+**Add to §4 as explicitly out of scope**, so the gap is visible rather than
+assumed covered: the shared stash stack, the shared git directory, concurrent
+processes inside one claim, and script mutation during execution.
+
+---
+
+## C-4. MISSING — the read-only exemption has no boundary, and this workstream lived on it
+
+§8 locks: *"Read-only work is exempt. Editing/committing/pushing/opening a PR
+requires a claim."*
+
+In this workstream, **roughly the first day was read-only**: reproducing under
+artificial load, reading wrapper source, running unmodified suites, reading CI
+timestamps. Nothing was edited. Under the locked rule no claim was owed for any of
+it — and that is exactly the window in which the peer session (C-0) was
+independently starting the same diagnosis.
+
+**The plan exempts precisely the phase in which its own headline collision
+occurs.** §3.2's duplicate-diagnosis failure happens before anyone writes a file.
+
+**Required change:** either (a) allow an `--intent` claim that costs nothing and
+blocks nothing but is visible to `list`/`status`, acquired when a session begins
+*investigating* a task issue; or (b) state plainly in §4 that duplicate
+*diagnosis* is not prevented — only duplicate *implementation* — and remove it
+from the benefit case in §3.2.
+
+---
+
+## C-5. MAJOR — `bind-head` adds a serialization point to a pipeline already at 70 minutes
+
+§8 locks: *"Before PR, `bind-head` advances the owned task ref … CI requires that
+exact task/ref/head binding"*, and §9.7 locks that any different head requires a
+fresh `bind-head`.
+
+**Measured on this workstream:** `windows-offline` runs 65–70 minutes, and the #89
+change itself added 3–5 minutes to it. Landing #89 took several pushes — the
+ask-ceiling fix (`050ad1e`) and the loud-timeout fix (`9aec837d`) were each
+discovered from a *failed CI run*, meaning each was a new head.
+
+Under §9.7 every one of those iterations needs an extra authenticated
+force-with-lease round trip before push, and **a forgotten one presents as a CI
+failure 70 minutes later**, not as a local error. Combined with Part 0's 54% queue
+pass rate, the cost of one missed `bind-head` is an hour.
+
+**Required change:** `bind-head` must run automatically inside the push guard —
+never a step a human or a model can forget — and its absence must fail *locally at
+push time*, never for the first time in CI.
+
+---
+
+## C-6. MINOR — §9.11's "run focused tests twice where concurrency matters" is not enough, measured
+
+§9.11 requires focused tests run twice. On this workstream the largest single
+cause reproduced **6 times** across many runs, and one check
+(`durable cancel is worker-confirmed`) failed roughly **1 run in 6**.
+
+Two runs would have had roughly a 30% chance of surfacing that check at all, and
+would have proved nothing about the rest. This reviewer needed **ten consecutive
+clean runs** of one suite — six sequential, four concurrent with a second suite —
+before the result was trustworthy, plus deliberate defect injection to prove the
+guarded checks could still go red.
+
+**Required change:** for a concurrency feature, derive the run count from the
+failure rate to be excluded, and require **defect injection**. A test that never
+fails is not evidence: §3.4 of `fix_test_ai.md` records a Kimi fixture whose
+search pattern could never match, which passed for its entire life while
+verifying nothing.
+
+---
+
+## C-7. Summary of Part C changes
+
+| # | Severity | Kind | Change |
+|---|---|---|---|
+| C-1 | HARMFUL | present | Make declared paths append-only by the owner — a 2-file issue became a correct 10-file fix |
+| C-2 | HARMFUL | present | `commit` must never require network — a measured 403-while-`5000/5000` window would have blocked every session |
+| C-3 | MISSING | — | State that 5 of 6 measured failures were within one owner; list them as out of scope in §4 |
+| C-4 | MISSING | — | Claim at *investigation* start, or stop claiming duplicate diagnosis as a benefit |
+| C-5 | MAJOR | present | `bind-head` automatic in the push guard; never discoverable only in a 70-minute CI run |
+| C-6 | MINOR | present | Replace "run twice" with a rate-derived run count plus mandatory defect injection |
+
+**Agreement with Part A/B:** C-2 strengthens finding 6 with a dated incident and
+should raise it to BLOCKING. Part 0's merge-queue finding is independently
+confirmed here at 3.5–4.5 hours lost on a single pull request. No finding in Part
+A or Part B is disputed.
+
+**The one-line version:** build it, because C-0 was real — but build it for the
+session that does not yet know which files it will touch, because that is the
+session §3.2 says is duplicating work.
