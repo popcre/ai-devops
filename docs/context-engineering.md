@@ -55,6 +55,59 @@ global-versus-skill-description overlaps. Always-loaded global text measures
 15,980 bytes, still over the 12,449-byte warning budget that predates this
 change.
 
+## Skill index ratchet on 2026-08-27
+
+Albert asked where his tokens were going. Ten days of transcripts from
+`edge-dev` (338 Claude Code sessions, 441 Codex sessions, 17-27 August 2026)
+were read end to end from the archive in `u2giants/ai-devops-transcripts`,
+using the usage records inside the transcripts rather than an estimate.
+
+Two findings mattered.
+
+**Session length dominates everything else.** Turns past number 200 were 40% of
+all activity but 66% of all input tokens; turns past 400 were 19% of activity
+and 40% of tokens, at an average 488,000 tokens of context each. Fifty-nine
+sessions (17% of the total) carried 73% of all turns, and they almost never
+compacted, because a very large context window means nothing forces a reset.
+That is a client-settings problem, not a repository one, and it is handled by
+`autoCompactWindow` plus a turn counter in the status line on each machine.
+
+**Tool output is not the problem here.** Everything every tool printed across
+all 338 Claude sessions came to 25 MB, roughly six million tokens, or 0.07% of
+input. The popular token-saving projects compress exactly that, so none of them
+apply to this setup.
+
+What *is* a repository problem is the skill index. Of 46 installed skills, 23
+were invoked in the ten-day window. Fourteen of the unused ones are rare
+procedures - portal scrapers, one-off audits, and new-project rituals - that
+Albert only ever starts deliberately. Each now carries
+`disable-model-invocation: true` in its frontmatter, which keeps it out of the
+startup skill listing entirely.
+
+Nothing was moved, renamed, or deleted. A manual-only skill is still installed,
+still appears in the slash-command menu, and still runs in full when invoked by
+name. To put one back in the automatic index, delete its
+`disable-model-invocation` line and reinstall. The fourteen are:
+`ai-development-pipeline`, `cicd-rules-audit`, `design-handoff-implement`,
+`designflow-human-qa`, `human-app-qa`, `item-description-taxonomy`,
+`licensor-incremental-capture`, `new-app-setup`,
+`paramount-creative-library-scrape`, `peanuts-scrape`, `repo-bug-audit`,
+`repo-docs-overhaul`, `sesame-workshop-scrape`, `strawberry-shortcake-scrape`.
+
+Measured: Claude skill manifest 15,293 -> 11,091 bytes (about 3,824 -> 2,773
+tokens, a 27% cut); Codex manifest 13,214 -> 10,595 bytes, which clears the
+Codex manifest budget warning that had been standing at 310 bytes over. The
+audit now excludes manual-only skills from both manifests and reports their
+count on its own line, so the saving is visible rather than silent - a skill
+that leaves the budget must never leave the report. `tests/test-context-audit.ps1`
+covers this and fails if a manual-only skill is still charged to a manifest.
+
+The remaining ten unused skills were left in the automatic index on purpose.
+They are the workflow and safety rituals - shipping, deploying, closing out,
+handing off, and the Synology procedures - where automatic triggering is what
+enforces the rule. Trading a governed procedure for about a thousand tokens a
+turn is the wrong trade.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at

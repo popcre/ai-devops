@@ -1,6 +1,7 @@
 ---
 name: licensor-incremental-capture
 description: Re-scrape a licensor portal and capture only new, changed, or withdrawn records. Use for refresh, re-scrape, delta, incremental, "what changed", or bookmark, manifest, and run-state design across any licensed-content portal.
+disable-model-invocation: true
 ---
 
 # Licensor incremental capture

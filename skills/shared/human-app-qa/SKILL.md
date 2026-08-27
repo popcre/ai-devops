@@ -1,6 +1,7 @@
 ---
 name: human-app-qa
 description: Explore a web frontend like a real customer and report evidence-backed behavior or usability problems without reviewing code. Use for human QA, exploratory or journey testing, visual checks, "use the app", "click everywhere", or "poke and prod".
+disable-model-invocation: true
 ---
 
 # Human App QA
