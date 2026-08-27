@@ -1,4 +1,4 @@
-# IMPLEMENTATION PLAN — collision-resistant ai-devops work claims (2026-08-27)
+# IMPLEMENTATION PLAN — collision-resistant ai-devops work claims (revised 2026-08-27)
 
 **Tracking issue:** [popcre/ai-devops#131](https://github.com/popcre/ai-devops/issues/131)
 **Registered handoff:** [`HANDOFF.d/2026-08-27T1939Z-edge-dev-codex-ai-devops-work-claims-plan.md`](HANDOFF.d/2026-08-27T1939Z-edge-dev-codex-ai-devops-work-claims-plan.md)
@@ -7,322 +7,405 @@
 
 | Step | Status | Evidence |
 |---|---|---|
-| 1. Freeze the claim contract and protected-surface policy | ⬜ open | This plan, §9.1 |
-| 2. Build the GitHub-backed claim command | ⬜ open | Target: `bin/ai-work-claim` and `config/work-claim-policy.json` |
-| 3. Add deterministic concurrency and failure tests | ⬜ open | Target: `tests/test-ai-work-claim.sh` |
-| 4. Route Claude and Codex sessions through the preflight | ⬜ open | Target: both global templates and repository router |
-| 5. Document, install, and validate on Windows and Linux | ⬜ open | Target: deployment/configuration docs and install tests |
-| 6. Independent final review, landing, and live proof | ⬜ open | Target: exact-head review, CI run, and issue #131 evidence |
+| 0. Reconcile the first plan and review findings | ✅ done 2026-08-27 | §6–8; live policy/ruleset/PR #104; [`docs/work-claims-plan-review-2026-08-27.md`](docs/work-claims-plan-review-2026-08-27.md) |
+| 1. Qualify atomic ref creation and force-with-lease mutation; freeze the contract | ⬜ open | §9.1–9.2; target evidence under `tests/verification/work-claims/` |
+| 2. Build atomic task claims and safe stale reconciliation | ⬜ open | Target: `bin/ai-work-claim`, `config/work-claim-policy.json` |
+| 3. Add deterministic concurrency, crash, fencing, and policy tests | ⬜ open | Target: `tests/test-ai-work-claim.sh` and focused policy suites |
+| 4. Add mechanical local/CI fencing and concise client routing | ⬜ open | Target: claim guard, hooks/integrations, workflow, both global templates |
+| 5. Document, install, and qualify on Windows/Linux | ⬜ open | Target: `docs/work-claims.md`, installer/restore evidence |
+| 6. Independent exact-head review, PR, merge queue, and installed proof | ⬜ open | Target: review artifact, PR checks, merge-group run, merged SHA |
 
-**Fresh-session starting point:** Step 1. Re-read all downstream phases before beginning each phase because concurrent work may change the named files.
+**Fresh-session starting point:** Step 1. Before each phase, fetch `origin/main`, read this STATUS table and all downstream steps, recheck issue #131 and the active GitHub ruleset, and preserve unrelated dirty work.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
-Albert should be able to run many AI sessions against `ai-devops` without paying twice for the same implementation or having sessions unknowingly edit the same high-contention operating surfaces. Unrelated work must remain concurrent and ordinary Git conflicts must remain visible and recoverable. The control must be cheap enough that sessions actually use it, must recover safely after a crashed session, and must not require a permanent orchestrator session.
+Albert should be able to run many AI sessions against `ai-devops` without paying twice for the same implementation or having sessions unknowingly edit the same high-risk operating surface. Unrelated work, including intentional audit/reviewer fan-out, must remain concurrent. The solution must coordinate different machines and clones, recover safely after crashes, and remain materially lighter than a permanent orchestrator.
 
-Success means every write-capable ai-devops session can make one quick, live GitHub-backed claim before editing; simultaneous claims deterministically produce one winner; expired ownership does not block forever; and malformed or ambiguous ownership fails safely on protected surfaces. If any step below conflicts with this goal, the goal wins — stop and flag it.
+Success means one atomic GitHub-backed owner exists for each write task; a second contender cannot believe it also won; stale ownership remains protective until explicitly reconciled; unclaimed or superseded work is mechanically blocked before publication; and ordinary cross-task Git conflicts remain visible rather than being turned into a repository-wide queue.
+
+If any step below conflicts with this goal, the goal wins — stop and flag it.
 
 ## 2. What this application is
 
-`popcre/ai-devops` is POP Creations' public backup-and-restore toolkit for a multi-model AI coding workflow. It contains command-line tools, shared Claude/Codex skills, global instruction templates, machine setup, and offline verification. It is not a hosted application and has no database or production service. GitHub `main` is the source of truth; toolkit “deployment” is local installation from the checkout.
+`popcre/ai-devops` is POP Creations’ public backup-and-restore toolkit for a multi-model AI coding workflow. It contains Bash and PowerShell commands, Claude/Codex skills and global instructions, machine setup, reviewer wrappers, documentation, and offline verification. It is not a hosted application and has no application database or production service. Toolkit “deployment” is installation from the repository checkout.
 
-The repository is currently at `C:\repos\ai-devops` on Windows `edge-dev`. Finished work goes directly to `main`, is tested locally, committed as Albert Hazan, pushed without force, and verified on `origin/main`. `install.sh:201-206` installs executable Unix commands from `bin/`; Windows uses the repository checkout and its setup paths. GitHub CLI authentication is part of restore/setup (`docs/restore-from-zero.md:41-63`).
+The canonical repository is `popcre/ai-devops`; `main` is protected by active GitHub ruleset `21564317`. All changes use a feature branch, pull request, required Linux/Windows checks, and the merge queue. `AGENTS.md:20-27` and `config/repository-policy.json` are the repository contract. Organization administrators can technically bypass the ruleset, but that bypass is not the normal workflow and must not be used for this implementation.
+
+The implementation must be portable between Ubuntu and Windows Git Bash. GitHub CLI authentication is already part of restore/setup (`docs/restore-from-zero.md:41-63`). `install.sh:201-206` installs executable Unix commands from `bin/`; Windows uses repository/setup-managed entrypoints.
 
 ## 3. What triggered this work
 
-Albert asked whether ai-devops needs a shared-db-style orchestrator because concurrent work has produced many collisions. A review of the private ai-devops transcript archive found real merge conflicts concentrated in shared instructions, skills, and memory, but the larger cost was duplicate diagnosis and implementation—especially parallel reviewer/test repairs. Much of the apparent concurrency was intentional audit fan-out, so a repository-wide single orchestrator would serialize useful independent work.
+Albert asked whether ai-devops needs a shared-db-style orchestrator because concurrent AI work has produced repeated collisions. A private transcript review of the recent ai-devops period found approximately 72 Claude and 103 Codex ai-devops sessions on edge-dev. Much of that concurrency was intentional audit/reviewer fan-out, so raw session count is not itself a defect.
 
-Claude recommended a light claims file. The accepted direction is lighter than an orchestrator but stronger than a committed file: a live GitHub-backed lease with deterministic winner selection. A mutable file in the repository would itself contend, would be stale on branches/worktrees, and could not prevent two sessions from both starting before either commit was visible.
+The measured problems were:
 
-Issue [#131](https://github.com/popcre/ai-devops/issues/131) tracks implementation. No claim tooling has been implemented yet.
+1. merge/rebase conflicts concentrated in shared operating surfaces, including instruction templates, shared skills, memory/docs, and some tests;
+2. separate sessions independently diagnosing or repairing the same flaky reviewer tests or wrapper behavior, wasting paid model work without necessarily creating a Git conflict;
+3. similar defects being planned/fixed repeatedly across copied reviewer implementations;
+4. shared checkouts routinely containing unrelated dirty work, requiring isolated publication to preserve ownership;
+5. stale local instructions causing incorrect branch behavior after the repository moved to `popcre`.
+
+Claude recommended a lightweight committed claims file. That was rejected because branches/worktrees see stale copies, simultaneous sessions can start before either commit becomes visible, and the claims file becomes a new contention point. The first version of this plan replaced it with GitHub claim issues plus a five-second settlement/tie-break. Grok 4.6 returned `REVISE`: issue creation plus delayed listing is not atomic, prompt-only renewal/fencing does not prevent split-brain after expiry, free-form work-unit/path wording can evade duplicate detection, public owner tokens are unsafe, and the plan’s direct-to-main rule was stale.
+
+The branch finding was independently reproduced: live `origin/main`, `config/repository-policy.json`, merged PR #104, and active ruleset `21564317` all require feature branch + PR + merge queue. The earlier direct push succeeded only through an organization-admin bypass and is not precedent.
+
+GLM 5.3 then reviewed the refs-based revision and returned `REVISE`. It confirmed create-only refs, stale-protective ownership, task-wide keys, hashed tokens, mechanical fencing, and corrected branch policy. It found four remaining must-fix defects: GitHub REST refs have no compare-and-swap; takeover authorization/threshold was undecided; lost create responses lacked exact re-adoption; and PR head binding was deferred. It also recommended dropping component refs from v1. This revision incorporates all five corrections through Git force-with-lease, 24h + exact Albert-authorized takeover, per-acquisition candidate/object recovery, `bind-head` + exact CI rules, and task-only refs.
 
 ## 4. Scope — in and out
 
 ### In scope
 
-- One cross-platform `ai-work-claim` command implemented in portable Bash for Git Bash and Linux.
-- GitHub Issues as the live registry; claims are short-lived issues with machine-readable bodies and append-only renewal/release comments.
-- Duplicate-work protection keyed by repository + task issue + work-unit.
-- Collision protection for configured high-contention path prefixes.
-- A two-phase acquire protocol that resolves simultaneous contenders deterministically before either may edit.
-- Lease renewal, release, list/status, stale reconciliation, and diagnostics.
-- Claude and Codex instructions that require the preflight for ai-devops writes but exempt read-only review and analysis.
-- Offline mocked tests, focused live proof in `popcre/ai-devops`, installation/docs updates, and an exact-head independent safety review.
+- One portable `ai-work-claim` command using atomic GitHub Git-reference creation as admission authority.
+- Default exclusive ownership keyed by canonical repository + open task issue.
+- Optional parallel work-units only when predeclared in the task issue’s machine-readable scope block.
+- Required file declarations and a small configured set of high-risk paths used for changed-file fencing and diagnostics. V1 does not acquire component refs.
+- GitHub task-issue comments/label for human visibility, while refs—not comments, search, or issue ordering—decide ownership.
+- Non-expiring protective ownership with liveness timestamps; stale claims do not admit a successor until explicit, audited reconciliation.
+- Owner-token hashes in public metadata; raw owner tokens remain user-only outside Git.
+- Local verification/fencing integrations and a required PR check so unclaimed/superseded work cannot merge.
+- Read-only diagnostics, list/status/doctor, owner renew/release, and explicit stale/malformed takeover procedure.
+- Offline concurrency/crash/security tests, bounded live ref qualification, documentation, installation, client routing, exact-head review, PR/merge-queue landing, and installed smoke proof.
 
 ### NOT in this plan
 
-- A permanent orchestrator session, queue manager, author lanes, or serialized repository-wide merge process.
-- Database-style object claims, production locks, or any reuse of shared-db’s preview/production governance.
-- Preventing all possible Git merge conflicts. Git remains the final merge safety layer.
-- Automatically refactoring the eight reviewer implementations. That architectural consolidation is separate work; claims prevent duplicate ownership but cannot remove copied code.
-- Claiming read-only analysis, reviewer runs, transcript review, or documentation browsing.
-- A committed `CLAIMS.md`, generated claim index, local-only lock as source of truth, GitHub Project, external service, scheduled automation, or database.
-- Automatic deletion of another live session’s worktree, branch, files, or metadata.
+- A permanent orchestrator session, work queue, author-lane manager, or repository-wide merge serialization.
+- A committed `CLAIMS.md`, shared JSON index, GitHub Project, external database/service, or scheduled closer.
+- Automatic takeover merely because a timeout elapsed.
+- Treating GitHub issue search, issue creation order, sleep duration, or first-page results as a mutex.
+- Automatically refactoring copied reviewer implementations. That remains separate architecture work; claims only stop duplicate ownership.
+- Claiming read-only analysis, transcript review, repository browsing, or independent reviewers.
+- Serializing ordinary `AGENTS.md` router-row edits in v1; Git remains responsible for those recoverable text conflicts.
+- Preventing every possible Git merge conflict or malicious administrator bypass.
+- Database, production, shared-db, or infrastructure mutation.
 
 ## 5. Current state of the code
 
-- `AGENTS.md:20-27` already requires direct-to-main work, GitHub truth, and preservation of concurrent dirty changes, but it has no live ownership preflight.
-- `AGENTS.md:65` routes continuation through matching handoffs, and `AGENTS.md:120` says active work appears in issues/plans/handoffs. These improve discovery but do not provide atomic ownership.
-- `HANDOFF.d/` prevents sessions from overwriting one shared handoff, but handoffs describe continuation rather than current short-lived edit ownership.
-- Reviewer wrappers already contain local mutex patterns, for example `bin/ai-grok-review:288-353` and `bin/ai-glm:259-284`. Those locks protect one machine/process family and are not a cross-machine repository claim service.
-- `install.sh:201-206` automatically installs executable `bin/` entries on Ubuntu. No new install list is needed if `bin/ai-work-claim` is executable.
-- `tests/test-all.sh:6` discovers `tests/test-*.sh`, so a correctly named test joins the full suite automatically.
-- GitHub issue #131 is open. The repository has no `work-claim` labels, policy file, command, or tests.
-- The checkout is dirty with unrelated reviewer-cache and taxonomy work. An implementing session must not stage, overwrite, reformat, or “clean up” those files.
-- This plan and its handoff are planning artifacts only. Until committed and pushed, they are not yet on `origin/main`.
+- The first plan is published on `origin/main` at `ac72d40798d3867feef83b3d4de1bcc49acf045c` and linked from `AGENTS.md`. It is a planning artifact only; no claim tool exists.
+- Issue #131 is open. No `work-claim` labels, refs, policy file, command, tests, hooks, or workflow have been implemented.
+- `AGENTS.md:20-27` now requires feature branch + PR; `config/repository-policy.json` maps both old and new ai-devops owner names to `feature-branch-pr`.
+- Active ruleset `21564317` requires pull requests, squash merging through the merge queue, and `linux-offline` + `windows-offline` checks. Organization admins have an always-bypass capability; the implementation must not use it.
+- `HANDOFF.d/` avoids one shared handoff file but records continuation, not live edit ownership.
+- Existing wrapper-local mutex patterns (`bin/ai-grok-review`, `bin/ai-glm`) protect particular paid/session work. They prove atomic local-directory locking patterns but are not cross-machine repository ownership.
+- `bin/ai-completion-check-hook` documents that instruction wording alone did not reliably enforce completion behavior. This is direct evidence that claims need mechanical fencing, not only global prose.
+- `tests/test-all.sh:6` discovers `tests/test-*.sh`, so a correctly named focused test joins the full suite.
+- `install.sh:201-206` installs executable `bin/` entries generically on Ubuntu.
+- The original shared checkout is stale and dirty with unrelated work. This revision is owned on branch `codex/revise-work-claims-plan-131` in an isolated worktree based on `origin/main`.
 
 ## 6. Key findings and root cause
 
-1. **The expensive failure is not just textual merge conflict.** Sessions can independently diagnose or fix the same issue in clean worktrees, producing no Git conflict while duplicating paid work. Therefore the primary identity is the task/work-unit, not merely a filename.
-2. **A committed claims file cannot be authoritative.** Concurrent branches and worktrees see different bytes, and the shared file becomes a new hot spot. Live GitHub state is required.
-3. **A check-then-create registry has a race.** Two sessions can both observe no claim and both create one. The protocol therefore needs a settlement phase and deterministic winner using GitHub’s server-assigned issue number; only the oldest eligible contender may proceed.
-4. **Repository-wide serialization is disproportionate.** Most transcript concurrency was intentional, independent audit/reviewer work. Only identical task/work-unit claims and configured protected-path overlap should block.
-5. **Leases must survive crashes without permanent blockage.** Ownership expires unless renewed. Expired claims are ignored for admission but preserved until a bounded reconciliation command closes them, leaving audit history.
-6. **Local clocks are not trustworthy for cross-machine ownership.** Lease age must use timestamps returned by GitHub and a GitHub response `Date` header, never one workstation’s clock.
-7. **A path claim alone is too easy to game accidentally.** Every write claim requires an existing open task issue and a stable work-unit slug. Protected path prefixes add collision protection; the task identity prevents duplicate work across disjoint-looking files.
-8. **Malformed ownership is dangerous only where it overlaps.** A malformed active claim that could overlap the requested task or protected surface must fail closed and name the issue. An unrelated malformed claim must be reported by `doctor` without freezing the entire repository.
+1. **Duplicate work is an intent collision, not just a path collision.** Two clean worktrees can solve the same task with disjoint initial files. Default ownership must therefore be one writer per task issue.
+2. **Issue creation/listing is not atomic admission.** If two candidates cannot see each other due to eventual consistency, both can proceed. A delay and lowest issue number are a tie-break, not a mutex.
+3. **Create-only Git refs provide atomic admission.** A single fully qualified task-ref name has one successful creator; a competing create receives conflict/validation failure. A lost response is resolved by exact readback against the per-acquisition owner hash and intended object SHA.
+4. **GitHub REST ref updates do not provide compare-and-swap.** Heartbeat, bind-head, release, and takeover must use Git protocol `--force-with-lease=<ref>:<expected-oid>` plus exact post-operation readback. A plain REST PATCH is forbidden for ownership mutation.
+5. **Automatic expiry creates split-brain.** A disconnected writer can keep editing after its lease expires. Therefore elapsed liveness marks a claim stale but does not free it. A successor needs explicit reconciliation/takeover with audit evidence.
+6. **Prompt-only enforcement repeats a measured failure.** Concise instructions remain necessary, but local Git fencing and a required PR check provide mechanical enforcement.
+7. **Free-form work-units are an evasion path.** Default key is the task issue. Parallel units are valid only when the issue declares their exact slugs before acquisition; sessions may not invent them to bypass a blocker.
+8. **Optional paths make publication fencing honor-system.** Write claims require intended paths. Before commit/push/PR, the guard compares changed files against the declared set; undeclared changes fail. High-risk mappings improve diagnostics but do not create additional v1 locks.
+9. **Public metadata cannot contain bearer ownership.** Store only `sha256(raw_owner_token)` publicly. Raw random tokens stay in user-only state and authorize renew/release by hash proof.
+10. **AGENTS.md is a measured hot file but mostly cheap conflict.** Freezing every router-row edit would serialize legitimate work and attack the wrong problem. It is excluded from v1 high-risk mappings.
+11. **Stale branch guidance caused an actual process violation.** The plan must derive branch policy from live `origin/main` and policy/ruleset immediately before landing, not from an old working copy.
+12. **Component refs are unnecessary v1 complexity.** Task-wide ownership addresses the measured expensive duplicate-work failure. Cross-task same-file edits remain visible Git conflicts; component refs add partial-acquisition, rollback, livelock, and orphan recovery before evidence shows that machinery is needed.
 
 ## 7. Approaches considered and REJECTED, and why
 
-1. **Full shared-db-style orchestrator — rejected.** Git work is branchable, conflicts are recoverable, and intentional fan-out is valuable. A sole coordinator would impose repository-wide latency without addressing copied reviewer architecture.
-2. **Committed `CLAIMS.md` or JSON registry — rejected.** It is branch-local, stale, and itself a shared mutable collision point.
-3. **Local filesystem locks — rejected as authority.** They cannot coordinate edge-dev, Linux hosts, remote machines, or independent clones. A local cache may improve messages but may never grant ownership.
-4. **Simple “query then create” GitHub issue — rejected.** Simultaneous sessions can both pass the query. Deterministic post-create settlement is mandatory.
-5. **One permanent registry issue with editable body — rejected.** It recreates a shared mutable document, has update races, and makes individual ownership/release history hard to audit.
-6. **One permanent registry issue with comments only — rejected.** Append-only comments preserve history but require expensive whole-thread reconstruction and still need a tie-break protocol. One issue per short-lived claim gives native open/closed state and indexed queries.
-7. **Git branches/refs as locks — rejected for v1.** They can provide atomic ref creation but require custom commit/ref metadata, pollute ref discovery, and complicate safe stale reconciliation. GitHub issue numbering plus settlement provides deterministic admission with substantially less machinery.
-8. **Path-only claims — rejected.** Duplicate implementation often touches different files initially; task issue + work-unit is the duplicate-work key.
-9. **Automatic scheduled closer — rejected for v1.** Expired claims can be ignored safely without a mutating bot. Manual/CI `doctor --reconcile-expired` is auditable and avoids introducing credentials or scheduled infrastructure.
-10. **Broad freeze on any malformed claim — rejected.** One bad historical record must not stop unrelated work. Fail closed only for a potentially overlapping task or protected path, while surfacing all malformed records through diagnostics.
+1. **Full shared-db-style orchestrator — rejected.** It would serialize intentional independent work and add a coordinator tax to recoverable Git changes.
+2. **Committed claims file/index — rejected.** Branch-local, stale, and itself a shared mutable collision point.
+3. **Local filesystem lock as authority — rejected.** It cannot coordinate machines/clones. Local state may prove token possession but never grant remote ownership.
+4. **One GitHub issue per claim plus sleep/lowest-number winner — rejected.** Not atomic under delayed visibility, retry, pagination, or partial failure; adds tracker clutter.
+5. **GitHub issue comments/body/labels as the lock — rejected.** Human-visible but not compare-and-swap admission. They remain audit/UI only.
+6. **Automatic expiry admission — rejected.** Creates split-brain while an old session is still editing.
+7. **Prompt-only verify/renew/release — rejected.** Existing completion enforcement shows wording alone does not hold.
+8. **Session-chosen work-unit in every duplicate key — rejected.** Different wording permits accidental duplicate owners.
+9. **Optional paths — rejected.** The guard cannot mechanically assess protected overlap or undeclared edits.
+10. **Public raw owner token — rejected.** Anyone with repository read access could replay it; publish only its hash.
+11. **Protecting all `AGENTS.md` edits — rejected for v1.** It serializes cheap router conflicts rather than expensive duplicate implementation.
+12. **Creating a candidate when a visible owner already exists — rejected.** Read existing exact refs first for a fast refusal; atomic create still decides races.
+13. **Broad scheduled cleanup — rejected.** Stale claims are safety evidence and remain protective until bounded reconciliation.
+14. **Custom ref namespace assumed without qualification — rejected.** Official GitHub docs accept fully qualified refs with at least two slashes, but API read/delete behavior and this repository’s ruleset must be proved with a disposable ref before choosing the production namespace.
+15. **Direct push to `main` — rejected and prohibited.** Live repository contract requires branch + PR + merge queue; admin bypass is not normal workflow.
+16. **Component refs in v1 — rejected after GLM review.** They do not address the primary same-task duplication better than the task ref and introduce partial-acquisition/livelock risk. Reconsider only from measured cross-issue contention evidence.
 
 ## 8. Design decisions already made (2026-08-27)
 
 ### LOCKED — do not relitigate
 
-- No permanent orchestrator and no repository-wide serialization.
-- GitHub is the only ownership authority; local state never grants a claim.
-- Claims are separate short-lived GitHub issues labeled `work-claim` and `work-claim-active`; closing the issue releases it.
-- Every write claim identifies an existing open task issue and a lowercase work-unit slug matching `[a-z0-9][a-z0-9-]{0,62}`.
-- Duplicate identity is `(canonical repository, task issue number, work-unit)`.
-- Protected collision identity comes from normalized path-prefix claims governed by `config/work-claim-policy.json`.
-- Acquisition is two phase: create candidate, wait five seconds, re-query, and select the lowest GitHub issue number among all valid, unexpired contenders. A loser closes its own candidate and exits nonzero before editing.
-- Default lease is 120 minutes; renew when fewer than 30 minutes remain. Bounds are 15–480 minutes. Lease time uses GitHub timestamps/server time.
-- Read-only work is exempt. Any session that will edit, commit, push, or open a PR must claim first.
-- Expired claims do not block acquisition. They remain visible until reconciliation closes them with an explanatory comment.
-- The command prints no secret/token/environment values and never writes claim state into the repository.
-- Protected surfaces initially include: `AGENTS.md`; `templates/system/`; `skills/shared/`; `install.sh`; `update.sh`; `uninstall.sh`; `bin/setup-machine.ps1`; `bin/bootstrap-windows-dev.ps1`; `config/machine-tools.tsv`; shared reviewer plumbing named by policy; and any test file explicitly claimed by another active session. Exact final prefixes are reviewed in Step 1, but coverage may not be weakened without transcript/Git evidence.
+- No permanent orchestrator, committed claims registry, external service, or repository-wide serialization.
+- GitHub Git refs are the only admission authority. Issue comments/labels are visibility/audit only; local files never grant ownership.
+- One exclusive task ref exists per `(canonical repository, open task issue)` by default.
+- Parallel work-units are allowed only when the task issue already contains a valid machine-readable scope block listing exact unit slugs and their non-overlapping responsibilities.
+- Task-wide and work-unit modes are mutually exclusive. A valid scope block makes bare task acquisition invalid and permits only exact listed units; without a scope block, unit acquisition is invalid and only the bare task claim is permitted. The scope block must exist before the first acquisition.
+- Every unit claim records the exact scope-block digest. Adding, removing, or changing the scope block while any claim ref for that task exists fails closed until all claims are released or explicitly reconciled.
+- Every write claim declares intended repository-relative paths. Paths fence the work and drive high-risk diagnostics; only the task key is an admission ref in v1.
+- No successor is admitted merely because a claim is old. Liveness timestamps mark `healthy`, `stale`, or `malformed`; stale/malformed overlapping claims remain protective until explicit reconciliation/takeover.
+- Public metadata contains the owner-token hash only. Raw token is random, user-only, outside the repository, and never logged or committed.
+- Generate a new raw token for every acquisition. Persist token + intended synthetic object SHA locally in `candidate` state before remote creation, so a lost create response can be re-adopted only when exact readback matches both.
+- Create-only REST admission is atomic. All later ref mutation uses Git `push --force-with-lease=<ref>:<expected-oid>` (including lease-protected deletion) plus exact readback; plain REST PATCH/DELETE is not an ownership mutation path.
+- Ref-layer mutation is cooperative accident prevention, not a hostile-user security boundary: all sessions share Albert’s GitHub authority and could bypass the tool. Local/CI fencing and audit make ordinary mistakes fail closed; repository-admin bypass remains technically possible.
+- Owner release/heartbeat/bind-head/takeover operations validate remote ref object, repository, task, unit, token hash, and expected previous object. No unconditional force update or unleased/unverified delete.
+- Read-only work is exempt. Editing/committing/pushing/opening a PR requires a claim.
+- Mechanical fencing is required: local changed-file/ownership checks plus a required PR check. Before PR, `bind-head` advances the owned task ref with force-with-lease to metadata containing the exact branch head SHA; CI requires that exact task/ref/head binding. Global instructions alone are insufficient.
+- `AGENTS.md` is not a high-risk mapping in v1. High-risk path mappings cover global templates, installer/update/uninstall paths, shared skill implementation, repository policy/workflows, shared reviewer plumbing, and exact tests for diagnostics/fencing only; they do not create additional locks.
+- Network/API ambiguity fails closed for acquire, renew, verification, release, and takeover. No local fallback grants ownership.
+- Implementation lands through feature branch + PR + merge queue; admin bypass is forbidden.
 
-### OPEN — implementer judgment within stated criteria
+### OPEN — resolve by the stated evidence gates, not preference
 
-- The exact JSON field names and shell function layout may change if the schema remains versioned, strict, and fully tested.
-- The five-second settlement may be raised only if a repeated live race test proves GitHub search indexing is slower; choose the smallest value that passes ten simultaneous acquisition trials.
-- Policy may use explicit prefixes plus named components if that produces clearer diagnostics. It must remain reviewable, secret-free, and deterministic.
-- Whether expired reconciliation runs in ordinary `doctor` as read-only reporting or behind an explicit mutating flag. Closing claims must always require the explicit flag.
+- **Ref namespace:** prefer `refs/ai-devops-claims/<key>` if live qualification proves REST create/read/list plus Git force-with-lease update/delete and ruleset compatibility. Otherwise use `refs/heads/ai-work-claims/<key>` and accept transient branch visibility. Do not use tags. Record the proof before coding.
+- **Local fencing installation:** select the fewest-moving-parts supported mechanism that works in Git Bash and Ubuntu and cannot silently disappear. Candidate: repository-managed hooks path plus wrapper command. It must preserve user hooks/config and pass install/rollback tests. If Codex/Claude offer different lifecycle hooks, keep procedure centralized in `ai-work-claim` and adapters thin.
+- **Stale takeover authority (locked contract):** takeover requires age of at least 24 hours, exact ref/object evidence, no open PR for the bound branch/head, a typed reason, and Albert’s explicit current-chat authorization naming the exact claim ref/task. The command requires an audit comment URL recording that authorization context. Because all sessions share Albert’s GitHub credentials, this is a cooperative authorization boundary, not cryptographic proof of who typed the comment.
+- **Liveness interval:** warn after 8 hours and classify stale after 24 hours unless measurement proves a longer heartbeat-less session. Liveness never transfers ownership. Heartbeat adapters are optional convenience; absence of a Codex lifecycle hook is safe because ownership remains protective.
+- **Required status check:** add a dedicated `work-claim-guard` job to the existing workflow, then update ruleset `21564317` only with Albert’s current-chat authorization naming that exact ruleset/check if the implementation session does not already have it. Until the ruleset is updated, the guard is informative and the feature is not complete.
 
-No owner decision is required before implementation. If live GitHub behavior disproves the issue-number settlement design, stop before substituting another authority and raise that evidence on issue #131.
+No owner decision is needed to write/test the command through local/live-disposable qualification. A real takeover requires Albert’s exact current-chat authorization for that claim. Adding `work-claim-guard` as a required GitHub ruleset check requires Albert to authorize that exact ruleset action in the implementing chat.
 
 ## 9. The plan — numbered, ordered, executable steps
 
-### Phase 1 — contract and command
+### Phase 1 — qualify authority and freeze the contract
 
-#### 9.1 Freeze the schema and policy
+#### 9.1 Re-derive live policy and qualify the Git-ref primitive
 
-Create `config/work-claim-policy.json` with schema version, repository identity, lease bounds, settlement seconds, label names, and protected path prefixes/components. Add a header comment block to the future `bin/ai-work-claim` documenting the protocol and threats it does and does not cover. Update this plan’s STATUS if live evidence changes a locked decision.
+From a clean feature branch based on fetched `origin/main`, capture: canonical remote identity, `AGENTS.md` branch rule, `config/repository-policy.json` result, ruleset `21564317`, issue #131 state, and existing matching refs. Create one disposable ref pointing to a synthetic commit whose message contains harmless test metadata and a token hash. Prove: first REST create returns 201; same-name second create returns a non-success without changing the ref; a simulated lost response is resolved by exact ref/object/owner-hash readback; exact readback matches; Git `push --force-with-lease=<ref>:<expected-oid>` updates only from the expected object and rejects a stale expected object; lease-protected delete succeeds only from the expected object; and the selected namespace is discoverable without issue search. Delete the disposable ref and verify absence.
 
-The claim issue body must be bounded and machine-readable between `<!-- ai-work-claim:v1 -->` markers and contain: canonical repository, task issue URL/number, work-unit, purpose summary, owner token, client (`claude`/`codex`), machine nickname, source checkout head, claimed normalized paths/components, requested lease minutes, candidate creation timestamp returned by GitHub, and schema version. The owner token is a random non-secret identifier stored under the user state directory, never the repository.
+Use `gh api` only for create/read/list/object creation and Git protocol force-with-lease for update/delete. If a custom namespace is not fully supported by both paths, repeat using `refs/heads/ai-work-claims/qualification-<random>` and select the branch namespace. Do not test on `main`, use unconditional force, or leave the qualification ref behind.
 
-Dependencies: none. Do not begin code until the contract can represent duplicate work, protected overlap, expiry, renewal, release, and malformed-record handling.
+Target evidence: `tests/verification/work-claims/<UTC>/ref-qualification.md`, containing status codes, ref names, object SHAs/hashes, ruleset result, cleanup proof, and no raw token.
 
-**Verification gate:** a fixture in `tests/fixtures/work-claims/` can represent one valid active claim, one expired claim, one released claim, one duplicate-task contender, one protected-path contender, and one malformed potentially overlapping claim without ambiguous interpretation.
+Dependencies: none. This is the authority gate.
 
-#### 9.2 Implement read-only discovery and validation first
+**Verification gate:** evidence proves exactly one creator, lost-response re-adoption, force-with-lease stale-object refusal, lease-protected deletion, selected namespace, and zero surviving disposable refs. If it does not, stop; do not implement an issue/sleep fallback.
 
-Create executable `bin/ai-work-claim` following repository Bash conventions and verification-header style. Implement: canonical repository discovery from `git remote get-url origin`; `gh auth status`/repository access preflight; strict policy parsing; paginated issue retrieval by label; strict body/comment parsing; GitHub server-time retrieval; overlap normalization; and commands `list`, `status`, and `doctor`.
+#### 9.2 Freeze schema, key derivation, scope modes, and high-risk mappings
 
-`list` prints bounded non-sensitive summaries. `status --task ISSUE --work-unit SLUG --path PATH...` returns: `clear`, `owned`, `blocked`, or `ambiguous`, with exact blocking issue URLs. `doctor` reports malformed, expired, multiply-owned, or policy-unknown records but makes no mutations.
+Create `config/work-claim-policy.json` with schema version, canonical repository aliases, selected ref namespace, task/unit key derivation, 8h warning/24h stale thresholds, per-acquisition owner-hash algorithm, issue-scope marker format, high-risk path mappings, and output limits. Create strict fixtures under `tests/fixtures/work-claims/` for candidate, healthy, head-bound, stale, malformed, parallel-unit, lost-response, closed-task, and takeover states.
 
-Dependencies: 9.1. Use `gh api`, not scraping `gh issue list` tables. Paginate every collection query. Never trust titles or free text as schema.
+Define one ref key as a deterministic lowercase hash over the versioned canonical task/unit tuple, while public task comments show readable task/unit/paths. Synthetic claim commit metadata must include schema, canonical repo, task issue, optional predeclared unit, exact scope-block digest when unit mode is active, per-acquisition owner hash, client, machine nickname, declared paths/high-risk classifications, base SHA, optional bound branch/head SHA, created/heartbeat GitHub time, and previous claim object where applicable. No raw token or private absolute path.
 
-**Verification gate:** mocked API tests prove pagination, canonical remote normalization (`u2giants` redirects to `popcre`), server-time use, malformed isolation, and exact/prefix overlap behavior.
+Initial high-risk path mappings must be explicit and narrow: global templates; lifecycle installers/updaters; shared skills; repository policy/workflows; named shared reviewer plumbing; and exact declared test files. They drive diagnostics and stricter changed-file messages, not separate refs. `AGENTS.md`, ordinary docs, and memory remain Git conflict territory in v1 because their measured collisions are recoverable and task ownership already prevents same-task duplication.
 
-#### 9.3 Implement two-phase acquisition
+Dependencies: 9.1 selected namespace.
 
-Add `acquire --task ISSUE --work-unit SLUG --purpose TEXT [--path PATH]... [--component NAME]... [--lease-minutes N]`. Preflight requires the task issue to exist and be open, validates every requested path relative to repository root, and identifies all policy-protected prefixes touched. It creates a candidate claim issue, records its server-issued number/timestamps, waits the configured settlement interval, then re-queries all active candidates.
+**Verification gate:** every fixture maps deterministically to the same task key/path classification on Windows Git Bash and Ubuntu; bare acquisition is refused in unit mode, unit acquisition is refused in bare mode, two different units are accepted only when the issue scope block predeclares both, and any active-claim scope-digest change fails closed; malformed/unknown policy fails closed for the requested work.
 
-The winner is the lowest issue number among unexpired valid claims with either the same duplicate identity or overlapping protected paths/components. The candidate must re-read its own issue and verify labels/body after settlement. A loser comments with the winning issue URL, closes only its own candidate, deletes only its own local token, and exits nonzero. A winner writes its issue number and owner token to user-only state, prints the exact claim URL and expiry, and exits zero. No repository file changes are allowed before this success.
+### Phase 2 — command and lifecycle
 
-Dependencies: 9.2. Signal/timeout cleanup may close only a candidate whose owner token matches and that has not been reported as acquired.
+#### 9.3 Implement read-only discovery first
 
-**Verification gate:** two concurrent mocked acquisitions for the same work-unit yield exactly one success; two protected-overlap acquisitions yield exactly one success; and unrelated task/path claims both succeed.
+Create executable `bin/ai-work-claim` following repository Bash conventions and verification-header style. Implement canonical remote discovery, `gh` authentication/repository preflight, strict policy/schema parsing, exact ref listing/readback, task-issue/scope validation, GitHub server-time extraction, local user-state path handling, and commands `list`, `status`, and `doctor`.
 
-#### 9.4 Implement renewal, release, and reconciliation
+`status --task ISSUE [--unit SLUG] --path PATH...` reports `clear`, `owned`, `blocked`, `stale-protective`, or `ambiguous`, with exact task/ref/issue evidence. `doctor` is read-only by default and reports orphan comments, refs without valid metadata, local tokens without refs, stale/malformed refs, and remote/local mismatches. The explicit `doctor --recover-owned` may repair only local state from exact candidate/ref/object/hash evidence; it never mutates remote refs or closes/rewrites ownership.
 
-Add `renew`, `release`, and `doctor --reconcile-expired`. Each mutating command must re-read the claim, validate the owner token, validate task/repository identity, and append a machine-readable comment before changing labels or closing. Renewal uses the comment’s GitHub timestamp as the new lease anchor. Release closes only the owned claim. Reconciliation closes only claims proven expired from GitHub time and records that no ownership assertion was made about local work.
+Dependencies: 9.2.
 
-Add `verify-owned` for use immediately before first edit and before commit/push. It must fail if ownership expired, changed, became ambiguous, the task closed, or a lower-number overlapping contender appeared.
+**Verification gate:** mocked tests prove canonical old/new remote aliases, pagination/all-ref discovery where applicable, GitHub-time use, bounded redaction, strict schema, and no repository mutation.
+
+#### 9.4 Implement atomic, retry-safe task acquisition
+
+Add `acquire --task ISSUE [--unit SLUG] --purpose TEXT --path PATH...`. Require an existing open task issue and read its scope state before acquisition. When a valid scope block exists, refuse bare acquisition and require an exact listed `--unit`; when none exists, refuse unit acquisition and allow only the bare task claim. Normalize/validate every path inside the repository and classify high-risk paths. Generate a new token for this acquisition, build the intended synthetic object, and atomically persist a user-only `candidate` record containing raw token, owner hash, ref key, intended object SHA, task/unit, exact scope digest, and paths before POSTing the ref. Re-read the scope immediately before and after ref creation; any digest/mode change fails closed and leaves the ref protective for reconciliation rather than declaring success.
+
+On a lost/ambiguous create response or 422, read the exact ref. If object SHA and owner hash match the persisted candidate, re-adopt the successful earlier create and transition local state to `owned`; if they do not, report the other owner and stop before editing. Repeating acquire with the same candidate is idempotent; a fresh acquisition never reuses another token. If candidate persistence fails, do not call GitHub. If audit comment creation fails after ownership, keep the ref protective and report an `audit-pending` recovery state rather than releasing silently. `doctor --recover-owned` may re-adopt only from exact candidate/object/hash evidence.
 
 Dependencies: 9.3.
 
-**Verification gate:** tests prove wrong-owner release/renew refusal, expired-ignore behavior, explicit reconciliation, interrupted-candidate safety, and `verify-owned` failure after lease expiry or claim tampering.
+**Verification gate:** simultaneous same-task acquisitions yield exactly one owner; bare and unit modes cannot coexist; different predeclared units both succeed; an active-claim scope change fails closed; lost-response retry re-adopts only its own exact object; competitor 422 never re-adopts; candidate/audit persistence failures preserve a truthful recoverable state.
 
-**Natural context cut:** after 9.4 and its focused tests pass, use `fresh-session`; the next session must re-read Phases 2–3 before proceeding.
+#### 9.5 Implement heartbeat, verification, release, and explicit takeover
 
-### Phase 2 — tests, routing, and installation
+Add `heartbeat`, `bind-head`, `verify-owned`, `release`, and `takeover`. Heartbeat creates a new synthetic claim object and advances the task ref only through Git force-with-lease from the exact locally recorded object; it updates the task audit comment without exposing the token. `bind-head` similarly advances the owned ref to metadata containing exact branch name and head SHA before PR/push verification. `verify-owned` requires the task ref to match current owner hash/object, task still open, declared unit still valid, and changed files contained by declared paths. It warns after 8h and reports stale after 24h but does not surrender ownership.
 
-#### 9.5 Build the full deterministic test harness
+Release uses force-with-lease deletion from the exact recorded object and confirms absence; failure leaves the ref protective. Takeover never triggers from age alone: require at least 24h without heartbeat, exact target ref/object, typed reason, no open PR for the bound branch/head, Albert’s current-chat authorization naming the exact task/ref, and an audit comment URL recording that authorization. Takeover uses force-with-lease from the old object directly to the successor’s synthetic claim object, avoiding a delete/create gap. Any stale expected object, audit ambiguity, or missing authorization preserves the old claim.
 
-Create `tests/test-ai-work-claim.sh` with a fake `gh` executable and isolated Git fixtures. Do not call live GitHub from the offline suite. Cover the specific cases in §10 plus command usage, output bounds, exit codes, no token leakage, and cleanup ownership. Add fixture files only under `tests/fixtures/work-claims/` if inline setup becomes unreadable.
+If the task issue closes mid-work, `verify-owned` blocks further editing/publication. The owner must either release and stop, or obtain authority to reopen the same issue and re-verify before continuing; it may not silently switch to another issue. If a heartbeat adapter is unavailable, ownership remains healthy for 8h and protective indefinitely; no competitor may self-takeover.
 
-Dependencies: 9.1–9.4.
+Dependencies: 9.4.
 
-**Verification gate:** through explicit Git Bash on Windows, `tests/test-ai-work-claim.sh` passes twice consecutively and leaves the repository unchanged.
+**Verification gate:** wrong-token operations fail; stale claims still block ordinary acquire; force-with-lease rejects stale heartbeat/release/takeover attempts; interrupted operations preserve the task ref; closed tasks block; an exactly authorized takeover produces one successor object and complete audit history without a ref-absent window.
 
-#### 9.6 Route ai-devops writers through claims
+**Natural context cut:** after 9.5 focused tests pass, use `fresh-session`; re-read Phases 3–4 before continuing.
 
-Update both `templates/system/CLAUDE-global.md` and `templates/system/AGENTS-global-codex.md` with aligned ai-devops-specific rules: read-only work is exempt; before any ai-devops edit, acquire a claim tied to an open task issue; run `verify-owned` before first edit and before commit/push; renew long work; release only after work is committed/pushed or deliberately abandoned; and never bypass a blocker by changing work-unit/path wording.
+### Phase 3 — mechanical enforcement and routing
 
-Update `AGENTS.md` routing with a concise “Concurrent ai-devops write” row linking this plan while open and, after implementation, the operating documentation. Do not paste the full procedure into global files. Update any context-size/trigger evaluation fixtures that assert the global templates.
+#### 9.6 Add changed-file fencing and client heartbeat adapters
 
-Dependencies: 9.4 and 9.5. Back up installed globals before adoption as required by repository policy.
+Implement a central guard subcommand that calls `verify-owned` and evaluates only the files being published: the staged index at pre-commit, the exact outgoing commit range at pre-push, and the immutable PR/merge-group diff in CI. It must never fence the whole dirty worktree; unrelated unstaged files in a shared checkout are ignored. Compare that exact publication set with the owned claim’s declared paths/high-risk classifications. Integrate it into the repository’s supported local Git hook/setup mechanism without overwriting user hooks or global Git configuration. Add thin Claude/Codex adapters only where supported to heartbeat during active write sessions; no adapter may become a second ownership authority.
 
-**Verification gate:** global-alignment/trigger tests show Claude and Codex receive equivalent instructions, a read-only prompt does not trigger a claim, and a write prompt does. `bin/ai-adopt-globals` preview shows only intended instruction changes before installation.
+Account explicitly for linked worktrees sharing one common Git directory/config: hook install/uninstall is repository-wide, not worktree-local. Use one manifest-owned dispatcher installed once per logical repository, chain any pre-existing hook safely, make concurrent installs idempotent, and never let one worktree uninstall a dispatcher still owned/needed by others. The hook is fail-closed for claim verification; this intentionally differs from the fail-open completion-honesty hook and must be tested as such.
 
-#### 9.7 Document and install
+The guard must block commit/push when: claim missing, task/unit mismatch, owner superseded, ref ambiguous, task closed, any changed file undeclared, or network verification unavailable. It must allow read-only activity and unrelated repositories. Before push/PR it requires `bind-head` against the exact branch head. Commit/PR metadata must include `Task-Issue: #N` and `Work-Claim: <ref-key>` trailers sufficient for CI lookup without a raw token.
 
-Create `docs/work-claims.md` as the operating guide: purpose, quick start, command reference, claim schema, protected policy, lifecycle, crash recovery, failure messages, and why this is not an orchestrator. Update `docs/architecture.md`, `docs/configuration.md`, `docs/deployment.md`, `docs/restore-from-zero.md`, and `docs/config-inventory.md` only where the new command changes their inventories or recovery proof. Ensure `bin/ai-work-claim` is executable so `install.sh`’s generic loop owns Linux installation; document Windows invocation through Git Bash.
+Dependencies: 9.5.
 
-Add repository labels `work-claim`, `work-claim-active`, and `work-claim-expired` through an idempotent setup subcommand or documented one-time `gh api` operation. Labels are metadata only; never put owner identity solely in a label.
+**Verification gate:** local fixtures prove a normal Git command cannot publish unclaimed or superseded claimed work, pre-commit checks only staged files, pre-push checks only the exact outgoing range, unrelated unstaged files do not block another session, existing user hooks/config survive install/uninstall, and heartbeat failure leaves the claim protective rather than silently releasing it.
+
+#### 9.7 Add the PR claim guard
+
+Add a `work-claim-guard` job/workflow that runs on pull requests and merge-group candidates. It requires exactly one consistent `Task-Issue: #N` and `Work-Claim: <ref-key>` identity from the PR/commit contract, derives changed files from immutable PR/head data, reads the task ref, and requires its public metadata to match repository, task, optional unit, scope digest, declared paths, branch, and exact PR head SHA bound by `bind-head`. It rejects malformed, superseded, closed-task, forged-key, undeclared-file, changed-scope, and changed-head states. Liveness age follows the locked rule below: stale-but-still-exact owner/head may pass with a warning. It must not require the raw token and must not mutate refs/issues.
+
+The exact CI rule is locked: a claim older than 24h may still pass only when its current ref object is head-bound to this exact PR head and no successor object exists; liveness age is a warning, not rejection, because ownership never auto-expires. Any different head requires the owner to run `bind-head` again through force-with-lease. Trailers and public metadata are forgeable by another session sharing Albert’s credentials; this is acceptable only under the documented cooperative accident-prevention threat model, not presented as hostile-user security.
+
+Adding this job to required ruleset checks is outside repository code. The implementation session must obtain Albert’s current-chat authorization naming ruleset `21564317` and the `work-claim-guard` check before mutating it. Without that required-check update, mark implementation partial and do not call the system enforced.
 
 Dependencies: 9.6.
 
-**Verification gate:** install tests prove the executable is included without a special-case installer edit; restore documentation contains an authenticated `ai-work-claim doctor` proof; docs links pass; and no runtime claim/token file appears in Git status.
+**Verification gate:** PR and merge-group fixtures reject no-claim, inconsistent/missing trailers, wrong task/unit/ref key, undeclared files, changed head, malformed ref, closed task, and superseded owner; accept exact bound owner/head including stale-but-still-owned state; existing Linux/Windows jobs remain unchanged. Live ruleset readback proves the check is required only after explicit authorization.
 
-### Phase 3 — live qualification and landing
+#### 9.8 Route sessions concisely
 
-#### 9.8 Run focused live race qualification
+Update `templates/system/CLAUDE-global.md` and `templates/system/AGENTS-global-codex.md` with one aligned router rule: read-only work is exempt; ai-devops writers use `ai-work-claim`; blocked/stale ownership is not bypassed by renaming tasks/units/paths; procedure lives in `docs/work-claims.md`. Update `AGENTS.md` and relevant trigger/context tests. Do not paste the lifecycle into always-loaded globals.
 
-On `popcre/ai-devops`, create a temporary open qualification issue and run ten pairs of simultaneous claims using distinct temporary work-unit slugs. For same-work pairs, exactly one must win every time. Run one protected-overlap pair and one unrelated pair. Release/close all temporary claims and the qualification issue after recording only issue URLs and outcomes in a scrubbed artifact under `tests/evidence/` or `docs/`.
+Dependencies: 9.6–9.7.
 
-Do not test by touching repository files. Do not expose owner tokens. If GitHub indexing misses a candidate within five seconds, increase only the policy settlement value to the smallest duration that passes ten consecutive trials, update this plan, and rerun from zero.
+**Verification gate:** alignment/trigger tests show equivalent Claude/Codex routing, read-only prompts do not claim, write prompts do, and global context growth stays within the repository’s measured budget.
 
-Dependencies: 9.7 and authenticated `gh`.
+### Phase 4 — documentation, qualification, landing
 
-**Verification gate:** the committed qualification artifact identifies ten same-work trials with one winner each, one protected overlap with one winner, and one unrelated pair with two winners; a final `doctor` reports no active qualification claims.
+#### 9.9 Document, install, and restore
 
-#### 9.9 Full verification and independent review
-
-Freeze the intended tree. Run the focused tests, relevant global/installer/context tests, and `tests/test-all.sh` through `C:\Program Files\Git\bin\bash.exe`. Because this changes global routing and concurrency safety, run one read-only exact-head final review with `ai-reviewer` after all edits and before commit. Fix material findings and rerun affected tests; if the tree changes, repeat the exact-head final review.
+Create `docs/work-claims.md` covering business purpose, command lifecycle, task scope blocks, protected policy, ref authority, issue audit comments, heartbeat, stale protection, takeover, failure messages, local/CI fencing, and why this is not an orchestrator. Update architecture/configuration/deployment/restore/config inventory only where required. Ensure generic installation owns the executable and hook/adapters with preview, backup, idempotency, and rollback.
 
 Dependencies: 9.8.
 
-**Verification gate:** all suites pass from the frozen tree, the independent report approves the exact reviewed head/tree, and `git diff --check` is clean.
+**Verification gate:** docs links pass; install/refresh/uninstall preserve user config and leave no repository-local token; fresh-machine instructions end with read-only `doctor` and a disposable acquire/release proof.
 
-#### 9.10 Commit, push, install, and close
+#### 9.10 Run bounded live concurrency/crash qualification
 
-Run `git var GIT_COMMITTER_IDENT` and require `Albert Hazan <u2giants@users.noreply.github.com>`. Recheck concurrent changes, stage only files owned by issue #131, commit directly to `main`, reconcile a concurrent `origin/main` advance without force, push, and confirm the exact commit exists on `origin/main`. Verify the GitHub Actions run for that commit. Install/adopt the changed command and globals using the documented preview-first process, then perform one real acquire/verify/release smoke test.
+On a temporary qualification task issue, run: ten simultaneous same-task acquisitions; two predeclared units; one lost-create-response re-adoption; one competitor 422 refusal; one heartbeat force-with-lease race; one stale claim that remains protective; one exactly authorized test takeover using the plan’s non-production contract; one closed-task refusal; and one changed-file/bind-head/PR-head qualification. Use harmless paths and synthetic refs only; do not edit real source as the race payload.
 
-Update this STATUS table with commit/CI/evidence artifacts, delete this handoff when issue #131 is genuinely complete, close #131 with the proof, and retain this completed plan as a decision record.
+Record scrubbed issue/ref/object/status evidence under `tests/verification/work-claims/<UTC>/`. Close the qualification issue, delete every disposable ref with exact readback, and prove no matching refs/local tokens remain.
 
 Dependencies: 9.9.
 
-**Verification gate:** exact commit on `origin/main`; CI green for that SHA; installed `ai-work-claim doctor` succeeds; one live claim lifecycle succeeds; issue #131 is closed; and no open/stale claim or handoff from this workstream remains.
+**Verification gate:** expected winner counts and protective failures pass; zero disposable state remains; ten trials are smoke evidence, not a mathematical proof—the atomic API response is the correctness basis.
+
+#### 9.11 Full tests and independent exact-head review
+
+Freeze the intended tree. Run focused tests twice where concurrency matters, all affected policy/installer/global/workflow tests, `tests/test-all.sh` through explicit Git Bash, PowerShell tests where named, docs links, and `git diff --check`. Run one read-only exact-head final review after all edits because this changes concurrency/routing safety. Fix material findings, rerun affected/full gates, and repeat review if the tree changes.
+
+Dependencies: 9.10.
+
+**Verification gate:** all gates pass from one frozen head/tree and the independent report approves that exact head without unresolved material finding.
+
+#### 9.12 PR, merge queue, installation, and closeout
+
+Verify `Albert Hazan <u2giants@users.noreply.github.com>`, stage only issue #131 files, commit on a `codex/` feature branch, push, and open a PR to `main`. Do not use admin bypass. Wait for required PR checks, enqueue through the merge queue, verify `state=MERGED`, record squash SHA, verify merge-group/`main` checks, and confirm the exact intended files on `origin/main`.
+
+Install/adopt through the documented preview-first path, prove one real acquire/heartbeat/verify/release lifecycle, update STATUS with artifacts, close issue #131, and delete this handoff only when every obligation is complete. Retain the completed plan as a decision record.
+
+Dependencies: 9.11 and, for enforced completion, explicit authorization + successful ruleset required-check update from 9.7.
+
+**Verification gate:** merged squash SHA on `origin/main`; PR and merge-group checks green; required-check readback includes `work-claim-guard` if authorized; installed smoke passes; no active/stale workstream claim remains; #131 closed; handoff retired.
 
 ## 10. Tests required
 
-`tests/test-ai-work-claim.sh` must include named assertions for:
+`tests/test-ai-work-claim.sh` must name and prove:
 
-1. canonical repository identity, including redirected owner remotes;
-2. missing/closed task issue refusal;
-3. invalid work-unit, path escape, absolute path, unknown component, lease bound, and malformed policy refusal;
-4. paginated claim discovery;
-5. GitHub server time rather than local clock;
-6. valid, expired, released, renewed, and malformed schema parsing;
-7. duplicate `(repo, task, work-unit)` blocking even when file lists differ;
-8. protected exact-path and ancestor/descendant-prefix overlap;
-9. unrelated tasks and unprotected paths proceeding concurrently;
-10. simultaneous candidate tie-break with exactly one success;
-11. delayed/lower-number contender detection during settlement;
-12. candidate self-verification after creation;
-13. loser closes only itself and names the winner;
-14. wrong-owner renew/release refusal;
-15. interrupted candidate versus acquired-owner cleanup distinction;
-16. expired claim ignored for admission but reported by doctor;
-17. explicit expired reconciliation with audit comment;
-18. potentially overlapping malformed claim failing closed while unrelated malformed history does not freeze the repo;
-19. task closure, tampering, expiry, and ambiguity causing `verify-owned` failure;
-20. bounded redacted output with no owner-token leakage;
-21. no repository mutation by any claim command;
-22. help/usage and stable exit-code contract.
+1. canonical repository alias normalization;
+2. selected ref namespace REST create/read/list plus Git force-with-lease update/delete contract;
+3. first create succeeds and same-key concurrent create has exactly one winner;
+4. GitHub API ambiguous/partial/network responses fail closed;
+5. missing/closed task issue refusal;
+6. default task-wide exclusivity even when purpose/path wording differs;
+7. bare acquisition refusal when a valid scope block exists, and unit refusal when it does not;
+8. distinct predeclared units proceeding concurrently with the exact recorded scope digest;
+9. scope block addition, removal, or change during active claims failing closed;
+10. required path validation, escape/absolute/symlink boundary refusal;
+11. high-risk path classification and unknown policy refusal without extra refs;
+12. per-acquisition candidate persistence before remote create;
+13. lost-create response exact own-object re-adoption and competitor refusal;
+14. raw owner token absent from all public/log/repository output;
+15. wrong-token renew/release/takeover refusal;
+16. force-with-lease heartbeat/bind-head success and stale-object refusal;
+17. stale claim remaining protective to ordinary acquire;
+18. malformed overlapping claim remaining protective;
+19. takeover success only after 24h + exact Albert authorization/task/ref/audit evidence;
+20. takeover ambiguity preserving old ownership;
+21. lease-protected release and failure-preserves-ref recovery;
+22. local token persistence failure preserving remote protection;
+23. list/status/doctor bounded redacted diagnostics;
+24. changed-file guard rejecting every undeclared published edit, ignoring unrelated unstaged files, and classifying high-risk edits;
+25. local commit/push fencing for missing, stale, superseded, closed-task, or network-unknown ownership;
+26. existing user hook/config preservation and rollback;
+27. PR guard exact trailer/ref/head/task/unit/scope/path binding and forged/inconsistent trailer refusal;
+28. merge-group claim verification;
+29. read-only exemption and unrelated repository behavior;
+30. stable help/exit-code contract;
+31. zero remote mutation by read-only commands and local-only exact recovery by `doctor --recover-owned`;
+32. task issue closed mid-work blocks until release or authorized reopen/reverify;
+33. shared-gitdir hook dispatcher concurrent install/uninstall preserves existing hooks and other worktrees.
 
-Existing suites required: `tests/test-all.sh`; global-template alignment and context/trigger tests discovered by that suite; installer/deployment tests affected by executable discovery; documentation link checks; `git diff --check`. Run Bash through `C:\Program Files\Git\bin\bash.exe` on Windows, not PowerShell’s ambiguous `bash` resolution.
+Existing suites required: `tests/test-all.sh`; repository-policy/workflow/merge-queue tests; installer parity/lifecycle tests; global template alignment/context/trigger tests; documentation link checks; PowerShell tests named by affected setup; and `git diff --check`. Use `C:\Program Files\Git\bin\bash.exe` explicitly on Windows.
 
 ## 11. Constraints, standing rules, and gotchas in force
 
-- Work directly on `main`; do not create a feature branch for ai-devops.
-- Before the first commit, verify the committer identity exactly. Stage only issue #131 files; never use broad staging or destructive reset/checkout.
-- Preserve the existing dirty reviewer-cache and taxonomy work. Another session owns it.
-- This repository is public. Claim bodies, fixtures, logs, and evidence must contain no secrets, private transcript text, local usernames beyond approved machine/client identifiers, or private filesystem details.
-- Use `apply_patch` for edits. Keep the Bash command portable across Git Bash and Ubuntu; do not depend on `flock`.
-- GitHub network failures must fail closed for acquisition/verification, with a bounded actionable message. They must not silently degrade to local-only ownership.
-- Never close, renew, or release a claim without exact owner-token and repository/task validation. Expired reconciliation is the only non-owner close path and must prove expiry from GitHub time.
-- GitHub search/query results must be paginated. A first page is never complete proof.
-- The claim tool coordinates intent; it does not authorize destructive Git actions, production changes, shared-db work, or edits outside the user’s task.
-- Changes to global behavior must stay aligned between Claude and Codex and be installed through preview/backups with `bin/ai-adopt-globals`.
-- This is a concurrency-safety path. Freeze the tree before one exact-head independent final review and rerun review if the reviewed tree changes.
-- Do not add scheduled infrastructure, service credentials, or broaden GitHub permissions. Existing authenticated `gh` access is sufficient.
-- Do not count an issue URL, PR number, or plan statement as verification. STATUS “done” rows cite rerunnable artifacts, commit SHAs, or CI run IDs.
+- Feature branch + PR + merge queue only. Never push directly to `main` or use organization-admin bypass.
+- Re-derive live `origin/main`, issue, policy, ruleset, PR, claim refs, and merge-group state immediately before acting; handoffs and this plan are context, not live proof.
+- Preserve unrelated dirty work. Stage only issue #131 files; never broad-stage, reset, clean, force-push, or delete unverified refs/state.
+- This repository is public. No transcript excerpts, secrets, raw owner tokens, private absolute paths, credentials, or environment dumps.
+- Runtime code must be portable Bash for Git Bash/Ubuntu; no `flock`, no OS binary replacement, no repository-local authority.
+- GitHub is the only admission authority. Local state proves token possession but cannot create ownership.
+- Stale/malformed claims remain protective until explicit reconciliation; age alone never admits a successor.
+- Every ref mutation uses Git force-with-lease for the expected object plus readback. No unconditional force, REST PATCH/DELETE ownership mutation, broad namespace delete, glob deletion, or cleanup based on local assumption.
+- Fast refusal may read an existing exact ref, but atomic create—not a preflight read—decides races.
+- Issue comments/labels are audit/UI only. Never infer ownership from search indexing or a comment.
+- The claim system coordinates work intent; it does not authorize destructive Git, production/cloud/ruleset, database, or shared-db actions.
+- Ruleset mutation needs Albert to name the exact action/resource in the current chat. Code/workflow can be prepared and tested without that mutation.
+- Exact-head independent review is mandatory because this changes shared concurrency and routing safety.
+- STATUS rows marked done cite rerunnable evidence/commit/CI artifacts, never unsourced counts or issue numbers alone.
 
 ## 12. Access and environment
 
-- Repository: `C:\repos\ai-devops`; canonical live GitHub repository currently resolves to `popcre/ai-devops`; default branch `main`.
-- GitHub CLI is authenticated now and can read/write issue #131. Re-verify with `gh auth status` and `gh repo view --json nameWithOwner,url,defaultBranchRef` before live qualification.
+- Canonical repository: `popcre/ai-devops`; target branch `main`; implementation branch prefix `codex/`.
+- Planning revision worktree: `C:\Users\ahazan\.codex\worktrees\ai-devops-work-claims-plan-revision`, branch `codex/revise-work-claims-plan-131`.
+- GitHub CLI is authenticated and can read issue #131, refs, rulesets, PRs, and checks. Recheck before live qualification.
+- Active ruleset: `21564317`, “main: pull request + merge queue”. Its mutation is not authorized merely by this plan.
 - Windows Bash: `C:\Program Files\Git\bin\bash.exe`.
-- Node/Python are not required for the planned runtime. Bash, `git`, `gh`, and `jq` are standard installer dependencies.
-- No database, hosted URL, production environment, test login, or new secret is involved.
-- Existing GitHub credentials remain in GitHub CLI’s managed authentication store. Never print or relocate them; 1Password is not needed for this work.
-- Local claim owner state belongs under the platform’s existing ai-devops state root (Linux `/var/lib` or user-state convention must follow `docs/architecture.md`; Windows under the established user-local ai-devops state directory). The implementing session must select the existing documented state-root helper/convention, not invent a repository-local directory.
+- Runtime dependencies already installed by the toolkit: Bash, Git, GitHub CLI, and `jq`.
+- No database, hosted application URL, test login, or new secret is required.
+- Raw claim tokens belong in the established user-only ai-devops state root selected from existing architecture conventions; never the repository or task issue. Public records contain hashes only.
 
 ## 13. Definition of done + risks and open questions
 
 ### Definition of done
 
-- [ ] Strict versioned policy and claim schema exist.
-- [ ] Acquire, verify, renew, release, list/status, doctor, and expired reconciliation work as specified.
-- [ ] Offline concurrency/failure tests and the full suite pass twice where nondeterminism matters.
-- [ ] Claude/Codex instructions are aligned and installed with preview/backups.
-- [ ] Operating, architecture, configuration, deployment, restore, and router documentation is accurate and linked.
-- [ ] Ten live same-work races, one protected-overlap race, and one unrelated race meet the expected winner counts.
+- [ ] Live evidence qualifies the selected ref namespace/atomic behavior and proves cleanup.
+- [ ] Strict policy/schema/task-unit/path-fencing contract exists.
+- [ ] Atomic task acquire, lost-response recovery, heartbeat, bind-head, verify, release, doctor, and explicit takeover work as specified.
+- [ ] Stale/malformed ownership remains protective; no automatic expiry split-brain.
+- [ ] Local changed-file/commit/push fencing and PR/merge-group guard pass all failure tests.
+- [ ] Claude/Codex routing is aligned, concise, installed, and within context budget.
+- [ ] Operating/architecture/configuration/deployment/restore docs are accurate and linked.
+- [ ] Bounded live concurrency/crash qualification passes with zero surviving disposable state.
 - [ ] Exact-head independent review approves the frozen final tree.
-- [ ] Correct Git identity is proven; only owned files are committed directly to `main` and pushed without force.
-- [ ] Exact commit is on `origin/main`; GitHub Actions is green for that SHA.
-- [ ] Installed live smoke test passes without leaking tokens or leaving stale claims.
-- [ ] Plan STATUS cites artifacts; issue #131 is closed; this workstream’s handoff is deleted; no claim remains active.
+- [ ] Correct Git identity proven; feature-branch PR passes required checks and merge queue without admin bypass.
+- [ ] Exact squash commit and merge-group/`main` checks verified on `origin/main`.
+- [ ] If explicitly authorized, ruleset readback proves `work-claim-guard` is required; otherwise status remains partial and issue stays open.
+- [ ] Installed smoke lifecycle succeeds; issue #131 closed; handoff deleted; plan STATUS cites artifacts.
 
 ### Risks and mitigations
 
-- **GitHub indexing delay produces two temporary candidates.** Neither may edit during settlement; lowest issue number wins after re-query. Live qualification calibrates the minimum safe window.
-- **Session crashes after acquiring.** Lease expires; others can proceed after expiry, while doctor preserves and later closes audit history.
-- **Session keeps editing after expiry.** Global rules require renewal and `verify-owned` before commit/push. Git cannot prevent all human bypasses; diagnostics make it visible.
-- **Claims become administrative clutter.** Claims close on release and are searchable by labels; no mutable index is added. Expired reconciliation is explicit and bounded.
-- **Overbroad policy serializes unrelated work.** Start only with measured hot surfaces and exact prefix overlap; review policy changes like code.
-- **Underbroad policy misses architectural duplication.** Task/work-unit identity still blocks duplicate work even when paths differ. Shared-code refactoring remains separate.
-- **Malicious or accidental body edits.** Strict re-read/self-verification fails closed for the affected scope and points to the exact issue.
-- **GitHub unavailable.** New write work waits; read-only diagnosis can continue. No local bypass is allowed.
+- **Custom namespace unsupported/inconsistent.** Phase 1 proves it before coding; fallback is transient `refs/heads/ai-work-claims/*`, not issue settlement.
+- **Crashed owner blocks work.** Deliberate safety trade: stale remains protective; explicit audited takeover restores progress without silent split-brain.
+- **Old owner resumes after takeover.** Its ref/object no longer matches, so local and PR guards reject publication. Existing dirty edits remain visible and must be reconciled, never silently deleted.
+- **Models skip the command.** Local Git fencing and required PR check mechanically block publication; concise routing makes the correct path discoverable.
+- **Task issue wording permits duplicate issues.** Default one-writer-per-task stops same-issue duplicates; `doctor` reports suspicious overlapping declared/high-risk paths across issues. Human task triage remains necessary for truly duplicated issue records.
+- **Ref clutter.** Successful release deletes exact refs; doctor reports stale/malformed refs. Branch namespace is accepted only if custom namespace is unsupported.
+- **Admin bypass defeats guard.** It is technically possible but prohibited; audit can detect direct main pushes. No software inside the repo can prevent an organization admin from overriding GitHub.
+- **GitHub unavailable.** Read-only work continues; new/renewed/published write work fails closed.
+- **Ruleset change unauthorized.** Prepare/test the guard but do not mutate the ruleset; status remains partial and #131 stays open.
 
 ### Open questions with decision criteria
 
-1. **Is five seconds enough for GitHub issue discovery?** Decide from ten consecutive live simultaneous trials. Raise only to the smallest passing value; if no bounded value is reliable, stop and revisit the authority design on issue #131.
-2. **Which existing user-state root should store owner tokens on both platforms?** Follow the established helper/convention found during implementation. It must be user-only, outside Git, recoverable, and tested; do not create a new global configuration class.
-3. **Should ordinary `doctor` close expired claims?** No by default. It remains read-only; only `doctor --reconcile-expired` mutates. Change only if a later measured operational problem justifies automation.
+1. **Custom vs branch ref namespace:** decide only from Phase 1 live REST-create/read/list plus Git force-with-lease update/delete evidence. Prefer custom if fully supported; otherwise branch namespace.
+2. **Local hook/adapter implementation details:** choose the supported manifest-owned dispatcher that preserves existing user configuration, shared-gitdir worktrees, and Windows/Ubuntu behavior. Reject silent hook/global-config replacement.
+3. **Required GitHub check:** completion requires exact ruleset authorization and readback. Without it, do not downgrade the definition of done.
 
 ### Rollback
 
-Revert the exact implementation commit on `main`, rerun installation to remove/restore the command through manifest-owned behavior, and adopt the previous global templates from their backups. Close any active claim issues created by the feature with a rollback explanation. Do not delete audit history. Because there is no hosted service or database, rollback is repository + installed-tool restoration only.
+Revert the merged implementation through a new feature-branch PR and merge queue. Preview uninstall, restore backed-up hooks/globals/config, and remove only manifest-owned integrations. Keep claim refs protective during rollback; release/delete each only after exact owner/object validation and record the rollback on its task issue. Remove the required ruleset check only with Albert’s explicit authorization naming ruleset `21564317`. Preserve audit comments/history. There is no database or hosted service rollback.
 
 ## Mandatory self-audit — final answers
 
-1. **Could a brand-new AI session execute this without asking Albert anything? Yes.** Sections 1–4 establish purpose/scope; Sections 5–8 carry current evidence, rejected approaches, and locked/open decisions; Section 9 names files, order, dependencies, and a verification gate for every step; Sections 10–13 define tests, environment, landing, rollback, and decision criteria.
-2. **Does the plan carry the relevant background, nuance, and rejected alternatives? Yes.** Sections 3, 6, and 7 distinguish merge conflicts from duplicate work, explain the check/create race, and record why an orchestrator, committed file, local lock, shared issue, refs, and scheduled closer were rejected.
-3. **Is the goal clear enough for a correct judgment call if a step is wrong? Yes.** Section 1 states the business outcome and precedence rule; Section 8 identifies locked boundaries and the one condition requiring a stop; Section 13 gives open-question criteria rather than leaving redesign choices implicit.
+1. **Could a brand-new session execute this without asking Albert anything? Yes through code/test/live-disposable qualification.** Sections 1–8 provide purpose, history, current state, rejected designs, and locked/open decisions. Every Step 9.1–9.12 names targets, dependencies, behavior, and a verification gate. The one external mutation—the required ruleset check—is explicitly gated on exact owner authorization rather than guessed.
+2. **Does the plan carry the full background and nuance, including failures? Yes.** Sections 3, 6, and 7 preserve the transcript-derived collision/duplication evidence, why a full orchestrator and claims file were rejected, why the first issue/sleep plan failed Grok review, why automatic expiry/prompt-only enforcement are unsafe, and why the stale direct-main rule was wrong.
+3. **Is the ultimate goal clear enough for correct judgment when a step is wrong? Yes.** Section 1 makes one-owner safety, concurrency, crash recovery, and low overhead the controlling outcome. Section 8 separates locked safety invariants from evidence-driven choices; Section 13 supplies stop/rollback criteria.
 
-**Checklist result:** all 13 required sections are present; goal-first wording, explicit exclusions, concrete file targets and gates, named tests, locked/open decisions, access, secrets boundary, commit/push/CI/install proof, reciprocal handoff links, risks, rollback, and final self-audit are all included. PASS.
+**Checklist result:** all 13 required sections are present; goal-first precedence, explicit exclusions, current evidence, rejected attempts, locked/open decisions, concrete files/steps/gates, named tests, access/secrets boundaries, branch/PR/merge-queue landing, external authorization boundary, risks, rollback, reciprocal handoff links, and evidence-backed self-audit are included. PASS.
