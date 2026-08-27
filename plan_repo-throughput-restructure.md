@@ -28,8 +28,8 @@ not start a follow-on until Phase 3′ has landed.
 | # | Step | State | Evidence |
 |---|------|-------|----------|
 | 0.1 | Growth rule **and CI-waiting conduct rule** into `AGENTS.md` | ⬜ open | — |
-| 1.1 | Replace all seven poll loops in `tests/test-ai-grok-review.sh` | 🟨 partial 2026-08-27 | Adopted from PR [#123](https://github.com/popcre/ai-devops/pull/123) (`050ad1e`), plus `9aec837` closing its last two silent waits. Local proof: 191 passed / 0 failed on `edge-dev`, measured baseline 12s. **Awaiting 1.2.** |
-| 1.2 | Prove it: 10 consecutive green reviewer runs on Windows CI | ⬜ open | — |
+| 1.1 | Replace all seven poll loops in `tests/test-ai-grok-review.sh` | 🟨 partial 2026-08-27 | Adopted from PR [#123](https://github.com/popcre/ai-devops/pull/123) (`050ad1e`), plus `9aec837` closing its last two silent waits. **Do not cite the earlier single 191/0 run as proof — it was one quiet run and was not representative.** The real evidence is `tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md` (lands with PR #130): six local runs, **one failure**, ~17% (down from ~33%). The fix is real but insufficient; see 1.2. |
+| 1.2 | Prove it: 10 consecutive green reviewer runs on Windows CI | 🟥 **not satisfied — one change still required** | The local series stopped at 6 of 10 by owner decision on 2026-08-27 after this problem consumed two sessions for ~24 hours. Confirmed cause, not suspected: the timing baseline is measured once at `tests/test-ai-grok-review.sh:216` and every later ceiling derives from that frozen value, while the failing wait sits several hundred seconds further down the file. **Fix:** make the wait progress-sensitive rather than deadline-sensitive. **Do not raise the multiplier** (Decision B). Handed back to issue [#89](https://github.com/popcre/ai-devops/issues/89). |
 | 0.2 | Re-point required checks at the new CI shape **(last)** | ⬜ open | — |
 | 3′.1 | Fast lane in its **own workflow file**, under 3 minutes | ⬜ open | — |
 | 3′.2 | Coarse path filtering — docs-only changes skip the matrix | ⬜ open | — |
