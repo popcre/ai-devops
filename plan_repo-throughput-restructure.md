@@ -28,7 +28,7 @@ not start a follow-on until Phase 3′ has landed.
 | # | Step | State | Evidence |
 |---|------|-------|----------|
 | 0.1 | Growth rule **and CI-waiting conduct rule** into `AGENTS.md` | ⬜ open | — |
-| 1.1 | Replace all seven poll loops in `tests/test-ai-grok-review.sh` | ⬜ open | — |
+| 1.1 | Replace all seven poll loops in `tests/test-ai-grok-review.sh` | 🟨 partial 2026-08-27 | Adopted from PR [#123](https://github.com/popcre/ai-devops/pull/123) (`050ad1e`), plus `9aec837` closing its last two silent waits. Local proof: 191 passed / 0 failed on `edge-dev`, measured baseline 12s. **Awaiting 1.2.** |
 | 1.2 | Prove it: 10 consecutive green reviewer runs on Windows CI | ⬜ open | — |
 | 0.2 | Re-point required checks at the new CI shape **(last)** | ⬜ open | — |
 | 3′.1 | Fast lane in its **own workflow file**, under 3 minutes | ⬜ open | — |
@@ -773,6 +773,17 @@ Line 121 (`for _i in $(seq 1 $#); do :; done`) is an argument-counting idiom, no
 a wait. Leave it.
 
 **How it should behave when done — two shapes, pick per loop:**
+
+> **Status 2026-08-27: largely done, via PR #123 rather than from scratch.**
+> That PR was taken over on Albert's instruction. It does not inflate timeouts —
+> it introduces `tests/lib-test-timing.sh` with a `poll_until` helper that prints
+> a distinct `fixture:` line naming what never became ready, derives every
+> ceiling from a measured baseline that **never returns below the previous
+> floor** (so no assertion is weaker on CI), and it found four real defects,
+> including `concurrent refusal starts no second provider turn`, which waited on
+> a directory pattern the wrapper never produces and **had therefore never tested
+> anything**. Commit `9aec837` then converted the last two bare loops it left.
+> What remains of this step is step 1.2 — the proof.
 
 1. **Waiting for one event** (lines 148, 202, 649's `hold-started` half): block
    until the marker file appears, with a generous safety ceiling that, when hit,

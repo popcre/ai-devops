@@ -160,16 +160,38 @@ forever.
 - Test suite isolation is **fine** — no shared `$HOME`, no live ports, no fixture
   writes. Isolation is not the problem; do not go looking there.
 
-## Open question that needs Albert
+## RESOLVED — PR #123 was taken over, and adopted
 
-**Whether to take over PR [#123](https://github.com/popcre/ai-devops/pull/123)**
-("derive reviewer test timing budgets from a measured baseline"). It touches the
-same file as the plan's Phase 1 step 1.1. Its session
-(`local_14c80f71-1a31-4abc-9135-02978d80f87e`) has been idle since
-2026-08-27T15:44Z after 24 hours without progress.
+Albert said "take it over" on 2026-08-27. Applying the plan's own decision
+criteria (§ 13, question 1) to its diff: **adopt, do not supersede.** It does not
+inflate timeouts. It:
 
-The plan gives decision criteria so an implementer can proceed without him
-(plan § 13, open question 1), but Albert's call is preferred.
+- adds `tests/lib-test-timing.sh`, whose `poll_until` prints a distinct
+  `fixture:` line naming what never became ready — the exact "a timeout must not
+  masquerade as a defect" requirement of step 1.1;
+- derives ceilings from a measured baseline that **never returns below the old
+  floor**, so no assertion is weaker on an idle CI runner;
+- waits on specific session locks by label rather than counting anonymous locks;
+- found four real defects, including `concurrent refusal starts no second
+  provider turn`, which searched for `*/same-name/owner.json` while the wrapper
+  names that directory `kimi.<rid>-<caller>-<name>` — **it had never tested
+  anything** and passed only because its wait was shorter than the stub's sleep.
+
+**What this session added on top** (commit `9aec837`): it had left two bare
+waits that still gave up silently. One guards a deliberate `TERM` — if it
+expired, the test killed a process holding no lock and the two retries then
+reported `uncertain_ask_blocks_its_exact_retry` and
+`uncertain_ask_blocks_changed_prompt_for_same_next_turn` as wrapper defects that
+did not exist. Those are two of the four checks #89 was opened about. Both now
+use `poll_until`. No assertion changed; no ceiling moved.
+
+**Local proof:** `tests/test-ai-grok-review.sh` → **191 passed, 0 failed** on
+`edge-dev`, measured baseline 12s. (An earlier 188/3 run was self-inflicted — a
+second full suite was running concurrently on the same box. Do not read a run
+taken under another suite's load as evidence.)
+
+**Still open:** plan step 1.2, the ten-consecutive-green proof on Windows CI.
+That is what actually closes issue #89.
 
 ## Where a fresh session starts
 
