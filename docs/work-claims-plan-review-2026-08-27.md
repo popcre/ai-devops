@@ -2,6 +2,14 @@
 
 This is the durable review record for `plan_ai-devops-work-claims.md`. It records conclusions without copying private transcript content.
 
+## Current contract after execution evidence — read this first
+
+Parts A, B, and C in `plan_must_address.md` superseded the earlier “ready to land” conclusion below. Two sessions with extensive live ai-devops execution showed that queue unreliability is the dominant tax and that the earlier plan's units, required claim check, network-dependent commit fencing, shared hooks, takeover, fixed paths, and issue-close blocking would harm throughput.
+
+The current plan therefore sequences behind `plan_repo-throughput-restructure.md` and defines a smaller advisory v1: one task ref; explicit owner-appendable paths; no units, component refs, takeover command, hooks, push wrapper, exact-head enforcement, or required check; network-independent Git commit/push; a separate fast advisory workflow; exact manual stale reconciliation; and reproducible 30-day keep/change/remove measurement. Implementation begins at the queue-reliability prerequisite, not Git-ref qualification.
+
+Grok 4.6 reviewed this evidence-based revision in session `work-claims-evidence-revision` and initially returned `REJECT`. It agreed with the direction but found seven contract gaps: router/review-record contradictions, advisory workflow placement, unwritten stale reconciliation, non-reproducible measurement, unenforceable push-wrapper binding, under-specified path extension, and missing command inventory. After those fixes, it found nine stale sentences that still implied the removed push/bind machinery. Those were corrected, and its final exact-tree verdict was `APPROVE` with no blocking findings. Across the three review turns, reported cost was $0.26315558 on `grok-4.6-build` ($0.12531278 + $0.0758948 + $0.061948).
+
 ## Background supplied to reviewers
 
 Transcript analysis found that ordinary file overlap was mild, while duplicate intent was costly: separate sessions independently repaired the same flaky tests, copied provider implementations multiplied the same repair across tools, and `AGENTS.md` was edited 72 times in 30 days. The repository also uses multiple machines, clones, linked worktrees, shared GitHub credentials, and occasionally unrelated dirty files in a shared checkout. Prompt-only ownership and stale branch-policy assumptions had already failed in practice.
@@ -31,6 +39,6 @@ The same protected session reviewed the complete revision and again returned `RE
 
 The final plan now locks mutually exclusive bare/unit modes, records and rechecks the issue scope digest, fails closed when scope changes while claims exist, uses publication-specific file sets, clarifies stale PR acceptance, makes `doctor` read-only except for explicit local-only exact recovery, consistently calls the mechanism claims rather than leases, and stores this durable review record. GLM stated that no further review round was needed after these bounded corrections. Reported usage: input 11,087; output 2,464; reasoning 3,391; cache read 80,448.
 
-## Result
+## Historical result before Parts A–C
 
-The plan is ready to land as the implementation contract. Review verdicts remain recorded truthfully as `REVISE`; readiness comes from applying every material correction, not relabeling either review as approval. Implementation remains open under issue #131 and begins with live qualification of the Git-ref primitive.
+At that point the plan was considered ready, but Parts A–C later disproved that conclusion. This paragraph is retained as history, not current instruction. The current contract is the first section of this record plus the live STATUS table in `plan_ai-devops-work-claims.md`.
