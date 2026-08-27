@@ -118,3 +118,58 @@ fixture_expected() {
   printf '  fixture: %s (baseline %ss)\n' "$what" "$AI_TEST_BASELINE" >&2
   return 1
 }
+
+# ai_test_fingerprint PATH... — a cheap, stable string describing observable
+# progress: entry count for a directory, byte size for a file, "-" for absent.
+# Used by poll_until_progress to tell "this machine is slow" from "this is hung".
+ai_test_fingerprint() {
+  local p
+  for p in "$@"; do
+    if [ -d "$p" ]; then
+      printf '%s:%s ' "$p" "$(find "$p" -mindepth 1 2>/dev/null | wc -l)"
+    elif [ -f "$p" ]; then
+      printf '%s:%s ' "$p" "$(wc -c < "$p" 2>/dev/null || printf 0)"
+    else
+      printf '%s:- ' "$p"
+    fi
+  done
+}
+
+# poll_until_progress STALL WHAT PROGRESS CONDITION... — wait while the fixture
+# is still advancing; fail only when nothing has changed for STALL seconds.
+#
+# WHY THIS EXISTS. poll_until() takes a deadline derived from a baseline that is
+# measured once, near the top of a suite that then runs for another ten minutes.
+# A machine that degrades after that measurement leaves every later ceiling sized
+# for a computer that no longer exists — the confirmed cause of the issue #89
+# flake, recorded in tests/verification/reviewer-flake-89/. Raising the multiplier
+# is forbidden (Decision B): a ceiling large enough for a degraded machine no
+# longer detects the genuine hang these checks exist to catch.
+#
+# A stall window makes that distinction directly. A slow machine still moves —
+# locks appear, wrapper stderr grows — so it keeps its time. A hung wrapper moves
+# nothing and is reported in STALL seconds, no slower than before. The absolute
+# ceiling below is only a runaway backstop for a fixture that churns forever.
+poll_until_progress() {
+  local stall="$1" what="$2" progress="$3"; shift 3
+  local hard=$(( stall * 10 )) elapsed=0 idle=0 last='' now=''
+  last="$(eval "$progress" 2>/dev/null)"
+  while [ "$elapsed" -lt "$hard" ]; do
+    eval "$*" >/dev/null 2>&1 && return 0
+    now="$(eval "$progress" 2>/dev/null)"
+    if [ "$now" != "$last" ]; then
+      last="$now"; idle=0
+    else
+      idle=$(( idle + 1 ))
+      if [ "$idle" -ge "$stall" ]; then
+        printf '  fixture: %s stalled - no observable progress for %ss after %ss (baseline %ss)\n' \
+          "$what" "$stall" "$elapsed" "$AI_TEST_BASELINE" >&2
+        return 1
+      fi
+    fi
+    sleep 1; elapsed=$(( elapsed + 1 ))
+  done
+  printf '  fixture: %s still advancing at the %ss absolute ceiling (baseline %ss)\n' \
+    "$what" "$hard" "$AI_TEST_BASELINE" >&2
+  return 1
+}

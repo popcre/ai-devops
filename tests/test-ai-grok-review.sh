@@ -371,7 +371,9 @@ echo hold > "$TMP/mode"
 # A locally interrupted wrapper must not claim or assume that the paid remote
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
-poll_until "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub'   "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || true
+poll_until_progress "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub' \
+  "ai_test_fingerprint '$AI_GROK_STATE_DIR/locks' '$TMP/int.err' '$TMP/int.out' '$TMP/hold-started'" \
+  "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || true
 LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '$TMP/hold-started'"
 kill -TERM "$INT_PID" 2>/dev/null || true
@@ -726,7 +728,8 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # the duplicate took 124s against a 110s ceiling.
 ( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
 ( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
-poll_until "$(budget 15 30)" 'both named ask turns hold their own session locks' \
+poll_until_progress "$(budget 15 30)" 'both named ask turns hold their own session locks' \
+  "ai_test_fingerprint '$AI_GROK_STATE_DIR/locks' '$TMP/ask-a.err' '$TMP/ask-b.err' '$TMP/ask-a.out' '$TMP/ask-b.out'" \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 DUP_ASK="$(run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
@@ -742,7 +745,9 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # terminate a process that holds no lock, and the retries then assert against
 # state an interrupt never produced - reporting a wrapper defect that does not
 # exist. Say so instead.
-poll_until "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub'   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
+poll_until_progress "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub' \
+  "ai_test_fingerprint '$AI_GROK_STATE_DIR/locks' '$TMP/ask-uncertain.err' '$TMP/ask-uncertain.out' '$TMP/hold-started'" \
+  "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
