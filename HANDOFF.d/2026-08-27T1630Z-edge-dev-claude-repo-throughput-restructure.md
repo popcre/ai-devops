@@ -4,7 +4,8 @@
 **Repository:** `popcre/ai-devops`
 **Branch:** `claude/test-infrastructure-redesign-74eb99`
 **Worktree:** `C:\repos\ai-devops\.claude\worktrees\github-org-move-handoff-d576f2`
-**Base commit:** `789d92299110d804e1e246750d7c2ce021695ffd`
+**Base commit:** `b9734ca` (rebased onto `main` 2026-08-27; the plan was authored
+against `789d922`, whose Disney commit was already on `main` under SHA `724a306`)
 
 ---
 

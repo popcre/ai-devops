@@ -4,7 +4,8 @@
 also remains valid on purpose — see § 11)
 **Branch this plan was authored on:** `claude/test-infrastructure-redesign-74eb99`
 **Authored:** 2026-08-27 by Claude (Opus 5) on machine `edge-dev`
-**Base commit:** `789d92299110d804e1e246750d7c2ce021695ffd`
+**Base commit:** `b9734ca` (rebased onto `main` 2026-08-27; the plan was authored
+against `789d922`, whose Disney commit was already on `main` under SHA `724a306`)
 **Handoff:** [`HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`](HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md)
 **Adversarial reviews — both incorporated:**
 - **Grok 4.6, 2026-08-27: REJECTED** the first draft of this work. Recorded in § 7.
