@@ -1,6 +1,7 @@
 # Issue #89 — post-fix run series on `edge-dev`
 
-**Status: SERIES INCOMPLETE, AND THE FIX IS NOT PROVEN.**
+**Status: SERIES STOPPED AT 6 OF 10 RUNS. THE FIX IS REAL BUT NOT PROVEN, AND
+ITERATION ON IT ENDED HERE BY OWNER DECISION (2026-08-27).**
 **Captured:** 2026-08-27 by Claude (Opus 5) on `edge-dev` (Windows 11)
 **Code under test:** `claude/flaky-reviewer-tests-timing-c1ba63` at `9aec837`
 (PR [#123](https://github.com/popcre/ai-devops/pull/123) plus this session's
@@ -18,10 +19,19 @@ Read this before claiming issue #89 is fixed. It is not.
 | **4** | **990** | **190 passed, 1 failed** |
 | 5 | 834 | 191 passed, 0 failed |
 | 6 | 774 | 191 passed, 0 failed |
-| 7–10 | — | not yet run |
+| 7–10 | — | **not run — series stopped** |
 
 `bash tests/test-ai-grok-review.sh`, sequential, quiet machine, no other suite
 running. Logs under the capture directory named in the session handoff.
+
+**Why the series stopped at six.** Albert ended iteration on 2026-08-27 —
+"if the first 25 iterations didn't work, it's not going to work on the 26th" —
+after this problem had consumed two sessions for roughly 24 hours. That judgement
+is correct and this file exists so the next attempt does not restart from zero.
+Six runs at roughly 13 minutes each is about 80 minutes of evidence, and it is
+enough to establish both of the findings below. What it is **not** enough for is
+the plan's step 1.2 gate, which requires ten consecutive green runs on Windows CI
+and is therefore still open.
 
 ## What run 4 actually said
 
@@ -109,3 +119,30 @@ Anyone updating that plan's STATUS table must cite this file, not the earlier
 
 The earlier "191 passed, 0 failed" figure recorded against step 1.1 is a
 **single quiet run** and must not be read as proof.
+
+## Handing this back to issue #89
+
+Iteration stopped here. Everything a successor needs is above; nothing further is
+in flight, and no background run is still going.
+
+**What is done and merged:** budgets derive from a measured baseline instead of
+fixed sleeps; the last two silent waits became loud `poll_until` calls; a failure
+now names itself as a fixture problem with its ceiling and baseline.
+`fix_test_ai.md` has been corrected so it no longer reads as "FIXED".
+
+**What is left, and it is one change, not an investigation.** Replace the
+deadline-sensitive wait with a progress-sensitive one: keep waiting while the
+observed state is still advancing (one lock has appeared, the second has not) and
+fail only when nothing has changed for N seconds. That distinguishes a slow
+machine from a genuine hang, which no fixed ceiling can do at any value.
+Optionally re-measure the baseline immediately before the ask-concurrency block as
+a cheaper stopgap.
+
+**How the successor knows it worked.** Re-run this series to ten. Do not accept a
+single green run as evidence — a single green run is what made this fix look
+finished the first time.
+
+**Do not** raise `budget 15 30`, add retries around the assertion, or mark the
+check as allowed-to-fail. Decision **B** of `plan_repo-throughput-restructure.md`
+forbids weakening a test to make a lane green, and this test guards paid-work
+locking.
