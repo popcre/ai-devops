@@ -57,22 +57,41 @@ runners are slower and busier than this box.
 Run 4 was the **slowest run in the series** — 990s against 728–834s for the
 others — so the machine degraded partway through.
 
-`tests/lib-test-timing.sh` measures its baseline **once, at suite start**, and
-derives every later ceiling from it. Run 4's baseline was 12s, giving
-`budget 15 30` = 180s. The library's own header records a wrapper round trip
-costing ~15s idle, 26–42s with two suites, and 82s under a four-suite storm. If
-the box degrades *after* the baseline is taken, every ceiling for the rest of the
-run is measured against a machine that no longer exists.
+This is a confirmed diagnosis, not a hypothesis. The mechanism, with line
+numbers:
+
+- `tests/test-ai-grok-review.sh:216` calls `ai_test_measure_baseline` **exactly
+  once**, near the top of the suite.
+- `ai_test_measure_baseline` sets the global `AI_TEST_BASELINE` and never runs
+  again.
+- `budget FACTOR FLOOR` returns `max(AI_TEST_BASELINE * FACTOR, FLOOR)` — so
+  every ceiling in the file is derived from that one frozen measurement.
+- The failing wait is around line 730, **several hundred seconds later**.
+
+Run 4's baseline was 12s, giving `budget 15 30` = 180s. The library's own header
+records a wrapper round trip costing ~15s idle, 26–42s with two suites, and 82s
+under a four-suite storm. So a machine that degrades *after* the baseline is
+taken leaves every later ceiling sized for a computer that no longer exists —
+and the concurrency block, which needs **two** wrapper round trips to overlap, is
+the most exposed thing in the suite.
 
 That is a design gap, not a tuning problem, and raising the multiplier would
 paper over it.
 
-**Next action — do not skip to a bigger number:**
+**Next action. Two options; the second is better.**
 
-1. Re-measure the baseline immediately before the ask-concurrency block, or
-   re-measure periodically, so ceilings track the machine's current state rather
-   than its state ten minutes ago.
-2. Only then re-run this series.
+1. **Cheap and targeted:** re-measure the baseline immediately before the
+   ask-concurrency block. Costs one extra wrapper round trip (~12–15s) and makes
+   that block's ceiling reflect current conditions.
+2. **Better shape:** make the wait progress-sensitive rather than
+   deadline-sensitive — keep waiting while the observed state is still advancing
+   (one lock has appeared, the second has not), and fail only when nothing has
+   changed for N seconds. This preserves exactly what the check exists to detect
+   — a genuine hang — while tolerating a slow machine, which is the distinction a
+   fixed ceiling cannot make at any value.
+
+Either way, **re-run this series afterwards.** A fix to a flake is not evidence;
+the series is.
 
 **Do not "fix" this by raising `budget 15 30`.** A ceiling that is large enough
 on a degraded machine is one that no longer detects a genuine hang, which is
