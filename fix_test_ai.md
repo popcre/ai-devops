@@ -1,239 +1,335 @@
-# fix_test_ai — the two AI reviewer test suites are non-deterministic
+# fix_test_ai — the AI reviewer test suites were non-deterministic
 
-**Written:** 2026-08-26 (edge-dev / claude)
-**Status:** DIAGNOSIS ONLY — nothing has been changed. No fix has been applied.
-**Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`
+**Written:** 2026-08-26 (edge-dev / claude) — diagnosis
+**Updated:** 2026-08-27 (edge-dev / claude) — FIXED. Section 3 rewritten: the
+original attribution was inferred from code inspection and was wrong on both
+suites. The causes below are measured.
+**Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`, and — after
+a sweep — `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-muse.sh`,
+`tests/test-ai-gemini.sh`, `tests/test-ai-qwen.sh`, `tests/test-ai-glm.sh`.
 
 ---
 
 ## 1. The short version
 
-Both suites pass in GitHub Actions and fail intermittently on a developer
-machine, on the **same commit**, with **no code change between runs**. They are
-not detecting a defect when they fail. They are measuring how fast the machine
-happened to be at that moment.
+Both suites passed in GitHub Actions and failed intermittently on a developer
+machine, on the **same commit**, with **no code change between runs**. They were
+not detecting a defect when they failed. They were measuring how fast the
+machine happened to be at that moment.
 
 This matters because a suite that cries wolf teaches people to ignore it. These
-two files hold some of the most important safety assertions in the repository —
-the Grok early-return regression test, and the "a run that never completes is a
+files hold some of the most important safety assertions in the repository — the
+Grok early-return regression test, and the "a run that never completes is a
 failure" rule — and those are exactly the assertions that get waved away once
 "oh, that one's just flaky" becomes the habit.
 
-**Nothing here is caused by the identity-guard work in `fix_to_gh_org.md`.**
-Neither suite touches any file that change modified. This was found while
-running the full suite as a check on that work.
+**Nothing here was caused by the identity-guard work in `fix_to_gh_org.md`.**
 
 ---
 
-## 2. The evidence that it is non-determinism, not a defect
+## 2. The evidence that it was non-determinism, not a defect
 
-Runs of `tests/test-all.sh` and of the two files individually, all on the same
-tree (`eeb510f`), on `edge-dev`, 2026-08-25/26:
+Runs on `edge-dev`, 2026-08-25/26, all on the same tree. The **total check count
+is constant** — 191 for Grok, 203 for Kimi — while the pass/fail split moves. A
+check that flips `ok` → `FAIL` → `ok` with no input change is flaky by
+definition.
 
-| Run | `test-ai-grok-review.sh` | `test-ai-kimi.sh` |
-|---|---|---|
-| Full suite | suite reported `tests=54 failures=1` | (same run) |
-| Per-test scan | **passed 188, failed 3** | **passed 202, failed 1** |
-| Targeted rerun | passed 191, failed 0 | passed 203, failed 0 |
-| Repeat run 1 | passed 191, failed 0 | — |
+Controlled comparison, both suites launched at the same moment on the same
+machine:
 
-The total check count is constant — 191 for Grok, 203 for Kimi. So three Grok
-checks and one Kimi check **flipped from `ok` to `FAIL` and back again with no
-input change**. That is the definition of a flaky test. Note also that the full
-suite and the per-test scan disagreed with each other, which is why the failure
-could not be identified from the first log.
+| | Result |
+|---|---|
+| Original `test-ai-grok-review.sh` | 190 passed, **1 failed** |
+| Fixed `test-ai-grok-review.sh` | **191 passed, 0 failed** |
 
-Meanwhile, on the same commit, GitHub Actions was green on all three jobs:
-
-- `linux-offline` (whole Bash suite) — pass, 9m13s
-- `windows-offline` (whole Bash suite, **on Windows**) — pass
-- `windows-reviewer-safety` (runs `test-ai-grok-review.sh` specifically) — pass
-
-So this is not Windows-specific either. A clean idle Windows runner passes; a
-busy developer Windows machine does not.
+Meanwhile GitHub Actions was green on all three jobs for the same commit. CI
+passing is not evidence the suites are sound; it is evidence that an idle
+single-purpose runner wins every race. See section 4.
 
 ---
 
-## 3. Root cause
+## 3. Root cause — MEASURED
 
-Both suites assert on **wall-clock timing** against budgets far too tight to
-survive a loaded machine, in three distinct ways.
+> The first version of this section named the fixed `sleep 5` before the
+> heartbeat assertion and the 3-second timeout ceilings as the likely culprits.
+> **Both were wrong.** The `sleep 5` passed in every run captured under load.
+> The three real causes were only found by reproducing under artificial load and
+> reading the full output rather than a tail. Do not trust code inspection over
+> a reproduction.
 
-### 3.1 Sub-5-second timeout budgets where process startup is slow
+### 3.1 A fixture with a self-destruct shorter than the test (Grok)
 
-`tests/test-ai-grok-review.sh` drives the wrapper with a **3-second** ceiling at
-line 249, and again at line 262 for the orphan case:
+The single biggest cause, reproduced **six times**, and absent from the original
+diagnosis entirely.
 
-```
-TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"
-```
-
-`tests/test-ai-kimi.sh` uses a **2-second** ceiling in at least seven places
-(lines 184, 393, 420, 439, 448, 455, 479), against a stub whose `slow` and
-`timeoutpartial` modes `sleep 30`.
-
-The production default for both wrappers is **900 seconds**
-(`bin/ai-grok-review:90`, `bin/ai-kimi:82`). The tests compress that by a factor
-of 300 to 450.
-
-The assertions then depend on fixture work completing *inside* that window. For
-example `configured_timeout_stops_the_local_grok_process` requires the stub to
-have written `hold-child-pid` before the 3-second ceiling fires:
+`list_shows_active_reviews_across_clones_and_callers` and
+`list_reports_start_elapsed_pid_checkout_and_owner_state` assert on what `list`
+reports about a review that is **still running**. That long-running review is
+the stub in `hold` mode — which released itself after **60 seconds**:
 
 ```
-check "configured_timeout_stops_the_local_grok_process" \
-  "test '$TIMED_OUT_RC' -ne 0 && ... && test -s '$TMP/hold-child-pid' && ..."
+for _i in $(seq 1 60); do [ -f "$TMPDIR_FOR_TEST/release-grok" ] && break; sleep 1; done
 ```
 
-On Git Bash for Windows, spawning `bash`, then the wrapper, then the stub, and
-having the stub write a file, routinely costs more than 3 seconds when the
-machine is busy — antivirus scanning a fresh temp tree makes it worse. When it
-does, the ceiling fires **before the fixture is ready**, `hold-child-pid` is
-empty, and the check fails. The wrapper behaved correctly; the fixture lost the
-race.
+Between that review starting and the `list` assertions, the test clones two more
+repositories, starts two more reviews, creates a fourth repository and runs a
+review in it. On a loaded machine that exceeds 60 seconds, so the held review
+had already finished and `list` correctly reported nothing. The wrapper was
+right; the fixture had expired.
 
-### 3.2 A fixed `sleep` used as a synchronisation primitive
+**Fixed:** the hold is a last-resort escape hatch (900s), not a timer, and the
+cleanup trap releases stragglers.
 
-`tests/test-ai-grok-review.sh:236-241`, with `AI_GROK_HEARTBEAT_INTERVAL=2` set
-at line 196:
+### 3.2 A compressed wait ceiling losing to process startup (Grok)
 
-```
-sleep 5
-touch "$TMP/release-grok"
-wait "$FIRST_PID"
-...
-check "slow_turn_emits_truthful_bounded_heartbeats" "... grep -c 'does not prove provider activity' ... -ge 2"
-```
+`AI_GROK_WAIT_TIMEOUT=15` was the suite-wide default against a 900-second
+production default. The `cancelled` stopReason case is not testing the ceiling
+at all, but on Windows the wrapper spawns Git Bash, then a Python supervisor,
+then the stub; under load that exceeded 15 seconds, so the wrapper reported a
+timeout instead of the cancellation message and took three checks down together:
 
-The test sleeps 5 seconds, then demands that **at least two** heartbeats were
-emitted at 2-second intervals. That is a 5-second budget for something needing a
-minimum of 4, with no margin for the held review to even reach its heartbeat
-loop. Under load the count comes back as 1 and the check fails.
+- `cancelled has cancellation recovery message`
+- `cancelled message names the session`
+- `cancelled recommends a fresh session`
 
-This is the classic anti-pattern: a fixed sleep standing in for "wait until the
-condition is true". The same file already knows better — it uses bounded polling
-at lines 191, 213 and 219. The heartbeat case was never converted.
+Note the wrapper counts its ceiling in **poll iterations, not wall-clock
+seconds** (`sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))`), so
+under load a ceiling of N takes appreciably more than N seconds to fire. Any
+fixture that must outlive a ceiling has to do so in that same distorted clock.
 
-`tests/test-ai-kimi.sh:187-188` has the same shape:
+### 3.3 Fixture-readiness waits far too short (Kimi)
 
-```
-AI_KIMI_WAIT_TIMEOUT=30 run start durable-cancel --prompt review >/dev/null
-sleep 1
-CANCEL_OUT="$(run cancel durable-cancel 2>&1)"
-```
-
-One second to get a worker registered before cancelling it, then an assertion
-that the cancel was *worker-confirmed*. If the worker has not registered yet,
-the cancel is recorded differently and the check fails.
-
-### 3.3 Bounded polls whose ceiling is also a wall-clock guess
-
-`tests/test-ai-grok-review.sh:219-220`:
+Three loops gave a worktree-creating `implement` launch **five seconds** to
+register its owner file:
 
 ```
-for _i in $(seq 1 30); do [ "$(find ... -name 'work--*.lock.d' | wc -l)" -ge 3 ] && break; sleep 1; done
-check "same_repo_different_caller_and_work_run_concurrently" "... -ge 3"
+for _ in 1 2 3 4 5; do ... sleep 1; done
 ```
 
-Polling is the right shape, but the 30-second ceiling is still a guess, and the
-check that follows fails **silently** when the ceiling is hit rather than
-reporting "the fixture never became ready". Three concurrent wrapper launches,
-each cloning a git repository, can exceed 30 seconds on a contended machine.
+Under load this produced `concurrent refusal starts no second provider turn`,
+`implement interrupt removes worktree` and `incomplete export cleans worktree`
+— 1, 2 and 5 failures across three concurrent runs of the unmodified suite.
 
-### 3.4 Why the machine is contended in the first place
+### 3.4 A fixture wait that could never succeed (Kimi)
 
-Not hypothetical. `edge-dev` runs **multiple concurrent AI sessions** and had
-**seven registered git worktrees** at the time of these runs; several of those
-sessions run their own suites. The CI runners have none of that: one job, one
-clean VM, nothing competing.
+Found only after the launch stopped discarding its output to `/dev/null`.
 
-That is the entire difference between green in CI and red locally.
+`concurrent refusal starts no second provider turn` waited for the first
+`implement` to register by searching `-path '*/same-name/owner.json'`. The
+wrapper names that directory `kimi.<rid>-<caller>-<name>`, so no component is
+ever literally `same-name`. **The pattern could never match.**
+
+The check passed anyway, by luck: the loop burned its full five seconds and gave
+up, and five seconds happened to be shorter than the stub's thirty-second sleep,
+so the first run was still alive and the duplicate was correctly refused. The
+check was passing for a reason unrelated to what it appeared to verify — and on
+a loaded machine, where five seconds elapsed before the wrapper had even
+launched, it failed.
+
+**A passing check is not proof of coverage.** This one tested nothing for its
+entire life.
+
+### 3.4a A confirmation wait bounded by a knob meant for something else
+
+`durable cancel is worker-confirmed` failed roughly one run in six with
+`cancel-request-unconfirmed`. `cmd_cancel_job` waits for the worker to reach a
+terminal phase, bounded by `STARTUP_TIMEOUT` — the same knob that bounds how
+long a worker may take to start. On a slow machine the confirmation can outlast
+it. Both quantities are machine-dependent, so both now scale; see 3.5, which is
+the same mistake in a different place.
+
+### 3.4b A fixture whose ceiling was shorter than the duplicate's startup (Grok)
+
+Found from CI timestamps, not locally: the ask-concurrency block failed four
+checks on `main` in roughly one CI run in three.
+
+```
+14:55:21  ok   different_named_sessions_can_ask_concurrently
+14:57:25  FAIL same_next_ask_turn_is_serialized      <- 124s later
+```
+
+The duplicate `ask` that must be refused builds a review packet first - several
+git operations - and on the `windows-2025` runner that took 124s against the
+first turn's 110s ceiling. So the first turn timed out and released its session
+lock **before the duplicate reached the lock check**, and the duplicate was then
+allowed for an entirely correct reason. Same disease as 3.1: an assertion about a
+fixture that had already expired.
+
+The held turns now take the wide ceiling that section 16's held review already
+had. They are released explicitly by the test, so a wide ceiling costs nothing.
+
+**Note for the record:** the `windows-reviewer-safety` runner measures an 11s
+baseline - it is *not* a fast machine, and the assumption that CI always sits at
+the ceiling floors is wrong.
+
+### 3.5 Two quantities sharing one knob
+
+This pattern caused three separate regressions while fixing the above, and is
+the thing to watch for in this repository:
+
+- The `slow` stub's lifetime served both "outlive the wall deadline" and "die
+  before you starve the next fixture's repository lock". Scaled up, later
+  fixtures starved; scaled down, the deadline test lost its race.
+- `AI_KIMI_STARTUP_TIMEOUT` (default 60s) served both "how long this machine
+  needs to boot a detached worker" and "how long the deadline under test may
+  take". Left unscaled it expired first, and the run died of `startup-timeout`
+  before the deadline it exists to test could fire.
+
+No compromise value exists when two requirements point in opposite directions.
+Separate them.
+
+### 3.6 Why the machine is contended in the first place
+
+`edge-dev` is **not** short of resources — 20 CPUs, 241 GB free disk. The cost is
+Windows process startup: every wrapper call spawns several processes before
+doing any work, and that multiplies when sessions run concurrently. Measured
+cost of one wrapper round trip:
+
+| Condition | Baseline |
+|---|---|
+| GitHub Actions runner | ~1s |
+| edge-dev, one suite | ~15s |
+| edge-dev, two suites | 26–72s |
+| edge-dev, four-suite storm | 82s |
 
 ---
 
 ## 4. Why CI does not protect us here
 
-CI passing is currently read as "the suites are fine". It is not evidence of
-that. It is evidence that **an idle single-purpose runner is fast enough to win
-every race**. The races are still in the tests; CI simply never loses them.
+CI passing is evidence that **an idle single-purpose runner is fast enough to
+win every race**, not that the races are gone. Two consequences:
 
-Two consequences:
-
-1. **A real regression could be masked.** The same checks that fail spuriously
+1. A real regression could be masked — the same checks that fail spuriously
    under load could pass spuriously when a genuine bug makes the wrapper
-   *faster* — for example returning early, which is precisely the bug
-   `await_blocks_until_terminal_json` exists to catch.
-2. **Developers cannot trust a local run.** The full suite takes roughly 50
-   minutes on Windows. Fifty minutes ending in an unexplained `failures=1` that
-   evaporates on rerun is worse than no local suite, because the honest response
-   is to rerun — another 50 minutes.
+   *faster*, which is precisely what `await_blocks_until_terminal_json` exists
+   to catch.
+2. Developers could not trust a local run, and the honest response to an
+   unexplained `failures=1` after fifty minutes is to rerun — another fifty
+   minutes.
 
 ---
 
-## 5. What a fix must and must not do
+## 5. What the fix does
 
-**Must not:** weaken or delete any of these assertions. The Grok early-return
-regression test and the Kimi "never completes is a failure" test are
-load-bearing safety checks. Raising a timeout until the check stops meaning
-anything, marking a test allowed-to-fail, or deleting it, are all symptom
-suppression, not repair. The suites must still fail when the wrapper is wrong.
+Every wait ceiling is now derived from **one measured baseline** taken at suite
+start, instead of a hard-coded constant.
 
-**Must:** make the assertions depend on **observable state**, not elapsed
-wall-clock time.
+- `budget FACTOR FLOOR` never returns less than `FLOOR`, so **on an idle CI
+  runner every ceiling keeps exactly the value it had before**. No assertion is
+  weaker than it was.
+- The baseline is **capped** (default 45s, `AI_TEST_BASELINE_CAP`). Scaling
+  exists to survive a busy machine, not to let one inflate the suite without
+  limit. Past the cap the suite says so loudly rather than stretching silently.
+- Fixed sleeps became condition polls. A poll that exhausts its ceiling prints a
+  distinct `fixture:` line naming what never became ready, so "the fixture was
+  not ready" can never again be mistaken for "the wrapper misbehaved".
+- Preconditions are checked, not assumed: the ask-concurrency block waits for
+  the specific session locks by label rather than counting locks globally, and
+  selects its target lock by label rather than by `find -print -quit`, which
+  returned an arbitrary match and then deleted it.
+- Shared helpers live in `tests/lib-test-timing.sh`, sourced by all seven
+  reviewer suites, so there is one copy of this logic rather than seven.
 
-Recommended direction, in priority order:
-
-1. **Replace fixed sleeps with condition polling.** `sleep 5; assert >= 2
-   heartbeats` becomes: poll until the heartbeat count reaches 2, up to a
-   generous ceiling, failing with a distinct message if the ceiling is hit. Same
-   for the Kimi `sleep 1` before cancel — poll until the worker is registered.
-2. **Separate "the fixture was not ready" from "the wrapper misbehaved".** Every
-   bounded poll should report which one happened. Today a fixture that never
-   became ready produces the same red as a genuine defect, which is why the two
-   cannot be told apart from the log.
-3. **Scale the compressed timeouts to the machine, not to a constant.** Keep the
-   compression — a 900-second ceiling in a test is useless — but derive it from a
-   measured baseline (time one trivial wrapper invocation at suite start and
-   multiply), or raise the floor to something a loaded Windows box can meet. A
-   2-second ceiling on a platform whose process startup alone can cost seconds
-   is not testing the ceiling logic, it is testing the hardware.
-4. **Make timing-sensitive cases announce themselves.** A timing-dependent check
-   should print the measured value on failure. `await returned too early (2s)`
-   at `tests/test-ai-kimi.sh:518` is the right pattern; most others do not do it.
-5. **Add a load-aware guard, not a skip.** If the suite cannot meet its own
-   timing preconditions, it should say so loudly on a distinct exit path — never
-   silently skip, never quietly pass.
+**Check counts are unchanged.** Assertion sites, `HEAD` vs now: grok 197, kimi
+218, deepseek 65, muse 135, gemini 65, qwen 96, glm 256 — identical in every
+file.
 
 ---
 
-## 6. How to verify a fix
+## 6. Proof the tests can still fail
 
-A fix is proven when **all** of these hold:
+A green suite proves nothing on its own. Each guarded defect was deliberately
+reintroduced and the relevant check confirmed red:
 
-1. Both suites pass 10 consecutive local runs on `edge-dev` **while other work
-   is running on the machine**. An idle box already passes today and proves
-   nothing.
-2. Both suites still **fail** when the defect they guard is reintroduced.
-   Deliberately break the wrapper — for example make `await_result` return
-   before a terminal record exists — and confirm the relevant check goes red. A
-   test that cannot fail is not a test.
-3. All three CI jobs stay green.
-4. Total check counts are unchanged or higher — 191 for Grok, 203 for Kimi. A
-   fix that reduces the count has removed coverage.
+| Injected defect | Check that failed |
+|---|---|
+| `await_result` returns before a terminal record | `await_result returned too early — the early-return bug is NOT caught` |
+| Heartbeat emission silenced | `slow_turn_emits_truthful_bounded_heartbeats` |
+| Kimi: any output counts as a terminal record | `message names the terminal record` |
+
+These injections also caught a bug in the fix itself — a precondition poll that
+released too early — which is the argument for doing them at all.
 
 ---
 
-## 7. What was NOT investigated
+## 7. Verification results
 
-- **Whether the same pattern exists in the other reviewer suites**
-  (`test-ai-deepseek-agent.sh`, `test-ai-muse.sh`, `test-ai-gemini.sh`,
-  `test-ai-qwen.sh`, `test-ai-glm.sh`). Not examined. Given a shared authorship
-  lineage it is likely, and worth a sweep.
-- **The exact identity of the four checks that flipped.** The failing runs were
-  captured by tail only, so the counts are known (3 Grok, 1 Kimi) but the names
-  are not. Section 3 names the checks most likely responsible from code
-  inspection; a session fixing this should reproduce under artificial load
-  rather than trust that attribution.
-- **Whether `edge-dev` has an unrelated resource problem** (disk, antivirus
-  policy, a runaway process from an abandoned worktree). The contention
-  explanation fits the evidence but was not measured.
+**Ten consecutive `test-ai-kimi.sh` runs, 203 passed / 0 failed each.** The last
+four ran concurrently with `test-ai-grok-review.sh`, which was 191/0 in every one.
+
+Controlled comparison, both suites launched at the same moment on the same
+machine: original 190/1, fixed 191/0.
+
+The five swept suites: deepseek 71, gemini 62, qwen 90, glm 244, muse 128 — all
+0 failed.
+
+**Assertion counts unchanged in every file** (grok 197, kimi 218, deepseek 65,
+muse 135, gemini 65, qwen 96, glm 256), so no coverage was removed.
+
+### 7.1 CI passed a commit with a known-failing check
+
+Worth recording, because it is section 4 demonstrated rather than argued. All
+three CI jobs — `linux-offline`, `windows-offline`, `windows-reviewer-safety` —
+**passed** on a pushed commit that the local full suite had already failed on
+`concurrent refusal starts no second provider turn`.
+
+`main` itself has also failed two of its last four `verify.yml` runs. The
+flakiness reaches CI; CI just loses the race less often.
+
+**Do not close a flaky-test issue in this repository on the strength of green
+CI.** It is not evidence.
+
+### 7.2 CI cost of this change
+
+Each suite now performs one baseline probe at start — a real wrapper round trip
+in the two large suites, 40 process spawns in the other five. Measured effect on
+the longest job:
+
+| | `windows-offline` |
+|---|---|
+| `main`, recent runs | 65-67 min |
+| this change | 70 min |
+
+About 3-5 minutes. Relevant to issue #98, which is about that job's duration:
+**take its baseline after this merges, not across it.**
+
+### 7.3 Honest limits of this verification
+
+- The clean rounds ran with measured baselines of 9-19s, while the runs that
+  originally failed measured 55-72s: other sessions on the machine had quietened
+  in between. The concurrency structure was identical but the machine was not as
+  loaded. A run under genuinely heavy contention may still hit the cap, and when
+  it does the suite says so rather than failing silently.
+- **The `durable cancel is worker-confirmed` mechanism is inferred, not proven.**
+  It failed roughly one run in six with `cancel-request-unconfirmed`, and the
+  fix — giving `cancel`'s confirmation wait the same scaled budget as worker
+  startup, which is what the wrapper bounds it by — rests on a plausible story
+  about the worker being busy finalizing. Ten clean runs are *consistent* with
+  that story without confirming it. The check now prints how long `cancel`
+  actually waited against its budget, so a recurrence will settle it.
+
+## 7.4 Carried forward
+
+The `#89` handoff is retired with this change. Its remaining open items did not
+belong to this workstream and are now issue
+[#125](https://github.com/popcre/ai-devops/issues/125): six `HANDOFF.d/` files
+whose issues are closed, and six with no contract block at all.
+
+Its question about whether `edge-dev` has an unrelated resource problem is
+answered in section 3.6: it does not.
+
+## 8. Method notes for whoever works on these suites next
+
+- **Never judge `tests/test-all.sh` by a piped exit code.** `bash tests/test-all.sh | tail`
+  returns `tail`'s status. Read the `OFFLINE BASH SUMMARY tests=N failures=N`
+  line. This produced one false "it passed" report.
+- **Never edit a test file while a copy of it is running.** Bash reads a script
+  incrementally from disk; the edit corrupts the in-flight run. This destroyed
+  three measurement runs. Run from a snapshot copy inside `tests/` (the suites
+  compute their repo root from their own path).
+- **Do not discard fixture output.** `>/dev/null 2>&1` on a fixture launch hid a
+  test that had never worked (3.4). Capture it and print it when the fixture
+  fails.
+- **Do not create your own storm and then certify against it.** Running four
+  suites at once inflated the baseline to 82s and produced failures that did not
+  reproduce at realistic load. Useful for finding bugs, useless as a verdict.

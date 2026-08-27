@@ -67,6 +67,9 @@ cleanup() {
   # handle. Keep a persistent leak visible, but allow that bounded handoff to
   # settle so a fully passing safety run does not fail only in EXIT cleanup.
   cd "$REPO_ROOT" || return 1
+  # Release any still-held stub so it exits now instead of sitting out its
+  # escape-hatch ceiling and keeping a handle on $TMP.
+  touch "$TMP/release-grok" 2>/dev/null || true
   local attempt
   for attempt in 1 2 3 4 5; do
     rm -rf "$TMP" 2>/dev/null && return 0
@@ -145,7 +148,11 @@ case "$mode" in
   hold)      touch "$TMPDIR_FOR_TEST/hold-started"
              printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
              trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
-             for _i in $(seq 1 60); do
+             # The hold is released by the test, or terminated by the wrapper's
+             # own timeout. Its ceiling is only a last-resort escape hatch: a
+             # short one made the fixture expire mid-test on a loaded machine
+             # and the assertions then measured the box, not the wrapper.
+             for _i in $(seq 1 "${AI_GROK_TEST_HOLD_SECONDS:-900}"); do
                [ -f "$TMPDIR_FOR_TEST/release-grok" ] && break
                sleep 1
              done
@@ -188,6 +195,67 @@ cat > "$TMP/no-session.json" <<'EOF'
 EOF
 echo ok > "$TMP/mode"
 
+# --- measured timing budgets --------------------------------------------------
+# Every wait ceiling below is derived from one measured wrapper round trip
+# instead of a hard-coded constant. A constant that is generous on an idle CI
+# runner is a lost race on a loaded developer box, which is what made this suite
+# non-deterministic (see fix_test_ai.md). Scaling keeps the compression — a
+# 900-second production ceiling is useless in a test — without asserting that
+# the machine is fast.
+BASELINE_REPO="$TMP/baseline-repo"; mkdir -p "$BASELINE_REPO"
+git -C "$BASELINE_REPO" init -q
+git -C "$BASELINE_REPO" config user.email t@example.com
+git -C "$BASELINE_REPO" config user.name T
+printf '.ai/\n' > "$BASELINE_REPO/.gitignore"; echo b > "$BASELINE_REPO/b.txt"
+git -C "$BASELINE_REPO" add -A; git -C "$BASELINE_REPO" commit -qm baseline
+git -C "$BASELINE_REPO" remote add origin https://github.com/example/timing-baseline.git
+# One representative wrapper round trip. Every ceiling below is derived from
+# it, so the suite adapts to the machine instead of asserting the machine is
+# fast. budget()/poll_until() and the baseline cap live in the shared library.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_baseline bash -c 'cd "$1" && AI_GROK_WAIT_TIMEOUT=600 bash "$2" new timing-baseline --prompt x' _ "$BASELINE_REPO" "$SCRIPT"
+BASELINE="$AI_TEST_BASELINE"
+
+# work_lock_labelled LABEL -> the newest work lock carrying that label.
+# `find -print -quit` returned an arbitrary lock, so a leftover from an earlier
+# section could be inspected, and later deleted, in place of the real one.
+work_lock_labelled() {
+  local d newest="" newest_t=0 t
+  for d in "$AI_GROK_STATE_DIR"/locks/work--*.lock.d; do
+    [ -d "$d" ] || continue
+    grep -qs -x "$1" "$d/label" || continue
+    t="$(stat -c %Y "$d" 2>/dev/null || echo 0)"
+    if [ "$t" -ge "$newest_t" ]; then newest_t="$t"; newest="$d"; fi
+  done
+  printf %s "$newest"
+}
+
+# ask_session_lock_held NAME - the real precondition for the ask-concurrency
+# assertions. Counting work locks globally could be satisfied by a leftover
+# lock from an earlier section while the session under test had not started.
+ask_session_lock_held() {
+  grep -qs -x "ask:$1" "$AI_GROK_STATE_DIR"/locks/session--*.lock.d/label 2>/dev/null
+}
+
+# fixture_note_if_timed_out OUTPUT LABEL — a run that is not testing the wait
+# ceiling must never be judged by it. Say so loudly when one trips.
+fixture_note_if_timed_out() {
+  case "$1" in
+    *"exceeded the configured"*)
+      printf '  fixture: %s hit the wait ceiling (%ss, baseline %ss); the assertions below measured the machine, not the wrapper\n' \
+        "$2" "$AI_GROK_WAIT_TIMEOUT" "$BASELINE" >&2 ;;
+  esac
+}
+
+# The general-purpose ceiling for runs that are NOT testing timeout behaviour.
+export AI_GROK_WAIT_TIMEOUT="$(budget 10 15)"
+# The ceiling for the cases that deliberately trip it. It must still be far
+# below the held stub's escape hatch so the wrapper, not the fixture, ends them.
+TIMEOUT_CEILING="$(budget 2 3)"
+# Wall-clock bound for a run that trips TIMEOUT_CEILING, scaled the same way.
+TIMEOUT_WALL="$(( TIMEOUT_CEILING * 15 ))"
+[ "$TIMEOUT_WALL" -lt 45 ] && TIMEOUT_WALL=45
+
 # 16 ------------------------------------------------------------------------
 echo "== exact_work_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
@@ -198,8 +266,8 @@ export AI_GROK_HEARTBEAT_INTERVAL=2
 # This turn is released explicitly below. Give only this test-owned process a
 # wide ceiling so slow Windows clone/setup work cannot turn the fixture into an
 # unintended timeout and leave a false remote-uncertain lock.
-( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
-for _i in $(seq 1 60); do
+( cd "$REPO" && AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" bash "$SCRIPT" new shared-lock --prompt x >"$TMP/first.out" 2>"$TMP/first.err" ) & FIRST_PID=$!
+for _i in $(seq 1 "$(budget 20 60)"); do
   [ -d "$AI_GROK_STATE_DIR/locks/work--"*.lock.d ] 2>/dev/null && [ -f "$TMP/hold-started" ] && break
   sleep 1
 done
@@ -209,14 +277,16 @@ if [ ! -f "$TMP/hold-started" ]; then
 fi
 check "slow_fixture_reached_the_provider_before_mode_changes" "test -f '$TMP/hold-started'"
 rm -f "$TMP/hold-started"
-( cd "$CLONE" && AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new other-clone --prompt different >"$TMP/second.out" 2>"$TMP/second.err" ) & SECOND_PID=$!
-for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 2 ] && break; sleep 1; done
+( cd "$CLONE" && AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" bash "$SCRIPT" new other-clone --prompt different >"$TMP/second.out" 2>"$TMP/second.err" ) & SECOND_PID=$!
+poll_until "$(budget 15 30)" 'two concurrent work locks' \
+  "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "same_repo_different_session_and_packet_run_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 EXACT="$( cd "$CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; EXACT_RC=$?
 check "same_exact_session_and_turn_is_refused" "test '$EXACT_RC' -ne 0 && printf '%s' \"$EXACT\" | grep -Eq 'already has an owner|session-name collision|exact Grok'"
 CLAUDE_PID=''
-( cd "$CLONE" && AI_GROK_CALLER=claude AI_GROK_WAIT_TIMEOUT=120 bash "$SCRIPT" new claude-independent --prompt caller-different >"$TMP/claude.out" 2>"$TMP/claude.err" ) & CLAUDE_PID=$!
-for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 3 ] && break; sleep 1; done
+( cd "$CLONE" && AI_GROK_CALLER=claude AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" bash "$SCRIPT" new claude-independent --prompt caller-different >"$TMP/claude.out" 2>"$TMP/claude.err" ) & CLAUDE_PID=$!
+poll_until "$(budget 15 30)" 'three concurrent work locks' \
+  "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 3" || true
 check "same_repo_different_caller_and_work_run_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 3"
 check "lock_metadata_contains_digests_not_raw_prompts" "! grep -R -F 'caller-different' '$AI_GROK_STATE_DIR/locks'"
 SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
@@ -230,10 +300,19 @@ git -C "$OTHER" remote add origin https://github.com/example/unrelated.git
 echo ok > "$TMP/mode"
 ( cd "$OTHER" && bash "$SCRIPT" new unrelated --prompt x >/dev/null 2>&1 ) && ok "unrelated_upstreams_do_not_block_each_other" || bad "unrelated_upstreams_do_not_block_each_other"
 echo wait > "$TMP/mode"
+# These two assertions describe what `list` reports about a review that is
+# still running. If the held fixture ended first they measure nothing, so name
+# that case distinctly instead of letting it look like a wrapper defect.
+kill -0 "$FIRST_PID" 2>/dev/null || \
+  printf '  fixture: the held shared-lock review ended before the list assertions (baseline %ss)\n' "$BASELINE" >&2
 LIST="$( cd "$CLONE" && bash "$SCRIPT" list 2>&1 )"
 check "list_shows_active_reviews_across_clones_and_callers" "printf '%s' \"\$LIST\" | grep -q shared-lock"
 check "list_reports_start_elapsed_pid_checkout_and_owner_state" "printf '%s' \"\$LIST\" | grep -q 'ELAPSED' && printf '%s' \"\$LIST\" | grep -Eq 'active.*[0-9]+s'"
-sleep 5
+# Heartbeats are proven by counting them, not by sleeping long enough that two
+# probably happened. A fixed 5s sleep against a 2s interval left no margin and
+# was one reason this section went red on a busy machine.
+poll_until "$(budget 20 30)" 'two bounded heartbeats from the held review' \
+  "test \"\$(grep -c 'does not prove provider activity' '$TMP/first.err')\" -ge 2" || true
 touch "$TMP/release-grok"
 wait "$FIRST_PID"
 wait "$SECOND_PID"
@@ -246,11 +325,11 @@ check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE'
 # prove that the provider stopped billing or working.
 rm -f "$TMP/release-grok" "$TMP/hold-child-pid" "$TMP/hold-child-terminated"; echo hold > "$TMP/mode"
 TIMEOUT_START="$(date +%s)"
-TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"; TIMED_OUT_RC=$?
+TIMED_OUT="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT="$TIMEOUT_CEILING" bash "$SCRIPT" new bounded-timeout --prompt x 2>&1 )"; TIMED_OUT_RC=$?
 TIMEOUT_ELAPSED=$(( $(date +%s) - TIMEOUT_START ))
 TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
-check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured 3s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
-check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt 45"
+check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured ${TIMEOUT_CEILING}s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
+check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt '$TIMEOUT_WALL'"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
 check "Windows timeouts delegate both process trees to the native supervisor" "test \"\$(grep -c -- '--stop-file \"\$ACTIVE_GROK_NATIVE_STOP_FILE\"' '$SCRIPT')\" -eq 2 && grep -q 'TerminateJobObject(job, 124)' '$REPO_ROOT/bin/ai-process-supervisor'"
 check "Windows fallback translates the MSYS PID and never emits a console signal" "grep -q '/proc/\$child/winpid' '$SCRIPT' && grep -q 'taskkill.exe /PID \"\$windows_pid\"' '$SCRIPT'"
@@ -259,7 +338,7 @@ rm -rf "$TIMEOUT_LOCK"
 # The launcher may exit before the worker. The terminal-result timeout must
 # still terminate the worker captured from the launcher's process tree.
 rm -f "$TMP/orphan-pid" "$TMP/orphan-terminated"; echo orphan > "$TMP/mode"
-ORPHANED="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT=3 bash "$SCRIPT" new orphan-timeout --prompt x 2>&1 )"; ORPHANED_RC=$?
+ORPHANED="$( cd "$OTHER" && AI_GROK_WAIT_TIMEOUT="$TIMEOUT_CEILING" bash "$SCRIPT" new orphan-timeout --prompt x 2>&1 )"; ORPHANED_RC=$?
 ORPHAN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "launcher_exit_timeout_kills_the_tracked_orphan_worker" "test '$ORPHANED_RC' -ne 0 && test -s '$TMP/orphan-pid' && ! kill -0 \"\$(cat '$TMP/orphan-pid')\" 2>/dev/null"
 check "orphan_timeout_remains_fail_closed_for_remote_work" "test -f '$ORPHAN_LOCK/remote-uncertain'"
@@ -292,7 +371,7 @@ echo hold > "$TMP/mode"
 # A locally interrupted wrapper must not claim or assume that the paid remote
 # turn stopped. Its retained uncertainty marker blocks another paid call.
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
-for _i in $(seq 1 30); do
+for _i in $(seq 1 "$(budget 15 30)"); do
   LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
   [ -n "$LOCK_NOW" ] && [ -f "$TMP/hold-started" ] && break
   sleep 1
@@ -309,7 +388,7 @@ UNRELATED_AFTER_STOP="$( cd "$CLONE" && bash "$SCRIPT" new after-interrupt --pro
 check "remote_uncertainty_allows_unrelated_review" "test '$UNRELATED_RC' -eq 0"
 rm -rf "$LOCK_NOW"
 echo empty > "$TMP/mode"
-UNCONFIRMED="$( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new no-terminal --prompt x 2>&1 )"; UNCONFIRMED_RC=$?
+UNCONFIRMED="$( cd "$REPO" && AI_GROK_WAIT_TIMEOUT="$TIMEOUT_CEILING" bash "$SCRIPT" new no-terminal --prompt x 2>&1 )"; UNCONFIRMED_RC=$?
 UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 [ "$UNCONFIRMED_RC" -ne 0 ] && ok "missing_terminal_result_fails" || bad "missing_terminal_result_fails"
 check "missing_terminal_result_retains_uncertainty_lock" "test -f '$UNCERTAIN_LOCK/remote-uncertain'"
@@ -324,7 +403,7 @@ rm -rf "$UNCERTAIN_LOCK"
 # blocks a second paid turn. The next caller converts the dead-owner lock into
 # an explicit uncertainty marker and remains blocked.
 echo empty > "$TMP/mode"
-MARK_FAIL="$( cd "$REPO" && AI_GROK_TEST_MARK_FAILURE=1 AI_GROK_WAIT_TIMEOUT=2 bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; MARK_FAIL_RC=$?
+MARK_FAIL="$( cd "$REPO" && AI_GROK_TEST_MARK_FAILURE=1 AI_GROK_WAIT_TIMEOUT="$TIMEOUT_CEILING" bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; MARK_FAIL_RC=$?
 MARK_FAIL_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "marker_write_failure_preserves_paid_work_lock" "[ \"$MARK_FAIL_RC\" -ne 0 ] && test -d '$MARK_FAIL_LOCK' && test ! -f '$MARK_FAIL_LOCK/remote-uncertain'"
 echo ok > "$TMP/mode"
@@ -468,6 +547,10 @@ wait $BGPID 2>/dev/null
 echo "== stop_reason handling =="
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
+# This case is about how a cancelled stopReason is reported, not about the wait
+# ceiling. If the ceiling fired instead, the four assertions below are measuring
+# process startup on a loaded machine — say so rather than reporting a defect.
+fixture_note_if_timed_out "$OUT" 'the cancelled-stopReason run'
 [ $RC -ne 0 ] && ok "cancelled exits non-zero" || bad "cancelled exits non-zero"
 check "cancelled has cancellation recovery message" "printf '%s' \"\$OUT\" | grep -qi 'cancelled without a final answer'"
 check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
@@ -637,16 +720,27 @@ check "preprovider_ask_failure_is_nonzero" "test '$PREPROVIDER_FAIL_RC' -ne 0 &&
 PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 2>&1)"; PREPROVIDER_RETRY_RC=$?
 check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
-( run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
-( run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
-for _i in $(seq 1 30); do [ "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" -ge 2 ] && break; sleep 1; done
+# These two turns are released explicitly below, so give them a wide ceiling of
+# their own. The duplicate that must be refused builds a review packet first -
+# several git operations - and on a slow Windows disk that can outlast a normal
+# ceiling. If it does, the first turn times out and releases its session lock
+# BEFORE the duplicate reaches the lock check, and the duplicate is then allowed
+# for a perfectly correct reason. Observed on the windows-reviewer-safety runner:
+# the duplicate took 124s against a 110s ceiling.
+( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
+( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+poll_until "$(budget 15 30)" 'both named ask turns hold their own session locks' \
+  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 DUP_ASK="$(run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
 check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
-( cd "$REPO" && exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
-for _i in $(seq 1 30); do ASK_UNCERTAIN_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"; [ -n "$ASK_UNCERTAIN_LOCK" ] && [ -f "$TMP/hold-started" ] && break; sleep 1; done
+# Terminated by the test below, so it must not reach its own ceiling first:
+# a self-timeout leaves different lock state than an interrupt, and the two
+# retries that follow assert on the interrupt case.
+( cd "$REPO" && AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
+for _i in $(seq 1 "$(budget 15 30)"); do ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"; [ -n "$ASK_UNCERTAIN_LOCK" ] && [ -f "$TMP/hold-started" ] && break; sleep 1; done
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
 check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"

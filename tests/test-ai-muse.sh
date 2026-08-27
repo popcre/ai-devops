@@ -7,6 +7,12 @@ ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
+# Timing budgets are measured, not guessed: a constant that is generous on an
+# idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md
+# and tests/lib-test-timing.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_spawn_baseline
+
 check 'wrapper parses' "bash -n '$SCRIPT'"
 check 'installed symlink resolution is implemented' "grep -q 'REAL_SELF=.*readlink -f' '$SCRIPT' && grep -q 'dirname \"\$SELF\"' '$SCRIPT'"
 check 'setup parses' "bash -n '$ROOT/bin/setup-opencode-muse.sh'"
@@ -134,13 +140,13 @@ check 'Muse key is absent from the provider process chain arguments' "cd '$REPO'
 unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
 check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""
 rm -f "$TMP/muse-post-open"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_OPEN_MARKER="$TMP/muse-post-open" AI_MUSE_TEST_POST_OPEN_DELAY=3 "$SCRIPT" new post-open-swap --prompt test >/dev/null 2>&1) & MUSE_POST_OPEN_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-post-open" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-post-open" ] && break; sleep .1; done
 MUSE_POST_OPEN="$(cat "$TMP/muse-post-open" 2>/dev/null || true)"; if [ -n "$MUSE_POST_OPEN" ]; then mv "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held"; printf attacker-preserved > "$MUSE_POST_OPEN"; fi
 MUSE_POST_OPEN_RC=0; wait "$MUSE_POST_OPEN_PID" || MUSE_POST_OPEN_RC=$?
 check 'post-open staging substitution is rejected against the held descriptor' "test '$MUSE_POST_OPEN_RC' -ne 0 && grep -qx attacker-preserved '$MUSE_POST_OPEN' && test ! -e '$MUSE_POST_OPEN.held'"
 rm -f -- "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held" "$TMP/muse-pre-open"; printf 'must-not-truncate\n' > "$TMP/muse-pre-open-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_OPEN_MARKER="$TMP/muse-pre-open" AI_MUSE_TEST_PRE_OPEN_DELAY=3 "$SCRIPT" new pre-open-substitution --prompt test >/dev/null 2>&1) & MUSE_PRE_OPEN_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-pre-open" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-pre-open" ] && break; sleep .1; done
 MUSE_PRE_OPEN="$(cat "$TMP/muse-pre-open" 2>/dev/null || true)"
 if [ -n "$MUSE_PRE_OPEN" ]; then MSYS=winsymlinks:nativestrict ln -s "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN" 2>/dev/null || cp "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN"; fi
 MUSE_PRE_OPEN_RC=0; wait "$MUSE_PRE_OPEN_PID" || MUSE_PRE_OPEN_RC=$?
@@ -148,30 +154,30 @@ check 'exclusive pre-open staging reservation rejects an attacker path without t
 rm -f -- "$MUSE_PRE_OPEN"
 rm -f -- "$MUSE_POST_OPEN"
 POST_LOG="$TMP/post-process.log"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_PROCESS_MARKER="$TMP/post-process-reached" AI_MUSE_TEST_POST_PROCESS_DELAY=20 "$SCRIPT" new post-process-interrupt --prompt test >"$POST_LOG" 2>&1) & POST_PID=$!
-for _ in $(seq 1 300); do [ -f "$TMP/post-process-reached" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -f "$TMP/post-process-reached" ] && break; sleep .1; done
 POST_META="$(find "$TMP/state" -name 'codex--post-process-interrupt.json' -type f -print -quit)"
 kill -TERM "$POST_PID" 2>/dev/null || true; wait "$POST_PID" 2>/dev/null || true
 check 'interrupt after provider exit but before classification marks outcome uncertain' "test -f '$POST_META' && jq -e '.status==\"provider_outcome_uncertain\"' '$POST_META'"
 rm -f "$TMP/muse-child-pid" "$TMP/muse-child-stopped"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-child-pid" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-child-pid" ] && break; sleep .1; done
 MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
 MUSE_HUP_META="$(find "$TMP/state" -name 'codex--hup-turn.json' -type f -print -quit)"
 check 'HUP stops and waits for the provider child before releasing an uncertain session' "test -f '$TMP/muse-child-stopped' && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_HUP_META'"
 rm -f "$TMP/muse-publish-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-publish-target" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-publish-target" ] && break; sleep .1; done
 MUSE_TARGET="$(cat "$TMP/muse-publish-target" 2>/dev/null || true)"; printf owner-target > "$MUSE_TARGET"; MUSE_TARGET_RC=0; wait "$MUSE_TARGET_PID" || MUSE_TARGET_RC=$?
 check 'exact Muse report target creation is refused without overwrite' "test '$MUSE_TARGET_RC' -ne 0 && grep -qx owner-target '$MUSE_TARGET'"
 rm -f "$TMP/muse-late-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-late-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=20 "$SCRIPT" new late-interrupt --prompt test >/dev/null 2>&1) & MUSE_LATE_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-late-target" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-late-target" ] && break; sleep .1; done
 MUSE_LATE_TARGET="$(cat "$TMP/muse-late-target" 2>/dev/null || true)"; kill -TERM "$MUSE_LATE_PID" 2>/dev/null || true; wait "$MUSE_LATE_PID" 2>/dev/null || true
 MUSE_LATE_META="$(find "$TMP/state" -name 'codex--late-interrupt.json' -type f -print -quit)"
 check 'interruption during final publication keeps session uncertain and publishes no report' "jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_LATE_META' && test -n '$MUSE_LATE_TARGET' && test ! -e '$MUSE_LATE_TARGET'"
 OUTSIDE_FINAL="$TMP/outside-final"; mkdir -p "$OUTSIDE_FINAL"; printf safe > "$OUTSIDE_FINAL/sentinel"; rm -f "$TMP/muse-final-swap-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-final-swap-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new final-dir-swap --prompt test >/dev/null 2>&1) & MUSE_FINAL_SWAP_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-final-swap-target" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-final-swap-target" ] && break; sleep .1; done
 if mv "$REPO/.ai/reviews" "$REPO/.ai/reviews.final-safe" 2>/dev/null && ln -s "$OUTSIDE_FINAL" "$REPO/.ai/reviews" 2>/dev/null; then
   MUSE_FINAL_SWAP_RC=0; wait "$MUSE_FINAL_SWAP_PID" || MUSE_FINAL_SWAP_RC=$?
   check 'late report-directory replacement is rejected without outside publication' "test '$MUSE_FINAL_SWAP_RC' -ne 0 && grep -qx safe '$OUTSIDE_FINAL/sentinel' && test \"\$(find '$OUTSIDE_FINAL' -type f | wc -l)\" -eq 1"
@@ -183,7 +189,7 @@ else
 fi
 rm -f "$TMP/muse-staging-path" "$TMP/muse-staging-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_STAGING_MARKER="$TMP/muse-staging-path" AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-staging-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new staging-replacement --prompt test >/dev/null 2>&1) & MUSE_STAGING_PID=$!
-for _ in $(seq 1 300); do [ -s "$TMP/muse-staging-path" ] && [ -s "$TMP/muse-staging-target" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$TMP/muse-staging-path" ] && [ -s "$TMP/muse-staging-target" ] && break; sleep .1; done
 MUSE_STAGING="$(cat "$TMP/muse-staging-path" 2>/dev/null || true)"; MUSE_STAGING_TARGET="$(cat "$TMP/muse-staging-target" 2>/dev/null || true)"
 if [ -n "$MUSE_STAGING" ] && mv "$MUSE_STAGING" "$MUSE_STAGING.held" 2>/dev/null; then printf attacker > "$MUSE_STAGING"; fi
 MUSE_DECOY="$REPO/.ai/decoy/$(basename "$MUSE_STAGING")"; mkdir -p "$(dirname "$MUSE_DECOY")"; printf preserve-me > "$MUSE_DECOY"
@@ -205,7 +211,7 @@ check 'hostile provider package is rejected before a turn' "cd '$REPO' && ! eval
 cp "$ROOT/config/opencode-muse/opencode.json" "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json"
 PREP_LOG="$TMP/prepare-visible.log"; PREP_MARKER="$TMP/prepare-visible.marker"
 (cd "$REPO" && eval "$ENV AI_MUSE_TEST_PREPARE_MARKER='$PREP_MARKER' AI_MUSE_TEST_PREPARE_DELAY=3 '$SCRIPT' new prepare-visible --prompt test" >"$PREP_LOG" 2>&1) & PREP_PID=$!
-for _ in $(seq 1 100); do [ -s "$PREP_MARKER" ] && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -s "$PREP_MARKER" ] && break; sleep .1; done
 PREP_META="$(find "$TMP/state" -name 'codex--prepare-visible.json' -type f -print -quit)"
 check 'preparation cannot hang without visible durable state' "test -f '$PREP_META' && jq -e '.status==\"preparing\" and .turn_kind==\"new\" and .session_id==null' '$PREP_META' && grep -q 'Muse session started: prepare-visible' '$PREP_LOG' && grep -Fq 'State: $PREP_META' '$PREP_LOG'"
 wait "$PREP_PID"
@@ -280,8 +286,8 @@ check 'partly malformed output preserves a recoverable session' "cd '$REPO' && !
 check 'missing completion is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=nostop '$SCRIPT' new nostop --prompt test\""
 check 'provider timeout is rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_TIMEOUT=1 MUSE_STUB_MODE=slow '$SCRIPT' new timeout --prompt test\""
 SLOW_LOG="$TMP/slow.log"; SLOW_PROVIDER_PID="$TMP/slow-provider.pid"; (cd "$REPO" && eval "$ENV AI_MUSE_HEARTBEAT_INTERVAL=1 MUSE_STUB_MODE=slow MUSE_STUB_DELAY=8 MUSE_STUB_PID_FILE='$SLOW_PROVIDER_PID' '$SCRIPT' new visible-slow --prompt test" >"$SLOW_LOG" 2>&1) & SLOW_PID=$!
-for _ in $(seq 1 300); do [ -s "$SLOW_PROVIDER_PID" ] && break; sleep .1; done
-SLOW_META=""; for _ in $(seq 1 50); do SLOW_META="$(find "$TMP/state" -name 'codex--visible-slow.json' -type f -print -quit)"; [ -n "$SLOW_META" ] && jq -e '.status=="turn_in_progress" and (.worker_pid|type)=="number" and (.last_heartbeat_at|length)>0' "$SLOW_META" >/dev/null 2>&1 && break; sleep .1; done
+for _ in $(seq 1 "$(scale_ticks 300)"); do [ -s "$SLOW_PROVIDER_PID" ] && break; sleep .1; done
+SLOW_META=""; for _ in $(seq 1 "$(scale_ticks 50)"); do SLOW_META="$(find "$TMP/state" -name 'codex--visible-slow.json' -type f -print -quit)"; [ -n "$SLOW_META" ] && jq -e '.status=="turn_in_progress" and (.worker_pid|type)=="number" and (.last_heartbeat_at|length)>0' "$SLOW_META" >/dev/null 2>&1 && break; sleep .1; done
 check 'slow turn publishes durable in-progress state before completion' "test -f '$SLOW_META' && jq -e '.status==\"turn_in_progress\" and (.worker_pid|type)==\"number\" and (.last_heartbeat_at|length)>0' '$SLOW_META'"
 wait "$SLOW_PID"
 check 'new emits its session and exact state path before provider completion' "grep -q 'Muse session started: visible-slow' '$SLOW_LOG' && grep -Fq 'State: $SLOW_META' '$SLOW_LOG'"

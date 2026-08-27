@@ -99,11 +99,11 @@ case "$mode" in
   timeoutpartial)
     printf 'deadline interrupted work\n' > timeout-partial.txt
     printf '{"role":"assistant","content":"not terminal"}\n'
-    sleep 30 ;;
+    sleep "${AI_KIMI_TEST_SLOW_SECONDS:-30}" ;;
   interruptpartial)
     printf 'cancelled work\n' > interrupt-partial.txt
     while :; do sleep 1; done ;;
-  slow) sleep 30 ;;
+  slow) sleep "${AI_KIMI_TEST_SLOW_SECONDS:-30}" ;;
 esac
 exit 0
 STUBEOF
@@ -120,6 +120,55 @@ EOF
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ); }
+
+# --- measured timing budgets --------------------------------------------------
+# Every wait ceiling below is derived from one measured wrapper round trip
+# instead of a hard-coded constant. A constant that is generous on an idle CI
+# runner is a lost race on a loaded developer box, which is what made this suite
+# non-deterministic (see fix_test_ai.md). Floors keep the original tight values
+# on a fast machine, so no assertion becomes weaker than it was.
+BASELINE_REPO="$TMP/baseline-repo"; mkdir -p "$BASELINE_REPO"
+git -C "$BASELINE_REPO" init -q
+git -C "$BASELINE_REPO" config user.email t@example.com; git -C "$BASELINE_REPO" config user.name T
+git -C "$BASELINE_REPO" remote add origin https://example.invalid/test/baseline.git
+printf '.ai/reviews/\n' > "$BASELINE_REPO/.gitignore"; echo b > "$BASELINE_REPO/b.txt"
+git -C "$BASELINE_REPO" add -A; git -C "$BASELINE_REPO" commit -qm baseline
+# One representative wrapper round trip. Every ceiling below is derived from
+# it, so the suite adapts to the machine instead of asserting the machine is
+# fast. budget()/poll_until() and the baseline cap live in the shared library.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_baseline bash -c 'cd "$1" && AI_KIMI_WAIT_TIMEOUT=600 bash "$2" new timing-baseline --prompt x' _ "$BASELINE_REPO" "$SCRIPT"
+BASELINE="$AI_TEST_BASELINE"
+
+# How long a detached worker may take to acknowledge startup. This is a
+# property of the machine, not of the behaviour under test, so it scales
+# freely. Left at its 60s default it expired first on a loaded box and the
+# run died of "startup-timeout" before the wall deadline it exists to test
+# could ever fire - which also ended the first half of the concurrency
+# fixture early, so the duplicate it refuses was no longer concurrent.
+# This knob also bounds how long `cancel` waits for the worker to confirm, so
+# it has to cover the machine's worst case for BOTH starting a worker and
+# finishing one. It stays far above TIMEOUT_CEILING so the wall deadline under
+# test always fires first.
+export AI_KIMI_STARTUP_TIMEOUT="$(budget 20 60)"
+
+# The general-purpose ceiling for runs that are NOT testing timeout behaviour.
+export AI_KIMI_WAIT_TIMEOUT="$(budget 10 15)"
+# The ceiling for the cases that deliberately trip it.
+TIMEOUT_CEILING="$(budget 2 2)"
+# The shared `slow` stub keeps its original lifetime. Scaling it starves every
+# later fixture: a stub that outlives its job still holds the repository lock,
+# and the next `implement` then never registers a worktree owner. Only the one
+# case that races the wrapper's wall deadline gets a long-lived stub, and it
+# asks for it at its own call site.
+AI_KIMI_TEST_SLOW_SECONDS=30
+export AI_KIMI_TEST_SLOW_SECONDS
+# The wrapper counts its deadline in poll iterations, not wall-clock seconds, so
+# under load a ceiling of N takes appreciably more than N seconds to fire. The
+# stub for that one case must outlive the ceiling in the SAME distorted clock,
+# which a fixed margin cannot guarantee - hence a multiple.
+DEADLINE_STUB_SECONDS="$(( TIMEOUT_CEILING * 10 ))"
+[ "$DEADLINE_STUB_SECONDS" -lt 30 ] && DEADLINE_STUB_SECONDS=30
 
 echo "ai-kimi tests"
 
@@ -181,16 +230,27 @@ check "durable review classifies quota separately from authentication" "run stat
 check "quota failure preserves an incomplete no-verdict artifact" "p=\$(run status quota-review | jq -r .artifact_paths.canonical); test -f \"\$p\" && grep -q 'INCOMPLETE.*NO VERDICT' \"\$p\" && grep -q 'Usage limit reached' \"\$p\""
 echo ok > "$TMP/mode"
 echo slow > "$TMP/mode"
-AI_KIMI_WAIT_TIMEOUT=2 run start durable-timeout --prompt review >/dev/null
-AI_KIMI_WAIT_TIMEOUT=10 run wait durable-timeout >/dev/null 2>&1 || true
+AI_KIMI_TEST_SLOW_SECONDS="$DEADLINE_STUB_SECONDS" AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run start durable-timeout --prompt review >/dev/null
+AI_KIMI_WAIT_TIMEOUT="$(budget 10 10)" run wait durable-timeout >/dev/null 2>&1 || true
 check "durable wall deadline records timed-out" "run status durable-timeout | jq -e '.phase == \"timed-out\" and .terminal_reason == \"timed-out\"'"
-AI_KIMI_WAIT_TIMEOUT=30 run start durable-cancel --prompt review >/dev/null
-sleep 1
+DURABLE_TIMEOUT_STATUS="$(run status durable-timeout | jq -c '{phase,terminal_reason,exit_code}' 2>&1)"
+case "$DURABLE_TIMEOUT_STATUS" in *"\"timed-out\""*) ;;
+  *) printf '  diagnostic: durable-timeout status was %s\n' "$DURABLE_TIMEOUT_STATUS" >&2 ;;
+esac
+AI_KIMI_WAIT_TIMEOUT="$(budget 20 30)" run start durable-cancel --prompt review >/dev/null
+# The assertion below is that the cancel is worker-confirmed, so the worker has
+# to exist first. A fixed 1s sleep was a guess at how long registration takes.
+poll_until "$(budget 15 30)" 'the durable-cancel worker registered' \
+  "run status durable-cancel | jq -e '.phase == \"running\"'" || true
+CANCEL_START="$(date +%s)"
 CANCEL_OUT="$(run cancel durable-cancel 2>&1)"; CANCEL_RC=$?
+CANCEL_ELAPSED=$(( $(date +%s) - CANCEL_START ))
 if run status durable-cancel | jq -e '.phase == "cancelled" and .terminal_reason == "cancelled-by-user"' >/dev/null; then
   ok "durable cancel is worker-confirmed"
 else
-  bad "durable cancel is worker-confirmed"; printf '  diagnostic: rc=%s %s\n' "$CANCEL_RC" "$CANCEL_OUT"
+  bad "durable cancel is worker-confirmed"
+  printf '  diagnostic: cancel rc=%s returned after %ss (startup/confirm budget %ss, baseline %ss); status: %s\n' \
+    "$CANCEL_RC" "$CANCEL_ELAPSED" "$AI_KIMI_STARTUP_TIMEOUT" "$BASELINE" "$CANCEL_OUT" >&2
 fi
 CANCEL_SIDECAR="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--durable-cancel/cancel.request' -print -quit)"
 check "durable cancel keeps an atomic sidecar signal" "test -n '$CANCEL_SIDECAR' && test -f '$CANCEL_SIDECAR'"
@@ -215,7 +275,7 @@ echo ok > "$TMP/mode"
 # worker while leaving the Windows detached-launch contract to the dedicated
 # launch/path tests below; coupling both made this fixture depend on runner load.
 AI_KIMI_TEST_DIRECT_WORKER=1 AI_KIMI_TEST_FAIL_ARTIFACT=1 run start artifact-finalization-failure --prompt review >/dev/null
-AI_KIMI_WAIT_TIMEOUT=30 run wait artifact-finalization-failure >/dev/null 2>&1 || true
+AI_KIMI_WAIT_TIMEOUT="$(budget 20 30)" run wait artifact-finalization-failure >/dev/null 2>&1 || true
 ARTIFACT_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--artifact-finalization-failure/job.json' -print -quit)"
 check "worker-level artifact failure remains recovery-required" "jq -e '.phase==\"recovery-required\" and .terminal_reason==\"artifact-write-failed\"' '$ARTIFACT_FAIL_META'"
 check "worker emergency exit removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$ARTIFACT_FAIL_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
@@ -311,16 +371,32 @@ check "mode collision starts no provider turn" "test \"\$(wc -l < '$TMP/argv.txt
 
 echo "== same-name implementation concurrency =="
 echo slow > "$TMP/mode"; : > "$TMP/argv.txt"
-( cd "$REPO" && exec bash "$SCRIPT" implement same-name --prompt wait ) >/dev/null 2>&1 &
+( cd "$REPO" && exec bash "$SCRIPT" implement same-name --prompt wait ) >"$TMP/same-name.out" 2>&1 &
 SAME_PID=$!
-for _ in 1 2 3 4 5; do
-  find "$AI_KIMI_STATE_DIR/worktrees" -path '*/same-name/owner.json' -print -quit 2>/dev/null | grep -q . && break
+for _ in $(seq 1 "$(budget 5 10)"); do
+  find "$AI_KIMI_STATE_DIR/worktrees" -path '*-same-name/owner.json' -print -quit 2>/dev/null | grep -q . && break
   sleep 1
 done
+if ! find "$AI_KIMI_STATE_DIR/worktrees" -path '*-same-name/owner.json' -print -quit 2>/dev/null | grep -q .; then
+  {
+    printf '  fixture: the first same-name implementation never registered a worktree owner (baseline %ss); its output follows\n' "$BASELINE"
+    sed -n '1,40p' "$TMP/same-name.out" 2>/dev/null || true
+  } >&2
+fi
+# The owner record is written BEFORE the provider is launched, so waiting only
+# for it captures the baseline too early: the first run then invokes the stub
+# and its own turn is miscounted as a second one. The precondition for "no
+# SECOND provider turn" is that the FIRST turn has already started.
+poll_until "$(budget 5 10)" 'the first same-name run started its provider turn' \
+  "test \"\$(wc -l < '$TMP/argv.txt')\" -ge 1" || true
 SAME_ARGV="$(wc -l < "$TMP/argv.txt")"
 OUT="$(run implement same-name --prompt duplicate 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "same-name concurrent implementation is refused" || bad "same-name concurrent implementation is refused"
 check "concurrent refusal starts no second provider turn" "test \"\$(wc -l < '$TMP/argv.txt')\" -eq '$SAME_ARGV' && printf '%s' \"\$OUT\" | grep -q 'already active'"
+case "$OUT" in
+  *"already active"*) ;;
+  *) printf '  diagnostic: duplicate implement rc=%s argv %s->%s, output: %s\n' "$RC" "$SAME_ARGV" "$(wc -l < "$TMP/argv.txt")" "$OUT" >&2 ;;
+esac
 kill -TERM "$SAME_PID" 2>/dev/null || true; wait "$SAME_PID" 2>/dev/null || true
 check "concurrency test leaves no disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 echo ok > "$TMP/mode"
@@ -390,7 +466,7 @@ done
 check "ten-turn conversation keeps exact identity and one state record" "jq -e '.generation==10 and .turns==10 and .kimi_session_id==\"session_35e1a0a2-139f-4095-afdd-fce90a32ed2d\"' '$META' && test \"\$(find '$AI_KIMI_STATE_DIR/sessions' -path '*/claude--persistent1.d/metadata.json' | wc -l)\" -eq 1"
 check "ten-turn conversation leaves one registered worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 echo continuationpartial > "$TMP/mode"
-OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run ask persistent1 --prompt 'fail after prior proven work' 2>&1)"; RC=$?
+OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run ask persistent1 --prompt 'fail after prior proven work' 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "failed continuation remains unsuccessful" || bad "failed continuation remains unsuccessful"
 TURN_PATCH="$(ls -t "$REPO"/.ai/reviews/kimi-persistent1-*.turn.incomplete.patch 2>/dev/null | head -1)"
 CUM_PATCH="$(ls -t "$REPO"/.ai/reviews/kimi-persistent1-*.incomplete.patch 2>/dev/null | grep -v '\.turn\.' | head -1)"
@@ -405,10 +481,12 @@ check "delete cleans hash-mismatched state but keeps human artifacts" "test ! -e
 echo slow > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" implement implinterrupt --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!
-for _ in 1 2 3 4 5; do
+for _ in $(seq 1 "$(budget 5 10)"); do
   find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null | grep -q . && break
   sleep 1
 done
+find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null | grep -q . || \
+  printf '  fixture: the implinterrupt run never registered a worktree owner before the interrupt (baseline %ss)\n' "$BASELINE" >&2
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "implement interrupt removes worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
@@ -417,7 +495,7 @@ echo ok > "$TMP/mode"
 
 echo "== incomplete implementation recovery =="
 echo usagepartial > "$TMP/mode"
-OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run implement usagepartial --prompt 'private prompt marker DO-NOT-LEAK-731' 2>&1)"; RC=$?
+OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement usagepartial --prompt 'private prompt marker DO-NOT-LEAK-731' 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "usage limit with changes returns nonzero" || bad "usage limit with changes returns nonzero"
 IPATCH="$(ls "$REPO"/.ai/reviews/kimi-usagepartial-*.incomplete.patch 2>/dev/null | head -1)"
 IREPORT="$(ls "$REPO"/.ai/reviews/kimi-usagepartial-*.incomplete.md 2>/dev/null | head -1)"
@@ -436,7 +514,7 @@ check "incomplete export cleans worktree" "test \"\$(git -C '$REPO' worktree lis
 check "incomplete export cleans owner record" "! find '$AI_KIMI_STATE_DIR/worktrees' -name owner.json -print -quit 2>/dev/null | grep -q ."
 
 echo networkpartial > "$TMP/mode"
-OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run implement networkpartial --prompt x 2>&1)"; RC=$?
+OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement networkpartial --prompt x 2>&1)"; RC=$?
 NPATCH="$(ls "$REPO"/.ai/reviews/kimi-networkpartial-*.incomplete.patch 2>/dev/null | head -1)"
 NREPORT="$(ls "$REPO"/.ai/reviews/kimi-networkpartial-*.incomplete.md 2>/dev/null | head -1)"
 [ $RC -ne 0 ] && ok "network failure with changes returns nonzero" || bad "network failure with changes returns nonzero"
@@ -445,14 +523,14 @@ check "generic report excludes raw provider text" "! grep -q 'provider connectio
 
 echo failednochange > "$TMP/mode"
 BEFORE_PATCHES="$(find "$REPO/.ai/reviews" -name '*.incomplete.patch' | wc -l)"
-OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run implement failednochange --prompt x 2>&1)"; RC=$?
+OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement failednochange --prompt x 2>&1)"; RC=$?
 AFTER_PATCHES="$(find "$REPO/.ai/reviews" -name '*.incomplete.patch' | wc -l)"
 [ $RC -ne 0 ] && ok "failure before changes returns nonzero" || bad "failure before changes returns nonzero"
 [ "$BEFORE_PATCHES" = "$AFTER_PATCHES" ] && ok "failure before changes creates no empty patch" || bad "failure before changes creates no empty patch"
 check "failure before changes is named" "printf '%s' \"\$OUT\" | grep -q 'failed before changes'"
 
 echo timeoutpartial > "$TMP/mode"
-OUT="$(AI_KIMI_WAIT_TIMEOUT=2 run implement timeoutpartial --prompt x 2>&1)"; RC=$?
+OUT="$(AI_KIMI_TEST_SLOW_SECONDS="$DEADLINE_STUB_SECONDS" AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement timeoutpartial --prompt x 2>&1)"; RC=$?
 TPATCH="$(ls "$REPO"/.ai/reviews/kimi-timeoutpartial-*.incomplete.patch 2>/dev/null | head -1)"
 TREPORT="$(ls "$REPO"/.ai/reviews/kimi-timeoutpartial-*.incomplete.md 2>/dev/null | head -1)"
 [ $RC -ne 0 ] && ok "timeout with changes returns nonzero" || bad "timeout with changes returns nonzero"
@@ -461,11 +539,13 @@ check "timeout exports incomplete patch" "test -s '$TPATCH' && grep -q 'Terminal
 echo interruptpartial > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" implement interruptpartial --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!
-for _ in 1 2 3 4 5; do
+for _ in $(seq 1 "$(budget 5 10)"); do
   OWNER="$(find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null)"
   [ -n "$OWNER" ] && [ -f "$(jq -r .worktree "$OWNER")/interrupt-partial.txt" ] && break
   sleep 1
 done
+{ [ -n "$OWNER" ] && [ -f "$(jq -r .worktree "$OWNER" 2>/dev/null)/interrupt-partial.txt" ]; } || \
+  printf '  fixture: interruptpartial never wrote its partial file before the interrupt (baseline %ss)\n' "$BASELINE" >&2
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 CPATCH="$(ls "$REPO"/.ai/reviews/kimi-interruptpartial-*.incomplete.patch 2>/dev/null | head -1)"
@@ -476,7 +556,7 @@ check "interrupt with changes cleans worktree" "test \"\$(git -C '$REPO' worktre
 echo "== incomplete artifact failure safety =="
 for failure in destination move; do
   echo usagepartial > "$TMP/mode"
-  OUT="$(AI_KIMI_WAIT_TIMEOUT=2 AI_KIMI_TEST_FAIL_EXPORT="$failure" run implement "exportfail-$failure" --prompt x 2>&1)"; RC=$?
+  OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" AI_KIMI_TEST_FAIL_EXPORT="$failure" run implement "exportfail-$failure" --prompt x 2>&1)"; RC=$?
   [ $RC -ne 0 ] && ok "$failure export failure returns nonzero" || bad "$failure export failure returns nonzero"
   OWNER="$(find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null)"
   WT="$(jq -r .worktree "$OWNER" 2>/dev/null)"
