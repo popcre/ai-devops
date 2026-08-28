@@ -4,6 +4,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-de
 PASS=0; FAIL=0; SKIP=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+
+# Timing budgets are measured, not guessed: a constant that is generous on an
+# idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md
+# and tests/lib-test-timing.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
 skip() { printf '  skip %s\n' "$1"; SKIP=$((SKIP+1)); }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -78,7 +84,7 @@ check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role
 history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
 rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
 (cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
-for _ in $(seq 1 100); do [ -d "$history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
 kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
 check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
 provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"

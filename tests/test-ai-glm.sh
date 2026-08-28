@@ -12,6 +12,18 @@ ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
+# Timing budgets are measured, not guessed: a constant that is generous on an
+# idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md
+# and tests/lib-test-timing.sh.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
+ai_test_measure_spawn_baseline
+# The startup deadline the wrapper must obey, and the wall-clock bound that
+# proves it aborted instead of blocking. Both scale together, so the ratio the
+# assertion depends on (wall = 2.5x deadline) is preserved exactly.
+GLM_START_DEADLINE="$(budget 2 2)"
+GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
+[ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
+
 TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -165,24 +177,24 @@ READY_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=3 AI_DEVOPS_CON
   systemctl(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 3 ]; }
   cmd_server start' 2>&1)"; READY_RC=$?
 [ "$READY_RC" -eq 0 ] && printf '%s' "$READY_OUT" | grep -q 'started and healthy' && ok "Linux start waits through delayed readiness" || bad "Linux start waits through delayed readiness"
-NEVER_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+NEVER_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
   source "$AI_GLM_SOURCE"; IS_WINDOWS=0
   systemctl(){ [ "${1:-}" != --user ] || return 0; }; sleep(){ :; }; server_up(){ return 1; }
   cmd_server start' 2>&1)"; NEVER_RC=$?
 [ "$NEVER_RC" -ne 0 ] && printf '%s' "$NEVER_OUT" | grep -q 'did not become healthy' && printf '%s' "$NEVER_OUT" | grep -q 'ai-glm server start' && ok "Linux start fails bounded with recovery guidance" || bad "Linux start fails bounded with recovery guidance"
 BLOCK_START="$(date +%s)"
-BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
   source "$AI_GLM_SOURCE"; IS_WINDOWS=0
   server_up(){ sleep "${1:-30}"; return 1; }
   wait_for_server_health blocked-health' 2>&1)"; BLOCK_RC=$?; BLOCK_ELAPSED=$(( $(date +%s) - BLOCK_START ))
-[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt 5 ] && printf '%s' "$BLOCK_OUT" | grep -q 'within 2s' && ok "blocking health probes obey the real startup deadline" || bad "blocking health probes obey the real startup deadline"
+[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt "$GLM_START_WALL" ] && printf '%s' "$BLOCK_OUT" | grep -q "within ${GLM_START_DEADLINE}s" && ok "blocking health probes obey the real startup deadline" || bad "blocking health probes obey the real startup deadline"
 BLOCK_START="$(date +%s)"
-BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+BLOCK_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
   source "$AI_GLM_SOURCE"; IS_WINDOWS=0
   server_up(){ sleep "${1:-30}"; return 1; }; systemctl(){ :; }
   cmd_server start' 2>&1)"; BLOCK_RC=$?; BLOCK_ELAPSED=$(( $(date +%s) - BLOCK_START ))
-[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt 5 ] && printf '%s' "$BLOCK_OUT" | grep -q 'within 2s' && ok "complete start operation shares one startup deadline" || bad "complete start operation shares one startup deadline"
-WIN_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+[ "$BLOCK_RC" -ne 0 ] && [ "$BLOCK_ELAPSED" -lt "$GLM_START_WALL" ] && printf '%s' "$BLOCK_OUT" | grep -q "within ${GLM_START_DEADLINE}s" && ok "complete start operation shares one startup deadline" || bad "complete start operation shares one startup deadline"
+WIN_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
   source "$AI_GLM_SOURCE"; IS_WINDOWS=1; n=0
   schtasks(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 2 ]; }
   cmd_server start' 2>&1)"; WIN_RC=$?
@@ -428,7 +440,7 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
   return "$impl_rc"
 }
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
-wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
+wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt "$(scale_ticks 100)" ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
 
 READY="$TMP/record-ready"; RELEASE="$TMP/record-release"
 run_fake_impl exclusive record "$READY" "$RELEASE" >"$TMP/exclusive.out" 2>&1 & exclusive_pid=$!
@@ -637,7 +649,10 @@ if [ "${AI_GLM_LIVE:-0}" = "1" ]; then
   "$AI_GLM" ask live-probe --prompt "Without re-reading any file, repeat that value." >"$TMP/r2" 2>&1
   check "session remembered the value"      "grep -q 'quartz-badger-4417' '$TMP/r2'"
 
-  "$AI_GLM" server restart >/dev/null && sleep 12
+  "$AI_GLM" server restart >/dev/null
+  # Wait for the restarted server to answer instead of guessing twelve seconds.
+  poll_until "$(budget 12 30)" 'the restarted GLM server became healthy' \
+    "'$AI_GLM' doctor >/dev/null 2>&1" || true
   "$AI_GLM" ask live-probe --prompt "Once more, from memory only: the value?" >"$TMP/r3" 2>&1
   check "context survived a server restart" "grep -q 'quartz-badger-4417' '$TMP/r3'"
 
