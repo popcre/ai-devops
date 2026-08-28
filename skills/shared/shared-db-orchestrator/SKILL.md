@@ -17,6 +17,23 @@ Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep t
 - Gate outside-sourced writes into curated Master Data.
 - Use `shared-db-handover` to stop or close the session.
 
+## Operational blockers are orchestration work
+
+Never sit silently idle behind a blocker. Resolving it is part of orchestration,
+even when the repair belongs to repo maintenance, documentation, tooling, or
+another repository. Immediately start the appropriate separate task or session;
+do not perform non-structural work in the orchestrator context. Keep every
+independent structural stream moving, disclose the blocker and owner-facing
+consequence immediately, and follow the repair task until the capability is
+restored. Record any required owner authorization at once in plain business
+language with one exact request; never park it silently.
+
+Treat reviewer, allocator, tooling, and rate-limit failures as urgent operational
+blockers. Preserve the capability, use bounded API calls, read the provider's
+rate-limit status, and report the reset time in Eastern Time. Do not repeatedly
+invoke a path already known to be unsafe. The reviewer-allocator redesign is
+tracked in [u2giants/shared-db#1767](https://github.com/u2giants/shared-db/issues/1767).
+
 ## The admission test — protect your own context window (AGENTS.md 0.0-C)
 
 Before opening, accepting, or acting on ANY item, ask one question: **does this change the SHAPE
@@ -112,8 +129,15 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
 - Keep preview application, PR merges and production promotion strictly one at a time.
 - Do not count read-only analysis, application code, tests or planning against the author lanes.
+- Distinguish an actively running author from a reserved claim. Claims protect
+  objects and versions; they are never reported as working slots without live
+  worker evidence.
 - Maintain one dynamic queue per lane, grouped by exact object overlap. Recompute them after every merge.
-- Refill every free lane in the same turn. Never wait for Albert to request status or say start.
+- When any author lane frees, run a live queue audit immediately. Close stale
+  already-delivered issues instead of duplicating them, then dispatch the next
+  genuinely eligible issue in an isolated worktree. Maintain explicit successor
+  queues and report truthfully when no eligible successor exists. Never wait for
+  Albert to request status or say start.
 - Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
 - Skip every other status, work type, and route. Never infer a route from `db-work` or `needs-albert` labels.
 - Classify every new or successor issue from its own requested work. Never
@@ -207,7 +231,7 @@ accept `material_access_change`" is not.
 
 ## Owner decisions
 
-Ask Albert one question at a time in plain business English when business judgment is required. Name the recommendation and a short acceptable answer range. Do not ask him to manage branches, PRs or claims.
+Ask Albert one question at a time in plain business English when business judgment is required. Name the recommendation and one exact request. Disclose it immediately with the business consequence; never silently park it. Do not ask him to manage branches, PRs or claims.
 
 `needs-albert` and `status: owner-decision` identify who must answer, not who owns
 the eventual work. Record work type and route before asking. After Albert answers,
