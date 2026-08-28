@@ -84,7 +84,7 @@ from Codex**; it defaults to `claude`, so without this both clients collide on o
 - The wrapper appends a formatting instruction asking Grok to put its conclusion under a
   `## Verdict` heading, and extracts from there. You do not need to ask for that.
 
-## Run a bounded debate
+## Run a debate to convergence
 
 Use `templates/delegation/debate-turn.md` as the one provider-neutral message contract.
 Run `ai-grok-review list`, reuse the exact named session with `ask`, and keep its opening
@@ -93,18 +93,38 @@ point to the current plan or diff, add only changed evidence and objections, and
 Grok to re-read those paths before checking each claim as confirmed, unsupported, or
 wrong. Keep the consensus ledger in the artifact current.
 
-The default bound is the initial review plus at most three rebuttal turns. The default
-total Grok ceiling is $1.50, including the initial turn. The parent skill enforces this
-planning ceiling; the wrapper cannot stop a turn mid-spend. Measured on Grok 0.2.112 on
-2026-08-10, resumed `total_cost_usd` is per-call, not cumulative. Add the reported value
-after every turn exactly once. Estimate the next turn using the largest observed
-per-turn cost in this session, or $0.46 before the first resume. Stop before the estimate
-would cross the ceiling and report unresolved objections plainly.
+Run as many review and rebuttal turns as the disagreement needs.
+There is no fixed round limit and no fixed dollar ceiling. Ordinary disagreement,
+rejection, the number of turns already spent, or
+accumulated cost is never by itself a reason to stop a debate that is still producing
+new evidence.
 
-Stop early only when Grok has re-read the current files and evidence and says no material
-objection remains. Also stop at the turn bound or cost ceiling. Agreement by itself is
-not consensus. Never broaden permissions, change the frozen prefix, start a new session,
-or run an unbounded loop to force convergence.
+Measured on Grok 0.2.112 on 2026-08-10, resumed `total_cost_usd` is per-call, not
+cumulative. Add the reported value after every turn exactly once and report the running
+total, so cost stays visible even though it is not a stopping condition.
+
+### When to stop
+
+Stop when either of these is true:
+
+1. **Consensus.** Grok has re-read the current files and evidence and says no material
+   objection remains. Agreement by itself is not consensus.
+2. **Quality degradation.** Grok's answers are no longer trustworthy. Stop on any of
+   these observable signals, and say which one you saw:
+   - it cites a file, line, function, test, or commit that does not exist, or describes
+     content that the path does not contain;
+   - it repeats a claim already shown to be unsupported or wrong, without new evidence;
+   - it contradicts itself within a turn, or reverses a position without explanation;
+   - it stops engaging with the specific paths and objections put to it, and answers
+     generically instead;
+   - it returns an empty, truncated, or off-topic answer, or restates the brief back
+     instead of reviewing;
+   - successive turns add no new evidence, objection, or correction.
+
+At either stop, report unresolved objections plainly along with the round count and the
+total cost. Never broaden permissions, change the frozen prefix, start a new session, or
+run an unattended loop to force convergence; each turn is a deliberate call you make
+after reading the previous answer.
 
 ## Reading the result
 
