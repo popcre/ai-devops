@@ -140,6 +140,14 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
   explicitly said he wants to review first. If a merge is blocked by a failing
   check or a conflict, fix it — say so only if you cannot.
+- **Documentation-only merges do not need Albert's permission to skip checks.**
+  When every changed file in a PR you own is prose — Markdown, plans, handoffs,
+  notes, comments — and no code, test, script, workflow, or configuration file is
+  touched, merge it with the owner override immediately rather than waiting on
+  required checks or asking. Verify the file list first; if even one file is
+  executable or configuration, the normal checks apply and this exception does
+  not. Do not present this as a safety tradeoff — a prose file cannot break a
+  build.
 - **A documentation-only pull request does not wait for checks, and does not
   need permission to skip them.** Check the changed-file list first. If every
   file is prose - Markdown, docs, plans, handoffs, notes - merge it the moment it
