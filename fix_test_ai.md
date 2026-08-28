@@ -181,6 +181,22 @@ had. They are released explicitly by the test, so a wide ceiling costs nothing.
 baseline - it is *not* a fast machine, and the assumption that CI always sits at
 the ceiling floors is wrong.
 
+### 3.4c A fixture wait that fell through instead of waiting (issue #148, Muse)
+
+Two `test-ai-muse.sh` interrupt checks failed on `main` on an idle machine and
+were reported as a probable race in the `ai-muse` shutdown path. They were not.
+Every fixture wait in that suite polled a baseline-scaled ceiling and then
+**continued regardless**, so on a slow run the signal was delivered before the
+fixture reached the state the check was about, and the suite blamed the wrapper.
+
+A ceiling alone cannot tell "the worker is still working" apart from "the worker
+died". The eleven waits now use `poll_worker_until PID CEILING WHAT COND` in
+`tests/lib-test-timing.sh`: the background worker responsible for producing the
+state is the moving signal, so the wait returns as soon as that worker exits,
+keeps waiting while it lives, and prints a distinct `fixture:` line on stderr
+naming which of the two happened. No ceiling was raised and no check was
+weakened.
+
 ### 3.5 Two quantities sharing one knob
 
 This pattern caused three separate regressions while fixing the above, and is
