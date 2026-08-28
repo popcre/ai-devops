@@ -1,6 +1,7 @@
 ---
 name: sesame-workshop-scrape
 description: Capture, refresh, validate, or interpret Sesame Workshop source data from the NetX TheLetterA portal. Use for Sesame brands, characters, style guides, art styles, asset metadata, NetX fields, category or asset IDs, and asserted relationships.
+disable-model-invocation: true
 ---
 
 # Sesame Workshop "TheLetterA" portal

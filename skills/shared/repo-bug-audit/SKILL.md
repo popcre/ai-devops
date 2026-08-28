@@ -1,6 +1,7 @@
 ---
 name: repo-bug-audit
 description: Audit an entire codebase for bugs, inefficient or poor code, and AI implementation problems. Use for "read the entire codebase", "audit the repo", broad quality reviews, or context and prompt-caching correctness. Writes bugs.md.
+disable-model-invocation: true
 ---
 
 # repo-bug-audit

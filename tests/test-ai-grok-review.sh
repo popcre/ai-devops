@@ -732,7 +732,11 @@ poll_until_progress "$(budget 15 30)" 'both named ask turns hold their own sessi
   "ai_test_fingerprint '$AI_GROK_STATE_DIR/locks' '$TMP/ask-a.err' '$TMP/ask-b.err' '$TMP/ask-a.out' '$TMP/ask-b.out'" \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
-DUP_ASK="$(run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
+# The duplicate needs the same wide ceiling as the turns it must lose to. It
+# builds its own review packet BEFORE reaching the lock check, so on a slow
+# runner a normal ceiling fires first and it reports a timeout instead of the
+# refusal - failing this check for a reason that is not a wrapper defect.
+DUP_ASK="$(AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
 check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"

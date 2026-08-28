@@ -36,6 +36,7 @@ which also records the rule that this machine hosts either the CI checks or a
 local series, never both. Read that file and
 `tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md` together;
 they are the evidence any later claim of "fixed" must be measured against.
+
 **Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`, and — after
 a sweep — `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-muse.sh`,
 `tests/test-ai-gemini.sh`, `tests/test-ai-qwen.sh`, `tests/test-ai-glm.sh`.

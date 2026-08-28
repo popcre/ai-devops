@@ -1,6 +1,7 @@
 ---
 name: design-handoff-implement
 description: Implement an attached Claude Design handoff zip in the real app. Use for "read the README in this zip", "recreate these screens", or "implement the design" in DesignFlow or POP React applications.
+disable-model-invocation: true
 ---
 
 # design-handoff-implement

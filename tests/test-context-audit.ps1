@@ -213,6 +213,32 @@ try {
     if ($strictBaseline.exit -ne 0) { throw "Strict mode failed on a clean fixture: $($strictBaseline.stderr)" }
     Write-Host "PASS: baseline classification, stable output, manifests, parity, safety markers, secret exclusions"
 
+    # ------------------------------------- manual-only skills leave the manifest
+    # A skill marked disable-model-invocation is not listed at startup, so it must
+    # not be charged to the manifest budget - but it must still be reported, so the
+    # saving is visible rather than silent.
+    $shared = Join-Path $fixture "skills\shared\sample\SKILL.md"
+    $before = (Invoke-Audit -Path $fixture -Strict).report
+    $body = Get-Content -LiteralPath $shared -Raw
+    $body = $body -replace "description: ", "disable-model-invocation: true`ndescription: "
+    Write-Utf8 $shared $body
+    $after = (Invoke-Audit -Path $fixture -Strict).report
+    if ($after.exit -eq 1) { throw "A manual-only skill failed the audit." }
+    if ($after.skillManifest.claude.skills -ge $before.skillManifest.claude.skills) {
+        throw "A manual-only skill was still counted in the Claude startup manifest."
+    }
+    if ($after.skillManifest.codex.skills -ge $before.skillManifest.codex.skills) {
+        throw "A manual-only skill was still counted in the Codex startup manifest."
+    }
+    if ($after.skillManifest.claude.bytes -ge $before.skillManifest.claude.bytes) {
+        throw "A manual-only skill did not reduce the Claude manifest budget."
+    }
+    if (@($after.manualOnlySkills).Count -ne 1) {
+        throw "The manual-only skill was hidden instead of reported: $($after.manualOnlySkills -join ', ')"
+    }
+    New-AuditFixture -Path $fixture
+    Write-Host "PASS: a manual-only skill leaves the startup manifest, is still reported, and never fails the audit"
+
     # ------------------------------------------------- safety marker removal
     foreach ($category in $safetyLines.Keys) {
         New-AuditFixture -Path $fixture -OmitSafety @($category)

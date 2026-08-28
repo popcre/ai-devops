@@ -55,6 +55,76 @@ global-versus-skill-description overlaps. Always-loaded global text measures
 15,980 bytes, still over the 12,449-byte warning budget that predates this
 change.
 
+## Skill index ratchet on 2026-08-27
+
+Albert asked where his tokens were going. Ten days of transcripts from
+`edge-dev` (338 Claude Code sessions, 441 Codex sessions, 17-27 August 2026)
+were read end to end from the archive in `u2giants/ai-devops-transcripts`,
+using the usage records inside the transcripts rather than an estimate.
+
+Two findings mattered.
+
+**Session length dominates everything else.** Turns past number 200 were 40% of
+all activity but 66% of all input tokens; turns past 400 were 19% of activity
+and 40% of tokens, at an average 488,000 tokens of context each. Fifty-nine
+sessions (17% of the total) carried 73% of all turns, and they almost never
+compacted, because a very large context window means nothing forces a reset.
+Two fixes follow. `autoCompactEnabled` and `autoCompactWindow: 200000` in
+`~/.claude/settings.json` cap the growth automatically. `bin/ai-claude-statusline`
+covers the judgement call the setting cannot: it renders a context gauge and a
+live turn count that goes amber at 150 turns and red at 250, so the moment to
+hand off to a fresh session is visible rather than guessed. `statusLine` takes
+an object, not a string, and the command runs through Git Bash on Windows, so
+the path needs forward slashes or the `~` shorthand. Wire it up with
+`"statusLine": {"type": "command", "command": "ai-claude-statusline"}` and
+restart Claude Code fully - the setting is only read at startup.
+
+**Tool traffic is most of what accumulates.** Of the conversation body across
+all 338 sessions - 54.2 MB of message content - tool results are 46.9% and the
+tool calls that produced them are another 36.2%. Assistant prose is 10.9% and
+Albert's own messages 6.1%. So roughly **83% of what a session accumulates is
+tool traffic**, and that is the part Headroom compresses.
+
+An earlier draft of this analysis put tool output at 0.07% and concluded that
+Headroom could not help. That was an arithmetic error - unique tool-output bytes
+were compared against total re-read tokens, which counts the same content once
+on one side and once per turn on the other. Corrected, the measurement supports
+the Headroom trial rather than undermining it, and is consistent with the 13.2%
+single-session and 5.7% lifetime savings recorded in
+[`headroom.md`](headroom.md). Nothing in that trial's standing decision changes
+on this evidence.
+
+What *is* a repository problem is the skill index. Of 46 installed skills, 23
+were invoked in the ten-day window. Fourteen of the unused ones are rare
+procedures - portal scrapers, one-off audits, and new-project rituals - that
+Albert only ever starts deliberately. Each now carries
+`disable-model-invocation: true` in its frontmatter, which keeps it out of the
+startup skill listing entirely.
+
+Nothing was moved, renamed, or deleted. A manual-only skill is still installed,
+still appears in the slash-command menu, and still runs in full when invoked by
+name. To put one back in the automatic index, delete its
+`disable-model-invocation` line and reinstall. The fourteen are:
+`ai-development-pipeline`, `cicd-rules-audit`, `design-handoff-implement`,
+`designflow-human-qa`, `human-app-qa`, `item-description-taxonomy`,
+`licensor-incremental-capture`, `new-app-setup`,
+`paramount-creative-library-scrape`, `peanuts-scrape`, `repo-bug-audit`,
+`repo-docs-overhaul`, `sesame-workshop-scrape`, `strawberry-shortcake-scrape`.
+
+Measured: Claude skill manifest 15,293 -> 11,091 bytes (about 3,824 -> 2,773
+tokens, a 27% cut); Codex manifest 13,214 -> 10,595 bytes, which clears the
+Codex manifest budget warning that had been standing at 310 bytes over. The
+audit now excludes manual-only skills from both manifests and reports their
+count on its own line, so the saving is visible rather than silent - a skill
+that leaves the budget must never leave the report. `tests/test-context-audit.ps1`
+covers this and fails if a manual-only skill is still charged to a manifest.
+
+The remaining ten unused skills were left in the automatic index on purpose.
+They are the workflow and safety rituals - shipping, deploying, closing out,
+handing off, and the Synology procedures - where automatic triggering is what
+enforces the rule. Trading a governed procedure for about a thousand tokens a
+turn is the wrong trade.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at

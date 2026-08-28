@@ -592,6 +592,7 @@ def run(args: argparse.Namespace) -> dict:
     duplicate_names: dict[str, list[str]] = defaultdict(list)
     duplicate_paragraphs: dict[str, list[str]] = defaultdict(list)
     manifests = {"claude": [], "codex": []}
+    manual_only_skills: list[str] = []
     for relative in names:
         match = SKILL_RE.match(relative)
         if not match:
@@ -608,8 +609,16 @@ def run(args: argparse.Namespace) -> dict:
         duplicate_names[name].append(relative)
         for paragraph in paragraphs(text):
             duplicate_paragraphs[hashlib.sha256(paragraph.encode()).hexdigest()].append(relative)
-        for client in ("claude", "codex") if source_client == "shared" else (source_client,):
-            manifests[client].append({"name": name, "description": description, "source": relative})
+        # A skill marked disable-model-invocation stays out of the startup skill
+        # listing entirely: it costs zero context until Albert invokes it by name.
+        # It is still installed and still discoverable in the slash-command menu,
+        # so exclude it from the manifest budget rather than from the audit.
+        manual_only = str(meta.get("disable-model-invocation", "")).strip().lower() == "true"
+        if manual_only:
+            manual_only_skills.append(relative)
+        else:
+            for client in ("claude", "codex") if source_client == "shared" else (source_client,):
+                manifests[client].append({"name": name, "description": description, "source": relative})
         markdown_paths.append(path)
 
     manifest_report = {}
@@ -682,6 +691,7 @@ def run(args: argparse.Namespace) -> dict:
         "files": sorted(files, key=lambda item: item["path"]),
         "skills": sorted(skill_records, key=lambda item: item["path"]),
         "skillManifest": manifest_report,
+        "manualOnlySkills": sorted(manual_only_skills),
         "duplicateSkillNames": [
             {"name": name, "sources": sources}
             for name, sources in sorted(duplicate_names.items()) if len(sources) > 1
@@ -719,6 +729,10 @@ def summary(report: dict) -> str:
     for client in ("claude", "codex"):
         item = report["skillManifest"][client]
         lines.append(f"{client} skill manifest: {item['skills']} skills, {item['bytes']} bytes, about {item['estimatedTokens']} tokens")
+    if report.get("manualOnlySkills"):
+        lines.append(
+            f"manual-only skills (not in any startup manifest): {len(report['manualOnlySkills'])}"
+        )
     effective = report["effectiveInstalledGlobals"]
     if effective["requested"]:
         if effective["complete"]:

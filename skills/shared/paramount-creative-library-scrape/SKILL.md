@@ -1,6 +1,7 @@
 ---
 name: paramount-creative-library-scrape
 description: Inspect, reconcile, or capture Paramount Creative Library metadata. Use for Paramount portal scraping, refresh, validation, properties, franchises, collections, style guides, characters, asset IDs, pagination, source relationships, or database mapping.
+disable-model-invocation: true
 ---
 
 # Paramount Creative Library scrape

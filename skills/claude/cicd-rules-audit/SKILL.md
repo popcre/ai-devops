@@ -1,6 +1,7 @@
 ---
 name: cicd-rules-audit
 description: Audit a repo's CI/CD against Albert's operating rules (GitHub = code truth, GHCR = artifacts, Coolify = runtime config, no SSH deploys, single-branch main). Use when the user pastes the "CI/CD/DevOps Operating Rules", asks "does this conform to our ci/cd pipeline rules", or requests CI/Coolify hardening.
+disable-model-invocation: true
 ---
 
 # cicd-rules-audit
