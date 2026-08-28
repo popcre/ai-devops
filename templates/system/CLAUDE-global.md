@@ -108,13 +108,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `shared-db-change` for the full procedure.
-  A shared-db orchestrator never sits silently idle behind an operational
-  blocker. It immediately starts and follows the appropriate separate repair
-  session, keeps independent structural work moving, and explains the blocker,
-  its business consequence, and any owner authorization needed immediately.
-  Reserved claims are not active workers. When an author lane frees, audit the
-  live queue, close stale delivered issues, and dispatch the next genuinely
-  eligible issue in an isolated worktree; say plainly when none exists.
+- **Shared-db orchestrator sessions only:** when opening or running the sole
+  orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
+  queue, reviewer, and owner-decision rules apply only in that context and stay
+  in the skill; do not load or copy them into ordinary sessions.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.
