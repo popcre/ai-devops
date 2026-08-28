@@ -32,7 +32,7 @@ Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](shared-db
 | 1. Freeze the old incentives and define the new outcome contract | ⬜ open | 2026-08-18 | Required edits and tests are in §9.1. |
 | 2. Replace three author lanes with the durable 1+1 delivery model | ⬜ open — **premise superseded 2026-08-25**, see the note above; the cap is now five and needs a fresh owner instruction before any 1+1 work | 2026-08-18 | Required manager behavior and race tests are in §9.2. |
 | 3. Add the read-only health audit and early delivery preflight | ⬜ open | 2026-08-18 | Required audit classes and fixtures are in §9.3. |
-| 4. Rewrite the shared-db and installed operating rules | ⬜ open | 2026-08-18 | Required source, router, and drift checks are in §9.4. |
+| 4. Rewrite the shared-db and installed operating rules | ⬜ open | 2026-08-28 | Required replacement remains in §9.4. The global templates now contain only a conditional pointer; the interim blocker-response, truthful-worker, and live-refill rules live in the orchestrator skill/manual. Do not mistake that bounded amendment for completing this step. |
 | 5. Prove the complete model in disposable fixtures | ⬜ open | 2026-08-18 | End-to-end scenarios are in §9.5. |
 | 6. Obtain exact-plan Grok and Kimi agreement and resolve every objection | ✅ done | 2026-08-18 | [`docs/shared-db-finish-first-plan-consensus-2026-08-18.md`](docs/shared-db-finish-first-plan-consensus-2026-08-18.md) records both named sessions, every objection/resolution, and both final `NO MATERIAL OBJECTION TO THE ENTIRE PLAN` verdicts. |
 | 7. Land, install, and activate the replacement safely | ⬜ open | 2026-08-18 | Landing and rollback gates are in §9.7. |

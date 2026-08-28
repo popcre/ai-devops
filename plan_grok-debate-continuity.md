@@ -58,6 +58,13 @@ Continuity at the CLI layer is good: explicit session ID, stable prefix, caller 
 
 ## 8. Design decisions
 
+**Superseded on 2026-08-28 by issue #151:** the fixed bound of three rebuttal turns
+and the $1.50 total ceiling below no longer apply. A Grok debate now runs for as many
+turns as it needs and stops only on evidence-backed consensus or on the observable
+quality-degradation signals listed in `skills/shared/grok-cli/SKILL.md`. Cost is still
+recorded and reported every turn, but is not a stopping condition. The rest of this
+paragraph is kept as the historical record.
+
 Locked on 2026-08-09: use the existing named session; exact file paths instead of pasted source; ordinary message text for relayed arguments; retain caller separation, read-only permissions, `--no-memory`, model pin, max turns, output/cost gates; bounded debate of initial review plus at most three rebuttal turns unless the user explicitly asks otherwise. Default total Grok debate ceiling is **$1.50**, including the initial turn. After every turn, add the reported `total_cost_usd`; estimate the next turn as the largest per-turn cost observed in that session, or $0.46 before the first resume. Stop if the estimate would exceed the ceiling and report unresolved objections. The live acceptance debate has a separate **$0.75** ceiling and may use fewer turns.
 
 Skill-only is the locked default. Do not change `bin/ai-grok-review` unless implementation first records a concrete missed-context failure that skill/template guidance cannot prevent and a measured benefit that outweighs a new wrapper surface.

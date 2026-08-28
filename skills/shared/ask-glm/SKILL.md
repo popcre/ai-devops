@@ -146,7 +146,7 @@ Run `ai-glm list` first and reuse the exact named session with `ask`. Use the sh
 bounded-convergence rule: initial review plus at most three rebuttal turns unless the user
 explicitly asks otherwise. Stop on evidence-backed consensus or the turn bound, and
 report unresolved objections rather than pretending agreement. GLM does not report money,
-so the Grok dollar ceiling in the shared workflow does not apply to GLM.
+so there is no cost figure to record for a GLM debate.
 
 ## Verify before you believe it
 

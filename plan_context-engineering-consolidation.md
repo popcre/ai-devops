@@ -1367,7 +1367,8 @@ The corrected plan was sent back to the same Grok session for a bounded
 consensus check. Grok re-read the plan and handoff, marked all six objections
 resolved, found no new conflict, and reported no remaining material objection.
 The follow-up used 300,046 tokens, 279,424 cached tokens, three turns, and cost
-`$0.1340952`. Total Grok review cost was `$0.5189288`, below the `$1.50` ceiling.
+`$0.1340952`. Total Grok review cost was `$0.5189288`, below the `$1.50` ceiling that applied at the
+time (removed on 2026-08-28 by issue #151).
 
 ### Kimi K3 implementation review
 

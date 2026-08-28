@@ -9,6 +9,7 @@
 5. Review and production
 6. Dynamic queues and automatic refill
 7. External review rotation
+8. Operational blocker recovery
 
 ## Startup recovery
 
@@ -97,9 +98,13 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
 components form serial queues; unrelated components fill the available lanes.
-Dispatch every `REFILL REQUIRED NOW` issue in the same turn. Do not ask Albert
-to approve dispatch. Ask only for a genuine owner decision or material business
-risk.
+Claims and permanent version reservations protect future work but are not active
+workers. Report a lane as working only when current worker evidence exists. When
+any author lane frees, run a live queue audit immediately, close stale issues
+whose outcome is already delivered, and dispatch the next genuinely eligible
+issue in an isolated worktree. Keep explicit successor queues, but say plainly
+when the audit proves no eligible successor exists. Do not ask Albert to approve
+dispatch.
 
 An empty lane is justified only by a complete audit with no eligible candidate.
 Unclassified or malformed issues make that proof impossible and the command
@@ -108,6 +113,24 @@ but never consume a lane. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
+
+## Operational blocker recovery
+
+An orchestrator must never sit silently idle when blocked. The blocker repair is
+part of orchestration even when its implementation is repo maintenance,
+documentation, tooling, reviewer infrastructure, or another repository. Start a
+separate appropriately scoped task immediately; never absorb non-structural work
+into the orchestrator context. Continue independent structural work, disclose
+the blocker and business consequence immediately, and follow the repair task
+until the original capability is restored.
+
+If Albert's authority is required, record it immediately in plain business
+language with one exact request and the consequence of waiting. Never silently
+park an owner decision. Reviewer, tooling, allocator, and rate-limit failures are
+urgent operational blockers: preserve capability, use bounded API calls, read
+and report the provider reset time in Eastern Time, and do not repeatedly invoke
+a path already known to be unsafe. The reviewer-allocator redesign blocker is
+[u2giants/shared-db#1767](https://github.com/u2giants/shared-db/issues/1767).
 
 ### Close what you supersede, in the same turn
 
