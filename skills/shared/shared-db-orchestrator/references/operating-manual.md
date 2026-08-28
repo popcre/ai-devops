@@ -41,7 +41,7 @@ records. Do not allocate while any malformed claim or lock exists.
 
 Albert's 2026-08-14 ruling allowed no more than three unrelated migration
 authors; he raised it to five on 2026-08-25. The manager acquires GitHub-backed
-object locks and one of `MAX_AUTHOR_LANES` fixed author slots across all
+object locks and one of `MAX_AUTHOR_LANES` renewable active-author slots across all
 computers. Read the constant in
 `scripts/manage-migration-author-lanes.mjs` rather than trusting a number
 written in prose. The cap is throughput only: isolation comes from the exact
@@ -59,9 +59,26 @@ node scripts/manage-migration-author-lanes.mjs --claim \
 
 The manager must include open draft and ready pull requests, paginate all GitHub
 reads, reject unreadable input, reserve a permanent unique migration version and
-return success only after lock read-back. Older claims count until adopted or
-explicitly released. A lease expiry is a warning, never permission to ignore its
-objects or author slot.
+return success only after lock read-back. Older claims protect their objects and
+versions until adopted or explicitly released. A lease expiry is a warning and
+releases neither object protection nor active-author capacity.
+
+When a durable external blocker stops a clean worktree and the claim holds no
+preview, merge, or production stage, relinquish only capacity:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
+  --claim <claim> --owner <owner> --blocked-on issue:#<blocker>
+```
+
+The protected claim remains in every collision calculation. After the blocker
+clears, resume through the guarded command; it renews the clock lease and
+rechecks active capacity, every collision, and the permanent version reservation:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
+  --claim <claim> --owner <owner> --lease-hours <hours>
+```
 
 Do not create migration files before acquisition succeeds. Do not choose a
 version manually. Do not edit fenced claim blocks.
@@ -98,9 +115,10 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
 components form serial queues; unrelated components fill the available lanes.
-Claims and permanent version reservations protect future work but are not active
-workers. Report a lane as working only when current worker evidence exists. When
-any author lane frees, run a live queue audit immediately, close stale issues
+Claims and permanent version reservations protect future work independently of
+active-author capacity. A relinquished claim is not an active author but still
+blocks overlap. Report a lane as working only when current worker evidence exists.
+When any author slot frees, run a live queue audit immediately, close stale issues
 whose outcome is already delivered, and dispatch the next genuinely eligible
 issue in an isolated worktree. Keep explicit successor queues, but say plainly
 when the audit proves no eligible successor exists. Do not ask Albert to approve
@@ -108,8 +126,9 @@ dispatch.
 
 An empty lane is justified only by a complete audit with no eligible candidate.
 Unclassified or malformed issues make that proof impossible and the command
-fails. Blocked, owner-decision, and every non-structural work type are reported
-but never consume a lane. `needs-albert` is not a route: after an answer, change
+fails. Blocked work consumes no active-author slot only after the guarded
+relinquishment above; its claim remains protected. Owner-decision and every
+non-structural work type are reported but never consume a lane. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.

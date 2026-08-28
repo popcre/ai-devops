@@ -123,7 +123,8 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
-- Allow at most `MAX_AUTHOR_LANES` migration authors simultaneously — five since 2026-08-25, three before it. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
+- Allow at most `MAX_AUTHOR_LANES` active-author leases simultaneously — five until the separately governed reviewer-capacity gate permits eight. Protected blocked claims do not consume active-author capacity, but keep every object and version lock. Clock expiry releases neither protection nor capacity. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
+- Relinquish capacity only with `--relinquish-author-lease --claim <n> --owner <owner> --blocked-on issue:#<n>` after clean-worktree and stage-holder proof. Resume only with `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`; resume renews the time lease and rechecks capacity, collision, and permanent version truth.
 - Give each author an isolated worktree and branch.
 - Require exact, parseable database-object claims.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
