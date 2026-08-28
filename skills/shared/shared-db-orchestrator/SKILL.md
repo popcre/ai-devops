@@ -146,7 +146,10 @@ Albert approved concurrent migration authoring on 2026-08-14.
   A successor that performs offline analysis or application work remains
   non-structural even when its predecessor changed the database.
 - Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, but they never consume a migration-author lane.
-- Assign each exact-head issue one external reviewer from the durable round robin.
+- Assign each exact-head issue one external reviewer from the durable round robin after excluding
+  the live orchestrator engine: Codex never reviews a Codex-orchestrated issue, and Claude never
+  reviews a Claude-orchestrated issue. Qwen and Gemini are inactive until ai-devops reviewer
+  reliability is repaired; historical records remain readable but neither may receive new work.
 
 Acquire a lane from the shared-db checkout:
 
