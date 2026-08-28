@@ -217,6 +217,29 @@ taken under another suite's load as evidence.)
 **Still open:** plan step 1.2, the ten-consecutive-green proof on Windows CI.
 That is what actually closes issue #89.
 
+## STOP — another session already owns the remaining fix (2026-08-27)
+
+Do **not** start writing the progress-sensitive wait. It exists. PR
+[#142](https://github.com/popcre/ai-devops/pull/142) makes the reviewer suite's
+exposed waits progress-sensitive and additionally moves the Windows
+verification jobs to a self-hosted runner. Its own final commit states plainly
+that the change is written but **not yet measured**.
+
+So the remaining work on issue [#89](https://github.com/popcre/ai-devops/issues/89)
+is no longer authorship — it is **verification**: run the ten-run series against
+that branch and report whether the failure actually disappears. One green run is
+not the proof; the earlier series failed on its fourth run, and that run was the
+slowest of six.
+
+Coordinate before starting. A session reading this handoff on its own nearly
+rebuilt #142 from scratch, which is precisely the duplicated-intent failure
+`plan_ai-devops-work-claims.md` was written to prevent.
+
+**Do not parallelize the series on one machine.** The failing assertion measures
+lock contention between concurrent reviewer sessions, so running ten copies at
+once on a single box changes the thing under test. Separate machines are valid;
+separate threads are not.
+
 ## Where a fresh session starts
 
 `plan_repo-throughput-restructure.md`, **Phase 0, step 0.1** — then straight to
