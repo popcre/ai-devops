@@ -122,13 +122,23 @@ fixture_expected() {
 # ai_test_fingerprint PATH... — a cheap, stable string describing observable
 # progress: entry count for a directory, byte size for a file, "-" for absent.
 # Used by poll_until_progress to tell "this machine is slow" from "this is hung".
+#
+# The modification-time term is load-bearing, not decoration. Counting entries
+# alone goes blind exactly when it matters: a wrapper busy building its review
+# packet creates no new file and takes no lock for minutes at a time, so a
+# count-only signal reports "no observable progress" for a process that is
+# perfectly healthy. That is what ejected PR #142 from the merge queue on
+# 2026-08-28 (run 33144576111). Anything the fixture touches must move this
+# string.
 ai_test_fingerprint() {
-  local p
+  local p newest
   for p in "$@"; do
     if [ -d "$p" ]; then
-      printf '%s:%s ' "$p" "$(find "$p" -mindepth 1 2>/dev/null | wc -l)"
+      newest="$(find "$p" -mindepth 1 -printf '%T@\n' 2>/dev/null | sort -n | tail -1)"
+      printf '%s:%s@%s ' "$p" "$(find "$p" -mindepth 1 2>/dev/null | wc -l)" "${newest:-0}"
     elif [ -f "$p" ]; then
-      printf '%s:%s ' "$p" "$(wc -c < "$p" 2>/dev/null || printf 0)"
+      printf '%s:%s@%s ' "$p" "$(wc -c < "$p" 2>/dev/null || printf 0)" \
+        "$(find "$p" -maxdepth 0 -printf '%T@' 2>/dev/null || printf 0)"
     else
       printf '%s:- ' "$p"
     fi
@@ -152,18 +162,23 @@ ai_test_fingerprint() {
 # ceiling below is only a runaway backstop for a fixture that churns forever.
 poll_until_progress() {
   local stall="$1" what="$2" progress="$3"; shift 3
-  local hard=$(( stall * 10 )) elapsed=0 idle=0 last='' now=''
+  local hard=$(( stall * 10 )) elapsed=0 idle=0 last='' now='' moved=0
   last="$(eval "$progress" 2>/dev/null)"
   while [ "$elapsed" -lt "$hard" ]; do
     eval "$*" >/dev/null 2>&1 && return 0
     now="$(eval "$progress" 2>/dev/null)"
     if [ "$now" != "$last" ]; then
-      last="$now"; idle=0
+      last="$now"; idle=0; moved=1
     else
       idle=$(( idle + 1 ))
       if [ "$idle" -ge "$stall" ]; then
-        printf '  fixture: %s stalled - no observable progress for %ss after %ss (baseline %ss)\n' \
-          "$what" "$stall" "$elapsed" "$AI_TEST_BASELINE" >&2
+        if [ "$moved" -eq 0 ]; then
+          printf '  fixture: %s gave up after %ss, but its progress signal never changed once - that is a defect in the TEST, not the code under test: name something that demonstrably moves while the fixture is healthily waiting, or use poll_until (baseline %ss)\n' \
+            "$what" "$elapsed" "$AI_TEST_BASELINE" >&2
+        else
+          printf '  fixture: %s stalled - it advanced, then nothing changed for %ss after %ss (baseline %ss)\n' \
+            "$what" "$stall" "$elapsed" "$AI_TEST_BASELINE" >&2
+        fi
         return 1
       fi
     fi

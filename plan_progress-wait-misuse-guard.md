@@ -14,11 +14,11 @@ plan is wrong and must be re-planned rather than forced.
 
 | # | Step | State | Evidence |
 |---|---|---|---|
-| 0 | Confirm the root cause locally (discriminate Finding B vs Finding F) | ⬜ open | — |
-| 1 | Make `poll_until_progress` name a never-moving progress signal | ⬜ open | — |
-| 2 | Unit-test the never-moved case | ⬜ open | — |
-| 3 | Write the rule into the helper header | ⬜ open | — |
-| 4 | Fix the three grok waits that regressed | ⬜ open | — |
+| 0 | Confirm the root cause locally (discriminate Finding B vs Finding F) | ✅ done 2026-08-28 | Finding F refuted, Finding B confirmed in a narrower form — see §6 Finding G. Failing run `33144576111` log: `no observable progress for 120s after 408s` (the signal did move, then went silent) and `for 120s after 124s` (never moved). Local re-run passed 191/0 with identical paths. |
+| 1 | Make `poll_until_progress` name a never-moving progress signal | ✅ done 2026-08-28 | `tests/lib-test-timing.sh` — `moved` flag; two distinct messages. Re-derive: `bash tests/test-lib-test-timing.sh` |
+| 2 | Unit-test the never-moved case | ✅ done 2026-08-28 | `tests/test-lib-test-timing.sh` — 3 new checks; `bash tests/test-lib-test-timing.sh` → 12 passed, 0 failed |
+| 3 | Write the rule into the helper header | ✅ done 2026-08-28 | `tests/lib-test-timing.sh` header above `ai_test_fingerprint`; `fix_test_ai.md` |
+| 4 | Fix the three grok waits that regressed | ✅ done 2026-08-28 | `tests/test-ai-grok-review.sh:375,732,753` now fingerprint the whole state and fixture trees; fingerprint is mtime-aware |
 | 5 | Green CI, merge, close out | ⬜ open | — |
 
 ---
@@ -227,6 +227,39 @@ a network problem without checking the duration against `timeout-minutes` in
 **Finding E — those timeouts were caused by contention**, not by slow code. When
 the machine was idle the same jobs took 13 minutes (30-minute budget) and 54
 minutes (75-minute budget). The budgets are correct and must not be raised.
+
+
+### Finding G — what Step 0 actually established (2026-08-28)
+
+Finding F is **refuted**. The merge-queue checkout uses the same directory on the
+self-hosted runner as an ordinary pull-request checkout, `TMPDIR` was identical,
+and the same commit passed and failed on the same machine with the same paths.
+Path length is not involved.
+
+Finding B is **confirmed, but in a narrower and more important form.** The signal
+was not simply "never moving". The failing run reports two different shapes:
+
+- `no observable progress for 120s after 408s` — the signal moved for 288
+  seconds and then went silent for 120 while the wrapper was still healthy.
+- `no observable progress for 120s after 124s` — the signal never moved at all.
+
+The cause of both is the same: `ai_test_fingerprint` measured only **entry
+counts and byte sizes**. A wrapper that is building its review packet creates no
+new file, takes no lock, and writes nothing to stderr for minutes at a time. It
+touches and rewrites files, but a count-and-size fingerprint cannot see that, so
+a perfectly healthy process looks stopped. Under the contention of four
+concurrent CI runs that quiet phase exceeded the 120-second stall window; on an
+idle machine it does not, which is exactly why the same commit passed earlier.
+
+Two consequences, both implemented:
+
+1. The fingerprint must sense **modification time**, not just size and count, and
+   must watch the whole state and fixture trees rather than the locks directory
+   alone.
+2. The tool must **distinguish a signal that never moved from one that moved and
+   stopped**, because the first is a defect in the test and the second is a hang
+   in the code under test. The old message called both a stall, and that is what
+   sent this session hunting CPU and network faults for hours.
 
 ## 7. Approaches considered and REJECTED
 

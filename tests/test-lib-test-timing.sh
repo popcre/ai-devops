@@ -46,8 +46,36 @@ RC=$?
 ELAPSED=$(( $(date +%s) - START ))
 check "a fixture that never moves fails inside the stall window" \
   "test '$RC' -ne 0 && test '$ELAPSED' -lt 10"
-check "a stalled fixture says it stalled, not that the code under test failed" \
-  "grep -q 'stalled' '$TMP/stall.err' && grep -q 'no observable progress' '$TMP/stall.err'"
+# A signal that never changed even once cannot distinguish a hang from a badly
+# chosen signal, so the tool must not claim it caught a hang. It must name
+# itself as the suspect and say what to do instead. This is the failure that
+# ejected PR #142 from the merge queue on 2026-08-28.
+check "a never-moving signal is blamed on the test, not on the code under test" \
+  "grep -q 'never changed once' '$TMP/stall.err' && grep -q 'defect in the TEST' '$TMP/stall.err' && grep -q 'poll_until' '$TMP/stall.err'"
+
+# --- poll_until_progress: advanced, then stopped -----------------------------
+# The genuine hang: the signal proved it can move, then stopped. That message
+# must be different from the one above, because the remedy is different.
+: > "$TMP/half"
+( sleep 1; echo x >> "$TMP/half" ) &
+HALF_PID=$!
+poll_until_progress 3 'a fixture that advanced then stopped' \
+  "ai_test_fingerprint '$TMP/half'" "false" 2>"$TMP/half.err"
+wait "$HALF_PID" 2>/dev/null
+check "a fixture that advanced then stopped is reported as a stall, not a test defect" \
+  "grep -q 'it advanced, then nothing changed' '$TMP/half.err' && ! grep -q 'defect in the TEST' '$TMP/half.err'"
+
+# --- ai_test_fingerprint: a touched file counts as progress ------------------
+# A wrapper building its review packet rewrites and touches files without
+# growing them or creating locks. A size-and-count-only fingerprint goes blind
+# for minutes and reports a healthy process as hung.
+: > "$TMP/touched"
+FP1="$(ai_test_fingerprint "$TMP" "$TMP/touched")"
+sleep 1
+touch "$TMP/touched"
+FP2="$(ai_test_fingerprint "$TMP" "$TMP/touched")"
+check "the fingerprint moves when a file is only touched, not grown" \
+  "test \"$FP1\" != \"$FP2\""
 
 # --- poll_until_progress: slow but advancing must NOT be failed --------------
 # The whole point. A background writer keeps the fingerprint moving for longer

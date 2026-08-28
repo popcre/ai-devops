@@ -227,6 +227,30 @@ cost of one wrapper round trip:
 
 ---
 
+### 3.7 A progress signal that goes blind while the work is healthy
+
+Replacing a frozen-baseline deadline with a stall window only helps if the thing
+being watched actually changes while the system is *healthily waiting*. The first
+version of `ai_test_fingerprint` measured directory entry counts and file byte
+sizes. A Grok wrapper building its review packet creates no file, takes no lock,
+and writes no stderr for minutes; it touches and rewrites files instead. That
+phase was therefore invisible, and under CI contention it outlasted the
+120-second stall window — so three healthy checks were failed and PR #142 was
+ejected from the merge queue (run `33144576111`, 2026-08-28).
+
+Two rules follow, both now enforced in `tests/lib-test-timing.sh`:
+
+- **A fingerprint must sense modification time, not only size and count**, and
+  should watch the whole tree the fixture works in, not one subdirectory.
+- **A wait that gives up must say whether its signal ever moved.** A signal that
+  never moved once is a defect in the test and is reported as such; a signal that
+  moved and then stopped is a hang in the code under test. Calling both a "stall"
+  is what cost this session hours on two disproved diagnoses.
+
+Before using a stall window, name something that demonstrably changes during the
+wait. If you cannot, use `poll_until` with a fixed ceiling instead. Never widen a
+ceiling to fix this (Decision B).
+
 ## 4. Why CI does not protect us here
 
 CI passing is evidence that **an idle single-purpose runner is fast enough to
