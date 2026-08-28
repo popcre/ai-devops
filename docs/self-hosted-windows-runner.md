@@ -1,4 +1,4 @@
-# The self-hosted Windows runner
+# The self-hosted Windows runners
 
 **Added:** 2026-08-27, with PR
 [#142](https://github.com/popcre/ai-devops/pull/142).
@@ -16,20 +16,19 @@ minute jobs and no evidence anyone could attribute: a failure could not be
 reproduced, and a pass could not be trusted. See
 [`tests/verification/reviewer-flake-89/`](../tests/verification/reviewer-flake-89/).
 
-A single self-hosted runner fixes two separate things:
+Self-hosting fixes two separate things:
 
 1. **The machine is known and constant**, so a run is comparable with the run
    before it and a series means something.
-2. **There is exactly one of it**, so the two Windows jobs queue behind each
-   other instead of contending for the same cores. Contention is the documented
-   cause of the baseline inflation these suites suffer from — see the header of
+2. **Capacity is controlled**, so the machine is never oversubscribed the way a
+   pool of unrelated hosted runners can be. Contention is the documented cause of
+   the baseline inflation these suites suffer from — see the header of
    [`tests/lib-test-timing.sh`](../tests/lib-test-timing.sh).
 
-The cost is real and accepted: verification only happens while that machine is
-on and logged in, and the two Windows jobs no longer overlap, so a full pass
-takes longer in wall clock than it did on two hosted runners.
+The cost is real and accepted: verification only happens while that machine is on
+and logged in.
 
-## Security — read this before adding a second runner
+## Security — read this before adding another runner
 
 **This repository is public.** A self-hosted runner executes whatever code a
 pull request contains, on the machine it runs on. The protection is the
@@ -53,18 +52,39 @@ credentials you would not hand to a pull request author.
 
 ## What is installed
 
-The runner lives outside every repository checkout, at `C:\actions-runner`, and
-works in `C:\actions-runner\_work`. It is registered to the repository with the
-label `edge-dev` alongside the automatic `self-hosted`, `Windows`, and `X64`
-labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]` selects.
+**Two runners**, both labelled `edge-dev`, living outside every repository
+checkout:
 
-It is **not** a Windows service. Installing one requires an elevated shell, so
-it runs from a scheduled task, `GitHubActionsRunner-aidevops`, triggered at
-logon for the interactive user and set to restart if it exits.
+| Runner | Directory | Scheduled task |
+|---|---|---|
+| `edge-dev-win` | `C:\actions-runner` | `GitHubActionsRunner-aidevops` |
+| `edge-dev-win-2` | `C:\actions-runner-2` | `GitHubActionsRunner-aidevops-2` |
 
-**Consequence:** verification runs only while that machine is powered on and
-that user is logged in. A queued job simply waits. Nothing fails; nothing
-finishes either.
+Two exist so `windows-offline` and `windows-reviewer-safety` run **in parallel**
+rather than one queueing behind the other; with a single runner a full pass took
+roughly twice as long in wall clock. Do not add a third without a reason — each
+one competes for the same cores, and oversubscribing this machine is what starves
+a runner's heartbeat (see the 2026-08-28 entry in
+[`critical-incidents.md`](critical-incidents.md)).
+
+The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
+`X64` labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]`
+selects.
+
+Neither is a Windows service — installing one requires an elevated shell. Both
+run from scheduled tasks triggered at logon for the interactive user.
+
+**Consequence:** verification runs only while that machine is powered on and that
+user is logged in. A queued job simply waits. Nothing fails; nothing finishes
+either.
+
+**Creating the scheduled task needs an elevated shell.** A non-elevated session
+can start a runner directly (so it works immediately) but cannot make it survive
+a reboot. From an **Administrator** PowerShell:
+
+```powershell
+schtasks /create /tn "GitHubActionsRunner-aidevops-2" /tr "C:\actions-runner-2\run.cmd" /sc onlogon /rl LIMITED /f
+```
 
 ## Checking it
 
@@ -72,15 +92,38 @@ finishes either.
 gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|{name,status,busy}'
 ```
 
-`status` must be `online`. If it is `offline`, on the machine itself:
+Every runner must report `online`. If one reports `offline`, check whether its
+process is actually alive before re-registering anything:
 
 ```powershell
-Start-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops'
+Get-Process -Name 'Runner.Listener','Runner.Worker' -ErrorAction SilentlyContinue
 ```
+
+**A live process plus an `offline` status means the machine is saturated, not
+that the runner is broken** — the heartbeat is being starved. Reduce the load; do
+not re-register. If the process is genuinely gone:
+
+```powershell
+Start-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops-2'
+```
+
+## Running a local test series alongside CI
+
+**Bound the concurrency, and scope your cleanup.** The reviewer suites and the CI
+jobs that run them are the same script with the same process name, on the same
+machine. Two rules follow, both learned the hard way on 2026-08-28:
+
+- **Cap concurrent local suites at about four.** Eight starved the runners'
+  heartbeat. Four leaves headroom — confirm with the runner check above while the
+  series runs.
+- **Never clean up with a bare process-name match.** It will match the CI job's
+  own processes and cancel a live check. Record the process IDs your script
+  starts and kill only those.
 
 ## Re-registering after a token or repository change
 
-Registration tokens expire in one hour, so fetch one at the moment you use it:
+Registration tokens expire in one hour, so fetch one at the moment you use it
+(change the directory and `--name` for the second runner):
 
 ```powershell
 $t = gh api --method POST repos/popcre/ai-devops/actions/runners/registration-token --jq '.token'; Set-Location C:\actions-runner; .\config.cmd --unattended --url https://github.com/popcre/ai-devops --token $t --name edge-dev-win --labels edge-dev --work _work --replace
@@ -89,6 +132,6 @@ $t = gh api --method POST repos/popcre/ai-devops/actions/runners/registration-to
 ## Going back to hosted runners
 
 Change both Windows jobs in `.github/workflows/verify.yml` back to
-`runs-on: windows-2025`. Nothing else in the repository depends on the runner,
+`runs-on: windows-2025`. Nothing else in the repository depends on the runners,
 and the required check names do not change either way — which is deliberate, so
 ruleset `21564317` needs no edit to move in either direction.
