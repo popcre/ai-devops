@@ -20,9 +20,22 @@ measurement is judged against a computer that no longer exists.
 
 **Do not fix this by raising the multiplier.** A ceiling large enough for a
 degraded machine no longer detects a genuine hang, which is what these checks
-exist to catch. The correct fix is a progress-sensitive wait. See
-`tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md`, which is
-the evidence any later claim of "fixed" must be measured against.
+exist to catch. The correct fix is a progress-sensitive wait.
+
+**Status 2026-08-28: that wait is now written, not yet measured.** Commit
+`fe7c0606` converts the three drift-exposed waits in
+`tests/test-ai-grok-review.sh` to stall detection - they fail only when nothing
+observable has changed for the stall window, so a slow-but-advancing machine is
+no longer failed while a genuine hang still is. No multiplier, timeout, retry, or
+quarantine was added. The mechanism is proven by `tests/test-lib-test-timing.sh`
+(10 checks, 10 passed).
+
+The flake rate is **still unmeasured**. Two local ten-run series were abandoned -
+see `tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md`,
+which also records the rule that this machine hosts either the CI checks or a
+local series, never both. Read that file and
+`tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md` together;
+they are the evidence any later claim of "fixed" must be measured against.
 **Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`, and — after
 a sweep — `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-muse.sh`,
 `tests/test-ai-gemini.sh`, `tests/test-ai-qwen.sh`, `tests/test-ai-glm.sh`.

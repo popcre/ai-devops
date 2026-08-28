@@ -8,7 +8,7 @@
 | Step | Status | Evidence |
 |---|---|---|
 | 0. Reconcile Grok, GLM, and two execution-session reviews | ✅ done 2026-08-27 | [`plan_must_address.md`](plan_must_address.md); [`docs/work-claims-plan-review-2026-08-27.md`](docs/work-claims-plan-review-2026-08-27.md); Grok 4.6 closing verdict `APPROVE` |
-| 1. Stabilize and shorten the existing merge queue before adding claim checks | ⬜ prerequisite | [`plan_repo-throughput-restructure.md`](plan_repo-throughput-restructure.md) STATUS; evidence under `tests/verification/reviewer-flake-89/` |
+| 1. Stabilize and shorten the existing merge queue before adding claim checks | 🟨 partial 2026-08-28 — still a prerequisite | The reviewer-determinism fix is written and unit-proven (`fe7c0606`; `tests/test-lib-test-timing.sh`, 10/10), and Windows verification moved to a self-hosted runner (`2f0c081f`, `docs/self-hosted-windows-runner.md`). **The proof is not done:** [`plan_repo-throughput-restructure.md`](plan_repo-throughput-restructure.md) step 1.2 is still not satisfied because no clean ten-run series exists — see `tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md`. Claim implementation stays blocked. |
 | 2. Qualify the Git-ref primitive on Windows and Ubuntu | ⬜ open | §9.2; target `tests/verification/work-claims/<UTC>/ref-qualification.md` |
 | 3. Build the task-only v1 command and owner-extensible paths | ⬜ open | Target: `bin/ai-work-claim`, `config/work-claim-policy.json` |
 | 4. Add deterministic concurrency tests and an advisory PR guard | ⬜ open | Target: `tests/test-ai-work-claim.sh`, advisory workflow |
