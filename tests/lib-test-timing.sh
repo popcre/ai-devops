@@ -188,3 +188,29 @@ poll_until_progress() {
     "$what" "$hard" "$AI_TEST_BASELINE" >&2
   return 1
 }
+
+# poll_worker_until PID CEILING WHAT CONDITION... — wait for a state that a
+# specific background worker is responsible for producing, using that worker as
+# the moving signal. A ceiling alone cannot tell "the worker is still working"
+# apart from "the worker died", and a fixed poll that quietly falls through
+# turns a slow fixture into a false accusation against the code under test:
+# issue #148 was filed as an ai-muse shutdown race when both failing checks were
+# interrupts delivered before the fixture was ready. This returns as soon as the
+# worker dies, waits while it lives, and reports which happened.
+poll_worker_until() {
+  local pid="$1" ceiling="$2" what="$3"; shift 3
+  local waited=0 grace
+  while :; do
+    eval "$*" >/dev/null 2>&1 && return 0
+    if ! kill -0 "$pid" 2>/dev/null; then
+      for grace in 1 2 3 4 5; do eval "$*" >/dev/null 2>&1 && return 0; sleep .1; done
+      printf '  fixture: %s - worker exited after %ss without reaching that state\n' "$what" "$((waited / 10))" >&2
+      return 1
+    fi
+    sleep .1; waited=$((waited + 1))
+    if [ "$waited" -ge $(( ceiling * 10 )) ]; then
+      printf '  fixture: %s did not hold within %ss while the worker was still running (baseline %ss)\n' "$what" "$ceiling" "$AI_TEST_BASELINE" >&2
+      return 1
+    fi
+  done
+}
