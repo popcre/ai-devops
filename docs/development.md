@@ -148,6 +148,33 @@ Three properties matter and are deliberate:
   failures. The symptom looked exactly like load-induced flakiness and was not.
   `tests/test-ai-test-local.sh` now asserts the path budget.
 
+### When a suite looks flaky
+
+A suite that fails in a harness and passes on its own looks like a timing
+problem, and that guess has been wrong here more often than right. Work these
+checks in order before believing it.
+
+1. **Reproduce with one suite alone.** Run the harness with `-p` narrowed to the
+   single suite, nothing else running. If it still fails, it is not load, not
+   concurrency and not a wall-clock budget, whatever the failure text implies.
+   This one check would have saved an afternoon and a wrongly-filed issue
+   (popcre/ai-devops#147, withdrawn).
+2. **Compare the environment, not the timing.** Diff what the harness sets
+   against a bare run: `TMPDIR`/`TMP`/`TEMP`, the working directory, whether
+   stdout is a terminal, and any `AI_TEST_*` variable. Change one at a time.
+3. **Check path length on Windows.** Most paths still cap at 260 characters and
+   the suites build their own `mktemp` trees below `TMPDIR`. A temp root inside a
+   worktree is already ~140 characters deep, which is enough to make writes fail
+   silently and produce failure text that reads like anything but a path problem.
+4. **Only then consider timing**, and fix the shape of the wait rather than the
+   ceiling: derive the budget from a baseline measured on the machine running the
+   test and poll for the condition (`tests/lib-test-timing.sh`, added by
+   popcre/ai-devops#123 for issue #89).
+
+Raising a timeout until nothing fails, marking a suite allowed-to-fail, or
+deleting a check is symptom suppression, not a fix. A harness that invents
+failures is worse than no harness, and a harness that hides them is worse again.
+
 Failing suites are named at the end with their log path and their first `FAIL`
 lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
 a local pre-check, not a replacement for CI: GitHub remains the authority on
