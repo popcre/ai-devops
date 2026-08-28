@@ -25,46 +25,77 @@ six other reviewer suites (`fix_test_ai.md`), and the ten-run flake series
 
 ## 1. State
 
-- Branch `claude/reviewer-flake-89-progress-waits`, HEAD `4f8482a3`, pushed.
-- PR [#142](https://github.com/popcre/ai-devops/pull/142) is **OPEN and was
-  ejected from the merge queue** by run
-  [33144576111](https://github.com/popcre/ai-devops/actions/runs/33144576111),
-  which failed `windows-offline` on three checks in the "ask" concurrency block
-  of `tests/test-ai-grok-review.sh`. Its three ordinary checks had passed.
-- The plan file above is committed. **No step of it has been started.**
+Branch `claude/reviewer-flake-89-progress-waits`, HEAD `b53c96b8`, pushed.
+PR [#142](https://github.com/popcre/ai-devops/pull/142) is **OPEN**, checks
+running. Plan Steps 0-4 are **done**; only Step 5 (green CI, merge queue, merge,
+close out) remains.
 
-## 2. Why this exists
+## 2. What was established and built
 
-`poll_until_progress` fails a wait when its progress signal stops changing. If
-the signal was chosen badly and never changes at all, the wait gives up early and
-reports a "stall" — which reads as though the code under test hung. It does not.
-This session read that message and spent hours on two wrong diagnoses (machine
-saturation, then network failure) before finding it.
+**Step 0 answered.** The deep-`TMPDIR` rival cause is refuted: the merge-queue
+checkout uses the same paths as an ordinary run, and the same commit passed and
+failed on the same machine. The real cause is narrower and is recorded as
+Finding G in the plan: `ai_test_fingerprint` measured entry counts and byte
+sizes only, so the minutes a Grok wrapper spends building its review packet -
+creating no file, taking no lock, writing no stderr - were invisible. Under the
+contention of four concurrent CI runs that quiet phase outlasted the 120s stall
+window and three healthy checks were failed.
 
-The plan makes the tool say which of the two situations it is in, covers that in
-unit tests, and writes the rule at the definition site.
+Shipped on this branch:
 
-## 3. Next step
+- `tests/lib-test-timing.sh` - the fingerprint senses modification time as well
+  as size and count; `poll_until_progress` reports a signal that never moved once
+  as a defect in the TEST, separately from one that moved and then stopped.
+- `tests/test-ai-grok-review.sh:375,732,753` - fingerprint the whole state and
+  fixture trees, not the locks directory alone.
+- `tests/test-lib-test-timing.sh` - 12 passed, 0 failed.
+- `bin/ai-pr-wait` + `tests/test-ai-pr-wait.sh` - see below.
+- `fix_test_ai.md` s3.7 and the `AGENTS.md` router carry both rules.
 
-`plan_progress-wait-misuse-guard.md` **Step 0** — reproduce the three failures
-locally on an idle `edge-dev` and confirm or refute the root cause. Every later
-step depends on that answer, and Step 0 carries an explicit stop-and-re-plan
-branch if the root cause is wrong.
+No ceiling, multiplier, or timeout was widened (Decision B).
 
-## 4. Dead ends — do not repeat
+**Local proof:** `bash tests/test-ai-grok-review.sh` - 191 passed, 0 failed, no
+stall messages at all.
 
-- Diagnosing the failure as CPU saturation. Measured: 24% sustained, run queue
-  ~0, 12 GB free. A single `Win32_Processor` sample said 71% and was wrong.
-- Diagnosing it as a network fault. 12 consecutive TLS connections to github.com,
-  all under 70 ms, none failed. The socket aborts in the runner log were the
-  *consequence* of a job being torn down at its `timeout-minutes`.
-- Raising a ceiling or restoring `budget 40 120` as a fix. Decision B forbids it
-  and it does not fix the class of bug.
-- Writing the rule in documentation only. Already done once; this session read it
-  and still made the mistake.
-- Running a local test series while CI runs on the same machine. Causes the job
-  timeouts, and a name-matched cleanup once cancelled live job `98712820009`.
+## 3. The second failure, and its guard
 
-## 5. Delete this file when
+A monitor watching `gh pr view 142 --json state` waited 5.5 hours on a pull
+request that had already been ejected from the merge queue - an ejection leaves
+the state `OPEN`. Albert caught it, not the monitor.
 
-Step 5 of the plan completes: PR #142 `MERGED` with a recorded SHA.
+`bin/ai-pr-wait <pr>` now exits on every terminal outcome: merged, closed, a
+failing check, an ejection, or its own deadline. `tests/test-ai-pr-wait.sh`
+fails CI if any file reintroduces the blind loop. It proved itself immediately:
+it caught the missing executable bit on `bin/ai-pr-wait` in nine minutes.
+
+**Use it. Do not hand-roll a wait loop.**
+
+## 4. Next step
+
+Plan **Step 5**: when the three checks on `b53c96b8` pass, `gh pr merge 142
+--squash` into the merge queue, confirm the `merge_group` run (`gh run list
+--event merge_group`), mark the plan STATUS row done with the merge SHA, update
+`plan_repo-throughput-restructure.md`, and delete this file.
+
+Still owed downstream, not started: the ten-run flake series that closes issue
+#89, and `plan_ai-devops-work-claims.md` step 2, which stays blocked until it
+does.
+
+## 5. Dead ends - do not repeat
+
+- CPU saturation. Measured 24% sustained, run queue ~0, 12 GB free. A single
+  `Win32_Processor` sample said 71% and was wrong.
+- A network fault. 12 consecutive TLS connections to github.com, all under 70 ms.
+  The socket aborts in the runner log were the *consequence* of a job being torn
+  down at its `timeout-minutes`.
+- Deep `TMPDIR` path length. Checked and refuted; see Finding G.
+- Raising a ceiling or restoring `budget 40 120`. Decision B forbids it and it
+  does not fix the class of bug.
+- Documentation alone. Already tried; this session read the doc and still made
+  the mistake. Hence the enforcing test.
+- Running a local test series while CI runs on the same machine. It caused the
+  two job timeouts and, once, a name-matched cleanup cancelled a live job.
+
+## 6. Delete this file when
+
+PR #142 is `MERGED` with a recorded SHA.

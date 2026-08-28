@@ -1,0 +1,28 @@
+# Words exempt from the project-shaped-identifier rule in
+# bin/ai-public-boundary-check.
+#
+# That rule rejects any run of exactly 20 lowercase letters, because that is the
+# shape of a Supabase project reference. It is deliberately blunt: a project ref
+# has no prefix to key on, unlike ghp_/sk-/AKIA, so shape is all there is.
+#
+# The cost is that ordinary long English words trip it, and the failure names no
+# file. This list is how a false positive is cleared WITHOUT widening the rule.
+#
+# Rules for adding an entry:
+#   - It must be a real word or an unambiguously non-identifier string.
+#   - One per line, exact match, lowercase.
+#   - Say where it appears and why it is not an identifier.
+#   - If you are not certain, reword the prose instead. That is always allowed
+#     and never wrong; this file is the exception, not the default.
+#
+# Never add a string you cannot explain. A Supabase project reference looks
+# exactly like a word you have not heard of.
+
+# An application field name, not a project identifier. Predates this file.
+wilassetcatfranchise
+
+# The noun form of "indistinguishable" - 20 letters. Ordinary English. It is the
+# word that exposed this false-positive class: a documentation-only pull request
+# was rejected by CI with a message naming no file, and the cause took twenty
+# minutes to find.
+indistinguishability

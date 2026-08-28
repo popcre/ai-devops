@@ -112,6 +112,75 @@ the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
 provider qualification must live under `tests/probes/` and remains an explicit
 release gate, never CI.
 
+### Running the suites concurrently on one machine
+
+`tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is
+correct but slow: the complete Windows set takes about 70 minutes, and the hosted
+CI queue often adds more before a single test starts. For a local pre-check, run
+the same suites, unchanged, across worker slots on this machine:
+
+```bash
+bin/ai-test-local
+```
+
+`--bash`, `--powershell` and `--reviewer` restrict it to one CI job's equivalent;
+`-j N` sets the worker count. The Bash and PowerShell runners can also be called
+directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
+`--list` to show what would run.
+
+Measured on a 20-core desktop against current `main`: 58 Bash suites in 825
+seconds of wall clock against 5560 seconds of suite time, and the 16 PowerShell
+suites in 23 seconds instead of 38.
+
+Three properties matter and are deliberate:
+
+- **Nothing about the suites changes.** Same scripts, same assertions, same exit
+  codes. Only the scheduling differs, so a local pass means the same thing a
+  serial pass means. Assertions are never relaxed to make a parallel run green.
+- **Every suite gets its own uniquely named log** under `.test-logs/`. A shared
+  log once produced an interleaved file and a believed-but-false failure count;
+  a unique log per suite is not optional.
+- **Every suite gets its own short-pathed `TMPDIR`**, outside the log tree. This
+  one cost an afternoon: temp directories were first placed under `.test-logs/`,
+  which inside a worktree is already about 140 characters deep. Windows still
+  caps most paths at 260 characters and the suites nest their own `mktemp` trees
+  below `TMPDIR`, so writes failed silently and six healthy suites reported
+  failures. The symptom looked exactly like load-induced flakiness and was not.
+  `tests/test-ai-test-local.sh` now asserts the path budget.
+
+### When a suite looks flaky
+
+A suite that fails in a harness and passes on its own looks like a timing
+problem, and that guess has been wrong here more often than right. Work these
+checks in order before believing it.
+
+1. **Reproduce with one suite alone.** Run the harness with `-p` narrowed to the
+   single suite, nothing else running. If it still fails, it is not load, not
+   concurrency and not a wall-clock budget, whatever the failure text implies.
+   This one check would have saved an afternoon and a wrongly-filed issue
+   (popcre/ai-devops#147, withdrawn).
+2. **Compare the environment, not the timing.** Diff what the harness sets
+   against a bare run: `TMPDIR`/`TMP`/`TEMP`, the working directory, whether
+   stdout is a terminal, and any `AI_TEST_*` variable. Change one at a time.
+3. **Check path length on Windows.** Most paths still cap at 260 characters and
+   the suites build their own `mktemp` trees below `TMPDIR`. A temp root inside a
+   worktree is already ~140 characters deep, which is enough to make writes fail
+   silently and produce failure text that reads like anything but a path problem.
+4. **Only then consider timing**, and fix the shape of the wait rather than the
+   ceiling: derive the budget from a baseline measured on the machine running the
+   test and poll for the condition (`tests/lib-test-timing.sh`, added by
+   popcre/ai-devops#123 for issue #89).
+
+Raising a timeout until nothing fails, marking a suite allowed-to-fail, or
+deleting a check is symptom suppression, not a fix. A harness that invents
+failures is worse than no harness, and a harness that hides them is worse again.
+
+Failing suites are named at the end with their log path and their first `FAIL`
+lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
+a local pre-check, not a replacement for CI: GitHub remains the authority on
+whether a branch is green, and the reviewer suites in particular must be proven
+on the Windows runner.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash
