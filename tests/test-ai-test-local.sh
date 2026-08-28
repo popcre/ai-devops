@@ -25,8 +25,8 @@ trap 'rm -rf "$WORK"' EXIT
 SUITES="$WORK/suites"; LOGS="$WORK/logs"
 mkdir -p "$SUITES" "$LOGS"
 
-printf '#!/usr/bin/env bash\necho green-one\nexit 0\n' > "$SUITES/test-green-one.sh"
-printf '#!/usr/bin/env bash\necho green-two\nexit 0\n' > "$SUITES/test-green-two.sh"
+printf '#!/usr/bin/env bash\necho green-one\necho "TMPDIR=$TMPDIR"\nexit 0\n' > "$SUITES/test-green-one.sh"
+printf '#!/usr/bin/env bash\necho green-two\necho "TMPDIR=$TMPDIR"\nexit 0\n' > "$SUITES/test-green-two.sh"
 printf '#!/usr/bin/env bash\necho "  FAIL deliberate"\nexit 3\n' > "$SUITES/test-red.sh"
 chmod +x "$SUITES"/*.sh
 
@@ -49,7 +49,11 @@ check 'all-green run exits zero' '[ "$green_rc" -eq 0 ]'
 check 'green run reports zero failures' 'grep -q "failures=0" "$WORK/green.out"'
 check 'each suite has its own log' '[ -s "$green_dir/test-green-one.sh.log" ] && [ -s "$green_dir/test-green-two.sh.log" ]'
 check 'a suite log holds only that suite output' 'grep -q green-one "$green_dir/test-green-one.sh.log" && ! grep -q green-two "$green_dir/test-green-one.sh.log"'
-check 'each suite gets its own TMPDIR' '[ -d "$green_dir/tmp/test-green-one.sh" ]'
+check 'each suite gets its own TMPDIR' 'one=$(sed -n "s/^TMPDIR=//p" "$green_dir/test-green-one.sh.log"); two=$(sed -n "s/^TMPDIR=//p" "$green_dir/test-green-two.sh.log"); [ -n "$one" ] && [ -n "$two" ] && [ "$one" != "$two" ]'
+# Windows still caps most paths at 260 characters and the suites nest their own
+# mktemp trees below TMPDIR. A temp path inside the log tree once broke six
+# healthy suites, so the budget is asserted, not assumed.
+check 'the suite TMPDIR is short enough for Windows' 'one=$(sed -n "s/^TMPDIR=//p" "$green_dir/test-green-one.sh.log"); [ "${#one}" -lt 100 ]'
 
 # --- red path --------------------------------------------------------------
 red_dir="$LOGS/red"
@@ -76,8 +80,6 @@ check 'rerun-failed passes once the suite is fixed' '[ "$rerun_rc" -eq 0 ]'
 run -j 0 --list >/dev/null 2>&1;  check 'rejects -j 0' '[ "$?" -ne 0 ]'
 run -j abc --list >/dev/null 2>&1; check 'rejects a non-numeric -j' '[ "$?" -ne 0 ]'
 run --nonsense >/dev/null 2>&1;    check 'rejects an unknown option' '[ "$?" -ne 0 ]'
-run --lane-jobs 0 --list >/dev/null 2>&1;   check 'rejects --lane-jobs 0' '[ "$?" -ne 0 ]'
-run --lane-jobs two --list >/dev/null 2>&1; check 'rejects a non-numeric --lane-jobs' '[ "$?" -ne 0 ]'
 
 # --- launcher --------------------------------------------------------------
 check 'ai-test-local is executable' '[ -x "$LAUNCHER" ]'

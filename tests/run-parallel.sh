@@ -45,14 +45,12 @@ PATTERN=""
 LOG_DIR=""
 LIST_ONLY=0
 RERUN_FAILED=0
-LANE_JOBS=
 
 usage() {
   cat <<'USAGE'
 usage: tests/run-parallel.sh [options]
 
-  -j N            worker slots for phase 1 (default: this machine's cores, max 16)
-  --lane-jobs N   concurrent wall-clock-sensitive suites in phase 2 (default 2)
+  -j N            worker slots (default: this machine's cores, max 16)
   -p PATTERN      only suites whose filename matches this shell pattern
   -l DIR          log directory (default: a fresh dir under the repo's .test-logs)
   --list          print the suites that would run, then exit
@@ -67,7 +65,6 @@ USAGE
 while [ $# -gt 0 ]; do
   case "$1" in
     -j) JOBS="${2:-}"; shift 2 ;;
-    --lane-jobs) LANE_JOBS="${2:-}"; shift 2 ;;
     -p) PATTERN="${2:-}"; shift 2 ;;
     -l) LOG_DIR="${2:-}"; shift 2 ;;
     --list) LIST_ONLY=1; shift ;;
@@ -80,9 +77,6 @@ done
 [ -n "$JOBS" ] || JOBS="$(default_jobs)"
 case "$JOBS" in ''|*[!0-9]*) printf 'run-parallel: -j needs a whole number, got %s\n' "$JOBS" >&2; exit 2 ;; esac
 [ "$JOBS" -ge 1 ] || { printf 'run-parallel: -j must be at least 1\n' >&2; exit 2; }
-[ -n "$LANE_JOBS" ] || LANE_JOBS=2
-case "$LANE_JOBS" in ''|*[!0-9]*) printf 'run-parallel: --lane-jobs needs a whole number, got %s\n' "$LANE_JOBS" >&2; exit 2 ;; esac
-[ "$LANE_JOBS" -ge 1 ] || { printf 'run-parallel: --lane-jobs must be at least 1\n' >&2; exit 2; }
 
 LOG_ROOT="${AI_TEST_LOG_ROOT:-$ROOT/.test-logs}"
 if [ "$RERUN_FAILED" = 1 ]; then
@@ -126,31 +120,9 @@ if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
 
-# Two phases, because this repository has two kinds of suite.
-#
-# TIMING_SENSITIVE lists the suites that wait on wall-clock deadlines instead of
-# on a condition. Measured on a 20-core desktop against current main: every one
-# of these passes on its own and goes red when the machine is busy. Six of the
-# seven "failures" in an early wide-open run of this runner were that, not
-# defects. A pre-check that invents failures is worse than no pre-check, so they
-# do not share the machine with the fan-out phase.
-#
-# Phase 1 fans the ordinary suites out across every worker slot; they finish in
-# minutes. Phase 2 then runs the timing-sensitive family on an otherwise idle
-# machine, only LANE_JOBS at a time (default 2). Issue #89 fixed this defect
-# class for the Grok and Kimi suites by deriving budgets from a measured
-# baseline; until the rest follow, this list is the containment.
-TIMING_SENSITIVE='test-ai-grok-review.sh test-ai-codex-review.sh test-ai-claude-review.sh test-ai-kimi.sh test-ai-deepseek-agent.sh test-ai-muse.sh test-ai-glm.sh test-ai-qwen.sh test-ai-gemini.sh test-ai-review-lifecycle.sh test-ai-review-preflight.sh test-ai-review-packet.sh test-ai-review-sandbox.sh test-ai-memory-sync.sh test-ai-memory-health.sh'
-
-# Slowest first within each phase: with a fixed number of slots, starting a
-# 16-minute suite last leaves every other slot idle waiting for it.
+# Slowest first: with a fixed number of slots, starting a 16-minute suite last
+# leaves every other slot idle waiting for it.
 KNOWN_SLOW='test-ai-grok-review.sh test-ai-glm.sh test-ai-qwen.sh test-ai-gemini.sh test-ai-kimi.sh test-ai-muse.sh test-ai-codex-review.sh test-ai-claude-review.sh test-ai-review-packet.sh test-ai-memory-health.sh test-ai-review-sandbox.sh test-ai-run-task.sh test-ai-config-migrate.sh'
-
-in_list() {
-  local needle="$1" list="$2" item
-  for item in $list; do [ "$item" = "$needle" ] && return 0; done
-  return 1
-}
 
 # Slowest known suites first, then everything else in discovery order.
 order_by_cost() {
@@ -167,23 +139,25 @@ order_by_cost() {
   done
 }
 
-timing=(); fast=()
-for name in "${suites[@]}"; do
-  if in_list "$name" "$TIMING_SENSITIVE"; then timing+=("$name"); else fast+=("$name"); fi
-done
-order_by_cost timing timing_ordered; timing=("${timing_ordered[@]}")
-if [ "${#fast[@]}" -gt 0 ]; then
-  order_by_cost fast fast_ordered; fast=("${fast_ordered[@]}")
-fi
+order_by_cost suites ordered; suites=("${ordered[@]}")
 
-printf 'run-parallel: %s suites (%s in the serial timing lane), %s workers, logs in %s\n\n' \
-  "${#suites[@]}" "${#timing[@]}" "$JOBS" "$LOG_DIR"
+# Short-lived temp root outside the log tree; see run_one.
+TMP_ROOT="$(dirname "$(mktemp -u)")/ait-$$"
+mkdir -p "$TMP_ROOT"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+printf 'run-parallel: %s suites, %s workers, logs in %s\n\n' \
+  "${#suites[@]}" "$JOBS" "$LOG_DIR"
 
 run_one() {
   local name="$1" log="$LOG_DIR/$name.log" start end rc
   # Each suite gets its own TMPDIR so concurrent runs cannot collide on a
   # temp name, and so a crashed suite's leftovers are attributable.
-  local tmp="$LOG_DIR/tmp/$name"
+  # Short path on purpose. Windows still caps most paths at 260 characters, and
+  # the suites nest their own mktemp trees several levels below TMPDIR. Handing
+  # them a temp directory inside .test-logs (already ~140 characters deep in a
+  # worktree) silently broke file writes and turned six healthy suites red.
+  local tmp="$TMP_ROOT/${name#test-}"
   mkdir -p "$tmp"
   start="$(date +%s)"
   TMPDIR="$tmp" TMP="$tmp" TEMP="$tmp" AI_TEST_PARALLEL=1 \
@@ -217,14 +191,7 @@ run_pool() {
   wait
 }
 
-if [ "${#fast[@]}" -gt 0 ]; then
-  printf -- '--- phase 1: %s ordinary suites across %s workers\n' "${#fast[@]}" "$JOBS"
-  run_pool fast "$JOBS"
-fi
-if [ "${#timing[@]}" -gt 0 ]; then
-  printf -- '\n--- phase 2: %s wall-clock-sensitive suites, %s at a time on an idle machine\n' "${#timing[@]}" "$LANE_JOBS"
-  run_pool timing "$LANE_JOBS"
-fi
+run_pool suites "$JOBS"
 suite_end="$(date +%s)"
 
 failed=()

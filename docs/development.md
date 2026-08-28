@@ -124,41 +124,29 @@ bin/ai-test-local
 ```
 
 `--bash`, `--powershell` and `--reviewer` restrict it to one CI job's equivalent;
-`-j N` sets the worker count and `--lane-jobs N` the phase-2 count (below). The
-Bash and PowerShell runners can also be called directly as `tests/run-parallel.sh`
-and `tests/run-parallel.ps1`, and both accept `--list` to show what would run.
+`-j N` sets the worker count. The Bash and PowerShell runners can also be called
+directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
+`--list` to show what would run.
 
-The Bash runner works in two phases, because this repository has two kinds of
-suite:
+Measured on a 20-core desktop against current `main`: 58 Bash suites in 825
+seconds of wall clock against 5560 seconds of suite time, and the 16 PowerShell
+suites in 23 seconds instead of 38.
 
-1. **Ordinary suites**, fanned out across every worker slot. They finish in a
-   few minutes.
-2. **Wall-clock-sensitive suites** — the reviewer, provider and memory-sync
-   family — run afterwards on an otherwise idle machine, two at a time. These
-   wait on fixed second counts rather than on a condition, so a busy machine
-   makes them fail even though nothing is wrong.
-
-That second phase is the whole reason the runner is trustworthy. Measured on a
-20-core desktop against current `main`, running the full set wide open reported
-seven failures; run one at a time, six of those seven passed. Only
-`test-ai-muse.sh` actually fails on `main`. A pre-check that invents failures is
-worse than no pre-check, so the sensitive family is contained rather than
-accelerated. Issue #89 fixed this defect class for the Grok and Kimi suites by
-deriving budgets from a measured per-machine baseline; the rest of the family
-still needs the same treatment, and until it gets it the phase-2 list is the
-containment.
-
-Two further properties are deliberate:
+Three properties matter and are deliberate:
 
 - **Nothing about the suites changes.** Same scripts, same assertions, same exit
   codes. Only the scheduling differs, so a local pass means the same thing a
   serial pass means. Assertions are never relaxed to make a parallel run green.
-- **Every suite gets its own uniquely named log** under `.test-logs/`, plus its
-  own `TMPDIR`. A shared log once produced an interleaved file and a believed-but
-  -false failure count; a unique log per suite is not optional.
-
-Raising `--lane-jobs` speeds up phase 2 and reintroduces exactly the false reds
-it exists to prevent.
+- **Every suite gets its own uniquely named log** under `.test-logs/`. A shared
+  log once produced an interleaved file and a believed-but-false failure count;
+  a unique log per suite is not optional.
+- **Every suite gets its own short-pathed `TMPDIR`**, outside the log tree. This
+  one cost an afternoon: temp directories were first placed under `.test-logs/`,
+  which inside a worktree is already about 140 characters deep. Windows still
+  caps most paths at 260 characters and the suites nest their own `mktemp` trees
+  below `TMPDIR`, so writes failed silently and six healthy suites reported
+  failures. The symptom looked exactly like load-induced flakiness and was not.
+  `tests/test-ai-test-local.sh` now asserts the path budget.
 
 Failing suites are named at the end with their log path and their first `FAIL`
 lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
