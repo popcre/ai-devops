@@ -76,6 +76,8 @@ check 'rerun-failed passes once the suite is fixed' '[ "$rerun_rc" -eq 0 ]'
 run -j 0 --list >/dev/null 2>&1;  check 'rejects -j 0' '[ "$?" -ne 0 ]'
 run -j abc --list >/dev/null 2>&1; check 'rejects a non-numeric -j' '[ "$?" -ne 0 ]'
 run --nonsense >/dev/null 2>&1;    check 'rejects an unknown option' '[ "$?" -ne 0 ]'
+run --lane-jobs 0 --list >/dev/null 2>&1;   check 'rejects --lane-jobs 0' '[ "$?" -ne 0 ]'
+run --lane-jobs two --list >/dev/null 2>&1; check 'rejects a non-numeric --lane-jobs' '[ "$?" -ne 0 ]'
 
 # --- launcher --------------------------------------------------------------
 check 'ai-test-local is executable' '[ -x "$LAUNCHER" ]'

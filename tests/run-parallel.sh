@@ -34,9 +34,9 @@ detect_cpus() {
 # Raise it with -j only when you accept that a red result may be the load.
 default_jobs() {
   local cpus; cpus="$(detect_cpus)"
-  local n=$(( cpus / 4 ))
+  local n="$cpus"
   [ "$n" -lt 1 ] && n=1
-  [ "$n" -gt 8 ] && n=8
+  [ "$n" -gt 16 ] && n=16
   echo "$n"
 }
 
@@ -45,12 +45,14 @@ PATTERN=""
 LOG_DIR=""
 LIST_ONLY=0
 RERUN_FAILED=0
+LANE_JOBS=
 
 usage() {
   cat <<'USAGE'
 usage: tests/run-parallel.sh [options]
 
-  -j N            worker slots (default: a quarter of this machine's cores, max 8)
+  -j N            worker slots for phase 1 (default: this machine's cores, max 16)
+  --lane-jobs N   concurrent wall-clock-sensitive suites in phase 2 (default 2)
   -p PATTERN      only suites whose filename matches this shell pattern
   -l DIR          log directory (default: a fresh dir under the repo's .test-logs)
   --list          print the suites that would run, then exit
@@ -65,6 +67,7 @@ USAGE
 while [ $# -gt 0 ]; do
   case "$1" in
     -j) JOBS="${2:-}"; shift 2 ;;
+    --lane-jobs) LANE_JOBS="${2:-}"; shift 2 ;;
     -p) PATTERN="${2:-}"; shift 2 ;;
     -l) LOG_DIR="${2:-}"; shift 2 ;;
     --list) LIST_ONLY=1; shift ;;
@@ -77,6 +80,9 @@ done
 [ -n "$JOBS" ] || JOBS="$(default_jobs)"
 case "$JOBS" in ''|*[!0-9]*) printf 'run-parallel: -j needs a whole number, got %s\n' "$JOBS" >&2; exit 2 ;; esac
 [ "$JOBS" -ge 1 ] || { printf 'run-parallel: -j must be at least 1\n' >&2; exit 2; }
+[ -n "$LANE_JOBS" ] || LANE_JOBS=2
+case "$LANE_JOBS" in ''|*[!0-9]*) printf 'run-parallel: --lane-jobs needs a whole number, got %s\n' "$LANE_JOBS" >&2; exit 2 ;; esac
+[ "$LANE_JOBS" -ge 1 ] || { printf 'run-parallel: --lane-jobs must be at least 1\n' >&2; exit 2; }
 
 LOG_ROOT="${AI_TEST_LOG_ROOT:-$ROOT/.test-logs}"
 if [ "$RERUN_FAILED" = 1 ]; then
@@ -120,43 +126,55 @@ if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
 
-# Two lanes, for two different reasons.
+# Two phases, because this repository has two kinds of suite.
 #
-# TIMING_SENSITIVE lists the suites that assert on wall-clock deadlines. Measured
-# on a 20-core desktop: run wide open they go red for lack of time rather than
-# for a defect (issue #89's exact failure mode), and a runner that produces false
-# reds is worse than no runner. These get one dedicated lane and run one at a
-# time, so each of them sees a quiet-ish machine.
+# TIMING_SENSITIVE lists the suites that wait on wall-clock deadlines instead of
+# on a condition. Measured on a 20-core desktop against current main: every one
+# of these passes on its own and goes red when the machine is busy. Six of the
+# seven "failures" in an early wide-open run of this runner were that, not
+# defects. A pre-check that invents failures is worse than no pre-check, so they
+# do not share the machine with the fan-out phase.
 #
-# Everything else fans out across the remaining slots, slowest first — with a
-# fixed number of slots, starting a 20-minute suite last leaves every other slot
-# idle waiting for it.
-TIMING_SENSITIVE='test-ai-grok-review.sh test-ai-codex-review.sh test-ai-kimi.sh test-ai-review-lifecycle.sh test-ai-review-preflight.sh test-ai-memory-sync.sh'
-KNOWN_SLOW='test-ai-glm.sh test-ai-muse.sh test-ai-qwen.sh test-ai-deepseek-agent.sh test-ai-gemini.sh test-ai-review-packet.sh'
+# Phase 1 fans the ordinary suites out across every worker slot; they finish in
+# minutes. Phase 2 then runs the timing-sensitive family on an otherwise idle
+# machine, only LANE_JOBS at a time (default 2). Issue #89 fixed this defect
+# class for the Grok and Kimi suites by deriving budgets from a measured
+# baseline; until the rest follow, this list is the containment.
+TIMING_SENSITIVE='test-ai-grok-review.sh test-ai-codex-review.sh test-ai-claude-review.sh test-ai-kimi.sh test-ai-deepseek-agent.sh test-ai-muse.sh test-ai-glm.sh test-ai-qwen.sh test-ai-gemini.sh test-ai-review-lifecycle.sh test-ai-review-preflight.sh test-ai-review-packet.sh test-ai-review-sandbox.sh test-ai-memory-sync.sh test-ai-memory-health.sh'
+
+# Slowest first within each phase: with a fixed number of slots, starting a
+# 16-minute suite last leaves every other slot idle waiting for it.
+KNOWN_SLOW='test-ai-grok-review.sh test-ai-glm.sh test-ai-qwen.sh test-ai-gemini.sh test-ai-kimi.sh test-ai-muse.sh test-ai-codex-review.sh test-ai-claude-review.sh test-ai-review-packet.sh test-ai-memory-health.sh test-ai-review-sandbox.sh test-ai-run-task.sh test-ai-config-migrate.sh'
 
 in_list() {
-  local needle="$1" item
-  shift
-  for item in $1; do [ "$item" = "$needle" ] && return 0; done
+  local needle="$1" list="$2" item
+  for item in $list; do [ "$item" = "$needle" ] && return 0; done
   return 1
+}
+
+# Slowest known suites first, then everything else in discovery order.
+order_by_cost() {
+  local -n _in="$1" _out="$2"
+  local slow name skip
+  _out=()
+  for slow in $KNOWN_SLOW; do
+    for name in "${_in[@]}"; do [ "$name" = "$slow" ] && _out+=("$name"); done
+  done
+  for name in "${_in[@]}"; do
+    skip=0
+    for slow in $KNOWN_SLOW; do [ "$name" = "$slow" ] && skip=1; done
+    [ "$skip" = 0 ] && _out+=("$name")
+  done
 }
 
 timing=(); fast=()
 for name in "${suites[@]}"; do
   if in_list "$name" "$TIMING_SENSITIVE"; then timing+=("$name"); else fast+=("$name"); fi
 done
-
-# Slowest of the remainder first.
-ordered=()
-for slow in $KNOWN_SLOW; do
-  for name in "${fast[@]}"; do [ "$name" = "$slow" ] && ordered+=("$name"); done
-done
-for name in "${fast[@]}"; do
-  skip=0
-  for slow in $KNOWN_SLOW; do [ "$name" = "$slow" ] && skip=1; done
-  [ "$skip" = 0 ] && ordered+=("$name")
-done
-fast=("${ordered[@]}")
+order_by_cost timing timing_ordered; timing=("${timing_ordered[@]}")
+if [ "${#fast[@]}" -gt 0 ]; then
+  order_by_cost fast fast_ordered; fast=("${fast_ordered[@]}")
+fi
 
 printf 'run-parallel: %s suites (%s in the serial timing lane), %s workers, logs in %s\n\n' \
   "${#suites[@]}" "${#timing[@]}" "$JOBS" "$LOG_DIR"
@@ -183,26 +201,30 @@ run_one() {
 
 suite_start="$(date +%s)"
 
-# The timing lane: one slot, one suite at a time.
-fan_slots="$JOBS"
-if [ "${#timing[@]}" -gt 0 ]; then
-  (
-    for name in "${timing[@]}"; do run_one "$name"; done
-  ) &
-  fan_slots=$(( JOBS - 1 ))
-  [ "$fan_slots" -lt 1 ] && fan_slots=1
-fi
-
-running=0
-for name in "${fast[@]}"; do
-  while [ "$running" -ge "$fan_slots" ]; do
-    wait -n 2>/dev/null || wait
-    running=$(( running - 1 ))
+# A pool of background jobs, at most $2 at a time.
+run_pool() {
+  local -n _items="$1"
+  local slots="$2" running=0 name
+  [ "${#_items[@]}" -gt 0 ] || return 0
+  for name in "${_items[@]}"; do
+    while [ "$running" -ge "$slots" ]; do
+      wait -n 2>/dev/null || wait
+      running=$(( running - 1 ))
+    done
+    run_one "$name" &
+    running=$(( running + 1 ))
   done
-  run_one "$name" &
-  running=$(( running + 1 ))
-done
-wait
+  wait
+}
+
+if [ "${#fast[@]}" -gt 0 ]; then
+  printf -- '--- phase 1: %s ordinary suites across %s workers\n' "${#fast[@]}" "$JOBS"
+  run_pool fast "$JOBS"
+fi
+if [ "${#timing[@]}" -gt 0 ]; then
+  printf -- '\n--- phase 2: %s wall-clock-sensitive suites, %s at a time on an idle machine\n' "${#timing[@]}" "$LANE_JOBS"
+  run_pool timing "$LANE_JOBS"
+fi
 suite_end="$(date +%s)"
 
 failed=()

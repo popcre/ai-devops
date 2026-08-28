@@ -124,34 +124,41 @@ bin/ai-test-local
 ```
 
 `--bash`, `--powershell` and `--reviewer` restrict it to one CI job's equivalent;
-`-j N` sets the worker count. The Bash and PowerShell runners can also be called
-directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
-`--list` to show what would run.
+`-j N` sets the worker count and `--lane-jobs N` the phase-2 count (below). The
+Bash and PowerShell runners can also be called directly as `tests/run-parallel.sh`
+and `tests/run-parallel.ps1`, and both accept `--list` to show what would run.
 
-Measured on a 20-core desktop, on the tree this landed in:
+The Bash runner works in two phases, because this repository has two kinds of
+suite:
 
-| | serial | parallel |
-|---|---|---|
-| Bash suites | 56 min | 23 min |
-| PowerShell suites | 38 s | 23 s |
+1. **Ordinary suites**, fanned out across every worker slot. They finish in a
+   few minutes.
+2. **Wall-clock-sensitive suites** — the reviewer, provider and memory-sync
+   family — run afterwards on an otherwise idle machine, two at a time. These
+   wait on fixed second counts rather than on a condition, so a busy machine
+   makes them fail even though nothing is wrong.
 
-Three properties matter and are deliberate:
+That second phase is the whole reason the runner is trustworthy. Measured on a
+20-core desktop against current `main`, running the full set wide open reported
+seven failures; run one at a time, six of those seven passed. Only
+`test-ai-muse.sh` actually fails on `main`. A pre-check that invents failures is
+worse than no pre-check, so the sensitive family is contained rather than
+accelerated. Issue #89 fixed this defect class for the Grok and Kimi suites by
+deriving budgets from a measured per-machine baseline; the rest of the family
+still needs the same treatment, and until it gets it the phase-2 list is the
+containment.
+
+Two further properties are deliberate:
 
 - **Nothing about the suites changes.** Same scripts, same assertions, same exit
   codes. Only the scheduling differs, so a local pass means the same thing a
-  serial pass means.
+  serial pass means. Assertions are never relaxed to make a parallel run green.
 - **Every suite gets its own uniquely named log** under `.test-logs/`, plus its
   own `TMPDIR`. A shared log once produced an interleaved file and a believed-but
   -false failure count; a unique log per suite is not optional.
-- **The default worker count is a quarter of this machine's cores, capped at 8.**
-  That number is measured, not guessed. On a 20-core desktop, `-j 10` turned two
-  suites red that pass on their own (`test-ai-grok-review.sh` and
-  `test-ai-review-lifecycle.sh`, both of which wait on wall-clock deadlines): a
-  loaded machine makes every wait slower, which is exactly the defect class of
-  issue #89. Until every reviewer suite derives its budgets from a measured
-  per-machine baseline, the conservative default is what makes a red result
-  worth believing. Raise `-j` only when you accept that a failure may be the
-  load rather than the code.
+
+Raising `--lane-jobs` speeds up phase 2 and reintroduces exactly the false reds
+it exists to prevent.
 
 Failing suites are named at the end with their log path and their first `FAIL`
 lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
