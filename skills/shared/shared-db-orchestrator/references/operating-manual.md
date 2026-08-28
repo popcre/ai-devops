@@ -176,6 +176,10 @@ When a successor is misrouted, stop before dispatch, preserve private artifacts
 in their approved private repository, and hand off to the route named in its own
 scope block. Never paste a private artifact into a public shared-db issue.
 
+## Phase 2 preview and reviewer lifecycle
+
+Keep object protection separate from active-author capacity. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest needs an owner decision and no mutation. Reviewer reservations use canonical provider/wrapper execution keys and durable ordered waits.
+
 ## Preview and merge locks
 
 Author permission never grants preview or merge permission. Acquire one exclusive

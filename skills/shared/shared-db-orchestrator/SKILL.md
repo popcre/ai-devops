@@ -190,6 +190,10 @@ Expiry never removes collision protection. Cleanup must prove ownership and
 finished branch/worktree/PR state before removing temporary refs. The reserved
 version remains permanently unavailable because it may already exist in preview.
 
+## Phase 2 preview and reviewer lifecycle
+
+Phase 2 is shadow-first. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys, prefer active reviewers to overflow, and create durable ordered waits when all keys are busy.
+
 ## Before preview and merge
 
 For each PR separately:

@@ -33,6 +33,8 @@ check "manual preserves collision protection after relinquishment" "grep -qi 'pr
 check "skill and manual name the guarded relinquish command" "grep -q -- '--relinquish-author-lease' '$ORCH' && grep -q -- '--relinquish-author-lease' '$MANUAL'"
 check "skill and manual name the guarded resume command" "grep -q -- '--resume-author-lease' '$ORCH' && grep -q -- '--resume-author-lease' '$MANUAL'"
 check "clock expiry releases neither protection nor capacity" "grep -qi 'Clock expiry releases neither protection nor capacity' '$ORCH' && grep -qi 'releases neither object protection nor active-author capacity' '$MANUAL'"
+check "Phase 2 commands and historical warning stay synchronized" "grep -q -- '--prepare-preview-dispatch <issue>' '$ORCH' && grep -q -- '--repair-preview-ready <ready-id> --issue <n>' '$ORCH' && grep -q 'historical dry-run proves nothing' '$ORCH'"
+check "review reservations use provider execution identity" "grep -q 'provider/wrapper execution keys' '$ORCH'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
