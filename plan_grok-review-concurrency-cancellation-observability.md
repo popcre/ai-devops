@@ -8,7 +8,7 @@ Incident evidence:
 - Local-only evidence `.ai/reviewer-issues/20260820T172906Z-edge-dev-grok-888349` — no progress was visible during a long turn.
 - [`docs/reviewer-result-delivery-defects-2026-08-20.md`](docs/reviewer-result-delivery-defects-2026-08-20.md) — the same-day cross-reviewer context.
 
-Planning handoff: [`HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair-plan.md`](HANDOFF.d/2026-08-20T1752Z-edge-dev-codex-grok-review-repair-plan.md)
+The completed planning handoff was retired on 2026-08-27 and remains available in Git history.
 
 ---
 

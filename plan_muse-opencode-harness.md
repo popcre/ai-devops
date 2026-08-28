@@ -2,7 +2,7 @@
 
 Tracking issue: [u2giants/ai-devops#40](https://github.com/u2giants/ai-devops/issues/40)
 
-Handoff for this plan: [`HANDOFF.d/2026-08-18T1929Z-al8960ofc-codex-muse-opencode-plan.md`](HANDOFF.d/2026-08-18T1929Z-al8960ofc-codex-muse-opencode-plan.md)
+The completed planning handoff was retired on 2026-08-27 and remains available in Git history.
 
 Official compatibility evidence:
 
