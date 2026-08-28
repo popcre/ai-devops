@@ -92,3 +92,6 @@ __pycache__/
 # "Filename too long", which aborted setup on 4837 and left a broken clone. Untracked
 # here so a fresh clone never writes these paths again.
 claude_chats/
+
+# === Local parallel test runner logs (regenerated every run) ===
+.test-logs/

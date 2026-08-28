@@ -112,6 +112,48 @@ the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
 provider qualification must live under `tests/probes/` and remains an explicit
 release gate, never CI.
 
+### Running the suites concurrently on one machine
+
+`tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is
+correct but slow: the complete Windows set takes about 70 minutes, and the hosted
+CI queue often adds more before a single test starts. For a local pre-check, run
+the same suites, unchanged, across worker slots on this machine:
+
+```bash
+bin/ai-test-local
+```
+
+`--bash`, `--powershell` and `--reviewer` restrict it to one CI job's equivalent;
+`-j N` sets the worker count. The Bash and PowerShell runners can also be called
+directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
+`--list` to show what would run.
+
+Measured on a 20-core desktop against current `main`: 58 Bash suites in 825
+seconds of wall clock against 5560 seconds of suite time, and the 16 PowerShell
+suites in 23 seconds instead of 38.
+
+Three properties matter and are deliberate:
+
+- **Nothing about the suites changes.** Same scripts, same assertions, same exit
+  codes. Only the scheduling differs, so a local pass means the same thing a
+  serial pass means. Assertions are never relaxed to make a parallel run green.
+- **Every suite gets its own uniquely named log** under `.test-logs/`. A shared
+  log once produced an interleaved file and a believed-but-false failure count;
+  a unique log per suite is not optional.
+- **Every suite gets its own short-pathed `TMPDIR`**, outside the log tree. This
+  one cost an afternoon: temp directories were first placed under `.test-logs/`,
+  which inside a worktree is already about 140 characters deep. Windows still
+  caps most paths at 260 characters and the suites nest their own `mktemp` trees
+  below `TMPDIR`, so writes failed silently and six healthy suites reported
+  failures. The symptom looked exactly like load-induced flakiness and was not.
+  `tests/test-ai-test-local.sh` now asserts the path budget.
+
+Failing suites are named at the end with their log path and their first `FAIL`
+lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
+a local pre-check, not a replacement for CI: GitHub remains the authority on
+whether a branch is green, and the reviewer suites in particular must be proven
+on the Windows runner.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash
