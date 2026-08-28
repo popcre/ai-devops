@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Run this repository's CI verification locally, in parallel, on this machine.
+#
+# GitHub Actions runs three jobs: linux-offline (the Bash suites), windows-offline
+# (the Bash suites plus the PowerShell suites) and windows-reviewer-safety (the two
+# reviewer suites). Serially those take about 70 minutes of wall clock, and the
+# hosted queue often adds more before a single test starts.
+#
+# This runs the same suites, unchanged, across worker slots on this machine.
+# It is a local pre-check, not a replacement for CI: GitHub is still the authority
+# on whether a branch is green.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+JOBS=""
+MODE="all"
+
+usage() {
+  cat <<'USAGE'
+usage: bin/ai-test-local [--bash|--powershell|--reviewer|--all] [-j N]
+
+  --all          Bash suites and PowerShell suites (default; mirrors CI)
+  --bash         only the Bash suites (mirrors linux-offline)
+  --powershell   only the PowerShell suites
+  --reviewer     only the reviewer safety suites (mirrors windows-reviewer-safety)
+  -j N           worker slots (default: a quarter of this machine's cores, max 8)
+
+Logs land under .test-logs/. Failing suites are named at the end with their log
+path; rerun just those with: bash tests/run-parallel.sh --rerun-failed
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --all) MODE=all; shift ;;
+    --bash) MODE=bash; shift ;;
+    --powershell|--pwsh) MODE=powershell; shift ;;
+    --reviewer) MODE=reviewer; shift ;;
+    -j) JOBS="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+jflag=()
+[ -n "$JOBS" ] && jflag=(-j "$JOBS")
+
+failures=0
+started="$(date +%s)"
+
+run_bash_suites() {
+  printf '\n===== BASH SUITES (parallel) =====\n'
+  bash "$ROOT/tests/run-parallel.sh" "${jflag[@]}" || failures=$((failures + 1))
+}
+
+run_reviewer_suites() {
+  printf '\n===== REVIEWER SAFETY SUITES (parallel) =====\n'
+  bash "$ROOT/tests/run-parallel.sh" "${jflag[@]}" -p 'test-ai-@(grok-review|codex-review).sh' \
+    || failures=$((failures + 1))
+}
+
+run_powershell_suites() {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    printf '\n===== POWERSHELL SUITES skipped: pwsh is not on PATH =====\n'
+    return
+  fi
+  printf '\n===== POWERSHELL SUITES (parallel) =====\n'
+  local args=(-NoProfile -File "$ROOT/tests/run-parallel.ps1")
+  [ -n "$JOBS" ] && args+=(-Jobs "$JOBS")
+  pwsh "${args[@]}" || failures=$((failures + 1))
+}
+
+shopt -s extglob
+case "$MODE" in
+  all)        run_bash_suites; run_powershell_suites ;;
+  bash)       run_bash_suites ;;
+  powershell) run_powershell_suites ;;
+  reviewer)   run_reviewer_suites ;;
+esac
+
+wall=$(( $(date +%s) - started ))
+printf '\nLOCAL VERIFY SUMMARY mode=%s failing-groups=%s wall=%ss\n' "$MODE" "$failures" "$wall"
+[ "$failures" -eq 0 ]

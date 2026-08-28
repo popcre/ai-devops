@@ -112,6 +112,46 @@ the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
 provider qualification must live under `tests/probes/` and remains an explicit
 release gate, never CI.
 
+### Running the suites concurrently on one machine
+
+`tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is
+correct but slow: the complete Windows set takes about 70 minutes, and the hosted
+CI queue often adds more before a single test starts. For a local pre-check, run
+the same suites, unchanged, across worker slots on this machine:
+
+```bash
+bin/ai-test-local
+```
+
+`--bash`, `--powershell` and `--reviewer` restrict it to one CI job's equivalent;
+`-j N` sets the worker count. The Bash and PowerShell runners can also be called
+directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
+`--list` to show what would run.
+
+Three properties matter and are deliberate:
+
+- **Nothing about the suites changes.** Same scripts, same assertions, same exit
+  codes. Only the scheduling differs, so a local pass means the same thing a
+  serial pass means.
+- **Every suite gets its own uniquely named log** under `.test-logs/`, plus its
+  own `TMPDIR`. A shared log once produced an interleaved file and a believed-but
+  -false failure count; a unique log per suite is not optional.
+- **The default worker count is a quarter of this machine's cores, capped at 8.**
+  That number is measured, not guessed. On a 20-core desktop, `-j 10` turned two
+  suites red that pass on their own (`test-ai-grok-review.sh` and
+  `test-ai-review-lifecycle.sh`, both of which wait on wall-clock deadlines): a
+  loaded machine makes every wait slower, which is exactly the defect class of
+  issue #89. Until every reviewer suite derives its budgets from a measured
+  per-machine baseline, the conservative default is what makes a red result
+  worth believing. Raise `-j` only when you accept that a failure may be the
+  load rather than the code.
+
+Failing suites are named at the end with their log path and their first `FAIL`
+lines; rerun only those with `bash tests/run-parallel.sh --rerun-failed`. This is
+a local pre-check, not a replacement for CI: GitHub remains the authority on
+whether a branch is green, and the reviewer suites in particular must be proven
+on the Windows runner.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash
