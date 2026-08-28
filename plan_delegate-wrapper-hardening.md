@@ -2,6 +2,12 @@
 
 ## STATUS
 
+> **Superseded on 2026-08-28 by issue #151:** every reference to a $1.50 Grok debate
+> ceiling below is historical. A Grok debate no longer has a fixed round or dollar
+> limit; it stops on evidence-backed consensus or on the quality-degradation signals
+> in `skills/shared/grok-cli/SKILL.md`. Per-turn cost is still added and reported.
+
+
 | Step | State | Date | Evidence |
 |---|---|---|---|
 | 1. Capture baselines and re-check every review claim | ✅ complete | 2026-08-10 | Base `77b4592`; baselines: Kimi 56, GLM 129, Grok 79, Windows 23; doctors confirmed Kimi 0.32.0, Grok 0.2.112, OpenCode 1.18.12. |
