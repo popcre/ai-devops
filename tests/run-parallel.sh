@@ -131,7 +131,7 @@ fi
 # Everything else fans out across the remaining slots, slowest first — with a
 # fixed number of slots, starting a 20-minute suite last leaves every other slot
 # idle waiting for it.
-TIMING_SENSITIVE='test-ai-grok-review.sh test-ai-codex-review.sh test-ai-kimi.sh test-ai-review-lifecycle.sh test-ai-review-preflight.sh'
+TIMING_SENSITIVE='test-ai-grok-review.sh test-ai-codex-review.sh test-ai-kimi.sh test-ai-review-lifecycle.sh test-ai-review-preflight.sh test-ai-memory-sync.sh'
 KNOWN_SLOW='test-ai-glm.sh test-ai-muse.sh test-ai-qwen.sh test-ai-deepseek-agent.sh test-ai-gemini.sh test-ai-review-packet.sh'
 
 in_list() {

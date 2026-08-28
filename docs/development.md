@@ -128,6 +128,13 @@ bin/ai-test-local
 directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
 `--list` to show what would run.
 
+Measured on a 20-core desktop, on the tree this landed in:
+
+| | serial | parallel |
+|---|---|---|
+| Bash suites | 56 min | 23 min |
+| PowerShell suites | 38 s | 23 s |
+
 Three properties matter and are deliberate:
 
 - **Nothing about the suites changes.** Same scripts, same assertions, same exit
