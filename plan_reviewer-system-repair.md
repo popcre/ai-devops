@@ -253,8 +253,7 @@ reviewer behaviour.
 configuration, credential, or installed binary has been changed. The only work
 done so far is analysis: [`fix_reviewer_system.md`](fix_reviewer_system.md) on
 `main` at commit `c361855` ("document delegated reviewer system failures"), plus
-its handoff at
-[`HANDOFF.d/2026-08-17T2115Z-al8960ofc-codex-reviewer-system-repair.md`](HANDOFF.d/2026-08-17T2115Z-al8960ofc-codex-reviewer-system-repair.md).
+its now-retired handoff, which remains available in Git history.
 
 What already exists and works — read these before writing code:
 
