@@ -123,7 +123,7 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
-- Allow at most `MAX_AUTHOR_LANES` active-author leases simultaneously — five until the separately governed reviewer-capacity gate permits eight. Protected blocked claims do not consume active-author capacity, but keep every object and version lock. Clock expiry releases neither protection nor capacity. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
+- Allow at most `MAX_AUTHOR_LANES` active-author leases simultaneously — eight after Albert's 2026-08-28 approval of the six-reviewer rotation. Protected blocked claims do not consume active-author capacity, but keep every object and version lock. Clock expiry releases neither protection nor capacity. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
 - Relinquish capacity only with `--relinquish-author-lease --claim <n> --owner <owner> --blocked-on issue:#<n>` after clean-worktree and stage-holder proof. Resume only with `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`; resume renews the time lease and rechecks capacity, collision, and permanent version truth.
 - Give each author an isolated worktree and branch.
 - Require exact, parseable database-object claims.
@@ -192,7 +192,7 @@ version remains permanently unavailable because it may already exist in preview.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is shadow-first. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys, prefer active reviewers to overflow, and create durable ordered waits when all keys are busy.
+Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when all six are busy.
 
 ## Before preview and merge
 
