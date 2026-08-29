@@ -1,7 +1,7 @@
 # plan_progress-wait-misuse-guard.md
 
 **Created:** 2026-08-28 · **Branch:** `claude/reviewer-flake-89-progress-waits`
-**Handoff:** [`HANDOFF.d/2026-08-28T1100Z-edge-dev-claude-progress-wait-misuse-guard.md`](HANDOFF.d/2026-08-28T1100Z-edge-dev-claude-progress-wait-misuse-guard.md)
+**Handoff:** closed — this plan is complete.
 **Related:** [`fix_test_ai.md`](fix_test_ai.md) · [`plan_repo-throughput-restructure.md`](plan_repo-throughput-restructure.md) · issue
 [#89](https://github.com/popcre/ai-devops/issues/89) · PR
 [#142](https://github.com/popcre/ai-devops/pull/142)
@@ -19,7 +19,7 @@ plan is wrong and must be re-planned rather than forced.
 | 2 | Unit-test the never-moved case | ✅ done 2026-08-28 | `tests/test-lib-test-timing.sh` — 3 new checks; `bash tests/test-lib-test-timing.sh` → 12 passed, 0 failed |
 | 3 | Write the rule into the helper header | ✅ done 2026-08-28 | `tests/lib-test-timing.sh` header above `ai_test_fingerprint`; `fix_test_ai.md` |
 | 4 | Fix the three grok waits that regressed | ✅ done 2026-08-28 | `tests/test-ai-grok-review.sh:375,732,753` now fingerprint the whole state and fixture trees; fingerprint is mtime-aware |
-| 5 | Green CI, merge, close out | ⬜ open | — |
+| 5 | Green CI, merge, close out | ✅ done 2026-08-29 | PR [#142](https://github.com/popcre/ai-devops/pull/142) merged as `7adaefd8` through the merge queue with `linux-offline`, `windows-offline`, and `windows-reviewer-safety` all green. That merge also repaired `main`, which had been red since 2026-08-28 12:27Z because `HANDOFF.d/2026-08-28T1100Z-edge-dev-claude-progress-wait-misuse-guard.md` linked to this plan before this plan existed on `main`. |
 
 ---
 
