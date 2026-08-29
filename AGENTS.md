@@ -117,6 +117,15 @@ and [`docs/architecture.md`](docs/architecture.md).
   toolkit source, but there is no container, package registry, hosted service,
   application deployment workflow, or application database.
 
+- **Never verify the same commit twice (SOP).** The merge queue tests the exact
+  commit that will land on `main` before it lands, so a second full run triggered
+  by the resulting push proves nothing and costs another occupancy of the
+  self-hosted Windows runner - about 71 minutes per merge as measured on
+  2026-08-28. CI triggers exist for pull requests and for `merge_group`. Do not
+  add or restore a `push:` trigger on a branch that only receives queue merges,
+  and do not re-run a job whose identical commit already has a green result;
+  re-run only what actually failed.
+
 ## Handoffs and completion
 
 `HANDOFF.md` is a static pointer. Read only OPEN files in `HANDOFF.d/` that

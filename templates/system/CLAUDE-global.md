@@ -133,7 +133,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Before the first commit in a repository, run `git var GIT_COMMITTER_IDENT`; it
   must show `Albert Hazan <u2giants@users.noreply.github.com>`. Check for other
   sessions' changes before pull, merge, or commit, and stage only owned files.
-- Default `u2giants` application work goes directly to `main`. DesignFlow uses
+- **Never push directly to a protected `main`.** Work on a branch, open a pull
+  request, and let the repository's checks and merge queue decide. The
+  authoritative per-repository answer is `config/repository-policy.json` in
+  `ai-devops`; `feature-branch-pr` is the default and `popcre/ai-devops` itself
+  is on it. An admin bypass exists for emergencies only and is not a working
+  style. DesignFlow uses
   Albert's sandbox branch and a pull request to `develop`, never a self-merge.
   `shared-db` uses a branch and pull request. Read the repository's own
   `AGENTS.md` before changing branches or shipping.
