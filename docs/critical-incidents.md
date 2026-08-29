@@ -334,3 +334,65 @@ Unrelated noise seen during that login: `codex_apps` (Codex's built-in hosted
 apps MCP) reported `token_revoked` from the pre-login token, and the other MCP
 servers reported "startup interrupted" because startup was cut short. Both
 cleared once the fresh login was in place.
+
+
+## 2026-08-28 — A local test series cancelled a live CI job on the same machine
+
+**Impact:** a required check on PR #142 (`windows-reviewer-safety`, job
+`98712820009`) recorded `cancelled` at its test step. It looked like a CI
+failure. It was not: the session's own cleanup had killed the job's processes.
+A second ten-run measurement series was lost with it, on top of a first series
+already discarded for a different reason.
+
+**Symptom:** three things that each looked like an unrelated fault:
+
+1. The repository API reported the self-hosted runner `status=offline` while
+   `busy=true`, even though `Runner.Listener` and `Runner.Worker` were both alive
+   and working the whole time.
+2. A required check flipped to `fail` with no assertion in its log.
+3. Every `gh` call against the Actions API returned `403 rate limit exceeded`
+   while `gh api rate_limit` still reported `remaining=5000/5000`.
+
+**Root cause:** the reviewer suites and the CI job that runs them are the *same
+script with the same process name*. Eight local suites were started on the
+machine that also hosts the only self-hosted runner. Two independent failures
+followed:
+
+- **Starvation.** Eight suites saturated the machine, so the runner's heartbeat
+  to GitHub stopped arriving on time. The `offline` status was a reporting
+  artifact, not a dead runner. Do not re-register a runner on this evidence.
+- **A name-matched kill.** Stopping the series matched on the suite's process
+  name, which also matched the processes the CI job had spawned. The job was
+  killed from outside and GitHub correctly recorded `cancelled`.
+
+The 403s were a separate, self-inflicted problem: two check monitors polling the
+Actions API every 30 seconds tripped GitHub's **secondary** rate limit. The
+`rate_limit` endpoint reports only the *primary* quota, so it reads a full
+5000/5000 during a secondary block. That reading is not evidence that the quota
+is fine.
+
+**Fix:** stop the series, let the checks run on a quiet machine, and re-run.
+Pushing a new commit supersedes the old run, so a job cancelled this way does not
+need a manual re-run — but the *old* run is not cancelled automatically and will
+keep holding the single runner until it is cancelled explicitly.
+
+**Prevention:**
+
+- **This machine hosts either the CI checks or a local test series, never both.**
+  Confirm the runner is idle first:
+  ```bash
+  gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) busy=\(.busy)"'
+  ```
+- Scope any cleanup to the series' own process tree. Never issue a bare name
+  match against every matching process on the machine.
+- Poll the Actions API at 5-minute intervals, not 30-second ones, and never run
+  two watchers at once.
+- Treat a `cancelled` conclusion as "something killed this from outside", never
+  as a test result.
+
+**Why the diagnosis was slow:** all three symptoms pointed away from the real
+cause. `offline` suggested a broken runner, `fail` suggested a broken test, and
+`5000/5000` suggested the quota was healthy. Each was a misleading report of a
+healthy component. See
+[`../tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md`](../tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md)
+and [`self-hosted-windows-runner.md`](self-hosted-windows-runner.md).

@@ -20,9 +20,23 @@ measurement is judged against a computer that no longer exists.
 
 **Do not fix this by raising the multiplier.** A ceiling large enough for a
 degraded machine no longer detects a genuine hang, which is what these checks
-exist to catch. The correct fix is a progress-sensitive wait. See
-`tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md`, which is
-the evidence any later claim of "fixed" must be measured against.
+exist to catch. The correct fix is a progress-sensitive wait.
+
+**Status 2026-08-28: that wait is now written, not yet measured.** Commit
+`fe7c0606` converts the three drift-exposed waits in
+`tests/test-ai-grok-review.sh` to stall detection - they fail only when nothing
+observable has changed for the stall window, so a slow-but-advancing machine is
+no longer failed while a genuine hang still is. No multiplier, timeout, retry, or
+quarantine was added. The mechanism is proven by `tests/test-lib-test-timing.sh`
+(10 checks, 10 passed).
+
+The flake rate is **still unmeasured**. Two local ten-run series were abandoned -
+see `tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md`,
+which also records the rule that this machine hosts either the CI checks or a
+local series, never both. Read that file and
+`tests/verification/reviewer-flake-89/2026-08-27-ten-run-series.md` together;
+they are the evidence any later claim of "fixed" must be measured against.
+
 **Affects:** `tests/test-ai-grok-review.sh`, `tests/test-ai-kimi.sh`, and — after
 a sweep — `tests/test-ai-deepseek-agent.sh`, `tests/test-ai-muse.sh`,
 `tests/test-ai-gemini.sh`, `tests/test-ai-qwen.sh`, `tests/test-ai-glm.sh`.
@@ -228,6 +242,30 @@ cost of one wrapper round trip:
 | edge-dev, four-suite storm | 82s |
 
 ---
+
+### 3.7 A progress signal that goes blind while the work is healthy
+
+Replacing a frozen-baseline deadline with a stall window only helps if the thing
+being watched actually changes while the system is *healthily waiting*. The first
+version of `ai_test_fingerprint` measured directory entry counts and file byte
+sizes. A Grok wrapper building its review packet creates no file, takes no lock,
+and writes no stderr for minutes; it touches and rewrites files instead. That
+phase was therefore invisible, and under CI contention it outlasted the
+120-second stall window — so three healthy checks were failed and PR #142 was
+ejected from the merge queue (run `33144576111`, 2026-08-28).
+
+Two rules follow, both now enforced in `tests/lib-test-timing.sh`:
+
+- **A fingerprint must sense modification time, not only size and count**, and
+  should watch the whole tree the fixture works in, not one subdirectory.
+- **A wait that gives up must say whether its signal ever moved.** A signal that
+  never moved once is a defect in the test and is reported as such; a signal that
+  moved and then stopped is a hang in the code under test. Calling both a "stall"
+  is what cost this session hours on two disproved diagnoses.
+
+Before using a stall window, name something that demonstrably changes during the
+wait. If you cannot, use `poll_until` with a fixed ceiling instead. Never widen a
+ceiling to fix this (Decision B).
 
 ## 4. Why CI does not protect us here
 
