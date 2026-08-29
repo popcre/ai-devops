@@ -9,6 +9,7 @@
 5. Review and production
 6. Dynamic queues and automatic refill
 7. External review rotation
+8. Operational blocker recovery
 
 ## Startup recovery
 
@@ -40,7 +41,7 @@ records. Do not allocate while any malformed claim or lock exists.
 
 Albert's 2026-08-14 ruling allowed no more than three unrelated migration
 authors; he raised it to five on 2026-08-25. The manager acquires GitHub-backed
-object locks and one of `MAX_AUTHOR_LANES` fixed author slots across all
+object locks and one of `MAX_AUTHOR_LANES` renewable active-author slots across all
 computers. Read the constant in
 `scripts/manage-migration-author-lanes.mjs` rather than trusting a number
 written in prose. The cap is throughput only: isolation comes from the exact
@@ -58,9 +59,26 @@ node scripts/manage-migration-author-lanes.mjs --claim \
 
 The manager must include open draft and ready pull requests, paginate all GitHub
 reads, reject unreadable input, reserve a permanent unique migration version and
-return success only after lock read-back. Older claims count until adopted or
-explicitly released. A lease expiry is a warning, never permission to ignore its
-objects or author slot.
+return success only after lock read-back. Older claims protect their objects and
+versions until adopted or explicitly released. A lease expiry is a warning and
+releases neither object protection nor active-author capacity.
+
+When a durable external blocker stops a clean worktree and the claim holds no
+preview, merge, or production stage, relinquish only capacity:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
+  --claim <claim> --owner <owner> --blocked-on issue:#<blocker>
+```
+
+The protected claim remains in every collision calculation. After the blocker
+clears, resume through the guarded command; it renews the clock lease and
+rechecks active capacity, every collision, and the permanent version reservation:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
+  --claim <claim> --owner <owner> --lease-hours <hours>
+```
 
 Do not create migration files before acquisition succeeds. Do not choose a
 version manually. Do not edit fenced claim blocks.
@@ -97,17 +115,41 @@ priority runs first. Open dependencies make otherwise ready structural work wait
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
 components form serial queues; unrelated components fill the available lanes.
-Dispatch every `REFILL REQUIRED NOW` issue in the same turn. Do not ask Albert
-to approve dispatch. Ask only for a genuine owner decision or material business
-risk.
+Claims and permanent version reservations protect future work independently of
+active-author capacity. A relinquished claim is not an active author but still
+blocks overlap. Report a lane as working only when current worker evidence exists.
+When any author slot frees, run a live queue audit immediately, close stale issues
+whose outcome is already delivered, and dispatch the next genuinely eligible
+issue in an isolated worktree. Keep explicit successor queues, but say plainly
+when the audit proves no eligible successor exists. Do not ask Albert to approve
+dispatch.
 
 An empty lane is justified only by a complete audit with no eligible candidate.
 Unclassified or malformed issues make that proof impossible and the command
-fails. Blocked, owner-decision, and every non-structural work type are reported
-but never consume a lane. `needs-albert` is not a route: after an answer, change
+fails. Blocked work consumes no active-author slot only after the guarded
+relinquishment above; its claim remains protected. Owner-decision and every
+non-structural work type are reported but never consume a lane. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
+
+## Operational blocker recovery
+
+An orchestrator must never sit silently idle when blocked. The blocker repair is
+part of orchestration even when its implementation is repo maintenance,
+documentation, tooling, reviewer infrastructure, or another repository. Start a
+separate appropriately scoped task immediately; never absorb non-structural work
+into the orchestrator context. Continue independent structural work, disclose
+the blocker and business consequence immediately, and follow the repair task
+until the original capability is restored.
+
+If Albert's authority is required, record it immediately in plain business
+language with one exact request and the consequence of waiting. Never silently
+park an owner decision. Reviewer, tooling, allocator, and rate-limit failures are
+urgent operational blockers: preserve capability, use bounded API calls, read
+and report the provider reset time in Eastern Time, and do not repeatedly invoke
+a path already known to be unsafe. The reviewer-allocator redesign blocker is
+[u2giants/shared-db#1767](https://github.com/u2giants/shared-db/issues/1767).
 
 ### Close what you supersede, in the same turn
 
@@ -133,6 +175,10 @@ it is never routing evidence.
 When a successor is misrouted, stop before dispatch, preserve private artifacts
 in their approved private repository, and hand off to the route named in its own
 scope block. Never paste a private artifact into a public shared-db issue.
+
+## Phase 2 preview and reviewer lifecycle
+
+Keep object protection separate from active-author capacity. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest needs an owner decision and no mutation. Reviewer reservations use canonical provider/wrapper execution keys and durable ordered waits.
 
 ## Preview and merge locks
 

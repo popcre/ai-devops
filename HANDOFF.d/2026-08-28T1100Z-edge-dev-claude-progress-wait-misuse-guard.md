@@ -9,7 +9,8 @@ created: 2026-08-28T11:00Z
 # Progress-wait misuse guard — open plan, no implementation started
 
 **The plan is the brief:**
-[`plan_progress-wait-misuse-guard.md`](../plan_progress-wait-misuse-guard.md).
+`plan_progress-wait-misuse-guard.md`, which lands with PR #142 on branch
+`claude/reviewer-flake-89-progress-waits` and is not on `main` yet.
 Read its STATUS table first. Do not re-derive or re-plan it.
 
 ## 0. What a reader needs to decide anything
