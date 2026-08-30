@@ -1008,6 +1008,30 @@ cleanup_review_transients() { # JOB-DIR PROMPT-FILE
   rm -f -- "$2" "$1/launch-worker.ps1" "$1/launch-bootstrap.ps1" 2>/dev/null || true
 }
 
+release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
+  # A terminal phase is a readiness contract: callers may immediately start
+  # the next paid turn.  Release the exact repository lock before publishing
+  # that phase so a loaded machine cannot observe "completed" while cleanup is
+  # still holding the lock.  The delay is a deterministic regression hook.
+  if [ "${AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY:-0}" -gt 0 ] 2>/dev/null; then
+    sleep "$AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY"
+  fi
+  cleanup_review_transients "$1" "$2"
+  lock_release "$3"
+  # Test-only fault injection proves that a failed deletion can never be
+  # published as terminal readiness. A directory at the launcher path models
+  # an undeletable transient without depending on host ACL behavior.
+  [ "${AI_KIMI_TEST_FAIL_TERMINAL_CLEANUP:-0}" != 1 ] || mkdir -p "$1/launch-worker.ps1"
+  if [ -e "$2" ] || [ -e "$1/launch-worker.ps1" ] \
+    || [ -e "$1/launch-bootstrap.ps1" ] || [ -d "$3" ]; then
+    write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
+      '.phase="recovery-required"|.terminal_reason="transient-cleanup-failed"|.exit_code=2|.updated=$u' \
+      || true
+    return 1
+  fi
+  trap - EXIT
+}
+
 review_worker() { # JOB-DIR PROMPT-FILE
   local dir="$1" pf="$2" meta out repo workdir repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase
   meta="$dir/job.json"; [ -f "$meta" ] || exit 2
@@ -1030,9 +1054,13 @@ review_worker() { # JOB-DIR PROMPT-FILE
   if [ "$RUN_TURN_CANCELLED" = 1 ] || [ -f "$ACTIVE_CANCEL_FILE" ] \
     || jq -e '.cancel_requested == true' "$meta" >/dev/null 2>&1; then
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="cancelled-by-user"|.exit_code=$rc|.updated=$u' || exit 2
-    finalize_review_artifact "$meta" "$out" incomplete cancelled-by-user || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+    if ! finalize_review_artifact "$meta" "$out" incomplete cancelled-by-user; then
+      release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
+      write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'
+      exit 2
+    fi
+    release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="cancelled"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
-    cleanup_review_transients "$dir" "$pf"
     exit 1
   fi
   if has_resume_hint "$out"; then
@@ -1044,17 +1072,25 @@ review_worker() { # JOB-DIR PROMPT-FILE
     defect="$(review_answer_defect "$out")"; [ -n "${reason:-}" ] || [ -z "$defect" ] || reason="$defect"
     if [ -n "${reason:-}" ]; then
       write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
-      finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+      if ! finalize_review_artifact "$meta" "$out" incomplete "$reason"; then
+        release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
+        write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'
+        exit 2
+      fi
+      release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
       write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase="failed"|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
-      cleanup_review_transients "$dir" "$pf"
       exit 1
     fi
     [ "$source_before" = "$(tree_state "$repo")" ] || stale=true
     write_meta "$(meta_path "$(repo_id "$repo")" "$name")" "$(jq -n --arg sid "$new_sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg upstream "$(jq -r .upstream_identity "$meta")" --arg workspace "$workdir" --arg kind "$(jq -r '.review_kind // "diff"' "$meta")" --arg base "$(jq -r '.base // ""' "$meta")" --arg head "$(jq -r '.head // ""' "$meta")" --arg name "$name" --arg caller "$CALLER" --arg mode "$mode" --arg model "$KIMI_MODEL" --arg created "$(date -u +%FT%TZ)" '{kimi_session_id:$sid,repo:$repo,repo_remote:$remote,upstream_identity:$upstream,review_workspace:$workspace,review_kind:$kind,base:$base,head:$head,name:$name,caller:$caller,mode:$mode,model:$model,created:$created,updated:$created,turns:1}')"
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason="session.resume_hint"|.exit_code=$rc|.updated=$u' || exit 2
-    finalize_review_artifact "$meta" "$out" complete session.resume_hint || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+    if ! finalize_review_artifact "$meta" "$out" complete session.resume_hint; then
+      release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
+      write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'
+      exit 2
+    fi
+    release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
     write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg sid "$new_sid" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" --argjson stale "$stale" '.phase="completed"|.kimi_session_id=$sid|.updated=$u|.source_checkout_changed=$stale|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="complete"|.artifact_sha256=$h' || exit 2
-    cleanup_review_transients "$dir" "$pf"
     exit 0
   fi
   reason="provider-process-failed"
@@ -1066,9 +1102,13 @@ review_worker() { # JOB-DIR PROMPT-FILE
   [ "$reason" = provider-process-failed ] && grep -Eqi 'auth|credential|provider|no providers' "$out" "$out.err" 2>/dev/null && reason="credentials-unavailable"
   terminal_phase="failed"; [ "$reason" = timed-out ] && terminal_phase="timed-out"
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
-  finalize_review_artifact "$meta" "$out" incomplete "$reason" || { write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'; exit 2; }
+  if ! finalize_review_artifact "$meta" "$out" incomplete "$reason"; then
+    release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
+    write_job_state "$meta" '.phase="recovery-required"|.terminal_reason="artifact-write-failed"'
+    exit 2
+  fi
+  release_review_worker_resources "$dir" "$pf" "$repo_lock" "$meta" || exit 2
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg phase "$terminal_phase" --arg c "$FINAL_CANONICAL" --arg m "$FINAL_MIRROR" --arg h "$FINAL_HASH" '.phase=$phase|.updated=$u|.artifact_paths.canonical=$c|.artifact_paths.repository=(if $m=="" then null else $m end)|.artifact_kind="incomplete"|.artifact_sha256=$h' || exit 2
-  cleanup_review_transients "$dir" "$pf"
   exit 1
 }
 

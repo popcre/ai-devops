@@ -18,8 +18,8 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
-| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | implemented; merge pending | [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
-| 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | open | — |
+| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
+| 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | acceptance complete; ready to land | [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
 | 3 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 4 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
 | 5 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |

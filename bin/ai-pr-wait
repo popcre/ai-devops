@@ -15,7 +15,7 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS]
+#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N]
 #
 # Exit status:
 #   0  merged
@@ -28,12 +28,21 @@ PR=''
 REPO=''
 TIMEOUT_MINUTES=180
 INTERVAL=60
+API_TIMEOUT_SECONDS=30
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) REPO="${2:-}"; shift 2 ;;
-    --timeout-minutes) TIMEOUT_MINUTES="${2:-}"; shift 2 ;;
-    --interval) INTERVAL="${2:-}"; shift 2 ;;
+    --repo|--timeout-minutes|--interval|--api-timeout-seconds)
+      option="$1"
+      [ $# -ge 2 ] && [ -n "$2" ] || { printf 'ai-pr-wait: %s requires a value\n' "$option" >&2; exit 3; }
+      case "$option" in
+        --repo) REPO="$2" ;;
+        --timeout-minutes) TIMEOUT_MINUTES="$2" ;;
+        --interval) INTERVAL="$2" ;;
+        --api-timeout-seconds) API_TIMEOUT_SECONDS="$2" ;;
+      esac
+      shift 2
+      ;;
     -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
     -*) printf 'ai-pr-wait: unknown option %s\n' "$1" >&2; exit 3 ;;
     *) PR="$1"; shift ;;
@@ -49,11 +58,51 @@ esac
 case "$INTERVAL" in
   ''|0*|*[!0-9]*) printf 'ai-pr-wait: --interval must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
 esac
+case "$API_TIMEOUT_SECONDS" in
+  ''|0*|*[!0-9]*) printf 'ai-pr-wait: --api-timeout-seconds must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
+esac
 command -v gh >/dev/null 2>&1 || { printf 'ai-pr-wait: gh is not installed\n' >&2; exit 3; }
 command -v jq >/dev/null 2>&1 || { printf 'ai-pr-wait: jq is not installed\n' >&2; exit 3; }
+GH_RUNNER="$(command -v gh)"
+SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
+[ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
+BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
+[ -n "$BASH_RUNNER" ] || { printf 'ai-pr-wait: bash is not installed\n' >&2; exit 3; }
+PYTHON_RUNNER=''
+for candidate in python3 python; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 || continue
+  PYTHON_RUNNER="$(command -v "$candidate")"
+  break
+done
+[ -n "$PYTHON_RUNNER" ] || { printf 'ai-pr-wait: Python 3.10 or newer is not installed\n' >&2; exit 3; }
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    BASH_RUNNER="$(cygpath -w "$BASH_RUNNER")"
+    GH_RUNNER="$(cygpath -w "$GH_RUNNER")"
+    PYTHON_RUNNER="$(cygpath -w "$PYTHON_RUNNER")"
+    SUPERVISOR="$(cygpath -w "$SUPERVISOR")"
+    ;;
+esac
+
+DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+
+bounded_gh() {
+  local now remaining limit
+  now="$(date +%s)"
+  remaining=$(( DEADLINE - now ))
+  [ "$remaining" -gt 0 ] || return 124
+  limit="$API_TIMEOUT_SECONDS"
+  [ "$limit" -le "$remaining" ] || limit="$remaining"
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
+    printf '%s\n' "$GH_RUNNER" > "$AI_PR_WAIT_TEST_TRACE.resolved"
+  fi
+  "$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
+    "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then printf "%s\n" "$runner" > "$AI_PR_WAIT_TEST_TRACE.child"; fi; exec "$runner" "$@"' bash "$GH_RUNNER" "$@"
+}
 
 if [ -z "$REPO" ]; then
-  REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
+  REPO="$(bounded_gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
   [ -n "$REPO" ] || { printf 'ai-pr-wait: cannot determine the repository; pass --repo\n' >&2; exit 3; }
 fi
 OWNER="${REPO%%/*}"
@@ -61,9 +110,12 @@ NAME="${REPO##*/}"
 
 say() { printf '%s\n' "$*"; }
 
-DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAS_QUEUED=0
 LAST=''
+API_STDERR=/dev/null
+if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
+  API_STDERR="$AI_PR_WAIT_TEST_TRACE.stderr"
+fi
 
 deadline_reached() {
   [ "$(date +%s)" -ge "$DEADLINE" ]
@@ -82,7 +134,7 @@ wait_for_next_poll() {
 while :; do
   # One GraphQL call carries everything that decides the outcome, including the
   # merge-queue membership that `gh pr view` does not report.
-  Q="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){nodes{... on CheckRun{name conclusion}}}}}}}}}}" 2>/dev/null)"
+  Q="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){nodes{... on CheckRun{name conclusion}}}}}}}}}}" 2>"$API_STDERR")"
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
     say "ai-pr-wait: could not read PR #$PR (transient); retrying"

@@ -52,6 +52,11 @@ case "${1:-}" in
     done
     exit 1 ;;
 esac
+# Only invocations that reach the actual model turn belong in this ledger.
+# Version, provider-discovery, and transcript-export helpers are recorded in
+# argv.txt above, but they are not second paid turns and may legitimately run
+# after a slow first turn completes.
+printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/provider-turns.txt"
 case "$mode" in
   ok)      cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   nohint)  printf '{"role":"assistant","content":"partial answer"}\n' ;;   # no terminal record
@@ -179,7 +184,7 @@ check "help exits 0" "run --help"
 
 echo "== review_uses_readonly_agent (structural read-only) =="
 : > "$TMP/argv.txt"
-run new r1 --prompt "review" >/dev/null 2>&1
+AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY=2 run new r1 --prompt "review" >/dev/null 2>&1
 check "review passes --agent-file"   "grep -q -- '--agent-file' '$TMP/argv.txt'"
 check "review pins the model"        "grep -q -- '-m kimi-code/k3' '$TMP/argv.txt'"
 check "review uses stream-json"      "grep -q -- '--output-format stream-json' '$TMP/argv.txt'"
@@ -189,11 +194,14 @@ check "never uses -c/--continue"     "! grep -qE -- '(^| )-c( |$)|--continue' '$
 check "preflight created an isolated Kimi sessions directory" "test -d '$KIMI_CODE_HOME/sessions'"
 REVIEW_WORKSPACE="$(tail -1 "$TMP/pwd.txt" 2>/dev/null || true)"
 check "review runs in a private workspace" "test -n '$REVIEW_WORKSPACE' && test '$REVIEW_WORKSPACE' != '$REPO' && test -d '$REVIEW_WORKSPACE/.git'"
+: > "$TMP/argv.txt"
+run ask r1 --prompt "immediate follow up" >/dev/null 2>&1
+check "terminal review is immediately resumable" "grep -q -- '-r session_35e1a0a2' '$TMP/argv.txt'"
 
 echo "== durable_review_jobs =="
 JOB_ID="$(run start durable --prompt review)"
 check "start returns a durable job id" "test -n '$JOB_ID'"
-check "status reports a durable phase" "run status durable | jq -e '.phase == \"preflight\" or .phase == \"starting\" or .phase == \"running\" or .phase == \"completed\"'"
+check "status reports a durable phase" "run status durable | jq -e '.phase == \"preflight\" or .phase == \"starting\" or .phase == \"running\" or .phase == \"finalizing\" or .phase == \"completed\"'"
 run wait durable >/dev/null 2>&1
 check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
 check "durable job records measured preparation and provider timing" "run status durable | jq -e '.timing.snapshot_seconds >= 0 and .timing.test_seconds >= 0 and .timing.packet_seconds >= 0 and .timing.provider_seconds >= 0 and .timing.model_steps == \"unavailable\"'"
@@ -213,6 +221,11 @@ check "recovery hashes and restores a proven complete artifact" "run status dura
 ALT="$TMP/alternate-checkout"; mkdir -p "$ALT"; git -C "$ALT" init -q; git -C "$ALT" remote add origin https://example.invalid/test/repo.git
 check "job remains retrievable from another clone of the same remote" "cd '$ALT' && bash '$SCRIPT' result durable | grep -q APPROVE"
 check "fallback retrieval never crosses caller identities" "cd '$ALT' && AI_KIMI_CALLER=codex bash '$SCRIPT' result durable >/dev/null 2>&1; test \$? -ne 0"
+AI_KIMI_TEST_FAIL_TERMINAL_CLEANUP=1 run start cleanup-failure --prompt review >/dev/null
+run wait cleanup-failure >/dev/null 2>&1 || true
+check "terminal cleanup failure never publishes readiness" "run status cleanup-failure | jq -e '.phase==\"recovery-required\" and .terminal_reason==\"transient-cleanup-failed\" and .exit_code==2'"
+CLEANUP_FAILURE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--cleanup-failure/job.json' -print -quit)"
+rm -rf "$(dirname "$CLEANUP_FAILURE_META")/launch-worker.ps1"
 UNSAFE_DIR="$(dirname "$(dirname "$DURABLE_META")")/claude--recover-unsafe"; mkdir -p "$UNSAFE_DIR"; cp "$(jq -r .artifact_paths.stream "$DURABLE_META")" "$UNSAFE_DIR/stream.jsonl"; : > "$UNSAFE_DIR/stream.jsonl.err"
 # Derive the fixture from the wrapper-owned metadata path and keep that exact
 # spelling. On hosted Windows, `pwd -P` physically expands Git Bash's /tmp mount
@@ -370,7 +383,7 @@ OUT="$(run implement r1 --prompt 'must not cross modes' 2>&1)"; RC=$?
 check "mode collision starts no provider turn" "test \"\$(wc -l < '$TMP/argv.txt')\" -eq '$ARGV_BEFORE' && printf '%s' \"\$OUT\" | grep -q 'review session'"
 
 echo "== same-name implementation concurrency =="
-echo slow > "$TMP/mode"; : > "$TMP/argv.txt"
+echo slow > "$TMP/mode"; : > "$TMP/argv.txt"; : > "$TMP/provider-turns.txt"
 ( cd "$REPO" && exec bash "$SCRIPT" implement same-name --prompt wait ) >"$TMP/same-name.out" 2>&1 &
 SAME_PID=$!
 for _ in $(seq 1 "$(budget 5 10)"); do
@@ -388,15 +401,18 @@ fi
 # and its own turn is miscounted as a second one. The precondition for "no
 # SECOND provider turn" is that the FIRST turn has already started.
 poll_until "$(budget 5 10)" 'the first same-name run started its provider turn' \
-  "test \"\$(wc -l < '$TMP/argv.txt')\" -ge 1" || true
-SAME_ARGV="$(wc -l < "$TMP/argv.txt")"
+  "test \"\$(wc -l < '$TMP/provider-turns.txt')\" -ge 1" || true
+SAME_TURNS="$(wc -l < "$TMP/provider-turns.txt")"
 OUT="$(run implement same-name --prompt duplicate 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "same-name concurrent implementation is refused" || bad "same-name concurrent implementation is refused"
-check "concurrent refusal starts no second provider turn" "test \"\$(wc -l < '$TMP/argv.txt')\" -eq '$SAME_ARGV' && printf '%s' \"\$OUT\" | grep -q 'already active'"
-case "$OUT" in
-  *"already active"*) ;;
-  *) printf '  diagnostic: duplicate implement rc=%s argv %s->%s, output: %s\n' "$RC" "$SAME_ARGV" "$(wc -l < "$TMP/argv.txt")" "$OUT" >&2 ;;
-esac
+SAME_TURNS_AFTER="$(wc -l < "$TMP/provider-turns.txt")"
+if [ "$SAME_TURNS_AFTER" = "$SAME_TURNS" ] && printf '%s' "$OUT" | grep -q 'already active'; then
+  ok "concurrent refusal starts no second provider turn"
+else
+  bad "concurrent refusal starts no second provider turn"
+  printf '  diagnostic: duplicate implement rc=%s provider turns %s->%s, output: %s\n' \
+    "$RC" "$SAME_TURNS" "$SAME_TURNS_AFTER" "$OUT" >&2
+fi
 kill -TERM "$SAME_PID" 2>/dev/null || true; wait "$SAME_PID" 2>/dev/null || true
 check "concurrency test leaves no disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 echo ok > "$TMP/mode"
