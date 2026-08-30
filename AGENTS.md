@@ -50,6 +50,14 @@ The full recovery procedure is in
   record is marked resolved or partially resolved with exact repair evidence.
   Preserve the original incident package; follow `log-reviewer-issue` for the
   closure audit before reporting success.
+- **Wait on CI through bounded, event-aware tools, never long polling loops.**
+  Use `bin/ai-pr-wait <pr>` for a pull request, surface a failing check or queue
+  ejection immediately, and do independent useful work while long checks run.
+- **Reuse before growing the repository.** New top-level plans, workflows, test
+  harnesses, or copied provider logic need a stated owner, a reason the existing
+  shared home cannot serve the need, and a retirement or consolidation path.
+  Harness consolidation belongs to #167, provider-wrapper sharing to #169, and
+  plan-backlog consolidation to #168 under parent #159.
 
 ## Documentation router
 

@@ -43,6 +43,12 @@ done
 case "$PR" in
   ''|*[!0-9]*) printf 'ai-pr-wait: give a pull request number\n' >&2; exit 3 ;;
 esac
+case "$TIMEOUT_MINUTES" in
+  ''|0*|*[!0-9]*) printf 'ai-pr-wait: --timeout-minutes must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
+esac
+case "$INTERVAL" in
+  ''|0*|*[!0-9]*) printf 'ai-pr-wait: --interval must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
+esac
 command -v gh >/dev/null 2>&1 || { printf 'ai-pr-wait: gh is not installed\n' >&2; exit 3; }
 command -v jq >/dev/null 2>&1 || { printf 'ai-pr-wait: jq is not installed\n' >&2; exit 3; }
 
@@ -59,6 +65,20 @@ DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAS_QUEUED=0
 LAST=''
 
+deadline_reached() {
+  [ "$(date +%s)" -ge "$DEADLINE" ]
+}
+
+wait_for_next_poll() {
+  local now remaining delay
+  now="$(date +%s)"
+  remaining=$(( DEADLINE - now ))
+  [ "$remaining" -gt 0 ] || return 1
+  delay="$INTERVAL"
+  [ "$delay" -le "$remaining" ] || delay="$remaining"
+  sleep "$delay"
+}
+
 while :; do
   # One GraphQL call carries everything that decides the outcome, including the
   # merge-queue membership that `gh pr view` does not report.
@@ -66,7 +86,14 @@ while :; do
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
     say "ai-pr-wait: could not read PR #$PR (transient); retrying"
-    sleep "$INTERVAL"
+    if deadline_reached; then
+      say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
+      exit 2
+    fi
+    wait_for_next_poll || {
+      say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
+      exit 2
+    }
     continue
   fi
 
@@ -109,9 +136,12 @@ while :; do
     LAST="$NOW"
   fi
 
-  if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+  if deadline_reached; then
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
     exit 2
   fi
-  sleep "$INTERVAL"
+  wait_for_next_poll || {
+    say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
+    exit 2
+  }
 done

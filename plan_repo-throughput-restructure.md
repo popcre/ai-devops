@@ -18,7 +18,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
-| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | open | — |
+| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | implemented; merge pending | [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | open | — |
 | 3 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 4 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
@@ -52,7 +52,8 @@ The outcomes are: useful feedback in minutes; only relevant work on each change 
 
 `popcre/ai-devops` is POP Creations' public backup-and-restore toolkit for a multi-model AI coding workflow. It contains Bash and PowerShell commands, reviewer safety wrappers, prompt and skill packages, machine setup, documentation, and offline verification. It is not a web application or deployed service.
 
-- Default branch: `main`; ordinary work lands directly on `main`.
+- Default branch: `main`; work lands through a branch, pull request, and merge
+  queue under the live repository policy.
 - GitHub identity: `u2giants`; never use the DesignFlow `popcre` identity.
 - Runtime: Windows developer machines and Linux, plus GitHub runners.
 - GitHub is source of truth. Installation is deployment; there is no application deployment.
@@ -278,12 +279,15 @@ These were named follow-ons in the old plan. They remain inside parent #159 so t
 | Throughput artifacts | Baseline/final timing, events, rebuilds, p95, outcomes |
 | Throwaway PR | Required contexts, queue admission, recovery path |
 
-Run full offline verification before each code child lands. Documentation-only #165 uses focused policy checks and the repository's documentation exception.
+Run full offline verification before each code child lands. #165 includes an
+executable policy test and therefore uses the normal code-change checks, not the
+documentation exception.
 
 ## 11. Constraints and gotchas
 
 - Read current `AGENTS.md` and routed docs at each child start.
-- Work on `main`; stage only owned files; verify Git identity; never force-push.
+- Work on a task branch and merge through a pull request; stage only owned
+  files; verify Git identity; never force-push.
 - Inspect concurrent changes before pull/merge/commit/cleanup.
 - Use Git Bash for Bash checks on Windows; PowerShell `bash` may invoke WSL.
 - Re-read exact live rules, bypass actors, contexts, and target before every ruleset write.

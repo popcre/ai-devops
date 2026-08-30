@@ -112,6 +112,10 @@ the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
 provider qualification must live under `tests/probes/` and remains an explicit
 release gate, never CI.
 
+`tests/test-session-conduct-policy.sh` protects the bounded CI-waiting and
+shared-infrastructure growth rules. Update that test with any deliberate change
+to those standing rules; do not weaken it simply to shorten guidance.
+
 ### Running the suites concurrently on one machine
 
 `tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is

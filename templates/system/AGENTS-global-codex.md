@@ -192,6 +192,12 @@ the whole turn so far, so cost grows faster than the work does.
   avoid duplicate keys, and validate the result. Codex configuration is
   `~/.codex/config.toml`; never change Claude configuration as part of Codex
   setup.
+- **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
+  failing check or queue ejection immediately, and do independent useful work
+  while long checks run; never burn turns in long hand-written polling loops.
+- Reuse the repository's shared plans, workflows, harnesses, and provider
+  helpers before adding another copy. Any new top-level or copied infrastructure
+  needs an explicit owner, necessity, and consolidation or retirement path.
 
 ## Context and handoffs
 
