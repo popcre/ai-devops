@@ -80,6 +80,11 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   reply where it comes up, not when Albert next asks. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
+- Continue authorized work through review findings, corrections, verification,
+  shipping, and closure. Intermediate failures, reviewer findings, failing
+  tests, merge conflicts, and routine tool errors are work to resolve—not
+  reasons to stop. Stop only for missing authority, an unsafe irreversible
+  action, or a material owner decision.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.

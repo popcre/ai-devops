@@ -45,9 +45,10 @@ jobs:
     # makes the two Windows jobs queue behind each other instead of contending
     # for the same cores, which is what these timing-sensitive suites need.
     runs-on: [self-hosted, Windows, X64, edge-dev]
-    # The complete protected matrix measured about 62 minutes on windows-2025
-    # after the 2026-08 reviewer expansions. Keep bounded failure plus headroom.
-    timeout-minutes: 75
+    # This job waits behind windows-reviewer-safety on the single edge-dev
+    # runner, and GitHub counts that serialized wait against the job budget.
+    # Keep the full suite bounded while leaving room for both jobs to finish.
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
