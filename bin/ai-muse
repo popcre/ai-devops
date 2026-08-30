@@ -136,6 +136,12 @@ prepare(){
   PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --decision "$(cat "$prompt")" --class medium)"
   "$PACKET" verify "$PACKET_DIR" >/dev/null
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
+  # Muse is given exactly this one directory. Anything outside it - including the
+  # source repository the snapshot was taken from, and any scratch path - is
+  # refused by OpenCode with "The user rejected permission to use this specific
+  # tool call.", with no user ever prompted. Print the boundary so a caller never
+  # has to guess which paths its prompt may name.
+  printf 'Muse review boundary: %s\nMuse evidence packet: %s\nMuse can read ONLY inside the review boundary. Name files relative to it; absolute paths outside it are refused.\n' "$REVIEW_DIR" "$PACKET_DIR" >&2
 }
 load_key(){
   need op; local candidate="$STATE/credential.lock.d" owner token attempt; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
@@ -371,14 +377,21 @@ cmd_doctor(){
     require_runtime; need jq
     fixture="$RUN_TMP/doctor-fixture"; mkdir -p "$fixture"
     prompt="$(tmp_file)"; out="$(tmp_file)"
-    printf 'Reply with exactly MUSE_REVIEWER_HEALTHY' > "$prompt"
+    # The live probe must prove a real read inside the review boundary, not just
+    # that the provider answers. A reviewer that cannot open one file in its own
+    # directory is useless, and every non-read check above still passes in that
+    # state (observed 2026-08-29, issue #182). The expected answer is therefore
+    # placed in a file the provider has to open to produce it.
+    printf 'MUSE_REVIEWER_HEALTHY\n' > "$fixture/muse-read-probe.txt" || die 'could not write the Muse doctor read fixture.'
+    chmod 600 "$fixture/muse-read-probe.txt" 2>/dev/null || true
+    printf 'Read the file muse-read-probe.txt in your working directory and reply with exactly its single line of contents. Output nothing else.' > "$prompt"
     prior_timeout="$TIMEOUT"; TIMEOUT="${AI_MUSE_DOCTOR_TIMEOUT:-90}"
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
     if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; die "$TURN_ERROR"; fi
     TIMEOUT="$prior_timeout"
     final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"
-    [ "$final_text" = MUSE_REVIEWER_HEALTHY ] || die 'Muse live probe returned unexpected final text.'
-    printf 'PASS  live provider response\n'
+    [ "$final_text" = MUSE_REVIEWER_HEALTHY ] || die 'Muse live probe could not read a file inside its own review directory, or returned unexpected final text. Muse can read ONLY the directory it is given; absolute paths to the source repository or to scratch space are refused with "The user rejected permission to use this specific tool call."'
+    printf 'PASS  live provider response and in-boundary file read\n'
   fi
 }
 usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
