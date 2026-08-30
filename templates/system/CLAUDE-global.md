@@ -171,6 +171,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Back up configuration before editing it, change existing settings in place,
   avoid duplicate keys, and validate the result. Claude setup must never change
   Codex configuration, and Codex setup must never change Claude configuration.
+- **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
+  failing check or queue ejection immediately, and do independent useful work
+  while long checks run; never burn turns in long hand-written polling loops.
+- Reuse the repository's shared plans, workflows, harnesses, and provider
+  helpers before adding another copy. Any new top-level or copied infrastructure
+  needs an explicit owner, necessity, and consolidation or retirement path.
 
 ## Context and handoffs
 
