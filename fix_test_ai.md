@@ -211,6 +211,28 @@ keeps waiting while it lives, and prints a distinct `fixture:` line on stderr
 naming which of the two happened. No ceiling was raised and no check was
 weakened.
 
+### 3.4d Three grok concurrency checks that stall on identical code (issue #177)
+
+`main` went red on `529d5408` — a documentation-only commit — when
+`tests/test-ai-grok-review.sh` reported `passed 193, failed 3`. The three
+failures are `different_named_sessions_can_ask_concurrently`,
+`same_next_ask_turn_is_serialized`, and `uncertain_ask_blocks_its_exact_retry`,
+all with a genuine stall report: the progress signal advanced, then nothing
+changed for 135s after 389s against a 9s baseline.
+
+This is **not** the frozen-baseline pattern of 3.4a: the wait is already
+progress-sensitive and reported honestly. The open question is whether the
+concurrent-ask path really stalls or whether these fixtures' signals go blind
+during a quiet phase, the same question 3.4b answered for three other waits.
+
+What makes it load-bearing: the commit under test changes only Markdown, so the
+code is byte-identical to the tree the merge queue passed at `7adaefd8` less
+than three hours earlier. The same code both passes and stalls, which is the
+definition of the unmeasured flake rate that issue #160 exists to close. Do not
+raise the stall window, add a retry, or quarantine these checks (Decision B).
+
+Evidence: run `33237124406`, `windows-offline`, log line ~1031.
+
 ### 3.5 Two quantities sharing one knob
 
 This pattern caused three separate regressions while fixing the above, and is
