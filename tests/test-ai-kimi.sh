@@ -226,6 +226,12 @@ run wait cleanup-failure >/dev/null 2>&1 || true
 check "terminal cleanup failure never publishes readiness" "run status cleanup-failure | jq -e '.phase==\"recovery-required\" and .terminal_reason==\"transient-cleanup-failed\" and .exit_code==2'"
 CLEANUP_FAILURE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--cleanup-failure/job.json' -print -quit)"
 rm -rf "$(dirname "$CLEANUP_FAILURE_META")/launch-worker.ps1"
+AI_KIMI_TEST_REPLACE_TERMINAL_LOCK=1 run start terminal-lock-replaced --prompt review >/dev/null
+run wait terminal-lock-replaced >/dev/null 2>&1 || true
+REPLACED_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--terminal-lock-replaced/job.json' -print -quit)"
+REPLACED_LOCK="$(jq -r .repo_lock "$REPLACED_META")"
+check "ownership mismatch never deletes a successor repository lock" "run status terminal-lock-replaced | jq -e '.phase==\"recovery-required\" and .terminal_reason==\"repository-lock-release-failed\"' && test -d '$REPLACED_LOCK' && grep -qx test-replaced '$REPLACED_LOCK/label'"
+rm -rf "$REPLACED_LOCK"
 AI_KIMI_TEST_REACQUIRE_TERMINAL_LOCK=1 run start terminal-lock-reacquire --prompt review >/dev/null
 run wait terminal-lock-reacquire >/dev/null 2>&1
 REACQUIRE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--terminal-lock-reacquire/job.json' -print -quit)"

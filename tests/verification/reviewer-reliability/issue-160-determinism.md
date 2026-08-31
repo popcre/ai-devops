@@ -86,6 +86,15 @@ and its absolute runaway ceiling are unchanged, so a genuine hang is not hidden.
   making the public path available; the old worker thereafter can clean only
   that private path. A deterministic reacquisition test proves the successor
   lock survives.
+- `20260831T083632-2688225-3701`: REJECT on commit `e6dbd3f`. If the public
+  lock's recorded owner changed before the atomic rename, the emergency EXIT
+  safeguard could still target that successor path. The mismatch branch now
+  clears its public-path cleanup target before returning, and a separate
+  deterministic replacement test proves the successor survives. The review's
+  exact-source test also exposed one transient failure in the existing Windows
+  spaced-state-path assertion; the same committed tree had passed that
+  assertion in both the focused 206/206 run and the complete Windows run, so it
+  remains a required assertion and must pass again before re-review.
 
 ## Other reviewer-suite sweep
 

@@ -1033,9 +1033,26 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
   # this worker's still-owned directory aside atomically, then point the EXIT
   # safeguard only at that private release path. A successor may acquire the
   # public path immediately without the old worker being able to erase it.
+  if [ "${AI_KIMI_TEST_REPLACE_TERMINAL_LOCK:-0}" = 1 ] \
+    && [ "${AI_KIMI_TEST_MODE:-0}" = 1 ]; then
+    mv -- "$3" "${3}.test-predecessor.$$" \
+      && mkdir "$3" \
+      && printf '1\n' > "$3/pid" \
+      && printf 'test-replaced\n' > "$3/label"
+    rm -rf -- "${3}.test-predecessor.$$"
+  fi
   lock_owner="$(cat "$3/pid" 2>/dev/null || true)"
   release_lock="${3}.releasing.$$"
-  if [ "$lock_owner" != "$$" ] || [ -e "$release_lock" ]; then
+  if [ "$lock_owner" != "$$" ]; then
+    # This path now belongs to a successor. Disable the emergency safeguard's
+    # public-path target before returning; cleanup must never remove it.
+    owned_repo_lock=""
+    write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
+      '.phase="recovery-required"|.terminal_reason="repository-lock-release-failed"|.exit_code=2|.updated=$u' \
+      || true
+    return 1
+  fi
+  if [ -e "$release_lock" ]; then
     write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
       '.phase="recovery-required"|.terminal_reason="repository-lock-release-failed"|.exit_code=2|.updated=$u' \
       || true
