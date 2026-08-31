@@ -735,6 +735,8 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 ( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
 poll_workers_until "$ASK_A_PID $ASK_B_PID" "$(budget 40 120)" 'both named ask turns hold their own session locks' \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
+ASK_CONCURRENT_READY=$?
+check "concurrent_ask_fixture_reached_both_session_locks" "test '$ASK_CONCURRENT_READY' -eq 0"
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 # The duplicate needs the same wide ceiling as the turns it must lose to. It
 # builds its own review packet BEFORE reaching the lock check, so on a slow
