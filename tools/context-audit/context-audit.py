@@ -99,6 +99,7 @@ SAFETY_REASONS = {
 # Rules that must be present in BOTH client globals. Claude and Codex load
 # different entry files, so identical behavior has to be asserted, not assumed.
 PARITY_RULES = {
+    "ast-grep advisory and rewrite safety": r"(?s)Use `rg` for ordinary text.*Consider the full `ast-grep` command.*preview before applying.*Git diff.*normal tests.*repair a missing managed installation",
     "response style contract": r"^# Response Style",
     "closeout contract: account for deliverables": r"Account for the whole job",
     "closeout contract: preparation is not delivery": r"Preparation is not delivery",

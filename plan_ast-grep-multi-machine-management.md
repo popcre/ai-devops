@@ -8,11 +8,11 @@ Companion handoff: [HANDOFF.d/2026-08-30T1403Z-edge-dev-codex-ast-grep-managemen
 
 | Step | Status | Date | Evidence |
 |---|---|---|---|
-| 1. Refresh live facts and reserve the work | ⬜ open | — | Re-run the commands in Phase 0 and record the issue/commit links here. |
-| 2. Add the pinned Windows installation and repair path | ⬜ open | — | Required source files and tests are named in Phase 1. |
-| 3. Add Windows verification, documentation, and restore coverage | ⬜ open | — | Required checks are named in Phases 1–2. |
-| 4. Add concise shared Claude/Codex usage guidance | ⬜ open | — | Required templates and parity checks are named in Phase 2. |
-| 5. Add the same pinned package to the Ubuntu Ansible role | ⬜ open | — | Required `u2giants/ansible` files and tests are named in Phase 3. |
+| 1. Refresh live facts and reserve the work | ✅ complete | 2026-08-30 | Claimed in issue comment 5472420747. ai-devops `a66586dc`; Ansible `1e5fe45b`; npm `0.45.2` still publishes `ast-grep` and `sg`; Windows has neither command; hetz `/usr/bin/sg` resolves to login-owned `/usr/bin/newgrp` SHA-256 `572ab15948df3969e929b902641c3a42e76dce7d71a22fbc58011ca89d8d965e`; auto-apply is true; no competing #187 claim. This bounded dependency follows #187 and does not duplicate the broader #159/#168 throughput mechanism. |
+| 2. Add the pinned Windows installation and repair path | ✅ complete | 2026-08-30 | Exact `0.45.2` catalog/reconciler pin, `sg` ownership refusal, direct/bootstrap convergence, and non-mutating fixture implemented; Windows structural test and 26 pin checks pass. |
+| 3. Add Windows verification, documentation, and restore coverage | ✅ complete | 2026-08-30 | Verifier reads the catalog and requires exact ast-grep version; Windows and Ubuntu recovery routes documented; focused Windows test passes. |
+| 4. Add concise shared Claude/Codex usage guidance | ✅ complete | 2026-08-30 | Both globals carry aligned advisory wording; strict context audit and its enforcement suite pass with zero parity mismatches. |
+| 5. Add the same pinned package to the Ubuntu Ansible role | 🟨 source ready; preview running | 2026-08-30 | Ansible commit `a98ec32` and PR #13 isolate the package, expose only `ast-grep`, preserve OS `sg`, and pass the focused source test; official lint/syntax/read-only preview is pending. |
 | 6. Land source changes and roll out the three Windows computers | ⬜ open | — | Required GitHub and per-machine evidence is named in Phase 4. |
 | 7. Apply and verify the Ubuntu production-host change | ⬜ open; owner authorization required before apply | — | Required Ansible check/apply/live evidence is named in Phase 5. |
 

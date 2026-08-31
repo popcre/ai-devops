@@ -34,6 +34,8 @@ once from the `vibe_coding` vault. Do not paste it into a repo file.
 
 Verify with the script's final checks and a real `codex exec` sandbox write.
 Fully quit and reopen Claude Desktop before checking its MCP servers.
+From a new PowerShell and newly opened Claude/Codex sessions, require
+`ast-grep --version` to match the reviewed catalog pin.
 
 ## Ubuntu
 
@@ -93,6 +95,9 @@ memory; the installer does not enable a recurring writer.
 The model and npm/MCP selections are the exact reviewed values in
 `config/tool-versions.json`. Do not substitute `latest` during recovery. Version
 upgrades are a separate tested change after the machine is healthy.
+On the managed `hetz` Ubuntu host, Ansible owns the isolated ast-grep package;
+never install it manually over SSH. Recovery acceptance requires
+`ast-grep --version` to match the same reviewed pin.
 
 ### 6. Log in to Claude
 

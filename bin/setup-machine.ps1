@@ -55,8 +55,8 @@ Flags:
   -Token <ops_...>     Provide the token non-interactively (else you are asked).
   -SkipDesktopMcp      Do the token/env/skills wiring but do not touch the
                        Claude Desktop config.
-  -SkipRailwayCliReconcile
-                       Internal bootstrap flag; Railway was already reconciled.
+  -SkipPackageExceptionReconcile
+                       Internal bootstrap flag; npm/Scoop exceptions were already reconciled.
   -EnableMemorySyncSchedule
                        Opt in to the private-memory task after qualification.
                        The default is disabled during incident remediation.
@@ -69,7 +69,7 @@ Flags:
 param(
   [string]$Token = "",
   [switch]$SkipDesktopMcp,
-  [switch]$SkipRailwayCliReconcile,
+  [switch]$SkipPackageExceptionReconcile,
   [switch]$EnableMemorySyncSchedule,
   [string]$RepoPath = "",
   [string]$SupabaseProjectRef = "",
@@ -204,14 +204,11 @@ $knownHostsPathExitCode = $LASTEXITCODE
 if ($knownHostsPathExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($knownHostsTmplRaw)) { throw "Protected SSH host keys are unavailable." }
 $knownHostsTmpl = ConvertFrom-GitBashPath -Path $knownHostsTmplRaw -GitBashPath $gitBash
 
-# Railway's official MCP is bundled into its CLI. Reconcile the current official
-# npm package even when setup-machine.ps1 is run directly. npm install is
-# idempotent and repairs an outdated or incomplete existing installation.
-if (-not $SkipRailwayCliReconcile -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-  Write-Host "    reconciling Railway CLI via npm..."
-  & npm.cmd install --global '@railway/cli@5.43.1'
-  if ($LASTEXITCODE -ne 0) { throw "Railway CLI npm installation failed." }
-  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+# Direct setup must converge on the same package exceptions as the full bootstrap.
+if (-not $SkipPackageExceptionReconcile) {
+  Write-Host "    reconciling package-manager exceptions..."
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoPath 'bin\reconcile-windows-package-exceptions.ps1')
+  if ($LASTEXITCODE -ne 0) { throw "Package-manager exception reconciliation failed." }
 }
 if (Get-Command railway -ErrorAction SilentlyContinue) { Ok "railway $(railway --version 2>$null)" } else { Warn "Railway CLI not found; rerun after Node/npm is available." }
 
