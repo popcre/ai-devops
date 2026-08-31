@@ -69,6 +69,15 @@ ai-run-task run <run-directory>
 Run/review artifacts (`.ai/runs/`, `.ai/reviews/`) are created **inside the
 target application repo**, not in this toolkit repo, and are git-ignored.
 
+## Planned reviewer-assisted problem solving
+
+Issue #198 will add a provider-neutral route for a Claude or Codex session that
+has exhausted multiple evidence-based diagnostic attempts. The implementation
+contract, safety boundaries, tests, and live-installation gates are in the
+[`reviewer-assisted problem-solving plan`](../plan_reviewer-assisted-problem-solving.md).
+Until its STATUS table proves completion, existing provider skills remain the
+only implemented route; do not infer proactive selection from this pointer.
+
 ## Delegate debate continuity
 
 Grok, GLM, and Kimi debates use the provider-neutral
