@@ -1009,6 +1009,7 @@ cleanup_review_transients() { # JOB-DIR PROMPT-FILE
 }
 
 release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
+  local release_lock="" lock_owner=""
   # A terminal phase is a readiness contract: callers may immediately start
   # the next paid turn.  Release the exact repository lock before publishing
   # that phase so a loaded machine cannot observe "completed" while cleanup is
@@ -1017,15 +1018,45 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
     sleep "$AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY"
   fi
   cleanup_review_transients "$1" "$2"
-  lock_release "$3"
   # Test-only fault injection proves that a failed deletion can never be
   # published as terminal readiness. A directory at the launcher path models
   # an undeletable transient without depending on host ACL behavior.
   [ "${AI_KIMI_TEST_FAIL_TERMINAL_CLEANUP:-0}" != 1 ] || mkdir -p "$1/launch-worker.ps1"
   if [ -e "$2" ] || [ -e "$1/launch-worker.ps1" ] \
-    || [ -e "$1/launch-bootstrap.ps1" ] || [ -d "$3" ]; then
+    || [ -e "$1/launch-bootstrap.ps1" ]; then
     write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
       '.phase="recovery-required"|.terminal_reason="transient-cleanup-failed"|.exit_code=2|.updated=$u' \
+      || true
+    return 1
+  fi
+  # Never delete the public lock path after making it available again. Move
+  # this worker's still-owned directory aside atomically, then point the EXIT
+  # safeguard only at that private release path. A successor may acquire the
+  # public path immediately without the old worker being able to erase it.
+  lock_owner="$(cat "$3/pid" 2>/dev/null || true)"
+  release_lock="${3}.releasing.$$"
+  if [ "$lock_owner" != "$$" ] || [ -e "$release_lock" ]; then
+    write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
+      '.phase="recovery-required"|.terminal_reason="repository-lock-release-failed"|.exit_code=2|.updated=$u' \
+      || true
+    return 1
+  fi
+  owned_repo_lock="$release_lock"
+  if ! mv -- "$3" "$release_lock" 2>/dev/null; then
+    owned_repo_lock="$3"
+    write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
+      '.phase="recovery-required"|.terminal_reason="repository-lock-release-failed"|.exit_code=2|.updated=$u' \
+      || true
+    return 1
+  fi
+  if [ "${AI_KIMI_TEST_REACQUIRE_TERMINAL_LOCK:-0}" = 1 ] \
+    && [ "${AI_KIMI_TEST_MODE:-0}" = 1 ]; then
+    mkdir "$3" && printf '1\n' > "$3/pid" && printf 'test-reacquired\n' > "$3/label"
+  fi
+  lock_release "$release_lock"
+  if [ -e "$release_lock" ]; then
+    write_job_state "$4" --arg u "$(date -u +%FT%TZ)" \
+      '.phase="recovery-required"|.terminal_reason="repository-lock-release-failed"|.exit_code=2|.updated=$u' \
       || true
     return 1
   fi
@@ -1033,15 +1064,16 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
 }
 
 review_worker() { # JOB-DIR PROMPT-FILE
-  local dir="$1" pf="$2" meta out repo workdir repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase
+  local dir="$1" pf="$2" meta out repo workdir repo_lock owned_repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase
   meta="$dir/job.json"; [ -f "$meta" ] || exit 2
   repo="$(jq -r .repo "$meta")"; name="$(jq -r .name "$meta")"; mode="$(jq -r .mode "$meta")"
   workdir="$(jq -r '.review_workspace // .repo' "$meta")"
   repo_lock="$(jq -r '.repo_lock // ""' "$meta")"
+  owned_repo_lock="$repo_lock"
   if [ -n "$repo_lock" ] && [ -d "$repo_lock" ]; then printf '%s\n' "$$" > "$repo_lock/pid"; fi
   # The worker owns these transients after startup acknowledgement. Keep their
   # cleanup in the emergency EXIT path as well as each explicit terminal path.
-  trap 'cleanup_review_transients "$dir" "$pf"; lock_release "$repo_lock"' EXIT
+  trap 'cleanup_review_transients "$dir" "$pf"; lock_release "$owned_repo_lock"' EXIT
   sid="$(jq -r '.kimi_session_id // ""' "$meta")"; out="$(jq -r .artifact_paths.stream "$meta")"
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2

@@ -226,6 +226,12 @@ run wait cleanup-failure >/dev/null 2>&1 || true
 check "terminal cleanup failure never publishes readiness" "run status cleanup-failure | jq -e '.phase==\"recovery-required\" and .terminal_reason==\"transient-cleanup-failed\" and .exit_code==2'"
 CLEANUP_FAILURE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--cleanup-failure/job.json' -print -quit)"
 rm -rf "$(dirname "$CLEANUP_FAILURE_META")/launch-worker.ps1"
+AI_KIMI_TEST_REACQUIRE_TERMINAL_LOCK=1 run start terminal-lock-reacquire --prompt review >/dev/null
+run wait terminal-lock-reacquire >/dev/null 2>&1
+REACQUIRE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--terminal-lock-reacquire/job.json' -print -quit)"
+REACQUIRED_LOCK="$(jq -r .repo_lock "$REACQUIRE_META")"
+check "terminal cleanup never deletes a successor repository lock" "test -d '$REACQUIRED_LOCK' && grep -qx test-reacquired '$REACQUIRED_LOCK/label'"
+rm -rf "$REACQUIRED_LOCK"
 UNSAFE_DIR="$(dirname "$(dirname "$DURABLE_META")")/claude--recover-unsafe"; mkdir -p "$UNSAFE_DIR"; cp "$(jq -r .artifact_paths.stream "$DURABLE_META")" "$UNSAFE_DIR/stream.jsonl"; : > "$UNSAFE_DIR/stream.jsonl.err"
 # Derive the fixture from the wrapper-owned metadata path and keep that exact
 # spelling. On hosted Windows, `pwd -P` physically expands Git Bash's /tmp mount

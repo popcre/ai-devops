@@ -1,6 +1,7 @@
 # Issue #160 — reviewer determinism evidence
 
-Status: all acceptance gates passed; exact-head independent review approved.
+Status: final lock-handoff repair passed focused and complete Windows
+verification; exact-head independent re-review and CI landing remain pending.
 
 ## Source and trigger
 
@@ -78,6 +79,13 @@ and its absolute runaway ceiling are unchanged, so a genuine hang is not hidden.
   `60b9eab44ffe22ffc07bc46cc54edff32b0591d85e00f1c46a91783170e91d30`.
   The reviewer reported no correctness, regression, data-exposure, or material
   test-gap finding after the terminal-cleanup repair.
+- `20260831T004143-1251035-10407`: REJECT on commit `96374d6`. After releasing
+  the public repository-lock path, the old worker could mistake a successor's
+  newly acquired lock for its own residue and delete it from the EXIT trap. The
+  repair atomically renames the owned lock to a private release path before
+  making the public path available; the old worker thereafter can clean only
+  that private path. A deterministic reacquisition test proves the successor
+  lock survives.
 
 ## Other reviewer-suite sweep
 
@@ -174,3 +182,14 @@ suites were searched for fixed sleeps, bounded readiness loops,
   with zero failures in 4,480 seconds, followed by all 17 PowerShell suites
   with zero failures. Exact-head independent run
   `20260831T000304-1076947-9812` then approved commit `b9c203c` with no findings.
+- Final successor-lock repair proof on `EDGE-DEV`, working head `d80d2f9`, tree
+  `c363bec803763cc75397639c2dcf9f394c75643c`, focused implementation/test diff
+  SHA-256 `838e25351cb92de89fa9d0afae8026ec517e09c8383dce822914c84c3662712b`:
+  `tests/test-ai-kimi.sh` passed 206/206. This includes the deterministic
+  successor reacquisition assertion and the existing cancellation, refusal,
+  missing-terminal, timeout, artifact, and cleanup defect injections.
+- The authoritative complete Windows run started `2026-08-31T06:44:24Z` on an
+  otherwise idle machine and passed all 61 Bash suites and all 17 PowerShell
+  suites with zero failures in 4,014.1 seconds. The Kimi suite within that run
+  also passed 206/206. Both GitHub self-hosted runners were idle before the
+  local run; starting CPU after completion was 0.7 percent.
