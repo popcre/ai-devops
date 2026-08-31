@@ -746,8 +746,11 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # BEFORE the duplicate reaches the lock check, and the duplicate is then allowed
 # for a perfectly correct reason. Observed on the windows-reviewer-safety runner:
 # the duplicate took 124s against a 110s ceiling.
-( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
-( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+# The owners must outlive the challenger below. Equal ceilings let a loaded
+# challenger arrive exactly as both valid owners timed out, at which point its
+# admission was correct and the fixture made a false serialization claim.
+( AI_GROK_WAIT_TIMEOUT="$(budget 80 240)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
+( AI_GROK_WAIT_TIMEOUT="$(budget 80 240)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
 # Snapshot isolation must start with the suite, not only in the final boundary
 # section. Before #177, packet refreshes happened outside TMP, so this otherwise
 # complete fixture fingerprint went silent for 135s on loaded Windows CI. The

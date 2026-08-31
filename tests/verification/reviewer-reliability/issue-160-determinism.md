@@ -31,6 +31,18 @@ digest, and atomic-refresh activity is now inside the suite-owned temp tree that
 the existing progress fingerprint already watches. The 135-second stall window
 and its absolute runaway ceiling are unchanged, so a genuine hang is not hidden.
 
+The final loaded run exposed two narrower fixture defects after that boundary
+repair. Packet construction advanced through real Git, digest, file-list, and
+hash phases without reporting those completed operations, so a healthy turn
+could still be silent inside the watched tree. The packet and snapshot helpers
+now append test-only progress after each concrete operation; production ignores
+the marker, and process liveness alone is never treated as progress. Separately,
+the two deliberately held owner turns had the same lifetime as their duplicate
+challenger. On a loaded host the owners could expire exactly as the challenger
+reached the lock, making its admission correct. Only the fixture owners now get
+the longer bound needed to outlive the unchanged challenger; the 135-second
+stall guard and every product timeout/refusal assertion remain unchanged.
+
 ## Independent review history
 
 - `20260830T024631-549075-8893`: REJECT. Worker liveness alone would have hidden
@@ -202,3 +214,17 @@ suites were searched for fixed sleeps, bounded readiness loops,
   suites with zero failures in 4,014.1 seconds. The Kimi suite within that run
   also passed 206/206. Both GitHub self-hosted runners were idle before the
   local run; starting CPU after completion was 0.7 percent.
+- Final readiness repair on `EDGE-DEV`, starting commit `7da4411`, whole-source
+  digest `ff8e626ddbbb80bdbacefd7aa37a2dbb6c801f43d8b40f849510954fc15bdf14e`
+  and implementation diff digest
+  `e3824d1d370b772eba3034ba47d05798c37546c5`: timing helper 12/12,
+  review sandbox 73/73, evidence packet 92/92, Grok 199/199, and Kimi 207/207.
+  The Grok result includes all three formerly failing readiness/serialization/
+  uncertainty assertions; Kimi includes both successor-lock races and the
+  Windows spaced-state-path assertion.
+- The authoritative complete Windows run for that exact source started
+  `2026-08-31T15:00:09Z` on idle `EDGE-DEV` at 6 percent CPU and ended
+  `2026-08-31T16:04:22Z`. All 61 Bash suites and all 17 PowerShell suites passed
+  with zero failures in 3,852.9 seconds. Grok passed 199/199 in 585 seconds and
+  Kimi passed 207/207 in 591 seconds. The branch was already based on current
+  `origin/main` (`a66586d`) when this proof completed.

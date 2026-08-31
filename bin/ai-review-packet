@@ -107,6 +107,15 @@ die()  { printf 'ai-review-packet: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-review-packet: warning: %s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
+# Observable progress for loaded offline fixtures only. Advance this marker
+# after concrete packet phases complete; never use mere process liveness, which
+# could conceal a genuinely hung evidence build until its runaway ceiling.
+test_progress() {
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || return 0
+  [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ] || return 0
+  printf '.\n' >> "$AI_REVIEW_SANDBOX_PROGRESS_FILE"
+}
+
 canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
 
 # A linked worktree is exactly the case where `.git` is a file, not a directory.
@@ -259,6 +268,7 @@ cmd_build() {
   mkdir -p "$pkt"
   # Line 1 is the review root, line 2 the owning tag. Both are read back above.
   printf '%s\n%s\n' "$root" "$tag" > "$pkt/$MARKER"
+  test_progress || die "could not publish packet preparation progress."
 
   # The packet must never become part of the change under review.
   # --git-path prints a path relative to the repository, so it must be resolved
@@ -310,6 +320,7 @@ judgment, say so rather than assuming."
     test_block="**No tests were run for this packet.** Treat this as unknown, not
 as a pass. If the change needs test evidence to judge, say so in your verdict."
   fi
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   source_digest_before="$($SCRIPT_DIR/ai-review-sandbox digest "$root")" \
     || { rm -rf "$pkt"; die "could not bind the packet to a complete source digest."; }
@@ -318,6 +329,7 @@ as a pass. If the change needs test evidence to judge, say so in your verdict."
     [ -n "$marker_digest" ] && [ "$marker_digest" = "$source_digest_before" ] \
       || { rm -rf "$pkt"; die "review snapshot digest does not match its source marker; rebuild the snapshot before reviewing."; }
   fi
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   # --- the patch -------------------------------------------------------------
   # Committed range AND uncommitted edits: what a human sees in the directory.
@@ -355,6 +367,7 @@ EOF
     cp "$tmp_patch" "$pkt/$PATCH"
   fi
   rm -f "$tmp_patch"
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   # --- identity ---------------------------------------------------------------
   # $root may be a disposable snapshot built by ai-review-sandbox. Naming the
@@ -386,6 +399,7 @@ EOF
   changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
   dirty="$(list_block "$pkt"     dirty-files.txt     "(none — the working tree is clean)"           "$dirty")"
   untracked="$(list_block "$pkt" untracked-files.txt "(none)"                                        "$untracked")"
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   # --- optional sections ------------------------------------------------------
   local scope_block exclude_block pointer_block p path note
@@ -506,7 +520,9 @@ EOF
     || { rm -rf "$pkt"; die "could not re-read the complete source after packet creation."; }
   [ "$source_digest_before" = "$source_digest_after" ] \
     || { rm -rf "$pkt"; die "source changed while the evidence packet was being built; no mixed packet was published."; }
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
   hash_packet "$pkt" > "$pkt/$HASHFILE"
+  test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
   printf '%s' "$pkt"
 }
 
@@ -520,6 +536,7 @@ hash_packet() { # hash_packet PACKET_DIR
       printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
         "${file#./}" "$(wc -c < "$file" | tr -d ' ')" \
         "$(sha256sum "$file" | cut -d' ' -f1)"
+      test_progress || exit 1
     done < <(find . -type f ! -path "./$HASHFILE" -print0 | LC_ALL=C sort -z)
   ) | sha256sum | cut -d' ' -f1
 }
