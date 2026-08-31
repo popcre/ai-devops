@@ -733,8 +733,7 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # the duplicate took 124s against a 110s ceiling.
 ( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
 ( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
-poll_until_progress "$(budget 15 30)" 'both named ask turns hold their own session locks' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-a.err' '$TMP/ask-b.err' '$TMP/ask-a.out' '$TMP/ask-b.out'" \
+poll_workers_until "$ASK_A_PID $ASK_B_PID" "$(budget 40 120)" 'both named ask turns hold their own session locks' \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 # The duplicate needs the same wide ceiling as the turns it must lose to. It
@@ -754,8 +753,7 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # terminate a process that holds no lock, and the retries then assert against
 # state an interrupt never produced - reporting a wrapper defect that does not
 # exist. Say so instead.
-poll_until_progress "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-uncertain.err' '$TMP/ask-uncertain.out' '$TMP/hold-started'" \
+poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask took its work lock and reached the Grok stub' \
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true

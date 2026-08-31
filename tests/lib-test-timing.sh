@@ -214,3 +214,29 @@ poll_worker_until() {
     fi
   done
 }
+
+# poll_workers_until PIDS CEILING WHAT CONDITION... — the multi-worker form of
+# poll_worker_until. Every named worker is required to remain alive until their
+# shared state is ready; one early exit is a fixture failure, not a timeout in
+# the wrapper under test.
+poll_workers_until() {
+  local pids="$1" ceiling="$2" what="$3"; shift 3
+  local waited=0 grace pid
+  while :; do
+    eval "$*" >/dev/null 2>&1 && return 0
+    for pid in $pids; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        for grace in 1 2 3 4 5; do eval "$*" >/dev/null 2>&1 && return 0; sleep .1; done
+        printf '  fixture: %s - worker %s exited after %ss without reaching that state\n' \
+          "$what" "$pid" "$((waited / 10))" >&2
+        return 1
+      fi
+    done
+    sleep .1; waited=$((waited + 1))
+    if [ "$waited" -ge $(( ceiling * 10 )) ]; then
+      printf '  fixture: %s did not hold within %ss while all workers were still running (baseline %ss)\n' \
+        "$what" "$ceiling" "$AI_TEST_BASELINE" >&2
+      return 1
+    fi
+  done
+}
