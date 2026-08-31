@@ -228,3 +228,11 @@ suites were searched for fixed sleeps, bounded readiness loops,
   with zero failures in 3,852.9 seconds. Grok passed 199/199 in 585 seconds and
   Kimi passed 207/207 in 591 seconds. The branch was already based on current
   `origin/main` (`a66586d`) when this proof completed.
+- PR #193 attempt 4 exposed one remaining fixture-lifetime boundary. The
+  uncertainty owner took 243 seconds to prepare its packet and complete the
+  deliberate 150-second Windows stall, so its 240-second test lease expired
+  before the exact retry checked the lock. The wrapper correctly admitted a
+  retry whose owner was no longer valid. Held test owners now use 480 seconds;
+  the challenger bound, deliberate stall, assertions, and every production
+  timeout remain unchanged. The focused Grok suite then passed 199/199 on
+  `EDGE-DEV`, including `uncertain_ask_blocks_its_exact_retry`.
