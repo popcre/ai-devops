@@ -14,7 +14,7 @@ grep -Fq 'workflow_dispatch:' "$workflow" || fail 'qualification needs an explic
 grep -Fq "CurrentBuildNumber" "$workflow" || fail 'qualification must prove the Windows build'
 grep -Fq 'windows-runner-security.json' "$workflow" || fail 'qualification must consume Administrator security evidence'
 grep -Fq '[math]::Abs($evidenceAge.TotalHours) -gt 24' "$workflow" || fail 'qualification must reject stale evidence while tolerating bounded clock skew'
-grep -Fq "@('git', 'gh', 'jq', 'pwsh')" "$workflow" || fail 'qualification must prove service-visible dependencies'
+grep -Fq "@('git', 'gh', 'jq', 'pwsh', 'node', 'python')" "$workflow" || fail 'qualification must prove every service-visible runtime dependency'
 grep -Fq 'actions.runner.*' "$workflow" || fail 'qualification must prove the runner service'
 grep -Fq 'run: .\tests\test-all.ps1' "$workflow" || fail 'qualification must run the complete declared suite'
 grep -Fq 'git status --short --untracked-files=all' "$workflow" || fail 'qualification must prove reusable workspace cleanup'

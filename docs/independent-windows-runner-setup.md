@@ -66,6 +66,8 @@ winget install --id Git.Git -e --source winget --accept-package-agreements --acc
 winget install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements
 winget install --id Microsoft.PowerShell -e --source winget --installer-type wix --force --accept-package-agreements --accept-source-agreements
 winget install --id jqlang.jq -e --scope machine --source winget --force --accept-package-agreements --accept-source-agreements
+winget install --id OpenJS.NodeJS.LTS -e --version 24.17.0 --scope machine --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Python.Python.3.13 -e --version 3.13.14 --scope machine --source winget --accept-package-agreements --accept-source-agreements
 ```
 
 PowerShell 7.6+ defaults to a Store-style MSIX through WinGet. The explicit
@@ -80,6 +82,8 @@ Close and reopen PowerShell, then verify:
 git --version
 gh --version
 jq --version
+node --version
+python --version
 & 'C:\Program Files\PowerShell\7\pwsh.exe' --version
 Test-Path 'C:\Program Files\Git\bin\bash.exe'
 where.exe jq
@@ -194,6 +198,13 @@ The first host, `EDGE-RUNN-ENVY`, exposed these reusable traps:
   `pwsh`. The machine-wide WiX/MSI installation fixed it.
 - The first jq installation created only a user WinGet link. Reinstalling with
   `--scope machine` created the service-visible Program Files link.
+- Node.js and Python were omitted from the first manual setup, so the complete
+  suite spent 35 minutes before exposing cascading provider-test failures. Both
+  are pinned machine-wide prerequisites and are now checked before the suite.
+- A private-file ACL test used the interactive username. Under Network Service,
+  Windows exposed the computer identity and `icacls` could not resolve it. The
+  fixture now grants the current security SID directly, which is valid for both
+  interactive users and runner services without weakening the ACL assertion.
 - The service does not have permission to read TPM state directly. The
   Administrator preflight records a narrow, non-secret attestation instead.
 - Incorrect system time made fresh evidence look stale. Enabling Windows Time,
@@ -234,4 +245,3 @@ failure without its logs.
   job `99985106789`.
 - Ordinary CI admission, second/third physical hosts, failover proof and EDGE-DEV
   retirement remain open under #209.
-

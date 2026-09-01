@@ -40,7 +40,7 @@ jobs:
           if ([math]::Abs($evidenceAge.TotalHours) -gt 24) {
             throw 'Administrator security preflight evidence is not fresh.'
           }
-          foreach ($tool in @('git', 'gh', 'jq', 'pwsh')) {
+          foreach ($tool in @('git', 'gh', 'jq', 'pwsh', 'node', 'python')) {
             if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
               throw "$tool is not visible to the runner service account."
             }
