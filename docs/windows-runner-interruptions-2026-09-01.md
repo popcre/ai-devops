@@ -67,6 +67,41 @@ on a busy repository with an hour-long Windows job is that the long job may
 never finish, because the gap between two sessions' merges is shorter than the
 job itself.
 
+### The documentation-merge trap (confirmed, and self-inflicted in this session)
+
+The repository rule for documentation-only pull requests is: merge immediately,
+do not wait for checks, because prose cannot break a build. That rule is about
+**not waiting**. It does not mean no build starts, and it does not mean the merge
+is free.
+
+Merging *anything at all* — including a prose-only change merged with
+`--admin` in under a second — rebuilds the merge queue on a new base commit and
+cancels whatever is currently running inside it. The hour-long `windows-offline`
+job then restarts from zero.
+
+This session demonstrated it on its own work. Three of PR #197's four queue runs
+were killed by documentation merges made from this very session:
+
+- `pr-197-23324c75` — superseded when PR #202 (`AGENTS.md`, prose) merged.
+- `pr-197-72e4c327` — superseded when PR #203 (this document, prose) merged.
+- `pr-197-90b45b8a` — superseded when PR #205 (a handoff file, prose) merged.
+
+So the two rules interact badly. "Documentation merges are free, ship them
+immediately" is true for the person merging and false for the repository: each
+one costs whoever is in the queue up to an hour of runner time and can prevent a
+code change from ever landing on a busy day.
+
+The practical consequence for any session: **before merging a documentation-only
+change, check whether anything is sitting in the merge queue.** If something is,
+either wait for it or accept — knowingly — that you are restarting its build.
+
+```bash
+gh run list --repo popcre/ai-devops --limit 10 --json status,headBranch
+```
+
+Anything whose branch starts with `gh-readonly-queue/` and is not `completed` is
+a build you are about to kill.
+
 ## Mechanism 2 — only two runners for two Windows jobs (confirmed)
 
 In run 33467918585, `windows-reviewer-safety` occupied `edge-dev-win-2` from
@@ -134,6 +169,9 @@ The runners are probably not "dying" in the hardware sense. What is happening:
   08:54-08:56 would settle this; the API cannot.
 - Should `merge_group` be excluded from `cancel-in-progress`, so a queue run
   that has already spent forty minutes is not thrown away?
+- Should documentation-only merges be held while the queue is busy, or should
+  the queue simply not run the hour-long suite so prose merges stop costing an
+  hour of somebody else's build?
 - Should the hour-long `windows-offline` suite run in the merge queue at all, or
   only on the pull request, given the queue re-runs it on every regroup?
 - Can the Windows suite be split or parallelised so no single job runs for an
