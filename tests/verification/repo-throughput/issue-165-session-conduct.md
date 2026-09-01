@@ -38,11 +38,14 @@ Source baseline: `5f3f56438f5440a8d524e490e70513c62f2ee7af`
   zero-prefixed `00` bypassed the original numeric guard; both timeout and
   interval now reject leading-zero values, with explicit regression cases.
 
-## Independent review
+## Independent review and landing
 
 Run `20260830T011433-94859-14746`: APPROVE. The sealed review packet ran the
 focused policy test, context audit, and diff check itself; it reported no
 findings or material test gap. The plan moved from `review gate` to `done` only
 after this approval, then returned to `implemented; merge pending` because the
 required `origin/main` commit cannot be recorded before GitHub merges the step.
-The final merge commit will be added before issue #165 is closed.
+Final review run `20260830T023936-513505-27965`: APPROVE, with no blockers.
+Pull request #181 passed its pull-request and merge-group matrices and landed on
+`main` as `15991e63e53dbded3d52c218ff7f62430ef05bca`; GitHub closed issue #165 at
+2026-08-30T04:31:10Z.

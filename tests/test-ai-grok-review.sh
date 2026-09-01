@@ -62,6 +62,8 @@ check "missing local runtime is named distinctly" "grep -q 'local_dependency_una
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
+mkdir -p "$TMP/system-tmp"
+export TMPDIR="$TMP/system-tmp"
 cleanup() {
   # Native Windows children can exit before Git Bash releases their final cwd
   # handle. Keep a persistent leak visible, but allow that bounded handoff to
@@ -80,11 +82,18 @@ cleanup() {
 trap cleanup EXIT
 
 export AI_GROK_STATE_DIR="$TMP/state"
+export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+export AI_REVIEW_SANDBOX_PROGRESS_FILE="$TMP/source-digest.progress"
 export AI_GROK_AUTH_HOME="$TMP/no-auth"
 export AI_GROK_CALLER="claude"
 export AI_GROK_TEST_MODE=1
+export AI_DEVOPS_TEST_MODE=1
 export AI_GROK_POLL_INTERVAL=1
 export AI_GROK_WAIT_TIMEOUT=15
+SYSTEM_TMP_PROBE="$(mktemp)"
+check "review digest staging is inside the watched fixture boundary" \
+  "case '$SYSTEM_TMP_PROBE' in '$TMP/system-tmp/'*) true;; *) false;; esac"
+rm -f "$SYSTEM_TMP_PROBE"
 
 # --- a git repo to run in -----------------------------------------------------
 REPO="$TMP/repo"
@@ -169,6 +178,8 @@ chmod +x "$STUB/grok"
 export TMPDIR_FOR_TEST="$TMP"
 export PATH="$STUB:$PATH"
 export AI_GROK_BIN="$STUB/grok"
+check "source-digest progress is inside the watched fixture boundary" \
+  "case '$AI_REVIEW_SANDBOX_PROGRESS_FILE' in '$TMP/'*) true;; *) false;; esac"
 
 cat > "$TMP/fixture.json" <<'EOF'
 {"text":"I'll read the files first.\nNext I'll inspect the tests.\n## Verdict\nAPPROVE — looks correct.",
@@ -723,6 +734,10 @@ PREPROVIDER_FAIL="$(AI_GROK_TEST_INSPECT_MODE=badshape run ask ask-a --prompt pr
 check "preprovider_ask_failure_is_nonzero" "test '$PREPROVIDER_FAIL_RC' -ne 0 && printf '%s' \"$PREPROVIDER_FAIL\" | grep -q 'isolation inspection'"
 PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 2>&1)"; PREPROVIDER_RETRY_RC=$?
 check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
+ASK_A_REVIEW_DIR="$(run show ask-a | jq -r '.review_dir')"
+ASK_B_REVIEW_DIR="$(run show ask-b | jq -r '.review_dir')"
+check "named-session snapshot activity is inside the watched fixture boundary" \
+  "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # These turns are released explicitly below. Keep the wrapper's real 15-minute
 # ceiling: shortening it to the fixture's 120-second readiness ceiling lets a
@@ -731,6 +746,9 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # remains worker-driven and bounded by poll_workers_until.
 ( AI_GROK_WAIT_TIMEOUT=900 run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
 ( AI_GROK_WAIT_TIMEOUT=900 run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+# Snapshot isolation starts with the suite, not only in the final boundary
+# section. The review directories asserted above remain under TMP while worker
+# liveness, rather than filesystem churn, is the readiness signal here.
 poll_workers_until "$ASK_A_PID $ASK_B_PID" "$(budget 40 120)" 'both named ask turns hold their own session locks' \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 ASK_CONCURRENT_READY=$?

@@ -77,6 +77,7 @@ The full recovery procedure is in
 | Skill creation, placement, or trigger quality | [`docs/skills-map.md`](docs/skills-map.md), [`docs/skills-usage-guide.md`](docs/skills-usage-guide.md), [`docs/skill-trigger-eval.md`](docs/skill-trigger-eval.md) | Shared is the default; never keep duplicate client copies |
 | Install or refresh skills/globals | [`docs/skills-usage-guide.md`](docs/skills-usage-guide.md), [`docs/codex-skills-usage-guide.md`](docs/codex-skills-usage-guide.md), `bin/ai-install-skills`, `bin/ai-adopt-globals` | `ai-adopt-globals` preserves and verifies machine sections |
 | Delegated reviewer work | [`bugs.md`](bugs.md) status, the linked provider plan, [`docs/reviewer-issues.md`](docs/reviewer-issues.md), affected wrapper header/skill/tests | Preserve read-only boundaries, completion proof, exact-head evidence, and provider-specific restrictions |
+| Reviewer-assisted diagnosis when a session is stuck | [`plan_reviewer-assisted-problem-solving.md`](plan_reviewer-assisted-problem-solving.md) STATUS, issue #198 | Implementation has not started; the plan defines the evidence threshold, one-reviewer bound, privacy rules, and separation from formal approval |
 | Reviewer evidence packet or sandbox | Header of `bin/ai-review-packet` or `bin/ai-review-sandbox`, matching tests | A reviewer keeps full repository read access; linked worktrees need self-contained snapshots |
 | Reviewer caching, snapshot reuse, or token/cost reporting | [`plan_reviewer-cache-efficiency.md`](plan_reviewer-cache-efficiency.md) STATUS | Read its STATUS table first; never trade evidence integrity for speed, and never report a token number the provider did not return |
 | `ai-muse` stale-turn rejection diagnostics | [`fix_muse_wrapper_reject.md`](fix_muse_wrapper_reject.md) STATUS | The guard is correct; never narrow what `tree_state` covers to stop it firing |
@@ -122,6 +123,16 @@ and [`docs/architecture.md`](docs/architecture.md).
 - Keep PowerShell compatible and correctly formatted; run Bash tests through Git
   Bash on Windows.
 - UI changes require visual verification. This repository itself has no UI.
+- Keep command output quiet by default; verbose output is a permanent token cost
+  in every later turn. Prefer `git status -s`, `git log --oneline`, and
+  `git diff --stat` before a full diff, avoid `ls -R` unless recursion is needed,
+  and pass a test runner's own quiet flag (`pytest -q --tb=short`,
+  `npm test -- --silent`). Never quiet a command whose full output is the
+  evidence you are about to report, and never silence errors: quiet flags reduce
+  noise, not failures.
+- The `edge-dev` machine hosts this repository's two self-hosted Windows CI
+  runners. When working there, do not start a local full test sweep while a
+  GitHub run is active; the local run cancels the running CI job.
 - Installation is the deployment mechanism. The GitHub `verify` workflow checks
   toolkit source, but there is no container, package registry, hosted service,
   application deployment workflow, or application database.

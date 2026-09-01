@@ -58,6 +58,19 @@ check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
 check "packet_lives_inside_the_review_dir"    "[ \"\$(cd \"\$(dirname '$PKT')\" && pwd -P)\" = \"\$(cd '$R' && pwd -P)\" ] && [ \"\$(basename '$PKT')\" = '.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
 
+# Loaded Grok readiness waits observe this test-only marker while the packet is
+# still being prepared. Production builds must ignore it completely.
+PROGRESS_FILE="$TMP/packet-progress"
+"$SCRIPT" remove "$R" progress
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_PROGRESS_FILE="$PROGRESS_FILE" \
+  "$SCRIPT" build "$R" progress >/dev/null
+check "test_mode_exposes_concrete_packet_phase_progress" "test \"\$(wc -l < '$PROGRESS_FILE')\" -ge 7"
+rm -f "$PROGRESS_FILE"
+"$SCRIPT" remove "$R" production-progress
+AI_REVIEW_SANDBOX_PROGRESS_FILE="$PROGRESS_FILE" \
+  "$SCRIPT" build "$R" production-progress >/dev/null
+check "production_packet_build_ignores_test_progress_instrumentation" "test ! -e '$PROGRESS_FILE'"
+
 # --- identity: full SHAs, derived by the wrapper -----------------------------
 check "manifest_carries_full_head_sha"        "grep -qF '$HEAD_SHA' '$M'"
 check "manifest_carries_full_base_sha"        "grep -qF '$BASE_SHA' '$M'"

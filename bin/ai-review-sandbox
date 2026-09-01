@@ -104,18 +104,28 @@ remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child 
   case "$build" in "$final".building.*) rm -rf -- "$build" ;; *) die "refusing to remove unexpected partial snapshot: $build" ;; esac
 }
 
+test_progress() { # test_progress — observable work for loaded fixture waits only
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || return 0
+  [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ] || return 0
+  printf '.\n' >> "$AI_REVIEW_SANDBOX_PROGRESS_FILE"
+}
+
 source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible tree identity
   local root="$1" output="$2" list diff rel kind bytes digest tree
   list="$(mktemp)"; diff="$(mktemp)"
   tree="$(git -C "$root" rev-parse HEAD^{tree} 2>/dev/null)" \
     || { rm -f "$list" "$diff"; return 1; }
+  test_progress || { rm -f "$list" "$diff"; return 1; }
   git -C "$root" diff --binary HEAD > "$diff" 2>/dev/null \
     || { rm -f "$list" "$diff"; return 1; }
+  test_progress || { rm -f "$list" "$diff"; return 1; }
   git -C "$root" ls-files --others --exclude-standard -z > "$list" \
     || { rm -f "$list" "$diff"; return 1; }
+  test_progress || { rm -f "$list" "$diff"; return 1; }
   : > "$output"
   printf 'head_tree\0%s\0tracked_diff_bytes\0%s\0tracked_diff_sha256\0%s\0' \
     "$tree" "$(wc -c < "$diff" | tr -d ' ')" "$(sha256sum "$diff" | cut -d' ' -f1)" >> "$output"
+  test_progress || { rm -f "$list" "$diff"; return 1; }
   while IFS= read -r -d '' rel; do
     case "$rel" in .ai-review*|AI-REVIEW-SANDBOX.md) continue ;; esac
     if [ -L "$root/$rel" ]; then
@@ -133,6 +143,7 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
     fi
     printf 'path\0%s\0type\0%s\0bytes\0%s\0sha256\0%s\0' \
       "$rel" "$kind" "$bytes" "$digest" >> "$output"
+    test_progress || { rm -f "$list" "$diff"; return 1; }
   done < "$list"
   rm -f "$list" "$diff"
 }
@@ -177,6 +188,7 @@ copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-igno
       || { rm -f "$list"; return 1; }
     mkdir -p "$dst/$(dirname "$rel")" || { rm -f "$list"; return 1; }
     cp -Pp "$src/$rel" "$dst/$rel" 2>/dev/null || { rm -f "$list"; return 1; }
+    test_progress || { rm -f "$list"; return 1; }
   done < "$list"
   rm -f "$list"
 }
@@ -195,11 +207,21 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
     || die "worktree $root has no commits yet; there is nothing to snapshot."
 
-  git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
-    || return 1
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
+    git -c core.longpaths=true clone --progress --no-hardlinks "$root" "$build" \
+      2>> "$AI_REVIEW_SANDBOX_PROGRESS_FILE" || return 1
+  else
+    git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
+      || return 1
+  fi
   printf '%s\nsource_digest=%s\n' "$root" "$before" > "$build/$MARKER" || return 1
   git -C "$build" remote remove origin >/dev/null 2>&1 || true
-  git -C "$build" checkout --quiet --detach "$base" 2>/dev/null || return 1
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
+    git -C "$build" checkout --progress --detach "$base" \
+      2>> "$AI_REVIEW_SANDBOX_PROGRESS_FILE" || return 1
+  else
+    git -C "$build" checkout --quiet --detach "$base" 2>/dev/null || return 1
+  fi
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.

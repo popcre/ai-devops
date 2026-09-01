@@ -18,16 +18,18 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
-| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | implemented; merge pending | [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
-| 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | open | — |
-| 3 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
-| 4 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
-| 5 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
-| 6 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
-| 7 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
-| 8 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
-| 9 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
-| 10 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | open; after #165 | — |
+| 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
+| 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | open; capacity prerequisite for parallel Windows work | [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
+| 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
+| 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
+| 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
+| 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209 | — |
+| 8 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
+| 9 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
+| 10 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
+| 11 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | open; after #165 | — |
+| 12 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
 
 Natural context cuts are after #160, after #163, and before #166. Use `fresh-session` and reread the next phase at each cut.
 
@@ -183,7 +185,9 @@ No owner decision is open. The user authorized this holistic plan and issue reor
 
 **Gates:** ten serial loaded Windows passes for each suite; injected early-return/cancellation/locking defects fail; counts at least 191/203; exact-commit CI green; evidence under `tests/verification/reviewer-reliability/`.
 
-Use `fresh-session` after #160.
+Use `fresh-session` after #160. At #160 closeout, reread every downstream
+phase through #166, report any plan drift, and update the remaining phase specs
+before handing off.
 
 ### Phase B — fast and non-duplicative verification
 
@@ -195,9 +199,37 @@ Create `tests/verification/repo-throughput/baseline.md` plus machine-readable da
 
 **Targets:** new workflow, `verify.yml`, `test-workflow-policy.sh`, fixtures.
 
-**Change:** separate always-on syntax/policy workflow; prose-only long-matrix filters; never ignore `skills/`; scheduled complete matrix with actionable failure routing.
+**Change:** separate an always-required hosted-Ubuntu syntax/policy classifier
+that always reports in under three minutes; use its output to skip long jobs for
+the narrow prose-only allowlist rather than top-level `paths-ignore`; never
+ignore `skills/`. Keep scheduled and manual matrices complete. For merge-group
+events, run the short compatibility gate that #162 and #164 must prove instead
+of automatically repeating the full pull-request matrix. Until #209 qualifies
+independent hosts, serialize every EDGE-DEV Windows job through one shared
+job-level concurrency group with cancellation disabled; after #209, route work
+only across qualified independent physical hosts. Add a manifest proving all 61
+Bash and 17 PowerShell suites are assigned exactly once before #162 or #163
+narrows platform or local selection.
 
-**Gates:** fast p50/p90 under 3m; docs-only under 5m; skills/code still verify; scheduled full matrix complete.
+**Gates:** the classifier is the stable required context and always reports;
+fast p50/p90 under 3m; docs-only under 5m without a stuck required context;
+skills/code still verify; scheduled/manual matrices remain complete; the
+merge-group compatibility gate is proven by #162/#164; shared EDGE-DEV
+serialization prevents overlap before #209 and qualified hosts provide physical
+isolation afterward; the suite manifest has no omissions or duplicates.
+
+#### B2a. #209 — independent Windows runner pool
+
+**Targets:** three supported Windows hosts, canonical bootstrap/verification,
+runner labels/groups, security and capacity evidence.
+
+**Change:** qualify one runner per independent physical host, move ordinary CI
+off the daily-use EDGE-DEV machine, prove restart/update/cleanup/dependency
+parity, and retain fork-approval safety. Do not commit private machine inventory.
+
+**Gates:** three hosts pass qualification; taking one offline leaves visible
+working capacity; jobs distribute across physical hosts; setup is recoverable
+and idempotent. Required-check changes remain #166-last.
 
 #### B3. #162 — duplicate platform/event work
 
@@ -216,6 +248,19 @@ Create `tests/verification/repo-throughput/baseline.md` plus machine-readable da
 **Gates:** no args all; `--only grok-review` one; docs-only no long suite with clear message; representative bin/skills/workflow/PowerShell/test changes select documented categories.
 
 Use `fresh-session` after #163.
+
+#### B5. #210 — bounded parallel Windows verification
+
+**Targets:** #161 suite manifest, #162 timings/classification, #209 qualified
+hosts, stable aggregate reporting.
+
+**Change:** divide every Windows-required suite into explicit balanced sections
+only on independent hosts, preserve every assertion, and publish one stable
+aggregate result. Scheduled full coverage remains the backstop.
+
+**Gates:** every suite appears exactly once; injected defects fail the aggregate;
+no ordinary section has p90 above 20 minutes without a named bounded exception;
+runner-minutes, wall time, queue waste and failure-detection time improve.
 
 ### Phase C — convergence and cutover
 
