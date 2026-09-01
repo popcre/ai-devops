@@ -150,6 +150,98 @@ it is the same failure mode and should be ruled in or out.
 A guard rule was added to `AGENTS.md` in PR #202: do not start a local full
 sweep on `edge-dev` while a GitHub run is active.
 
+## Mechanism 5 — throughput: the repository asks for more runner time than it has (confirmed)
+
+This was not in the first version of this log and it may be the most important
+number in it.
+
+Measured at 2026-09-01 11:30Z: **16 runs were pending at once** — 6 `merge_group`,
+5 `pull_request`, 5 `push`. Every one of those runs needs **two** Windows jobs,
+and both self-hosted runners were `busy=true`.
+
+Do the arithmetic:
+
+- `windows-offline` takes about 60–75 minutes. `windows-reviewer-safety` takes
+  about 15–30 minutes. That is roughly **1.5 hours of Windows runner time per
+  run**.
+- 16 pending runs is therefore about **24 hours of serial Windows work**, spread
+  over two runners — most of a day of backlog, with more arriving.
+- A runner executes one job at a time. There is no parallelism beyond the two
+  machines.
+
+**And a single merge creates three runs, not one.** Merging one pull request fires
+a `pull_request` run, a `push` run on `main`, and a `merge_group` run. Each of the
+three drags two Windows jobs behind it. Six Windows jobs, roughly four and a half
+hours of runner time, for one merge of one file.
+
+That is the underlying condition. Mechanisms 1 through 4 are what happens *to* a
+job; this is why there are always so many jobs in flight for something to happen
+to. A queue that is saturated also means every job sits waiting longer before it
+starts, which widens the window in which a regroup can cancel it. The
+cancellations and the backlog feed each other.
+
+## Mechanism 6 — both runners live on one machine (structural risk, not yet a measured failure)
+
+`edge-dev-win` and `edge-dev-win-2` are two runner services on the **same physical
+machine**, `edge-dev`. This has three consequences the log should state plainly:
+
+1. **No redundancy.** If that machine sleeps, reboots, loses its network, or has
+   its runner service stopped, the repository has *zero* Windows CI. There is no
+   second host to fall back to. The cloud `linux-offline` job would keep passing,
+   which makes the outage look partial rather than total.
+2. **The two runners compete for one machine's CPU, disk and memory.** When both
+   run simultaneously — the normal case, since every run needs both — the test
+   suites are sharing one box. This repository's test suites are known to be
+   timing-sensitive; earlier sessions recorded flakes caused by machine slowness
+   and by environment conditions rather than by code. A job slowed by contention
+   is a job closer to its timeout.
+3. **The machine is also a daily working machine** (mechanism 4). Its spare
+   capacity is whatever the humans and AI sessions on it are not using at that
+   moment.
+
+## Timeout headroom is thin (confirmed from the workflow)
+
+`windows-offline` is capped at `timeout-minutes: 75`. The workflow's own comment
+records the suite measuring about 62 minutes. The successful PR #197 run took
+**1h 3m 51s**. That is roughly 15% of headroom.
+
+Under contention — two jobs on one machine, plus local work — a suite that
+normally finishes in 63 minutes does not need to slow down much to hit 75. A
+timeout is reported as a **failure**, not as a capacity problem, so it will look
+like broken code. Nothing currently distinguishes the two in the interface.
+
+## There is no retry, and no alert
+
+- A cancelled or killed run is **not** retried automatically. Someone — a human or
+  an AI session — has to notice and re-queue it. PR #197 was re-queued by hand
+  four times; had nobody been watching, it would simply have sat OPEN forever.
+- Nothing alerts on repeated cancellations. The pattern in this document was found
+  only because a session was actively babysitting one pull request.
+- A merge-queue ejection **leaves the pull request OPEN**, so any automation that
+  waits on pull request state alone waits forever. This was already known from
+  earlier sessions and it bit this one again.
+- Polling the API aggressively to watch runs (`gh run watch`, tight loops) can trip
+  a secondary rate limit that returns 403 on every Actions call *while the quota
+  endpoint still reports a full allowance*. Poll on the order of a minute, not
+  seconds.
+
+## Failure states are not distinguishable from each other
+
+This is the reporting problem that ties the whole document together. All four of
+these appear differently in the interface than what they actually are:
+
+| What really happened | How it is reported |
+|---|---|
+| Queue regrouped and cancelled the run | `cancelled` — clear, and correct |
+| Process killed mid-suite (run 33486858691) | **`failure`** — looks like broken code |
+| Suite exceeded 75 minutes under contention | **`failure`** — looks like broken code |
+| Local sweep on `edge-dev` killed the job | `cancelled` — clear, but the cause is invisible |
+
+Two of the four masquerade as test failures. Until that is fixed, every red
+Windows job in this repository has to be opened and inspected step-by-step before
+anyone can say whether the code is actually broken — which is exactly the wasted
+investigation this session performed.
+
 ## What this adds up to
 
 The runners are probably not "dying" in the hardware sense. What is happening:
@@ -161,6 +253,10 @@ The runners are probably not "dying" in the hardware sense. What is happening:
 3. At least one death was an abrupt kill reported as a test failure, which is
    actively misleading.
 4. Local work on the runner host can kill live CI, and that host is in daily use.
+5. The repository asks for more Windows runner time than two runners on one
+   machine can supply, so everything queues and stays exposed for longer.
+6. Two of the four ways a job dies are reported as test failures, so red is not
+   evidence of broken code here.
 
 ## Open questions for the investigation
 
@@ -177,6 +273,12 @@ The runners are probably not "dying" in the hardware sense. What is happening:
 - Can the Windows suite be split or parallelised so no single job runs for an
   hour? An hour is longer than the typical gap between two sessions' merges,
   which is the structural reason this keeps repeating.
+- Can a killed or timed-out job be made visually distinct from a real test
+  failure, so nobody investigates a phantom bug again?
+- Should cancelled queue runs be retried automatically, and should repeated
+  cancellation of the same pull request raise an alert?
+- Does a second Windows host exist or can one be added? Today a single machine
+  sleeping takes all Windows CI down with it.
 - Do the two runners belong on a machine that is not also a daily working
   machine?
 
