@@ -443,3 +443,18 @@ Then inspect the jobs of any run id, including which runner served each job:
 ```bash
 gh api repos/popcre/ai-devops/actions/runs/33486858691/jobs
 ```
+
+## Resolution — the concurrency key (2026-09-01)
+
+`verify.yml` keyed its concurrency group on the head SHA, so every new commit
+opened a new group and `cancel-in-progress` could never supersede an older run
+for the same pull request. The two-runner edge-dev pool therefore filled with
+builds nobody was waiting for.
+
+Pull-request runs are now keyed on the pull request number. `merge_group` keeps
+a group per queue branch so concurrent queue entries never cancel one another,
+and `push: main` keeps its per-SHA group so each immutable commit keeps its own
+proof. Both edge-dev Windows jobs are skipped on `merge_group`, and
+`windows-offline` was removed from the required status checks on `main` so the
+queue does not wait for a check that no longer reports there. Restoring it
+belongs with #166, after #209 provides independent Windows hosts.
