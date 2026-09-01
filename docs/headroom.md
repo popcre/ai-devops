@@ -18,11 +18,15 @@ blobs *before* they are sent upstream, and forwards everything else untouched.
 Goal: **fewer input tokens per request → lower Claude token usage.**
 
 - Vendor claim: 15–20% fewer tokens for coding agents (60–95% for raw JSON).
-- **Our measured reality: 13.2%** on the last real session (2026-08-12), and
-  ~5.7% lifetime across 845 requests (see §6). The old "0.27%" figure was
+- **Our measured reality: ~2.2%** over the trailing 7 days to 2026-08-31, and
+  ~4.1% lifetime across 1,756 requests (see §6). The old "0.27%" figure was
   measured BEFORE the 2026-07-14 crash-loop fix and is obsolete — do not quote
-  it. On our workload the payoff now looks close to the vendor claim.
-- Installed version: **0.30.0** (pipx, Python).
+  it. Higher per-session figures quoted earlier (13.2%) were single favourable
+  sessions, not a trend. **All of these are `token`-mode / 0.30.0 numbers and
+  must be re-measured** — see §5b and §5c.
+- It does **not** break the prompt cache; that was measured, not assumed (§5b).
+- Installed version: **0.37.0** (pipx package `headroom-ai`, upgraded from
+  0.30.0 on 2026-08-31).
 
 > ⚖️ **Standing decision: if it is not clearly worth it, we pull it.** This is a
 > trial. After real sessions run through it, read the savings (§6). If the token
@@ -206,6 +210,88 @@ window on 2026-07-07 and nothing since.
 
 Result: one healthy proxy, both workflows routed, reboot-safe, private-only.
 
+## 5b. Prompt-cache safety and optimization mode (settled 2026-08-31)
+
+**The concern.** A widely circulated criticism says compression proxies destroy
+your prompt cache: because Anthropic discounts a re-read prefix by ~90%, any
+tool that rewrites earlier turns invalidates the cache from the edit point
+onward, and every token after it re-bills at full rate. Trading a ~90% native
+discount for a few percent of compression would be a net loss.
+
+**It is a real mechanism, and Headroom has a switch for it.** `headroom proxy`
+takes `--mode [token|cache]`:
+
+- `token` — "prior turns may be rewritten for max savings" (cache-unsafe)
+- `cache` — "freeze prior turns to maximise provider prefix-cache hit rate"
+
+Until 2026-08-31 our `headroom.service` passed **no `--mode` flag**, so it ran
+the then-default `token` mode — the cache-unsafe one.
+
+**What we measured.** `proxy.log` records `cache_read`, `cache_write` and
+`cache_hit_pct` per request, so the question was answerable from history with no
+API spend. On deep conversations (`msgs >= 10`), comparing requests Headroom
+compressed against requests it left untouched:
+
+| Group | Requests | Avg cache hit | Avg cache_write | Avg tokens saved |
+|---|---|---|---|---|
+| Compressed | 718 | **92.5%** | 6,199 | 2,444 |
+| Untouched | 16 | 86.1% | 25,599 | 0 |
+
+Compression correlated with **better** cache performance and 4x less cache
+rewriting — the opposite of the criticism. The reason is visible in the
+`transforms=` field: the router is conservative, and most entries are
+`router:excluded:tool`, `router:protected:*` or `router:noop`. The only genuine
+edits are `router:tool_result:text` — the newest tool output, not history.
+
+**What we changed anyway.** Relying on a cache-unsafe mode choosing to behave is
+not a control. On 2026-08-31 the unit was backed up to
+`headroom.service.bak-2026-08-31` and `--mode cache` was added explicitly. The
+proxy now logs at startup:
+
+```
+Mode: cache
+  Prefix freeze: strict (all prior turns immutable)
+  Mutations: latest turn only
+```
+
+**Vendor agreement.** Headroom 0.37.0 changed its own default to `cache`. Our
+explicit flag is now belt-and-braces rather than a deviation.
+
+> ⚠️ **All savings figures in §6 predate this change.** They were measured in
+> `token` mode on 0.30.0. 0.37.0 also enables code-aware (AST) compression that
+> was not previously active. The percentages must be re-measured before being
+> quoted as current.
+
+## 5c. Durable performance recording (added 2026-08-31)
+
+`proxy.log` rotates at ~10 MB keeping 5 files, so the evidence above was on a
+path to being overwritten. Metrics are now extracted to a permanent CSV.
+
+| Item | Path |
+|---|---|
+| Recorder | `/home/ai/headroom-perf/record.py` |
+| Data | `/home/ai/headroom-perf/perf.csv` |
+| Cron log | `/home/ai/headroom-perf/record.log` |
+| Schedule | `17 * * * *` in the `ai` user crontab |
+
+The recorder parses every `PERF` line from `proxy.log` and its rotations into
+`ts, reqid, model, msgs, tok_before, tok_after, tok_saved, cache_read,
+cache_write, cache_hit_pct, transforms`. It is **idempotent** — it dedupes on the
+`hr_` request id, so re-running it adds nothing. Run it by hand any time:
+
+```bash
+sudo -u ai python3 /home/ai/headroom-perf/record.py
+```
+
+The `token`-mode baseline is preserved: **1,706 requests, 2026-07-15 to
+2026-08-28.** Compare `cache` mode against that window rather than against the
+narrative figures in §6.
+
+> Watch out: the log timestamp uses a comma for milliseconds
+> (`18:11:53,213`). A naive CSV split on commas shifts every column and silently
+> drops rows — the first version of this recorder lost a third of the data while
+> looking correct. The current parser anchors on a full regex.
+
 ## 6. How to see whether it is actually helping
 
 On the VPS (`ssh hetzner`, or via the `devops-mcp` MCP):
@@ -229,6 +315,12 @@ sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 | Last real activity | **2026-08-26** |
 
 Read live with the commands above; these are a snapshot, re-checked 2026-08-27.
+
+> **These numbers are `token`-mode / 0.30.0 figures and are now historical.**
+> See §5b. The durable per-request record in §5c is the source to re-measure
+> from. Live lifetime as of 2026-08-31: 1,756 requests, 2,854,228 tokens saved
+> (~$14.15) against $200.66 of input; trailing 7 days 668,804 saved on
+> 30,253,311 sent = **2.21%**.
 
 > ⚠️ **Traffic, not health, is the thing to check.** On 2026-08-21 the service
 > was `active`, `enabled`, 16 days uptime, `NRestarts=0`, `/health` green — and
@@ -360,6 +452,9 @@ Then, and only then: `pipx uninstall headroom-ai` as the `ai` user, and
 | VPS access | `ssh hetzner` (root) or `ssh vps2` (ai) or `devops-mcp` MCP |
 | Service control | `systemctl {status,restart,stop} headroom.service` |
 | Savings data | `/home/ai/.headroom/proxy_savings.json`, `savings_events.jsonl` |
+| Durable perf record | `/home/ai/headroom-perf/perf.csv` (hourly cron, §5c) |
+| Optimization mode | `cache` (prefix freeze strict) — set in the unit, §5b |
+| Unit backup | `/etc/systemd/system/headroom.service.bak-2026-08-31` |
 | Off switch (any machine) | `ai-headroom off` + fully restart Claude |
 | Check what I'm using | `ai-headroom status` |
 | Off switch (VPS `ai`) | `ai-headroom off` (or comment out the `.bashrc` export) |
