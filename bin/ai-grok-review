@@ -999,12 +999,24 @@ VERDICT_MARKER='## Verdict'
 # heading and the caller saw the two words "## Verdict / REJECT" — a verdict
 # with no reasons is not actionable, and the reasons were correct. Keep the
 # verdict last (governance reads the tail) but never discard the findings.
+#
+# THE ORDER WAS INVERTED AND THE COMMENT ABOVE WAS THE ONLY THING THAT SAID SO
+# (fixed 2026-09-01). The verdict section printed FIRST and the findings after it,
+# so the terminal line of stdout was never the verdict. run-governed-review.mjs in
+# u2giants/shared-db requires the verdict to be the LAST non-empty line and records
+# nothing otherwise, so every governed review assigned to this wrapper failed with
+# "did not produce a recordable terminal verdict (exit 0)" while the review itself
+# had completed correctly. Observed twice on shared-db PR #2068 and reproduced with
+# a one-line probe. Findings first, verdict last -- both still kept.
 extract_answer() { # extract_answer FILE
   local text; text="$(jq -r '.text // ""' "$1")"
   if printf '%s' "$text" | grep -qF "$VERDICT_MARKER"; then
-    printf '%s\n' "$text" | sed -n "/^${VERDICT_MARKER}/,\$p"
-    printf '\n---\n### Findings and reasoning (everything the reviewer said before its verdict)\n\n'
+    printf '### Findings and reasoning (everything the reviewer said before its verdict)\n\n'
     printf '%s\n' "$text" | sed -n "1,/^${VERDICT_MARKER}/p" | sed "/^${VERDICT_MARKER}/d"
+    printf '
+---
+'
+    printf '%s\n' "$text" | sed -n "/^${VERDICT_MARKER}/,\$p"
   else
     warn "Grok's reply has no '$VERDICT_MARKER' section; emitting the whole response including any progress narration."
     printf '%s\n' "$text"
