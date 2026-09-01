@@ -123,6 +123,16 @@ and [`docs/architecture.md`](docs/architecture.md).
 - Keep PowerShell compatible and correctly formatted; run Bash tests through Git
   Bash on Windows.
 - UI changes require visual verification. This repository itself has no UI.
+- Keep command output quiet by default; verbose output is a permanent token cost
+  in every later turn. Prefer `git status -s`, `git log --oneline`, and
+  `git diff --stat` before a full diff, avoid `ls -R` unless recursion is needed,
+  and pass a test runner's own quiet flag (`pytest -q --tb=short`,
+  `npm test -- --silent`). Never quiet a command whose full output is the
+  evidence you are about to report, and never silence errors: quiet flags reduce
+  noise, not failures.
+- The `edge-dev` machine hosts this repository's two self-hosted Windows CI
+  runners. When working there, do not start a local full test sweep while a
+  GitHub run is active; the local run cancels the running CI job.
 - Installation is the deployment mechanism. The GitHub `verify` workflow checks
   toolkit source, but there is no container, package registry, hosted service,
   application deployment workflow, or application database.
