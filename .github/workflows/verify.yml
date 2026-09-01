@@ -10,9 +10,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Keep each immutable commit's proof alive when newer work lands on main.
-  # Only a duplicate run for the same event and source SHA is superseded.
-  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+  # A pull request is keyed on its *number*, not its head SHA. Keying on the SHA
+  # made every new commit its own group, so cancel-in-progress could never fire
+  # across pushes and the two-runner Windows pool filled with builds nobody was
+  # waiting for (issue #204: nine queued runs for six commits on one branch).
+  #
+  # merge_group keeps its own per-queue-branch group and push: main keeps its
+  # per-SHA group, so concurrent queue entries never cancel one another and each
+  # immutable commit on main still gets its own preserved proof (commit 817f8069).
+  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -38,6 +44,11 @@ jobs:
         run: bash tests/test-all.sh
 
   windows-offline:
+    # Not run on merge_group: the edge-dev pool is two logical runners on one
+    # physical machine, and a queue rebuild restarted this job five times for a
+    # single pull request (issue #204). linux-offline is the queue gate; the
+    # Windows proof comes from the pull_request run on the exact head commit.
+    if: github.event_name != 'merge_group'
     # Self-hosted on edge-dev. Every failure this repository has had to
     # investigate has been a Windows timing flake, and GitHub-hosted runners made
     # them unreproducible: a different machine every time, and two days of runs
@@ -63,6 +74,11 @@ jobs:
         run: .\tests\test-all.ps1
 
   windows-reviewer-safety:
+    # Not run on merge_group: the edge-dev pool is two logical runners on one
+    # physical machine, and a queue rebuild restarted this job five times for a
+    # single pull request (issue #204). linux-offline is the queue gate; the
+    # Windows proof comes from the pull_request run on the exact head commit.
+    if: github.event_name != 'merge_group'
     runs-on: [self-hosted, Windows, X64, edge-dev]
     timeout-minutes: 30
     steps:
