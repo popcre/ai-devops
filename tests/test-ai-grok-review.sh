@@ -601,11 +601,14 @@ check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.
 echo "== verdict_delimiter_extraction =="
 OUT="$(run new t7 --prompt x 2>/dev/null)"
 check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE'"
-check "verdict comes first"            "[ \"\$(printf '%s' \"\$OUT\" | head -1)\" = '## Verdict' ]"
-# Contract changed 2026-08-18. Emitting ONLY the verdict section discarded the
-# findings: a real measured review produced 42 lines of evidenced defects above
-# the heading and the caller saw two words. A verdict with no reasons cannot be
-# acted on. The verdict still leads; the reasoning is kept below it.
+# Contract changed 2026-08-18: emitting ONLY the verdict section discarded the
+# findings -- a real measured review produced 42 lines of evidenced defects and
+# the caller saw two words. A verdict with no reasons cannot be acted on.
+# Contract changed again 2026-09-01: the verdict section must come LAST. Governed
+# review in u2giants/shared-db reads only the FINAL non-empty line of our stdout
+# and records nothing unless it is the verdict, so a verdict-first report was
+# silently unrecordable. Findings first, verdict last -- both still kept.
+check "verdict section comes last"     "[ \"\$(printf '%s' \"\$OUT\" | grep -n '^## Verdict' | cut -d: -f1)\" -gt 1 ] && printf '%s' \"\$OUT\" | grep -v '^[[:space:]]*\$' | tail -1 | grep -q 'APPROVE'"
 check "findings are NOT discarded"     "printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
 check "findings are clearly labelled"  "printf '%s' \"\$OUT\" | grep -q 'Findings and reasoning'"
 cat > "$TMP/fixture2.json" <<'EOF'
