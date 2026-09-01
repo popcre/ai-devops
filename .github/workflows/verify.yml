@@ -8,6 +8,8 @@ on:
   # waits forever for checks that never start.
   merge_group:
   workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
 
 concurrency:
   # Keep each immutable commit's proof alive when newer work lands on main.
@@ -19,7 +21,12 @@ permissions:
   contents: read
 
 jobs:
+  fast-classifier:
+    uses: ./.github/workflows/fast-classifier.yml
+
   linux-offline:
+    needs: fast-classifier
+    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -38,6 +45,8 @@ jobs:
         run: bash tests/test-all.sh
 
   windows-offline:
+    needs: fast-classifier
+    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
     # Self-hosted on edge-dev. Every failure this repository has had to
     # investigate has been a Windows timing flake, and GitHub-hosted runners made
     # them unreproducible: a different machine every time, and two days of runs
@@ -45,9 +54,10 @@ jobs:
     # makes the two Windows jobs queue behind each other instead of contending
     # for the same cores, which is what these timing-sensitive suites need.
     runs-on: [self-hosted, Windows, X64, edge-dev]
-    # The complete protected matrix measured about 62 minutes on windows-2025
-    # after the 2026-08 reviewer expansions. Keep bounded failure plus headroom.
-    timeout-minutes: 75
+    # The protected matrix retains its 75-minute execution bound. This job may
+    # first wait up to 90 minutes for the shared physical host, so the job-level
+    # envelope covers both bounds plus setup/teardown.
+    timeout-minutes: 170
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -60,11 +70,17 @@ jobs:
           }
       - name: Complete offline Windows and Bash suites
         shell: pwsh
-        run: .\tests\test-all.ps1
+        run: |
+          . .\tools\ci\edge-dev-serialization.ps1
+          Invoke-EdgeDevSerialized -BodyMinutes 75 -Body { & pwsh -NoProfile -File .\tests\test-all.ps1 }
 
   windows-reviewer-safety:
+    needs: fast-classifier
+    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
     runs-on: [self-hosted, Windows, X64, edge-dev]
-    timeout-minutes: 30
+    # This may wait behind the complete job from any workflow run before its
+    # own 30-minute measured work. The host mutex preserves every queued job.
+    timeout-minutes: 125
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -78,10 +94,37 @@ jobs:
       - name: Focused Windows reviewer safety suites
         shell: pwsh
         run: |
-          $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $failures = 0
-          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
-            & $bash $test
-            if ($LASTEXITCODE -ne 0) { $failures++ }
+          . .\tools\ci\edge-dev-serialization.ps1
+          Invoke-EdgeDevSerialized -BodyMinutes 30 -Body {
+            $bash = 'C:\Program Files\Git\bin\bash.exe'
+            $failures = 0
+            foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
+              & $bash $test
+              if ($LASTEXITCODE -ne 0) { $failures++ }
+            }
+            if ($failures -ne 0) { throw "$failures focused reviewer suite(s) failed." }
           }
-          if ($failures -ne 0) { exit 1 }
+
+  report-scheduled-failure:
+    needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety]
+    if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the scheduled verification incident
+        shell: bash
+        run: |
+          title='Scheduled full verification is failing'
+          body="The complete scheduled matrix failed at $RUN_URL. Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
+          fi

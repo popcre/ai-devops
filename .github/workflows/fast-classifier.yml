@@ -1,0 +1,62 @@
+name: fast-classifier
+
+on:
+  workflow_call:
+    outputs:
+      run_long:
+        value: ${{ jobs.classify.outputs.run_long }}
+      prose_only:
+        value: ${{ jobs.classify.outputs.prose_only }}
+      skills:
+        value: ${{ jobs.classify.outputs.skills }}
+      code:
+        value: ${{ jobs.classify.outputs.code }}
+      workflow:
+        value: ${{ jobs.classify.outputs.workflow }}
+      powershell:
+        value: ${{ jobs.classify.outputs.powershell }}
+      test_fixtures:
+        value: ${{ jobs.classify.outputs.test_fixtures }}
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      run_long: ${{ steps.classify.outputs.run_long }}
+      prose_only: ${{ steps.classify.outputs.prose_only }}
+      skills: ${{ steps.classify.outputs.skills }}
+      code: ${{ steps.classify.outputs.code }}
+      workflow: ${{ steps.classify.outputs.workflow }}
+      powershell: ${{ steps.classify.outputs.powershell }}
+      test_fixtures: ${{ steps.classify.outputs.test_fixtures }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            # Disable rename detection so both the deleted source and added
+            # destination are classified. A skills-to-docs rename must not
+            # become a prose-only bypass.
+            git diff --no-renames --name-only "$BASE_SHA" HEAD | bash tools/ci/classify-changes.sh pull_request >> "$GITHUB_OUTPUT"
+          else
+            bash tools/ci/classify-changes.sh "${{ github.event_name }}" </dev/null >> "$GITHUB_OUTPUT"
+          fi
+      - name: Bash syntax
+        shell: bash
+        run: |
+          find bin tests tools -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do
+            head -n 1 "$file" | grep -q 'bash' || continue
+            bash -n "$file"
+          done
+      - name: Workflow policy
+        run: bash tests/test-workflow-policy.sh
