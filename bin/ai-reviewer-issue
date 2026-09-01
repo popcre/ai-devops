@@ -170,6 +170,7 @@ capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER
 record_issue(){
   local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" metadata_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
+  local report_count=0 log_count=0 scoreboard_count=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --provider) provider="${2:-}"; shift 2 ;;
@@ -230,11 +231,18 @@ record_issue(){
   : > "$report_dir/captured-provider-logs.txt"
   capture_exact_files "$metadata_source" report "$root" "$report_dir/review-reports" "$report_dir/captured-review-reports.txt"
   capture_exact_files "$metadata_source" log "$STATE_BASE/$provider" "$report_dir/provider-logs" "$report_dir/captured-provider-logs.txt"
-  capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$source_digest" "$report_dir/latest-scoreboard-entry.json"
+  if [ "$metadata_status" -ne 2 ]; then
+    capture_scoreboard "$provider" "$root" "$head" "$run_id" "$session_id" "$caller" "$source_digest" "$report_dir/latest-scoreboard-entry.json"
+  fi
+  report_count="$(find "$report_dir/review-reports" -maxdepth 1 -type f -print 2>/dev/null | wc -l | tr -d ' ')"
+  log_count="$(find "$report_dir/provider-logs" -maxdepth 1 -type f -print 2>/dev/null | wc -l | tr -d ' ')"
+  [ -s "$report_dir/latest-scoreboard-entry.json" ] && scoreboard_count=1
   if [ "$metadata_status" -eq 2 ]; then
-    printf 'Multiple reviewer metadata records matched provider, repository, head, run/session, and caller. No evidence was captured because ownership is ambiguous.\n' > "$report_dir/missing-evidence.txt"
+    printf 'Multiple reviewer metadata records matched provider, repository, head, run/session, and caller. No metadata-owned review report, provider log, or scoreboard entry was captured because ownership is ambiguous.\n' > "$report_dir/missing-evidence.txt"
   elif [ -z "$metadata_source" ]; then
     printf 'No exact reviewer metadata matched provider, repository, head, run/session, and caller.\n' > "$report_dir/missing-evidence.txt"
+  elif [ "$report_count" -eq 0 ] && [ "$log_count" -eq 0 ] && [ "$scoreboard_count" -eq 0 ]; then
+    printf 'Exact reviewer metadata matched, but no owned review report, provider log, or scoreboard entry was captured.\n' > "$report_dir/missing-evidence.txt"
   fi
   if [ -n "$details" ]; then
     printf '%s\n' "$details" | redact_text > "$report_dir/details.redacted.txt"
@@ -256,6 +264,7 @@ record_issue(){
     --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
     --arg details_file "$details_file" --arg details "$details" \
     --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" \
+    --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" \
     '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
       join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
@@ -263,9 +272,12 @@ record_issue(){
       machine:{hostname:$host,os:$os,shell:$shell},
       evidence:{latest_metadata_source:$metadata_source,redacted_metadata_copy:$metadata_copy,
         recent_review_artifacts:"recent-review-artifacts.txt",
-        complete_matching_review_reports:"review-reports/",
-        recent_provider_logs:"provider-logs/",
-        latest_scoreboard_entry:"latest-scoreboard-entry.json",
+        complete_matching_review_reports:(if $report_count>0 then "review-reports/" else null end),
+        complete_matching_review_reports_captured:$report_count,
+        recent_provider_logs:(if $log_count>0 then "provider-logs/" else null end),
+        recent_provider_logs_captured:$log_count,
+        latest_scoreboard_entry:(if $scoreboard_count>0 then "latest-scoreboard-entry.json" else null end),
+        latest_scoreboard_entry_captured:$scoreboard_count,
         session_details:(if ($details_file=="" and $details=="") then null else "details.redacted.txt" end),
         complete_error_log:(if $error_source=="" then null else "error.redacted.txt" end)}}' \
     > "$report_dir/issue.json"
