@@ -67,14 +67,23 @@ winget install --id GitHub.cli -e --source winget --accept-package-agreements --
 winget install --id Microsoft.PowerShell -e --source winget --installer-type wix --force --accept-package-agreements --accept-source-agreements
 winget install --id jqlang.jq -e --scope machine --source winget --force --accept-package-agreements --accept-source-agreements
 winget install --id OpenJS.NodeJS.LTS -e --version 24.17.0 --scope machine --source winget --accept-package-agreements --accept-source-agreements
-winget install --id Python.Python.3.13 -e --version 3.13.14 --scope machine --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Python.Python.3.13 -e --version 3.13.14 --scope machine --source winget --override "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" --accept-package-agreements --accept-source-agreements
 ```
 
 PowerShell 7.6+ defaults to a Store-style MSIX through WinGet. The explicit
 `--installer-type wix` is required so the runner service can execute
 `C:\Program Files\PowerShell\7\pwsh.exe`. For jq, `--scope machine` must create
 `C:\Program Files\WinGet\Links\jq.exe`; a path only under the interactive user's
-profile is insufficient.
+profile is insufficient. Verify the background service can execute the link,
+not merely that an Administrator can find it. If the qualification log says
+`Program Files/WinGet/Links/jq: Permission denied`, grant the runner service
+read-and-execute access to the exact WinGet package binary and restart it:
+
+```powershell
+$jqTarget = (Get-Item 'C:\Program Files\WinGet\Links\jq.exe').Target
+icacls.exe $jqTarget /grant '*S-1-5-20:(RX)'
+Get-Service | Where-Object Name -Like 'actions.runner.*' | Restart-Service
+```
 
 Close and reopen PowerShell, then verify:
 
@@ -87,6 +96,26 @@ python --version
 & 'C:\Program Files\PowerShell\7\pwsh.exe' --version
 Test-Path 'C:\Program Files\Git\bin\bash.exe'
 where.exe jq
+where.exe python
+```
+
+Do **not** substitute `winget install python3`. That alias currently selects
+Python 3.14 and can leave the `python` command pointing only at the Microsoft
+Store execution alias. The repository pins Python 3.13.14, and the explicit
+installer override above both installs it for all users and prepends its
+machine-wide path. `where.exe python` must list
+`C:\Program Files\Python313\python.exe` first, and `python --version` must report
+`Python 3.13.14`.
+
+Likewise, use the exact pinned Node command above rather than omitting
+`--version`. A different current LTS may work, but it is not dependency parity
+with the reviewed recovery catalog.
+
+After installing or correcting any dependency, restart the runner service so it
+inherits the new machine PATH:
+
+```powershell
+Get-Service | Where-Object Name -Like 'actions.runner.*' | Restart-Service
 ```
 
 ## 3. Register exactly one service
@@ -198,9 +227,21 @@ The first host, `EDGE-RUNN-ENVY`, exposed these reusable traps:
   `pwsh`. The machine-wide WiX/MSI installation fixed it.
 - The first jq installation created only a user WinGet link. Reinstalling with
   `--scope machine` created the service-visible Program Files link.
+- A machine-wide jq link can still point to a package binary that Network
+  Service cannot execute. This produces hundreds of misleading downstream
+  failures. Grant `S-1-5-20` read-and-execute access to that exact binary,
+  restart the service, and rerun qualification.
 - Node.js and Python were omitted from the first manual setup, so the complete
   suite spent 35 minutes before exposing cascading provider-test failures. Both
   are pinned machine-wide prerequisites and are now checked before the suite.
+- Using `winget install python3 --scope machine` installed Python 3.14.7 but
+  `python` still resolved to the Microsoft Store alias. Installing the exact
+  `Python.Python.3.13` version with `InstallAllUsers=1 PrependPath=1`, reopening
+  PowerShell and restarting the runner service produced the required
+  `C:\Program Files\Python313\python.exe` first in PATH.
+- Installing Node without the pinned version selected 24.19.0 rather than the
+  catalog's 24.17.0. The first host could execute it, but future setup must use
+  the catalog version so runner rebuilds are reproducible.
 - A private-file ACL test used the interactive username. Under Network Service,
   Windows exposed the computer identity and `icacls` could not resolve it. The
   fixture now grants the current security SID directly, which is valid for both
