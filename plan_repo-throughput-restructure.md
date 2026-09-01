@@ -197,9 +197,21 @@ Create `tests/verification/repo-throughput/baseline.md` plus machine-readable da
 
 **Targets:** new workflow, `verify.yml`, `test-workflow-policy.sh`, fixtures.
 
-**Change:** separate always-on syntax/policy workflow; prose-only long-matrix filters; never ignore `skills/`; scheduled complete matrix with actionable failure routing.
+**Change:** separate an always-required hosted-Ubuntu syntax/policy classifier
+that always reports in under three minutes; use its output to skip long jobs for
+the narrow prose-only allowlist rather than top-level `paths-ignore`; never
+ignore `skills/`; make merge-group, scheduled, and manual runs complete; route
+scheduled failures to an actionable tracked issue. Serialize every EDGE-DEV
+Windows job through one shared job-level concurrency group with cancellation
+disabled, because both logical runner registrations share one physical host.
+Add a manifest proving all 61 Bash and 17 PowerShell suites are assigned exactly
+once before #162 or #163 narrows platform or local selection.
 
-**Gates:** fast p50/p90 under 3m; docs-only under 5m; skills/code still verify; scheduled full matrix complete.
+**Gates:** the classifier is the stable required context and always reports;
+fast p50/p90 under 3m; docs-only under 5m without a stuck required context;
+skills/code still verify; merge-group/scheduled/manual matrices are complete;
+shared EDGE-DEV serialization prevents cross-PR overlap; the suite manifest has
+no omissions or duplicates.
 
 #### B3. #162 — duplicate platform/event work
 

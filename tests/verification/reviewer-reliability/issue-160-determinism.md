@@ -236,3 +236,10 @@ suites were searched for fixed sleeps, bounded readiness loops,
   the challenger bound, deliberate stall, assertions, and every production
   timeout remain unchanged. The focused Grok suite then passed 199/199 on
   `EDGE-DEV`, including `uncertain_ask_blocks_its_exact_retry`.
+- Final exact-tree verification on commit
+  `2be4a7bf844cb1b038a170d04b7538f1a3c58f35` started on idle `EDGE-DEV` at
+  `2026-09-01T09:26:12Z` and completed before the next GitHub Windows job began
+  at `2026-09-01T10:37:41Z`. All 61 Bash suites passed with zero failures in
+  3,773 seconds, followed by all 17 PowerShell suites with zero failures.
+  Grok passed 199/199 and Kimi passed 207/207. The complete run exited zero at
+  `2026-09-01T10:29:45Z`; the durable local log remains ignored under `.ai/`.
