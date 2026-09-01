@@ -76,6 +76,12 @@ check "uncommitted_edits_reproduced"          "grep -q uncommitted '$STAGE/a.txt
 check "untracked_files_reproduced"            "grep -q brand-new '$STAGE/c.txt'"
 check "snapshot_records_whole_source_digest" \
   "grep -qx \"source_digest=\$('$SCRIPT' digest '$WT')\" '$STAGE/.ai-review-sandbox'"
+PROGRESS_FILE="$TMP/source-inventory.progress"
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_PROGRESS_FILE="$PROGRESS_FILE" "$SCRIPT" digest "$WT" >/dev/null
+check "test-mode digest exposes real inventory progress" "test -f '$PROGRESS_FILE'"
+rm -f "$PROGRESS_FILE"
+AI_REVIEW_SANDBOX_PROGRESS_FILE="$PROGRESS_FILE" "$SCRIPT" digest "$WT" >/dev/null
+check "production digest ignores test progress instrumentation" "test ! -e '$PROGRESS_FILE'"
 check "head_matches_the_worktree" \
   "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 

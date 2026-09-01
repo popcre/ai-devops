@@ -31,6 +31,13 @@ OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 00 2>&1)"; RC=$?
 check "a zero-prefixed zero deadline is refused" "test '$RC' -eq 3"
 OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --interval 00 2>&1)"; RC=$?
 check "a zero-prefixed zero interval is refused" "test '$RC' -eq 3"
+OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --api-timeout-seconds 00 2>&1)"; RC=$?
+check "a zero-prefixed API timeout is refused" "test '$RC' -eq 3"
+for OPTION in --repo --timeout-minutes --interval --api-timeout-seconds; do
+  OUT="$(bash "$CMD" 1 "$OPTION" 2>&1)"; RC=$?
+  check "$OPTION without a value is refused immediately" \
+    "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'requires a value'"
+done
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -42,13 +49,41 @@ EOF
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
 state="${AI_PR_WAIT_TEST_CLOCK:?}"
-if [ ! -f "$state" ]; then printf '1000\n' > "$state"; printf '1000\n'
-else printf '1060\n'; fi
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
+check "fixture resolves its exact gh stub" \
+  "test \"$(PATH="$TMP/bin:$PATH" command -v gh)\" = '$TMP/bin/gh'"
 OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+: > "${AI_PR_WAIT_TEST_MARKER:?}"
+sleep 300
+EOF
+rm -f "$TMP/clock"
+SECONDS=0
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/hung-trace" AI_PR_WAIT_TEST_MARKER="$TMP/hung-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 --api-timeout-seconds 1 2>&1)"; RC=$?
+ELAPSED=$SECONDS
+check "a hung GitHub request is killed inside the overall deadline" \
+  "test -f '$TMP/hung-called' && test '$RC' -eq 2 && test '$ELAPSED' -lt 5 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+: > "${AI_PR_WAIT_TEST_MARKER:?}"
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeCommit":{"oid":"abc123"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}}}}}'
+EOF
+rm -f "$TMP/clock"
+SECONDS=0
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/fast-trace" AI_PR_WAIT_TEST_MARKER="$TMP/fast-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --api-timeout-seconds 5 2>&1)"; RC=$?
+ELAPSED=$SECONDS
+[ "$RC" -eq 0 ] || printf '  diagnostic: fast request rc=%s elapsed=%ss resolved=%s child=%s stderr=%s output=%s\n' "$RC" "$ELAPSED" "$(cat "$TMP/fast-trace.resolved" 2>/dev/null || printf missing)" "$(cat "$TMP/fast-trace.child" 2>/dev/null || printf missing)" "$(cat "$TMP/fast-trace.stderr" 2>/dev/null || printf missing)" "$OUT" >&2
+check "a fast successful request returns without an orphan timer" \
+  "test -f '$TMP/fast-called' && test '$RC' -eq 0 && test '$ELAPSED' -lt 5 && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit abc123' && ! grep -q '( sleep \"\$limit\"' '$CMD'"
 
 check "it exits on an ejection instead of waiting" \
   "grep -q 'EJECTED from the merge queue' '$CMD'"
