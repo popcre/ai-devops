@@ -313,6 +313,99 @@ The runners are probably not "dying" in the hardware sense. What is happening:
 6. Two of the four ways a job dies are reported as test failures, so red is not
    evidence of broken code here.
 
+## Issue #160 closeout session — corrections and additional evidence
+
+The issue #160 session independently observed the same structural problem and
+adds the following evidence. This section also corrects two conclusions that
+could not be made from the Actions API alone.
+
+### Smart App Control caused a real runner-start failure
+
+Before this backlog investigation, both official runner registrations were
+unable to load their unsigned .NET assemblies. Code Integrity events 3077 and
+3033 named the signed `VerifiedAndReputableDesktop` Smart App Control base
+policy. A narrow unsigned supplemental policy was rejected with
+`IsAuthorized:false`; it was removed and no supplemental policy remained.
+
+The Code Integrity registry state and active policy files were backed up under
+`C:\ProgramData\ai-devops\backups\smart-app-control-<timestamp>`. Albert had
+explicitly authorized Smart App Control Off on `EDGE-DEV`, so
+`VerifiedAndReputablePolicyState` was set to `0`. Afterward,
+`Runner.Listener.exe --version` succeeded at 2.337.0 and both registrations
+reported online. This was a real runner load/start problem, unlike a queued job
+or a heartbeat-starved but live listener. Issue #200 owns the permanent,
+backed-up and idempotent setup repair; it remains separate from #160.
+
+### The inherited durable Bash rerun was alive, but overlapped CI
+
+The inherited `.ai/issue-160-bash-rerun.log` began around
+`2026-08-31T23:45Z`. When the closeout session first inspected it, no terminal
+summary had yet been written and its tail was inside `test-ai-grok-review.sh`.
+Later file evidence proved the process had continued and eventually printed
+`OFFLINE BASH SUMMARY tests=61 failures=0` around `2026-09-01T01:19Z`.
+
+The early statement that this process was already dead was therefore wrong and
+was corrected from the durable log. GitHub Windows jobs from runs including
+`33449336803`, `33449373129`, `33450901116`, and `33450914863` were active in
+the same interval. The 61/61 result is diagnostic only: local and CI suites
+shared the machine, process names, locks, CPU and disk, so the run cannot prove
+#160 even though it reached exit zero.
+
+### Run 33486858691 coincided with a local #160 suite
+
+The first final #160 attempt wrote
+`.ai/issue-160-final-full-2be4a7b.log`. It began on exact commit `2be4a7b` at
+`2026-09-01T08:24:18Z`, after a live check found no active Windows job. GitHub
+created merge-group run `33486858691` five seconds later, at `08:24:23Z`, and
+both of its Windows jobs started at `08:24:26Z`.
+
+At `08:54Z`, while the local run was in the Grok suite, the collision was
+discovered and the local run was deliberately interrupted. The first interrupt
+did not remove every descendant, so the remaining pre-`08:55Z` local test tree
+was identified by exact PID, parent relationship, start time and test identity,
+then stopped. Processes that began with the GitHub job were not targeted.
+
+The merge-group run then recorded reviewer safety `cancelled` at `08:54:39Z`
+and Windows offline `failure` with exit `-1` at `08:55:51Z`. This precise local
+overlap was not visible from the Actions API used by the earlier investigation.
+It is the leading explanation for the near-simultaneous machine-wide deaths,
+but the surviving evidence cannot assign each terminal state to one exact local
+process. The conservative acceptance decision is unchanged: neither local nor
+Windows result counts as #160 proof.
+
+### The second final #160 run was complete and isolated
+
+After all GitHub Windows work became terminal, the second attempt wrote
+`.ai/issue-160-final-full-2be4a7b-attempt2.log` and ran exact commit
+`2be4a7bf844cb1b038a170d04b7538f1a3c58f35` from
+`2026-09-01T09:26:12Z` through `10:29:45Z`.
+
+It passed all 61 Bash suites in 3,773 seconds, all 17 PowerShell suites, Grok
+199/199 and Kimi 207/207, with overall exit zero. The next GitHub Windows job,
+from run `33498373084`, began at `10:37:41Z`, eight minutes after the local
+proof ended. This is the valid complete and isolated #160 local evidence.
+
+### Precise meaning of runner states used in this session
+
+- `queued` means waiting for a matching runner; it does not prove death;
+- `in_progress` means a runner was assigned, so local reviewer suites must not
+  start on the shared host;
+- `cancelled` is incomplete evidence and may mean queue replacement, timeout or
+  external termination rather than a product defect;
+- `failure` requires reading the failing step and timing; PR #193's 243-second
+  owner expiry was a real fixture defect, while exit `-1` in run `33486858691`
+  coincided with machine-wide process interruption;
+- runner `offline` while `Runner.Listener` is alive can be heartbeat starvation;
+- an absent or Code Integrity-blocked listener is a real process/start problem;
+- a merge-group replacement is new speculative work after the queue base moved,
+  not proof that hardware or the runner service died.
+
+The phrase “another session must release EDGE-DEV” was also corrected. There is
+no explicit session lease or release button. It means every Windows job and
+local suite on the one shared physical host must become terminal. The work may
+come from another AI branch, an automatic `main` push, or a GitHub-generated
+merge-group replacement.
+
 ## Open questions for the investigation
 
 - Why exit `-1` in run 33486858691, and why did a job on the *other* runner die
