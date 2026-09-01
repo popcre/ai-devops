@@ -39,6 +39,61 @@ Every row below was read from the Actions API during this session.
 ever interrupted. The interruptions are exclusive to the two self-hosted Windows
 runners, and they land overwhelmingly on the long job.
 
+## Issue #187 / PR #192 session — what interrupted and what did not
+
+This section records the ast-grep multi-machine-management session separately.
+It matters because that session initially looked like another example of a
+runner being displaced by concurrent work, but the Actions API proves a more
+specific story.
+
+PR #192 produced five pull-request workflow runs:
+
+| Run | Head | Windows result | What happened |
+|---|---|---|---|
+| 33347252472 | `80ee4e68` | reviewer safety passed in 24m50s; offline passed in 71m47s | Both Windows jobs ran serially on `edge-dev-win-2`; no interruption. |
+| 33347373826 | `cebfe998` | offline passed in 69m19s; reviewer safety cancelled at 30m12s | The reviewer job hit its configured 30-minute maximum. GitHub's annotation says `The job has exceeded the maximum execution time of 30m0s`. This was a timeout, not another session inserting a run. |
+| 33423685688 | `f289a8fe` | offline passed in 60m16s; reviewer safety passed in 12m53s | A newer commit was pushed while this run existed, but this run was not killed; it completed successfully. |
+| 33425040358 | `b351b72c` | reviewer safety passed in 13m04s; offline passed in 63m21s | The two jobs used different runners. A later push did not cancel either job. |
+| 33432393593 | `3b30a2df` | offline passed in 63m27s; reviewer safety passed in 14m00s | Final exact-head run; all three workflow jobs passed. |
+
+The first cancelled reviewer job was therefore not evidence that a runner died.
+The job was alive, checking out and running its focused suite until GitHub
+enforced `timeout-minutes: 30`. Its setup and dependency steps passed; only the
+focused suite step was cancelled. The companion `windows-offline` job on the
+other runner completed successfully, as did `linux-offline`.
+
+The session then found a real test-fixture problem under load. Two Grok tests
+watched file changes as a proxy for progress. A healthy worker can spend minutes
+building a packet or waiting on disk without changing those watched files, so
+the fixture could declare a stall while the worker was still alive. The repair
+changed readiness detection to watch the responsible worker process, then added
+fail-closed assertions so a readiness failure could never be discarded or race
+to a false green. Before the final two assertions, local evidence had passed 196
+Grok checks, 203 Kimi checks and the timing-helper checks. After both assertions
+were present, the exact-head GitHub run passed all three jobs.
+
+### Concurrent runs increased load but did not interrupt these PR runs
+
+Pushing `b351b72c` and later `3b30a2df` created new workflow runs before all
+older Windows work had finished. The runs used different head SHAs, so the
+workflow concurrency key did not cancel the older run. The API shows the older
+runs completed successfully while newer jobs queued or ran on the other
+runner. In this session, concurrent work consumed scarce runner capacity and
+extended the wall-clock wait, but it did not displace a running #192 job.
+
+This distinction is important: a new run appearing in the queue is not by
+itself proof that an old runner was interrupted. The old job's conclusion,
+annotation, timestamps and runner name have to be checked.
+
+### Local shell-session disappearance was not runner evidence
+
+The Codex task also lost access to one local Git Bash process handle after a
+turn ended; polling it later returned `Unknown process id`. No corresponding
+GitHub job failure, runner-offline event or process-exit evidence was available.
+That event cannot truthfully be called a runner death. The affected full suite
+was rerun through GitHub and later inside a sealed independent review instead
+of treating the missing local handle as a pass or a failure.
+
 ## Mechanism 1 — merge-queue regrouping cancels the run in flight (confirmed)
 
 This is the dominant cause, and this session's own history documents it end to
