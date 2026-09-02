@@ -314,11 +314,29 @@ failure without its logs.
 - `EDGE-ALIEN` is registered and online with the candidate label only. Its
   Administrator preflight and service-visible dependency gates passed in run
   [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
-  on 2026-09-02, but the complete offline matrix did not finish inside the 90
-  minute ceiling on an otherwise idle host, so it is not qualified and takes no
-  ordinary CI. Read that run's logs for the suite that was mid-flight before
-  anyone considers the ceiling; a machine taking over 90 minutes for a 62 minute
-  workload looks like a hang, not slowness.
+  on 2026-09-02, but the complete offline matrix was cancelled at the 90 minute
+  ceiling there and again in run
+  [33639477174](https://github.com/popcre/ai-devops/actions/runs/33639477174),
+  so the host is not qualified and takes no ordinary CI.
+- That is host slowness, not a hang, and the second run's log proves it: the
+  suite logged a passing check at 15:32:53Z and the cancellation arrived at
+  15:32:54Z. Nothing was stuck. Measured against `EDGE-RUNN-ENVY` on the same
+  commit and the same matrix, `EDGE-ALIEN` is roughly three times slower on
+  every suite - `test-ai-claude-review.sh` 17m against 4m26s,
+  `test-ai-codex-review.sh` 14m against 3m52s, `test-ai-glm.sh` 18m against
+  6m00s, and `test-ai-grok-review.sh` still running past 20m against 9m02s. The
+  slowdown is uniform per operation rather than one long wait: the gap between
+  consecutive checks clusters at 5-12s on `EDGE-RUNN-ENVY` and never exceeds
+  19s, while on `EDGE-ALIEN` gaps of 20-64s recur throughout. A 62 minute
+  matrix at that rate needs about three hours.
+- The repair is on the host, not on the ceiling. Raising `timeout-minutes` is
+  forbidden here: it would hide a machine that cannot carry the workload and
+  would hold a pool slot for hours. Look on `EDGE-ALIEN` for the per-process
+  costs that produce a flat multiplier - Microsoft Defender real-time scanning
+  with no exclusion for the runner work folder, a power plan other than High
+  performance, and a runner work folder on rotating or SATA storage. Requalify
+  from a clean run afterwards; admission still requires a green `qualify
+  Windows runner` job on that exact host.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 

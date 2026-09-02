@@ -31,7 +31,7 @@ grep -Fq '|| github.sha' "$workflow" || {
   exit 1
 }
 # Neither Windows job may run on merge_group; a queue rebuild restarts them,
-# and the long suite holds an edge-dev runner for over an hour each time.
+# and the long suite holds a qualified pool host for over an hour each time.
 windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | tr -d '
 ')"
 [ "$windows_skips" -eq 2 ] || {
@@ -39,9 +39,25 @@ windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | 
 ' >&2
   exit 1
 }
+# Ordinary Windows verification must run on the dedicated qualified pool
+# (issue #209), never on the daily-use EDGE-DEV computer and never on a bare
+# candidate host. `ai-devops-windows` is the qualification-only label: a host
+# carrying it has been registered, not proven. Membership in
+# `ai-devops-windows-qualified` requires a green `qualify Windows runner` job
+# on that exact physical host.
+windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\r')"
+[ "$windows_pool" -eq 2 ] || {
+  printf 'FAIL: both Windows jobs must run on the qualified independent runner pool\n' >&2
+  exit 1
+}
+if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
+  printf 'FAIL: verification must never route to the daily-use desktop or an unqualified candidate host\n' >&2
+  exit 1
+fi
+
 grep -Fq 'cancel-in-progress: true' "$workflow" || {
   printf 'FAIL: duplicate verification runs for the same source must still be cancellable\n' >&2
   exit 1
 }
 
-printf 'PASS: Windows headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
+printf 'PASS: Windows work runs on the qualified pool, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
