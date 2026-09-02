@@ -285,12 +285,12 @@ inherits the new machine PATH. If a job fails, open the exact failed step; never
 treat cancellation, timeout, missing dependency or exit `-1` as a code-test
 failure without its logs.
 
-## First-host evidence as of 2026-09-01
+## First-host evidence as of 2026-09-02
 
 - Host: `EDGE-RUNN-ENVY`, Windows 11 Pro 25H2 build 26200, i7-10700, 16 GB RAM.
 - TPM ready and Secure Boot enabled; Windows Time synchronized.
 - One automatic runner service; runner version 2.336.0.
-- Candidate labels only: `self-hosted`, `Windows`, `X64`,
+- Labels at qualification time: `self-hosted`, `Windows`, `X64`,
   `ai-devops-windows`.
 - Administrator preflight passed.
 - Service-visible dependency gate passed.
@@ -300,9 +300,19 @@ failure without its logs.
   exposed the username/SID and Git Bash/native temp-path defects above.
 - Both focused repairs passed locally (`ai-gemini`: 62/62; `ai-grok-review`:
   199/199) and received independent exact-head approval on commit `fa46a1f`.
-- The corrected complete offline matrix passed in 1h00m14s in Actions run
-  [33571202823](https://github.com/popcre/ai-devops/actions/runs/33571202823),
-  job `100065323527`, on exact commit `fa46a1f`. This qualified the first host;
-  it did not yet admit that host to ordinary CI.
-- Ordinary CI admission, second/third physical hosts, failover proof and EDGE-DEV
-  retirement remain open under #209.
+- Complete offline matrix passed in qualification run
+  [33571202823](https://github.com/popcre/ai-devops/actions/runs/33571202823)
+  on 2026-09-01, job `qualify`, 1h00m14s. Within it
+  `tests/test-ai-grok-review.sh` passed 199 of 199 checks in 538s - the same
+  suite that exceeded its 30 minute ceiling twice while sharing the edge-dev
+  desktop (runs 33571202865 and 33624326508).
+- Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
+  label `ai-devops-windows` kept for requalification. The `edge-dev` label was
+  not added.
+- Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
+  qualified pool.
+- `EDGE-ALIEN` is registered and online with the candidate label only. It has no
+  Administrator preflight evidence and is not qualified, so it takes no ordinary
+  CI. Qualifying it is the next step under #209.
+- Second qualified host, failover proof and EDGE-DEV retirement remain open
+  under #209.
