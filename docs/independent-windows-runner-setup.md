@@ -267,6 +267,47 @@ The first host, `EDGE-RUNN-ENVY`, exposed these reusable traps:
   jobs to start and fail during setup. Candidate and qualified routing must stay
   separate.
 
+## Reaching a runner host over SSH
+
+`EDGE-ALIEN` and `EDGE-RUNN-ENVY` accept SSH **only over the private Tailscale
+network**, using the operator's dedicated runner key. There is no LAN or public
+route to either host, so a runner is unreachable whenever Tailscale is down on
+either end, and password authentication is not the intended path. Concrete
+addresses, account names, key file and host aliases live in the protected
+machine atlas, not in this public repository:
+
+```bash
+ai-private-config path machine_atlas
+```
+
+The account name differs between the operator workstation and the runner hosts,
+and that mismatch is the usual cause of a surprise password prompt. Use the
+configured host alias, which already carries the correct account and key,
+instead of typing a host and key path by hand.
+
+Two traps that make a working key look broken:
+
+- A shell running under a second local Windows profile reads a different `.ssh`
+  directory that holds no key, so SSH silently falls back to a password.
+  Confirm the profile with `echo "$env:USERNAME | $env:USERPROFILE"` before
+  concluding the key or the server is at fault.
+- A wrong key path is not a connect-time error. SSH only warns `Identity file
+  ... not accessible` and then asks for a password, which reads as a rejected
+  key.
+
+Prove key authentication rather than assuming it:
+
+```bash
+ssh -o BatchMode=yes <runner-alias> "whoami"
+```
+
+`BatchMode=yes` disables the password fallback, so this succeeds only when the
+key is actually accepted. The two hosts do not share a default remote shell -
+one answers PowerShell and the other `cmd.exe` - so quote remote commands for
+the shell that host actually runs.
+
+Both hosts were verified reachable this way on 2026-09-02.
+
 ## Status and troubleshooting
 
 Repository runner status:
