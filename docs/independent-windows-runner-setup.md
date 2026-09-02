@@ -169,6 +169,12 @@ resolves only inside a user profile. The removal and registration tokens are
 requested from GitHub as the script runs and are passed to the runner on
 standard input, so they never reach a command line, a log or the repository.
 
+It is safe to run twice, and it also repairs a runner that a previous attempt
+left wrecked - a registered service that is stopped with the runner identity
+files deleted, which is where `edge-dev` was left on 2026-09-02. In that state
+the local credentials are gone, so it deletes the stale registration from GitHub
+and the leftover service before registering the host again.
+
 A tool installed under `C:\Users\...` is invisible to the service account, so
 install it for all users before qualifying; on `edge-dev` that applies to
 Python:
