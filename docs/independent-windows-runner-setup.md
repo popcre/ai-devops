@@ -329,14 +329,23 @@ failure without its logs.
   consecutive checks clusters at 5-12s on `EDGE-RUNN-ENVY` and never exceeds
   19s, while on `EDGE-ALIEN` gaps of 20-64s recur throughout. A 62 minute
   matrix at that rate needs about three hours.
-- The repair is on the host, not on the ceiling. Raising `timeout-minutes` is
-  forbidden here: it would hide a machine that cannot carry the workload and
-  would hold a pool slot for hours. Look on `EDGE-ALIEN` for the per-process
-  costs that produce a flat multiplier - Microsoft Defender real-time scanning
-  with no exclusion for the runner work folder, a power plan other than High
-  performance, and a runner work folder on rotating or SATA storage. Requalify
-  from a clean run afterwards; admission still requires a green `qualify
-  Windows runner` job on that exact host.
+- The cause is the hardware and there is no configuration fix. `EDGE-ALIEN` is
+  an i7-6700: 4 cores, 8 threads, 2015. `EDGE-RUNN-ENVY` is an i7-10700: 8
+  cores, 16 threads. Checked on the host on 2026-09-02 and ruled out: Defender
+  real-time protection is already off, the runner work folder is already on the
+  NVMe volume rather than the SATA disk, and the CPU runs at its full 3401 MHz
+  with the processor throttle at 100 percent. The power plan was Balanced and
+  was set to High performance, which bought about five percent. SentinelOne is
+  installed there and has consumed over an hour of CPU inspecting process
+  creation, but removing that overhead entirely still leaves the core-count gap.
+- Raising `timeout-minutes` is the wrong repair and does not even work. The
+  ceiling is not the binding constraint: `windows-offline` in `verify.yml`
+  allows 75 minutes, so a host needing about 186 minutes for the matrix cannot
+  serve ordinary CI however long its qualification job is allowed to run. A
+  raised qualification ceiling would admit a host that then times out on every
+  real job. `EDGE-ALIEN` is therefore not a viable pool member on this
+  hardware; it keeps the candidate label, takes no CI, and the pool waits for a
+  machine of ENVY's class.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
