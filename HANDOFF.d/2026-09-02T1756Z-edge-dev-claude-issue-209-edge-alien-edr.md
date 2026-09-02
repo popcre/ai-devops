@@ -458,10 +458,12 @@ evidence and every later phase is executable without chat context.
   Re-check `gh auth status` in a fresh session.
 - **Both runner hosts are reachable by SSH over Tailscale only** — neither answers
   on the LAN by name or ping, and neither is recorded in `machine-atlas.md`:
-  - `ssh -i ~/.ssh/916-alien 100.65.60.70` → EDGE-ALIEN (lands as `edge-alien\ahazan`)
-  - `ssh -i ~/.ssh/916-alien 100.104.201.6` → EDGE-RUNN-ENVY
+  - EDGE-ALIEN: `ssh -i ~/.ssh/916-alien <tailscale-ip>` (lands as `edge-alien\ahazan`)
+  - EDGE-RUNN-ENVY: `ssh -i ~/.ssh/916-alien <tailscale-ip>`
 
-  Same key for both. See the `$`-eating trap in section 4.
+  Same key for both. The two addresses are private topology and must not be
+  written into this public repository; keep them in the private machine atlas.
+  See the `$`-eating trap in section 4.
 - **This session ran on EDGE-DEV**, which hosts the `edge-dev-win` runner
   (currently offline). Working directory is the worktree named in section 7.
 - Runner service on EDGE-ALIEN: `actions.runner.popcre-ai-devops.EDGE-ALIEN`,
