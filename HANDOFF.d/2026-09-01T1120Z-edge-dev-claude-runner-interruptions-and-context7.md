@@ -13,14 +13,17 @@ them one at a time.
 
 **Blocking nothing right now, but wasting real money and time every day:**
 
-1. **Should the hour-long Windows test job keep running inside the merge queue?**
-   Today it runs twice for every change — once on the pull request, once again in
-   the queue — and the queue copy is thrown away and restarted every time any
-   other session merges anything. My recommendation: stop running the long suite
-   in the queue and keep it on the pull request only. This is the single change
-   that would stop the repeated cancellations. It is a real trade-off: the queue
-   would no longer re-prove the combined result before merging. Blocks nothing;
-   costs hours of machine time daily until decided. Tracked as issue #204.
+1. ~~**Should the hour-long Windows test job keep running inside the merge queue?**~~
+   **ANSWERED 2026-09-01, and it is no longer an owner decision.** Albert declined
+   to rule on it ("i am non-technical and not qualified to make that decision")
+   and asked for a model review. Kimi K3 was out of quota; Grok reviewed instead
+   and recommended: take BOTH Windows jobs off `merge_group`, remove them from the
+   merge-queue required checks, and keep `linux-offline` as the queue gate. The
+   full ranked list is on issue #204
+   (<https://github.com/popcre/ai-devops/issues/204#issuecomment-5499056115>).
+   **Nothing further is needed from Albert on this.** What remains is engineering
+   work, and two Codex sessions (issues #161 and #209) are already in that file —
+   this session deliberately did not edit `verify.yml` to avoid colliding with them.
 
 2. **Do you want the unexplained 2026-09-01 08:55 runner death investigated?**
    One job was killed mid-run and reported as a *test failure* rather than a
@@ -96,11 +99,16 @@ him. The work became:
 - `AGENTS.md` — quiet-output rules plus the `edge-dev` local-sweep guard. Merged,
   commit `90b45b8a`, PR #202.
 
-**NOT merged — the one piece of unfinished work:**
+**MERGED 2026-09-01T15:02Z — this section is retained because the STORY is the
+evidence for issue #204, not because the work is outstanding:**
 
 - **PR #197 — `.mcp.json` adding the Context7 documentation server.**
   <https://github.com/popcre/ai-devops/pull/197>
-  State: OPEN, mergeable, all three of its own checks PASSED
+  State: **MERGED**, commit `08749a97aa5e05a5eba50f7f6ac91868cc8335dd`. Verified
+  by reading `.mcp.json` from `main` through the contents API. It took roughly ten
+  hours and seven trips through the merge queue for a two-line configuration file.
+  Historic state below, kept as the evidence: it was mergeable with all three of
+  its own checks PASSED
   (`linux-offline` 9m52s, `windows-offline` 1h3m51s, `windows-reviewer-safety`
   14m22s, run 33449373129). It has been placed in the merge queue **four** times
   and cancelled every time — most recently by my own merges of PR #202 and #203,
@@ -225,24 +233,35 @@ and why both tools are now inert.
 **`linux-offline` has never once been interrupted.** Every interruption in the
 observed window is on the two self-hosted Windows runners.
 
+
+### The queue backlog was mostly stale duplicates, and the concurrency key is why (found 2026-09-01, the biggest finding of this session)
+
+Albert asked the right question — "am I really doing that much work? none of them
+are duplicates? none are stale?" Measured at 18:59Z: **11 runs pending, 9 of them
+on ONE branch** (`codex/issue-209-windows-runner-pool`) across **6 different
+commits**, only the newest of which was live. About 7.5 hours of queued Windows
+work for commits that had already been superseded.
+
+**Root cause.** `verify.yml` keys its concurrency group on
+`github.event.pull_request.head.sha || github.sha`. A new commit is a NEW group,
+so `cancel-in-progress: true` can never fire across pushes on the same pull
+request. The setting looks like superseded-run cancellation and does nothing of
+the kind. A per-PR / per-branch key is required; the suggested replacement is on
+issue #204.
+
+This reframes the whole document: the capacity crisis in mechanism 5 was not
+mostly real demand. It was one broken line of YAML manufacturing phantom load.
+
+**Action taken:** the 6 superseded runs were cancelled (`gh run cancel`), taking
+the backlog from 11 to 5. This is safe — required checks attach to the pull
+request head SHA, so queued work for a superseded commit can never become that
+check. Grok confirmed before the cancellation.
+
 ## 6. Exact next steps
 
-1. **Merge PR #197.** Run:
+1. ~~**Merge PR #197.**~~ **DONE 2026-09-01T15:02Z**, commit `08749a97`.
 
-   ```bash
-   gh pr merge 197 --squash --repo popcre/ai-devops
-   ```
-
-   Then watch BOTH the pull request state and the queue run — the queue run name
-   is `gh-readonly-queue/main/pr-197-<sha>`. **Do not merge anything else while it
-   is queued**; that is exactly what cancelled it three times.
-   *You will know it worked when* `gh pr view 197 --json state,mergeCommit` prints
-   `MERGED` with a commit SHA, and `.mcp.json` exists on `main`.
-
-2. **If it is cancelled again, stop retrying and say so.** Three hours of runner
-   time have already gone into this one file. At that point the honest report to
-   Albert is that decision 1 in section 0 has to be answered before the change can
-   land, and issue #204 is the blocker.
+2. ~~**If it is cancelled again, stop retrying.**~~ Not needed; it landed.
 
 3. **Verify Context7 actually works once it is merged.** In a fresh Claude Code
    session in this repository, confirm the `context7` MCP server is listed and
@@ -296,9 +315,10 @@ observed window is on the two self-hosted Windows runners.
 
 ## 9. Open questions and risks
 
-- **Will PR #197 ever land under the current queue behaviour?** Unresolved. Four
-  attempts, zero merges, roughly seven hours elapsed. This is the risk that decision
-  1 in section 0 exists to address.
+- ~~**Will PR #197 ever land under the current queue behaviour?**~~ **RESOLVED:
+  yes, but at absurd cost** — it landed on the seventh queue attempt after roughly
+  ten hours, for a two-line configuration file. The cost, not the outcome, is the
+  argument for issue #204.
 - **What killed the job at 08:55 on 2026-09-01?** Unknown, and unanswerable from
   GitHub's data. Decision 2.
 - **Did my own local test sweeps on 2026-08-31 cancel other sessions' CI runs?**

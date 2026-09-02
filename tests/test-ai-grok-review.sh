@@ -62,6 +62,11 @@ check "missing local runtime is named distinctly" "grep -q 'local_dependency_una
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
+# Git Bash can spell the Network Service temp directory as /tmp while native
+# Windows children report its physical /c/Windows/ServiceProfiles/... path.
+# Keep every fixture, progress fingerprint, and saved review path in one
+# canonical namespace so service-account activity is observed truthfully.
+TMP="$(cd "$TMP" && pwd -P)"
 mkdir -p "$TMP/system-tmp"
 export TMPDIR="$TMP/system-tmp"
 cleanup() {
@@ -601,11 +606,14 @@ check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.
 echo "== verdict_delimiter_extraction =="
 OUT="$(run new t7 --prompt x 2>/dev/null)"
 check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE'"
-check "verdict comes first"            "[ \"\$(printf '%s' \"\$OUT\" | head -1)\" = '## Verdict' ]"
-# Contract changed 2026-08-18. Emitting ONLY the verdict section discarded the
-# findings: a real measured review produced 42 lines of evidenced defects above
-# the heading and the caller saw two words. A verdict with no reasons cannot be
-# acted on. The verdict still leads; the reasoning is kept below it.
+# Contract changed 2026-08-18: emitting ONLY the verdict section discarded the
+# findings -- a real measured review produced 42 lines of evidenced defects and
+# the caller saw two words. A verdict with no reasons cannot be acted on.
+# Contract changed again 2026-09-01: the verdict section must come LAST. Governed
+# review in u2giants/shared-db reads only the FINAL non-empty line of our stdout
+# and records nothing unless it is the verdict, so a verdict-first report was
+# silently unrecordable. Findings first, verdict last -- both still kept.
+check "verdict section comes last"     "[ \"\$(printf '%s' \"\$OUT\" | grep -n '^## Verdict' | cut -d: -f1)\" -gt 1 ] && printf '%s' \"\$OUT\" | grep -v '^[[:space:]]*\$' | tail -1 | grep -q 'APPROVE'"
 check "findings are NOT discarded"     "printf '%s' \"\$OUT\" | grep -q \"I'll read the files\""
 check "findings are clearly labelled"  "printf '%s' \"\$OUT\" | grep -q 'Findings and reasoning'"
 cat > "$TMP/fixture2.json" <<'EOF'
@@ -736,8 +744,13 @@ PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 
 check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
 ASK_A_REVIEW_DIR="$(run show ask-a | jq -r '.review_dir')"
 ASK_B_REVIEW_DIR="$(run show ask-b | jq -r '.review_dir')"
+# Compare against the resolved sandbox root. Git Bash on the GitHub-hosted
+# Windows image maps /tmp onto the user's AppData Temp directory, so mktemp
+# reports /tmp/... while the reviewer reports the resolved path; the two name
+# the same directory and only the spelling differs.
+BOUNDARY_ROOT="$(cd "$AI_REVIEW_SANDBOX_DIR" && pwd -P)"
 check "named-session snapshot activity is inside the watched fixture boundary" \
-  "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
+  "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$BOUNDARY_ROOT/'*:'$BOUNDARY_ROOT/'*) true;; '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # These turns are released explicitly below. Keep the wrapper's real 15-minute
 # ceiling: shortening it to the fixture's 120-second readiness ceiling lets a

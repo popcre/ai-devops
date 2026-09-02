@@ -9,8 +9,34 @@ case "$windows_timeout" in
 esac
 [ "$windows_timeout" -ge 75 ] || { printf 'FAIL: windows-offline needs at least 75 minutes of measured runtime headroom\n' >&2; exit 1; }
 
-grep -Fq 'group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}' "$workflow" || {
-  printf 'FAIL: verification concurrency must be scoped to immutable event and source SHA\n' >&2
+# A pull-request run must be superseded by a newer push to the same pull
+# request. Keying the group on the head SHA made that impossible and filled the
+# two-runner Windows pool with builds nobody was waiting for (issue #204).
+grep -Fq "format('pr-{0}', github.event.pull_request.number)" "$workflow" || {
+  printf 'FAIL: pull-request verification must be keyed on the pull request, not its head SHA
+' >&2
+  exit 1
+}
+# Concurrent merge-queue entries must never cancel one another, so merge_group
+# keeps a group per queue branch.
+grep -Fq "github.event_name == 'merge_group' && github.ref" "$workflow" || {
+  printf 'FAIL: merge-group verification must be keyed on its own queue branch
+' >&2
+  exit 1
+}
+# push: main keeps a per-SHA group so each immutable commit keeps its own proof.
+grep -Fq '|| github.sha' "$workflow" || {
+  printf 'FAIL: push runs must still be scoped to their immutable source SHA
+' >&2
+  exit 1
+}
+# Neither Windows job may run on merge_group; a queue rebuild restarts them,
+# and the long suite holds an edge-dev runner for over an hour each time.
+windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | tr -d '
+')"
+[ "$windows_skips" -eq 2 ] || {
+  printf 'FAIL: both Windows jobs must be skipped on merge_group
+' >&2
   exit 1
 }
 grep -Fq 'cancel-in-progress: true' "$workflow" || {
@@ -18,4 +44,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
   exit 1
 }
 
-printf 'PASS: complete Windows suite keeps measured runtime headroom and immutable runs survive newer commits\n'
+printf 'PASS: Windows headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
