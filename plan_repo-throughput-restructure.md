@@ -20,7 +20,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
-| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host `EDGE-RUNN-ENVY` qualified, promoted to `ai-devops-windows-qualified`, and both heavy Windows jobs routed to it; second host `EDGE-ALIEN` failed qualification twice on a 90 minute overrun, diagnosed 2026-09-02 as SentinelOne EDR process/file inspection (it is the only host running it) on top of 2015-era 4-core hardware, and is now **blocked on an external IT decision** to grant SentinelOne exclusions; the qualified pool therefore stands at one host, and failover proof, third host and EDGE-DEV retirement remain open | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38` and `7e9210d1`; Actions runs `33571202823`, `33625670215` and `33627638433`; failed qualifications `33625657591` and `33639477174`; EDR diagnosis in [#209 comment 5513464456](https://github.com/popcre/ai-devops/issues/209#issuecomment-5513464456); single-host outage risk tracked in [#222](https://github.com/popcre/ai-devops/issues/222); [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host `EDGE-RUNN-ENVY` qualified and promoted to `ai-devops-windows-qualified`; Windows work is deliberately two lanes - `windows-offline` on GitHub-hosted `windows-2025` because hosted concurrency is unmetered on a public repository, `windows-reviewer-safety` on the qualified pool for flake reproducibility - because the pool is **extra** capacity and never a replacement for GitHub's runners; second host `EDGE-ALIEN` is blocked on an external IT decision to grant SentinelOne exclusions and its latest qualification died mid-run at 37 minutes with every static gate passed, which is EDR termination rather than a ceiling overrun; `edge-dev` is a candidate for the pool and is **not** being retired, and its onboarding needs one elevated session to finish converting its runner to a service; failover proof and a third host remain open; downstream drift check B3-E1 completed 2026-09-02 | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38` and `7e9210d1`; Actions runs `33571202823`, `33625670215` and `33627638433`; failed qualifications `33625657591` and `33639477174`; EDR diagnosis in [#209 comment 5513464456](https://github.com/popcre/ai-devops/issues/209#issuecomment-5513464456); single-host outage risk tracked in [#222](https://github.com/popcre/ai-devops/issues/222); [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md); hosted lane and `edge-dev` onboarding in [#229](https://github.com/popcre/ai-devops/pull/229); EDR mid-run death recorded in `19b44479` from run `33673582179` |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
@@ -238,8 +238,9 @@ isolation afterward; the suite manifest has no omissions or duplicates.
 **Targets:** three supported Windows hosts, canonical bootstrap/verification,
 runner labels/groups, security and capacity evidence.
 
-**Change:** qualify one runner per independent physical host, move ordinary CI
-off the daily-use EDGE-DEV machine, prove restart/update/cleanup/dependency
+**Change:** qualify one runner per independent physical host, keep ordinary CI
+off any machine that is not a qualified pool member - which EDGE-DEV is being
+onboarded to become, not retired from - prove restart/update/cleanup/dependency
 parity, and retain fork-approval safety. Do not commit private machine inventory.
 
 **Gates:** three hosts pass qualification; taking one offline leaves visible
@@ -267,6 +268,50 @@ timetable:
 downstream phase from B3 through the final #166 cutover. Report and update any
 assumption, interface, identifier or sequencing rule that #209 changed or
 invalidated; do not leave that discovery only in chat.
+
+**Drift check performed 2026-09-02, B3 through E1.** Five downstream assumptions
+changed. Each is corrected in place below and in the STATUS row for #209; a
+later session must not re-derive them.
+
+1. **EDGE-DEV is not being retired, and this phase's own change statement is
+   wrong.** B2a says "move ordinary CI off the daily-use EDGE-DEV machine". The
+   owner has directed the opposite: `edge-dev` is to be onboarded into the
+   qualified pool, because the pool needs more than one host. Read that clause
+   as "move ordinary CI off a machine that is not a qualified pool member", not
+   as retirement. Every reference to EDGE-DEV retirement in this plan and in the
+   #209 STATUS row is withdrawn.
+
+2. **The self-hosted pool is additive, not a replacement, and the Windows work
+   is now two lanes.** `windows-offline` runs on GitHub-hosted `windows-2025`
+   where concurrency is unmetered on a public repository; `windows-reviewer-safety`
+   runs on `ai-devops-windows-qualified` so a timing flake can be reproduced on a
+   known physical machine. B2a's gate "jobs distribute across physical hosts"
+   therefore applies to the self-hosted lane and to overflow, not to all Windows
+   work. Routing both lanes to the pool serialised the repository and is not to
+   be repeated.
+
+3. **#210 (B5) loses most of its target set.** "Divide every Windows-required
+   suite into explicit balanced sections only on independent hosts" was scoped
+   when both Windows jobs sat on the pool. With `windows-offline` hosted and
+   unmetered, sectioning it buys wall-clock, not capacity, and it needs no
+   independent hosts at all. Scope #210 to the self-hosted reviewer lane plus any
+   measured wall-clock case on hosted, and keep its existing sequencing behind a
+   real second qualified host rather than behind #209 being open.
+
+4. **#166 (E1) inherits one measurement and one relaxed risk.** It must set the
+   restored `windows-offline` required-check ceiling from a completed hosted run,
+   never from the stale 62-minute figure. Against that, the single-host
+   queue-forever risk recorded above no longer applies to `windows-offline`:
+   hosted capacity means a dead pool cannot leave it silently queued. That risk
+   still applies in full to any self-hosted-only job promoted to required, which
+   remains gated on a second qualified host and on [#222](https://github.com/popcre/ai-devops/issues/222).
+
+5. **#162 (B3) should expect its line-ending gate to disagree with the working
+   tree.** The index is LF throughout, so `git ls-files --eol` passes, but a
+   Windows checkout materialises many files as CRLF and `tests/test-line-endings.sh`
+   fails locally on that drift. B3 must treat the index as the contract and state
+   which of the two it is asserting, or it will chase a defect that does not exist
+   in the repository.
 
 #### B3. #162 — duplicate platform/event work
 
