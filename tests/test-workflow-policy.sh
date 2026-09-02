@@ -51,8 +51,8 @@ actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
 manifest_bash="$(jq -r '.bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
-check 'manifest declares 61 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 61 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 61 ]"
-check 'manifest declares 17 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 17 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 17 ]"
+check 'manifest declares 62 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 62 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 62 ]"
+check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
 
@@ -82,7 +82,7 @@ grep -Fq '|| github.sha' "$workflow" || {
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
 [ "$windows_skips" -eq 2 ] || {
-  printf 'FAIL: both edge-dev Windows jobs must be skipped on merge_group
+  printf 'FAIL: both Windows jobs must be skipped on merge_group
 ' >&2
   exit 1
 }
@@ -93,4 +93,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
 
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
-printf 'PASS: fast routing, complete event coverage, EDGE-DEV serialization, 61+17 suite manifest, cancellable superseded pull-request runs, and no edge-dev Windows jobs in the merge queue\n'
+printf 'PASS: fast routing, complete event coverage, EDGE-DEV serialization, 62+18 suite manifest, cancellable superseded pull-request runs, and no edge-dev Windows jobs in the merge queue\n'

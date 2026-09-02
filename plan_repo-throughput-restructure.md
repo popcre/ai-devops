@@ -20,7 +20,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
-| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | open; capacity prerequisite for parallel Windows work | [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host passed canonical qualification and its repairs merged; admission, second/third hosts, failover, routing and EDGE-DEV retirement remain open | Merge `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38`; Actions run `33571202823`; [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
@@ -30,6 +30,21 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 10 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
 | 11 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | open; after #165 | — |
 | 12 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
+
+### Unplanned work that landed inside this plan — #204 (2026-09-02)
+
+`verify.yml` keyed its concurrency group on the head SHA, so superseded runs were never cancelled and the two-runner edge-dev pool filled with builds nobody was waiting for. Fixed outside the phase order because it was blocking every phase. Merges `ee2b5a82`, `aa2f1337`. Issue #204 closed with evidence.
+
+Four consequences bind later phases. Do not re-derive them.
+
+- **A required context was removed from the live ruleset.** Ruleset 21564317 now requires **`linux-offline` only**; `windows-offline` was removed because a required check that never reports on a merge group hangs every queue entry for the full 120-minute `check_response_timeout_minutes`. **#166 (E1) must restore it** once the Windows jobs report on the queue again, and its "no stale context" gate must account for this deliberate removal rather than treating it as drift.
+- **The merge_group concurrency key is `github.ref`, deliberately not `merge_group.base_ref`.** `base_ref` is always `refs/heads/main`, so keying on it makes concurrent queue entries cancel one another and deadlocks the queue at `max_entries_to_build: 5`. **#164 (C1) must not change this** when it touches concurrency policy.
+- **Both Windows jobs are already skipped on `merge_group`** (`if: github.event_name != 'merge_group'`); `linux-offline` is the queue gate and the Windows proof comes from the pull_request run on the exact head commit. **#162 and #210 must treat this part of their scope as done** and scope themselves to what remains.
+- **GitHub-hosted `windows-2025` is a dead end for `windows-reviewer-safety`.** Routing works, but the reviewer suites stall there: the held Grok stub never observes the test's release file, both background turns run to their 480s ceiling, and the job dies at its 30-minute limit with nothing to read. Two of three hosted runs behaved that way. **#209 and #210 must not propose hosted images as the load-spreading lever**; the rationale is recorded in `verify.yml` beside the job.
+
+`tests/test-workflow-policy.sh` enforces all of the above; a later phase that regresses one of them fails its own gate rather than reaching CI.
+
+Also open and now likely superseded: PR #115 (`ci: stop superseded merge-group runs from starving the live candidate`, last touched 2026-08-26) attacks the same starvation from the merge-queue side. Reconcile or close it before #164.
 
 Natural context cuts are after #160, after #163, and before #166. Use `fresh-session` and reread the next phase at each cut.
 
@@ -230,6 +245,11 @@ parity, and retain fork-approval safety. Do not commit private machine inventory
 **Gates:** three hosts pass qualification; taking one offline leaves visible
 working capacity; jobs distribute across physical hosts; setup is recoverable
 and idempotent. Required-check changes remain #166-last.
+
+**End-of-phase drift check:** before handing off or closing #209, reread every
+downstream phase from B3 through the final #166 cutover. Report and update any
+assumption, interface, identifier or sequencing rule that #209 changed or
+invalidated; do not leave that discovery only in chat.
 
 #### B3. #162 — duplicate platform/event work
 
