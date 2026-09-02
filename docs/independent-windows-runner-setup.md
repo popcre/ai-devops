@@ -370,14 +370,62 @@ failure without its logs.
   consecutive checks clusters at 5-12s on `EDGE-RUNN-ENVY` and never exceeds
   19s, while on `EDGE-ALIEN` gaps of 20-64s recur throughout. A 62 minute
   matrix at that rate needs about three hours.
-- The repair is on the host, not on the ceiling. Raising `timeout-minutes` is
-  forbidden here: it would hide a machine that cannot carry the workload and
-  would hold a pool slot for hours. Look on `EDGE-ALIEN` for the per-process
-  costs that produce a flat multiplier - Microsoft Defender real-time scanning
-  with no exclusion for the runner work folder, a power plan other than High
-  performance, and a runner work folder on rotating or SATA storage. Requalify
-  from a clean run afterwards; admission still requires a green `qualify
-  Windows runner` job on that exact host.
+- Part of the gap is hardware and part is endpoint scanning; only the second
+  part is recoverable. `EDGE-ALIEN` is an i7-6700 (4 cores, 8 threads, 2015)
+  against `EDGE-RUNN-ENVY`'s i7-10700 (8 cores, 16 threads). Checked on the host
+  on 2026-09-02 and ruled out as causes: Defender real-time protection is
+  already off, the runner work folder is already on the NVMe volume rather than
+  the SATA disk, and the CPU runs at its full 3401 MHz with the processor
+  throttle at 100 percent. The power plan was Balanced and was set to High
+  performance, which measured about five percent.
+- The suspect is SentinelOne, agent 25.2.442, which is installed on
+  `EDGE-ALIEN` and not on the other Windows hosts here. Two identical
+  arithmetic loops separate it from raw speed. An `awk` loop, which spawns
+  nothing and runs no script engine, is 2.2x slower on `EDGE-ALIEN` than on the
+  i7-12700 desktop - ordinary generational difference. The same loop written in
+  Windows PowerShell is **9.3x** slower on the same pair. Process spawning sits
+  with the `awk` figure at 2.1x. The suites lean heavily on PowerShell and on
+  file writes, which is where script and file scanning lands, and the real
+  matrix runs at 3x. So most of the penalty sits in the part an exclusion can
+  address, not in the core count.
+- **Onboarding of `EDGE-ALIEN` is paused pending SentinelOne exclusions.** The
+  owner has asked the IT contractor to exclude the runner's
+  directories on that host. Requested paths, confirmed present on the machine:
+
+  | Path | Why |
+  | --- | --- |
+  | `C:\actions-runner\` | The runner, its `_work` checkout and `_work\_tool` cache: every file CI writes and re-reads |
+  | `C:\Program Files\Git\` | `git.exe` and the Git Bash toolchain, re-scanned on every one of thousands of spawns |
+  | `C:\Program Files\PowerShell\7\` | The other shell the suites spawn |
+  | `C:\Program Files\nodejs\` | `node.exe`, spawned per reviewer check |
+  | `C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Temp\` | The runner service account's temp directory |
+
+  Ask specifically whether the policy's **script or AMSI scanning** can be
+  excluded for these paths as well as on-access file scanning. The PowerShell
+  measurement above points at the script engine, so a file-only exclusion may
+  recover far less.
+- The security trade is real and worth stating: excluding the runner tree means
+  code that CI checks out and executes is no longer inspected on that host. This
+  repository is public, which is only acceptable because fork pull-request
+  approval is pinned to `all_external_contributors`, so no outside contributor's
+  code runs without a maintainer releasing it. If that setting ever changes,
+  these exclusions must be revisited.
+- **Even a complete win may not be enough, and the gate does not move.** Removing
+  the scanning penalty leaves the hardware ratio of about 1.6x, which puts the
+  62 minute matrix near 100 minutes on `EDGE-ALIEN`. That is inside the 90
+  minute qualification ceiling only if the recovery is better than estimated,
+  and it is still above `windows-offline`'s 75 minute ceiling in `verify.yml`.
+  Admission is fitness for the 75 minute job, not a green qualification run, so
+  a qualification that merely finishes does not admit the host.
+- To re-measure after the exclusions land, repeat the same three numbers on an
+  **idle** host and compare against this baseline, taken on 2026-09-02 with the
+  High performance plan already applied and SentinelOne unmodified:
+  `awk` loop 395 ms, 100 process spawns 6499 ms, 30 `git --version` spawns
+  2722 ms. Then re-run the PowerShell loop, which is the one expected to move
+  most. Only after that is it worth spending a qualification run. Nothing on
+  that host may be measured while a CI job is live on it: a local run and a CI
+  job on the same four cores corrupt each other, which happened on 2026-09-02
+  and cost two measurements.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
