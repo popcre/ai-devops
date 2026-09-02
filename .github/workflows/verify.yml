@@ -74,11 +74,16 @@ jobs:
         run: .\tests\test-all.ps1
 
   windows-reviewer-safety:
-    # Not run on merge_group: the edge-dev pool is two logical runners on one
-    # physical machine, and a queue rebuild restarted this job five times for a
-    # single pull request (issue #204). linux-offline is the queue gate; the
-    # Windows proof comes from the pull_request run on the exact head commit.
+    # Not run on merge_group: linux-offline is the queue gate, and the Windows
+    # proof comes from the pull_request run on the exact head commit (#204).
     if: github.event_name != 'merge_group'
+    # Self-hosted on edge-dev, like windows-offline. Moving this job to the
+    # GitHub-hosted windows-2025 image was tried on 2026-09-02 to take its
+    # 14-25 minutes off the edge-dev pool (#204). The reviewer suites stalled
+    # there: the held Grok stub never observed the test's release file, both
+    # background turns ran to their 480s ceiling, and the job died at 30
+    # minutes with no failure to read. That is precisely the unreproducible
+    # Windows timing flake self-hosting exists to avoid (7adaefd8).
     runs-on: [self-hosted, Windows, X64, edge-dev]
     timeout-minutes: 30
     steps:

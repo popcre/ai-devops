@@ -739,8 +739,13 @@ PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 
 check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
 ASK_A_REVIEW_DIR="$(run show ask-a | jq -r '.review_dir')"
 ASK_B_REVIEW_DIR="$(run show ask-b | jq -r '.review_dir')"
+# Compare against the resolved sandbox root. Git Bash on the GitHub-hosted
+# Windows image maps /tmp onto the user's AppData Temp directory, so mktemp
+# reports /tmp/... while the reviewer reports the resolved path; the two name
+# the same directory and only the spelling differs.
+BOUNDARY_ROOT="$(cd "$AI_REVIEW_SANDBOX_DIR" && pwd -P)"
 check "named-session snapshot activity is inside the watched fixture boundary" \
-  "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
+  "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$BOUNDARY_ROOT/'*:'$BOUNDARY_ROOT/'*) true;; '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # These two turns are released explicitly below, so give them a wide ceiling of
 # their own. The duplicate that must be refused builds a review packet first -
