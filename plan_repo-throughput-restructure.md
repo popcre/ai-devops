@@ -20,7 +20,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
-| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host `EDGE-RUNN-ENVY` qualified, promoted to `ai-devops-windows-qualified`, and both heavy Windows jobs routed to it; second host `EDGE-ALIEN` failed qualification on a 90 minute overrun; failover proof, third host and EDGE-DEV retirement remain open | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38` and `7e9210d1`; Actions runs `33571202823`, `33625670215` and `33627638433`; failed qualification `33625657591`; [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host `EDGE-RUNN-ENVY` qualified, promoted to `ai-devops-windows-qualified`, and both heavy Windows jobs routed to it; second host `EDGE-ALIEN` failed qualification twice on a 90 minute overrun, diagnosed 2026-09-02 as SentinelOne EDR process/file inspection (it is the only host running it) on top of 2015-era 4-core hardware, and is now **blocked on an external IT decision** to grant SentinelOne exclusions; the qualified pool therefore stands at one host, and failover proof, third host and EDGE-DEV retirement remain open | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38` and `7e9210d1`; Actions runs `33571202823`, `33625670215` and `33627638433`; failed qualifications `33625657591` and `33639477174`; EDR diagnosis in [#209 comment 5513464456](https://github.com/popcre/ai-devops/issues/209#issuecomment-5513464456); single-host outage risk tracked in [#222](https://github.com/popcre/ai-devops/issues/222); [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
@@ -245,6 +245,23 @@ parity, and retain fork-approval safety. Do not commit private machine inventory
 **Gates:** three hosts pass qualification; taking one offline leaves visible
 working capacity; jobs distribute across physical hosts; setup is recoverable
 and idempotent. Required-check changes remain #166-last.
+
+**Single-host consequence, recorded 2026-09-02.** The qualified pool currently
+holds exactly one host. Three downstream phases assume more than one and must not
+be started on the assumption that a second is arriving on an engineering
+timetable:
+
+- **B2a's own gate** ("three hosts pass qualification", "taking one offline leaves
+  visible working capacity") cannot be met today. `EDGE-ALIEN` is blocked on an
+  external IT decision about SentinelOne exclusions, not on work in this repo.
+- **#210 bounded parallel Windows verification** has nothing to parallelise across
+  until a second host qualifies. Sequence it behind a real second host, not behind
+  #209 merely being open.
+- **#166 required-check cutover** must not promote a Windows job to a required
+  check while the pool is one host deep. A dead single host leaves those jobs
+  *queued*, never failed, so merges would block silently with no red signal. The
+  detection gap is [#222](https://github.com/popcre/ai-devops/issues/222); the cure
+  is a second qualified host.
 
 **End-of-phase drift check:** before handing off or closing #209, reread every
 downstream phase from B3 through the final #166 cutover. Report and update any
