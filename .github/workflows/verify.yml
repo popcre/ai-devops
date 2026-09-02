@@ -12,9 +12,15 @@ on:
     - cron: '17 6 * * 1'
 
 concurrency:
-  # Keep each immutable commit's proof alive when newer work lands on main.
-  # Only a duplicate run for the same event and source SHA is superseded.
-  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+  # A pull request is keyed on its *number*, not its head SHA. Keying on the SHA
+  # made every new commit its own group, so cancel-in-progress could never fire
+  # across pushes and the two-runner Windows pool filled with builds nobody was
+  # waiting for (issue #204: nine queued runs for six commits on one branch).
+  #
+  # merge_group keeps its own per-queue-branch group and push: main keeps its
+  # per-SHA group, so concurrent queue entries never cancel one another and each
+  # immutable commit on main still gets its own preserved proof (commit 817f8069).
+  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -46,13 +52,24 @@ jobs:
 
   windows-offline:
     needs: fast-classifier
-    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
+    # Not run on merge_group: the edge-dev pool is two logical runners on one
+    # physical machine, and a queue rebuild restarted this job five times for a
+    # single pull request (issue #204). linux-offline is the queue gate; the
+    # Windows proof comes from the pull_request run on the exact head commit.
+    # Also skipped when the fast classifier proves the change is prose-only.
+    # Fail-closed: any classifier result other than a clean prose-only verdict
+    # runs the complete matrix.
+    if: >-
+      always() && github.event_name != 'merge_group' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
     # Self-hosted on edge-dev. Every failure this repository has had to
     # investigate has been a Windows timing flake, and GitHub-hosted runners made
     # them unreproducible: a different machine every time, and two days of runs
-    # that produced no usable evidence. One runner on one known machine also
-    # makes the two Windows jobs queue behind each other instead of contending
-    # for the same cores, which is what these timing-sensitive suites need.
+    # that produced no usable evidence. A known, constant machine is what these
+    # timing-sensitive suites need. Note the label currently resolves to two
+    # logical runners on one physical host, so the two Windows jobs can contend
+    # for the same cores outside the serialization mutex; #209 owns that.
     runs-on: [self-hosted, Windows, X64, edge-dev]
     # Measured bound, not a guess. Run 33479765150 completed the identical
     # body in 62m on an otherwise idle EDGE-DEV. Run 33541520697 was killed at
@@ -83,7 +100,17 @@ jobs:
 
   windows-reviewer-safety:
     needs: fast-classifier
-    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
+    # Not run on merge_group: the edge-dev pool is two logical runners on one
+    # physical machine, and a queue rebuild restarted this job five times for a
+    # single pull request (issue #204). linux-offline is the queue gate; the
+    # Windows proof comes from the pull_request run on the exact head commit.
+    # Also skipped when the fast classifier proves the change is prose-only.
+    # Fail-closed: any classifier result other than a clean prose-only verdict
+    # runs the complete matrix.
+    if: >-
+      always() && github.event_name != 'merge_group' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
     runs-on: [self-hosted, Windows, X64, edge-dev]
     # This may wait behind the complete job from any workflow run before its
     # own 30-minute measured work. The host mutex preserves every queued job.

@@ -18,9 +18,8 @@ windows_timeout="$(sed -n '/^  windows-offline:/,/^  windows-reviewer-safety:/p'
 reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows job covers lock wait plus execution' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 245 ]'
 check 'reviewer Windows job covers lock wait plus execution' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 120 ]'
-check 'immutable duplicate runs remain cancellable' "grep -Fq 'group: verify-\${{ github.workflow }}-\${{ github.event_name }}-\${{ github.event.pull_request.head.sha || github.sha }}' '$workflow' && grep -Fq 'cancel-in-progress: true' '$workflow'"
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')\" '$workflow')\" -eq 3 ]"
+check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 3 ] && [ \"\$(grep -c '^    needs: fast-classifier$' '$workflow')\" -eq 3 ]"
 check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 3 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
@@ -57,5 +56,41 @@ check 'manifest declares 17 unique PowerShell suites' "[ \"\$(jq '.powershell | 
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
 
+# A pull-request run must be superseded by a newer push to the same pull
+# request. Keying the group on the head SHA made that impossible and filled the
+# two-runner Windows pool with builds nobody was waiting for (issue #204).
+grep -Fq "format('pr-{0}', github.event.pull_request.number)" "$workflow" || {
+  printf 'FAIL: pull-request verification must be keyed on the pull request, not its head SHA
+' >&2
+  exit 1
+}
+# Concurrent merge-queue entries must never cancel one another, so merge_group
+# keeps a group per queue branch.
+grep -Fq "github.event_name == 'merge_group' && github.ref" "$workflow" || {
+  printf 'FAIL: merge-group verification must be keyed on its own queue branch
+' >&2
+  exit 1
+}
+# push: main keeps a per-SHA group so each immutable commit keeps its own proof.
+grep -Fq '|| github.sha' "$workflow" || {
+  printf 'FAIL: push runs must still be scoped to their immutable source SHA
+' >&2
+  exit 1
+}
+# The edge-dev Windows jobs must not run on merge_group; a queue rebuild
+# restarts them and starves the two-runner pool.
+windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
+')"
+[ "$windows_skips" -eq 2 ] || {
+  printf 'FAIL: both edge-dev Windows jobs must be skipped on merge_group
+' >&2
+  exit 1
+}
+grep -Fq 'cancel-in-progress: true' "$workflow" || {
+  printf 'FAIL: duplicate verification runs for the same source must still be cancellable\n' >&2
+  exit 1
+}
+
+
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
-printf 'PASS: fast routing, complete event coverage, EDGE-DEV serialization, and 61+17 suite manifest\n'
+printf 'PASS: fast routing, complete event coverage, EDGE-DEV serialization, 61+17 suite manifest, cancellable superseded pull-request runs, and no edge-dev Windows jobs in the merge queue\n'
