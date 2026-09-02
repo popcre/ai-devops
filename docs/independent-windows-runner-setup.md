@@ -311,8 +311,44 @@ failure without its logs.
   not added.
 - Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
   qualified pool.
-- `EDGE-ALIEN` is registered and online with the candidate label only. It has no
-  Administrator preflight evidence and is not qualified, so it takes no ordinary
-  CI. Qualifying it is the next step under #209.
+- `EDGE-ALIEN` is registered and online with the candidate label only. Its
+  Administrator preflight and service-visible dependency gates passed in run
+  [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
+  on 2026-09-02, but the complete offline matrix did not finish inside the 90
+  minute ceiling on an otherwise idle host, so it is not qualified and takes no
+  ordinary CI. Read that run's logs for the suite that was mid-flight before
+  anyone considers the ceiling; a machine taking over 90 minutes for a 62 minute
+  workload looks like a hang, not slowness.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
+
+## If the qualified pool goes down
+
+`ai-devops-windows-qualified` resolves to one host today, so losing it stops
+`windows-offline` and `windows-reviewer-safety` from ever starting - a dead host
+leaves those jobs *queued*, not failed, so they never report. This does not
+freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
+and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
+Windows proof, which is the gap recorded in
+[`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
+
+Check the pool with:
+
+```bash
+gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) \(.status) \(.labels|map(.name)|join(","))"'
+```
+
+If no `ai-devops-windows-qualified` runner is `online`, repair that host first.
+Only if it stays down long enough to matter may the owner deliberately apply the
+`ai-devops-windows-qualified` label to the `edge-dev` runners and accept
+serialized, slower CI on the interactive desktop:
+
+```bash
+gh api --method POST repos/popcre/ai-devops/actions/runners/<id>/labels -f "labels[]=ai-devops-windows-qualified"
+```
+
+That is a deliberate, owner-authorized fallback, not a default. Remove the label
+again once the dedicated host returns. Never add `edge-dev` to the `runs-on`
+list in `verify.yml` as a fallback: `runs-on` entries are ANDed, so a shared
+fallback label lets the desktop win the race again and reintroduces the
+double-cancellation this pool exists to remove.
