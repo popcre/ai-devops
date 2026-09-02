@@ -309,8 +309,12 @@ failure without its logs.
 - Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
   label `ai-devops-windows` kept for requalification. The `edge-dev` label was
   not added.
-- Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
-  qualified pool.
+- Ordinary CI routes `windows-reviewer-safety` to the qualified pool. Since
+  2026-09-02 `windows-offline` runs on the GitHub-hosted `windows-2025` image
+  instead: a single qualified host serialised the whole repository and six
+  verify runs queued behind it at once. Hosted concurrency is free on this
+  public repository, so the long matrix takes the hosted lane and the
+  flake-prone reviewer suites keep the reproducible self-hosted lane.
 - `EDGE-ALIEN` is registered and online with the candidate label only. Its
   Administrator preflight and service-visible dependency gates passed in run
   [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
@@ -343,8 +347,9 @@ failure without its logs.
 ## If the qualified pool goes down
 
 `ai-devops-windows-qualified` resolves to one host today, so losing it stops
-`windows-offline` and `windows-reviewer-safety` from ever starting - a dead host
-leaves those jobs *queued*, not failed, so they never report. This does not
+`windows-reviewer-safety` from ever starting - a dead host leaves that job
+*queued*, not failed, so it never reports. `windows-offline` is unaffected: it
+runs on the GitHub-hosted lane. This does not
 freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
 and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
 Windows proof, which is the gap recorded in

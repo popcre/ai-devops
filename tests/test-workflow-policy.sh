@@ -39,15 +39,24 @@ windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | 
 ' >&2
   exit 1
 }
-# Ordinary Windows verification must run on the dedicated qualified pool
-# (issue #209), never on the daily-use EDGE-DEV computer and never on a bare
-# candidate host. `ai-devops-windows` is the qualification-only label: a host
-# carrying it has been registered, not proven. Membership in
+# Windows verification is split across two lanes so no single host can
+# serialise the whole repository. The long offline matrix runs on the free
+# GitHub-hosted windows-2025 image, where concurrency is unbounded on this
+# public repository. The reviewer safety suites, which produce every timing
+# flake worth investigating, stay on the dedicated qualified self-hosted pool
+# (issue #209) so a failure can be reproduced on a known physical machine.
+# EDGE-DEV and bare candidate hosts stay banned either way:
+# `ai-devops-windows` is the qualification-only label, and membership in
 # `ai-devops-windows-qualified` requires a green `qualify Windows runner` job
 # on that exact physical host.
-windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\r')"
-[ "$windows_pool" -eq 2 ] || {
-  printf 'FAIL: both Windows jobs must run on the qualified independent runner pool\n' >&2
+windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\\r')"
+[ "$windows_pool" -eq 1 ] || {
+  printf 'FAIL: the reviewer safety suites must run on the qualified independent runner pool\n' >&2
+  exit 1
+}
+hosted_pool="$(grep -cE '^[[:space:]]*runs-on: windows-2025[[:space:]]*$' "$workflow" | tr -d '\\r')"
+[ "$hosted_pool" -eq 1 ] || {
+  printf 'FAIL: the long Windows matrix must take the GitHub-hosted lane\n' >&2
   exit 1
 }
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
@@ -60,4 +69,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
   exit 1
 }
 
-printf 'PASS: Windows work runs on the qualified pool, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
+printf 'PASS: Windows work is split across the hosted and qualified lanes, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
