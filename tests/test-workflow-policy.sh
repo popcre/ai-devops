@@ -30,12 +30,12 @@ grep -Fq '|| github.sha' "$workflow" || {
 ' >&2
   exit 1
 }
-# The edge-dev Windows jobs must not run on merge_group; a queue rebuild
-# restarts them and starves the two-runner pool.
+# Neither Windows job may run on merge_group; a queue rebuild restarts them,
+# and the long suite holds an edge-dev runner for over an hour each time.
 windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | tr -d '
 ')"
 [ "$windows_skips" -eq 2 ] || {
-  printf 'FAIL: both edge-dev Windows jobs must be skipped on merge_group
+  printf 'FAIL: both Windows jobs must be skipped on merge_group
 ' >&2
   exit 1
 }
@@ -44,4 +44,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
   exit 1
 }
 
-printf 'PASS: Windows headroom kept, superseded pull-request runs are cancellable, and the merge queue does not schedule edge-dev Windows jobs\n'
+printf 'PASS: Windows headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'

@@ -74,12 +74,17 @@ jobs:
         run: .\tests\test-all.ps1
 
   windows-reviewer-safety:
-    # Not run on merge_group: the edge-dev pool is two logical runners on one
-    # physical machine, and a queue rebuild restarted this job five times for a
-    # single pull request (issue #204). linux-offline is the queue gate; the
-    # Windows proof comes from the pull_request run on the exact head commit.
+    # Not run on merge_group: linux-offline is the queue gate, and the Windows
+    # proof comes from the pull_request run on the exact head commit (#204).
     if: github.event_name != 'merge_group'
-    runs-on: [self-hosted, Windows, X64, edge-dev]
+    # GitHub-hosted, not edge-dev. The self-hosting rationale in 7adaefd8 is
+    # about reproducing Windows *timing* flakes on a known machine, and that
+    # applies to the long windows-offline suite, not to these two review
+    # suites. Running both Windows jobs on the edge-dev pool serialized 14-25
+    # minutes ahead of a 63-75 minute job on the same physical machine, which
+    # is what pushed windows-offline past its 75-minute ceiling (#204). This
+    # repository is public, so hosted minutes are free.
+    runs-on: windows-2025
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
