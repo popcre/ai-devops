@@ -16,8 +16,8 @@ classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
 
 windows_timeout="$(sed -n '/^  windows-offline:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-check 'complete Windows job covers lock wait plus execution' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 245 ]'
-check 'reviewer Windows job covers lock wait plus execution' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 120 ]'
+check 'complete Windows job keeps measured headroom' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 75 ]'
+check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 3 ] && [ \"\$(grep -c '^    needs: fast-classifier$' '$workflow')\" -eq 3 ]"
 check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 3 ]"
@@ -25,15 +25,12 @@ check 'rename sources cannot disappear from classification' "grep -q 'git diff -
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
-check 'EDGE-DEV jobs share one host lock without lossy Actions concurrency' "[ \"\$(grep -c 'Invoke-EdgeDevSerialized' '$workflow')\" -eq 2 ] && ! grep -q 'group: edge-dev-windows' '$workflow' && grep -Fq 'Global\ai-devops-edge-dev-ci' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
-check 'EDGE-DEV execution retains separate measured deadlines' "grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 150' '$workflow' && grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 30' '$workflow' && grep -q 'exceeded its.*execution limit' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
-check 'EDGE-DEV timeouts name the interrupted work instead of only the cutoff' "grep -q 'Last progress marker' '$ROOT/tools/ci/edge-dev-serialization.ps1' && grep -q 'StreamReader' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
-check 'EDGE-DEV behavioral fixture is present' "[ -f '$ROOT/tests/fixtures/ci/test-edge-dev-serialization.ps1' ]"
-if command -v pwsh >/dev/null 2>&1 && pwsh -NoProfile -Command 'if (-not $IsWindows) { exit 1 }'; then
-  check 'EDGE-DEV serialization behavior passes on Windows' "pwsh -NoProfile -File '$ROOT/tests/fixtures/ci/test-edge-dev-serialization.ps1'"
-else
-  printf '  ok   EDGE-DEV behavioral fixture is Windows-only (structural policy checked here)\n'
-fi
+# Ordinary Windows verification must run on the dedicated qualified pool
+# (issue #209), never on the daily-use EDGE-DEV computer and never on a bare
+# candidate host. `ai-devops-windows` is the qualification-only label: a host
+# carrying it has been registered, not proven.
+check 'both Windows jobs run on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 2 ]"
+check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
 check 'docs are prose-only' "classify pull_request 'docs/example.md' | grep -q '^run_long=false$'"
@@ -77,8 +74,8 @@ grep -Fq '|| github.sha' "$workflow" || {
 ' >&2
   exit 1
 }
-# The edge-dev Windows jobs must not run on merge_group; a queue rebuild
-# restarts them and starves the two-runner pool.
+# Neither Windows job may run on merge_group; a queue rebuild restarts them,
+# and the long suite holds a qualified pool host for the better part of an hour.
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
 [ "$windows_skips" -eq 2 ] || {
@@ -93,4 +90,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
 
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
-printf 'PASS: fast routing, complete event coverage, EDGE-DEV serialization, 62+18 suite manifest, cancellable superseded pull-request runs, and no edge-dev Windows jobs in the merge queue\n'
+printf 'PASS: fast routing, complete event coverage, qualified Windows pool, 62+18 suite manifest, cancellable superseded pull-request runs, and no Windows jobs in the merge queue\n'

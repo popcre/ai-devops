@@ -75,6 +75,12 @@ The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
 `X64` labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]`
 selects.
 
+Since 2026-09-02 the two heavy `verify` Windows jobs no longer select this
+label: `windows-offline` and `windows-reviewer-safety` run on
+`ai-devops-windows-qualified`, a pool of dedicated hosts documented in
+[`independent-windows-runner-setup.md`](independent-windows-runner-setup.md).
+These two runners still serve every other workflow that asks for `edge-dev`.
+
 Neither is a Windows service — installing one requires an elevated shell. Both
 run from scheduled tasks triggered at logon for the interactive user.
 

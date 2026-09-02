@@ -285,12 +285,12 @@ inherits the new machine PATH. If a job fails, open the exact failed step; never
 treat cancellation, timeout, missing dependency or exit `-1` as a code-test
 failure without its logs.
 
-## First-host evidence as of 2026-09-01
+## First-host evidence as of 2026-09-02
 
 - Host: `EDGE-RUNN-ENVY`, Windows 11 Pro 25H2 build 26200, i7-10700, 16 GB RAM.
 - TPM ready and Secure Boot enabled; Windows Time synchronized.
 - One automatic runner service; runner version 2.336.0.
-- Candidate labels only: `self-hosted`, `Windows`, `X64`,
+- Labels at qualification time: `self-hosted`, `Windows`, `X64`,
   `ai-devops-windows`.
 - Administrator preflight passed.
 - Service-visible dependency gate passed.
@@ -300,9 +300,73 @@ failure without its logs.
   exposed the username/SID and Git Bash/native temp-path defects above.
 - Both focused repairs passed locally (`ai-gemini`: 62/62; `ai-grok-review`:
   199/199) and received independent exact-head approval on commit `fa46a1f`.
-- The corrected complete offline matrix passed in 1h00m14s in Actions run
-  [33571202823](https://github.com/popcre/ai-devops/actions/runs/33571202823),
-  job `100065323527`, on exact commit `fa46a1f`. This qualified the first host;
-  it did not yet admit that host to ordinary CI.
-- Ordinary CI admission, second/third physical hosts, failover proof and EDGE-DEV
-  retirement remain open under #209.
+- Complete offline matrix passed in qualification run
+  [33571202823](https://github.com/popcre/ai-devops/actions/runs/33571202823)
+  on 2026-09-01, job `qualify`, 1h00m14s. Within it
+  `tests/test-ai-grok-review.sh` passed 199 of 199 checks in 538s - the same
+  suite that exceeded its 30 minute ceiling twice while sharing the edge-dev
+  desktop (runs 33571202865 and 33624326508).
+- Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
+  label `ai-devops-windows` kept for requalification. The `edge-dev` label was
+  not added.
+- Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
+  qualified pool.
+- `EDGE-ALIEN` is registered and online with the candidate label only. Its
+  Administrator preflight and service-visible dependency gates passed in run
+  [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
+  on 2026-09-02, but the complete offline matrix was cancelled at the 90 minute
+  ceiling there and again in run
+  [33639477174](https://github.com/popcre/ai-devops/actions/runs/33639477174),
+  so the host is not qualified and takes no ordinary CI.
+- That is host slowness, not a hang, and the second run's log proves it: the
+  suite logged a passing check at 15:32:53Z and the cancellation arrived at
+  15:32:54Z. Nothing was stuck. Measured against `EDGE-RUNN-ENVY` on the same
+  commit and the same matrix, `EDGE-ALIEN` is roughly three times slower on
+  every suite - `test-ai-claude-review.sh` 17m against 4m26s,
+  `test-ai-codex-review.sh` 14m against 3m52s, `test-ai-glm.sh` 18m against
+  6m00s, and `test-ai-grok-review.sh` still running past 20m against 9m02s. The
+  slowdown is uniform per operation rather than one long wait: the gap between
+  consecutive checks clusters at 5-12s on `EDGE-RUNN-ENVY` and never exceeds
+  19s, while on `EDGE-ALIEN` gaps of 20-64s recur throughout. A 62 minute
+  matrix at that rate needs about three hours.
+- The repair is on the host, not on the ceiling. Raising `timeout-minutes` is
+  forbidden here: it would hide a machine that cannot carry the workload and
+  would hold a pool slot for hours. Look on `EDGE-ALIEN` for the per-process
+  costs that produce a flat multiplier - Microsoft Defender real-time scanning
+  with no exclusion for the runner work folder, a power plan other than High
+  performance, and a runner work folder on rotating or SATA storage. Requalify
+  from a clean run afterwards; admission still requires a green `qualify
+  Windows runner` job on that exact host.
+- Second qualified host, failover proof and EDGE-DEV retirement remain open
+  under #209.
+
+## If the qualified pool goes down
+
+`ai-devops-windows-qualified` resolves to one host today, so losing it stops
+`windows-offline` and `windows-reviewer-safety` from ever starting - a dead host
+leaves those jobs *queued*, not failed, so they never report. This does not
+freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
+and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
+Windows proof, which is the gap recorded in
+[`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
+
+Check the pool with:
+
+```bash
+gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) \(.status) \(.labels|map(.name)|join(","))"'
+```
+
+If no `ai-devops-windows-qualified` runner is `online`, repair that host first.
+Only if it stays down long enough to matter may the owner deliberately apply the
+`ai-devops-windows-qualified` label to the `edge-dev` runners and accept
+serialized, slower CI on the interactive desktop:
+
+```bash
+gh api --method POST repos/popcre/ai-devops/actions/runners/<id>/labels -f "labels[]=ai-devops-windows-qualified"
+```
+
+That is a deliberate, owner-authorized fallback, not a default. Remove the label
+again once the dedicated host returns. Never add `edge-dev` to the `runs-on`
+list in `verify.yml` as a fallback: `runs-on` entries are ANDed, so a shared
+fallback label lets the desktop win the race again and reintroduces the
+double-cancellation this pool exists to remove.
