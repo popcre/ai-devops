@@ -12,8 +12,8 @@ Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep t
 **Reporting to Albert.** Every status, queue, audit, marker and dispatch record
 in this skill is written into GitHub issues, plans and handoffs — never into the
 chat reply. Replies to Albert obey the global 150-word limit, and anything he
-must decide or approve appears only in the closing `**What I need from you**`
-block. Never paste a queue listing, marker block, audit result or per-agent
+must decide or approve, and every issue, agent, check or merge this session is
+waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
 status roll-up into chat.
 
 ## Scope
