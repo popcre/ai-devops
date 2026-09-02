@@ -46,6 +46,15 @@ If `ask` says reconciliation is required, inspect that transcript first, then ru
 `AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
 provider state. Never bypass or silently replace an uncertain session.
 
+Muse can read ONLY the disposable review copy it is given. The wrapper prints that
+directory as `Muse review boundary:` and the packet as `Muse evidence packet:` before
+each turn. Name files relative to the review boundary. Never put a path from the
+source repository, a linked worktree, or a scratch directory in a Muse prompt: those
+are outside the boundary and OpenCode refuses them with
+`The user rejected permission to use this specific tool call.` — no user is ever
+prompted, and Muse then stops after a sentence of preamble having read nothing.
+Copy any external material into the prompt text itself instead of pointing at it.
+
 For a code review, tell Muse to read the manifest in its evidence packet first.
 The packet directory is named after the session (`.ai-review-muse-<caller>-<name>`),
 not a fixed `.ai-review`, so two reviewers working from one checkout cannot
