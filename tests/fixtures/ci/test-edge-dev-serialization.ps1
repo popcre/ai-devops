@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $helper = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/ci/edge-dev-serialization.ps1')).Path
 $mutexName = "Local\ai-devops-edge-dev-ci-test-$PID"
 $log = Join-Path ([System.IO.Path]::GetTempPath()) "edge-dev-ci-test-$PID.log"
+. $helper
 
 function Start-LockJob([int]$SleepSeconds, [int]$BodyLimit = 10, [int]$WaitLimit = 10, [string]$ChildPidFile = '') {
     Start-Job -ScriptBlock {
@@ -62,11 +63,27 @@ try {
         throw 'Execution timeout left a descendant process running.'
     }
 
+    $markerError = ''
+    try {
+        Invoke-EdgeDevSerialized -MutexName $mutexName -BodyMinutes 1 `
+            -TestWaitSeconds 10 -TestBodySeconds 3 -Body {
+                Write-Host '===== BASH test-progress-marker.sh ====='
+                Start-Sleep -Seconds 30
+            }
+    }
+    catch { $markerError = $_.Exception.Message }
+    # The marker is only ever recorded by the live drain of the child's
+    # redirected output, so naming it here proves the wrapper reads progress
+    # while the body runs instead of dumping everything after the kill.
+    if ($markerError -notmatch 'test-progress-marker\.sh') {
+        throw "The execution timeout did not name the work it interrupted: $markerError"
+    }
+
     $after = Start-LockJob 0
     Wait-Job -Job $after -Timeout 8 | Out-Null
     Receive-Job -Job $after
     if ($after.State -ne 'Completed') { throw 'Mutex was not released after timeout.' }
-    Write-Host 'PASS: EDGE-DEV lock serializes processes, kills timed-out process trees, and releases after failure'
+    Write-Host 'PASS: EDGE-DEV lock serializes processes, streams live progress, names interrupted work, kills timed-out process trees, and releases after failure'
 }
 finally {
     Get-Job | Where-Object Name -like 'Job*' | Remove-Job -Force -ErrorAction SilentlyContinue

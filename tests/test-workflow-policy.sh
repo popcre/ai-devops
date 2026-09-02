@@ -16,7 +16,7 @@ classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
 
 windows_timeout="$(sed -n '/^  windows-offline:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-check 'complete Windows job covers lock wait plus execution' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 165 ]'
+check 'complete Windows job covers lock wait plus execution' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 245 ]'
 check 'reviewer Windows job covers lock wait plus execution' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 120 ]'
 check 'immutable duplicate runs remain cancellable' "grep -Fq 'group: verify-\${{ github.workflow }}-\${{ github.event_name }}-\${{ github.event.pull_request.head.sha || github.sha }}' '$workflow' && grep -Fq 'cancel-in-progress: true' '$workflow'"
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
@@ -27,7 +27,8 @@ check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$wo
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
 check 'EDGE-DEV jobs share one host lock without lossy Actions concurrency' "[ \"\$(grep -c 'Invoke-EdgeDevSerialized' '$workflow')\" -eq 2 ] && ! grep -q 'group: edge-dev-windows' '$workflow' && grep -Fq 'Global\ai-devops-edge-dev-ci' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
-check 'EDGE-DEV execution retains separate measured deadlines' "grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 75' '$workflow' && grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 30' '$workflow' && grep -q 'exceeded its.*execution limit' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
+check 'EDGE-DEV execution retains separate measured deadlines' "grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 150' '$workflow' && grep -q 'Invoke-EdgeDevSerialized -BodyMinutes 30' '$workflow' && grep -q 'exceeded its.*execution limit' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
+check 'EDGE-DEV timeouts name the interrupted work instead of only the cutoff' "grep -q 'Last progress marker' '$ROOT/tools/ci/edge-dev-serialization.ps1' && grep -q 'StreamReader' '$ROOT/tools/ci/edge-dev-serialization.ps1'"
 check 'EDGE-DEV behavioral fixture is present' "[ -f '$ROOT/tests/fixtures/ci/test-edge-dev-serialization.ps1' ]"
 if command -v pwsh >/dev/null 2>&1 && pwsh -NoProfile -Command 'if (-not $IsWindows) { exit 1 }'; then
   check 'EDGE-DEV serialization behavior passes on Windows' "pwsh -NoProfile -File '$ROOT/tests/fixtures/ci/test-edge-dev-serialization.ps1'"

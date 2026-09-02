@@ -54,10 +54,17 @@ jobs:
     # makes the two Windows jobs queue behind each other instead of contending
     # for the same cores, which is what these timing-sensitive suites need.
     runs-on: [self-hosted, Windows, X64, edge-dev]
-    # The protected matrix retains its 75-minute execution bound. This job may
-    # first wait up to 90 minutes for the shared physical host, so the job-level
-    # envelope covers both bounds plus setup/teardown.
-    timeout-minutes: 170
+    # Measured bound, not a guess. Run 33479765150 completed the identical
+    # body in 62m on an otherwise idle EDGE-DEV. Run 33541520697 was killed at
+    # 75m having finished 17 of 61 Bash suites, and every one of those suites,
+    # including one-second suites, ran about 2x its idle time. That uniform
+    # ratio is host contention from non-CI work on the shared machine, not a
+    # hung suite, so the bound must cover a contended run: 62m x 2 plus modest
+    # headroom. It stays finite and fail-closed, and #209 (independent hosts)
+    # plus #162 (duplicate removal) are what bring it back down.
+    # This job may first wait up to 90 minutes for the shared physical host, so
+    # the job-level envelope covers both bounds plus setup/teardown.
+    timeout-minutes: 250
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -72,7 +79,7 @@ jobs:
         shell: pwsh
         run: |
           . .\tools\ci\edge-dev-serialization.ps1
-          Invoke-EdgeDevSerialized -BodyMinutes 75 -Body { & pwsh -NoProfile -File .\tests\test-all.ps1 }
+          Invoke-EdgeDevSerialized -BodyMinutes 150 -Body { & pwsh -NoProfile -File .\tests\test-all.ps1 }
 
   windows-reviewer-safety:
     needs: fast-classifier
