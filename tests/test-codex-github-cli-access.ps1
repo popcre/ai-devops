@@ -15,7 +15,8 @@ $group = ([Security.Principal.SecurityIdentifier]'S-1-5-32-545').Translate(
 try {
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
   Set-Content -LiteralPath (Join-Path $tempRoot "config.yml") -Value "git_protocol: https" -Encoding utf8
-  & icacls.exe $tempRoot /inheritance:r /grant:r "$env:USERNAME`:(OI)(CI)(F)" | Out-Null
+  $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  & icacls.exe $tempRoot /inheritance:r /grant:r "*$currentSid`:(OI)(CI)(F)" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not prepare the restricted test folder." }
 
   & $repair -GitHubConfigDir $tempRoot -CodexSandboxGroup $group

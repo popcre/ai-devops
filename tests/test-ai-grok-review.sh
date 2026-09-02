@@ -62,6 +62,11 @@ check "missing local runtime is named distinctly" "grep -q 'local_dependency_una
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
+# Git Bash can spell the Network Service temp directory as /tmp while native
+# Windows children report its physical /c/Windows/ServiceProfiles/... path.
+# Keep every fixture, progress fingerprint, and saved review path in one
+# canonical namespace so service-account activity is observed truthfully.
+TMP="$(cd "$TMP" && pwd -P)"
 mkdir -p "$TMP/system-tmp"
 export TMPDIR="$TMP/system-tmp"
 cleanup() {
