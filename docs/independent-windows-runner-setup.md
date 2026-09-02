@@ -159,11 +159,19 @@ Convert it in place - the runner keeps its registration, name and labels:
 pwsh -File bin\promote-windows-runner-to-service.ps1
 ```
 
-Run it from Administrator PowerShell. It removes the runner scheduled tasks,
-installs and starts the service, forces automatic start, and then warns about
-any required tool that resolves only inside a user profile. A tool installed
-under `C:\Users\...` is invisible to the service account, so install it for all
-users before qualifying; on `edge-dev` that applies to Python:
+Run it from Administrator PowerShell, in a session where `gh` is already signed
+in. A runner that was never configured with `--runasservice` has no service
+installer at all, so the script unconfigures it and configures it again in
+service mode under the same name, labels and work folder. It reads the labels
+back from GitHub first, removes the runner scheduled tasks, registers and starts
+the service, forces automatic start, and then warns about any required tool that
+resolves only inside a user profile. The removal and registration tokens are
+requested from GitHub as the script runs and are passed to the runner on
+standard input, so they never reach a command line, a log or the repository.
+
+A tool installed under `C:\Users\...` is invisible to the service account, so
+install it for all users before qualifying; on `edge-dev` that applies to
+Python:
 
 ```powershell
 winget install --id Python.Python.3.13 --scope machine
