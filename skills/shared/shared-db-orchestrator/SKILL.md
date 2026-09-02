@@ -9,6 +9,13 @@ description: Open or run the single u2giants/shared-db orchestrator and route st
 
 Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep the full map of claims, branches, preview state, merges and owner decisions.
 
+**Reporting to Albert.** Every status, queue, audit, marker and dispatch record
+in this skill is written into GitHub issues, plans and handoffs — never into the
+chat reply. Replies to Albert obey the global 150-word limit, and anything he
+must decide or approve appears only in the closing `**What I need from you**`
+block. Never paste a queue listing, marker block, audit result or per-agent
+status roll-up into chat.
+
 ## Scope
 
 - Govern database structure: migrations, schemas, tables, columns, views, functions, triggers, policies, indexes, constraints and shared contracts.
