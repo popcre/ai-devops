@@ -739,6 +739,7 @@ PREPROVIDER_RETRY="$(run ask ask-a --prompt corrected-after-preprovider-failure 
 check "preprovider_turn_reservation_is_reclaimable_for_corrected_retry" "test '$PREPROVIDER_RETRY_RC' -eq 0 && printf '%s' \"$PREPROVIDER_RETRY\" | grep -q 'APPROVE'"
 ASK_A_REVIEW_DIR="$(run show ask-a | jq -r '.review_dir')"
 ASK_B_REVIEW_DIR="$(run show ask-b | jq -r '.review_dir')"
+printf 'DIAG boundary: TMP=[%s] A=[%s] B=[%s] SANDBOX=[%s]\n' "$TMP" "$ASK_A_REVIEW_DIR" "$ASK_B_REVIEW_DIR" "$AI_REVIEW_SANDBOX_DIR" >&2
 check "named-session snapshot activity is inside the watched fixture boundary" \
   "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
