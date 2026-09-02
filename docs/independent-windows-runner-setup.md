@@ -410,11 +410,22 @@ failure without its logs.
   approval is pinned to `all_external_contributors`, so no outside contributor's
   code runs without a maintainer releasing it. If that setting ever changes,
   these exclusions must be revisited.
+- **The host does not merely run slowly there - it dies mid-run.** Qualification
+  run 33673582179 on 2026-09-02 failed after 37 minutes, nowhere near the
+  ceiling. Its first three steps succeeded, including the host security and
+  service-visible dependency proof, so every static gate passed. The remaining
+  steps recorded no conclusion at all and produced no retrievable log, which is
+  the shape of the process tree being killed part way through sustained test
+  execution rather than a test failing. The host returned to idle on its own
+  afterwards. Read alongside the measurements above, this is the strongest
+  evidence for the exclusion request: `EDGE-ALIEN` passes every security and
+  dependency check and only fails once continuous compilation and process
+  spawning begins.
 - **Even a complete win may not be enough, and the gate does not move.** Removing
   the scanning penalty leaves the hardware ratio of about 1.6x, which puts the
-  62 minute matrix near 100 minutes on `EDGE-ALIEN`. That is inside the 90
-  minute qualification ceiling only if the recovery is better than estimated,
-  and it is still above `windows-offline`'s 75 minute ceiling in `verify.yml`.
+  62 minute matrix near 100 minutes on `EDGE-ALIEN`. That is inside the 150
+  minute qualification ceiling, but that ceiling is not the bar, and it is
+  still above `windows-offline`'s 75 minute ceiling in `verify.yml`.
   Admission is fitness for the 75 minute job, not a green qualification run, so
   a qualification that merely finishes does not admit the host.
 - To re-measure after the exclusions land, repeat the same three numbers on an
