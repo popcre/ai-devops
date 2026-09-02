@@ -145,6 +145,30 @@ Exactly one service must be `Running` and automatic. GitHub should show the host
 online and idle with `self-hosted`, `Windows`, `X64`, and
 `ai-devops-windows`—not `edge-dev`.
 
+### An already-registered runner started by a scheduled task
+
+A host whose runner was installed as a logon scheduled task rather than a
+service cannot qualify, and that is deliberate: a service with automatic start
+is the only thing that proves the host comes back on its own after a reboot with
+nobody signed in. A logon task also flashes console windows at whoever is using
+the machine. `edge-dev` was in exactly this state on 2026-09-02.
+
+Convert it in place - the runner keeps its registration, name and labels:
+
+```powershell
+pwsh -File bin\promote-windows-runner-to-service.ps1
+```
+
+Run it from Administrator PowerShell. It removes the runner scheduled tasks,
+installs and starts the service, forces automatic start, and then warns about
+any required tool that resolves only inside a user profile. A tool installed
+under `C:\Users\...` is invisible to the service account, so install it for all
+users before qualifying; on `edge-dev` that applies to Python:
+
+```powershell
+winget install --id Python.Python.3.13 --scope machine
+```
+
 ## 4. Synchronize time and create Administrator evidence
 
 Correct system time is required for TLS, GitHub authentication, logs and test
@@ -350,8 +374,23 @@ failure without its logs.
 - Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
   label `ai-devops-windows` kept for requalification. The `edge-dev` label was
   not added.
-- Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
-  qualified pool.
+- Windows CI runs in two lanes at once, on purpose. `windows-offline`, the long
+  matrix, takes GitHub's hosted `windows-2025` image, where concurrency is
+  unmetered on a public repository and a run never waits for a machine.
+  `windows-reviewer-safety` takes the qualified self-hosted pool, where a timing
+  flake can be reproduced on a known physical machine. The self-hosted pool is
+  **extra** Windows capacity, never a replacement for GitHub's runners; routing
+  both jobs to a one-host pool on 2026-09-02 serialised the whole repository and
+  left six verify runs queued behind one desktop.
+- `edge-dev` is being onboarded into the qualified pool rather than retired, so
+  the pool holds more than one machine and a single failure cannot stop the
+  self-hosted lane. It is a candidate until a green `qualify Windows runner` job
+  runs on it, exactly like any other host. One blocker is specific to it: its
+  runner is installed as an interactive scheduled task, and both the
+  Administrator preflight and the qualification job require a real Windows
+  service with automatic start. Converting it also removes the console windows
+  that the scheduled task produced. That conversion needs one elevated command
+  on the machine.
 - `EDGE-ALIEN` is registered and online with the candidate label only. Its
   Administrator preflight and service-visible dependency gates passed in run
   [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
@@ -431,12 +470,14 @@ failure without its logs.
 
 ## If the qualified pool goes down
 
-`ai-devops-windows-qualified` resolves to one host today, so losing it stops
-`windows-offline` and `windows-reviewer-safety` from ever starting - a dead host
-leaves those jobs *queued*, not failed, so they never report. This does not
+`ai-devops-windows-qualified` resolves to one host until `edge-dev` qualifies, so
+losing it stops `windows-reviewer-safety` from ever starting - a dead host leaves
+that job *queued*, not failed, so it never reports. `windows-offline` is
+unaffected: it runs in GitHub's hosted lane, which is exactly why that lane was
+kept. This does not
 freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
 and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
-Windows proof, which is the gap recorded in
+reviewer-suite proof, which is the gap recorded in
 [`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
 
 Check the pool with:

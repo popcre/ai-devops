@@ -39,15 +39,29 @@ windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | 
 ' >&2
   exit 1
 }
-# Ordinary Windows verification must run on the dedicated qualified pool
-# (issue #209), never on the daily-use EDGE-DEV computer and never on a bare
-# candidate host. `ai-devops-windows` is the qualification-only label: a host
-# carrying it has been registered, not proven. Membership in
-# `ai-devops-windows-qualified` requires a green `qualify Windows runner` job
-# on that exact physical host.
+# Windows verification runs in two lanes at once, and both must stay present.
+# The self-hosted pool was added to this repository to have MORE Windows
+# capacity than GitHub's runners alone, not to replace them: routing every
+# Windows job to a one-host pool serialised the whole repository on
+# 2026-09-02. So the long offline matrix keeps the GitHub-hosted lane, where
+# concurrency is unmetered on a public repository and a run never waits for a
+# machine, and the reviewer safety suites - the source of every timing flake
+# worth investigating - keep the qualified self-hosted lane, where a failure
+# can be reproduced on a known physical machine.
+#
+# EDGE-DEV and bare candidate hosts stay banned from `runs-on` either way.
+# `ai-devops-windows` is the qualification-only label: a host carrying it has
+# been registered, not proven. Membership in `ai-devops-windows-qualified`
+# requires a green `qualify Windows runner` job on that exact physical host,
+# and the pool may hold any number of qualified hosts.
 windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\r')"
-[ "$windows_pool" -eq 2 ] || {
-  printf 'FAIL: both Windows jobs must run on the qualified independent runner pool\n' >&2
+[ "$windows_pool" -eq 1 ] || {
+  printf 'FAIL: the reviewer safety suites must run on the qualified self-hosted pool\n' >&2
+  exit 1
+}
+hosted_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
+[ "$hosted_pool" -eq 1 ] || {
+  printf "FAIL: the long Windows matrix must keep GitHub's hosted lane so the pool is extra capacity, not a replacement\n" >&2
   exit 1
 }
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
@@ -60,4 +74,5 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
   exit 1
 }
 
-printf 'PASS: Windows work runs on the qualified pool, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs\n'
+printf 'PASS: Windows work runs in both the hosted and qualified self-hosted lanes, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs
+'
