@@ -137,6 +137,42 @@ identify and remove whatever makes EDGE-ALIEN 3.4x slower than EDGE-RUNN-ENVY.
 
 # 3. Current state — what is true right now
 
+## SUPERSEDED LATER THE SAME DAY — read this before anything else in section 3
+
+Work continued after this handoff was written. Four things below are now wrong.
+
+1. **PR #220's routing is reversed.** #220 put BOTH heavy Windows jobs on the
+   self-hosted pool. That serialised the repository behind one machine.
+   **PR #229 is merged as `82c5af34`** and splits them: `windows-offline` runs on
+   GitHub-hosted `windows-2025` at a 100-minute ceiling, `windows-reviewer-safety`
+   stays on `ai-devops-windows-qualified` at 30. The self-hosted pool is
+   ADDITIVE capacity for flake reproducibility on known hardware. It is not a
+   replacement for GitHub's runners and must never again be made one.
+
+2. **EDGE-DEV is NOT being retired.** "EDGE-DEV retirement" under *Not started*
+   is withdrawn by owner direction. EDGE-DEV is to be ONBOARDED into the
+   qualified pool. Its runner registration was destroyed on 2026-09-02 (see
+   below) and it is currently absent from the fleet, not merely unqualified.
+
+3. **The 75-minute ceiling and the 62-minute figure are both dead.** Hosted
+   `windows-offline` measured 73m23s (run 33658549626) and 71m46s (run
+   33682986264) on 2026-09-02. Self-hosted the same day: 58m40s to 62m18s. The
+   75-minute ceiling sat inside the hosted spread and killed a healthy run at
+   75m11s. The ceiling is now 100, sized from those two completions, and it is a
+   hang bound - NOT a target, and not the number #166 should make required.
+
+4. **EDGE-ALIEN is offline as well as paused.** The qualified pool is one
+   machine, EDGE-RUNN-ENVY, with no standby. Do not record EDGE-ALIEN as a
+   second host anywhere.
+
+Also landed after this handoff was written: `19b44479` (EDGE-ALIEN EDR evidence
+in the runbook), `d71fda48` (downstream drift check B3 to E1 in the plan),
+`fe8d5cd1` (the plan's stale "one figure still unmeasured" sentence replaced with
+the measured hosted duration), and **issue #233**, a Windows race in
+`bin/ai-kimi` where a durable job's state file is read while `write_meta` renames
+over it. #233 is unrelated to #209 and blocks nothing here.
+
+
 ## Done, merged, and verified
 
 - **PR #214 MERGED** as `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38`. Qualification
@@ -350,6 +386,54 @@ verified this session, not assumed.
   rulesets are invisible at that endpoint.
 
 # 6. Exact next steps
+
+**STEP ORDER CHANGED - EDGE-DEV COMES FIRST.** The steps below were written when
+EDGE-ALIEN was the only candidate for host two. It is now paused AND offline, and
+the owner has directed that EDGE-DEV be onboarded into the pool. Do EDGE-DEV
+first; treat the EDGE-ALIEN steps as the contingency they became.
+
+**Step A - re-register the EDGE-DEV runner. This is the whole remaining
+critical path and it needs an elevated shell, which an AI session does not have.**
+
+EDGE-DEV's runner was destroyed on 2026-09-02: `.runner`, `.credentials` and
+`svc.cmd` were deleted while the service stayed registered but stopped, and the
+GitHub registration (id 25) was subsequently deleted deliberately, because a
+stale OFFLINE registration blocks re-registering under the same name. So the host
+is ABSENT from the fleet, not merely unqualified.
+
+Albert must run these two, in an **Administrator PowerShell on EDGE-DEV**, with
+`gh` signed in inside that elevated session:
+
+```powershell
+pwsh -File bin\promote-windows-runner-to-service.ps1
+winget install --id Python.Python.3.13 --scope machine
+```
+
+`bin/promote-windows-runner-to-service.ps1` shipped in #229. It is idempotent and
+handles all three broken states, including this one. Do NOT substitute a
+hand-built `config.cmd` line: with `.credentials` gone, `config.cmd remove`
+cannot authenticate, and `config.cmd` cannot install over the leftover service.
+The script deletes the leftover service first, drops the stale registration via
+the API when local credentials are gone, and pipes the registration token on
+standard input so it never reaches a command line or a log.
+
+Python matters because it is currently installed under a per-user path, which a
+service account cannot see. The script warns about any of git/gh/jq/pwsh/node/python
+in that state.
+
+*You'll know it worked when* the script's last line starts `PASS:` and
+`gh api repos/popcre/ai-devops/actions/runners` shows `edge-dev-win` online with
+labels `self-hosted, Windows, X64, edge-dev, ai-devops-windows`.
+
+**Step B - qualify EDGE-DEV.** Dispatch the `qualify Windows runner` workflow.
+**Guard against it landing on EDGE-ALIEN**, which shares the `ai-devops-windows`
+candidate label. On green, add `ai-devops-windows-qualified` and keep the other
+labels; never add `edge-dev` to any `runs-on`.
+
+**Step C - failover and reboot proof.** Only possible once a second host is
+qualified. Reboot one host with nobody signed in, confirm the service returns on
+its own, and confirm a job runs with the other host offline.
+
 
 **Step 0 — orientation (always).** From a current-main checkout read `AGENTS.md`,
 then the STATUS table and B2a section of `plan_repo-throughput-restructure.md`,
