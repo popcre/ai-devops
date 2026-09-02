@@ -77,14 +77,14 @@ jobs:
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     if: github.event_name != 'merge_group'
-    # GitHub-hosted, not edge-dev. The self-hosting rationale in 7adaefd8 is
-    # about reproducing Windows *timing* flakes on a known machine, and that
-    # applies to the long windows-offline suite, not to these two review
-    # suites. Running both Windows jobs on the edge-dev pool serialized 14-25
-    # minutes ahead of a 63-75 minute job on the same physical machine, which
-    # is what pushed windows-offline past its 75-minute ceiling (#204). This
-    # repository is public, so hosted minutes are free.
-    runs-on: windows-2025
+    # Self-hosted on edge-dev, like windows-offline. Moving this job to the
+    # GitHub-hosted windows-2025 image was tried on 2026-09-02 to take its
+    # 14-25 minutes off the edge-dev pool (#204). The reviewer suites stalled
+    # there: the held Grok stub never observed the test's release file, both
+    # background turns ran to their 480s ceiling, and the job died at 30
+    # minutes with no failure to read. That is precisely the unreproducible
+    # Windows timing flake self-hosting exists to avoid (7adaefd8).
+    runs-on: [self-hosted, Windows, X64, edge-dev]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
