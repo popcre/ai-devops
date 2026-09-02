@@ -246,6 +246,19 @@ The first host, `EDGE-RUNN-ENVY`, exposed these reusable traps:
   Windows exposed the computer identity and `icacls` could not resolve it. The
   fixture now grants the current security SID directly, which is valid for both
   interactive users and runner services without weakening the ACL assertion.
+- Do not use `$env:USERNAME` or `%USERNAME%` to secure runner-created files.
+  Under the GitHub service it can be the computer identity, such as
+  `EDGE-RUNN-ENVY$`, which is not the service's security principal. Resolve
+  `[Security.Principal.WindowsIdentity]::GetCurrent().User.Value` and grant the
+  resulting SID instead. Tests may use the matching `.Name` only when reading
+  and verifying the ACL that was already granted by SID.
+- Do not compare a Git Bash `/tmp/...` string directly with a path saved by a
+  native Windows child process. Under Network Service they can name the same
+  directory as `/tmp/...` and
+  `/c/Windows/ServiceProfiles/NetworkService/AppData/Local/Temp/...`. Immediately
+  normalize a new fixture root with `TMP="$(cd "$TMP" && pwd -P)"` before
+  exporting state, sandbox or progress paths. This fixed false concurrency
+  stalls without increasing timeouts or weakening reviewer lock assertions.
 - The service does not have permission to read TPM state directly. The
   Administrator preflight records a narrow, non-secret attestation instead.
 - Incorrect system time made fresh evidence look stale. Enabling Windows Time,
@@ -281,8 +294,15 @@ failure without its logs.
   `ai-devops-windows`.
 - Administrator preflight passed.
 - Service-visible dependency gate passed.
-- Complete offline matrix is currently in progress in Actions run
-  [33544988495](https://github.com/popcre/ai-devops/actions/runs/33544988495),
-  job `99985106789`.
+- Run
+  [33559660147](https://github.com/popcre/ai-devops/actions/runs/33559660147)
+  proved security, service-visible dependencies and reusable cleanup, then
+  exposed the username/SID and Git Bash/native temp-path defects above.
+- Both focused repairs passed locally (`ai-gemini`: 62/62; `ai-grok-review`:
+  199/199) and received independent exact-head approval on commit `fa46a1f`.
+- The corrected complete offline matrix passed in 1h00m14s in Actions run
+  [33571202823](https://github.com/popcre/ai-devops/actions/runs/33571202823),
+  job `100065323527`, on exact commit `fa46a1f`. This qualified the first host;
+  it did not yet admit that host to ordinary CI.
 - Ordinary CI admission, second/third physical hosts, failover proof and EDGE-DEV
   retirement remain open under #209.
