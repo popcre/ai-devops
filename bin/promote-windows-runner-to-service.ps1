@@ -62,8 +62,12 @@ if (Test-Path -LiteralPath $runnerFile -PathType Leaf) {
   $workFolder = '_work'
 }
 
-$registered = gh api "repos/$Repository/actions/runners" --jq "[.runners[]|select(.name==\`"$RunnerName\`")]|first" | ConvertFrom-Json
+# Filter in PowerShell rather than in a --jq expression. Embedded quotes in a
+# jq filter do not survive PowerShell native argument passing; they reach gh as
+# backslash-escaped quotes and jq rejects them.
+$runnerList = gh api "repos/$Repository/actions/runners" | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'gh could not read the runner list; sign gh in inside this elevated session first.' }
+$registered = @($runnerList.runners | Where-Object { $_.name -eq $RunnerName })[0]
 if ($registered) {
   $remoteLabels = ($registered.labels | Where-Object type -eq 'custom' | ForEach-Object name) -join ','
   if ($remoteLabels) { $Labels = $remoteLabels }
