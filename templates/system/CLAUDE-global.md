@@ -78,8 +78,8 @@ in the issue, plan, or handoff — the reply to Albert stays under 150 words.
 
 - **Preserve the capability.** Diagnose and repair broken tools or services; do
   not remove, disable, bypass, or replace them as a substitute for repair.
-- A repair is complete only when the reported problem is gone and the original
-  capability still works. If impossible, stop before reducing function and ask.
+- A repair is complete only when the reported problem is gone and the original capability still works. If
+  impossible, stop before reducing function and ask.
   Never present symptom suppression as a fix.
 - Recover from routine errors and continue without a "proceed" loop. Mention an
   error only if it changes the result, causes loss, or needs Albert's action.
