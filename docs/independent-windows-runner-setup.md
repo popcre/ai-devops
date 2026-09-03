@@ -249,7 +249,44 @@ Only after the exact qualification job is green:
 5. take one qualified runner offline and prove the other physical hosts keep
    Windows CI operational;
 6. prove restart, automatic runner update, workspace cleanup and visible
-   offline/capacity reporting.
+   offline/capacity reporting;
+7. prove **unattended administrative recovery**, not just unattended CI
+   recovery - see the warning below.
+
+### A green runner does not mean you can still get into the machine
+
+Step 7 exists because of a real incident on 2026-09-03. `EDGE-RUNN-ENVY` was
+rebooted remotely to prove auto-start. The runner service came back `online` on
+its own in about two minutes and ran a full CI job to success with nobody signed
+in - and the host was simultaneously stranded, unreachable by SSH or RDP, until
+someone signed in at the physical keyboard.
+
+The two are independent. The runner service reaches GitHub over the ordinary
+internet, so **CI health says nothing about whether the host can still be
+administered.** Tailscale on that machine was not in unattended mode, so the node
+only rejoined the private network after an interactive login - and every remote
+route to the host runs over Tailscale (see the SSH section below).
+
+Before admitting any host, put Tailscale into unattended mode on it and verify
+the preference is actually set, rather than trusting that it connected once:
+
+```powershell
+tailscale up --unattended
+tailscale debug prefs    # expect "ForceDaemon": true
+```
+
+Then prove it the only way that counts: reboot the host while it is idle and
+confirm you can reach it again **without anyone signing in**. Both current pool
+members passed this on 2026-09-03 (`edge-dev-win` preventively before its first
+reboot, `EDGE-RUNN-ENVY` after the incident above, reverified by a second
+reboot). Recovery took roughly two to three minutes on both.
+
+Check the pool is idle before rebooting anything - a reboot cancels a running
+job, and it reports as `cancelled` rather than failed:
+
+```bash
+gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) \(.status) busy=\(.busy)"'
+```
 
 Do not add `edge-dev` merely to drain the backlog before qualification. Required
 green checks are approval evidence, so faster unqualified checks are not useful.
