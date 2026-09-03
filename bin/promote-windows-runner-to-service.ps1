@@ -24,9 +24,12 @@ It is safe to run twice. A runner that is already a running service with
 automatic start is left alone.
 
 Registration and removal tokens are requested from GitHub through the
-already-authenticated gh CLI while the script runs, and are handed to the runner
-on standard input. They never appear on a command line, in a log, or in the
-repository.
+already-authenticated gh CLI while the script runs. The removal token goes to
+config.cmd on standard input. The registration token cannot: config.cmd reads it
+with a masked console read that fails when standard input is redirected, so
+--unattended --token is the only route the runner offers. That token is minted
+seconds before use, is single-purpose, and expires within the hour. Neither token
+is ever written to a log, a transcript, or the repository.
 
 .EXAMPLE
 pwsh -File bin\promote-windows-runner-to-service.ps1
@@ -121,17 +124,25 @@ if (-not $healthy) {
     Write-Output 'Configuring the runner in service mode.'
     $registrationToken = gh api --method POST "repos/$Repository/actions/runners/registration-token" --jq .token
     if ($LASTEXITCODE -ne 0 -or -not $registrationToken) { throw 'Could not obtain a runner registration token.' }
+    # config.cmd reads the token with a masked console read, which fails outright
+    # when standard input is redirected ("Cannot read keys when either application
+    # does not have a console or when console input has been redirected"). So a
+    # pipe cannot be used and --unattended --token is the only route the runner
+    # offers. The token is a registration token minted seconds earlier by gh, is
+    # single-purpose, and expires within the hour; it is visible only in this
+    # elevated process's own command line and never reaches a log, a transcript
+    # or the repository.
     $arguments = @(
       '--url', "https://github.com/$Repository",
       '--name', $RunnerName,
       '--labels', $Labels,
       '--work', $workFolder,
       '--replace',
-      '--runasservice'
+      '--unattended',
+      '--runasservice',
+      '--token', $registrationToken
     )
-    # The token is the only answer config.cmd still needs; the blank lines accept
-    # the default runner group. It travels on standard input only.
-    "$registrationToken`n`n`n" | & .\config.cmd @arguments
+    & .\config.cmd @arguments
     $registrationToken = $null
     if ($LASTEXITCODE -ne 0) { throw "config.cmd failed with exit code $LASTEXITCODE." }
   } finally {
