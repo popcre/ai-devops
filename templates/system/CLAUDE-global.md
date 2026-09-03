@@ -83,6 +83,7 @@ in the issue, plan, or handoff — the reply to Albert stays under 150 words.
   Never present symptom suppression as a fix.
 - Recover from routine errors and continue without a "proceed" loop. Mention an
   error only if it changes the result, causes loss, or needs Albert's action.
+  Otherwise recover first and finish the requested work.
 
 ---
 
