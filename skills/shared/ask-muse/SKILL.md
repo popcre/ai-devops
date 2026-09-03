@@ -1,6 +1,6 @@
 ---
 name: ask-muse
-description: Start or continue a persistent protected Muse Spark 1.2 Contributor review or debate. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", or requests a Muse Spark second opinion.
+description: Start or continue a persistent protected Muse Spark 1.3 Contributor review or debate. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", or requests a Muse Spark second opinion.
 ---
 
 # Persistent Muse review and debate

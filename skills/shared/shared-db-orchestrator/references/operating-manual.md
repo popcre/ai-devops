@@ -203,7 +203,7 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2
+The GitHub-backed cursor rotates Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3
 Contributor, then repeats across machines and restarts. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
 `ai-grok-review`, `ai-glm`, `ai-kimi`, `ai-muse`, or — for the overflow provider

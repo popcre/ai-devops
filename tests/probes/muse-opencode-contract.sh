@@ -9,7 +9,7 @@ command -v curl >/dev/null || { echo 'curl is required.' >&2; exit 2; }
 command -v jq >/dev/null || { echo 'jq is required.' >&2; exit 2; }
 
 BASE='https://api.meta.ai/v1'
-MODEL='muse-spark-1.2-contributor'
+MODEL='muse-spark-1.3-contributor'
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
