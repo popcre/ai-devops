@@ -1296,3 +1296,12 @@ underlying fragility; id-based references survive a rename.
   "Exact-head approval verified: PR #2155 head 58723af4... (1 approval(s),
   1 pinned assignment(s))" and exits 0. Required checks, preview and the guarded
   merge remain the orchestrator's separate steps.
+
+## 2026-09-03 — codex-gpt-5.6-sol, shared-db PR #2199 (ColdLion `/divisions` landing table)
+
+Two `ai-codex-review diff-review` runs against the same head `63d8441b37bf41fa7dd798ba313a58d666e2ea53`, read-only sandbox, caller `shared-db-orchestrator`.
+
+- Run `20260903T122923-602328-5026`, 157s, verdict REJECT. Raised one High finding: the migration omitted two source fields by extending an owner ruling made for a different feed, where the governing plan requires a per-feed ruling because omissions are permanent. It also refuted the author's reversibility argument on its own terms — the stored row hash records that a record changed, not what the omitted fields contained. The finding was correct and was escalated to the owner, who ruled.
+- Run `20260903T124954-688215-10953`, 214s, verdict APPROVE after the owner ruling was supplied in the brief. No defects at any severity. It did not simply accept the ruling: it re-derived why prerequisite guards, migration ordering and the foreign key make the second author decision safe, and cited exact file lines throughout.
+
+Objective notes: cited line numbers were accurate in both runs; the verdict body agreed with the final line in both runs; no decision word leaked outside the final section once the brief matched the wrapper's own two-line `## Verdict` contract. A first attempt failed with "Codex verdict must be the one final two-line section" because the brief imposed a different verdict format than the wrapper enforces — a brief must not override the wrapper's format contract.
