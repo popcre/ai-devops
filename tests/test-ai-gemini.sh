@@ -39,13 +39,13 @@ EOF
 cat > "$TMP/bin/agy" <<'EOF'
 #!/usr/bin/env bash
 set -e
-case "${1:-}" in --version) echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.7-flash-high'; exit;; esac
+case "${1:-}" in --version) echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
 printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
 if [[ "$args" == *" /model "* ]]; then
   [ "${MOCK_MODE:-normal}" = mutate-model ] && printf model-changed > dirty.txt
   cid='conv-good'; [[ "$args" == *"--conversation conv-good"* ]] || cid='wrong-model-conversation'
-  model='gemini-3.7-flash-high'; [ "${MOCK_MODE:-normal}" = wrongmodel ] && model='gemini-wrong'
+  model='gemini-3.8-flash-high'; [ "${MOCK_MODE:-normal}" = wrongmodel ] && model='gemini-wrong'
   printf '{"status":"SUCCESS","conversation_id":"%s","command":{"name":"model","data":{"id":"%s","is_default":false}}}\n' "$cid" "$model"
   exit
 fi
@@ -77,7 +77,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
-check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.7-flash-high\"' '$FIXTURES/model-mismatch.json'"
+check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
 check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.2'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
@@ -92,17 +92,17 @@ check 'quarantine exposes only the governed live qualification path without over
 check 'provider prompt states the exact allowed verdict words' "grep -q 'Replace APPROVE with REJECT or BLOCKED' '$SCRIPT'"
 check 'doctor rejects unknown options instead of overstating a live check' "! '$SCRIPT' doctor --unknown"
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
-check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.7-flash-high '"
+check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
 WRAPPER_SHA="$(sha256sum "$SCRIPT" | awk '{print $1}')"; AGY_SHA="$(sha256sum < "$AI_GEMINI_BIN" | awk '{print $1}')"
-write_qualification(){ jq -nc --arg sha "$WRAPPER_SHA" --arg agy "${1:-1.1.14}" --arg agy_sha "${3:-$AGY_SHA}" --arg model "${2:-gemini-3.7-flash-high}" '{version:2,provider:"gemini",wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:1}' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"; }
+write_qualification(){ jq -nc --arg sha "$WRAPPER_SHA" --arg agy "${1:-1.1.14}" --arg agy_sha "${3:-$AGY_SHA}" --arg model "${2:-gemini-3.8-flash-high}" '{version:2,provider:"gemini",wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:1}' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"; }
 write_qualification
 check 'valid governed record releases the wrapper gate' "$SCRIPT doctor | grep -q '^PASS'"
 RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"
-write_qualification 1.1.14 gemini-3.7-flash-high "$RACE_SHA"
+write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"
 RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
 check 'runtime replacement after startup gate is refused before provider contact' "! (cd '$RACE_REPO' && AI_GEMINI_BIN='$RACE_AGY' MOCK_MUTATE_RUNTIME_AFTER_GATE=1 '$SCRIPT' new runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
 REAL_SHA256SUM="$(command -v sha256sum)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
@@ -111,13 +111,13 @@ cat > "$TMP/race-bin/sha256sum" <<'EOF'
 case "$*" in *inventory-race-trigger*) if [ ! -e "$MOCK_INVENTORY_RACE_DONE" ]; then printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"; : > "$MOCK_INVENTORY_RACE_DONE"; fi;; esac
 exec "$REAL_SHA256SUM" "$@"
 EOF
-chmod +x "$TMP/race-bin/sha256sum"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.7-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
+chmod +x "$TMP/race-bin/sha256sum"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
 check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" REAL_SHA256SUM='$REAL_SHA256SUM' MOCK_INVENTORY_RACE_DONE='$TMP/inventory-race-done' AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
 check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
 check 'model drift re-quarantines before provider contact' "! '$SCRIPT' new stale-model --prompt review && test ! -s '$MOCK_AGY_CALLS'"
-write_qualification 1.1.14 gemini-3.7-flash-high "$(printf '%064d' 0)"
+write_qualification 1.1.14 gemini-3.8-flash-high "$(printf '%064d' 0)"
 check 'same-version runtime byte drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime-bytes --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 printf '{"version":2,"provider":"gemini"}\n' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"
 check 'missing qualification fields fail closed before provider contact' "! '$SCRIPT' new malformed --prompt review && test ! -s '$MOCK_AGY_CALLS'"

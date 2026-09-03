@@ -87,7 +87,7 @@ if (mode === 'mutate-source-committed') {
   spawnSync('git', ['-C', repo, 'commit', '-qm', 'live-drift']);
 }
 if (mode === 'fail') { console.log('{"type":"assistant","message":{"content":[]}}'); process.exit(0); }
-const returnedModel = mode === 'wrong-model' ? 'qwen-other' : 'qwen3-coder-plus';
+const returnedModel = mode === 'wrong-model' ? 'qwen-other' : 'qwen3.8-max';
 console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:returnedModel,content:[]}}));
 console.log(JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,num_turns:2,result:'## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}));
 STUBEOF
@@ -127,6 +127,7 @@ check 'syntax is valid' "bash -n '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$QWEN_HOME_DIR/.ai-devops-private-home-v1\" ]' '$SCRIPT'"
 check 'help exits zero' 'run --help'
 check 'production Qwen executable overrides are refused' "! env -u AI_QWEN_TEST_DIR AI_QWEN_BIN='$STUB/qwen' bash '$SCRIPT' --help"
+check 'Windows official Qwen path comparison normalizes drive-letter paths' "grep -Fq 'physical=\"\$(cygpath -u \"\$physical\"' '$SCRIPT'"
 INSTALL_OUT="$(env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen 2>&1)"; INSTALL_RC=$?
 [ "$INSTALL_RC" -eq 0 ] && grep -q '"BAILIAN_CODING_PLAN_API_KEY"' "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" && ok 'provider installer applies Qwen child-process credential hardening' || { printf '  diagnostic: installer: %s\n' "$INSTALL_OUT"; bad 'provider installer applies Qwen child-process credential hardening'; }
 cp "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" "$TMP/bad-sanitizer.js"
@@ -146,7 +147,7 @@ if [ -n "${SYSTEMROOT:-}" ]; then
 else
   check 'Qwen runtime home is mode 0700 before provider contact' "test \"\$(stat -c %a '$AI_QWEN_HOME')\" = 700"
 fi
-check 'review pins a Coding Plan supported Qwen model' "grep -q -- '--model qwen3-coder-plus' '$TMP/argv.txt'"
+check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
 check 'review uses plan mode' "grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
 check 'review excludes mutation tools' "grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"

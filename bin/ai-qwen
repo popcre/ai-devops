@@ -52,7 +52,7 @@ VERSION="0.1.0"
 
 STATE_DIR="${AI_QWEN_STATE_DIR:-$HOME/.local/state/ai-devops/qwen}"
 CALLER="${AI_QWEN_CALLER:-claude}"
-QWEN_MODEL="${AI_QWEN_MODEL:-qwen3-coder-plus}"
+QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max}"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
@@ -182,6 +182,11 @@ resolve_qwen() {
            /usr/local/bin/qwen; do
     [ -n "$c" ] && usable_qwen_bin "$c" || continue
     physical="$(readlink -f "$c" 2>/dev/null || true)"
+    if [ -n "${LOCALAPPDATA:-}" ] && [ -n "$physical" ]; then
+      # Git for Windows can return drive-letter paths for .cmd files while
+      # cygpath -u returns /c/...; compare one normalized representation.
+      physical="$(cygpath -u "$physical" 2>/dev/null || true)"
+    fi
     if [ -n "${LOCALAPPDATA:-}" ]; then
       case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/qwen-code/bin/qwen.cmd|"$(cygpath -u "$LOCALAPPDATA")"/qwen-code/qwen-code/bin/qwen|"$(cygpath -u "$LOCALAPPDATA")"/qwen-code/qwen-code/bin/qwen.cmd) ;;
         *) continue;; esac

@@ -146,7 +146,7 @@ private, self-deleting handoff file to the repository-owned Node preloader. Qwen
 launches in an explicit allowlisted OS environment with no provider key and
 `QWEN_HOME` as its only home directory.
 The wrapper uses the international Coding Plan endpoint with the supported
-`qwen3-coder-plus` model. Never paste the key into Qwen
+`qwen3.8-max` model. Never paste the key into Qwen
 settings, prompts, command arguments, or logs. If the managed reference is
 missing, repair the ai-devops machine installation instead of configuring an
 unmanaged plaintext key.
