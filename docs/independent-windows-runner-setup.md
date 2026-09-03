@@ -490,6 +490,28 @@ failure without its logs.
   that host may be measured while a CI job is live on it: a local run and a CI
   job on the same four cores corrupt each other, which happened on 2026-09-02
   and cost two measurements.
+- **Re-measured 2026-09-03 after the second round of SentinelOne exclusions
+  landed.** Host idle, no runner job live, three consecutive runs agreeing to
+  within one percent. Against the 2026-09-02 baseline: `awk` loop 395 ms ->
+  216 ms, 100 process spawns 6499 ms -> 3494 ms, 30 `git --version` spawns
+  2722 ms -> 2326 ms. Measured on the same script the same day, `EDGE-DEV`
+  (i7-12700) gives awk 135 ms, 100 spawns 1402 ms, 30 git spawns 1123 ms, so
+  `EDGE-ALIEN` now sits at 1.6x on the pure-arithmetic loop, 2.5x on process
+  spawning and 2.1x on `git` spawning.
+- **What moved and what did not.** The script-engine penalty is gone: the same
+  arithmetic loop written in Windows PowerShell was 9.3x the i7-12700 before the
+  exclusions and is 1.47x now (367 ms against 250 ms), which is hardware. File
+  writes into the runner tree are 1.3x. Process creation did not improve
+  relative to hardware - it was about 2.1x before and is 2.1-2.5x now, and
+  `SentinelAgent` still burned 4.2 CPU-seconds across the roughly 7-second
+  benchmark. AMSI/script and file scanning were excluded; the process-creation
+  hook was not, and the suites are spawn-heavy.
+- **Consequence for admission.** The recoverable scanning penalty is largely
+  recovered, leaving roughly the hardware ratio plus a spawn tax. That is a real
+  improvement over the 3.4x that killed the earlier matrix runs, but it does not
+  by itself clear the bar: admission is fitness for `windows-offline`'s 75 minute
+  ceiling, and only a real qualification run can settle it. `EDGE-ALIEN` still
+  carries `ai-devops-windows-paused` and takes no CI until that run is spent.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
