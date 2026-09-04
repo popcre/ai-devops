@@ -61,24 +61,46 @@ done
 #
 # It fails OPEN. A local pre-check that refuses to run because gh is missing or
 # unauthenticated is worse than the collision it prevents; --force skips it.
+# The glob is overridable so the suite can drive this with fixture .runner
+# files instead of whatever happens to be installed on the test machine. That
+# matters: the GitHub-hosted CI lanes have no runner installed, so a check
+# gated on real files would silently pass there and prove nothing.
+AI_TEST_RUNNER_DIRS="${AI_TEST_RUNNER_DIRS:-/c/actions-runner* $HOME/actions-runner*}"
+
+# Names are compared case-insensitively, with NULs and CRs stripped. The GitHub
+# API returns EDGE-ALIEN where that host's own .runner may say edge-alien, and
+# a stray CR from a Windows tool would make an exact compare fail open -- that
+# is, run the series on a busy host while reporting all clear. Dropping NULs
+# also lets a UTF-16 .runner parse, instead of yielding nothing and silently
+# turning the guard off.
+normalise_names() { tr -d '\000\r' | tr '[:upper:]' '[:lower:]' | sed '/^$/d'; }
+
 local_runner_names() {
-  local f name
-  for f in /c/actions-runner*/.runner "$HOME"/actions-runner*/.runner; do
+  local d f name
+  for d in $AI_TEST_RUNNER_DIRS; do
+    f="$d/.runner"
     [ -f "$f" ] || continue
-    name="$(sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
+    name="$(tr -d '\000' < "$f" |
+              sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+              head -1)"
     [ -n "$name" ] && printf '%s\n' "$name"
-  done
+  done | normalise_names
 }
 
 refuse_if_local_runner_busy() {
-  [ "$FORCE" -eq 1 ] && return 0
+  if [ "$FORCE" -eq 1 ]; then
+    # Say it out loud. An unlogged escape hatch gets used under time pressure
+    # and then nobody can tell, afterwards, why two runs killed each other.
+    echo 'ai-test-local: --force given; skipping the same-host CI check.' >&2
+    return 0
+  fi
   local names; names="$(local_runner_names)"
   [ -n "$names" ] || return 0
   command -v gh >/dev/null 2>&1 || return 0
 
   local busy_remote
   busy_remote="$(gh api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
-                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null)" || return 0
+                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || return 0
 
   local n busy=""
   while IFS= read -r n; do

@@ -310,7 +310,15 @@ foreach ($i in 1..20) {
     Start-Sleep -Seconds 2
   }
 }
-if (-not $smoke.HasExited) { Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue }
+if (-not $smoke.HasExited) {
+  # Kill the whole tree, not just bash. Bash does not reliably take its opencode
+  # child with it, and Stop-PortOwner below can only act on what the TCP table
+  # shows -- which is nothing if Get-NetTCPConnection is unavailable or the
+  # child has not bound yet. Killing the tree we started needs no lookup and
+  # cannot touch a process we do not own.
+  & taskkill.exe /PID $smoke.Id /T /F 2>&1 | Out-Null
+  Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue
+}
 Stop-PortOwner $Port
 # Killing bash does not always take the opencode child with it, and even when it does the
 # socket lingers. Starting the scheduled task while the port is still held means the real
@@ -324,7 +332,7 @@ function Wait-PortFree($p, $seconds) {
   return $false
 }
 if (-not (Wait-PortFree $Port 30)) {
-  Warn "Port $Port is still held after the smoke test; stopping whatever holds it."
+  Warn "Port $Port is still held after the smoke test; stopping our own listener on it."
   Stop-PortOwner $Port
   [void](Wait-PortFree $Port 15)
 }

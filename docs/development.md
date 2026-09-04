@@ -143,6 +143,14 @@ bin/ai-test-local
 directly as `tests/run-parallel.sh` and `tests/run-parallel.ps1`, and both accept
 `--list` to show what would run.
 
+On a machine that also hosts a CI runner, both entry points refuse to collide
+with it. `bin/ai-test-local` checks once at start-up whether *this host's* runner
+is busy and stops with exit 3 if it is; `--force` overrides and says so.
+`tests/run-parallel.sh` additionally watches between suites and stops launching
+more if a job arrives mid-series, because a 65-minute run started while idle will
+otherwise be handed one. Both are per-host: a job on any other runner in the pool
+never blocks you, and nothing here serialises the pool.
+
 Measured on a 20-core desktop against current `main`: 58 Bash suites in 825
 seconds of wall clock against 5560 seconds of suite time, and the 16 PowerShell
 suites in 23 seconds instead of 38.
