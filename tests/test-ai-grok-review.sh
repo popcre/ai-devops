@@ -303,7 +303,7 @@ poll_until "$(budget 15 30)" 'two concurrent work locks' \
   "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "same_repo_different_session_and_packet_run_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 EXACT="$( cd "$CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; EXACT_RC=$?
-check "same_exact_session_and_turn_is_refused" "test '$EXACT_RC' -ne 0 && printf '%s' \"$EXACT\" | grep -Eq 'already has an owner|session-name collision|exact Grok'"
+check "same_exact_session_and_turn_is_refused" "test '$EXACT_RC' -ne 0 && printf '%s' \"$EXACT\" | grep -Eq 'already in progress|session-name collision|exact Grok'"
 CLAUDE_PID=''
 ( cd "$CLONE" && AI_GROK_CALLER=claude AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" bash "$SCRIPT" new claude-independent --prompt caller-different >"$TMP/claude.out" 2>"$TMP/claude.err" ) & CLAUDE_PID=$!
 poll_until "$(budget 15 30)" 'three concurrent work locks' \
@@ -639,7 +639,7 @@ mkdir -p "$LOCKDIR"; printf '%s\n' "$$" > "$LOCKDIR/pid"; printf 'new:t9\n' > "$
 OUT="$(run new t9 --prompt x 2>&1)"; RC=$?
 rm -rf "$LOCKDIR"
 [ $RC -ne 0 ] && ok "a second concurrent review is refused" || bad "a second concurrent review is refused"
-check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'already has an owner'"
+check "refusal names the running review" "printf '%s' \"\$OUT\" | grep -q 'already in progress'"
 
 # 13 ------------------------------------------------------------------------
 echo "== reviews_dir_safety =="
@@ -781,7 +781,7 @@ check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_
 # runner a normal ceiling fires first and it reports a timeout instead of the
 # refusal - failing this check for a reason that is not a wrapper defect.
 DUP_ASK="$(AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
-check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
+check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # Terminated by the test below, so it must not reach its own ceiling first:

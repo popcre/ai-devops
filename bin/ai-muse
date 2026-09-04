@@ -41,7 +41,12 @@ secure_review_directory(){
 }
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required."; }
 name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) [ "${#1}" -le 40 ];; esac; }
-[ -n "$CALLER" ] || { printf 'ai-muse: error: AI_MUSE_CALLER must explicitly name the caller (for example codex or claude).\n' >&2; exit 1; }
+[ -n "$CALLER" ] || { printf '%s\n' \
+  'ai-muse: error: this session has not named itself, so Muse did not start.' \
+  '  Muse itself is fine - this is local setup, not a Muse outage.' \
+  '  Set AI_MUSE_CALLER to the assistant running this command, then rerun:' \
+  '    export AI_MUSE_CALLER=claude   # or: codex' \
+  '    AI_MUSE_CALLER=claude ai-muse doctor' >&2; exit 1; }
 name_ok "$CALLER" || { printf 'ai-muse: error: invalid caller name %s.\n' "$CALLER" >&2; exit 1; }
 repo_root(){ git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: ${1:-$PWD}"; }
 repo_id(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
