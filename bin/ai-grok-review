@@ -1294,7 +1294,7 @@ cmd_new() {
 
   turns="${OPT_MAX_TURNS:-$DEFAULT_MAX_TURNS}"
   sess_lock="$(session_lock_path "$upstream" "$CALLER" "$name")"
-  session_lock_acquire "$sess_lock" "new:$name" || die "session '$name' already has an owner: $(lock_info "$sess_lock")"
+  session_lock_acquire "$sess_lock" "new:$name" || die "another Grok review named '$name' is already in progress: $(lock_info "$sess_lock"). Grok is available; only this exact session name is busy. Other Grok reviews in this repository can run at the same time - use a different session name, or check status with: ai-grok-review list"
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'" EXIT
 
@@ -1308,7 +1308,7 @@ cmd_new() {
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" new "$name" "$GROK_MODEL" "$source_id" "$prompt_digest" 1)"; rid_lock="$(work_lock_path "$workid")"
   if ! reserve_new_session "$upstream" "$name" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
-  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate paid review."; fi
+  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "an earlier Grok review using this exact session name ended without a confirmed result, so it is held for reconciliation. Grok is available; other reviews in this repository are unaffected. Use a different session name, or reconcile the held one first."; fi
   if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" 1; then
     lock_release "$sess_lock"
     die "this exact Grok review submission is already active or retained: $(lock_info "$rid_lock"). Status: ai-grok-review list"
@@ -1375,7 +1375,7 @@ cmd_ask() {
   Continuing would silently discard the provider cache. Start a new session instead."
 
   sess_lock="$(session_lock_path "$upstream" "$CALLER" "$name")"
-  session_lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
+  session_lock_acquire "$sess_lock" "ask:$name" || die "another turn of Grok session '$name' is already running: $(lock_info "$sess_lock"). Grok is available; only this exact session is busy. Wait for that turn, or start a differently named review. Status: ai-grok-review list"
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'" EXIT
 
@@ -1414,7 +1414,7 @@ $REVIEW_HEAD only."
   workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
   if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
   ACTIVE_TURN_RECORD="$(turn_record_path "$upstream" "$CALLER" "$name" "$next_turn")"
-  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "legacy Grok work protects this exact session; refusing a duplicate continuation."; fi
+  if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "an earlier turn of this exact Grok session ended without a confirmed result, so it is held for reconciliation. Grok is available; other reviews in this repository are unaffected. Reconcile the held session before continuing it."; fi
   if ! lock_acquire "$rid_lock" "ask:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" "$next_turn"; then
     lock_release "$sess_lock"
     die "this exact Grok continuation turn is already active or retained: $(lock_info "$rid_lock"). Status: ai-grok-review list"
