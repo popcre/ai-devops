@@ -55,3 +55,25 @@ Every key the wrappers parse is present and unchanged in shape:
 `stopReason`, `total_cost_usd` and the `modelUsage` model-identity key are the
 three the wrappers depend on for cancellation, cost ceilings and model truth.
 Measured cost of this probe: $0.0069.
+
+## Two-turn live qualification through the real wrapper
+Session `qual1013d`, `AI_GROK_CALLER=codex`, read-only, at head `20898d21ee4e`:
+
+| Turn | Call | Tokens | Cost |
+|---|---|---|---|
+| 1 | `ai-grok-review new` | 55567 (28928 cached) | $0.01211862 |
+| 2 | `ai-grok-review ask` (resume) | 15979 (15232 cached) | $0.00165002 |
+
+Both turns returned a terminal result with a verdict; the session resumed
+cleanly and prompt caching worked across turns. Turn 2's cost is far below
+turn 1's, which re-confirms on 1.0.13 that resumed `total_cost_usd` is per-call
+and must be summed by the caller, not read as a running total.
+
+Total live spend for the whole qualification, including the contract probe and
+one deliberate max-turns cancellation: under $0.04.
+
+## Behaviour re-checked rather than assumed
+- `--worktree` still creates no worktree in headless `-p` mode. 1.0.13 now says
+  so in its own help, so the wrapper's git-owned worktree stays correct.
+- A cancelled session still may not resume cleanly; the wrapper's advice to
+  start a fresh named session is unchanged and no longer names a stale version.

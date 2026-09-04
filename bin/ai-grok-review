@@ -1023,7 +1023,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  stopReason  : $sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
-      note "Grok 0.2.112 may not resume a cancelled session cleanly. Do not broaden"
+      note "Grok may not resume a cancelled session cleanly. Do not broaden"
       note "permissions or keep retrying an empty resume. Start a fresh named session"
       note "and include the last verified evidence in its brief."
       return 1 ;;

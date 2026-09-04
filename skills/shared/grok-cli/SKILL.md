@@ -5,9 +5,11 @@ description: Use xAI Grok Build through ai-grok-review for repository analysis, 
 
 # Grok CLI
 
-Before upgrading Grok Build from 1.0.5 or adapting wrappers for 1.0.6–1.0.13,
-read the STATUS table in `plan_grok-build-1.0.13-wrapper-integration.md` and
-continue issue #251 instead of re-planning the version transition.
+This repository qualifies exactly one Grok Build version, recorded in
+`config/provider-cli-versions.json` (currently 1.0.13). Both wrappers refuse
+paid work against any other build. Changing it means editing that policy file
+and re-qualifying against `docs/grok-build-1.0.13-release-disposition.md` — never
+relaxing the check.
 
 While [ai-devops issue #56](https://github.com/popcre/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
 
@@ -103,8 +105,8 @@ rejection, the number of turns already spent, or
 accumulated cost is never by itself a reason to stop a debate that is still producing
 new evidence.
 
-Measured on Grok 0.2.112 on 2026-08-10, resumed `total_cost_usd` is per-call, not
-cumulative. Add the reported value after every turn exactly once and report the running
+Measured on Grok 0.2.112 on 2026-08-10 and re-confirmed on 1.0.13 on 2026-09-04,
+resumed `total_cost_usd` is per-call, not cumulative. Add the reported value after every turn exactly once and report the running
 total, so cost stays visible even though it is not a stopping condition.
 
 ### When to stop
@@ -150,7 +152,7 @@ The wrapper tells you which case you are in and what to do. The one thing to int
 > broaden permissions and do not automatically raise `--max-turns`. Diagnose a vague
 > brief, an oversized change, or reviewer wandering; then start a fresh session with a
 > smaller exact scope. Cancellation is different: an empty resumed run after a
-> cancellation is a known 0.2.112/0.2.118 behaviour, so start a fresh session rather than
+> cancellation is known behaviour, so start a fresh session rather than
 > retrying that one.
 
 ## Verifying the install
@@ -195,7 +197,7 @@ and **preserves the worktree** so unique work is never silently deleted.
 ### Why hand-composing is banned
 
 `grok --worktree=<name>` is **accepted and silently ignored in headless mode**
-(measured on Grok 0.2.112, Windows, 2026-08-12). No error, no warning, no exit-status
+(measured on Grok 0.2.112, Windows, 2026-08-12; documented as such by 1.0.13). No error, no warning, no exit-status
 signal. Grok then runs in whatever `--cwd` points at — the primary checkout. On
 2026-08-12 that checkout was on a stale detached HEAD, so `read_file` and `list_dir`
 returned ordinary `NotFound` errors for paths that only existed on `origin/main`, and

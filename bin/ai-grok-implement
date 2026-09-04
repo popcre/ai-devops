@@ -336,9 +336,9 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
                --disable-web-search --no-memory)
   if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
 
-  # NOTE: --worktree is deliberately NOT passed. It is silently ignored in
-  # headless mode on Grok 0.2.112 and its absence is the whole point of this
-  # wrapper. Do not "restore" it.
+  # NOTE: --worktree is deliberately NOT passed. Grok 1.0.13 documents that
+  # headless mode (-p) creates no worktree from that flag, and its absence is
+  # the whole point of this wrapper. Do not "restore" it.
   local args=(--cwd "$(native_path "$wt")"
               --model "$GROK_MODEL"
               --prompt-file "$(native_path "$run_dir/brief.md")"
@@ -474,7 +474,7 @@ cmd_doctor() {
   if "$grok" models >/dev/null 2>&1; then echo OK; else echo "FAILED — run 'grok login'"; fi
   echo "state dir    : $IMPL_DIR"
   echo ""
-  echo "NOTE: 'grok --worktree' is silently ignored in headless mode on 0.2.112."
+  echo "NOTE: 'grok --worktree' creates no worktree in headless mode (-p)."
   echo "      This wrapper creates the worktree with git and passes only --cwd."
 }
 
