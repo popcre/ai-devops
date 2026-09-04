@@ -294,6 +294,12 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
 
   local before; before="$(primary_fingerprint "$repo")"
 
+  # The version gate runs before any state is created, not just before the paid
+  # turn. Refusing after `git worktree add` would leave a worktree and a branch
+  # behind and make the obvious retry fail on "worktree path already exists".
+  local grok; grok="$(resolve_grok)"
+  require_supported_grok_version "$grok"
+
   mkdir -p "$wt_root"
   git -C "$repo" worktree add -q -b "$branch" "$wt" "$base_sha" \
     || die "failed to create worktree $wt from $ref."
@@ -325,8 +331,6 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
 
   local out="$art/result.json" err="$art/result.err" diff="$art/changes.diff"
   cp "$run_dir/brief.md" "$art/brief.md"
-  local grok; grok="$(resolve_grok)"
-  require_supported_grok_version "$grok"
 
   # Permission set. NOT `--permission-mode auto`: auto-cancelling a tool ends the
   # run with stopReason "Cancelled" (measured 2026-08-12). An explicit --deny is

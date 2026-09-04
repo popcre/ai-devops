@@ -99,12 +99,24 @@ function Update-ProviderToExactVersion {
     try { Copy-Item -Force -LiteralPath $backup -Destination $Path; Write-Host "Restored the previous $($Provider.Name) from $backup" }
     catch { Write-Warning "Restore from $backup FAILED; restore it by hand." }
   }
-  & $Path update --version $Version
-  if ($LASTEXITCODE -ne 0) { & $restore; throw "$($Provider.Name): 'update --version $Version' exited with status $LASTEXITCODE." }
-  $now = Get-ReportedProviderVersion -Path $Path
-  if ($now -ne $Version) {
-    & $restore
-    throw "$($Provider.Name): upgrade finished but the binary reports '$now', not $Version."
+  # Everything after the backup is inside try/finally. $ErrorActionPreference is
+  # 'Stop', so a throwing `update` -- a replaced or locked executable, a failed
+  # download -- would otherwise skip the restore entirely and leave the machine
+  # with a worse binary than the one it started with. $ok is set only on the
+  # single path that ends with the pinned version actually installed.
+  $ok = $false
+  try {
+    & $Path update --version $Version
+    if ($LASTEXITCODE -ne 0) {
+      throw "$($Provider.Name): 'update --version $Version' exited with status $LASTEXITCODE."
+    }
+    $now = Get-ReportedProviderVersion -Path $Path
+    if ($now -ne $Version) {
+      throw "$($Provider.Name): upgrade finished but the binary reports '$now', not $Version."
+    }
+    $ok = $true
+  } finally {
+    if (-not $ok) { & $restore }
   }
   Write-Host "$($Provider.Name) is now exactly $Version (previous binary kept at $backup)."
 }

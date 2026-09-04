@@ -12,7 +12,8 @@ wait loop stay in force on 1.0.13 exactly as they were on 1.0.5.
 
 ## Categories
 
-- **Adopted** — the repository changed to use or enforce it.
+- **Adopted** — the repository changed a file because of it: a wrapper, an
+  installer, a test, a pinned version, or documented guidance a session acts on.
 - **Inherited** — a native improvement we benefit from with no code change. The
   wrapper contract is unaffected; we record it so a later session does not
   "re-fix" something the vendor already fixed.
@@ -30,7 +31,7 @@ wait loop stay in force on 1.0.13 exactly as they were on 1.0.5.
 | 1.0.10 | — | Faster matching checkout reuse. | Provider worktree reuse (evaluated, not adopted: the repository owns worktree lifecycle, isolation and cleanup). |
 | 1.0.11 | Headless session discovery; permission-chain reliability; background wait completion. | Configurable interactive default; history duration/footer — documentation only. | The headless permission startup hint, and `--always-approve` / `--permission-mode auto` / `bypassPermissions` in every form. A reviewer that can approve its own tools is not read-only. Mouse/paste/cards/images/execute expansion/voice. |
 | 1.0.12 | MCP transient retry — carried to #249. Subagent wait isolation; reasoning/rewind/mode token truth; compaction state; worktree speed. | .NET watcher; recap reliability. | Table-copy and friendly prompt descriptions. |
-| 1.0.13 | Truncation continuation and tool-call completion; transient inference retries; Windows home/worktree handling; durable session saves; compaction/truncation diagnostics; subagent/MCP startup. | Large-image resilience; compressed updates; monitor stop reminder. | Full UUID scheduled IDs — nothing in this repository consumes them yet. iTerm image preview and Windows hyperlink cosmetics. |
+| 1.0.13 | The version pin itself: 1.0.13 is the qualified build, installed by exact version, enforced by both wrappers, and recorded in `tests/verification/grok-build-1.0.13/`. | Truncation continuation and tool-call completion; transient inference retries; Windows home/worktree handling; durable session saves; compaction/truncation diagnostics; subagent/MCP startup; large-image resilience; compressed updates; monitor stop reminder — all vendor-side, all benefiting the wrappers with no code change, none of them replacing a local control. | Full UUID scheduled IDs — nothing in this repository consumes them yet. iTerm image preview and Windows hyperlink cosmetics. |
 
 ## What "supported" now means
 
@@ -39,12 +40,20 @@ the defect: both wrappers parse one build's terminal JSON, stop reasons, usage
 and cost keys, and session behaviour, and that parsing was never version-checked.
 
 Now the exact qualified version is a repository fact in
-[`config/provider-cli-versions.json`](../config/provider-cli-versions.json),
-read by one tool, `bin/ai-provider-version`, and enforced in four places:
+[`config/provider-cli-versions.json`](../config/provider-cli-versions.json).
+That file is the single source of truth. Two readers consume it, because the
+Windows installer cannot depend on Bash or `jq`: `bin/ai-provider-version` on
+Unix and `Get-RequiredProviderVersion` in the Windows installer. Both take the
+first `x.y.z` in a version banner, and both are covered by their own tests, so
+the two can never disagree about which build is qualified. It is enforced in
+four places:
 
 - both installers upgrade a wrong build to exactly the pinned version with
   `grok update --version <VERSION>`, keeping a restorable backup of the previous
-  executable and rolling back on failure or on a wrong resulting version;
+  executable and rolling back on a failed update, on a wrong resulting version,
+  and on an unexpected error part-way through — the Windows path restores from
+  a `finally` block, so even a throwing or locked `update` cannot leave the
+  machine on a worse binary than it started with;
 - both wrappers refuse paid work against any other build, before the provider is
   contacted, naming the installed and the required version;
 - both doctors report the installed version against the required one;

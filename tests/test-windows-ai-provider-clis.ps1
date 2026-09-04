@@ -135,7 +135,58 @@ try {
   $mute = Join-Path $versionFixture 'mute.cmd'
   Set-Content -LiteralPath $mute -Value '@exit /b 0'
   Assert ($null -eq (Get-ReportedProviderVersion -Path $mute)) 'a provider that reports no version must not pass as qualified'
+
+  # Behavioural rollback. Reading the installer's source only proves the restore
+  # text exists; these run it. The third case is the one that matters: an
+  # `update` that THROWS rather than exiting non-zero must still restore, or a
+  # replaced or locked executable leaves the machine worse than it started.
+  $upgradeFn = $ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Update-ProviderToExactVersion'
+  }, $true)
+  Assert ($upgradeFn.Count -eq 1) 'could not load the exact-version upgrade path for its fixture'
+  Invoke-Expression $upgradeFn[0].Extent.Text
+
+  $fakeProvider = [pscustomobject]@{ Name = 'Fake Grok'; Command = 'grok' }
+  # Keep fixture backups inside the fixture. A test must never write into the
+  # operator's real provider-CLI backup directory.
+  $savedHome = $HOME
+  Set-Variable -Name HOME -Value $versionFixture -Scope Local -Force
+  $reportsOld = '@echo off' + "`r`n" + 'if [%1]==[--version] (echo grok 1.0.5 ^(fake^) [stable] & exit /b 0)' + "`r`n"
+  $cases = @(
+    @{ name = 'a non-zero update';                        tail = 'exit /b 7' }
+    @{ name = 'an update that reports the wrong version'; tail = 'exit /b 0'; rewriteTo = '9.9.9' }
+    @{ name = 'an update that destroys the binary';       tail = 'del "%~f0" >nul 2>&1' + [Environment]::NewLine + 'exit /b 0' }
+  )
+  foreach ($case in $cases) {
+    $live = Join-Path $versionFixture 'live-grok.cmd'
+    if ($case.rewriteTo) {
+      # Succeeds, but the resulting binary is not the pinned version.
+      $body = '@echo off' + "`r`n" + 'if [%1]==[--version] (echo grok ' + $case.rewriteTo + ' & exit /b 0)' + "`r`n" + $case.tail
+      Set-Content -LiteralPath $live -Value $body
+    } else {
+      Set-Content -LiteralPath $live -Value ($reportsOld + $case.tail)
+    }
+
+    $threw = $false
+    try { Update-ProviderToExactVersion -Provider $fakeProvider -Path $live -Version '1.0.13' }
+    catch { $threw = $true }
+
+    Assert $threw ('{0} must fail loudly' -f $case.name)
+    Assert (Test-Path -LiteralPath $live) ('{0} must leave a usable binary behind, not a hole' -f $case.name)
+    # A .cmd cannot safely rewrite itself mid-execution, so the wrong-version
+    # fake reports 9.9.9 both before and after; what it proves here is that a
+    # resulting version other than the pin is rejected and restored rather than
+    # accepted. Rollback that really reverts a mutated binary is proved on the
+    # Unix side, where the fake rewrites its own version on update. The
+    # destroying case is the one that needs the `finally`: it leaves no binary
+    # at all, and only the backup can put one back.
+    $expected = if ($case.rewriteTo) { $case.rewriteTo } else { '1.0.5' }
+    Assert ((Get-ReportedProviderVersion -Path $live) -eq $expected) ('{0} must restore the previous binary' -f $case.name)
+  }
 } finally {
+  if ($savedHome) { Set-Variable -Name HOME -Value $savedHome -Scope Local -Force }
   $env:AI_PROVIDER_VERSIONS_FILE = $savedPolicyEnv
   if (Test-Path -LiteralPath $versionFixture) { Remove-Item -LiteralPath $versionFixture -Recurse -Force }
 }
