@@ -96,6 +96,14 @@ races, and idempotent finalization.
 
 ## Testing
 
+Start manual GitHub verification through `ai-verify-run start`, with the
+originating task and purpose. It refuses an active exact-SHA duplicate and never
+cancels as a side effect. GitHub serializes same-SHA manual requests without
+cancelling the running one; after the lock is acquired, an already-successful
+exact-SHA manual run is reused instead of repeating the expensive jobs.
+Cancellation is a separate exact-run command with an explicit discard-proof
+confirmation.
+
 Run the complete declared offline suite on Windows with one command:
 
 ```powershell

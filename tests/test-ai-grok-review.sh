@@ -764,13 +764,11 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # could expire a correct owner immediately before the exact retry checked it.
 ( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
 ( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
-# Snapshot isolation must start with the suite, not only in the final boundary
-# section. Before #177, packet refreshes happened outside TMP, so this otherwise
-# complete fixture fingerprint went silent for 135s on loaded Windows CI. The
-# suite-owned sandbox now lives under TMP and a genuine stall keeps the same
-# window and diagnostic.
-poll_until_progress "$(budget 15 30)" 'both named ask turns hold their own session locks' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-a.err' '$TMP/ask-b.err' '$TMP/ask-a.out' '$TMP/ask-b.out'" \
+# Packet construction can spend minutes inside one antivirus-scanned Git
+# operation without changing any observable file. The owning worker is the
+# reliable progress signal: wait while it is alive, but still fail if it exits
+# before publishing both locks or reaches its own bounded timeout.
+poll_worker_until "$ASK_A_PID" "$(budget 80 480)" 'both named ask turns hold their own session locks' \
   "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 # The duplicate needs the same wide ceiling as the turns it must lose to. It
@@ -790,8 +788,7 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # terminate a process that holds no lock, and the retries then assert against
 # state an interrupt never produced - reporting a wrapper defect that does not
 # exist. Say so instead.
-poll_until_progress "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-uncertain.err' '$TMP/ask-uncertain.out' '$TMP/hold-started'" \
+poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask took its work lock and reached the Grok stub' \
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true

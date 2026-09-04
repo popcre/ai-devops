@@ -30,6 +30,7 @@ a script you run from the shell (installed as symlinks in `/usr/local/bin`).
 |---|---|---|
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
 | Workspace safety | `bin/ai-workspace-status` | Read-only git/branch/PR/dirty snapshot + warnings |
+| Manual verification | `bin/ai-verify-run` | Provenance-bearing dispatch, duplicate refusal, status, and separately confirmed cancellation |
 | Approval review | `bin/ai-review`, `bin/ai-claude-review`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted Claude Opus 5 or Codex approval |
 | Model invocation | `bin/ai-model-call` | Runs one stage with validated arguments and atomic output; never shell-evaluates config |
 | Task orchestrator | `bin/ai-run-task` | Immutable seven-stage manifest, artifact chain, fail-closed resume and retry |
