@@ -39,7 +39,10 @@
 #     There is NO top-level `model` field; the real model id is the modelUsage
 #     key (`grok-4.5-build` for `--model grok-4.5`).
 #   Success stopReason observed: "end_turn" on 2026-08-05 and "EndTurn" on
-#     2026-08-10. Both are terminal success spellings from Grok 0.2.118.
+#     2026-08-10. Both are terminal success spellings from Grok 0.2.118, and
+#     "end_turn" is still what 1.0.13 emits (four live sessions, 2026-09-04).
+#     1.0.13 introduced no new terminal spelling, so the unrecognised-reason
+#     branch stays a refusal rather than a guess.
 #   `grok doctor` is a TERMINAL diagnostic ("Check terminal, clipboard, color,
 #     and input support") — it is not an auth check at all. This is the whole
 #     explanation for the 2026-08-05 "not authenticated" contradiction.

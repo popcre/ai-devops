@@ -118,8 +118,11 @@ assurance its fail-closed boundary provides. The requested business capability
 therefore needs a separate tier whose stronger tools operate only inside a
 stronger external containment boundary.
 
-The 2026-09-03 confirmed provider baseline is Grok CLI
-`1.0.5 (5115b46bc9) [stable]` on EDGE-DEV. `grok --help` confirms headless tool
+The confirmed provider baseline is Grok CLI `1.0.13 (5e9a58528b76) [stable]` on
+EDGE-DEV, qualified 2026-09-04 and recorded in
+`tests/verification/grok-build-1.0.13/qualified-1.0.13-after.md`. It is now the
+only build this repository supports; the wrappers refuse any other. Nothing in
+1.0.6-1.0.13 changed the containment picture below. `grok --help` confirms headless tool
 filtering, permission modes, `--disable-web-search`, `--no-subagents`, custom
 agents, and `--sandbox`. The official Grok Build documentation confirms:
 
@@ -205,7 +208,7 @@ snapshot mode; it must not silently reinterpret existing behavior.
 
 ### Provider and platform capability matrix
 
-| Capability | Grok 1.0.5 / Linux | Grok 1.0.5 / Windows | Consequence |
+| Capability | Grok 1.0.13 / Linux | Grok 1.0.13 / Windows | Consequence |
 |---|---|---|---|
 | Select shell/web tools | Yes | Yes | Provider flags can reduce surface, but are not containment |
 | Native filesystem sandbox | Landlock/bubblewrap when supported | No documented enforcement | Windows must dispatch to an external Linux boundary |
@@ -282,8 +285,9 @@ broadening inside that wrapper.
 3. **Use a command allowlist or Grok hook as the primary guard.** Rejected:
    shell grammar, interpreters, package managers, test runners, Git helpers, and
    command substitution defeat semantic allowlists; official hooks fail open.
-4. **Run Grok's Windows process under `--sandbox`.** Rejected: Grok 1.0.5 does
-   not document Windows OS enforcement.
+4. **Run Grok's Windows process under `--sandbox`.** Rejected: Grok 1.0.13 still
+   does not document Windows OS enforcement. 1.0.13's Windows fixes are home-path
+   and worktree handling, not containment.
 5. **Use only Grok `strict` on Linux.** Rejected: built-in failure can warn and
    continue, strict permits CWD writes, and its child network control is block/
    allow rather than destination allowlisting. A custom fail-closed profile is
@@ -384,9 +388,13 @@ one egress decision point. It does not require Grok to enforce controls it lacks
 
 ### OPEN — resolve by the named gates, not by guess
 
-1. **Grok-to-sandbox tool bridge.** First test whether Grok 1.0.5 can use a
+1. **Grok-to-sandbox tool bridge.** First test whether Grok 1.0.13 can use a
    single controller-owned local MCP/tool whose server exposes only
-   `sandbox_exec` and cannot access host data. If MCP transport necessarily
+   `sandbox_exec` and cannot access host data. 1.0.12 and 1.0.13 added MCP
+   connection retries and faster authenticated startup; those are reliability
+   changes, not permission changes, and the bridge's hostile tests must treat a
+   retry as a duplicate call: bounded, idempotent, incapable of widening an
+   endpoint or replaying a write, and never falling back to ambient MCP. If MCP transport necessarily
    exposes credentials/config or weakens transcript/lifecycle guarantees, use a
    controller-mediated agent profile/tool adapter. Gate: hostile tool-discovery
    tests show no Bash-on-controller, general MCP, or alternate integration tool.
@@ -794,7 +802,7 @@ Natural context cut: update STATUS, use `fresh-session`, and re-read Phases 4-7.
   `bffec57fb81ae02362b54bc48831044c5abec37a`.
 - Current remote: `https://github.com/popcre/ai-devops.git`.
 - Machine: EDGE-DEV, Windows; Bash scripts run through Git Bash.
-- Installed Grok: `1.0.5 (5115b46bc9) [stable]`.
+- Installed Grok: `1.0.13 (5e9a58528b76) [stable]`, the only qualified build.
 - GitHub CLI is authenticated for issue/source-of-truth work. Grok credentials
   exist in the normal private provider home but must never be read or printed.
 - No application deployment or database exists for this repository.
@@ -893,7 +901,7 @@ reuse until reconciled.
 
 ### Genuinely unresolved provider/platform limitation
 
-Grok 1.0.5 supplies shell and cited web tools, but it does not supply a complete
+Grok 1.0.13 supplies shell and cited web tools, but it does not supply a complete
 cross-platform containment and domain-egress architecture. In particular, its OS
 sandbox does not enforce on Windows, Linux child-network restriction is not a
 domain allowlist, in-process web/LLM networking remains outside that restriction,

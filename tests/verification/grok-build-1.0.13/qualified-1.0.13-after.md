@@ -77,3 +77,36 @@ one deliberate max-turns cancellation: under $0.04.
   so in its own help, so the wrapper's git-owned worktree stays correct.
 - A cancelled session still may not resume cleanly; the wrapper's advice to
   start a fresh named session is unchanged and no longer names a stale version.
+
+## Wrapper-behaviour evaluation on 1.0.13 (plan Phases 3 and 4)
+
+Each 1.0.6-1.0.13 wrapper-facing addition was evaluated against live 1.0.13
+behaviour. Where the existing handling is already correct, the outcome is
+recorded as evaluated / no change rather than a speculative rewrite.
+
+- **Headless permission handling — evaluated, no change.** Four live read-only
+  sessions on 1.0.13 (`qual1013c`, `qual1013d`, `i251review`, `i251review2`,
+  `i251review3`) ran to a terminal result under the frozen narrow prefix with no
+  interactive permission prompt and no hang. Nothing in 1.0.6-1.0.13 removed a
+  real non-interactive prompt that the narrow rules did not already cover, so
+  the fixed prefix is unchanged. `--always-approve`, `--permission-mode auto`
+  and `bypassPermissions` remain forbidden in every form.
+- **Terminal-result and stop-reason handling — evaluated, comment corrected.**
+  1.0.13 still emits `end_turn` on success and `cancelled` on cancellation; it
+  introduced no new terminal spelling. The unrecognised-reason branch therefore
+  stays a refusal, not a guess. One deliberate max-turns cancellation during
+  qualification exercised that path.
+- **Usage and cost handling — re-confirmed, no change.** Resumed
+  `total_cost_usd` is per-call on 1.0.13, not a running total (turn 2 of
+  `qual1013d` cost far less than turn 1). Model identity still comes from the
+  `modelUsage` key, not a top-level `model` field.
+- **Session discovery and transcript — evaluated, no change.** `list`, `show`,
+  `transcript` and resume all work on 1.0.13 against the exact named session.
+  Sessions remain scoped by repository and caller; the wrapper still requires an
+  explicit session name and never falls back to "most recent". 1.0.11's
+  browsable headless sessions change nothing the wrapper relies on.
+- **Implementation wrapper — audited, no behavioural change.** Its full suite
+  passes on 1.0.13 (40 checks). Wrapper-owned Git worktree creation, patch
+  export, primary-checkout immutability, failure preservation and cleanup are
+  retained; 1.0.13's own documentation now confirms headless `-p` creates no
+  worktree, which is why the wrapper keeps creating its own.
