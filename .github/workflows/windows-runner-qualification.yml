@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   qualify:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, Windows, X64, ai-devops-windows]
     # The complete matrix takes 60-75 minutes on the fastest qualified host.
     # EDGE-ALIEN was still passing tests at 90 minutes on 2026-09-02 (run
@@ -54,7 +55,7 @@ jobs:
             throw 'Git Bash is not installed at the supported machine-wide path.'
           }
           $runnerService = Get-Service | Where-Object Name -Like 'actions.runner.*'
-          if (-not $runnerService) { throw 'GitHub Actions runner service is not installed.' }
+          if (@($runnerService).Count -ne 1) { throw "Exactly one GitHub Actions runner service is required; found $(@($runnerService).Count)." }
           if ($runnerService.Status -ne 'Running') { throw 'GitHub Actions runner service is not running.' }
           $serviceConfig = $runnerService | ForEach-Object { Get-CimInstance Win32_Service -Filter "Name='$($_.Name)'" }
           if ($serviceConfig.StartMode -ne 'Auto') { throw 'GitHub Actions runner service is not automatic.' }

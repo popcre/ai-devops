@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-workflow="$ROOT/.github/workflows/verify.yml"
+workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 
 windows_timeout="$(sed -n '/^  windows-offline:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 case "$windows_timeout" in
@@ -24,15 +24,18 @@ grep -Fq "github.event_name == 'merge_group' && github.ref" "$workflow" || {
 ' >&2
   exit 1
 }
-# push: main keeps a per-SHA group so each immutable commit keeps its own proof.
+# Queue-tested commits must not consume a second Windows slot after landing.
+if grep -Eq '^[[:space:]]+push:' "$workflow"; then
+  printf 'FAIL: verify must not repeat merge-queue proof on push to main\n' >&2
+  exit 1
+fi
 grep -Fq '|| github.sha' "$workflow" || {
-  printf 'FAIL: push runs must still be scoped to their immutable source SHA
-' >&2
+  printf 'FAIL: manual verification must remain scoped to its immutable source SHA\n' >&2
   exit 1
 }
 # Neither Windows job may run on merge_group; a queue rebuild restarts them,
 # and the long suite holds a qualified pool host for over an hour each time.
-windows_skips="$(grep -c "if: github.event_name != 'merge_group'" "$workflow" | tr -d '
+windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
 [ "$windows_skips" -eq 2 ] || {
   printf 'FAIL: both Windows jobs must be skipped on merge_group
@@ -69,10 +72,61 @@ if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|e
   exit 1
 fi
 
-grep -Fq 'cancel-in-progress: true' "$workflow" || {
-  printf 'FAIL: duplicate verification runs for the same source must still be cancellable\n' >&2
+grep -Fq "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" "$workflow" || {
+  printf 'FAIL: only obsolete pull-request proof may be cancelled automatically\n' >&2
   exit 1
 }
 
-printf 'PASS: Windows work runs in both the hosted and qualified self-hosted lanes, headroom kept, superseded pull-request runs are cancellable, and the merge queue schedules no Windows jobs
-'
+grep -Fq 'requester_task:' "$workflow" && grep -Fq 'purpose:' "$workflow" || {
+  printf 'FAIL: manual verification must require visible task and purpose provenance\n' >&2
+  exit 1
+}
+required_inputs="$(grep -c '^[[:space:]]*required: true' "$workflow" | tr -d '\r')"
+[ "$required_inputs" -ge 2 ] || {
+  printf 'FAIL: both manual provenance inputs must be required\n' >&2
+  exit 1
+}
+grep -Fq "event: 'workflow_dispatch', status: 'completed'" "$workflow" &&
+grep -Fq "run.head_sha === sha && run.conclusion === 'success'" "$workflow" || {
+  printf 'FAIL: deduplication must reuse only complete successful exact-SHA proof\n' >&2
+  exit 1
+}
+grep -Fq 'run.id !== current' "$workflow" || {
+  printf 'FAIL: manual preflight must exclude its own run\n' >&2
+  exit 1
+}
+cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
+[ "$cancel_aware_jobs" -eq 3 ] || {
+  printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
+  exit 1
+}
+if grep -Fq 'if: always()' "$workflow"; then
+  printf 'FAIL: always() would keep superseded pull-request work running after cancellation\n' >&2
+  exit 1
+fi
+grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" "$workflow" || {
+  printf 'FAIL: untrusted fork pull requests must never reach the persistent self-hosted runner\n' >&2
+  exit 1
+}
+
+if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
+  mutation_dir="$(mktemp -d)"
+  trap 'rm -rf "$mutation_dir"' EXIT
+  assert_rejected() {
+    name="$1"
+    if WORKFLOW_POLICY_MUTATION_CHILD=1 WORKFLOW_UNDER_TEST="$mutation_dir/$name.yml" bash "$0" >/dev/null 2>&1; then
+      printf 'FAIL: policy test accepted mutation %s\n' "$name" >&2
+      exit 1
+    fi
+  }
+  sed "s/cancel-in-progress: \${{ github.event_name == 'pull_request' }}/cancel-in-progress: true/" "$workflow" >"$mutation_dir/manual-cancellation.yml"
+  assert_rejected manual-cancellation
+  sed "s/cancel-in-progress: \${{ github.event_name == 'pull_request' }}/cancel-in-progress: false/" "$workflow" >"$mutation_dir/pr-supersession.yml"
+  assert_rejected pr-supersession
+  sed 's/|| github.sha/|| github.run_id/' "$workflow" >"$mutation_dir/unique-manual-group.yml"
+  assert_rejected unique-manual-group
+  sed '0,/!cancelled()/s//!always()/' "$workflow" >"$mutation_dir/cancellation-insensitive-job.yml"
+  assert_rejected cancellation-insensitive-job
+fi
+
+printf 'PASS: Windows lanes and headroom are preserved, manual proof cannot be cancelled automatically, exact-SHA successes deduplicate, provenance is required, and PR supersession remains enabled\n'

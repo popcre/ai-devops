@@ -16,6 +16,8 @@ grep -Fq 'windows-runner-security.json' "$workflow" || fail 'qualification must 
 grep -Fq '[math]::Abs($evidenceAge.TotalHours) -gt 24' "$workflow" || fail 'qualification must reject stale evidence while tolerating bounded clock skew'
 grep -Fq "@('git', 'gh', 'jq', 'pwsh', 'node', 'python')" "$workflow" || fail 'qualification must prove every service-visible runtime dependency'
 grep -Fq 'actions.runner.*' "$workflow" || fail 'qualification must prove the runner service'
+grep -Fq '@($runnerService).Count -ne 1' "$workflow" || fail 'qualification must require exactly one runner service'
+grep -Fq 'github.event.pull_request.head.repo.full_name == github.repository' "$workflow" || fail 'fork pull requests must never reach the persistent runner'
 grep -Fq 'run: .\tests\test-all.ps1' "$workflow" || fail 'qualification must run the complete declared suite'
 grep -Fq 'git status --short --untracked-files=all' "$workflow" || fail 'qualification must prove reusable workspace cleanup'
 

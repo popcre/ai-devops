@@ -245,6 +245,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops version` | Print the toolkit version |
 | `ai-devops paths` | Print the paths this toolkit uses |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
+| `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review |
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |

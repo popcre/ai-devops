@@ -1,13 +1,20 @@
 name: verify
 
 on:
-  push:
-    branches: [main]
   pull_request:
   # Required for the merge queue: without this trigger a queued pull request
   # waits forever for checks that never start.
   merge_group:
   workflow_dispatch:
+    inputs:
+      requester_task:
+        description: Originating task or session
+        required: true
+        type: string
+      purpose:
+        description: Why this verification is needed
+        required: true
+        type: string
 
 concurrency:
   # A pull request is keyed on its *number*, not its head SHA. Keying on the SHA
@@ -15,17 +22,57 @@ concurrency:
   # across pushes and the two-runner Windows pool filled with builds nobody was
   # waiting for (issue #204: nine queued runs for six commits on one branch).
   #
-  # merge_group keeps its own per-queue-branch group and push: main keeps its
-  # per-SHA group, so concurrent queue entries never cancel one another and each
-  # immutable commit on main still gets its own preserved proof (commit 817f8069).
+  # merge_group keeps its own per-queue-branch group. Manual verification keeps
+  # its immutable source SHA, so duplicate requests serialize without destroying
+  # the active proof.
   group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.sha }}
-  cancel-in-progress: true
+  # New commits may supersede obsolete PR proof. Manual evidence must never be
+  # destroyed by another start.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  manual-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_expensive_jobs: ${{ steps.decide.outputs.run_expensive_jobs }}
+    steps:
+      - name: Record provenance and reuse complete exact-SHA proof
+        id: decide
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const workflow_id = 'verify.yml';
+            const current = context.runId;
+            const sha = context.sha;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id, event: 'workflow_dispatch', status: 'completed', per_page: 100
+            });
+            const reusable = runs.find(run =>
+              run.id !== current && run.head_sha === sha && run.conclusion === 'success'
+            );
+            const decision = reusable ? `reuse run ${reusable.id}` : 'run complete verification';
+            core.setOutput('run_expensive_jobs', reusable ? 'false' : 'true');
+            await core.summary
+              .addHeading('Manual verification provenance')
+              .addTable([
+                [{data: 'Source SHA', header: true}, sha],
+                [{data: 'Requester task', header: true}, context.payload.inputs.requester_task],
+                [{data: 'Purpose', header: true}, context.payload.inputs.purpose],
+                [{data: 'Decision', header: true}, decision]
+              ]).write();
+
   linux-offline:
+    needs: [manual-preflight]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -48,7 +95,8 @@ jobs:
     # physical machine, and a queue rebuild restarted this job five times for a
     # single pull request (issue #204). linux-offline is the queue gate; the
     # Windows proof comes from the pull_request run on the exact head commit.
-    if: github.event_name != 'merge_group'
+    needs: [manual-preflight]
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     # GitHub-hosted, on purpose. Self-hosted capacity was added to this
     # repository to have MORE Windows capacity, not to move off GitHub's
     # runners: hosted concurrency is unmetered on a public repository, so this
@@ -89,7 +137,8 @@ jobs:
   windows-reviewer-safety:
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
-    if: github.event_name != 'merge_group'
+    needs: [manual-preflight]
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     # Self-hosted on the qualified pool, like windows-offline. Moving this job
     # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
     # stalled (#204), so this is not a return to hosted runners: it is a move

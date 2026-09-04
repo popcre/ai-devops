@@ -396,3 +396,17 @@ cause. `offline` suggested a broken runner, `fail` suggested a broken test, and
 healthy component. See
 [`../tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md`](../tests/verification/reviewer-flake-89/2026-08-28-local-series-abandoned.md)
 and [`self-hosted-windows-runner.md`](self-hosted-windows-runner.md).
+
+# Duplicate manual verification discarded an hour of Windows proof (2026-09-03)
+
+Manual run `33796381096` was cancelled after roughly 59 minutes when a second
+same-SHA manual request entered the workflow concurrency group. The shared rule
+used automatic cancellation for every event, so GitHub discarded the older
+run; the runner did not fail. Both requests appeared as the shared GitHub
+identity, leaving no originating-task attribution.
+
+Issue #246 separated the policies. Only obsolete pull-request proof may be
+automatically superseded. Manual starts require a task and purpose, same-SHA
+requests cannot cancel active proof, and a complete successful exact-SHA manual
+run is reused. `ai-verify-run` refuses known active duplicates; cancellation is
+a separate exact-run operation requiring explicit destructive confirmation.
