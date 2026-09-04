@@ -60,15 +60,11 @@ checkout:
 | `edge-dev-win` | `C:\actions-runner` | `GitHubActionsRunner-aidevops` |
 | `edge-dev-win-2` | `C:\actions-runner-2` | `GitHubActionsRunner-aidevops-2` |
 
-Two registrations remain for recoverability, but they are not independent
-capacity: both use the same physical computer. The workflow therefore holds one
-host-wide mutex while either `windows-offline` or `windows-reviewer-safety`
-executes. A job may wait up to 90 minutes for that mutex, then keeps its own
-separate 75-minute or 30-minute execution bound. A wait timeout fails visibly;
-it never cancels an older queued job. Issue #209 owns moving this work to
-independent physical hosts. Do not add a third registration here — each one
-competes for the same cores, and oversubscribing this machine is what starves a
-runner's heartbeat (see the 2026-08-28 entry in
+Two exist so `windows-offline` and `windows-reviewer-safety` run **in parallel**
+rather than one queueing behind the other; with a single runner a full pass took
+roughly twice as long in wall clock. Do not add a third without a reason — each
+one competes for the same cores, and oversubscribing this machine is what starves
+a runner's heartbeat (see the 2026-08-28 entry in
 [`critical-incidents.md`](critical-incidents.md)).
 
 The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
@@ -85,9 +81,8 @@ Neither is a Windows service — installing one requires an elevated shell. Both
 run from scheduled tasks triggered at logon for the interactive user.
 
 **Consequence:** verification runs only while that machine is powered on and that
-user is logged in. A job waiting for a runner remains queued at GitHub. After a
-runner accepts it, the workflow's host-lock wait is bounded and reports a real
-failure if EDGE-DEV stays occupied too long.
+user is logged in. A queued job simply waits. Nothing fails; nothing finishes
+either.
 
 **Creating the scheduled task needs an elevated shell.** A non-elevated session
 can start a runner directly (so it works immediately) but cannot make it survive
