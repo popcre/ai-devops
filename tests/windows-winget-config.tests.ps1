@@ -46,11 +46,15 @@ Assert ($bootstrapText -match 'TestOnly') 'bootstrap must expose a non-installin
 Assert ($bootstrapText.Contains("'merge', '--ff-only', 'origin/main'")) 'bootstrap must update without rewriting local history'
 Assert ($bootstrapText.Contains("'fetch', 'origin', 'main'")) 'bootstrap must fetch the canonical branch before machine changes'
 Assert ($bootstrapText -match 'reconcile-windows-package-exceptions\.ps1') 'bootstrap must own non-WinGet package exceptions'
-Assert ($bootstrapText -match 'setup.*-SkipRailwayCliReconcile') 'bootstrap must not install Railway twice'
+Assert ($bootstrapText -match 'setup.*-SkipPackageExceptionReconcile') 'bootstrap must not reconcile package exceptions twice'
 Assert ($exceptionsText -match '@railway/cli@5\.43\.1') 'package exceptions must install the pinned official Railway CLI'
+Assert ($exceptionsText -match '@ast-grep/cli@0\.45\.2') 'package exceptions must install the pinned official ast-grep CLI'
+Assert ($exceptionsText -match 'Get-Command sg -All') 'ast-grep setup must preflight every existing sg command'
+Assert ($exceptionsText -match 'Refusing to replace unrelated sg command') 'ast-grep setup must refuse an unrelated sg command'
+Assert ($exceptionsText -match '(?s)Version=''0\.45\.2''.*ast-grep --version') 'ast-grep test-only verification must check the exact version'
 Assert ($machineSetupText -match "https://mcp\.railway\.com") 'machine setup must configure Railway hosted MCP for Codex'
 Assert ($machineSetupText -match "args = @\('mcp', 'proxy'\)") 'Codex must use Railway CLI authenticated proxy'
-Assert ($machineSetupText -match '(?s)reconciling Railway CLI via npm.*npm\.cmd install --global ''@railway/cli@5\.43\.1''') 'direct machine setup must reconcile the pinned Railway CLI on every run'
+Assert ($machineSetupText -match '(?s)reconciling package-manager exceptions.*reconcile-windows-package-exceptions\.ps1') 'direct machine setup must use the canonical exception reconciler'
 Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must be shared with Claude consumers'
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok, Kimi, and Qwen CLIs'
 Assert ($bootstrapText -match 'configure-windows-bootstrap-access\.ps1') 'bootstrap must own first-connection Tailscale/OpenSSH setup'
@@ -93,4 +97,48 @@ $providerText = Get-Content -Raw $providerClis
 Assert ($providerText -match 'https://x\.ai/cli/install\.ps1') 'provider setup must use the official Grok installer'
 Assert ($providerText -match 'https://code\.kimi\.com/kimi-code/install\.ps1') 'provider setup must use the official Kimi installer'
 Assert ($providerText -match 'TestOnly') 'provider setup must support a non-installing verification path'
+$verifyText = Get-Content -Raw $verify
+Assert ($verifyText -match "Check-CommandVersion 'ast-grep'") 'machine verification must check ast-grep exact version'
+Assert ($verifyText -match "tool-versions\.json") 'machine verification must read the canonical version catalog'
+
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-ast-grep-" + [guid]::NewGuid().ToString('N'))
+$prefix = Join-Path $fixtureRoot 'npm-prefix'
+$otherPrefix = Join-Path $fixtureRoot 'unrelated-prefix'
+$packageRoot = Join-Path $prefix 'node_modules\@ast-grep\cli'
+New-Item -ItemType Directory -Force -Path $packageRoot,$otherPrefix | Out-Null
+$mutationMarker = Join-Path $fixtureRoot 'npm-was-called'
+Set-Content -LiteralPath (Join-Path $prefix 'npm.cmd') -Encoding ascii -Value @("@echo called>`"$mutationMarker`"", '@exit /b 99')
+Set-Content -LiteralPath (Join-Path $prefix 'sg.cmd') -Encoding ascii -Value '@exit /b 0'
+Set-Content -LiteralPath (Join-Path $prefix 'ast-grep.cmd') -Encoding ascii -Value "@echo ast-grep 0.45.2`r`n@exit /b 0"
+Set-Content -LiteralPath (Join-Path $prefix 'vercel.cmd') -Encoding ascii -Value '@exit /b 0'
+Set-Content -LiteralPath (Join-Path $prefix 'trigger.dev.cmd') -Encoding ascii -Value '@exit /b 0'
+Set-Content -LiteralPath (Join-Path $prefix 'railway.cmd') -Encoding ascii -Value '@exit /b 0'
+Set-Content -LiteralPath (Join-Path $prefix 'supabase.cmd') -Encoding ascii -Value '@exit /b 0'
+Set-Content -LiteralPath (Join-Path $packageRoot 'package.json') -Encoding ascii -Value '{"name":"@ast-grep/cli","version":"0.45.2"}'
+$powershell = (Get-Command powershell.exe).Source
+$savedTestMode = $env:AI_DEVOPS_TEST_MODE
+$savedTestPath = $env:AI_DEVOPS_TEST_PATH
+$savedTestPrefix = $env:AI_DEVOPS_TEST_NPM_PREFIX
+try {
+  $env:AI_DEVOPS_TEST_MODE = '1'
+  $env:AI_DEVOPS_TEST_PATH = $prefix
+  $env:AI_DEVOPS_TEST_NPM_PREFIX = $prefix
+  & $powershell -NoProfile -ExecutionPolicy Bypass -File $exceptions -TestOnly | Out-Null
+  Assert ($LASTEXITCODE -eq 0) 'test-only fixture must accept the package-owned sg shim and exact ast-grep version'
+  Assert (-not (Test-Path -LiteralPath $mutationMarker)) 'test-only verification must never invoke npm or mutate packages'
+
+  Set-Content -LiteralPath (Join-Path $prefix 'ast-grep.cmd') -Encoding ascii -Value "@echo ast-grep 0.44.0`r`n@exit /b 0"
+  & $powershell -NoProfile -ExecutionPolicy Bypass -File $exceptions -TestOnly | Out-Null
+  Assert ($LASTEXITCODE -eq 2) 'test-only fixture must report ast-grep version drift'
+  Assert (-not (Test-Path -LiteralPath $mutationMarker)) 'version-drift verification must remain non-mutating'
+
+  $env:AI_DEVOPS_TEST_NPM_PREFIX = $otherPrefix
+  & $powershell -NoProfile -ExecutionPolicy Bypass -File $exceptions -TestOnly 2>$null | Out-Null
+  Assert ($LASTEXITCODE -ne 0) 'test-only fixture must refuse an unrelated sg command'
+} finally {
+  $env:AI_DEVOPS_TEST_MODE = $savedTestMode
+  $env:AI_DEVOPS_TEST_PATH = $savedTestPath
+  $env:AI_DEVOPS_TEST_NPM_PREFIX = $savedTestPrefix
+  Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+}
 Write-Host 'PASS: WinGet/DSC configuration and scripts passed non-installing structural tests.'

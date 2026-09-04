@@ -10,7 +10,15 @@ function Check-Command([string]$Name) {
   $command = Get-Command $Name -ErrorAction SilentlyContinue
   $checks.Add([pscustomobject]@{ Check="command:$Name"; Passed=[bool]$command; Detail=$(if($command){$command.Source}else{'not found'}) })
 }
+function Check-CommandVersion([string]$Name, [string]$ExpectedVersion) {
+  $command = Get-Command $Name -ErrorAction SilentlyContinue
+  $reported = if ($command) { (& $command.Source --version 2>$null | Out-String).Trim() } else { 'not found' }
+  $passed = [bool]$command -and $LASTEXITCODE -eq 0 -and $reported -match "(?<![0-9.])$([regex]::Escape($ExpectedVersion))(?![0-9.])"
+  $checks.Add([pscustomobject]@{ Check="command-version:$Name"; Passed=$passed; Detail="expected $ExpectedVersion; reported $reported" })
+}
 @('winget','git','pwsh','node','python','gh','op','gcloud','az','cloudflared','wsl','claude','grok','kimi','vercel','trigger.dev','railway','supabase') | ForEach-Object { Check-Command $_ }
+$catalog = Get-Content -Raw (Join-Path $RepoPath 'config\tool-versions.json') | ConvertFrom-Json
+Check-CommandVersion 'ast-grep' $catalog.npm.'@ast-grep/cli'
 
 $codexApp = Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object {
   $_.Name -like '*Codex*' -or $_.PackageFamilyName -like '*Codex*'

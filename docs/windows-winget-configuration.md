@@ -44,8 +44,8 @@ This split is intentional:
 
 The bootstrap is authoritative for:
 
-- declared WinGet packages, Win32 long-path support, Vercel, Trigger.dev, and
-  Railway through npm, and Supabase CLI through Scoop;
+- declared WinGet packages, Win32 long-path support, Vercel, Trigger.dev,
+  Railway, and ast-grep through npm, and Supabase CLI through Scoop;
 - Tailscale installation and connection detection;
 - Windows OpenSSH Server, key-only authentication, the committed `916-alien`
   public key, and the Tailscale-only TCP 22 firewall rule;
@@ -67,9 +67,10 @@ cloud credentials outside the documented 1Password flow.
 The declarative file covers Git, PowerShell, Node.js, Python, GitHub CLI,
 VS Code, 1Password CLI, Google Cloud SDK, Azure CLI, cloudflared, Tailscale,
 WSL, Ubuntu, Claude Code, the Codex desktop Store app, and Win32 long-path
-support. Vercel, Trigger.dev, and Railway (npm) and Supabase CLI (Scoop) are not
-WinGet packages. The bootstrap calls `bin/reconcile-windows-package-exceptions.ps1`
-internally for those four, keeping one user-facing command while leaving the
+support. Vercel, Trigger.dev, Railway, and ast-grep (npm) and Supabase CLI
+(Scoop) are not WinGet packages. ast-grep uses its official pinned npm package;
+the reconciler refuses to overwrite an unrelated `sg` command. The bootstrap calls
+`bin/reconcile-windows-package-exceptions.ps1` internally for these exceptions, keeping one user-facing command while leaving the
 declarative WinGet file honest about package ownership.
 
 The bootstrap also runs the official Windows installers for Grok Build and Kimi

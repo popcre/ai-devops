@@ -30,6 +30,7 @@ $parityLines = @(
     "Production infrastructure safety is absolute.",
     "Serialize every 1Password read.",
     "Synology long reads use the managed long-running skill.",
+    'Use `rg` for ordinary text. Consider the full `ast-grep` command for repeated, syntax-aware code patterns across files; preview before applying, inspect the Git diff, run normal tests, and repair a missing managed installation.',
     "Write a HANDOFF file at session end."
 )
 

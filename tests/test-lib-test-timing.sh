@@ -102,5 +102,23 @@ RC=$?
 check "poll_until still fails at its own deadline" \
   "test '$RC' -ne 0 && test \$(( $(date +%s) - START )) -lt 8"
 
+# --- worker-aware waits ------------------------------------------------------
+( sleep 2; touch "$TMP/worker-ready" ) & WORKER_PID=$!
+poll_worker_until "$WORKER_PID" 5 'a quiet healthy worker' "test -f '$TMP/worker-ready'"
+RC=$?; wait "$WORKER_PID"
+check "a quiet live worker is allowed to reach readiness" "test '$RC' -eq 0"
+
+( sleep 2; touch "$TMP/workers-ready" ) & WORKER_A_PID=$!
+( sleep 3 ) & WORKER_B_PID=$!
+poll_workers_until "$WORKER_A_PID $WORKER_B_PID" 5 'two quiet healthy workers' "test -f '$TMP/workers-ready'"
+RC=$?; wait "$WORKER_A_PID"; wait "$WORKER_B_PID"
+check "multiple live workers are allowed to reach shared readiness" "test '$RC' -eq 0"
+
+( exit 0 ) & DEAD_WORKER_PID=$!; wait "$DEAD_WORKER_PID"
+poll_worker_until "$DEAD_WORKER_PID" 5 'an exited worker' "false" 2>"$TMP/worker-dead.err"
+RC=$?
+check "an exited worker fails immediately and names the fixture" \
+  "test '$RC' -ne 0 && grep -q 'worker exited' '$TMP/worker-dead.err'"
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

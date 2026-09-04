@@ -146,6 +146,9 @@ the whole turn so far, so cost grows faster than the work does.
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
   configurable values out of code, test created code, and verify UI changes
   visually before reporting completion.
+- Use `rg` for ordinary text. Consider the full `ast-grep` command for repeated,
+  syntax-aware code patterns across files; preview before applying, inspect the
+  Git diff, run normal tests, and repair a missing managed installation.
 - GitHub is the source of truth: repository to automated checks to deployment.
   Never live-edit a server.
 - Never replace operating-system binaries. Use project-owned tools or supported

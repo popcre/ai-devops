@@ -752,47 +752,42 @@ BOUNDARY_ROOT="$(cd "$AI_REVIEW_SANDBOX_DIR" && pwd -P)"
 check "named-session snapshot activity is inside the watched fixture boundary" \
   "case '$ASK_A_REVIEW_DIR:$ASK_B_REVIEW_DIR' in '$BOUNDARY_ROOT/'*:'$BOUNDARY_ROOT/'*) true;; '$TMP/sandboxes/'*:'$TMP/sandboxes/'*) true;; *) false;; esac"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
-# These two turns are released explicitly below, so give them a wide ceiling of
-# their own. The duplicate that must be refused builds a review packet first -
-# several git operations - and on a slow Windows disk that can outlast a normal
-# ceiling. If it does, the first turn times out and releases its session lock
-# BEFORE the duplicate reaches the lock check, and the duplicate is then allowed
-# for a perfectly correct reason. Observed on the windows-reviewer-safety runner:
-# the duplicate took 124s against a 110s ceiling.
-# The owners must outlive the challenger below and the whole intentional stall.
-# Packet preparation plus the 150s Windows stall reached 243s in CI, so 240s
-# could expire a correct owner immediately before the exact retry checked it.
-( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
-( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
-# Snapshot isolation must start with the suite, not only in the final boundary
-# section. Before #177, packet refreshes happened outside TMP, so this otherwise
-# complete fixture fingerprint went silent for 135s on loaded Windows CI. The
-# suite-owned sandbox now lives under TMP and a genuine stall keeps the same
-# window and diagnostic.
-poll_until_progress "$(budget 15 30)" 'both named ask turns hold their own session locks' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-a.err' '$TMP/ask-b.err' '$TMP/ask-a.out' '$TMP/ask-b.out'" \
-  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
+# These turns are released explicitly below. Keep the wrapper's real 15-minute
+# ceiling: shortening it to the fixture's 120-second readiness ceiling lets a
+# healthy held turn self-timeout while the duplicate is still building its
+# packet, releasing the very lock the test is meant to observe. Readiness itself
+# remains worker-driven and bounded by poll_workers_until.
+( AI_GROK_WAIT_TIMEOUT=900 run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
+( AI_GROK_WAIT_TIMEOUT=900 run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+# Snapshot isolation starts with the suite, not only in the final boundary
+# section. The review directories asserted above remain under TMP while worker
+# liveness, rather than filesystem churn, is the readiness signal here.
+poll_workers_until "$ASK_A_PID $ASK_B_PID" "$(budget 40 120)" 'both named ask turns hold their own session locks' \
+  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
+ASK_CONCURRENT_READY=$?
+check "concurrent_ask_fixture_reached_both_session_locks" "test '$ASK_CONCURRENT_READY' -eq 0"
 check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
 # The duplicate needs the same wide ceiling as the turns it must lose to. It
 # builds its own review packet BEFORE reaching the lock check, so on a slow
 # runner a normal ceiling fires first and it reports a timeout instead of the
 # refusal - failing this check for a reason that is not a wrapper defect.
-DUP_ASK="$(AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
+DUP_ASK="$(AI_GROK_WAIT_TIMEOUT=900 run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
 check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already has a turn running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # Terminated by the test below, so it must not reach its own ceiling first:
 # a self-timeout leaves different lock state than an interrupt, and the two
 # retries that follow assert on the interrupt case.
-( cd "$REPO" && AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
+( cd "$REPO" && AI_GROK_WAIT_TIMEOUT=900 exec bash "$SCRIPT" ask ask-a --prompt uncertain-original >"$TMP/ask-uncertain.out" 2>"$TMP/ask-uncertain.err" ) & ASK_UNCERTAIN_PID=$!
 # This wait is load-bearing in a way the others are not: the TERM below is the
 # whole point of the next three checks. If the ask never reached the stub, we
 # terminate a process that holds no lock, and the retries then assert against
 # state an interrupt never produced - reporting a wrapper defect that does not
 # exist. Say so instead.
-poll_until_progress "$(budget 15 30)" 'the uncertain ask took its work lock and reached the Grok stub' \
-  "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/ask-uncertain.err' '$TMP/ask-uncertain.out' '$TMP/hold-started'" \
-  "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
+poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask took its work lock and reached the Grok stub' \
+  "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'"
+ASK_UNCERTAIN_READY=$?
+check "uncertain_ask_fixture_reached_provider" "test '$ASK_UNCERTAIN_READY' -eq 0"
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?

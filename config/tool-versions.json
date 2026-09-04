@@ -19,6 +19,7 @@
     "9PLM9XGG6VKS": "26.818.3698.0"
   },
   "npm": {
+    "@ast-grep/cli": "0.45.2",
     "vercel": "54.15.1",
     "trigger.dev": "4.4.6",
     "@railway/cli": "5.43.1",
