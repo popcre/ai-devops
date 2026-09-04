@@ -23,6 +23,37 @@ Read that first; this file is the operational state around it.
   repository, and it is the approval-gated interface that keeps secrets out of
   shell arguments. Do not "finish the job" by moving or removing it.
 
+### WARNING - THREE QUESTIONS THE OWNER ASKED THAT ARE STILL UNANSWERED
+
+Albert asked these at the close of session 2 and explicitly deferred them to the
+next session. **Answer all three, in plain non-technical language, before doing
+any other work.** Read section 3b first - it holds the evidence each answer needs.
+
+1. **"Forcing the desktop app through Headroom: the setting existed for the past
+   two weeks, so it's ignoring the setting."** He is right, and this kills the
+   quit-and-reopen theory recorded in section 3b. The Windows user environment
+   variable pointing at the proxy has been set for about two weeks, yet the
+   desktop app's own process reports the direct Anthropic endpoint. So the app is
+   not inheriting it, or is overriding it. Find out where the desktop app
+   actually gets its endpoint, whether it can be pointed at the proxy at all, and
+   if it cannot, say so plainly - Headroom is then saving nothing on the surface
+   where nearly all the spend now happens.
+2. **"Every time I type anything into the chat box do I have to end every message
+   with `-p work`?"** No - the explanation of Codex named profiles was unclear and
+   he has understandably misread it. Explain in plain terms what a named profile
+   is, that the flag is typed once when starting a session rather than on every
+   message, and what the day-to-day workflow actually looks like.
+3. **"I turn off all MCP servers, then mid-session the AI realises it needs the
+   database tool - what happens?"** Answer concretely and honestly: what the
+   assistant can and cannot do at that moment, whether the tool can be switched on
+   without losing the conversation, and what that costs. Session 2 established
+   that turning a tool on mid-session invalidates the prompt cache and re-bills
+   the whole conversation - the exact waste this workstream exists to remove - so
+   the answer has to weigh that.
+
+Do not answer these from memory or from this file alone. Verify against the live
+configuration and the Codex CLI's own help output first.
+
 ## 1. What this application is
 
 `popcre/ai-devops` holds the machine setup, the global instruction templates that
@@ -59,6 +90,96 @@ Shipped and verified:
   `.bak-muserev-20260904T122947Z` backups.
 
 Not shipped: everything in §6.
+
+## 3b. Session 2 (2026-09-04, later) - what changed and what was learned
+
+### Shipped and verified in session 2
+
+- **`u2giants/shared-db` PR #2295 is MERGED.** Merge commit
+  `081b6543b95d6f9e11f8fd8bc947c1dae68a2b09`, guarded-merge run `33880089268`
+  succeeded, remote branch deleted. This closes the last open item from section 3.
+  Getting there required a durable create-only verdict artifact
+  (`refs/db-review-verdicts/2296-2295-5c0bacbc669a54660d13aca3678a8e81dd274005`,
+  sha `ea0484ac2b745bfb4292f7351aeff3b8f986b6d6`) - see section 4b for what
+  failed first.
+- **Claude *desktop app* MCP list trimmed.** This is a different file from the
+  CLI user scope that session 1 edited:
+  `%APPDATA%\Claude\claude_desktop_config.json`. Removed `chrome-devtools`,
+  `supabase`, `devops-mcp`. Kept `1password`, `ag-grid`, `codex-cli`,
+  `playwright` (Albert explicitly asked to keep playwright), `recall-ai`,
+  `synology-monitor`, `trigger`. Backed up alongside it as
+  `claude_desktop_config.json.bak-<UTC>`.
+- **Codex config edited once, with explicit one-time owner permission**, after a
+  Grok review returned APPROVE. `chrome-devtools` was added to
+  `~/.codex/config.toml` with `enabled = false` rather than deleted, so the
+  capability stays recoverable. Verified with `codex mcp list`: chrome-devtools
+  `disabled`, the other 12 `enabled`. The backup was written **outside**
+  `$CODEX_HOME` at `~/.config/ai-devops/codex-config-backups/config.toml.bak-<UTC>`,
+  because a `.bak` file inside `$CODEX_HOME` can be picked up as a profile.
+
+### Key findings from session 2
+
+- **There are three separate Claude MCP surfaces on this machine, not one.**
+  `~/.claude.json` (CLI user scope), `%APPDATA%\Claude\claude_desktop_config.json`
+  (the desktop app - the surface Albert actually uses), and the committed
+  repo-root `.mcp.json` (project scope). Session 1 trimmed only the first, so it
+  bought **nothing** on the surface that matters. Any future tool-list work must
+  say which of the three it is touching.
+- **Codex honours `enabled = false` at server level** - proven empirically, not
+  assumed. That is the safe way to park a Codex tool. Two things that do *not*
+  work: Codex has **no per-directory MCP scoping** (`[projects.'...']` entries are
+  trust settings, not tool scoping), and a partial `-c` override such as
+  `mcp_servers."x".enabled=false` **replaces the whole table** and yields
+  "invalid transport". `--strict-config` is also rejected by `codex mcp`.
+- **Headroom is live but the desktop app bypasses it.** Proxy totals to date:
+  2,083 requests, 4,903,080 of 110,889,819 input tokens saved (about 4.4%, about
+  $158), `last_activity_at` 2026-09-01. Inside a desktop-app session the effective
+  endpoint is `https://api.anthropic.com` while the Windows user variable says
+  `http://100.66.37.58:8787`. Session 2 proposed a quit-and-reopen test;
+  **Albert has since pointed out the variable has been set for two weeks, so that
+  theory is dead** - see question 1 at the top of this file.
+- **Recommended against, with reasons:** leanCTX and ponytail (they compress tool
+  *output*, which is about 2% of spend - the 13.5% is cache invalidation, which
+  they do not touch), and wiring Codex to Headroom now (its OpenAI pipeline has
+  carried zero traffic lifetime, sign-in is fussier, and the spend is in the
+  desktop app anyway).
+- **The NAS tool cannot be project-scoped while every other tool can.** The
+  launcher chain is `~/.config/ai-devops/mcp-remote-launch.cmd` then
+  `bin/mcp-secret-launch.ps1`, and that script resolves secret references against
+  `~/.config/ai-devops/mcp.env`, throwing "Secret reference is not managed by ..."
+  when it cannot. That throw is the prime suspect. A background task
+  (`task_c2eac5fa`, "Fix NAS tool project scoping", cwd `C:\repos\ai-devops`) was
+  queued for it and is **still waiting for Albert to start it**.
+
+### The shared checkout question (asked and answered)
+
+Albert asked whether the uncommitted edits sitting in `C:\repos\ai-devops` -
+`bin/ai-muse`, `bin/ai-grok-review` and 15 other files, on a checkout 162 commits
+behind `origin/main` - belonged to this session. **They do not.** They belong to
+the reviewer-cache-efficiency workstream. This session's only footprint in that
+folder is git-ignored review reports under `.ai/reviews/`, which block nothing.
+Nothing there was touched, staged, stashed, or committed. Going forward, review
+wrappers are to be run from a dedicated worktree, not that shared checkout.
+
+## 4b. What did NOT work in session 2
+
+- **Relaying a reviewer's APPROVE as a PR comment does not satisfy the shared-db
+  merge gate.** It refused with "head ... has no durable APPROVE artifact". The
+  only sanctioned recorder is `scripts/run-governed-review.mjs`, which spawns the
+  reviewer itself and binds the artifact to the comment it posts. Recording before
+  posting is structurally impossible - do not try to shortcut it.
+- **A stale PR comment of our own blocked the gate.** It carried both the head SHA
+  and a bare `VERDICT: APPROVE` line, which the validator read as a second verdict.
+  Fixed by rewriting that line to begin "VOIDED RELAYED LINE". The rule: **no line
+  anywhere in a review body may begin with a decision word** after stripping
+  leading whitespace and markdown punctuation.
+- **The reviewer preflight requires a clean worktree at the exact head SHA.** A
+  dirty scratch checkout failed it; the fix was to copy the report out and reset.
+- **A broad Grok review brief burned 1,592,118 tokens and $0.185 and returned no
+  answer**, cancelled at the 20-turn ceiling. Per the grok-cli skill that exact
+  session was *not* retried. A fresh, narrowly scoped session answered the same
+  question for 31,775 tokens and $0.014 - a 13x cost difference. Narrow the brief;
+  never widen the turn limit.
 
 ## 4. Everything we tried that did NOT work
 
@@ -108,8 +229,18 @@ Tracked as [issue #269](https://github.com/popcre/ai-devops/issues/269):
    split its Claude and Codex server sets.
 5. Pin the `npx -y` MCP command paths — only if mutations remain after step 3.
 
-Also outstanding from this session: merge `u2giants/shared-db` PR #2295 once its
-checks pass.
+Added by session 2, in priority order:
+
+6. **Answer Albert's three questions at the top of this file.** That is the first
+   task of the next session, ahead of everything else listed here.
+7. Determine where the Claude desktop app takes its API endpoint from, and whether
+   it can be routed through Headroom at all. Until that is known, the proxy saves
+   nothing on the machine's main surface.
+8. Start the queued NAS scoping task (`task_c2eac5fa`), or do the work directly:
+   prove why the repo-scoped NAS entry fails, repair it, and remove the duplicate
+   global entry. Repair it - do not delete the tool.
+
+No longer outstanding: `u2giants/shared-db` PR #2295 is merged (see section 3b).
 
 ## 7. Constraints and gotchas in force
 
@@ -147,6 +278,11 @@ checks pass.
 - **Risk:** the next `bin/setup-machine.ps1` run silently undoes the relocation
   and re-adds `chrome-devtools`. Step 4 is the guard, and until it lands the
   relocation is not durable.
+- **Now known false:** the session-2 theory that the desktop app bypasses Headroom
+  because it was launched before the environment variable was set. The variable has
+  been in place about two weeks. Treat the bypass as deliberate app behaviour until
+  proven otherwise.
+- **Open:** the three owner questions at the top of this file.
 - **Correctness risk, accepted:** the new output-discipline rules trade some
   verbosity for tokens. They were rewritten once already to remove six specific
   ways the first draft would have caused a wrong diagnosis. If a session starts
