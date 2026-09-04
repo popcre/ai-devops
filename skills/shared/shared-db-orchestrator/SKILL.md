@@ -9,6 +9,13 @@ description: Open or run the single u2giants/shared-db orchestrator and route st
 
 Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep the full map of claims, branches, preview state, merges and owner decisions.
 
+**Reporting to Albert.** Every status, queue, audit, marker and dispatch record
+in this skill is written into GitHub issues, plans and handoffs — never into the
+chat reply. Replies to Albert obey the global 150-word limit, and anything he
+must decide or approve, and every issue, agent, check or merge this session is
+waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
+status roll-up into chat.
+
 ## Scope
 
 - Govern database structure: migrations, schemas, tables, columns, views, functions, triggers, policies, indexes, constraints and shared contracts.
@@ -195,7 +202,7 @@ version remains permanently unavailable because it may already exist in preview.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.2 Contributor, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when all six are busy.
+Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when all six are busy.
 
 ## Before preview and merge
 

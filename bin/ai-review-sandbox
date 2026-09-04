@@ -41,7 +41,7 @@
 
 set -euo pipefail
 
-VERSION="1.3.1"
+VERSION="1.4.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -222,6 +222,37 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   else
     git -C "$build" checkout --quiet --detach "$base" 2>/dev/null || return 1
   fi
+
+  # CARRY THE BASE BRANCHES ACROSS. `git clone` puts the source's branches under
+  # refs/remotes/origin/, and `remote remove origin` deletes every one of them, so
+  # the snapshot ends up with NO refs at all. ai-review-packet's base resolution
+  # tries `main`, `master`, `origin/main`, `origin/master` in that order and --
+  # because none of them can exist here -- silently falls through to HEAD~1.
+  #
+  # On an ordinary linear branch that is merely narrow. On a MERGE commit it is
+  # wrong in a way that looks completely normal: HEAD~1 is the first parent, so
+  # the packet's "what changed" becomes everything the merge brought IN from the
+  # base branch, and the reviewer confidently judges files the change never
+  # touched. Observed live on shared-db PR #2155 (head c337a6d5, a
+  # "Merge main into ..." commit): two Codex runs REJECTed the change over a
+  # handoff document that came from main and was not part of the pull request.
+  #
+  # ai-review-packet's own base-order comment already ASSUMES these local branch
+  # names survive the clone. This makes that true instead of assumed. It only
+  # ADDS refs: HEAD stays detached at $base and the reviewed tree is untouched,
+  # so nothing the reviewer reads changes -- only which commit the diff is taken
+  # against, which is the one thing that was wrong.
+  local base_ref base_sha
+  for base_ref in main master; do
+    base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$base_ref^{commit}" 2>/dev/null || true)"
+    [ -n "$base_sha" ] || base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$base_ref^{commit}" 2>/dev/null || true)"
+    [ -n "$base_sha" ] || continue
+    # The object came from the source we just cloned, so it is present here. A
+    # missing one degrades to the previous behaviour rather than failing the
+    # snapshot: no base ref is exactly the state this block replaces.
+    git -C "$build" cat-file -e "$base_sha^{commit}" 2>/dev/null || continue
+    git -C "$build" update-ref "refs/heads/$base_ref" "$base_sha" 2>/dev/null || return 1
+  done
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.

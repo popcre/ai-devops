@@ -39,6 +39,7 @@
     "test-ai-run-task.sh",
     "test-ai-sync-memory-public-containment.sh",
     "test-ai-test-local.sh",
+    "test-client-globals-required-phrases.sh",
     "test-codex-trigger-eval.sh",
     "test-completion-eval.sh",
     "test-install-ai-provider-clis.sh",

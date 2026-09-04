@@ -20,7 +20,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
-| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | in progress; first physical host `EDGE-RUNN-ENVY` qualified, promoted to `ai-devops-windows-qualified`, and both heavy Windows jobs routed to it; second host `EDGE-ALIEN` failed qualification on a 90 minute overrun; failover proof, third host and EDGE-DEV retirement remain open | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38` and `7e9210d1`; Actions runs `33571202823`, `33625670215` and `33627638433`; failed qualification `33625657591`; [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | engineering complete, pending closeout; the qualified pool is **two independent physical hosts** - `EDGE-RUNN-ENVY` and `edge-dev-win` - both carrying `ai-devops-windows-qualified`; reboot/failover proof PASSED on both 2026-09-03 (each recovers unattended, rejoins the pool with nobody signed in, and has independently carried a complete `windows-reviewer-safety` job while the other was out of the pool); Windows work stays deliberately two lanes - `windows-offline` on GitHub-hosted `windows-2025` because hosted concurrency is unmetered on a public repository, `windows-reviewer-safety` on the qualified pool for flake reproducibility - because the pool is **extra** capacity and never a replacement for GitHub's runners; `edge-dev` is a qualified pool member and was **never** retired; third host `EDGE-ALIEN` is parked on `ai-devops-windows-paused` and placed **on ice by the owner 2026-09-03** - do not work on it until he says it is ready; downstream drift checks completed 2026-09-02 (B3-E1) and 2026-09-03 (two-host supersession) | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38`, `7e9210d1`, `694a496c`, `ce8483ca`, `e1c9f0d6`; failover proof in [#209 comment 5531835428](https://github.com/popcre/ai-devops/issues/209#issuecomment-5531835428) and unattended-recovery proof in [#209 comment 5532328750](https://github.com/popcre/ai-devops/issues/209#issuecomment-5532328750); post-reboot job `33802110064` succeeded on `edge-dev-win`; EDR diagnosis in [#209 comment 5513464456](https://github.com/popcre/ai-devops/issues/209#issuecomment-5513464456); dead-pool detection built for [#222](https://github.com/popcre/ai-devops/issues/222) in [#245](https://github.com/popcre/ai-devops/pull/245); [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md); hosted lane and `edge-dev` onboarding in [#229](https://github.com/popcre/ai-devops/pull/229) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | open | — |
@@ -40,7 +40,7 @@ Four consequences bind later phases. Do not re-derive them.
 - **A required context was removed from the live ruleset.** Ruleset 21564317 now requires **`linux-offline` only**; `windows-offline` was removed because a required check that never reports on a merge group hangs every queue entry for the full 120-minute `check_response_timeout_minutes`. **#166 (E1) must restore it** once the Windows jobs report on the queue again, and its "no stale context" gate must account for this deliberate removal rather than treating it as drift.
 - **The merge_group concurrency key is `github.ref`, deliberately not `merge_group.base_ref`.** `base_ref` is always `refs/heads/main`, so keying on it makes concurrent queue entries cancel one another and deadlocks the queue at `max_entries_to_build: 5`. **#164 (C1) must not change this** when it touches concurrency policy.
 - **Both Windows jobs are already skipped on `merge_group`** (`if: github.event_name != 'merge_group'`); `linux-offline` is the queue gate and the Windows proof comes from the pull_request run on the exact head commit. **#162 and #210 must treat this part of their scope as done** and scope themselves to what remains.
-- **GitHub-hosted `windows-2025` is a dead end for `windows-reviewer-safety`.** Routing works, but the reviewer suites stall there: the held Grok stub never observes the test's release file, both background turns run to their 480s ceiling, and the job dies at its 30-minute limit with nothing to read. Two of three hosted runs behaved that way. **#209 and #210 must not propose hosted images as the load-spreading lever**; the rationale is recorded in `verify.yml` beside the job.
+- **GitHub-hosted `windows-2025` is a dead end for `windows-reviewer-safety` only - NOT for `windows-offline`.** The reviewer suites stalled there on 2026-09-02: the held Grok stub never observed the test's release file, both background turns ran to their 480s ceiling, and the job died at its 30-minute limit with nothing to read. Two of three hosted runs behaved that way. That evidence covers the reviewer suites alone, was never isolated from runner contention (an identical stall occurred on the self-hosted `edge-dev` host in run 33601322987), and says nothing about the long offline matrix. **An earlier revision of this line told #209 and #210 not to propose hosted images as the load-spreading lever. That instruction was wrong and is withdrawn.** `windows-offline` ran on `windows-2025` from 2026-04 until 7adaefd8 (2026-08-29) without a runner-caused failure; self-hosted capacity was added for flake *reproducibility* and as *extra* capacity, never as a replacement for GitHub's runners. Routing both Windows jobs to the single-host qualified pool on 2026-09-02 serialised the whole repository and left fourteen `verify` runs queued at once. The hosted lane for `windows-offline` is being restored in #229. Its duration on hosted hardware after the 2026-08 reviewer expansions has now been measured: run 33658549626 completed `windows-offline` on `windows-2025` in 73m23s on 2026-09-02, against 58m40s to 62m18s for the same job on the self-hosted host the same day. The 62-minute number in `verify.yml` predates the expansions and is stale; #229 replaces it with a 100-minute bound sized from those two measurements. #166 must still set the required-check ceiling from a completed hosted run rather than from either the stale figure or that bound.
 
 `tests/test-workflow-policy.sh` enforces all of the above; a later phase that regresses one of them fails its own gate rather than reaching CI.
 
@@ -238,18 +238,96 @@ isolation afterward; the suite manifest has no omissions or duplicates.
 **Targets:** three supported Windows hosts, canonical bootstrap/verification,
 runner labels/groups, security and capacity evidence.
 
-**Change:** qualify one runner per independent physical host, move ordinary CI
-off the daily-use EDGE-DEV machine, prove restart/update/cleanup/dependency
+**Change:** qualify one runner per independent physical host, keep ordinary CI
+off any machine that is not a qualified pool member - which EDGE-DEV is being
+onboarded to become, not retired from - prove restart/update/cleanup/dependency
 parity, and retain fork-approval safety. Do not commit private machine inventory.
 
 **Gates:** three hosts pass qualification; taking one offline leaves visible
 working capacity; jobs distribute across physical hosts; setup is recoverable
 and idempotent. Required-check changes remain #166-last.
 
+**SUPERSEDED 2026-09-03 by a two-host pool - read this before the block below.** `edge-dev-win` was qualified and admitted alongside `EDGE-RUNN-ENVY`, and the reboot/failover proof passed on both hosts: each recovers unattended after a reboot, rejoins the pool with nobody signed in, and has independently carried a complete `windows-reviewer-safety` job while the other was out of the pool. The three consequences recorded on 2026-09-02 resolve as follows.
+
+- **B2a's own gate is met in substance, not in the original number.** "Taking one offline leaves visible working capacity" is now proven in both directions. The literal "three hosts pass qualification" is NOT met and should be read as the two-host result plus a deliberately parked third: `EDGE-ALIEN` sits on `ai-devops-windows-paused` and was placed **on ice by the owner on 2026-09-03**. Do not treat the missing third host as an open engineering task; it is an owner-held decision.
+- **#210 is unblocked.** It was sequenced behind "a real second host", which now exists. Its scope reduction from drift item 3 still applies.
+- **#166 is no longer blocked by pool depth,** but the dead-pool detection gap it depends on is only just addressed: the [#222](https://github.com/popcre/ai-devops/issues/222) watchdog is implemented in [#245](https://github.com/popcre/ai-devops/pull/245) and needs its `RUNNER_POOL_READ_TOKEN` secret configured before it actually reports. #166 must not promote a self-hosted-only job to a required check until that watchdog is live and green.
+
+The 2026-09-02 block is preserved below for its reasoning; where the two disagree, this note wins.
+
+**Single-host consequence, recorded 2026-09-02.** The qualified pool currently
+holds exactly one host. Three downstream phases assume more than one and must not
+be started on the assumption that a second is arriving on an engineering
+timetable:
+
+- **B2a's own gate** ("three hosts pass qualification", "taking one offline leaves
+  visible working capacity") cannot be met today. `EDGE-ALIEN` is blocked on an
+  external IT decision about SentinelOne exclusions, not on work in this repo.
+- **#210 bounded parallel Windows verification** has nothing to parallelise across
+  until a second host qualifies. Sequence it behind a real second host, not behind
+  #209 merely being open.
+- **#166 required-check cutover** must not promote a Windows job to a required
+  check while the pool is one host deep. A dead single host leaves those jobs
+  *queued*, never failed, so merges would block silently with no red signal. The
+  detection gap is [#222](https://github.com/popcre/ai-devops/issues/222); the cure
+  is a second qualified host.
+
 **End-of-phase drift check:** before handing off or closing #209, reread every
 downstream phase from B3 through the final #166 cutover. Report and update any
 assumption, interface, identifier or sequencing rule that #209 changed or
 invalidated; do not leave that discovery only in chat.
+
+**Drift check performed 2026-09-02, B3 through E1.** Five downstream assumptions
+changed. Each is corrected in place below and in the STATUS row for #209; a
+later session must not re-derive them.
+
+1. **EDGE-DEV is not being retired, and this phase's own change statement is
+   wrong.** B2a says "move ordinary CI off the daily-use EDGE-DEV machine". The
+   owner has directed the opposite: `edge-dev` is to be onboarded into the
+   qualified pool, because the pool needs more than one host. Read that clause
+   as "move ordinary CI off a machine that is not a qualified pool member", not
+   as retirement. Every reference to EDGE-DEV retirement in this plan and in the
+   #209 STATUS row is withdrawn.
+
+2. **The self-hosted pool is additive, not a replacement, and the Windows work
+   is now two lanes.** `windows-offline` runs on GitHub-hosted `windows-2025`
+   where concurrency is unmetered on a public repository; `windows-reviewer-safety`
+   runs on `ai-devops-windows-qualified` so a timing flake can be reproduced on a
+   known physical machine. B2a's gate "jobs distribute across physical hosts"
+   therefore applies to the self-hosted lane and to overflow, not to all Windows
+   work. Routing both lanes to the pool serialised the repository and is not to
+   be repeated.
+
+3. **#210 (B5) loses most of its target set.** "Divide every Windows-required
+   suite into explicit balanced sections only on independent hosts" was scoped
+   when both Windows jobs sat on the pool. With `windows-offline` hosted and
+   unmetered, sectioning it buys wall-clock, not capacity, and it needs no
+   independent hosts at all. Scope #210 to the self-hosted reviewer lane plus any
+   measured wall-clock case on hosted, and keep its existing sequencing behind a
+   real second qualified host rather than behind #209 being open.
+
+4. **#166 (E1) inherits one measurement and one relaxed risk.** It must set the
+   restored `windows-offline` required-check ceiling from a completed hosted run,
+   never from the stale 62-minute figure. Against that, the single-host
+   queue-forever risk recorded above no longer applies to `windows-offline`:
+   hosted capacity means a dead pool cannot leave it silently queued. That risk
+   still applies in full to any self-hosted-only job promoted to required, which
+   remains gated on a second qualified host and on [#222](https://github.com/popcre/ai-devops/issues/222).
+
+5. **#162 (B3) should expect its line-ending gate to disagree with the working
+   tree.** The index is LF throughout, so `git ls-files --eol` passes, but a
+   Windows checkout materialises many files as CRLF and `tests/test-line-endings.sh`
+   fails locally on that drift. B3 must treat the index as the contract and state
+   which of the two it is asserting, or it will chase a defect that does not exist
+   in the repository.
+
+**Drift check performed 2026-09-03, B3 through E1, at #209 closeout.** Reread every downstream phase against the two-host result. Nothing in B3, B4, B5 or E1 is invalidated by it beyond what is already recorded above; the five corrections from 2026-09-02 all still stand. Two sequencing rules change, and one new dependency appears:
+
+6. **The "behind a real second qualified host" gate is now satisfied,** so #210 may be scheduled on its merits. Its target set stays reduced per item 3 - the self-hosted reviewer lane plus any measured wall-clock case on hosted.
+
+7. **E1 (#166) gains a dependency on the #222 watchdog being live,** not merely open. Pool depth is no longer the constraint; silent-queue detection is. The watchdog exists in [#245](https://github.com/popcre/ai-devops/pull/245) but is inert until its `RUNNER_POOL_READ_TOKEN` secret is set, and an inert watchdog is exactly the invisible failure #166 must not build on.
+
+8. **Reboot recovery is a two-part property, and CI health does not prove it.** The first `EDGE-RUNN-ENVY` reboot returned the runner to `online` in about two minutes while leaving the host administratively unreachable - Tailscale was not in unattended mode, so nothing could SSH or RDP in until someone signed in at the keyboard. The runner reaches GitHub over the ordinary internet, so a green pool says nothing about whether the machine can still be administered. Both current hosts are now fixed and reverified by a second reboot. **Any future host must prove unattended *administrative* recovery, not just unattended CI recovery, before admission.**
 
 #### B3. #162 — duplicate platform/event work
 

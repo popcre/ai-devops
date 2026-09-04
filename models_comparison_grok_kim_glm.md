@@ -1219,3 +1219,89 @@ underlying fragility; id-based references survive a rename.
   apply, direct catalog verification, deployment, and authenticated live UI
   acceptance subsequently passed; PR #1634 merged as
   `b2fee568dd544944be60e182a679f0b643362f79`.
+
+## 2026-09-02 review rotation evidence
+
+### shared-db #2152 / PR #2155 — review sequence 1054
+
+- Reviewer: Muse Spark 1.2 Contributor, drawn by the durable rotation and run
+  through the manager-assigned `ai-muse` wrapper. Model proven in the wrapper's
+  own turn footer as `meta-model-api/muse-spark-1.2-contributor`; no model or
+  reasoning override was used, and the wrapper's pinned OpenCode/provider/profile
+  configuration passed `ai-muse doctor` byte-for-byte beforehand.
+- Exact reviewed head: `58723af4fea7e2f7668e719858019e7183fcf741`.
+- Change under review: `scripts/manage-migration-author-lanes.mjs` (+ its test
+  file) stops walking `git/matching-refs?page=N` — an endpoint that ignores
+  `page`, so every request returned page 1 — and reads the namespace in ONE
+  `gh api -i` request, with a structural RFC 8288 `Link` parser, an RFC 9110
+  repeated-header join, and a `REVIEW_REF_ROW_LIMIT = 1000` refusal replacing the
+  old 6-page ceiling. A later commit at this head recorded one new scanned line
+  in `docs/verification/throughput-guard-truth-audit-20260828.json` (235, was
+  234) with an `excluded` disposition. The bug had frozen reviewer assignment
+  repository-wide once `refs/db-review-verdict` passed 100 refs.
+- Verdict line, recorded verbatim:
+  `VERDICT: APPROVE 58723af4fea7e2f7668e719858019e7183fcf741`
+- Findings independently CONFIRMED by the orchestrator (not accepted on the
+  reviewer's word):
+  - Wire cost is exactly one counted request per listing. Verified in source:
+    `runGitHubCommand` calls `consumeReviewWireRequest()` on every `gh`
+    invocation, and `ghRefListing` routes through the same `gh()` helper as
+    `ghJson`, so `gh api -i` is charged identically. The 23-of-25 slot-2 budget
+    derivation therefore still holds.
+  - Truth-audit integrity. A programmatic key-by-key comparison of the audit
+    JSON across the two commits returned exactly one added `semantic_key`, zero
+    removed, and zero existing entries with a changed `disposition`, `reason` or
+    `line_sha256`. The new site is line 931, which reads
+    `// parameter name. Anything that does not fit the grammar THROWS: a missing`
+    — prose about parser behaviour, not a truth claim about a database object.
+    The 234 moved line numbers are offset shifts from the ~100-line insertion.
+    `node scripts/check-throughput-truth-audit.mjs` reports `call_sites=235`.
+  - Test coverage. Every cited test line was read and the suite run: 400 tests,
+    0 failures. The named guards are genuinely asserted — one-request 726-row
+    read, `rel="next"` refusal, `prev`/`last` allowed, 1000-row ceiling refusal,
+    non-array body refusal, repeated-`Link` join, quoted `rel=next` non-match,
+    token-list `rel` matching, and unparseable-`Link` throw.
+  - Residual non-blocking observations, both true as stated: a silent
+    server-side cap between 727 and 999 rows arriving without a `Link` header
+    would pass both guards; and rows lacking `object.sha` are filtered out
+    silently at the map step rather than refused (pre-existing behaviour carried
+    over from the old implementation).
+- Findings disproved: none. Every factual claim the reviewer made was checked and
+  held.
+- Defects caught by this review: 0 blocking. False positives: 0.
+- Policy/tool adherence: read-only `ai-muse` wrapper reviewing its own
+  self-contained sandbox clone pinned to the exact head; one persistent named
+  session (`pr2155-seq1054`); no edits, no database contact, no preview, no
+  merge, no secrets, no licensed rows. The recording turn was run through
+  `scripts/run-governed-review.mjs`, which posted the complete findings to the
+  pull request and created the create-only durable verdict artifact
+  `refs/db-review-verdicts/2152-2155-58723af4fea7e2f7668e719858019e7183fcf741`
+  while the exact reviewer lease was still held. The earlier direct wrapper call
+  was supplementary diligence only and authorized nothing.
+- Continuity: initial review plus one same-session recording turn. Zero rebuttal
+  turns — no finding required one. The session survived the second turn with its
+  context intact and produced a stricter-formatted restatement on request.
+- Verdict-format discipline: the brief stated that a decision word anywhere but
+  the final line VOIDS the review. The reviewer complied on both turns, writing
+  "my conclusion" throughout and emitting a single terminal `VERDICT:` line with
+  the head SHA. `run-governed-review.mjs` accepted it without invoking its
+  voiding path.
+- Latency: roughly 3.8 minutes for the initial review turn (measured from the
+  wrapper's own progress ticks), plus the recording turn.
+- Reported usage: 110,933 tokens on the initial turn (94,513 cache hits, 0 cache
+  misses). The wrapper reported no cost figure for this session.
+- Final outcome at recording time: `PR_NUMBER=2155
+  REQUESTED_SHA=58723af4fea7e2f7668e719858019e7183fcf741 node
+  scripts/check-exact-head-approval.mjs` reports
+  "Exact-head approval verified: PR #2155 head 58723af4... (1 approval(s),
+  1 pinned assignment(s))" and exits 0. Required checks, preview and the guarded
+  merge remain the orchestrator's separate steps.
+
+## 2026-09-03 — codex-gpt-5.6-sol, shared-db PR #2199 (ColdLion `/divisions` landing table)
+
+Two `ai-codex-review diff-review` runs against the same head `63d8441b37bf41fa7dd798ba313a58d666e2ea53`, read-only sandbox, caller `shared-db-orchestrator`.
+
+- Run `20260903T122923-602328-5026`, 157s, verdict REJECT. Raised one High finding: the migration omitted two source fields by extending an owner ruling made for a different feed, where the governing plan requires a per-feed ruling because omissions are permanent. It also refuted the author's reversibility argument on its own terms — the stored row hash records that a record changed, not what the omitted fields contained. The finding was correct and was escalated to the owner, who ruled.
+- Run `20260903T124954-688215-10953`, 214s, verdict APPROVE after the owner ruling was supplied in the brief. No defects at any severity. It did not simply accept the ruling: it re-derived why prerequisite guards, migration ordering and the foreign key make the second author decision safe, and cited exact file lines throughout.
+
+Objective notes: cited line numbers were accurate in both runs; the verdict body agreed with the final line in both runs; no decision word leaked outside the final section once the brief matched the wrapper's own two-line `## Verdict` contract. A first attempt failed with "Codex verdict must be the one final two-line section" because the brief imposed a different verdict format than the wrapper enforces — a brief must not override the wrapper's format contract.

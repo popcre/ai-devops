@@ -25,11 +25,15 @@ check 'rename sources cannot disappear from classification' "grep -q 'git diff -
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
-# Ordinary Windows verification must run on the dedicated qualified pool
-# (issue #209), never on the daily-use EDGE-DEV computer and never on a bare
-# candidate host. `ai-devops-windows` is the qualification-only label: a host
-# carrying it has been registered, not proven.
-check 'both Windows jobs run on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 2 ]"
+# Windows verification runs in two lanes at once (issue #209): the long offline
+# matrix on GitHub's hosted image, where concurrency is unmetered, and the
+# reviewer safety suites on the qualified self-hosted pool, where a timing
+# flake can be reproduced on a known physical machine. Neither lane may route
+# to the daily-use EDGE-DEV computer or a bare candidate host.
+# `ai-devops-windows` is the qualification-only label: a host carrying it has
+# been registered, not proven.
+check 'reviewer Windows job runs on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
+check 'long Windows matrix keeps the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 1 ]"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -48,7 +52,7 @@ actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
 manifest_bash="$(jq -r '.bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
-check 'manifest declares 62 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 62 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 62 ]"
+check 'manifest declares 63 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 63 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 63 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
@@ -83,6 +87,36 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 ' >&2
   exit 1
 }
+# Windows verification runs in two lanes at once, and both must stay present.
+# The self-hosted pool was added to this repository to have MORE Windows
+# capacity than GitHub's runners alone, not to replace them: routing every
+# Windows job to a one-host pool serialised the whole repository on
+# 2026-09-02. So the long offline matrix keeps the GitHub-hosted lane, where
+# concurrency is unmetered on a public repository and a run never waits for a
+# machine, and the reviewer safety suites - the source of every timing flake
+# worth investigating - keep the qualified self-hosted lane, where a failure
+# can be reproduced on a known physical machine.
+#
+# EDGE-DEV and bare candidate hosts stay banned from `runs-on` either way.
+# `ai-devops-windows` is the qualification-only label: a host carrying it has
+# been registered, not proven. Membership in `ai-devops-windows-qualified`
+# requires a green `qualify Windows runner` job on that exact physical host,
+# and the pool may hold any number of qualified hosts.
+windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\r')"
+[ "$windows_pool" -eq 1 ] || {
+  printf 'FAIL: the reviewer safety suites must run on the qualified self-hosted pool\n' >&2
+  exit 1
+}
+hosted_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
+[ "$hosted_pool" -eq 1 ] || {
+  printf "FAIL: the long Windows matrix must keep GitHub's hosted lane so the pool is extra capacity, not a replacement\n" >&2
+  exit 1
+}
+if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
+  printf 'FAIL: verification must never route to the daily-use desktop or an unqualified candidate host\n' >&2
+  exit 1
+fi
+
 grep -Fq 'cancel-in-progress: true' "$workflow" || {
   printf 'FAIL: duplicate verification runs for the same source must still be cancellable\n' >&2
   exit 1
@@ -90,4 +124,4 @@ grep -Fq 'cancel-in-progress: true' "$workflow" || {
 
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
-printf 'PASS: fast routing, complete event coverage, qualified Windows pool, 62+18 suite manifest, cancellable superseded pull-request runs, and no Windows jobs in the merge queue\n'
+printf 'PASS: fast routing, complete event coverage, both Windows lanes, suite manifest, cancellable superseded pull-request runs, and no Windows jobs in the merge queue\n'

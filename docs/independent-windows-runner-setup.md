@@ -145,6 +145,44 @@ Exactly one service must be `Running` and automatic. GitHub should show the host
 online and idle with `self-hosted`, `Windows`, `X64`, and
 `ai-devops-windows`—not `edge-dev`.
 
+### An already-registered runner started by a scheduled task
+
+A host whose runner was installed as a logon scheduled task rather than a
+service cannot qualify, and that is deliberate: a service with automatic start
+is the only thing that proves the host comes back on its own after a reboot with
+nobody signed in. A logon task also flashes console windows at whoever is using
+the machine. `edge-dev` was in exactly this state on 2026-09-02.
+
+Convert it in place - the runner keeps its registration, name and labels:
+
+```powershell
+pwsh -File bin\promote-windows-runner-to-service.ps1
+```
+
+Run it from Administrator PowerShell, in a session where `gh` is already signed
+in. A runner that was never configured with `--runasservice` has no service
+installer at all, so the script unconfigures it and configures it again in
+service mode under the same name, labels and work folder. It reads the labels
+back from GitHub first, removes the runner scheduled tasks, registers and starts
+the service, forces automatic start, and then warns about any required tool that
+resolves only inside a user profile. The removal and registration tokens are
+requested from GitHub as the script runs and are passed to the runner on
+standard input, so they never reach a command line, a log or the repository.
+
+It is safe to run twice, and it also repairs a runner that a previous attempt
+left wrecked - a registered service that is stopped with the runner identity
+files deleted, which is where `edge-dev` was left on 2026-09-02. In that state
+the local credentials are gone, so it deletes the stale registration from GitHub
+and the leftover service before registering the host again.
+
+A tool installed under `C:\Users\...` is invisible to the service account, so
+install it for all users before qualifying; on `edge-dev` that applies to
+Python:
+
+```powershell
+winget install --id Python.Python.3.13 --scope machine
+```
+
 ## 4. Synchronize time and create Administrator evidence
 
 Correct system time is required for TLS, GitHub authentication, logs and test
@@ -211,7 +249,44 @@ Only after the exact qualification job is green:
 5. take one qualified runner offline and prove the other physical hosts keep
    Windows CI operational;
 6. prove restart, automatic runner update, workspace cleanup and visible
-   offline/capacity reporting.
+   offline/capacity reporting;
+7. prove **unattended administrative recovery**, not just unattended CI
+   recovery - see the warning below.
+
+### A green runner does not mean you can still get into the machine
+
+Step 7 exists because of a real incident on 2026-09-03. `EDGE-RUNN-ENVY` was
+rebooted remotely to prove auto-start. The runner service came back `online` on
+its own in about two minutes and ran a full CI job to success with nobody signed
+in - and the host was simultaneously stranded, unreachable by SSH or RDP, until
+someone signed in at the physical keyboard.
+
+The two are independent. The runner service reaches GitHub over the ordinary
+internet, so **CI health says nothing about whether the host can still be
+administered.** Tailscale on that machine was not in unattended mode, so the node
+only rejoined the private network after an interactive login - and every remote
+route to the host runs over Tailscale (see the SSH section below).
+
+Before admitting any host, put Tailscale into unattended mode on it and verify
+the preference is actually set, rather than trusting that it connected once:
+
+```powershell
+tailscale up --unattended
+tailscale debug prefs    # expect "ForceDaemon": true
+```
+
+Then prove it the only way that counts: reboot the host while it is idle and
+confirm you can reach it again **without anyone signing in**. Both current pool
+members passed this on 2026-09-03 (`edge-dev-win` preventively before its first
+reboot, `EDGE-RUNN-ENVY` after the incident above, reverified by a second
+reboot). Recovery took roughly two to three minutes on both.
+
+Check the pool is idle before rebooting anything - a reboot cancels a running
+job, and it reports as `cancelled` rather than failed:
+
+```bash
+gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) \(.status) busy=\(.busy)"'
+```
 
 Do not add `edge-dev` merely to drain the backlog before qualification. Required
 green checks are approval evidence, so faster unqualified checks are not useful.
@@ -267,6 +342,47 @@ The first host, `EDGE-RUNN-ENVY`, exposed these reusable traps:
   jobs to start and fail during setup. Candidate and qualified routing must stay
   separate.
 
+## Reaching a runner host over SSH
+
+`EDGE-ALIEN` and `EDGE-RUNN-ENVY` accept SSH **only over the private Tailscale
+network**, using the operator's dedicated runner key. There is no LAN or public
+route to either host, so a runner is unreachable whenever Tailscale is down on
+either end, and password authentication is not the intended path. Concrete
+addresses, account names, key file and host aliases live in the protected
+machine atlas, not in this public repository:
+
+```bash
+ai-private-config path machine_atlas
+```
+
+The account name differs between the operator workstation and the runner hosts,
+and that mismatch is the usual cause of a surprise password prompt. Use the
+configured host alias, which already carries the correct account and key,
+instead of typing a host and key path by hand.
+
+Two traps that make a working key look broken:
+
+- A shell running under a second local Windows profile reads a different `.ssh`
+  directory that holds no key, so SSH silently falls back to a password.
+  Confirm the profile with `echo "$env:USERNAME | $env:USERPROFILE"` before
+  concluding the key or the server is at fault.
+- A wrong key path is not a connect-time error. SSH only warns `Identity file
+  ... not accessible` and then asks for a password, which reads as a rejected
+  key.
+
+Prove key authentication rather than assuming it:
+
+```bash
+ssh -o BatchMode=yes <runner-alias> "whoami"
+```
+
+`BatchMode=yes` disables the password fallback, so this succeeds only when the
+key is actually accepted. The two hosts do not share a default remote shell -
+one answers PowerShell and the other `cmd.exe` - so quote remote commands for
+the shell that host actually runs.
+
+Both hosts were verified reachable this way on 2026-09-02.
+
 ## Status and troubleshooting
 
 Repository runner status:
@@ -309,8 +425,23 @@ failure without its logs.
 - Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
   label `ai-devops-windows` kept for requalification. The `edge-dev` label was
   not added.
-- Ordinary CI now routes `windows-offline` and `windows-reviewer-safety` to the
-  qualified pool.
+- Windows CI runs in two lanes at once, on purpose. `windows-offline`, the long
+  matrix, takes GitHub's hosted `windows-2025` image, where concurrency is
+  unmetered on a public repository and a run never waits for a machine.
+  `windows-reviewer-safety` takes the qualified self-hosted pool, where a timing
+  flake can be reproduced on a known physical machine. The self-hosted pool is
+  **extra** Windows capacity, never a replacement for GitHub's runners; routing
+  both jobs to a one-host pool on 2026-09-02 serialised the whole repository and
+  left six verify runs queued behind one desktop.
+- `edge-dev` is being onboarded into the qualified pool rather than retired, so
+  the pool holds more than one machine and a single failure cannot stop the
+  self-hosted lane. It is a candidate until a green `qualify Windows runner` job
+  runs on it, exactly like any other host. One blocker is specific to it: its
+  runner is installed as an interactive scheduled task, and both the
+  Administrator preflight and the qualification job require a real Windows
+  service with automatic start. Converting it also removes the console windows
+  that the scheduled task produced. That conversion needs one elevated command
+  on the machine.
 - `EDGE-ALIEN` is registered and online with the candidate label only. Its
   Administrator preflight and service-visible dependency gates passed in run
   [33625657591](https://github.com/popcre/ai-devops/actions/runs/33625657591)
@@ -329,25 +460,108 @@ failure without its logs.
   consecutive checks clusters at 5-12s on `EDGE-RUNN-ENVY` and never exceeds
   19s, while on `EDGE-ALIEN` gaps of 20-64s recur throughout. A 62 minute
   matrix at that rate needs about three hours.
-- The repair is on the host, not on the ceiling. Raising `timeout-minutes` is
-  forbidden here: it would hide a machine that cannot carry the workload and
-  would hold a pool slot for hours. Look on `EDGE-ALIEN` for the per-process
-  costs that produce a flat multiplier - Microsoft Defender real-time scanning
-  with no exclusion for the runner work folder, a power plan other than High
-  performance, and a runner work folder on rotating or SATA storage. Requalify
-  from a clean run afterwards; admission still requires a green `qualify
-  Windows runner` job on that exact host.
+- Part of the gap is hardware and part is endpoint scanning; only the second
+  part is recoverable. `EDGE-ALIEN` is an i7-6700 (4 cores, 8 threads, 2015)
+  against `EDGE-RUNN-ENVY`'s i7-10700 (8 cores, 16 threads). Checked on the host
+  on 2026-09-02 and ruled out as causes: Defender real-time protection is
+  already off, the runner work folder is already on the NVMe volume rather than
+  the SATA disk, and the CPU runs at its full 3401 MHz with the processor
+  throttle at 100 percent. The power plan was Balanced and was set to High
+  performance, which measured about five percent.
+- The suspect is SentinelOne, agent 25.2.442, which is installed on
+  `EDGE-ALIEN` and not on the other Windows hosts here. Two identical
+  arithmetic loops separate it from raw speed. An `awk` loop, which spawns
+  nothing and runs no script engine, is 2.2x slower on `EDGE-ALIEN` than on the
+  i7-12700 desktop - ordinary generational difference. The same loop written in
+  Windows PowerShell is **9.3x** slower on the same pair. Process spawning sits
+  with the `awk` figure at 2.1x. The suites lean heavily on PowerShell and on
+  file writes, which is where script and file scanning lands, and the real
+  matrix runs at 3x. So most of the penalty sits in the part an exclusion can
+  address, not in the core count.
+- **Onboarding of `EDGE-ALIEN` is paused pending SentinelOne exclusions.** The
+  owner has asked the IT contractor to exclude the runner's
+  directories on that host. Requested paths, confirmed present on the machine:
+
+  | Path | Why |
+  | --- | --- |
+  | `C:\actions-runner\` | The runner, its `_work` checkout and `_work\_tool` cache: every file CI writes and re-reads |
+  | `C:\Program Files\Git\` | `git.exe` and the Git Bash toolchain, re-scanned on every one of thousands of spawns |
+  | `C:\Program Files\PowerShell\7\` | The other shell the suites spawn |
+  | `C:\Program Files\nodejs\` | `node.exe`, spawned per reviewer check |
+  | `C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Temp\` | The runner service account's temp directory |
+
+  Ask specifically whether the policy's **script or AMSI scanning** can be
+  excluded for these paths as well as on-access file scanning. The PowerShell
+  measurement above points at the script engine, so a file-only exclusion may
+  recover far less.
+- The security trade is real and worth stating: excluding the runner tree means
+  code that CI checks out and executes is no longer inspected on that host. This
+  repository is public, which is only acceptable because fork pull-request
+  approval is pinned to `all_external_contributors`, so no outside contributor's
+  code runs without a maintainer releasing it. If that setting ever changes,
+  these exclusions must be revisited.
+- **The host does not merely run slowly there - it dies mid-run.** Qualification
+  run 33673582179 on 2026-09-02 failed after 37 minutes, nowhere near the
+  ceiling. Its first three steps succeeded, including the host security and
+  service-visible dependency proof, so every static gate passed. The remaining
+  steps recorded no conclusion at all and produced no retrievable log, which is
+  the shape of the process tree being killed part way through sustained test
+  execution rather than a test failing. The host returned to idle on its own
+  afterwards. Read alongside the measurements above, this is the strongest
+  evidence for the exclusion request: `EDGE-ALIEN` passes every security and
+  dependency check and only fails once continuous compilation and process
+  spawning begins.
+- **Even a complete win may not be enough, and the gate does not move.** Removing
+  the scanning penalty leaves the hardware ratio of about 1.6x, which puts the
+  62 minute matrix near 100 minutes on `EDGE-ALIEN`. That is inside the 150
+  minute qualification ceiling, but that ceiling is not the bar, and it is
+  still above `windows-offline`'s 75 minute ceiling in `verify.yml`.
+  Admission is fitness for the 75 minute job, not a green qualification run, so
+  a qualification that merely finishes does not admit the host.
+- To re-measure after the exclusions land, repeat the same three numbers on an
+  **idle** host and compare against this baseline, taken on 2026-09-02 with the
+  High performance plan already applied and SentinelOne unmodified:
+  `awk` loop 395 ms, 100 process spawns 6499 ms, 30 `git --version` spawns
+  2722 ms. Then re-run the PowerShell loop, which is the one expected to move
+  most. Only after that is it worth spending a qualification run. Nothing on
+  that host may be measured while a CI job is live on it: a local run and a CI
+  job on the same four cores corrupt each other, which happened on 2026-09-02
+  and cost two measurements.
+- **Re-measured 2026-09-03 after the second round of SentinelOne exclusions
+  landed.** Host idle, no runner job live, three consecutive runs agreeing to
+  within one percent. Against the 2026-09-02 baseline: `awk` loop 395 ms ->
+  216 ms, 100 process spawns 6499 ms -> 3494 ms, 30 `git --version` spawns
+  2722 ms -> 2326 ms. Measured on the same script the same day, `EDGE-DEV`
+  (i7-12700) gives awk 135 ms, 100 spawns 1402 ms, 30 git spawns 1123 ms, so
+  `EDGE-ALIEN` now sits at 1.6x on the pure-arithmetic loop, 2.5x on process
+  spawning and 2.1x on `git` spawning.
+- **What moved and what did not.** The script-engine penalty is gone: the same
+  arithmetic loop written in Windows PowerShell was 9.3x the i7-12700 before the
+  exclusions and is 1.47x now (367 ms against 250 ms), which is hardware. File
+  writes into the runner tree are 1.3x. Process creation did not improve
+  relative to hardware - it was about 2.1x before and is 2.1-2.5x now, and
+  `SentinelAgent` still burned 4.2 CPU-seconds across the roughly 7-second
+  benchmark. AMSI/script and file scanning were excluded; the process-creation
+  hook was not, and the suites are spawn-heavy.
+- **Consequence for admission.** The recoverable scanning penalty is largely
+  recovered, leaving roughly the hardware ratio plus a spawn tax. That is a real
+  improvement over the 3.4x that killed the earlier matrix runs, but it does not
+  by itself clear the bar: admission is fitness for `windows-offline`'s 75 minute
+  ceiling, and only a real qualification run can settle it. `EDGE-ALIEN` still
+  carries `ai-devops-windows-paused` and takes no CI until that run is spent.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
 ## If the qualified pool goes down
 
-`ai-devops-windows-qualified` resolves to one host today, so losing it stops
-`windows-offline` and `windows-reviewer-safety` from ever starting - a dead host
-leaves those jobs *queued*, not failed, so they never report. This does not
+`ai-devops-windows-qualified` resolves to one host until `edge-dev` qualifies, so
+losing it stops `windows-reviewer-safety` from ever starting - a dead host leaves
+that job *queued*, not failed, so it never reports. `windows-offline` is
+unaffected: it runs in GitHub's hosted lane, which is exactly why that lane was
+kept. This does not
 freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
 and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
-Windows proof, which is the gap recorded in
+reviewer-suite proof, which is the gap recorded in
 [`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
 
 Check the pool with:

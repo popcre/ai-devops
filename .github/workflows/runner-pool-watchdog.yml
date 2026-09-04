@@ -1,0 +1,75 @@
+name: runner-pool-watchdog
+
+# Issue #222. Fails when the self-hosted Windows pool has no online runner
+# carrying the `ai-devops-windows-qualified` label.
+#
+# Why this runs on ubuntu-24.04 and asks the runner API, rather than being a
+# job with `runs-on: [self-hosted, ai-devops-windows-qualified]`:
+# a heartbeat job would queue on the very pool it is meant to be testing. A
+# dead pool would leave it queued (GitHub does not cancel a queued job for
+# roughly 24 hours, and `timeout-minutes` does not start counting until a job
+# actually starts), so the alarm would arrive a day late or not at all. The
+# check has to come from outside the pool.
+#
+# The blind spot this closes: `linux-offline` is the only required check on
+# main, and both Windows jobs are skipped on `merge_group`. So a completely
+# dead Windows pool does not block merging and produces no red signal
+# anywhere - Windows coverage just silently disappears.
+
+on:
+  schedule:
+    # Hourly, on the 25th minute to stay off the busy top of the hour.
+    - cron: '25 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pool-online:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check the qualified Windows runner pool has at least one online host
+        env:
+          # Listing self-hosted runners requires repository *administration*
+          # rights, which the built-in GITHUB_TOKEN cannot be granted - there is
+          # no `administration:` entry in the workflow `permissions:` block. So
+          # this needs its own fine-grained token. See the failure message below.
+          GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Secret RUNNER_POOL_READ_TOKEN is not set, so this watchdog cannot see the runner pool."
+            echo "Create a fine-grained personal access token scoped to popcre/ai-devops"
+            echo "with Repository permissions -> Administration: Read-only, then save it as"
+            echo "the repository secret RUNNER_POOL_READ_TOKEN."
+            exit 1
+          fi
+
+          if ! roster="$(gh api repos/${GITHUB_REPOSITORY}/actions/runners --paginate 2>&1)"; then
+            echo "::error::Could not read the runner API. Response follows."
+            echo "$roster"
+            echo "If this is a 403, RUNNER_POOL_READ_TOKEN is missing Administration: Read-only."
+            exit 1
+          fi
+
+          echo "Full runner roster:"
+          echo "$roster" | jq -r '.runners[] | "  \(.name)  status=\(.status)  busy=\(.busy)  labels=\([.labels[].name] | join(","))"'
+
+          online="$(echo "$roster" | jq '[.runners[]
+            | select(.status == "online")
+            | select(.labels | map(.name) | index("ai-devops-windows-qualified"))]
+            | length')"
+
+          echo "Online hosts carrying ai-devops-windows-qualified: ${online}"
+
+          if [ "$online" -eq 0 ]; then
+            echo "::error::The qualified self-hosted Windows pool is fully offline. The windows-reviewer-safety lane cannot run, and because it is not a required check nothing else will report this."
+            exit 1
+          fi
+
+          if [ "$online" -eq 1 ]; then
+            echo "::warning::Only one qualified Windows host is online. The pool has no redundancy left - if it goes down, Windows coverage disappears silently."
+          fi

@@ -13,7 +13,12 @@ permissions:
 jobs:
   qualify:
     runs-on: [self-hosted, Windows, X64, ai-devops-windows]
-    timeout-minutes: 90
+    # The complete matrix takes 60-75 minutes on the fastest qualified host.
+    # EDGE-ALIEN was still passing tests at 90 minutes on 2026-09-02 (run
+    # 33639477174) and was killed by the ceiling, not by a defect. A slower
+    # candidate must be allowed to finish and be judged on its result; the
+    # ceiling is here to bound a hang, not to rank hardware.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -67,7 +67,7 @@ AI sessions work safely across his machines. Not customer-facing.
 ### What `ai-muse` is
 
 `bin/ai-muse` (394 lines) gives Claude and Codex named, persistent review
-conversations with Muse Spark 1.2 Contributor, driven through OpenCode in direct
+conversations with Muse Spark 1.3 Contributor, driven through OpenCode in direct
 mode — one `opencode run` process per turn, resuming an exact session id. Muse
 is an **advisory** reviewer: it cannot satisfy an approval gate
 (`bin/ai-review:9-11`). It reviews a disposable self-contained snapshot of the
