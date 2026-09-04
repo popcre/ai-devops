@@ -187,9 +187,12 @@ run_one() {
 # here can be influenced by a job on any other host.
 #
 # We stop OUR work, never CI's. Suites already running are allowed to finish.
+[ -n "${AI_TEST_RUNNER_PROC:-}" ] && AI_TEST_RUNNER_PROC_SET=1
 AI_TEST_RUNNER_PROC="${AI_TEST_RUNNER_PROC:-Runner.Worker}"
 ci_job_on_this_host() {
   [ "${AI_TEST_IGNORE_CI:-0}" = 1 ] && return 1
+  # Inside a CI job we ARE the runner worker; do not abort our own job.
+  [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${AI_TEST_RUNNER_PROC_SET:-}" ] && return 1
   if command -v tasklist >/dev/null 2>&1; then
     tasklist //FI "IMAGENAME eq $AI_TEST_RUNNER_PROC.exe" 2>/dev/null |
       grep -qi "$AI_TEST_RUNNER_PROC" && return 0
