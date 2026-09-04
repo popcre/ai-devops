@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "Exact third-party AI provider CLI versions this repository qualifies. A provider with a non-null supported_version must report exactly that version; anything else is unqualified and fails closed before paid work. Secret-free by contract: never add credentials, hosts, or account identifiers here.",
+  "providers": {
+    "grok": {
+      "command": "grok",
+      "supported_version": "1.0.13",
+      "qualified_on": "2026-09-03",
+      "exact_install_command": "grok update --version 1.0.13",
+      "notes": "Qualified by issue #251. ai-grok-review and ai-grok-implement parse this build's terminal JSON, stop reasons, usage/cost keys and session behaviour; a different build is not covered by that qualification."
+    },
+    "kimi": {
+      "command": "kimi",
+      "supported_version": null,
+      "qualified_on": null,
+      "exact_install_command": null,
+      "notes": "Not version-pinned. Presence is sufficient; do not force an upgrade from Grok work."
+    },
+    "qwen": {
+      "command": "qwen",
+      "supported_version": null,
+      "qualified_on": null,
+      "exact_install_command": null,
+      "notes": "Not version-pinned. Presence is sufficient; do not force an upgrade from Grok work."
+    }
+  }
+}

@@ -87,6 +87,47 @@ native_path() { # native_path POSIX_PATH
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Exact supported Grok version — one source of truth in
+# config/provider-cli-versions.json (issue #251). This wrapper's contract
+# (headless result JSON, worktree behaviour, patch export) is qualified against
+# exactly one build, so an off-policy build is refused before paid work rather
+# than trusted silently.
+# ---------------------------------------------------------------------------
+version_tool() {
+  local self real dir
+  self="${BASH_SOURCE[0]}"
+  real="$(readlink -f "$self" 2>/dev/null || true)"
+  [ -n "$real" ] && self="$real"
+  dir="$(cd "$(dirname "$self")" && pwd)"
+  # -f, not -x: a checkout that lost the executable bit is a packaging problem,
+  # not a reason to refuse every paid turn. The caller runs it through bash.
+  if [ -f "$dir/ai-provider-version" ]; then printf '%s' "$dir/ai-provider-version"; return 0; fi
+  command -v ai-provider-version 2>/dev/null || true
+}
+
+supported_grok_version() {
+  local tool; tool="$(version_tool)"
+  [ -n "$tool" ] && [ -f "$tool" ]     || die 'ai-provider-version is missing; refusing paid work without the exact supported Grok version.'
+  bash "$tool" required grok
+}
+
+installed_grok_version() { # installed_grok_version BINARY
+  local tool raw; tool="$(version_tool)"
+  raw="$("$1" --version 2>/dev/null | head -1 || true)"
+  [ -n "$raw" ] || { printf ''; return 0; }
+  bash "$tool" parse "$raw"
+}
+
+require_supported_grok_version() { # require_supported_grok_version BINARY
+  local want have; want="$(supported_grok_version)"
+  [ -n "$want" ] || die 'the provider version policy pins no Grok version; refusing paid work against an unqualified build.'
+  have="$(installed_grok_version "$1")"
+  [ -n "$have" ] || die "could not read a version from the Grok binary ($1); refusing paid work against an unidentified build."
+  [ "$have" = "$want" ] && return 0
+  die "unqualified Grok version: installed $have, this repository qualifies exactly $want. Run the provider installer (or 'grok update --version $want') before paid implementation work."
+}
+
 resolve_grok() {
   if [ -n "${AI_GROK_BIN:-}" ]; then
     [ -x "$AI_GROK_BIN" ] || die "AI_GROK_BIN=$AI_GROK_BIN is not executable."
@@ -255,6 +296,12 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
 
   local before; before="$(primary_fingerprint "$repo")"
 
+  # The version gate runs before any state is created, not just before the paid
+  # turn. Refusing after `git worktree add` would leave a worktree and a branch
+  # behind and make the obvious retry fail on "worktree path already exists".
+  local grok; grok="$(resolve_grok)"
+  require_supported_grok_version "$grok"
+
   mkdir -p "$wt_root"
   git -C "$repo" worktree add -q -b "$branch" "$wt" "$base_sha" \
     || die "failed to create worktree $wt from $ref."
@@ -286,7 +333,6 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
 
   local out="$art/result.json" err="$art/result.err" diff="$art/changes.diff"
   cp "$run_dir/brief.md" "$art/brief.md"
-  local grok; grok="$(resolve_grok)"
 
   # Permission set. NOT `--permission-mode auto`: auto-cancelling a tool ends the
   # run with stopReason "Cancelled" (measured 2026-08-12). An explicit --deny is
@@ -296,9 +342,9 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
                --disable-web-search --no-memory)
   if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
 
-  # NOTE: --worktree is deliberately NOT passed. It is silently ignored in
-  # headless mode on Grok 0.2.112 and its absence is the whole point of this
-  # wrapper. Do not "restore" it.
+  # NOTE: --worktree is deliberately NOT passed. Grok 1.0.13 documents that
+  # headless mode (-p) creates no worktree from that flag, and its absence is
+  # the whole point of this wrapper. Do not "restore" it.
   local args=(--cwd "$(native_path "$wt")"
               --model "$GROK_MODEL"
               --prompt-file "$(native_path "$run_dir/brief.md")"
@@ -416,15 +462,25 @@ cmd_list() {
 cmd_doctor() {
   need jq; need git
   local grok; grok="$(resolve_grok)"
+  local want_version have_version
+  want_version="$(supported_grok_version 2>/dev/null || true)"
+  have_version="$(installed_grok_version "$grok" 2>/dev/null || true)"
   echo "binary       : $grok"
   echo "version      : $("$grok" --version 2>&1 | head -1)"
+  if [ -z "$want_version" ]; then
+    echo "version policy: UNREADABLE — config/provider-cli-versions.json is missing or malformed; paid work will refuse to start."
+  elif [ "$have_version" = "$want_version" ]; then
+    echo "version policy: OK (exactly $want_version, the qualified build)"
+  else
+    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires exactly $want_version; paid work will refuse to start."
+  fi
   echo "platform     : $(uname -s) (windows=$(is_windows && echo yes || echo no))"
   echo "cygpath      : $(command -v cygpath >/dev/null 2>&1 && echo present || echo absent)"
   printf 'auth (models): '
   if "$grok" models >/dev/null 2>&1; then echo OK; else echo "FAILED — run 'grok login'"; fi
   echo "state dir    : $IMPL_DIR"
   echo ""
-  echo "NOTE: 'grok --worktree' is silently ignored in headless mode on 0.2.112."
+  echo "NOTE: 'grok --worktree' creates no worktree in headless mode (-p)."
   echo "      This wrapper creates the worktree with git and passes only --cwd."
 }
 

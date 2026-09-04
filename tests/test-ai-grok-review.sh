@@ -117,6 +117,12 @@ git -C "$REPO" remote add origin https://github.com/Example/Reviewer-Fixture.git
 STUB="$TMP/bin"; mkdir -p "$STUB"
 cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
+# The version gate probes `--version` before any billable work. That probe is
+# a local identity check, not a Grok session, so it is answered here without
+# being recorded as an invocation.
+case "${1:-}" in
+  --version) echo "grok ${AI_GROK_TEST_VERSION:-1.0.13} (stub)"; exit 0 ;;
+esac
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 printf '%s|%s|%s|%s\n' "${GROK_CLAUDE_MCPS_ENABLED:-}" "${GROK_CLAUDE_HOOKS_ENABLED:-}" "${GROK_CURSOR_MCPS_ENABLED:-}" "${GROK_CODEX_SESSIONS_ENABLED:-}" >> "$TMPDIR_FOR_TEST/isolation.txt"
 printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
@@ -143,7 +149,6 @@ for _a in "$@"; do
 done
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
-  --version) echo "grok 0.2.118 (stub)"; exit 0 ;;
   models)    [ "$mode" = noauth ] && exit 1; echo "grok-4.6"; exit 0 ;;
   export)    printf '%s\n' "$GROK_HOME" > "$TMPDIR_FOR_TEST/export-home"; echo "# transcript stub"; exit 0 ;;
 esac
@@ -911,6 +916,72 @@ check "refusal names both shas" \
   "( cd '$REPO' && bash '$SCRIPT' new badsha2 --prompt x --assert-head 0000000000000000000000000000000000000000 ) 2>&1 | grep -q 'actual'"
 check "right --assert-head is accepted" \
   "( cd '$REPO' && bash '$SCRIPT' new goodsha --prompt x --assert-head \"\$(git -C '$REPO' rev-parse HEAD)\" ) >/dev/null 2>&1"
+
+# --- exact supported Grok version (issue #251) --------------------------------
+# Presence of a runnable grok is NOT the contract. Everything this wrapper parses
+# is qualified against exactly one build, so an off-policy build must fail BEFORE
+# a paid turn - proven by the absence of the stub's provider-contact marker.
+VERSION_POLICY="$TMP/version-policy.json"
+cat > "$VERSION_POLICY" <<'POLICYEOF'
+{"schema_version":1,"providers":{"grok":{"command":"grok","supported_version":"1.0.13"}}}
+POLICYEOF
+
+version_gate_probe() { # version_gate_probe NAME POLICY_FILE REPORTED_VERSION
+  rm -f "$TMP/provider-contacted"
+  ( cd "$REPO" && AI_PROVIDER_VERSIONS_FILE="$2" AI_GROK_TEST_VERSION="$3" \
+      bash "$SCRIPT" new "$1" --prompt x ) >"$TMP/vg.out" 2>&1
+  printf '%s' "$?" > "$TMP/vg.rc"
+}
+
+version_gate_probe vg-exact "$VERSION_POLICY" 1.0.13
+check "grok_1_0_13_contract_is_accepted" "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
+
+# A refusal must leave nothing behind. If the sandbox, evidence packet or the
+# durable session record were created first, the obvious retry under the same
+# name would be rejected for a run that never contacted the provider.
+SANDBOX_BEFORE="$(find "$TMP" -name 'grok-vg-leftover*' 2>/dev/null | wc -l)"
+version_gate_probe vg-leftover "$VERSION_POLICY" 1.0.5
+check "refused_version_leaves_no_session_or_sandbox_state"   "[ \"\$(find '$TMP' -name '*vg-leftover*' 2>/dev/null | wc -l)\" = '$SANDBOX_BEFORE' ]"
+# The real proof: the same name works on the next attempt once the build is
+# right. A reservation left behind by the refusal would reject this retry.
+version_gate_probe vg-leftover "$VERSION_POLICY" 1.0.13
+check "refused_version_can_be_retried_under_the_same_name"   "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
+
+version_gate_probe vg-old "$VERSION_POLICY" 1.0.5
+check "stale_grok_version_fails_before_paid_turn" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
+check "stale_version_refusal_names_both_versions" \
+  "grep -q '1.0.5' '$TMP/vg.out' && grep -q 'qualifies exactly 1.0.13' '$TMP/vg.out'"
+
+version_gate_probe vg-new "$VERSION_POLICY" 1.0.14
+check "newer_unqualified_grok_version_is_not_accepted" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
+
+version_gate_probe vg-missing "$TMP/does-not-exist.json" 1.0.13
+check "missing_version_policy_fails_closed" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
+
+printf '%s\n' '{"schema_version":99,"providers":{}}' > "$TMP/bad-policy.json"
+version_gate_probe vg-malformed "$TMP/bad-policy.json" 1.0.13
+check "malformed_version_policy_fails_closed" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
+
+printf '%s\n' '{"schema_version":1,"providers":{"grok":{"command":"grok","supported_version":null}}}' > "$TMP/unpinned-policy.json"
+version_gate_probe vg-unpinned "$TMP/unpinned-policy.json" 1.0.13
+check "unpinned_grok_policy_refuses_paid_work" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
+
+DOCTOR_UNQUALIFIED="$( cd "$REPO" && AI_PROVIDER_VERSIONS_FILE="$VERSION_POLICY" AI_GROK_TEST_VERSION=1.0.5 bash "$SCRIPT" doctor 2>&1 )"
+check "doctor_reports_installed_versus_required_version" \
+  "printf '%s' \"\$DOCTOR_UNQUALIFIED\" | grep -q UNQUALIFIED"
+DOCTOR_OK="$( cd "$REPO" && AI_PROVIDER_VERSIONS_FILE="$VERSION_POLICY" AI_GROK_TEST_VERSION=1.0.13 bash "$SCRIPT" doctor 2>&1 )"
+check "doctor_confirms_the_qualified_version" \
+  "printf '%s' \"\$DOCTOR_OK\" | grep -q 'version policy: OK (exactly 1.0.13'"
+
+# The repository's real policy must be the one the wrapper enforces, and the
+# reviewer must never gain blanket approval just because 1.0.11 added a headless
+# permission startup hint.
+check "repository_policy_pins_grok_to_a_single_version" \
+  "[ -n \"\$(bash '$REPO_ROOT/bin/ai-provider-version' required grok)\" ]"
+# The header explains at length why blanket approval is refused, so assert on
+# real code only: a comment naming the flag is evidence, not a use of it.
+check "reviewer_never_uses_blanket_approval" \
+  "! grep -v '^[[:space:]]*#' '$SCRIPT' | grep -qE -e '--always-approve' -e 'permission-mode auto' -e 'bypassPermissions'"
 
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"

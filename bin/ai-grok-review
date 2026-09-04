@@ -39,7 +39,10 @@
 #     There is NO top-level `model` field; the real model id is the modelUsage
 #     key (`grok-4.5-build` for `--model grok-4.5`).
 #   Success stopReason observed: "end_turn" on 2026-08-05 and "EndTurn" on
-#     2026-08-10. Both are terminal success spellings from Grok 0.2.118.
+#     2026-08-10. Both are terminal success spellings from Grok 0.2.118, and
+#     "end_turn" is still what 1.0.13 emits (four live sessions, 2026-09-04).
+#     1.0.13 introduced no new terminal spelling, so the unrecognised-reason
+#     branch stays a refusal rather than a guess.
 #   `grok doctor` is a TERMINAL diagnostic ("Check terminal, clipboard, color,
 #     and input support") — it is not an auth check at all. This is the whole
 #     explanation for the 2026-08-05 "not authenticated" contradiction.
@@ -50,6 +53,26 @@
 #     `inspect --json`, `--no-subagents`, `--disallowed-tools`, `--deny`,
 #     `GROK_HOME`, and every GROK_CLAUDE_*/GROK_CURSOR_* compatibility cell
 #     used below are accepted. The live isolated doctor returned terminal JSON.
+#   Re-qualified 2026-09-03 on Windows against Grok Build 1.0.13 (issue #251):
+#     the full flag surface used below (`--cwd`, `--model`, `-p/--single`,
+#     `--prompt-file`, `-r/--resume`, `--max-turns`, `--permission-mode`,
+#     `--allow`, `--deny`, `--disallowed-tools`, `--no-subagents`,
+#     `--disable-web-search`, `--no-memory`, `--output-format json`) and the
+#     `inspect`, `models`, `export`, `sessions` and `update` subcommands are
+#     still present and unchanged in meaning. `grok update --version <X>` is the
+#     documented exact-version install path and is what the installers use.
+#     1.0.6-1.0.13 add vendor-side reliability (transient inference retries,
+#     length-truncation continuation, durable session saves, corrected server
+#     usage/context accounting, Windows home/worktree fixes, faster MCP and
+#     subagent startup). NONE of it replaces a control here: a provider retry is
+#     not proof of remote cancellation, of owned local process completion, of
+#     read-only scope, or of correct billing. The supported version is now a
+#     repository fact in config/provider-cli-versions.json and is enforced
+#     BEFORE any paid turn, so an unqualified build cannot spend money against a
+#     contract nobody verified. The 1.0.11 headless permission startup hint and
+#     `--always-approve` / `--permission-mode auto` are deliberately NOT used:
+#     the frozen explicit allow/deny profile below already prevents prompts, and
+#     convenience is never a reason to widen reviewer authority.
 #   NOTE: the early-return bug did NOT reproduce on a small 33s prompt — the
 #     file was complete when the command returned. The wait loop is harmless
 #     when the bug is absent (first poll succeeds) and load-bearing when it is
@@ -133,6 +156,50 @@ resolve_grok() {
     [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
   done
   die "local_dependency_unavailable: grok binary not found. This is not a Grok provider fault. Set AI_GROK_BIN, or install Grok. Looked on PATH, \$HOME/.local/bin, \$HOME/.grok/bin, /home/ai/.local/bin, /usr/local/bin."
+}
+
+# ---------------------------------------------------------------------------
+# Exact supported Grok version. One source of truth: config/provider-cli-versions.json.
+#
+# Presence-based checks are what let a machine sit on an unqualified build while
+# this wrapper claimed a contract verified against a different one (issue #251).
+# Everything below — the single terminal JSON object, the accepted stop reasons,
+# the modelUsage-keyed model identity, the usage/cost fields, session resume —
+# is qualified against exactly one build, so an off-policy build fails BEFORE a
+# paid turn rather than producing results nobody qualified.
+# ---------------------------------------------------------------------------
+version_tool() {
+  local self real dir
+  self="${BASH_SOURCE[0]}"
+  real="$(readlink -f "$self" 2>/dev/null || true)"
+  [ -n "$real" ] && self="$real"
+  dir="$(cd "$(dirname "$self")" && pwd)"
+  # -f, not -x: a checkout that lost the executable bit is a packaging problem,
+  # not a reason to refuse every paid turn. The caller runs it through bash.
+  if [ -f "$dir/ai-provider-version" ]; then printf '%s' "$dir/ai-provider-version"; return 0; fi
+  command -v ai-provider-version 2>/dev/null || true
+}
+
+supported_grok_version() {
+  local tool; tool="$(version_tool)"
+  [ -n "$tool" ] && [ -f "$tool" ]     || die 'ai-provider-version is missing; refusing paid work without the exact supported Grok version.'
+  bash "$tool" required grok
+}
+
+installed_grok_version() { # installed_grok_version BINARY
+  local tool raw; tool="$(version_tool)"
+  raw="$("$1" --version 2>/dev/null | head -1 || true)"
+  [ -n "$raw" ] || { printf ''; return 0; }
+  bash "$tool" parse "$raw"
+}
+
+require_supported_grok_version() { # require_supported_grok_version BINARY
+  local want have; want="$(supported_grok_version)"
+  [ -n "$want" ] || die 'the provider version policy pins no Grok version; refusing paid work against an unqualified build.'
+  have="$(installed_grok_version "$1")"
+  [ -n "$have" ] || die "could not read a version from the Grok binary ($1); refusing paid work against an unidentified build."
+  [ "$have" = "$want" ] && return 0
+  die "unqualified Grok version: installed $have, this repository qualifies exactly $want. Run the provider installer (or 'grok update --version $want') before paid reviewer work. Refusing to spend money against a contract nobody verified."
 }
 
 # Process diagnostics only — NEVER a completion signal.
@@ -737,6 +804,8 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
   local grok supervisor python_bin bash_bin; local -a grok_command; grok="$(resolve_grok)"
+  # Before anything billable. An unqualified build never reaches the provider.
+  require_supported_grok_version "$grok"
   supervisor="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
   if [ ! -x "$supervisor" ]; then
     # Ubuntu installs this wrapper as a symlink into /usr/local/bin. Resolve
@@ -959,7 +1028,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  stopReason  : $sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
-      note "Grok 0.2.112 may not resume a cancelled session cleanly. Do not broaden"
+      note "Grok may not resume a cancelled session cleanly. Do not broaden"
       note "permissions or keep retrying an empty resume. Start a fresh named session"
       note "and include the last verified evidence in its brief."
       return 1 ;;
@@ -1148,8 +1217,22 @@ cmd_doctor() {
   [ "${1:-}" = "--live" ] && live=1
   need jq
   grok="$(resolve_grok)"
+  local want_version have_version
+  want_version="$(supported_grok_version 2>/dev/null || true)"
+  have_version="$(installed_grok_version "$grok" 2>/dev/null || true)"
   echo "grok binary   : $grok"
   echo "grok version  : $("$grok" --version 2>&1 | head -1)"
+  if [ -z "$want_version" ]; then
+    echo "version policy: UNREADABLE — config/provider-cli-versions.json is missing or malformed; paid work will refuse to start."
+    rc=1
+  elif [ "$have_version" = "$want_version" ]; then
+    echo "version policy: OK (exactly $want_version, the qualified build)"
+  else
+    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires exactly $want_version."
+    echo "                Paid reviewer work will refuse to start. Fix with the provider"
+    echo "                installer, or 'grok update --version $want_version'."
+    rc=1
+  fi
   echo "caller        : $CALLER"
   echo "state dir     : $STATE_DIR"
   echo "model         : $GROK_MODEL"
@@ -1195,6 +1278,13 @@ cmd_doctor() {
 
 cmd_new() {
   local name="$1" repo rid upstream meta existing pf out sess_lock rid_lock sid rc turns prompt_digest options_digest source_id workid
+  # The version gate runs before any state is created -- no session lock, no
+  # private snapshot, no evidence packet, no durable session record. Refusing
+  # after those exist would leave a reservation behind for a run that never
+  # contacted the provider, and the obvious retry under the same name would then
+  # be rejected for a contract mismatch.
+  require_supported_grok_version "$(resolve_grok)"
+
   valid_name "$name" || die "invalid session name '$name' (use letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(meta_path "$rid" "$name")"
@@ -1264,6 +1354,13 @@ cmd_new() {
 
 cmd_ask() {
   local name="$1" repo rid upstream meta pf out sid rc turns sess_lock rid_lock boundary prompt_digest options_digest source_id workid next_turn
+  # The version gate runs before any state is created -- no session lock, no
+  # private snapshot, no evidence packet, no durable session record. Refusing
+  # after those exist would leave a reservation behind for a run that never
+  # contacted the provider, and the obvious retry under the same name would then
+  # be rejected for a contract mismatch.
+  require_supported_grok_version "$(resolve_grok)"
+
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .grok_session_id "$meta")"

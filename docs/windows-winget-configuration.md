@@ -76,6 +76,14 @@ The bootstrap also runs the official Windows installers for Grok Build and Kimi
 Code. Their first login remains an intentional one-time browser step owned by
 each provider; no provider password or API key is stored by this repository.
 
+Grok Build is version-pinned. `config/provider-cli-versions.json` names the one
+build this repository has qualified, and the installer brings any other build to
+exactly that version with `grok update --version <VERSION>`, keeping a restorable
+backup of the previous executable and rolling back on failure. The verification
+pass reports a wrong build as `STALE` and exits 2, so a machine that merely has a
+runnable `grok` no longer counts as ready. Credentials, sessions and logs under
+`%USERPROFILE%\.grok` are never read or copied.
+
 `config/tool-versions.json` is the one inventory for WinGet packages, npm CLIs,
 MCP packages, and production model pins. `tests/test-tool-version-pins.sh`
 rejects drift between that catalog and every recovery path. Upgrade a version

@@ -43,7 +43,10 @@ and `README.md` to list it.
 
 For Grok, GLM, or Kimi debate changes, keep the shared field contract in
 `templates/delegation/debate-turn.md`. Test headings and safety guidance
-offline in `tests/test-ai-grok-review.sh`. Do not add runtime parsing for
+offline in `tests/test-ai-grok-review.sh`. Grok is pinned to one exact CLI build
+in `config/provider-cli-versions.json`; the wrappers refuse paid work against any
+other build, so a Grok CLI upgrade means changing that policy file and
+re-qualifying, not relaxing the check. Do not add runtime parsing for
 semantic fields: missing evidence is a skill review failure, while the wrapper
 continues to enforce terminal completion, fixed permissions, session reuse,
 cache reporting, and cost reporting.

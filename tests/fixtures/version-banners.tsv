@@ -1,0 +1,12 @@
+# One banner per line: BANNER<TAB>EXPECTED (empty EXPECTED means "no version").
+# Both version readers -- bin/ai-provider-version (Unix, used by the wrappers and
+# the Bash installer) and Get-ReportedProviderVersion (the Windows installer) --
+# must agree on every line. A disagreement would qualify a build on one platform
+# and refuse it on the other.
+grok 1.0.13 (5e9a58528b76) [stable]	1.0.13
+grok 1.0.5 (aaaaaaaaaaaa) [stable]	1.0.5
+tool 2.3.4 built with lib 9.9.9	2.3.4
+1.0.13	1.0.13
+grok version 10.20.30	10.20.30
+grok (unknown build)	
+grok 1.0	
