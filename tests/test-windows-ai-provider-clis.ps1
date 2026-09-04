@@ -21,12 +21,23 @@ Assert ($installerText -match 'https://code\.kimi\.com/kimi-code/install\.ps1') 
 Assert ($installerText -match 'https://qwen-code-assets\.oss-cn-hangzhou\.aliyuncs\.com/installation/install-qwen-standalone\.ps1') 'must use the official Qwen standalone installer'
 Assert ($installerText -match 'qwen-code\\bin\\qwen\.cmd') 'must verify the Qwen standalone shim'
 Assert ($installerText -match 'TestOnly') 'must support a non-installing verification path'
+Assert ($installerText -match "ValidateSet\('grok', 'kimi', 'qwen'\)") 'must support a provider-scoped installation'
+Assert ($installerText -match 'QwenVersion') 'must support an explicit Qwen version'
+Assert ($installerText -match 'QWEN_INSTALL_VERSION') 'must pass the exact Qwen version through the official installer contract'
+Assert ($installerText -match 'Backup-QwenRuntime') 'must preserve an existing Qwen runtime before an upgrade'
+Assert ($installerText -match 'Recoverable Qwen runtime backup') 'must print the recoverable backup location'
+Assert ($installerText -match 'Qwen version verification failed') 'must verify the installed Qwen version after an upgrade'
 Assert ($installerText -match 'Set-QwenChildEnvironmentHardening') 'installer must harden the Qwen child-process environment after installation'
 Assert ($installerText -match 'BAILIAN_CODING_PLAN_API_KEY') 'Qwen hardening must remove the Coding Plan key from tool children'
 Assert ($installerText -match 'declaration\.Value\.Contains') 'Qwen hardening must inspect the sanitizer declaration, not an unrelated bundle occurrence'
 Assert ($installerText -match 'InstallerSha256') 'provider installers must carry repository-owned SHA-256 pins'
 Assert ($installerText -match 'Get-FileHash -Algorithm SHA256') 'downloaded provider installers must be hash-verified before execution'
+Assert ($installerText -match '\*\$\{currentSid\}:\(OI\)\(CI\)F') 'temporary installer ACL must pass the current account as a literal SID'
 Assert ($installerText -notmatch 'Invoke-Expression') 'downloaded provider installers must never execute directly from text'
+
+$verifierText = Get-Content -Raw (Join-Path $root 'tools\verify-qwen-child-env-sanitizer.mjs')
+Assert ($verifierText -match 'INTERNAL_SECRET_ENV_VAR_NAMES') 'Qwen verifier must support the case-insensitive sanitizer helper used by 0.23.0'
+Assert ($verifierText -match 'isInternalSecretEnvVar') 'Qwen verifier must behaviorally execute the 0.23.0 sanitizer helper'
 
 # Reproduce the vendor layout that exposed the production bug: the protected
 # name exists elsewhere in the bundle but is absent from the child sanitizer.

@@ -19,9 +19,17 @@ const source = fs.readFileSync(candidates[0], 'utf8');
 const declaration = source.match(/var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];/);
 const fn = source.match(/function sanitizeChildEnv\([^)]*\)\s*\{[\s\S]*?return sanitized;\s*\n\}/);
 if (!declaration || !fn) throw new Error('could not extract the known sanitizer implementation');
+let helperProgram = '';
+if (fn[0].includes('isInternalSecretEnvVar')) {
+  const nameSet = source.match(/var INTERNAL_SECRET_ENV_VAR_NAMES\s*=\s*new Set\([\s\S]*?\);/);
+  const helper = source.match(/function isInternalSecretEnvVar\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  if (!nameSet || !helper) throw new Error('could not extract the known case-insensitive sanitizer helper');
+  helperProgram = `${nameSet[0]}\n${helper[0]}`;
+}
 const program = `
 const PRIVATE_ACP_CAPABILITY_ENV = "QWEN_PRIVATE_ACP_CAPABILITY";
 ${declaration[0]}
+${helperProgram}
 ${fn[0]}
 sanitizeChildEnv({
   BAILIAN_CODING_PLAN_API_KEY: "must-be-removed",

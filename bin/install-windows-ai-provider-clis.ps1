@@ -13,7 +13,14 @@ upgrade restores the previous executable. Credentials under ~/.grok are never
 read, copied or backed up.
 #>
 [CmdletBinding()]
-param([switch]$TestOnly)
+param(
+  [switch]$TestOnly,
+  [ValidateSet('grok', 'kimi', 'qwen')]
+  [Alias('Provider')]
+  [string[]]$SelectedProvider = @('grok', 'kimi', 'qwen'),
+  [ValidatePattern('^v\d+\.\d+\.\d+$')]
+  [string]$QwenVersion
+)
 
 $ErrorActionPreference = 'Stop'
 $results = [Collections.Generic.List[object]]::new()
@@ -132,7 +139,7 @@ function Invoke-PinnedProviderInstaller {
   try {
     [void](New-Item -ItemType Directory -Path $tempDir)
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls.exe $tempDir '/inheritance:r' "/grant:r" "${currentSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    & icacls.exe $tempDir '/inheritance:r' "/grant:r" "*${currentSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not protect temporary installer directory: $tempDir" }
     Invoke-WebRequest -UseBasicParsing -Uri $Provider.InstallUri -OutFile $installerFile
     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerFile).Hash.ToLowerInvariant()
@@ -150,9 +157,21 @@ function Invoke-PinnedProviderInstaller {
   }
 }
 
-$providers = @(
+function Backup-QwenRuntime {
+  param([string]$Root = $(Join-Path $env:LOCALAPPDATA 'qwen-code'))
+  if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
+  $backupRoot = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'
+  [void](New-Item -ItemType Directory -Force -Path $backupRoot)
+  $backup = Join-Path $backupRoot ("runtime-{0}" -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+  Copy-Item -LiteralPath $Root -Destination $backup -Recurse
+  if (-not (Test-Path -LiteralPath $backup -PathType Container)) { throw 'Qwen runtime backup could not be verified.' }
+  return $backup
+}
+
+$providerCatalog = @(
   [pscustomobject]@{
     Name = 'Grok Build CLI'
+    Id = 'grok'
     Command = 'grok'
     InstallUri = 'https://x.ai/cli/install.ps1'
     InstallerSha256 = '9e995d8d6adaa425fd52ad89b5281d6d4d9076c1835d6cc65a666ec89288d5b6'
@@ -160,6 +179,7 @@ $providers = @(
   },
   [pscustomobject]@{
     Name = 'Kimi Code CLI'
+    Id = 'kimi'
     Command = 'kimi'
     InstallUri = 'https://code.kimi.com/kimi-code/install.ps1'
     InstallerSha256 = 'b6307003b603f525673ece0fb2174de2b16915a27dd0c8ed7c93d9b4d12ebe8b'
@@ -167,6 +187,7 @@ $providers = @(
   },
   [pscustomobject]@{
     Name = 'Qwen Code CLI'
+    Id = 'qwen'
     Command = 'qwen'
     InstallUri = 'https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1'
     InstallerSha256 = '901f2974d849a7366dcdbfe0fb23a6e85a97a563570e1e7aa5415a5f634da1c8'
@@ -174,7 +195,9 @@ $providers = @(
   }
 )
 
-foreach ($provider in $providers) {
+foreach ($providerDefinition in $providerCatalog) {
+  if ($providerDefinition.Id -notin $SelectedProvider) { continue }
+  $provider = $providerDefinition
   $required = Get-RequiredProviderVersion -Provider $provider.Command
   # An unpinned entry means "presence is enough", which is right for Kimi and
   # Qwen. For Grok it would reinstate the presence-skip this policy exists to
@@ -197,9 +220,21 @@ foreach ($provider in $providers) {
     continue
   }
 
-  if (-not $present) {
+  $forceQwenVersion = $provider.Id -eq 'qwen' -and -not [string]::IsNullOrEmpty($QwenVersion)
+  if (-not $present -or $forceQwenVersion) {
     Write-Host "Installing $($provider.Name) from its official installer..."
-    Invoke-PinnedProviderInstaller -Provider $provider
+    $backup = $null
+    $priorQwenVersion = $env:QWEN_INSTALL_VERSION
+    try {
+      if ($forceQwenVersion) {
+        $backup = Backup-QwenRuntime
+        $env:QWEN_INSTALL_VERSION = $QwenVersion
+      }
+      Invoke-PinnedProviderInstaller -Provider $provider
+    } finally {
+      $env:QWEN_INSTALL_VERSION = $priorQwenVersion
+    }
+    if ($backup) { Write-Host "Recoverable Qwen runtime backup: $backup" }
   }
 
   $command = Get-Command $provider.Command -ErrorAction SilentlyContinue
@@ -217,6 +252,12 @@ foreach ($provider in $providers) {
   if ($provider.Command -eq 'qwen') {
     $hardened = Set-QwenChildEnvironmentHardening
     Write-Host "Qwen child-process credential hardening applied: $hardened"
+    if ($forceQwenVersion) {
+      $versionOutput = (& $provider.ExpectedPath --version 2>&1 | Out-String).Trim()
+      if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch [regex]::Escape($QwenVersion.TrimStart('v'))) {
+        throw "Qwen version verification failed. Expected $QwenVersion, received '$versionOutput'."
+      }
+    }
   }
   Result $provider.Name 'APPLIED' $resolved
 }

@@ -5,9 +5,9 @@
 | Work | Status | Evidence / next gate |
 |---|---|---|
 | Protect the active Windows runs | IN FORCE | Local detached worktree at `e1c9f0d6866fc3e0acfb7a5b65304c7c4a872a62`; no push, PR, merge, dispatch, cancellation, runner action, install, or local suite |
-| Qwen 3.8 Max source preparation | OFFLINE GREEN | Stable `qwen3.8-max` pin, fixtures, skill, and Windows path normalization complete; non-live doctor passed on Qwen Code 0.21.15; focused suite 91/91 |
-| Gemini 3.8 Flash source preparation | OFFLINE GREEN | `agy models` confirmed `gemini-3.8-flash-high`; pin, fixtures, and skill complete; focused suite 62/62 |
-| Shared quarantine/preflight | OFFLINE GREEN | 51/51; former-model or changed-wrapper/runtime qualification remains invalid |
+| Qwen 3.8 Max source preparation | OFFLINE GREEN ON IDLE POOL HOST | Stable `qwen3.8-max` pin; Qwen Code 0.23.0 installed on `EDGE-RUNN-ENVY` through the repo-owned installer with recoverable backup and verified child-secret hardening; non-live doctor passed with runtime SHA-256 `8f3cbb225324286bc163aa4ccd66405ba95ed357894d34ff781e57d139190c4a`; focused suite 92/92 |
+| Gemini 3.8 Flash source preparation | OFFLINE GREEN ON IDLE POOL HOST | `agy models` confirmed `gemini-3.8-flash-high`; pin, fixtures, and skill complete; focused suite 62/62 on `EDGE-RUNN-ENVY` |
+| Shared quarantine/preflight | OFFLINE GREEN ON IDLE POOL HOST | 51/51 on `EDGE-RUNN-ENVY`; former-model or changed-wrapper/runtime qualification remains invalid |
 | Qualification and reviewer rotation | PENDING | Both providers remain quarantined and receive no assignments until exact-model hostile qualification, exact-head review, full gates, installation, and current evidence succeed |
 
 ## Goal
@@ -50,6 +50,38 @@ Before each later action, re-read live job state rather than relying on this pla
    and reviewer assignment policy, then remove the no-new-work restriction only
    for the provider whose current qualification is valid. Re-check orchestrator/
    reviewer separation before shared-db assignments.
+
+## 2026-09-04 pool-slot progress
+
+`EDGE-RUNN-ENVY` was confirmed online and idle before work began. The remaining
+long `windows-offline` jobs were running on GitHub-hosted Windows machines, not
+on that self-hosted runner. A temporary isolated checkout at
+`C:\ai-devops-reviewer-38` received only this workstream's files.
+
+The Windows provider installer was extended to select only Qwen, request an
+exact vendor version, preserve an existing runtime backup, verify the installed
+version, reapply the child-process credential hardening, and behaviorally test
+it. Two portability changes were required and tested: literal-SID ACL syntax on
+the remote host, and Qwen 0.23.0's case-insensitive sanitizer helper. The first
+install attempt stopped before download on the ACL guard. The second installed
+0.23.0 but correctly refused completion when the old verifier could not execute
+the new helper. The repaired installer then completed with backup
+`C:\Users\ahazan\.local\state\ai-devops\qwen\vendor-backups\runtime-20260904T005451Z`.
+
+The wrapper's non-live doctor was also repaired to secure a fresh dedicated
+Qwen home before checking its session store. Final evidence on the idle host:
+Qwen version 0.23.0; supported safety/budget/session flags present; child-secret
+hardening passed; runtime SHA-256
+`8f3cbb225324286bc163aa4ccd66405ba95ed357894d34ff781e57d139190c4a`;
+preloader SHA-256
+`774520d5e12ed1fc586d7d30c8278310b779672b51a4ba24ed663b0d7ad44291`;
+Qwen 92/92; shared preflight 51/51; Gemini 62/62.
+
+No paid provider call was made. `EDGE-RUNN-ENVY` lacks the governed 1Password
+reference and CLI, so exact-model live qualification remains pending. GitHub
+assigned a new reviewer-safety job to the host only after the focused tests had
+finished; further work there stopped immediately. `EDGE-DEV` was checked and
+was busy, so its existing Qwen 0.21.15 installation was not touched.
 
 ## Definition of done
 

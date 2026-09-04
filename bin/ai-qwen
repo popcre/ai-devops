@@ -815,6 +815,7 @@ doctor_worktrees() {
 cmd_doctor() {
   local live=0 qwen rc=0 runtime_sha="" preloader_sha=""
   [ "${1:-}" = "--live" ] && live=1
+  secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before checking the session store.'
   need jq; qwen="$(resolve_qwen)"
   echo "qwen binary   : $qwen"
   echo "qwen version  : $(qwen_local "$qwen" --version 2>&1 | head -1)"

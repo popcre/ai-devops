@@ -313,6 +313,7 @@ run delete review-1 >/dev/null 2>&1
 check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
 DOCTOR_ONE="$(run doctor)"
 check 'doctor checks installed interface without a model call' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen runtime sha256: [0-9a-f]{64}$'"
+check 'doctor secures a fresh Qwen home before checking its session store' "sed -n '/^cmd_doctor()/,/^}/p' '$SCRIPT' | grep -q 'secure_qwen_home'"
 check 'doctor fingerprints the repository credential preloader' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen preloader sha256: [0-9a-f]{64}$'"
 RUNTIME_HASH_ONE="$(printf '%s\n' "$DOCTOR_ONE" | sed -n 's/^qwen runtime sha256: //p')"
 printf '\n// runtime drift fixture\n' >> "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
