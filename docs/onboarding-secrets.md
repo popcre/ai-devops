@@ -285,7 +285,15 @@ SA saga) is recorded in the `op-account-migration-2026-07` memory.
 
 ## Known follow-ups (not done by this tooling)
 
-- `monitor/app/.mcp.json` contains a **raw NAS token** and should be changed to
-  `${NAS_MCP_TOKEN}` in that app repo (an app-repo change, out of scope here).
+- `monitor/app/.mcp.json` should hold `${NAS_MCP_TOKEN}` rather than a raw NAS
+  token (an app-repo change, out of scope here).
+  **Status 2026-08-26: no such file exists in that checkout, and `.mcp.json`
+  appears nowhere in that repo's history — verified on the hetz VPS.** The repo
+  now ignores it in BOTH `.gitignore:58` and `.git/info/exclude:7`, with the
+  reason recorded in `.gitignore:53-57`: a live token was once committed
+  (`006c059`), removed (`11f5d5e`), survived in history, and had to be rotated.
+  **That ignore rule is an incident safeguard. Do not remove it** to make MCP
+  project-scoping work — see [`mcp-server-scope.md`](mcp-server-scope.md), which
+  documents why those two servers stay global instead.
 - The Windows Desktop MCP wiring in `setup-machine.ps1` needs a first-run
   validation on an actual Windows machine.

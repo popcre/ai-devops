@@ -336,7 +336,7 @@ else
   mkdir -p "$(dirname "$CLAUDE_MCP_CONFIG")"
   [ -f "$CLAUDE_MCP_CONFIG" ] && cp "$CLAUDE_MCP_CONFIG" "$CLAUDE_MCP_CONFIG.aidevops.bak"
   AI_DEVOPS_OWNED_OUT="$OWNED_FILE" python3 - "$CLAUDE_MCP_CONFIG" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
-import json, os, sys
+import json, os, subprocess, sys
 
 path, launch, remote, supa_ref, codex = sys.argv[1:6]
 
@@ -396,13 +396,163 @@ if codex:
         "env": {"MCP_TOOL_TIMEOUT": "3600000"},
     }
 
+# --------------------------------------------------------------------------
+# PROJECT-SCOPED SERVERS  (mirrors bin/setup-machine.ps1 steps 5d-2 and 7b)
+#
+# Claude Code starts every GLOBAL server in EVERY session, in every repository.
+# Measured on edge-dev 2026-08-26: 11 global servers x 22 open sessions = 416
+# node processes holding 18.1 GB on a 32 GB machine. A server only one project
+# uses must not be global.
+#
+# The authority is the .mcp.json COMMITTED IN EACH PROJECT REPO - that is what
+# reaches extra clones, linked worktrees and other machines. This step only
+# seeds it, and never overwrites an entry the repo already owns.
+#
+# Keep this map identical to $McpProjectScope in bin/setup-machine.ps1.
+PROJECT_SCOPE = {
+    "trigger":          "oracle",
+    "recall-ai":        "oracle",
+    "railway":          "popdam3",
+    "ag-grid":          "designflow-frontend",
+    "devops-mcp":       "synology-monitor",
+    "synology-monitor": "synology-monitor",
+}
+
+# Checkout roots differ per machine; probe rather than assume one.
+# AI_DEVOPS_MCP_PROJECT_ROOTS (os.pathsep-separated) overrides the list entirely.
+# The regression test sets it so it can never touch a real checkout: on hetz,
+# /worksp/designflow-frontend exists and is owned by another account, and an
+# earlier version of this test tried to write there.
+_roots_env = os.environ.get("AI_DEVOPS_MCP_PROJECT_ROOTS")
+if _roots_env:
+    PROJECT_ROOTS = [p for p in _roots_env.split(os.pathsep) if p]
+else:
+    PROJECT_ROOTS = [
+        os.path.expanduser("~/repos"),
+        "/worksp",
+        "/srv",
+        os.path.expanduser("~"),
+    ]
+
+_HOME = os.path.expanduser("~")
+
+def _portable(obj):
+    """Replace this machine's home directory with ${HOME}, recursively."""
+    if isinstance(obj, str):
+        return obj.replace(_HOME, "${HOME}") if _HOME and _HOME != "/" else obj
+    if isinstance(obj, list):
+        return [_portable(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _portable(v) for k, v in obj.items()}
+    return obj
+
+# Machine-shaped locations where a repo is not in a folder of its own name.
+PROJECT_ALIASES = {
+    "synology-monitor": os.path.join("monitor", "app"),
+}
+
+def _find_project(name):
+    for root in PROJECT_ROOTS:
+        # A checkout is not always a directory named after the repo. On hetz the
+        # synology-monitor repo lives at /worksp/monitor/app (verified
+        # 2026-08-26); designflow-* live under a dflow_plm parent. Probe the
+        # known shapes rather than assuming the repo name is the folder name.
+        for candidate in (os.path.join(root, name),
+                          os.path.join(root, "dflow_plm", name),
+                          os.path.join(root, PROJECT_ALIASES.get(name, name))):
+            if os.path.isdir(os.path.join(candidate, ".git")) or os.path.isdir(candidate):
+                if os.path.isdir(candidate):
+                    return candidate
+    return None
+
+by_project = {}
+for _name, _proj in PROJECT_SCOPE.items():
+    if _name in servers:
+        by_project.setdefault(_proj, []).append(_name)
+
+# Names that genuinely reached a project file. ONLY these may be pruned from the
+# global config. A project that is not cloned here keeps its servers global -
+# removing them would take away a working capability with nowhere to put it.
+_scoped = set()
+
+for _proj, _names in sorted(by_project.items()):
+    _dir = _find_project(_proj)
+    if not _dir:
+        print("  -- %s not cloned here; %s left global" % (_proj, ", ".join(sorted(_names))))
+        continue
+    # A GITIGNORED .mcp.json can never travel. Seeding it would work on THIS
+    # machine while every other clone, worktree and machine has the server
+    # nowhere - the authority is the COMMITTED file. Found live on the hetz VPS
+    # 2026-08-26: synology-monitor ignores .mcp.json at .gitignore:54, and the
+    # servers had already been pruned from the global config.
+    # Fail safe: leave them global, which works, and say why.
+    _ignored = subprocess.call(
+        ["git", "-C", _dir, "check-ignore", "-q", ".mcp.json"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    if _ignored:
+        print("  !! %s ignores .mcp.json - a seed there would never be committed." % _proj)
+        print("     %s left GLOBAL so every clone keeps working." % ", ".join(sorted(_names)))
+        print("     Do NOT just un-ignore it: that rule can be a deliberate")
+        print("     safeguard. synology-monitor ignores it because the file has held")
+        print("     a raw NAS token and one already leaked. See docs/mcp-server-scope.md.")
+        continue
+
+    _file = os.path.join(_dir, ".mcp.json")
+    _cfg = {}
+    if os.path.exists(_file):
+        try:
+            with open(_file) as fh:
+                _cfg = json.load(fh)
+        except Exception as exc:
+            print("  !! %s is not valid JSON (%s); left alone" % (_file, exc))
+            continue
+    _existing = _cfg.setdefault("mcpServers", {})
+    _write = [n for n in sorted(_names) if n not in _existing]
+    if not _write:
+        print("  ok %s already carries: %s" % (_proj, ", ".join(sorted(_names))))
+    else:
+        # FAIL SAFE, NEVER FAIL CLOSED. A project directory can be unwritable
+        # (on hetz /worksp/designflow-frontend is owned by another account), the
+        # disk can be full, or the path can be read-only. Before this guard the
+        # exception escaped and killed the whole wiring step, so NO server at all
+        # was configured - a total capability loss from one unwritable directory.
+        # On any failure the servers stay GLOBAL, which still works.
+        try:
+            for n in _write:
+                # PORTABILITY: this file is COMMITTED and then read on other
+                # machines and by other user accounts, so it must not carry this
+                # machine's literal home directory. Claude Code expands ${HOME}
+                # in .mcp.json. Verified live on hetz 2026-08-26, where the
+                # launcher resolved to /home/ai/.config/... before this.
+                #
+                # Substitute on the STRINGS, not on the JSON text: a Windows home
+                # path is backslash-escaped once encoded, so a text replace
+                # silently matches nothing and the literal path ships anyway.
+                _existing[n] = _portable(servers[n])
+            with open(_file, "w") as fh:
+                json.dump(_cfg, fh, indent=2)
+                fh.write("\n")
+        except OSError as exc:
+            print("  !! could not write %s (%s)" % (_file, exc))
+            print("     %s left GLOBAL so they keep working." % ", ".join(sorted(_names)))
+            continue
+        print("  ok %s <- %s" % (_file, ", ".join(_write)))
+    # Whether seeded now or already committed, it must not also be global.
+    for n in _names:
+        servers.pop(n, None)
+        _scoped.add(n)
+
 cfg.setdefault("mcpServers", {}).update(servers)
+# A server that reached a project file must be actively removed from a config
+# written before this change, or the old global entry survives forever.
+for _name in _scoped:
+    cfg.get("mcpServers", {}).pop(_name, None)
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
 with open(os.environ["AI_DEVOPS_OWNED_OUT"], "w") as fh:
     fh.write(",".join(sorted(servers)))
-print("  ok wired: " + ", ".join(servers))
+print("  ok wired global: " + ", ".join(sorted(servers)))
 PY
   rc=$?
   if [ "$rc" -eq 0 ]; then
