@@ -28,6 +28,31 @@ Self-hosting fixes two separate things:
 The cost is real and accepted: verification only happens while that machine is on
 and logged in.
 
+### The hosted lane still runs these suites, and still goes red at random
+
+`windows-offline` runs on GitHub-hosted `windows-2025` and executes the full Bash
+suite, so it re-runs the reviewer suites that `windows-reviewer-safety` already
+proves on the qualified pool. On the hosted image that is intermittently red on
+`main` itself, with a recognisable signature:
+
+- `test-ai-grok-review.sh` takes 2000s or more against a ~650s green baseline,
+  and total `BASH SUITE TIMINGS seconds=` lands near 5700-5800 instead of ~4400.
+- The failures are the Grok concurrency and lock-serialization assertions, e.g.
+  `different_named_sessions_can_ask_concurrently`,
+  `same_next_ask_turn_is_serialized`, `uncertain_ask_blocks_its_exact_retry`.
+- `windows-reviewer-safety` passes in the same run, on the same commit.
+
+That combination is the hosted machine missing the timing window, not a defect.
+Confirm it by comparing the two lanes **within one run** before suspecting a
+branch — `main` run
+[33809598271](https://github.com/popcre/ai-devops/actions/runs/33809598271) is a
+clean example on `main` with no pull request involved. Only `linux-offline` is a
+required check, so this does not block a merge.
+
+Do not raise a timeout to make these pass; that discards the signal the two-lane
+split exists to preserve. Removing the reviewer suites from the hosted lane is
+tracked in [#260](https://github.com/popcre/ai-devops/issues/260).
+
 ## Security — read this before adding another runner
 
 **This repository is public.** A self-hosted runner executes whatever code a
