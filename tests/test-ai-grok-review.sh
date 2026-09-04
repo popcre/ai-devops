@@ -939,6 +939,17 @@ version_gate_probe() { # version_gate_probe NAME POLICY_FILE REPORTED_VERSION
 version_gate_probe vg-exact "$VERSION_POLICY" 1.0.13
 check "grok_1_0_13_contract_is_accepted" "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
 
+# A refusal must leave nothing behind. If the sandbox, evidence packet or the
+# durable session record were created first, the obvious retry under the same
+# name would be rejected for a run that never contacted the provider.
+SANDBOX_BEFORE="$(find "$TMP" -name 'grok-vg-leftover*' 2>/dev/null | wc -l)"
+version_gate_probe vg-leftover "$VERSION_POLICY" 1.0.5
+check "refused_version_leaves_no_session_or_sandbox_state"   "[ \"\$(find '$TMP' -name '*vg-leftover*' 2>/dev/null | wc -l)\" = '$SANDBOX_BEFORE' ]"
+# The real proof: the same name works on the next attempt once the build is
+# right. A reservation left behind by the refusal would reject this retry.
+version_gate_probe vg-leftover "$VERSION_POLICY" 1.0.13
+check "refused_version_can_be_retried_under_the_same_name"   "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
+
 version_gate_probe vg-old "$VERSION_POLICY" 1.0.5
 check "stale_grok_version_fails_before_paid_turn" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
 check "stale_version_refusal_names_both_versions" \

@@ -191,6 +191,24 @@ try {
   if (Test-Path -LiteralPath $versionFixture) { Remove-Item -LiteralPath $versionFixture -Recurse -Force }
 }
 
+# --- the Windows reader agrees with the Unix one, banner for banner --------
+# Same fixture the Bash suite drives through bin/ai-provider-version. Two
+# readers that disagree would qualify a build on one platform and refuse it on
+# the other.
+$bannerFixture = Join-Path $root 'tests/fixtures/version-banners.tsv'
+Assert (Test-Path -LiteralPath $bannerFixture) 'the shared version-banner fixture must exist'
+foreach ($line in Get-Content -LiteralPath $bannerFixture) {
+  if (-not $line -or $line.StartsWith('#')) { continue }
+  $parts = $line -split "`t", 2
+  $banner = $parts[0]
+  $expected = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+  $m = [regex]::Match($banner, '([0-9]+\.[0-9]+\.[0-9]+)')
+  $got = if ($m.Success) { $m.Groups[1].Value } else { '' }
+  Assert ($got -eq $expected) ("the Windows version reader parsed '$banner' as '$got', expected '$expected'")
+}
+
+Assert ($installerText -match 'pins no Grok version') 'an unpinned Grok must be a policy error, not a reason to skip the version check'
+
 $qwenWrapperText = Get-Content -Raw $qwenWrapper
 Assert ($qwenWrapperText -match '\*\.cmd\|\*\.bat') 'Qwen wrapper must accept official Windows command shims that are not marked executable by Git Bash'
 

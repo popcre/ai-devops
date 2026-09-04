@@ -44,16 +44,19 @@ Now the exact qualified version is a repository fact in
 That file is the single source of truth. Two readers consume it, because the
 Windows installer cannot depend on Bash or `jq`: `bin/ai-provider-version` on
 Unix and `Get-RequiredProviderVersion` in the Windows installer. Both take the
-first `x.y.z` in a version banner, and both are covered by their own tests, so
-the two can never disagree about which build is qualified. It is enforced in
-four places:
+first ASCII `x.y.z` in a version banner. Both suites drive the same fixture,
+[`tests/fixtures/version-banners.tsv`](../tests/fixtures/version-banners.tsv),
+through their own reader and assert the same answer, so a divergence that would
+qualify a build on one platform and refuse it on the other fails a test. It is
+enforced in four places:
 
 - both installers upgrade a wrong build to exactly the pinned version with
   `grok update --version <VERSION>`, keeping a restorable backup of the previous
   executable and rolling back on a failed update, on a wrong resulting version,
   and on an unexpected error part-way through — the Windows path restores from
-  a `finally` block, so even a throwing or locked `update` cannot leave the
-  machine on a worse binary than it started with;
+  a `finally` block and the Unix path runs the whole risky sequence in a
+  subshell, so on either platform a throwing, locked, or unparseable `update`
+  still ends with the backup restored rather than a worse binary in place;
 - both wrappers refuse paid work against any other build, before the provider is
   contacted, naming the installed and the required version;
 - both doctors report the installed version against the required one;

@@ -1273,6 +1273,13 @@ cmd_doctor() {
 
 cmd_new() {
   local name="$1" repo rid upstream meta existing pf out sess_lock rid_lock sid rc turns prompt_digest options_digest source_id workid
+  # The version gate runs before any state is created -- no session lock, no
+  # private snapshot, no evidence packet, no durable session record. Refusing
+  # after those exist would leave a reservation behind for a run that never
+  # contacted the provider, and the obvious retry under the same name would then
+  # be rejected for a contract mismatch.
+  require_supported_grok_version "$(resolve_grok)"
+
   valid_name "$name" || die "invalid session name '$name' (use letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(meta_path "$rid" "$name")"
@@ -1342,6 +1349,13 @@ cmd_new() {
 
 cmd_ask() {
   local name="$1" repo rid upstream meta pf out sid rc turns sess_lock rid_lock boundary prompt_digest options_digest source_id workid next_turn
+  # The version gate runs before any state is created -- no session lock, no
+  # private snapshot, no evidence packet, no durable session record. Refusing
+  # after those exist would leave a reservation behind for a run that never
+  # contacted the provider, and the obvious retry under the same name would then
+  # be rejected for a contract mismatch.
+  require_supported_grok_version "$(resolve_grok)"
+
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; upstream="$(require_upstream_identity "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .grok_session_id "$meta")"

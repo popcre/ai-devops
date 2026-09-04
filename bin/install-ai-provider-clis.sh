@@ -197,8 +197,24 @@ restore_binary() { # restore_binary BACKUP TARGET
   cp -p "$backup" "$target"
 }
 
+# The whole risky sequence runs in a subshell so that ANY failure inside it --
+# a non-zero `update`, a wrong post-install version, an unparseable banner, or a
+# `set -e` abort from something unexpected -- returns here with the backup still
+# on disk. This is the Unix half of the same restore-on-any-failure guarantee the
+# Windows installer gets from its `finally` block.
+_exact_upgrade_attempt() { # _exact_upgrade_attempt NAME BINARY WANT
+  local name="$1" bin_path="$2" want="$3" now
+  "$bin_path" update --version "$want" || {
+    echo "ERROR $name: 'update --version $want' failed" >&2; return 1; }
+  now="$(reported_version "$bin_path" 2>/dev/null || true)"
+  if [ "$now" != "$want" ]; then
+    echo "ERROR $name: upgrade finished but the binary reports '${now:-unreadable}', not $want" >&2
+    return 1
+  fi
+}
+
 upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
-  local name="$1" bin_path="$2" want="$3" backup now
+  local name="$1" bin_path="$2" want="$3" backup
   case "$name" in
     grok) ;;
     *) echo "ERROR $name: no exact-version upgrade path is defined for this provider" >&2; return 1 ;;
@@ -206,14 +222,8 @@ upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
   backup="$(backup_binary "$name" "$bin_path")" || {
     echo "ERROR $name: could not back up the existing binary; refusing an unrecoverable upgrade" >&2; return 1; }
   echo "     backed up $bin_path -> $backup"
-  if ! "$bin_path" update --version "$want"; then
-    echo "ERROR $name: 'update --version $want' failed; restoring the previous binary" >&2
-    restore_binary "$backup" "$bin_path" || echo "ERROR $name: restore from $backup FAILED; restore it by hand" >&2
-    return 1
-  fi
-  now="$(reported_version "$bin_path")"
-  if [ "$now" != "$want" ]; then
-    echo "ERROR $name: upgrade finished but the binary reports '${now:-unknown}', not $want; restoring the previous binary" >&2
+  if ! ( _exact_upgrade_attempt "$name" "$bin_path" "$want" ); then
+    echo "ERROR $name: restoring the previous binary" >&2
     restore_binary "$backup" "$bin_path" || echo "ERROR $name: restore from $backup FAILED; restore it by hand" >&2
     return 1
   fi
@@ -229,6 +239,12 @@ for entry in "${PROVIDERS[@]}"; do
   wants "$name" || continue
 
   want="$(required_version "$name")"
+  # An unpinned entry means "presence is enough", which is right for Kimi and
+  # Qwen. For Grok it would silently reinstate the presence-skip this change
+  # exists to remove, so an empty pin is a policy error, not a permission.
+  if [ "$name" = "grok" ] && [ -z "$want" ]; then
+    die "the provider version policy pins no Grok version; Grok must be qualified at an exact version before it is installed."
+  fi
 
   if existing="$(resolve "$cmd" "$home_rel")" && ((FORCE == 0)); then
     if [ -n "$want" ]; then

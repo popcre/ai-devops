@@ -220,4 +220,23 @@ grep -q '\.local/bin/qwen' "$script"
 grep -q 'provider unavailable' "$repo/bin/ai-machine-tools-doctor"
 grep -q 'install-ai-provider-clis' "$repo/bin/ai-machine-tools-doctor"
 
+# --- both platforms' version readers agree on the same banners -------------
+# One fixture, two parsers. If they ever disagree, the same Grok build would be
+# qualified on one platform and refused on the other.
+while IFS="$(printf '	')" read -r banner expected; do
+  case "$banner" in ''|'#'*) continue ;; esac
+  got="$(bash "$repo/bin/ai-provider-version" parse "$banner")"
+  if [ "$got" != "$expected" ]; then
+    echo "FAIL: version reader parsed '$banner' as '${got:-<none>}', expected '${expected:-<none>}'" >&2
+    exit 1
+  fi
+done < "$repo/tests/fixtures/version-banners.tsv"
+
+# An unreadable banner must not abort the caller: an aborted installer would
+# skip its own rollback and leave the machine on whatever `update` produced.
+bash "$repo/bin/ai-provider-version" parse 'grok (no version here)' >/dev/null
+
+# --- an unpinned Grok is a policy error, never a reason to skip ------------
+grep -q 'pins no Grok version' "$script"
+
 echo 'PASS: provider CLI installer contract'

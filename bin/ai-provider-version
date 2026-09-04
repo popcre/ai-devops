@@ -59,7 +59,10 @@ parse_version() { # parse_version TEXT - the FIRST x.y.z in the text
   # parsers that disagree about which number in `grok 1.0.13 (abc) [stable]`
   # is the version would qualify a build on one platform and refuse it on the
   # other, so this one must not be greedy.
-  printf '%s' "$1" | grep -oE '[0-9]+[.][0-9]+[.][0-9]+' | head -1
+  # A banner with no version prints nothing and still succeeds: callers decide
+  # what an unreadable version means, and an aborted caller would skip its own
+  # rollback.
+  printf '%s' "$1" | grep -oE '[0-9]+[.][0-9]+[.][0-9]+' | head -1 || true
 }
 
 case "${1:-}" in

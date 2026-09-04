@@ -79,7 +79,10 @@ function Get-ReportedProviderVersion {
   param([Parameter(Mandatory)][string]$Path)
   try { $raw = & $Path --version 2>&1 | Select-Object -First 1 } catch { return $null }
   if (-not $raw) { return $null }
-  $m = [regex]::Match([string]$raw, '(\d+\.\d+\.\d+)')
+  # [0-9], not \d: .NET's \d also matches non-ASCII digits, while the Unix
+  # reader (bin/ai-provider-version) is ASCII-only. Both must accept and reject
+  # exactly the same banner -- tests/fixtures/version-banners.tsv proves it.
+  $m = [regex]::Match([string]$raw, '([0-9]+\.[0-9]+\.[0-9]+)')
   if ($m.Success) { return $m.Groups[1].Value }
   return $null
 }
@@ -173,6 +176,12 @@ $providers = @(
 
 foreach ($provider in $providers) {
   $required = Get-RequiredProviderVersion -Provider $provider.Command
+  # An unpinned entry means "presence is enough", which is right for Kimi and
+  # Qwen. For Grok it would reinstate the presence-skip this policy exists to
+  # remove, so an empty pin is a policy error, not a permission.
+  if ($provider.Command -eq 'grok' -and -not $required) {
+    throw 'The provider version policy pins no Grok version; Grok must be qualified at an exact version before it is installed.'
+  }
   $command = Get-Command $provider.Command -ErrorAction SilentlyContinue
   $present = [bool]$command -or (Test-Path -LiteralPath $provider.ExpectedPath)
   if ($TestOnly) {

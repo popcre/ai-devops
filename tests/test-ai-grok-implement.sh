@@ -215,6 +215,40 @@ if AI_PROVIDER_VERSIONS_FILE="$TMP/absent-policy.json" "$SCRIPT" run vg2 --repo 
 else
   [ -s "$TMP/argv.txt" ] && bad "missing_version_policy_fails_closed" || ok "missing_version_policy_fails_closed"
 fi
+# A refusal must strand nothing: no worktree, no branch. Otherwise the obvious
+# retry fails on "worktree path already exists" for a run that never happened.
+if [ -z "$(git -C "$R6" worktree list --porcelain | grep -c '^worktree' | grep -v '^1$')" ]; then
+  ok "refused_version_creates_no_worktree"
+else
+  bad "refused_version_creates_no_worktree"
+fi
+git -C "$R6" branch --list '*vg*' | grep -q . && bad "refused_version_creates_no_branch"   || ok "refused_version_creates_no_branch"
+
+# Unpinned and malformed policies must fail closed too, not fall back to
+# "presence is enough".
+printf '%s
+' '{"schema_version":1,"providers":{"grok":{"command":"grok","supported_version":null}}}' > "$TMP/unpinned.json"
+: > "$TMP/argv.txt"
+if AI_PROVIDER_VERSIONS_FILE="$TMP/unpinned.json" "$SCRIPT" run vg3 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "unpinned_version_policy_fails_closed"
+else
+  [ -s "$TMP/argv.txt" ] && bad "unpinned_version_policy_fails_closed" || ok "unpinned_version_policy_fails_closed"
+fi
+printf '%s
+' '{"schema_version":99,"providers":{}}' > "$TMP/bad.json"
+: > "$TMP/argv.txt"
+if AI_PROVIDER_VERSIONS_FILE="$TMP/bad.json" "$SCRIPT" run vg4 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "malformed_version_policy_fails_closed"
+else
+  [ -s "$TMP/argv.txt" ] && bad "malformed_version_policy_fails_closed" || ok "malformed_version_policy_fails_closed"
+fi
+: > "$TMP/argv.txt"
+if AI_GROK_TEST_VERSION=1.0.14 "$SCRIPT" run vg5 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "newer_unqualified_version_is_not_accepted"
+else
+  [ -s "$TMP/argv.txt" ] && bad "newer_unqualified_version_is_not_accepted" || ok "newer_unqualified_version_is_not_accepted"
+fi
+
 # Comments explain why blanket approval is refused, so assert on real code only.
 if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE -e '--always-approve' -e 'permission-mode auto' -e 'bypassPermissions'; then
   bad "implementer_never_uses_blanket_approval"
