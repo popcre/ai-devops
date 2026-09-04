@@ -42,7 +42,16 @@ for file in "$codex" "$claude"; do
     "grep -Fq \"Reuse the repository's shared plans, workflows, harnesses, and provider\" '$file'"
   check "$(basename "$file") requires owner, necessity, and retirement" \
     "grep -Fq 'needs an explicit owner, necessity, and consolidation or retirement path.' '$file'"
+  check "$(basename "$file") keeps canonical checkouts landing-only" \
+    "grep -Fq 'Keep canonical checkouts landing-only.' '$file'"
+  check "$(basename "$file") requires a worktree before editing" \
+    "grep -Fq 'before editing.' '$file'"
 done
+
+check 'router makes the canonical checkout landing-only' \
+  "grep -Fq 'canonical local checkout is landing-only' '$router'"
+check 'router requires write-capable tasks to use worktrees' \
+  "grep -Fq 'write-capable Codex or Claude task uses its own current-upstream worktree' '$router'"
 
 printf '\nSESSION CONDUCT POLICY SUMMARY failures=%s\n' "$failures"
 [ "$failures" -eq 0 ]

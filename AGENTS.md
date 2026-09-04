@@ -28,8 +28,11 @@ The full recovery procedure is in
   verified on `origin/main`.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
   `Albert Hazan <u2giants@users.noreply.github.com>`.
-- Several AI sessions may share this checkout. Check `git status --short` before
-  pulling or staging. Stage only files owned by the current task; never use
+- The canonical local checkout is landing-only, not a session workspace. Every
+  write-capable Codex or Claude task uses its own current-upstream worktree and
+  branch. Use the canonical checkout only for a serialized landing,
+  installation, or recovery operation after proving no other task is using it.
+  Read-only inspection may remain there. Stage only task-owned files; never use
   broad staging, destructive resets, or force-pushes.
 - Custom code is limited to `bin/`, lifecycle scripts, `config/`, `templates/`,
   `docs/`, `skills/`, `tools/`, `mcp/`, `memory/`, and `tests/`. Changes outside
