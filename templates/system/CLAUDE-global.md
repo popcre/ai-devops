@@ -107,6 +107,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
+- **Keep canonical checkouts landing-only.** For write-capable work in a Git
+  repository, start the task in its own worktree from current upstream. If a
+  task opens in a shared local checkout, move the work to a dedicated worktree
+  before editing. Do not edit a shared local checkout except for an explicit,
+  serialized landing, installation, or recovery operation after proving no
+  other task is using it. Read-only work may remain in the local checkout.
 
 ## Safety rules that apply everywhere
 
