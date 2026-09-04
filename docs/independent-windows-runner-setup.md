@@ -549,6 +549,43 @@ failure without its logs.
   by itself clear the bar: admission is fitness for `windows-offline`'s 75 minute
   ceiling, and only a real qualification run can settle it. `EDGE-ALIEN` still
   carries `ai-devops-windows-paused` and takes no CI until that run is spent.
+- **Re-measured 2026-09-04 after the third round of SentinelOne exclusions
+  landed. The script-engine exclusion is gone and the host is worse than it was
+  after round two.** Both hosts idle, no runner job live on either, three
+  consecutive passes agreeing to within one percent on each host. `EDGE-ALIEN`
+  runs SentinelOne 25.2.6.442 with Microsoft Defender real-time protection off;
+  `EDGE-DEV` runs no SentinelOne and *does* have Defender real-time protection
+  on, so the comparison is not scanner-against-nothing. Windows PowerShell is
+  5.1 on both.
+- **A compiled control separates hardware from scanning for the first time.** A
+  `for` loop of 200 million iterations compiled to .NET through `Add-Type` runs
+  in 100 ms on `EDGE-ALIEN` against 76 ms on `EDGE-DEV` - **1.32x**, and that is
+  the whole hardware gap, slightly better than the 1.6x previously assumed. Any
+  ratio above 1.32x is scanning, not the 2015 CPU.
+- **The identical arithmetic loop interpreted by PowerShell is 7.3x**
+  (5957 ms against 819 ms, one million iterations). Against the 1.32x hardware
+  control that is a **5.5x script-engine penalty**. After the second round of
+  exclusions this same measurement was 1.47x. The AMSI/script-scanning exclusion
+  that round two delivered is no longer in effect after round three.
+- Supporting numbers on the same passes, `EDGE-ALIEN` against `EDGE-DEV`:
+  100 `cmd.exe /c exit` spawns 4162 ms against 1578 ms (**2.6x**), 30
+  `git --version` spawns 2481 ms against 725 ms (**3.4x**), 300 file writes into
+  a temp tree 447 ms against 313 ms (**1.4x**). File writes remain excluded and
+  are close to hardware. Process creation was 2.1-2.5x after round two and is
+  2.6-3.4x now, so it did not improve either.
+- `SentinelAgent` CPU could not be read through `Get-Process` on this pass - it
+  reports zero because the agent runs as a protected process, which is absence
+  of evidence, not evidence of absence.
+- **Consequence.** Round three did not add the process-creation exclusion that
+  was asked for, and it lost the script exclusion that round two had won. The
+  suites are both spawn-heavy and PowerShell-heavy, so this is the worst of the
+  three states measured so far. Do not spend a qualification run on `EDGE-ALIEN`
+  in this condition. `EDGE-ALIEN` keeps `ai-devops-windows-paused` and takes no
+  CI. The request back to Nexustek is to restore whatever script/AMSI exclusion
+  was in place on 2026-09-03 and to add the process-creation hook exclusion for
+  the runner tree; the compiled control above gives them a 1.32x target to aim
+  at, and the PowerShell loop is the single number that proves the script
+  exclusion is live.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
