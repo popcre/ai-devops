@@ -1714,7 +1714,13 @@ cmd_doctor() {
     # Windows has no Unix wrapper: the launcher execs the pinned binary directly and
     # ai-glm.cmd is what puts the command on PATH.
     chk "ai-glm command installed"         test -f "$HOME/.local/bin/ai-glm.cmd"
+    # The launcher now execs the `opencode-ai-devops` wrapper rather than the pinned
+    # .exe directly, so read the exec target from whichever file actually names it.
+    # Without this fallback doctor finds no binary and reports a version mismatch
+    # against a correctly pinned install, which reads as a LOCAL dependency fault
+    # and blocks every governed review that draws glm.
     bin_path="$(sed -n 's|^exec "\(.*opencode\.exe\)".*|\1|p' "$HOME/.local/bin/opencode-glm-launch" 2>/dev/null | tail -1 || true)"
+    [ -n "${bin_path:-}" ] || bin_path="$(sed -n 's|^exec "\(.*opencode\.exe\)".*|\1|p' "$HOME/.local/bin/opencode-ai-devops" 2>/dev/null | tail -1 || true)"
   else
     chk "opencode wrapper installed"       test -x "$HOME/.local/bin/opencode-ai-devops"
     bin_path="$HOME/.local/bin/opencode-ai-devops"
