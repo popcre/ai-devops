@@ -30,7 +30,7 @@ Albert wants reviewers to perform deeper testing with shell and internet access,
 - No Option B wrapper/config/test implementation has started. No provider was upgraded or installed by this session.
 - The checkout was already dirty. Overlapping dirty files include `bin/ai-muse`, `bin/ai-review-sandbox`, Muse docs/skill/tests, and `AGENTS.md`. Those changes belong to other work and were not altered by this plan except that a separate targeted AGENTS router registration may be added in the planning commit after ownership verification.
 - Planning observed local HEAD `ff72d5735b80beb2e05e94e552264674280fbdd4` and fetched `origin/main` `71bfed6eb12f252e8f3996e91038519958c9aae9`; these values are stale immediately after planning and Step 0 must re-resolve ancestry.
-- The plan/handoff/issue creation is not yet committed or pushed at the moment this handoff was drafted. The current session owns landing these documentation-only artifacts.
+- The plan, handoff, router registration, and issue hierarchy were committed and pushed to `origin/main` as `0129f9f2`. Implementation remains entirely open.
 
 ## 4. Everything we tried that did NOT work
 
