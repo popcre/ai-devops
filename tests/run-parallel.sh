@@ -173,6 +173,37 @@ run_one() {
   fi
 }
 
+# Stop launching new suites if a CI job starts on THIS machine mid-series.
+#
+# bin/ai-test-local checks the GitHub API once, at start-up. That cannot see a
+# job dispatched ten minutes into a 65-minute series -- and GitHub will dispatch
+# one, because a runner's "busy" flag only reflects jobs it accepted, so a local
+# shell suite is invisible to it. This is the other half of the same guard, and
+# it is the only one that covers a direct `tests/run-parallel.sh` run.
+#
+# The signal is local, not the API: the runner spawns Runner.Worker only while a
+# job is actually executing. No polling of GitHub (docs/critical-incidents.md
+# warns that tight Actions polling trips a secondary rate limit), and nothing
+# here can be influenced by a job on any other host.
+#
+# We stop OUR work, never CI's. Suites already running are allowed to finish.
+[ -n "${AI_TEST_RUNNER_PROC:-}" ] && AI_TEST_RUNNER_PROC_SET=1
+AI_TEST_RUNNER_PROC="${AI_TEST_RUNNER_PROC:-Runner.Worker}"
+ci_job_on_this_host() {
+  [ "${AI_TEST_IGNORE_CI:-0}" = 1 ] && return 1
+  # Inside a CI job we ARE the runner worker; do not abort our own job.
+  [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${AI_TEST_RUNNER_PROC_SET:-}" ] && return 1
+  if command -v tasklist >/dev/null 2>&1; then
+    tasklist //FI "IMAGENAME eq $AI_TEST_RUNNER_PROC.exe" 2>/dev/null |
+      grep -qi "$AI_TEST_RUNNER_PROC" && return 0
+  fi
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "$AI_TEST_RUNNER_PROC" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+CI_ABORT=0
 suite_start="$(date +%s)"
 
 # A pool of background jobs, at most $2 at a time.
@@ -185,6 +216,18 @@ run_pool() {
       wait -n 2>/dev/null || wait
       running=$(( running - 1 ))
     done
+    if ci_job_on_this_host; then
+      CI_ABORT=1
+      cat <<'STOPMSG'
+
+  STOPPING: a CI job started on this machine.
+  A local series and a CI job on the same host kill each other
+  (docs/critical-incidents.md, 2026-08-28). Suites already running
+  will finish; the rest were not launched.
+
+STOPMSG
+      break
+    fi
     run_one "$name" &
     running=$(( running + 1 ))
   done
@@ -209,6 +252,15 @@ done
 wall=$(( suite_end - suite_start ))
 printf '\nPARALLEL BASH SUMMARY tests=%s failures=%s wall=%ss serial-equivalent=%ss workers=%s\n' \
   "${#suites[@]}" "${#failed[@]}" "$wall" "$total_cpu" "$JOBS"
+
+if [ "$CI_ABORT" -eq 1 ]; then
+  cat <<'CUTMSG'
+
+This run was CUT SHORT by a CI job on this machine and proves nothing.
+Suites that never ran are counted as failures on purpose -- an aborted
+series must never read as green. Rerun when the runner here is idle.
+CUTMSG
+fi
 
 if [ "${#failed[@]}" -gt 0 ]; then
   printf '\nFailing suites — read the log, do not assume flake:\n'

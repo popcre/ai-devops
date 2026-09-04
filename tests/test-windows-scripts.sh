@@ -104,6 +104,18 @@ if grep -q 'opencode-glm-service' bin/setup-opencode-glm.ps1 && grep -q 'server.
 else bad "scheduled task output is discarded"; fi
 if grep -q 'Wait-PortFree' bin/setup-opencode-glm.ps1; then ok "waits for the port before starting the task"
 else bad "no port wait; the smoke test can block the real server"; fi
+# The GLM setup once stopped EVERY opencode on the machine, by name, twice. That
+# is the 2026-08-28 defect class: cleanup that reaches past the work it owns.
+# Nothing asserted its absence, so it could come back green.
+if grep -v "^\s*#" bin/setup-opencode-glm.ps1 | grep -q "Get-Process -Name opencode"; then
+  bad "GLM setup stops opencode by name and can kill another session's server"
+else ok "GLM setup does not stop opencode by process name"; fi
+if grep -q 'function Stop-PortOwner' bin/setup-opencode-glm.ps1; then
+  ok "GLM setup stops only the owner of its own port"
+else bad "no Stop-PortOwner; the port cleanup is unscoped"; fi
+if grep -q 'taskkill.exe /PID \$smoke.Id /T /F' bin/setup-opencode-glm.ps1; then
+  ok "the smoke test reaps its own process tree"
+else bad "the smoke test can leave an opencode child holding the port"; fi
 if grep -q "ProcessName -notmatch 'opencode'" bin/ai-glm; then ok "restart verifies the old listener before stopping it"
 else bad "restart may stop an unrelated listener"; fi
 if grep -q 'stayed busy for 30 seconds' bin/ai-glm; then ok "restart has a bounded port-free wait"

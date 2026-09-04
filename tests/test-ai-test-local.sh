@@ -113,32 +113,86 @@ check 'the reviewer mode targets exactly the two reviewer suites' \
 # ai-test-local must refuse to start when a CI job is live on THIS host, and
 # must NOT care about a job on any other runner in the pool. Both halves matter:
 # the first prevents the 2026-08-28 mutual kill, the second is why we own a
-# pool at all. A stub gh stands in for the API.
+# pool at all.
+#
+# Everything here is driven by FIXTURES: a fake .runner tree via
+# AI_TEST_RUNNER_DIRS and a stub gh on PATH. The first version of these tests
+# read the machine's real runner install, which meant they silently skipped on
+# both GitHub-hosted CI lanes -- a green pipeline that proved nothing about the
+# guard. Never gate these on a real runner being present.
 GHBIN="$WORK/ghbin"; mkdir -p "$GHBIN"
-RUNNER_FILES="$(ls -d /c/actions-runner*/.runner "$HOME"/actions-runner*/.runner 2>/dev/null)"
+RDIR="$WORK/runners/actions-runner"; mkdir -p "$RDIR"
 stub_gh() {
   { echo '#!/usr/bin/env bash'
     echo '[ "${1:-}" = api ] || exit 0'
-    printf "printf '%%s\\n' %s\n" "$1"
+    printf 'cat <<BUSY\n%s\nBUSY\n' "$1"
   } > "$GHBIN/gh"
   chmod +x "$GHBIN/gh"
 }
+fixture_runner() { printf '{ "agentId": 1, "agentName": "%s" }\n' "$1" > "$RDIR/.runner"; }
 guard_run() {
-  PATH="$GHBIN:$PATH" AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+  PATH="$GHBIN:$PATH" AI_TEST_RUNNER_DIRS="$WORK/runners/actions-runner*" \
+    AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
     bash "$LAUNCHER" --bash "$@" 2>&1
 }
-if [ -n "$RUNNER_FILES" ]; then
-  here="$(sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' $RUNNER_FILES | head -1)"
-  stub_gh "'$here'"; out="$(guard_run)"; rc=$?
-  check "refuses when this host's own runner is busy" '[ "$rc" -eq 3 ]'
-  check 'the refusal names the busy runner on this host' 'printf "%s" "$out" | grep -q "$here"'
-  guard_run --force >/dev/null 2>&1; frc=$?
-  check '--force overrides the refusal' '[ "$frc" -ne 3 ]'
-  stub_gh "'some-other-host-runner'"; guard_run >/dev/null 2>&1; orc=$?
-  check 'a busy runner on another host does not block' '[ "$orc" -ne 3 ]'
-else
-  ok 'no runner installed here, so the collision guard has nothing to check'
-fi
+fixture_runner 'edge-fixture-win'
+
+stub_gh 'edge-fixture-win'; out="$(guard_run)"; rc=$?
+check "refuses when this host's own runner is busy" '[ "$rc" -eq 3 ]'
+check 'the refusal names the busy runner on this host' 'printf "%s" "$out" | grep -q edge-fixture-win'
+
+guard_run --force >/dev/null 2>&1; frc=$?
+check '--force overrides the refusal' '[ "$frc" -ne 3 ]'
+fout="$(guard_run --force 2>&1)"
+check '--force says so, rather than skipping the check silently' \
+  'printf "%s" "$fout" | grep -q -- --force'
+
+stub_gh 'some-other-host-runner'; guard_run >/dev/null 2>&1; orc=$?
+check 'a busy runner on another host does not block' '[ "$orc" -ne 3 ]'
+
+# The API reports EDGE-ALIEN where that host's .runner says edge-alien. An
+# exact compare fails OPEN there -- it starts the series on a busy machine
+# while reporting all clear -- so case must not matter.
+stub_gh 'EDGE-FIXTURE-WIN'; guard_run >/dev/null 2>&1; crc=$?
+check 'a case difference between the API and .runner still refuses' '[ "$crc" -eq 3 ]'
+
+# Same for a stray CR, which is easy to acquire from a Windows tool.
+printf '{ "agentName": "edge-fixture-win" }\r\n' > "$RDIR/.runner"
+stub_gh 'edge-fixture-win'; guard_run >/dev/null 2>&1; rrc=$?
+check 'a CR in the runner name still refuses' '[ "$rrc" -eq 3 ]'
+fixture_runner 'edge-fixture-win'
+
+# No runner installed here at all: proceed. A developer laptop must not be
+# blocked by a guard aimed at hosts that run CI.
+PATH="$GHBIN:$PATH" AI_TEST_RUNNER_DIRS="$WORK/no-such-runner*" \
+  AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+  bash "$LAUNCHER" --bash >/dev/null 2>&1; nrc=$?
+check 'a machine with no runner installed is never blocked' '[ "$nrc" -ne 3 ]'
+
+# Fails open, deliberately: a pre-check that cannot run must not stop the work.
+{ echo '#!/usr/bin/env bash'; echo 'exit 1'; } > "$GHBIN/gh"; chmod +x "$GHBIN/gh"
+guard_run >/dev/null 2>&1; erc=$?
+check 'an unusable gh fails open rather than blocking' '[ "$erc" -ne 3 ]'
+
+# --- mid-run CI arrival ----------------------------------------------------
+# The launcher checks once, at start-up. A 65-minute series started while idle
+# is still handed a job halfway through, so run-parallel.sh watches for the
+# runner's worker process between suites and stops launching more. The process
+# name is overridable so this can be tested without a live CI job.
+# A real process is started so the detector exercises its real code path; only
+# the name it looks for is overridden. `sleep` exists on both platforms.
+sleep 45 & sleeper=$!
+AI_TEST_RUNNER_PROC=sleep AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+  bash "$RUNNER" -l "$LOGS/ciabort" >"$WORK/abort.out" 2>&1; arc=$?
+kill "$sleeper" 2>/dev/null
+check 'a CI job appearing mid-series stops further launches' \
+  'grep -q STOPPING "$WORK/abort.out"'
+check 'a series cut short by CI never reports green' '[ "$arc" -ne 0 ]'
+check 'the cut-short run says it proves nothing' \
+  'grep -q "proves nothing" "$WORK/abort.out"'
+AI_TEST_IGNORE_CI=1 AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+  bash "$RUNNER" -l "$LOGS/noabort" >"$WORK/noabort.out" 2>&1
+check 'no CI job means no interruption' '! grep -q STOPPING "$WORK/noabort.out"'
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
