@@ -5,6 +5,10 @@ description: Use xAI Grok Build through ai-grok-review for repository analysis, 
 
 # Grok CLI
 
+Before upgrading Grok Build from 1.0.5 or adapting wrappers for 1.0.6–1.0.13,
+read the STATUS table in `plan_grok-build-1.0.13-wrapper-integration.md` and
+continue issue #251 instead of re-planning the version transition.
+
 While [ai-devops issue #56](https://github.com/popcre/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
 
 ## Use `ai-grok-review`. Never call `grok` directly for a review.
