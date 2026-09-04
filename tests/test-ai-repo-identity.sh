@@ -90,13 +90,18 @@ missing=0
 for key in ai-devops ai-devops-memory ai-devops-transcripts ai-devops-private-config; do "$SCRIPT" list "$key" >> "$TMP/listed"; done
 sed -E "s#^github[.]com/##" "$TMP/listed" > "$TMP/listed.bare"
 cat "$TMP/listed.bare" >> "$TMP/listed"
+# `-e` is load-bearing: a candidate that begins with a hyphen would otherwise be
+# parsed by grep as an option, and the resulting usage error was reported as an
+# identity violation. The owner class excludes a leading hyphen for the same
+# reason -- no GitHub owner starts with one -- while still allowing a leading
+# dot so `.config/ai-devops` keeps matching the path filter below.
 while IFS= read -r found; do
-  grep -Fqx "${found%.git}" "$TMP/listed" ||
+  grep -Fqx -e "${found%.git}" "$TMP/listed" ||
     { printf '       unlisted identity in bin/: %s\n' "$found"; missing=1; }
 # Filtered out: filesystem paths that merely end in an ai-devops* directory
 # name, and `gh api repos/<owner>/<repo>` calls, which are API requests rather
 # than identity comparisons.
-done < <(grep -rhoE '(github\.com/)?[A-Za-z0-9._-]+/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" --exclude-dir=.git | grep -vE '^([.]|repos/|api/|share/|state/|worksp/|local/|bin/|opt/|var/|etc/|cache/|lib/|log/|tmp/|run/)' | LC_ALL=C sort -u)
+done < <(grep -rhoE '(github\.com/)?[A-Za-z0-9._][A-Za-z0-9._-]*/ai-devops(-[A-Za-z0-9._-]+)?(\.git)?' "$ROOT/bin" --exclude-dir=.git | grep -vE '^([.]|repos/|api/|share/|state/|worksp/|local/|bin/|opt/|var/|etc/|cache/|lib/|log/|tmp/|run/)' | LC_ALL=C sort -u)
 [ "$missing" -eq 0 ] && ok 'every ai-devops identity literal in bin/ is listed in the table' \
                      || bad 'every ai-devops identity literal in bin/ is listed in the table'
 
