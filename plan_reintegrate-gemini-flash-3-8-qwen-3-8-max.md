@@ -44,8 +44,8 @@ Before each later action, re-read live job state rather than relying on this pla
    current wrapper/runtime hashes. Any uncertainty remains quarantine.
 6. Run the repository-required complete gates and independent exact-head final
    review. Reconcile onto current `main` only after checking concurrent changes.
-   Verify Albert's Git identity, commit only owned files, then push once; do not
-   merge a separate feature branch because this repository is main-only.
+   Verify Albert's Git identity, commit only owned files, then push the feature
+   branch once and use the protected pull-request merge queue.
 7. Install from the verified `main`, prove installed hashes, update the scoreboard
    and reviewer assignment policy, then remove the no-new-work restriction only
    for the provider whose current qualification is valid. Re-check orchestrator/
