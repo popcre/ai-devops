@@ -112,7 +112,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   task opens in a shared local checkout, move the work to a dedicated worktree
   before editing. Do not edit a shared local checkout except for an explicit,
   serialized landing, installation, or recovery operation after proving no
-  other task is using it. Read-only work may remain in the local checkout.
+  other task is using it. Read-only work may remain in the local checkout. When
+  a project folder contains multiple child Git repositories and is not itself a
+  repository, create a dedicated current-upstream worktree for each child
+  repository before editing it.
 
 ## Safety rules that apply everywhere
 

@@ -46,6 +46,8 @@ for file in "$codex" "$claude"; do
     "grep -Fq 'Keep canonical checkouts landing-only.' '$file'"
   check "$(basename "$file") requires a worktree before editing" \
     "grep -Fq 'before editing.' '$file'"
+  check "$(basename "$file") isolates child repositories in umbrella projects" \
+    "grep -Fq 'child Git' '$file'"
 done
 
 check 'router makes the canonical checkout landing-only' \

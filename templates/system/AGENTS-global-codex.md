@@ -89,7 +89,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   in Local, use Handoff to move it before editing. Do not edit a shared local
   checkout except for an explicit, serialized landing, installation, or
   recovery operation after proving no other task is using it. Read-only work
-  may remain Local.
+  may remain Local. When a project folder contains multiple child Git
+  repositories and is not itself a repository, Codex cannot offer one managed
+  worktree for the container; create a dedicated current-upstream worktree for
+  each child repository before editing it.
 
 ## Safety rules that apply everywhere
 
