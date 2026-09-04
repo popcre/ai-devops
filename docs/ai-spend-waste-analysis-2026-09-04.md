@@ -230,6 +230,23 @@ them constantly.
 - `fa8024af` — `.mcp.json` in `popcre/ai-devops`.
 - `~/.claude.json` backed up to `.bak-relocate-20260904T131523Z` before the edit.
 
+The Synology entry was qualified after relocation with Claude Code 2.1.260
+started in this repository using `--strict-mcp-config --mcp-config .mcp.json`.
+That excludes user-wide and cloud MCP definitions. The project-local stdio
+server connected, and a real read-only `df -h` call returned volume1 capacity:
+edgesynology1 109 TB total / 59 TB used / 50 TB free, and edgesynology2 77 TB
+total / 50 TB used / 27 TB free. This is data-path proof, not a health check.
+
+The project entry's `"type": "stdio"` and empty `"env": {}` do not interfere
+with authentication. `mcp-remote-launch.cmd` passes the URL and `op://`
+reference by argument to `bin/mcp-secret-launch.ps1`; its Remote branch looks
+up that reference in the protected `mcp.env`/DPAPI cache and reads the resolved
+token from its own process environment. Claude's entry-level environment is not
+used. The path originally described as the machine-wide source,
+`AppData/Roaming/Claude/claude_desktop_config.json`, does not exist on this
+machine; the live user-wide Claude Code source was `~/.claude.json`, and the
+backup above proves it contained `synology-monitor` before removal.
+
 **Incident during this change.** The first push rewrote `ai-devops/.mcp.json`
 from a stale local checkout and silently dropped the project-local `context7`
 server added in #197. Caught by inspecting the file's history immediately after
