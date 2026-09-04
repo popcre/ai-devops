@@ -4,11 +4,11 @@
 
 | Work | Status | Evidence / next gate |
 |---|---|---|
-| Protect the active Windows runs | IN FORCE | Local detached worktree at `e1c9f0d6866fc3e0acfb7a5b65304c7c4a872a62`; no push, PR, merge, dispatch, cancellation, runner action, install, or local suite |
+| Protect the active Windows runs | COMPLETE FOR GEMINI | All local gates and live operations used a host proven idle immediately before launch; no active Windows job was cancelled, restarted, superseded, or interrupted |
 | Qwen 3.8 Max source preparation | OFFLINE GREEN ON IDLE POOL HOST | Stable `qwen3.8-max` pin; Qwen Code 0.23.0 installed on `EDGE-RUNN-ENVY` through the repo-owned installer with recoverable backup and verified child-secret hardening; non-live doctor passed with runtime SHA-256 `8f3cbb225324286bc163aa4ccd66405ba95ed357894d34ff781e57d139190c4a`; focused suite 92/92 |
-| Gemini 3.8 Flash source preparation and live qualification | LIVE QUALIFIED | `agy models` confirmed `gemini-3.8-flash-high`; focused suite 62/62 on `EDGE-RUNN-ENVY`; governed live qualification passed on idle `EDGE-DEV` with agy 1.1.25 and wrapper SHA-256 `dac5862e5f12b75ff3f8b00075c339e404b62db8b55441012d2fcde6f3ca1f9e` |
-| Shared quarantine/preflight | OFFLINE GREEN ON IDLE POOL HOST | 51/51 on `EDGE-RUNN-ENVY`; former-model or changed-wrapper/runtime qualification remains invalid |
-| Qualification and reviewer rotation | PENDING | Both providers remain quarantined and receive no assignments until exact-model hostile qualification, exact-head review, full gates, installation, and current evidence succeed |
+| Gemini 3.8 Flash activation | COMPLETE 2026-09-04 | PR #278 merged at `ed2c6180`; 64 Bash and 18 PowerShell suites passed; Antigravity 1.1.26 was governed-qualified on idle EDGE-DEV; installed preflight reports `available`; real review `issue261-proof` returned `APPROVE` with unchanged source |
+| Shared quarantine/preflight | GEMINI AVAILABLE; QWEN QUARANTINED | Gemini's current EDGE-DEV record binds exact wrapper, Antigravity 1.1.26 bytes, and `gemini-3.8-flash-high`; Qwen remains fail-closed under issue #259 evidence |
+| Qualification and reviewer rotation | GEMINI ACTIVE; QWEN PENDING | Gemini may receive governed read-only assignments on its qualified host. Qwen receives none until its own current live qualification succeeds |
 
 ## Goal
 
@@ -100,10 +100,12 @@ there until the runner became idle again. `EDGE-ALIEN` was deliberately paused
 from GitHub scheduling throughout its qualification.
 
 After all three self-hosted runners reported idle and `Runner.Worker` was absent
-on `EDGE-DEV`, the governed Gemini gate ran there and passed. The durable
-qualification binds exact model `gemini-3.8-flash-high`, agy 1.1.25, and wrapper
-SHA-256 `dac5862e5f12b75ff3f8b00075c339e404b62db8b55441012d2fcde6f3ca1f9e`.
-Do not repeat that paid gate unless one of those identities changes.
+on `EDGE-DEV`, the governed Gemini gate ran there and passed. That first record
+bound agy 1.1.25, but the 1.1.26 upgrade invalidated it as designed. On 2026-09-04
+exactly one new governed qualification passed and bound model
+`gemini-3.8-flash-high`, agy 1.1.26, and wrapper SHA-256
+`dac5862e5f12b75ff3f8b00075c339e404b62db8b55441012d2fcde6f3ca1f9e`.
+Repeat only if one of those bound identities changes.
 
 ## Definition of done
 

@@ -5,17 +5,17 @@ description: Use Gemini 3.8 Flash through the ai-gemini wrapper for an independe
 
 # Gemini code review
 
-Gemini is quarantined and must not be used as an approval-capable reviewer until
-both Windows and Ubuntu pass the live hostile qualification required by
-`plan_gemini_reviewer_safety_repair.md`. Never bypass that quarantine by calling
-`agy` directly. `ai-gemini doctor` deliberately reports `QUARANTINED`.
+Gemini 3.8 Flash is available as a governed read-only reviewer when the local
+hash-bound qualification remains current. Never call `agy` directly or bypass a
+quarantine. Check the installed wrapper before assigning work:
 
 ```bash
 AI_GEMINI_CALLER=codex ai-gemini doctor
 ```
 
-Until qualification finishes, stop after `doctor` and choose another governed
-reviewer. An empty answer, wrong model or conversation, changed protected file,
-committed or uncommitted source drift, interruption, or missing durable report
-is always a failed review. Gemini remains review-only even after eventual
-qualification.
+Proceed only when `doctor` reports `PASS` for exact model
+`gemini-3.8-flash-high`. If it reports `QUARANTINED`, stop and choose another
+governed reviewer until one governed requalification succeeds. An empty answer,
+wrong model or conversation, changed protected file, committed or uncommitted
+source drift, interruption, or missing durable report is always a failed review.
+Gemini is review-only.

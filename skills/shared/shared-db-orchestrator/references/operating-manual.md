@@ -204,12 +204,15 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
 ```
 
 The GitHub-backed cursor rotates Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3
-Contributor, then repeats across machines and restarts. Retrying the same
+Contributor, and Gemini 3.8 Flash, then repeats across machines and restarts.
+Gemini is eligible only where `ai-review-preflight status gemini` currently
+reports `available`; otherwise the selector skips it. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-grok-review`, `ai-glm`, `ai-kimi`, `ai-muse`, or — for the overflow provider
-below — `ai-codex-review`. Never override its model or reasoning pin.
+`ai-grok-review`, `ai-glm`, `ai-kimi`, `ai-muse`, `ai-gemini`, or — for the
+overflow provider below — `ai-codex-review`. Never override its model or
+reasoning pin, and never call `agy` directly.
 
-The four rotation wrappers are **persistent**: they hold named sessions, so the
+The five rotation wrappers are **persistent**: they hold named sessions, so the
 same session can be reused for rebuttals. `ai-codex-review` is **not**. It
 exposes five one-shot modes only — `plan-review`, `diff-review`,
 `security-review`, `visual-review`, `final-check` — with no session, resume, or
@@ -235,8 +238,8 @@ Codex `REVISE` whose findings the author accepts needs no debate at all; fix the
 code, and re-review at the new exact head under the ordinary rotation.
 
 Prefer waiting for a free rotation provider over spending an overflow review on
-work you expect to argue about. Overflow exists to keep five lanes moving when
-every reviewer is genuinely busy, not to review the contentious change.
+work you expect to argue about. Overflow exists to keep the author lanes moving
+when every eligible reviewer is genuinely busy, not to review contentious work.
 
 **Qwen 3.8 Max and the retired `glm-5.2` label receive no new work** until an
 explicit owner instruction restores them. Their historical assignments,
@@ -256,7 +259,7 @@ none at all.
 Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
 session for rebuttals and relay them with `templates/delegation/debate-turn.md`
-— this applies to the four persistent rotation wrappers; see the Codex exception
+— this applies to the five persistent rotation wrappers; see the Codex exception
 above.
 Stop at evidence-backed agreement or after the initial review plus three
 rebuttals. If a material disagreement remains, the merge stays stopped and the
