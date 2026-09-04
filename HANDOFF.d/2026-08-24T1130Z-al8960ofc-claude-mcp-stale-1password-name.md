@@ -269,10 +269,9 @@ than hunting for the old path.
     `tests/verification/reviewer-production-completion/2026-08-24-grok-deepseek.md`,
     `tests/verification/reviewer-production-completion/2026-08-24-gemini-tag-limit.md`.
     A failure in the **`windows-reviewer-safety`** job is almost certainly theirs.
-    Report it to Albert with the run URL, and point him at
-    [`HANDOFF.d/2026-08-24T1503Z-edge-dev-claude-gemini-qualification-record.md`](2026-08-24T1503Z-edge-dev-claude-gemini-qualification-record.md)
-    §3.3 — it already tells the next session in that workstream to confirm this
-    commit's CI passed before building on it.
+    Report it to Albert with the run URL. The completed Gemini workstream is now
+    recorded in [`plan_gemini_reviewer_safety_repair.md`](../plan_gemini_reviewer_safety_repair.md);
+    its retired handoffs remain available in Git history.
   - **Ambiguous:** `linux-offline` / `windows-offline` could be any session's.
     Report as ambiguous unless the failing suite name points at one of the paths
     above. **Do not guess at authorship** — a confident wrong attribution costs more

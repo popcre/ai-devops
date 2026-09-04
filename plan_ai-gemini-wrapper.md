@@ -4,7 +4,9 @@ Tracking issue: [u2giants/ai-devops#38](https://github.com/u2giants/ai-devops/is
 
 Measured investigation: [`docs/ai-gemini-wrapper-investigation.md`](docs/ai-gemini-wrapper-investigation.md)
 
-Handoff for this plan: [`HANDOFF.d/2026-08-18T1808Z-edge-dev-codex-ai-gemini-wrapper-plan.md`](HANDOFF.d/2026-08-18T1808Z-edge-dev-codex-ai-gemini-wrapper-plan.md)
+Current status: [`plan_gemini_reviewer_safety_repair.md`](plan_gemini_reviewer_safety_repair.md).
+This file is retained as the dated investigation and original design plan; its
+open-step table below is historical and must not override the current status.
 
 ## STATUS
 

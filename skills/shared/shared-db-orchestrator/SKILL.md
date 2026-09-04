@@ -155,8 +155,10 @@ Albert approved concurrent migration authoring on 2026-08-14.
 - Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, but they never consume a migration-author lane.
 - Assign each exact-head issue one external reviewer from the durable round robin after excluding
   the live orchestrator engine: Codex never reviews a Codex-orchestrated issue, and Claude never
-  reviews a Claude-orchestrated issue. Qwen and Gemini are inactive until ai-devops reviewer
-  reliability is repaired; historical records remain readable but neither may receive new work.
+  reviews a Claude-orchestrated issue. Gemini may receive read-only assignments only on a host
+  where `ai-review-preflight status gemini` currently reports `available`; runtime, wrapper, or
+  model drift returns it to quarantine. Qwen remains inactive under issue #259 evidence and may
+  not receive new work.
 
 Acquire a lane from the shared-db checkout:
 
@@ -202,7 +204,7 @@ version remains permanently unavailable because it may already exist in preview.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when all six are busy.
+Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when every eligible reviewer is busy. Gemini uses `ai-gemini` only; the selector must skip it unless local preflight reports `available`.
 
 ## Before preview and merge
 
