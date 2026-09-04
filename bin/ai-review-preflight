@@ -130,6 +130,7 @@ explain_failure() {
     service-unavailable) printf 'Retry the service check once after a short delay, then wait. Do not misclassify an outage as a code verdict.\n' ;;
     substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
     authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
+    live-qualification-required) printf 'This provider is quarantined until it passes live qualification on this machine. Run its wrapper qualification (for example `ai-gemini qualify-live`) and record the result. Do not assign it a review, and never bypass the quarantine gate to make one run.\n' ;;
     *) die "unknown failure class '$1'." ;;
   esac
 }
