@@ -199,6 +199,32 @@ the whole turn so far, so cost grows faster than the work does.
   helpers before adding another copy. Any new top-level or copied infrastructure
   needs an explicit owner, necessity, and consolidation or retirement path.
 
+## Terminal output discipline
+
+Everything put into a conversation is re-sent to the model on every later turn,
+so one oversized dump is billed dozens of times. Never let a command put more
+than ~40 lines into the conversation.
+
+- Reading a file: use a line window — `sed -n '120,180p' file`. Never `cat` a
+  file over 200 lines.
+- Cap anything open-ended: `| head -40`, `| tail -30`, `--max-count`.
+- git: `git --no-pager log --oneline -15`, `--stat` instead of a full diff,
+  `git status --short`.
+- gh: always project fields — `gh pr view <n> --json state,mergedAt` — never the
+  bare command, which prints the whole body and every comment.
+- npm / pnpm: `--silent --no-progress`; pipe installs to `| tail -5`.
+- Tests: run quiet (`-q`, dot reporter). When green, report the summary line
+  only. When red, report the failing cases only — never the full log.
+- Anything genuinely long goes to a scratch file; then grep the file. Do not
+  read it back in full.
+- Never re-run a command to re-read output already in this conversation.
+
+## Failed commands
+
+When a command fails, quote at most 5 lines of the error. Never paste a full
+stack trace or build log into the conversation. Do not retry the same command
+more than once — diagnose it, or say plainly that you are blocked and why.
+
 ## Context and handoffs
 
 - Read the repository's `AGENTS.md`, then only the documents its task router
