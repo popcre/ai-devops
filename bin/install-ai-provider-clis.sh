@@ -18,6 +18,14 @@
 #   - Authentication stays interactive and manual, exactly as on Windows. This
 #     script installs binaries; it never touches a login.
 #   - Idempotent: an already-installed provider is skipped unless --force.
+#   - Version-pinned where the repository qualifies an exact build. Grok is
+#     qualified against exactly one version (config/provider-cli-versions.json)
+#     because our wrappers parse that build's JSON, stop reasons, usage keys and
+#     session behaviour. "A runnable grok" is NOT good enough: presence-based
+#     skipping is what left machines on 1.0.5 indefinitely (issue #251). An
+#     off-policy Grok is upgraded to the exact supported version, the resulting
+#     version is verified, and a failed upgrade restores the original binary.
+#     Credentials under ~/.grok are never read, copied or backed up.
 #   - Fails loudly. A provider that installs but does not produce a working
 #     command is an error, never a warning.
 #   - Qwen uses the vendor's standalone installer, NOT npm: the npm package
@@ -75,6 +83,10 @@ die() { echo "ERROR $*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || die "curl is required but not installed."
 command -v bash >/dev/null 2>&1 || die "bash is required but not installed."
+# jq reads config/provider-cli-versions.json, the exact-version policy this
+# installer enforces. Without it there is no policy to enforce, so we stop
+# rather than fall back to "any build that runs" (issue #251).
+command -v jq >/dev/null 2>&1 || die "jq is required to read the provider version policy."
 
 if [ "$(id -u)" -eq 0 ] && ((ALLOW_ROOT == 0)); then
   die "refusing to run as root: vendor installers write into \$HOME, so this would install for root and leave your normal user still broken. Re-run as the user that runs AI sessions (on hetz that is 'ai'), or pass --allow-root if you really mean root."
@@ -148,6 +160,66 @@ harden_qwen_child_env() {
   echo "OK   qwen child-process sanitizer now strips the Coding Plan credential"
 }
 
+# ---------------------------------------------------------------------------
+# Exact-version policy (Grok). One source of truth: config/provider-cli-versions.json.
+# ---------------------------------------------------------------------------
+SELF_REAL="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+VERSION_TOOL="$(dirname "$SELF_REAL")/ai-provider-version"
+[ -x "$VERSION_TOOL" ] || VERSION_TOOL="$(command -v ai-provider-version 2>/dev/null || true)"
+
+required_version() { # required_version PROVIDER  -> exact version, or empty when unpinned
+  [ -n "$VERSION_TOOL" ] && [ -x "$VERSION_TOOL" ]     || die "ai-provider-version is missing; refusing to install a provider without its version policy."
+  "$VERSION_TOOL" required "$1"
+}
+
+reported_version() { # reported_version BINARY -> bare x.y.z, empty when unreadable
+  local out; out="$("$1" --version 2>/dev/null | head -1 || true)"
+  [ -n "$out" ] || return 0
+  "$VERSION_TOOL" parse "$out"
+}
+
+BACKUP_ROOT="$HOME/.local/state/ai-devops/provider-cli/backups"
+
+backup_binary() { # backup_binary NAME PATH -> prints backup path
+  local name="$1" src="$2" dst
+  mkdir -p "$BACKUP_ROOT"
+  dst="$BACKUP_ROOT/$name.$(date -u +%Y%m%dT%H%M%SZ).bak"
+  # Copy only the executable the vendor updater replaces. Never touch ~/.grok
+  # credentials, sessions or logs.
+  cp -p "$(readlink -f "$src" 2>/dev/null || echo "$src")" "$dst"
+  printf '%s' "$dst"
+}
+
+restore_binary() { # restore_binary BACKUP TARGET
+  local backup="$1" target="$2"
+  [ -f "$backup" ] || return 1
+  target="$(readlink -f "$target" 2>/dev/null || echo "$target")"
+  cp -p "$backup" "$target"
+}
+
+upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
+  local name="$1" bin_path="$2" want="$3" backup now
+  case "$name" in
+    grok) ;;
+    *) echo "ERROR $name: no exact-version upgrade path is defined for this provider" >&2; return 1 ;;
+  esac
+  backup="$(backup_binary "$name" "$bin_path")" || {
+    echo "ERROR $name: could not back up the existing binary; refusing an unrecoverable upgrade" >&2; return 1; }
+  echo "     backed up $bin_path -> $backup"
+  if ! "$bin_path" update --version "$want"; then
+    echo "ERROR $name: 'update --version $want' failed; restoring the previous binary" >&2
+    restore_binary "$backup" "$bin_path" || echo "ERROR $name: restore from $backup FAILED; restore it by hand" >&2
+    return 1
+  fi
+  now="$(reported_version "$bin_path")"
+  if [ "$now" != "$want" ]; then
+    echo "ERROR $name: upgrade finished but the binary reports '${now:-unknown}', not $want; restoring the previous binary" >&2
+    restore_binary "$backup" "$bin_path" || echo "ERROR $name: restore from $backup FAILED; restore it by hand" >&2
+    return 1
+  fi
+  echo "OK   $name is now exactly $want (previous binary kept at $backup)"
+}
+
 failed=0
 installed_any=0
 needs_path=()
@@ -156,8 +228,25 @@ for entry in "${PROVIDERS[@]}"; do
   IFS='|' read -r name cmd url home_rel <<<"$entry"
   wants "$name" || continue
 
+  want="$(required_version "$name")"
+
   if existing="$(resolve "$cmd" "$home_rel")" && ((FORCE == 0)); then
-    echo "SKIP $name already installed ($existing)"
+    if [ -n "$want" ]; then
+      have="$(reported_version "$existing")"
+      if [ "$have" != "$want" ]; then
+        if ((DRY_RUN)); then
+          echo "DRY-RUN would upgrade $name from ${have:-unknown} to exactly $want"
+          continue
+        fi
+        echo "==> $name reports ${have:-unknown}; this repository qualifies exactly $want"
+        if ! upgrade_to_exact_version "$name" "$existing" "$want"; then failed=1; continue; fi
+        link_into_local_bin "$cmd" "$existing"
+        continue
+      fi
+      echo "SKIP $name already installed at the exact supported version $want ($existing)"
+    else
+      echo "SKIP $name already installed ($existing)"
+    fi
     # Still repair reachability: "installed but not on PATH" is the exact state
     # that makes the doctor report the provider unavailable.
     ((DRY_RUN)) || link_into_local_bin "$cmd" "$existing"
@@ -191,6 +280,13 @@ for entry in "${PROVIDERS[@]}"; do
   # Prove it. A vendor installer that "succeeds" without producing a runnable
   # command is exactly the silent failure this repo forbids.
   if resolved="$(resolve "$cmd" "$home_rel")"; then
+    if [ -n "$want" ]; then
+      have="$(reported_version "$resolved")"
+      if [ "$have" != "$want" ]; then
+        echo "==> $name installed ${have:-unknown}; pinning to the supported version $want"
+        if ! upgrade_to_exact_version "$name" "$resolved" "$want"; then failed=1; continue; fi
+      fi
+    fi
     echo "OK   $name installed ($resolved)"
     installed_any=1
     link_into_local_bin "$cmd" "$resolved"

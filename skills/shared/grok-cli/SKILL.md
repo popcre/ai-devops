@@ -156,6 +156,11 @@ The wrapper tells you which case you are in and what to do. The one thing to int
 ## Verifying the install
 
 `ai-grok-review doctor` resolves the binary, prints the version, and checks auth for free.
+It also reports the installed version against the one this repository qualifies
+(`config/provider-cli-versions.json`). Both wrappers refuse paid work against any
+other build, before the provider is contacted. If the doctor reports
+`UNQUALIFIED`, run the provider installer to bring the CLI to exactly the
+qualified version; do not work around the refusal.
 
 **`grok doctor` is not an auth check.** It checks "terminal, clipboard, color, and input
 support" — which is why it once reported "You are not authenticated" while `grok models`

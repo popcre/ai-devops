@@ -23,6 +23,20 @@ are reported as information, not as broken repo launchers. `ai-install-skills`
 also runs a fail-closed bootstrap check so a sync using an older loaded skill
 cannot quietly claim complete after pulling a newer command catalog.
 
+## Qualified provider CLI versions
+
+`config/provider-cli-versions.json` records the exact third-party AI provider CLI
+version this repository has qualified. A provider with a pinned version must
+report exactly that version; anything else is unqualified and is refused before
+any paid work runs. Grok is pinned (the wrappers parse one build's JSON output,
+stop reasons, usage keys and session behaviour); Kimi and Qwen are deliberately
+unpinned so a Grok upgrade never forces theirs. `bin/ai-provider-version` is the
+only reader: both installers use it to bring a wrong build to exactly the pinned
+version with a restorable backup, both Grok wrappers use it to refuse an
+unqualified build, and both doctors report installed against required. The file
+is secret-free by contract -- never add credentials, hosts or account
+identifiers. See [`grok-build-1.0.13-release-disposition.md`](grok-build-1.0.13-release-disposition.md).
+
 ## Repository identity allow-list
 
 `config/repo-identities.tsv` is the single source of truth for the fail-closed

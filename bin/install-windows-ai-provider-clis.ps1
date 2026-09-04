@@ -4,6 +4,13 @@ Installs the official Windows Grok Build, Kimi Code, and Qwen Code command-line 
 
 Authentication deliberately remains interactive. The installers only put the
 programs on this computer; each provider opens its own login on first use.
+
+Grok is version-pinned. config/provider-cli-versions.json holds the one exact
+build this repository qualifies, because the Grok wrappers parse that build's
+JSON, stop reasons, usage keys and session behaviour. A present-but-off-policy
+Grok is upgraded to that exact version, the result is verified, and a failed
+upgrade restores the previous executable. Credentials under ~/.grok are never
+read, copied or backed up.
 #>
 [CmdletBinding()]
 param([switch]$TestOnly)
@@ -50,6 +57,56 @@ function Set-QwenChildEnvironmentHardening {
   & $node $verify $Root | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Qwen child-environment sanitizer failed its behavioral proof.' }
   return $path
+}
+
+function Get-RequiredProviderVersion {
+  param([Parameter(Mandatory)][string]$Provider)
+  $policyPath = if ($env:AI_PROVIDER_VERSIONS_FILE) { $env:AI_PROVIDER_VERSIONS_FILE }
+                else { Join-Path $PSScriptRoot '..\config\provider-cli-versions.json' }
+  if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+    throw "Provider version policy not found: $policyPath"
+  }
+  $policy = Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json
+  if ($policy.schema_version -ne 1 -or -not $policy.providers) {
+    throw "Malformed provider version policy: $policyPath"
+  }
+  $entry = $policy.providers.$Provider
+  if ($null -eq $entry) { throw "Unknown provider '$Provider' in $policyPath" }
+  return $entry.supported_version
+}
+
+function Get-ReportedProviderVersion {
+  param([Parameter(Mandatory)][string]$Path)
+  try { $raw = & $Path --version 2>&1 | Select-Object -First 1 } catch { return $null }
+  if (-not $raw) { return $null }
+  $m = [regex]::Match([string]$raw, '(\d+\.\d+\.\d+)')
+  if ($m.Success) { return $m.Groups[1].Value }
+  return $null
+}
+
+function Update-ProviderToExactVersion {
+  param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Version)
+  if ($Provider.Command -ne 'grok') {
+    throw "No exact-version upgrade path is defined for $($Provider.Name)."
+  }
+  $backupDir = Join-Path $HOME '.local\state\ai-devops\provider-cli\backups'
+  [void](New-Item -ItemType Directory -Force -Path $backupDir)
+  $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $Provider.Command, (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+  Copy-Item -LiteralPath $Path -Destination $backup
+  Write-Host "Backed up $Path -> $backup"
+  $restore = {
+    try { Copy-Item -Force -LiteralPath $backup -Destination $Path; Write-Host "Restored the previous $($Provider.Name) from $backup" }
+    catch { Write-Warning "Restore from $backup FAILED; restore it by hand." }
+  }
+  & $Path update --version $Version
+  if ($LASTEXITCODE -ne 0) { & $restore; throw "$($Provider.Name): 'update --version $Version' exited with status $LASTEXITCODE." }
+  $now = Get-ReportedProviderVersion -Path $Path
+  if ($now -ne $Version) {
+    & $restore
+    throw "$($Provider.Name): upgrade finished but the binary reports '$now', not $Version."
+  }
+  Write-Host "$($Provider.Name) is now exactly $Version (previous binary kept at $backup)."
 }
 
 function Invoke-PinnedProviderInstaller {
@@ -103,10 +160,19 @@ $providers = @(
 )
 
 foreach ($provider in $providers) {
+  $required = Get-RequiredProviderVersion -Provider $provider.Command
   $command = Get-Command $provider.Command -ErrorAction SilentlyContinue
   $present = [bool]$command -or (Test-Path -LiteralPath $provider.ExpectedPath)
   if ($TestOnly) {
-    Result $provider.Name $(if ($present) { 'OK' } else { 'MISSING' }) $(if ($command) { $command.Source } else { $provider.ExpectedPath })
+    $probe = if ($command) { $command.Source } else { $provider.ExpectedPath }
+    $status = if (-not $present) { 'MISSING' } else { 'OK' }
+    $detail = $probe
+    if ($present -and $required) {
+      $have = Get-ReportedProviderVersion -Path $probe
+      if ($have -ne $required) { $status = 'STALE'; $detail = "$probe reports '$have', requires exactly $required" }
+      else { $detail = "$probe ($required)" }
+    }
+    Result $provider.Name $status $detail
     continue
   }
 
@@ -120,6 +186,13 @@ foreach ($provider in $providers) {
     throw "$($provider.Name) installation finished but neither '$($provider.Command)' nor '$($provider.ExpectedPath)' is available. Open a new PowerShell window and rerun the bootstrap."
   }
   $resolved = if ($command) { $command.Source } else { $provider.ExpectedPath }
+  if ($required) {
+    $have = Get-ReportedProviderVersion -Path $resolved
+    if ($have -ne $required) {
+      Write-Host "$($provider.Name) reports '$have'; this repository qualifies exactly $required."
+      Update-ProviderToExactVersion -Provider $provider -Path $resolved -Version $required
+    }
+  }
   if ($provider.Command -eq 'qwen') {
     $hardened = Set-QwenChildEnvironmentHardening
     Write-Host "Qwen child-process credential hardening applied: $hardened"
@@ -128,5 +201,5 @@ foreach ($provider in $providers) {
 }
 
 $results | Format-Table -AutoSize | Out-Host
-if ($results.Status -contains 'MISSING') { exit 2 }
+if ($results.Status -contains 'MISSING' -or $results.Status -contains 'STALE') { exit 2 }
 exit 0

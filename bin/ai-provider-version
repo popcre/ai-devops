@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ai-provider-version — resolve the exact provider CLI version this repository
+# qualifies, from one versioned contract.
+#
+# WHY THIS EXISTS
+#   Both provider installers used to treat "a runnable binary" as "installed",
+#   so a machine could sit on Grok 1.0.5 forever while the wrappers claimed a
+#   qualification against a different build (issue #251). Version support is now
+#   a repository fact in config/provider-cli-versions.json, read here, and read
+#   nowhere else as a literal.
+#
+#   ai-provider-version required <provider>
+#       Print the exact supported version, or empty when the provider is
+#       deliberately unpinned. Exit 3 for an unknown provider.
+#   ai-provider-version parse <text>
+#       Print the bare x.y.z found in a provider `--version` line.
+#   ai-provider-version check <provider> <version-text>
+#       Exit 0 when the reported version matches policy exactly (or the provider
+#       is unpinned), 1 when it does not. Prints the required version to stdout.
+#   ai-provider-version policy-file
+#       Print the resolved policy path.
+#
+# Fails closed: a missing, unreadable or malformed policy is an error, never a
+# silent "no requirement".
+set -euo pipefail
+
+die() { printf 'ai-provider-version: error: %s\n' "$*" >&2; exit 2; }
+
+resolve_root() {
+  local self="${BASH_SOURCE[0]}" real
+  real="$(readlink -f "$self" 2>/dev/null || true)"
+  [ -n "$real" ] && self="$real"
+  cd "$(dirname "$self")/.." && pwd
+}
+
+policy_file() {
+  local f="${AI_PROVIDER_VERSIONS_FILE:-$(resolve_root)/config/provider-cli-versions.json}"
+  printf '%s' "$f"
+}
+
+load_policy() {
+  local f; f="$(policy_file)"
+  [ -f "$f" ] || die "provider version policy not found: $f"
+  command -v jq >/dev/null 2>&1 || die 'jq is required to read the provider version policy.'
+  jq -e '.schema_version == 1 and (.providers | type == "object")' "$f" >/dev/null 2>&1 \
+    || die "malformed provider version policy: $f"
+  printf '%s' "$f"
+}
+
+required_version() { # required_version PROVIDER
+  local f provider="$1"; f="$(load_policy)"
+  jq -e --arg p "$provider" '.providers | has($p)' "$f" >/dev/null 2>&1 \
+    || { printf 'ai-provider-version: error: unknown provider %s\n' "$provider" >&2; exit 3; }
+  jq -r --arg p "$provider" '.providers[$p].supported_version // ""' "$f"
+}
+
+parse_version() { # parse_version TEXT — first x.y.z in the text
+  printf '%s' "$1" | sed -n 's/.*[^0-9]\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p;s/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
+}
+
+case "${1:-}" in
+  required) [ $# -eq 2 ] || die 'usage: ai-provider-version required <provider>'
+            required_version "$2" ;;
+  parse)    [ $# -eq 2 ] || die 'usage: ai-provider-version parse <version-text>'
+            parse_version "$2" ;;
+  check)    [ $# -eq 3 ] || die 'usage: ai-provider-version check <provider> <version-text>'
+            want="$(required_version "$2")"
+            printf '%s\n' "$want"
+            [ -n "$want" ] || exit 0
+            got="$(parse_version "$3")"
+            [ "$got" = "$want" ] || exit 1 ;;
+  policy-file) load_policy >/dev/null; policy_file; printf '\n' ;;
+  -h|--help|'') sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$1'" ;;
+esac

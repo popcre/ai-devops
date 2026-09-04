@@ -31,9 +31,14 @@ export AI_GROK_CALLER="claude"
 STUB="$TMP/bin"; mkdir -p "$STUB"
 cat > "$STUB/grok" <<'STUBEOF'
 #!/usr/bin/env bash
+# The version gate probes `--version` before any billable work. That probe is
+# a local identity check, not a Grok session, so it is answered before the
+# invocation is recorded.
+case "${1:-}" in
+  --version) echo "grok ${AI_GROK_TEST_VERSION:-1.0.13} (stub)"; exit 0 ;;
+esac
 printf '%s\n' "$*" >> "$TMPDIR_FOR_TEST/argv.txt"
 case "${1:-}" in
-  --version) echo "grok 0.2.112 (stub)"; exit 0 ;;
   models)    echo "grok-4.6"; exit 0 ;;
   worktree)  # `list` must never show anything: headless runs are untracked.
              case "${2:-}" in list) echo "No worktrees found." ;; rm) exit 1 ;; esac; exit 0 ;;
@@ -182,7 +187,40 @@ else
 fi
 
 # --- 12. doctor ----------------------------------------------------------------
-"$SCRIPT" doctor 2>&1 | grep -q '0.2.112' && ok "doctor_reports_version" || bad "doctor_reports_version"
+PINNED="$(bash "$REPO_ROOT/bin/ai-provider-version" required grok)"
+"$SCRIPT" doctor 2>&1 | grep -q "$PINNED" && ok "doctor_reports_version" || bad "doctor_reports_version"
+"$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (exactly $PINNED" \
+  && ok "doctor_confirms_the_qualified_version" || bad "doctor_confirms_the_qualified_version"
+AI_GROK_TEST_VERSION=1.0.5 "$SCRIPT" doctor 2>&1 | grep -q "UNQUALIFIED .*1\.0\.5.*$PINNED" \
+  && ok "doctor_reports_installed_versus_required_version" || bad "doctor_reports_installed_versus_required_version"
+
+# --- 13. version gate ----------------------------------------------------------
+# The implementation wrapper writes to a real checkout, so an unqualified build
+# must be refused before the provider is ever contacted, not after.
+: > "$TMP/argv.txt"
+if AI_GROK_TEST_VERSION=1.0.5 "$SCRIPT" run vg --repo "$R6" --prompt-file "$BRIEF" >"$TMP/vg.out" 2>&1; then
+  bad "stale_grok_version_fails_before_paid_turn"
+else
+  if [ -s "$TMP/argv.txt" ]; then
+    bad "stale_grok_version_fails_before_paid_turn"
+  else
+    ok "stale_grok_version_fails_before_paid_turn"
+  fi
+fi
+grep -q '1.0.5' "$TMP/vg.out" && grep -q "$PINNED" "$TMP/vg.out" \
+  && ok "stale_version_refusal_names_both_versions" || bad "stale_version_refusal_names_both_versions"
+: > "$TMP/argv.txt"
+if AI_PROVIDER_VERSIONS_FILE="$TMP/absent-policy.json" "$SCRIPT" run vg2 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "missing_version_policy_fails_closed"
+else
+  [ -s "$TMP/argv.txt" ] && bad "missing_version_policy_fails_closed" || ok "missing_version_policy_fails_closed"
+fi
+# Comments explain why blanket approval is refused, so assert on real code only.
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE -e '--always-approve' -e 'permission-mode auto' -e 'bypassPermissions'; then
+  bad "implementer_never_uses_blanket_approval"
+else
+  ok "implementer_never_uses_blanket_approval"
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

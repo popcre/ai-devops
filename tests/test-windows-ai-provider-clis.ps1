@@ -67,6 +67,79 @@ function sanitizeChildEnv(env2 = process.env) {
 } finally {
   if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
 }
+
+# --- exact version policy (issue #251) -------------------------------------
+# "A provider that runs" is not the contract. Both Grok wrappers are qualified
+# against one exact build, so the Windows installer must detect any other build
+# as stale, bring it to exactly the pinned version, and roll back if it cannot.
+$policyPath = Join-Path $root 'config\provider-cli-versions.json'
+Assert (Test-Path -LiteralPath $policyPath) 'provider version policy is missing'
+$policy = Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json
+Assert ($policy.schema_version -eq 1) 'provider version policy has an unexpected schema_version'
+Assert ($policy.providers.grok.supported_version -match '^\d+\.\d+\.\d+$') 'grok must be pinned to one exact version'
+foreach ($other in @('kimi', 'qwen')) {
+  Assert ($null -eq $policy.providers.$other.supported_version) "$other must stay unpinned; Grok work must not force its upgrade"
+}
+$policyText = Get-Content -Raw -LiteralPath $policyPath
+Assert ($policyText -notmatch '(?i)"(token|api[_-]?key|password|secret)"') 'the version policy must stay secret-free'
+
+$pinned = $policy.providers.grok.supported_version
+
+Assert ($installerText -match 'Get-RequiredProviderVersion') 'installer must read the repository version policy'
+Assert ($installerText -match 'Update-ProviderToExactVersion') 'installer must have an exact-version upgrade path'
+Assert ($installerText -match "update --version") 'installer must use the documented exact-version install command'
+Assert ($installerText -match 'STALE') 'installer must report a wrong-version provider as stale, not as installed'
+Assert ($installerText -match "contains 'MISSING' -or .*contains 'STALE'") 'a stale provider must fail the verification exit code, like a missing one'
+Assert ($installerText -match 'Restored the previous') 'a failed upgrade must restore the previous binary'
+Assert ($installerText -match 'reports .\$now., not \$Version') 'a wrong resulting version must be rejected'
+Assert ($installerText -notmatch 'auth\.json') 'the installer must never touch provider credentials'
+Assert ($installerText -notmatch [regex]::Escape($pinned)) 'the installer must read the pinned version from the policy, not hard-code it'
+
+# Behavioural: load the two readers out of the installer and exercise them.
+$policyFns = $ast.FindAll({
+  param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+  $node.Name -in @('Get-RequiredProviderVersion', 'Get-ReportedProviderVersion')
+}, $true)
+Assert ($policyFns.Count -eq 2) 'could not load the version-policy readers for their fixture'
+foreach ($fn in $policyFns) { Invoke-Expression $fn.Extent.Text }
+
+$versionFixture = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-version-{0}" -f [Guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $versionFixture)
+$savedPolicyEnv = $env:AI_PROVIDER_VERSIONS_FILE
+try {
+  $env:AI_PROVIDER_VERSIONS_FILE = $policyPath
+  Assert ((Get-RequiredProviderVersion -Provider 'grok') -eq $pinned) 'required version did not match the policy'
+  Assert ($null -eq (Get-RequiredProviderVersion -Provider 'kimi')) 'an unpinned provider must report no required version'
+
+  $threw = $false
+  try { Get-RequiredProviderVersion -Provider 'not-a-provider' } catch { $threw = $true }
+  Assert $threw 'an unknown provider must fail closed'
+
+  $bad = Join-Path $versionFixture 'malformed.json'
+  Set-Content -LiteralPath $bad -Value '{"schema_version":99}'
+  $env:AI_PROVIDER_VERSIONS_FILE = $bad
+  $threw = $false
+  try { Get-RequiredProviderVersion -Provider 'grok' } catch { $threw = $true }
+  Assert $threw 'a malformed policy must fail closed, never default to "any version"'
+
+  $env:AI_PROVIDER_VERSIONS_FILE = Join-Path $versionFixture 'absent.json'
+  $threw = $false
+  try { Get-RequiredProviderVersion -Provider 'grok' } catch { $threw = $true }
+  Assert $threw 'a missing policy must fail closed'
+
+  # A provider that reports a version, and one that reports nothing at all.
+  $fakeGrok = Join-Path $versionFixture 'grok.cmd'
+  Set-Content -LiteralPath $fakeGrok -Value '@echo grok 1.0.5 (fake) [stable]'
+  Assert ((Get-ReportedProviderVersion -Path $fakeGrok) -eq '1.0.5') 'could not read a version out of the provider banner'
+  $mute = Join-Path $versionFixture 'mute.cmd'
+  Set-Content -LiteralPath $mute -Value '@exit /b 0'
+  Assert ($null -eq (Get-ReportedProviderVersion -Path $mute)) 'a provider that reports no version must not pass as qualified'
+} finally {
+  $env:AI_PROVIDER_VERSIONS_FILE = $savedPolicyEnv
+  if (Test-Path -LiteralPath $versionFixture) { Remove-Item -LiteralPath $versionFixture -Recurse -Force }
+}
+
 $qwenWrapperText = Get-Content -Raw $qwenWrapper
 Assert ($qwenWrapperText -match '\*\.cmd\|\*\.bat') 'Qwen wrapper must accept official Windows command shims that are not marked executable by Git Bash'
 

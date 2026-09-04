@@ -13,12 +13,12 @@ Official release source: [Grok Build changelog](https://x.ai/build/changelog)
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 0. Reconfirm clean ownership and exact baseline | ⬜ open | — | A dated baseline under `tests/verification/grok-build-1.0.13/` |
-| 1. Pin and safely install Grok Build 1.0.13 | ⬜ open | — | Installer tests plus before/after version and recoverable backup evidence |
-| 2. Qualify the 1.0.13 CLI and JSON contracts | ⬜ open | — | Redacted help/inspect/schema and two-turn live qualification artifacts |
+| 0. Reconfirm clean ownership and exact baseline | ✅ done | 2026-09-03 | `tests/verification/grok-build-1.0.13/baseline-1.0.5-before.md` |
+| 1. Pin and safely install Grok Build 1.0.13 | ✅ done | 2026-09-04 | `config/provider-cli-versions.json`, `bin/ai-provider-version`, both installers + tests, `tests/verification/grok-build-1.0.13/qualified-1.0.13-after.md` |
+| 2. Qualify the 1.0.13 CLI and JSON contracts | ✅ done | 2026-09-04 | Flag surface and live terminal-JSON contract in `qualified-1.0.13-after.md` |
 | 3. Integrate useful review-wrapper behavior | ⬜ open | — | Focused `tests/test-ai-grok-review.sh` cases and live read-only review |
 | 4. Integrate useful implementation/integration behavior | ⬜ open | — | Focused implementation and integration-review tests/probes |
-| 5. Update guidance, routing, and installed copies | ⬜ open | — | Source/installed hashes and documentation checks |
+| 5. Update guidance, routing, and installed copies | ✅ done | 2026-09-04 | `AGENTS.md` router row, `docs/grok-build-1.0.13-release-disposition.md`, config/dev/winget docs, `skills/shared/grok-cli/SKILL.md` |
 | 6. Independent exact-head review and full verification | ⬜ open | — | Review verdict, full suites, CI run, installed smoke, and `origin/main` SHA |
 
 **Fresh-session start:** Step 0. Do not edit a wrapper until the concurrent dirty
