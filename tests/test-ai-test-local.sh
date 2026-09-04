@@ -81,6 +81,25 @@ run -j 0 --list >/dev/null 2>&1;  check 'rejects -j 0' '[ "$?" -ne 0 ]'
 run -j abc --list >/dev/null 2>&1; check 'rejects a non-numeric -j' '[ "$?" -ne 0 ]'
 run --nonsense >/dev/null 2>&1;    check 'rejects an unknown option' '[ "$?" -ne 0 ]'
 
+# --- default worker count --------------------------------------------------
+# The default must stay a QUARTER of the cores, capped at 8. It shipped as
+# min(cores, 16) in #146, which on this 20-core desktop meant 16 concurrent
+# suites -- double the eight that starved the runner's heartbeat and killed a
+# CI job on 2026-08-28. The PowerShell twin always had this right.
+FAKEBIN="$WORK/fakebin"; mkdir -p "$FAKEBIN"
+workers_for() {
+  { echo '#!/usr/bin/env bash'; echo "echo $1"; } > "$FAKEBIN/nproc"
+  chmod +x "$FAKEBIN/nproc"
+  PATH="$FAKEBIN:$PATH" AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+    bash "$RUNNER" -p 'test-green-*.sh' -l "$LOGS/j$1" 2>/dev/null |
+    sed -n 's/^run-parallel: .* suites, \([0-9][0-9]*\) workers.*/\1/p'
+}
+check 'a 20-core machine defaults to 5 workers, not 16' '[ "$(workers_for 20)" = "5" ]'
+check 'the cap holds at 8 on a 64-core machine' '[ "$(workers_for 64)" = "8" ]'
+check 'a 2-core machine still gets one worker' '[ "$(workers_for 2)" = "1" ]'
+check 'the usage text states the real policy' \
+  'bash "$RUNNER" -h | grep -q "a quarter of this machine.s cores, max 8"'
+
 # --- launcher --------------------------------------------------------------
 check 'ai-test-local is executable' '[ -x "$LAUNCHER" ]'
 check 'ai-test-local has valid syntax' 'bash -n "$LAUNCHER"'
@@ -89,6 +108,37 @@ bash "$LAUNCHER" --nonsense >/dev/null 2>&1
 check 'ai-test-local rejects an unknown option' '[ "$?" -ne 0 ]'
 check 'the reviewer mode targets exactly the two reviewer suites' \
   '[ "$(bash "$RUNNER" --list -p "test-ai-@(grok-review|codex-review).sh" | wc -l)" -eq 2 ]'
+
+# --- CI collision guard ----------------------------------------------------
+# ai-test-local must refuse to start when a CI job is live on THIS host, and
+# must NOT care about a job on any other runner in the pool. Both halves matter:
+# the first prevents the 2026-08-28 mutual kill, the second is why we own a
+# pool at all. A stub gh stands in for the API.
+GHBIN="$WORK/ghbin"; mkdir -p "$GHBIN"
+RUNNER_FILES="$(ls -d /c/actions-runner*/.runner "$HOME"/actions-runner*/.runner 2>/dev/null)"
+stub_gh() {
+  { echo '#!/usr/bin/env bash'
+    echo '[ "${1:-}" = api ] || exit 0'
+    printf "printf '%%s\\n' %s\n" "$1"
+  } > "$GHBIN/gh"
+  chmod +x "$GHBIN/gh"
+}
+guard_run() {
+  PATH="$GHBIN:$PATH" AI_TEST_SUITE_DIR="$SUITES" AI_TEST_LOG_ROOT="$LOGS" \
+    bash "$LAUNCHER" --bash "$@" 2>&1
+}
+if [ -n "$RUNNER_FILES" ]; then
+  here="$(sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' $RUNNER_FILES | head -1)"
+  stub_gh "'$here'"; out="$(guard_run)"; rc=$?
+  check "refuses when this host's own runner is busy" '[ "$rc" -eq 3 ]'
+  check 'the refusal names the busy runner on this host' 'printf "%s" "$out" | grep -q "$here"'
+  guard_run --force >/dev/null 2>&1; frc=$?
+  check '--force overrides the refusal' '[ "$frc" -ne 3 ]'
+  stub_gh "'some-other-host-runner'"; guard_run >/dev/null 2>&1; orc=$?
+  check 'a busy runner on another host does not block' '[ "$orc" -ne 3 ]'
+else
+  ok 'no runner installed here, so the collision guard has nothing to check'
+fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -34,9 +34,9 @@ detect_cpus() {
 # Raise it with -j only when you accept that a red result may be the load.
 default_jobs() {
   local cpus; cpus="$(detect_cpus)"
-  local n="$cpus"
+  local n=$(( cpus / 4 ))
   [ "$n" -lt 1 ] && n=1
-  [ "$n" -gt 16 ] && n=16
+  [ "$n" -gt 8 ] && n=8
   echo "$n"
 }
 
@@ -50,7 +50,7 @@ usage() {
   cat <<'USAGE'
 usage: tests/run-parallel.sh [options]
 
-  -j N            worker slots (default: this machine's cores, max 16)
+  -j N            worker slots (default: a quarter of this machine's cores, max 8)
   -p PATTERN      only suites whose filename matches this shell pattern
   -l DIR          log directory (default: a fresh dir under the repo's .test-logs)
   --list          print the suites that would run, then exit

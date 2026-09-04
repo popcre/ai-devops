@@ -268,6 +268,27 @@ $env:Path = $BinDir + ';' + $env:Path
 Ok "ai-glm is now callable from PowerShell"
 
 Step "Smoke-testing the launcher before registering it"
+# Only ever stop the process that actually holds our port.
+#
+# This used to be `Get-Process -Name opencode | Stop-Process -Force`, which kills
+# EVERY opencode on the machine -- another session's server, a reviewer mid-run,
+# a colleague's foreground editor. That is the same defect class as the
+# 2026-08-28 incident, where a cleanup that matched on process name killed work
+# it did not own. bin/ai-glm has always done this correctly; copy it, do not
+# reintroduce a name match.
+function Stop-PortOwner($p) {
+  $conns = @(Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue |
+             Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1', '0.0.0.0', '::') })
+  foreach ($c in $conns) {
+    $proc = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+    if (-not $proc) { continue }
+    if ($proc.ProcessName -ne 'opencode') {
+      Warn "Port $p is held by $($proc.ProcessName) (PID $($proc.Id)), which we do not own. Leaving it alone."
+      continue
+    }
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+  }
+}
 # Run it in the foreground briefly and capture output. Without this, a broken launcher
 # only ever shows up as "server did not become healthy", with the actual error buried in
 # Task Scheduler history where nobody will look.
@@ -290,7 +311,7 @@ foreach ($i in 1..20) {
   }
 }
 if (-not $smoke.HasExited) { Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue }
-Get-Process -Name opencode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Stop-PortOwner $Port
 # Killing bash does not always take the opencode child with it, and even when it does the
 # socket lingers. Starting the scheduled task while the port is still held means the real
 # server cannot bind and exits, which surfaced only as "server did not become healthy".
@@ -304,7 +325,7 @@ function Wait-PortFree($p, $seconds) {
 }
 if (-not (Wait-PortFree $Port 30)) {
   Warn "Port $Port is still held after the smoke test; stopping whatever holds it."
-  Get-Process -Name opencode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Stop-PortOwner $Port
   [void](Wait-PortFree $Port 15)
 }
 if (-not $up) {

@@ -15,6 +15,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 JOBS=""
 MODE="all"
+FORCE=0
+AI_TEST_RUNNER_REPO="${AI_TEST_RUNNER_REPO:-popcre/ai-devops}"
 
 usage() {
   cat <<'USAGE'
@@ -25,6 +27,7 @@ usage: bin/ai-test-local [--bash|--powershell|--reviewer|--all] [-j N]
   --powershell   only the PowerShell suites
   --reviewer     only the reviewer safety suites (mirrors windows-reviewer-safety)
   -j N           worker slots (default: a quarter of this machine's cores, max 8)
+  --force        start even if a CI job is running on this same machine
 
 Logs land under .test-logs/. Failing suites are named at the end with their log
 path; rerun just those with: bash tests/run-parallel.sh --rerun-failed
@@ -38,10 +41,67 @@ while [ $# -gt 0 ]; do
     --powershell|--pwsh) MODE=powershell; shift ;;
     --reviewer) MODE=reviewer; shift ;;
     -j) JOBS="${2:-}"; shift 2 ;;
+    --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# --- refuse to collide with a CI job on THIS machine ------------------------
+# On 2026-08-28 a local series and a CI job shared this desktop. The series'
+# cleanup matched on process name and killed the runner's job, and eight
+# concurrent suites starved its heartbeat. GitHub cannot prevent this: a
+# runner's "busy" flag only reflects jobs it accepted, so a local shell suite
+# is invisible to the dispatcher and it will hand this host a job mid-run.
+#
+# The check is per HOST, not per pool. A job on another Windows runner cannot
+# touch this machine's processes, and waiting on one defeats the whole point of
+# having a pool. So we resolve the runner(s) installed HERE from their own
+# .runner files and ask about those names only.
+#
+# It fails OPEN. A local pre-check that refuses to run because gh is missing or
+# unauthenticated is worse than the collision it prevents; --force skips it.
+local_runner_names() {
+  local f name
+  for f in /c/actions-runner*/.runner "$HOME"/actions-runner*/.runner; do
+    [ -f "$f" ] || continue
+    name="$(sed -n 's/.*"agentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
+    [ -n "$name" ] && printf '%s\n' "$name"
+  done
+}
+
+refuse_if_local_runner_busy() {
+  [ "$FORCE" -eq 1 ] && return 0
+  local names; names="$(local_runner_names)"
+  [ -n "$names" ] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+
+  local busy_remote
+  busy_remote="$(gh api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
+                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null)" || return 0
+
+  local n busy=""
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    printf '%s\n' "$busy_remote" | grep -qxF "$n" && busy="$busy $n"
+  done <<< "$names"
+
+  [ -n "$busy" ] || return 0
+  cat >&2 <<MSG
+
+ai-test-local: refusing to start -- a CI job is running on THIS machine.
+
+  busy runner(s) here:$busy
+
+A local suite series and a CI job on the same host kill each other (see the
+2026-08-28 entry in docs/critical-incidents.md). Wait for that job, or run the
+series on a different machine. A job on any OTHER runner does not block you.
+
+  --force  run anyway, accepting that both may fail
+
+MSG
+  exit 3
+}
 
 jflag=()
 [ -n "$JOBS" ] && jflag=(-j "$JOBS")
@@ -72,6 +132,7 @@ run_powershell_suites() {
 }
 
 shopt -s extglob
+refuse_if_local_runner_busy
 case "$MODE" in
   all)        run_bash_suites; run_powershell_suites ;;
   bash)       run_bash_suites ;;
