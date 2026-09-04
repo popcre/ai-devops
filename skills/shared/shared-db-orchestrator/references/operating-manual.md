@@ -241,10 +241,12 @@ Prefer waiting for a free rotation provider over spending an overflow review on
 work you expect to argue about. Overflow exists to keep the author lanes moving
 when every eligible reviewer is genuinely busy, not to review contentious work.
 
-**Qwen 3.8 Max and the retired `glm-5.2` label receive no new work** until an
-explicit owner instruction restores them. Their historical assignments,
-failures, and replacement evidence stay readable and must be recovered through
-`scripts/manage-migration-author-lanes.mjs`, never hand-edited.
+**The retired `glm-5.2` label receives no new work** until an explicit owner
+instruction restores it. Qwen 3.8 Max is no longer retired (owner instruction,
+2026-09-04); it is gated only by its own preflight qualification. Historical
+assignments, failures, and replacement evidence stay readable and must be
+recovered through `scripts/manage-migration-author-lanes.mjs`, never
+hand-edited.
 
 **A Grok review running in another repository never blocks one here.**
 `ai-grok-review`'s locking is scoped to work, not to the reviewer: whatever it
