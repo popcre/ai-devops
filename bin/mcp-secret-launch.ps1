@@ -98,7 +98,9 @@ if ($Mode -eq 'Remote') {
   $name = (Get-References).GetEnumerator() | Where-Object Value -eq $SecretRef | Select-Object -ExpandProperty Key -First 1
   if (-not $name) { throw "Secret reference is not managed by ${envFile}: $SecretRef" }
   $token = [Environment]::GetEnvironmentVariable($name, 'Process')
-  & npx -y mcp-remote@0.1.38 $Url --header "Authorization: Bearer $token" @CommandArgs
+  $remoteCommand = Join-Path $cfgDir 'mcp-runtime\node_modules\.bin\mcp-remote.cmd'
+  if (-not (Test-Path -LiteralPath $remoteCommand)) { throw "Pinned MCP remote command is missing: $remoteCommand" }
+  & $remoteCommand $Url --header "Authorization: Bearer $token" @CommandArgs
 } else {
   if (-not $CommandArgs -or $CommandArgs.Count -eq 0) { throw 'No MCP command was supplied.' }
   $command = $CommandArgs[0]
