@@ -77,6 +77,14 @@ const mode = fs.existsSync(path.join(root, 'mode')) ? fs.readFileSync(path.join(
 fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
+if (mode === 'authentication') { console.error('HTTP 401 authentication failed API_KEY=must-not-survive'); process.exit(1); }
+if (mode === 'allowance') { console.error('HTTP 429 allowance exhausted raw-payload=must-not-survive'); process.exit(1); }
+if (mode === 'model-unavailable') { console.error('requested model unavailable: qwen3.8-max'); process.exit(1); }
+if (mode === 'transport') { console.error('socket closed provider payload must-not-survive'); process.exit(70); }
+if (mode === 'empty') process.exit(0);
+if (mode === 'timeout') process.exit(124);
+if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
+if (mode === 'runtime-drift') fs.appendFileSync(path.join(process.env.AI_QWEN_SANITIZER_ROOT, 'lib', 'chunks', 'chunk-test.js'), '\n// live drift\n');
 if (mode === 'write') fs.writeFileSync('qwen.txt', 'qwen change\n');
 if (mode === 'mutate-review') fs.appendFileSync('a.txt', 'bad\n');
 if (mode === 'mutate-source-dirty') fs.appendFileSync(path.join(repo, 'a.txt'), 'live dirty drift\n');
@@ -326,9 +334,34 @@ CALLS_BEFORE_MISSING_AUTH="$(wc -l < "$TMP/argv.txt")"; run new missing-governed
 [ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_MISSING_AUTH" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'missing governed authentication blocks before provider contact' || bad 'missing governed authentication blocks before provider contact'
 export AI_QWEN_OP_ENV_FILE="$GOVERNED_ENV"
 echo wrong-model > "$TMP/mode"
-if run doctor --live >/dev/null 2>&1; then bad 'live doctor rejects a returned model mismatch'; else ok 'live doctor rejects a returned model mismatch'; fi
+WRONG_DOCTOR="$(run doctor --live 2>&1)"; WRONG_DOCTOR_RC=$?
+if [ "$WRONG_DOCTOR_RC" -eq 0 ]; then bad 'live doctor rejects a returned model mismatch'; else ok 'live doctor rejects a returned model mismatch'; fi
+QWEN_DIAGNOSTICS="$REPO/.ai/reviews/qwen-qualification"
+if jq -e 'select(.failure_class=="returned-model-mismatch" and .requested_model=="qwen3.8-max" and .returned_model=="qwen-other" and .terminal_record_exists==true)' "$QWEN_DIAGNOSTICS"/*.json >/dev/null 2>&1; then
+  ok 'model mismatch leaves only safe actionable metadata'
+else
+  printf '  diagnostic: model-mismatch doctor: %s\n' "$WRONG_DOCTOR"
+  printf '  diagnostic: model-mismatch artifact: '; jq -c . "$QWEN_DIAGNOSTICS"/*.json 2>/dev/null || printf 'missing'; printf '\n'
+  bad 'model mismatch leaves only safe actionable metadata'
+fi
+for fixture in authentication allowance model-unavailable transport empty fail terminal-error timeout runtime-drift; do
+  echo "$fixture" > "$TMP/mode"
+  run doctor --live >/dev/null 2>&1 || true
+done
+check 'all governed live failure classes are deterministic' "for class in authentication-failure allowance-exhaustion requested-model-unavailable provider-process-transport-failure empty-provider-stream missing-terminal-result terminal-result-error timeout wrapper-runtime-evidence-drift; do grep -l \"\\\"failure_class\\\":\\\"\$class\\\"\" '$QWEN_DIAGNOSTICS'/*.json >/dev/null || return 1; done"
+check 'diagnostic schema retains the required safe evidence' "jq -e '.host and .timestamp and .requested_model and .wrapper_sha256 and .runtime_sha256 and .preloader_sha256 and (.provider_exit_status|type==\"number\") and (.terminal_record_exists|type==\"boolean\") and (.terminal_error|type==\"boolean\") and .stderr_classification' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
+check 'diagnostics redact credentials prompts and raw provider payloads' "! grep -ER 'must-not-survive|secret raw payload|Reply with exactly' '$QWEN_DIAGNOSTICS'"
+check 'diagnostics remain under the ignored review evidence area' "git -C '$REPO' check-ignore '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
+echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"; INTERRUPT_DIAGNOSTICS_BEFORE="$(find "$QWEN_DIAGNOSTICS" -type f | wc -l)"
+(cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" doctor --live >/dev/null 2>&1) & DOCTOR_INTERRUPT_PID=$!
+for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+kill -TERM "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true; wait "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true
+check 'interrupted live qualification retains safe diagnostics' "test \"\$(find '$QWEN_DIAGNOSTICS' -type f | wc -l)\" -gt '$INTERRUPT_DIAGNOSTICS_BEFORE' && grep -l '\"failure_class\":\"timeout\"' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
+check 'interrupted live qualification removes temporary secret handoffs' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
 echo review > "$TMP/mode"
+DIAGNOSTICS_BEFORE_SUCCESS="$(find "$QWEN_DIAGNOSTICS" -type f | wc -l)"
 check 'live doctor requires terminal success from the pinned model' 'run doctor --live'
+check 'successful live qualification creates no failure artifact' "test '$DIAGNOSTICS_BEFORE_SUCCESS' = \"\$(find '$QWEN_DIAGNOSTICS' -type f | wc -l)\""
 
 echo fail > "$TMP/mode"
 if run new no-terminal --prompt x >/dev/null 2>&1; then bad 'missing terminal result fails'; else ok 'missing terminal result fails'; fi

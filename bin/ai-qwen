@@ -359,6 +359,60 @@ has_result() { # has_result FILE
 session_id_from() { tail -5 "$1" | jq -r 'select(.type=="result")|.session_id // empty' 2>/dev/null | tail -1; }
 model_from() { jq -r 'select(.type=="assistant")|.message.model // empty' "$1" 2>/dev/null | tail -1; }
 
+qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA
+  local stream="$1" stderr="$2" provider_rc="$3" runtime_sha="$4" preloader_sha="$5" returned
+  returned="$(model_from "$stream")"
+  if [ -z "$runtime_sha" ] || [ -z "$preloader_sha" ]; then printf 'wrapper-runtime-evidence-drift'
+  elif [ "$provider_rc" = 124 ] || [ "$provider_rc" = 137 ]; then printf 'timeout'
+  elif grep -Eqi 'unauth|authentication|invalid[ _-]?(api[ _-]?)?key|login required|401' "$stderr"; then printf 'authentication-failure'
+  elif grep -Eqi 'allowance|quota|usage limit|credit|insufficient|429' "$stderr"; then printf 'allowance-exhaustion'
+  elif grep -Eqi 'model[^[:alnum:]]+(unavailable|unsupported|unknown|invalid|not found|rejected)|404' "$stderr"; then printf 'requested-model-unavailable'
+  elif [ -n "$returned" ] && [ "$returned" != "$QWEN_MODEL" ]; then printf 'returned-model-mismatch'
+  elif tail -20 "$stream" | jq -e 'select(.type=="result" and (.is_error==true or .subtype=="error"))' >/dev/null 2>&1; then printf 'terminal-result-error'
+  elif [ "$provider_rc" != 0 ]; then printf 'provider-process-transport-failure'
+  elif [ ! -s "$stream" ]; then printf 'empty-provider-stream'
+  elif ! tail -20 "$stream" | jq -e 'select(.type=="result")' >/dev/null 2>&1; then printf 'missing-terminal-result'
+  else printf 'provider-process-transport-failure'; fi
+}
+
+write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA [CLASS]
+  local stream="$1" stderr="$2" provider_rc="$3" runtime_sha="$4" preloader_sha="$5" class="${6:-}"
+  local repo dir stamp host file base terminal_exists=false terminal_subtype="" terminal_error=false returned=""
+  repo="$(repo_root 2>/dev/null || pwd)"
+  case "$provider_rc" in ''|*[!0-9]*) provider_rc=130 ;; esac
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"; host="${COMPUTERNAME:-${HOSTNAME:-unknown-host}}"
+  base="qwen-qualification/${stamp}-qwen-live-failure.json"
+  if [ -n "${AI_QWEN_QUALIFICATION_DIAGNOSTIC_DIR:-}" ]; then
+    dir="$AI_QWEN_QUALIFICATION_DIAGNOSTIC_DIR"
+    git -C "$repo" check-ignore --no-index -q -- "$dir/probe" 2>/dev/null || return 1
+  else
+    dir="$(reviews_dir "$repo" "$base")"
+    if [ -n "$dir" ]; then dir="$dir/qwen-qualification"
+    else dir="$STATE_DIR/qualification-diagnostics"; fi
+  fi
+  mkdir -p "$dir" || return 1; chmod 0700 "$dir" 2>/dev/null || true
+  file="$dir/${stamp}-qwen-live-failure.json"
+  [ -n "$class" ] || class="$(qualification_failure_class "$stream" "$stderr" "$provider_rc" "$runtime_sha" "$preloader_sha")"
+  if [ -s "$stream" ]; then
+    returned="$(model_from "$stream")"
+    terminal_subtype="$(tail -20 "$stream" | jq -r 'select(.type=="result")|.subtype // empty' 2>/dev/null | tail -1)"
+    if tail -20 "$stream" | jq -e 'select(.type=="result")' >/dev/null 2>&1; then terminal_exists=true; fi
+    if tail -20 "$stream" | jq -e 'select(.type=="result" and .is_error==true)' >/dev/null 2>&1; then terminal_error=true; fi
+  fi
+  write_meta "$file" "$(jq -nc --arg host "$host" --arg at "$(date -u +%FT%TZ)" --arg class "$class" \
+    --arg requested "$QWEN_MODEL" --arg wrapper "$(sha256_file "${BASH_SOURCE[0]}")" --arg runtime "$runtime_sha" \
+    --arg preloader "$preloader_sha" --arg returned "$returned" --arg subtype "$terminal_subtype" \
+    --argjson exit_status "${provider_rc:-null}" --argjson terminal_exists "$terminal_exists" --argjson terminal_error "$terminal_error" \
+    '{version:1,provider:"qwen",failure_class:$class,host:$host,timestamp:$at,requested_model:$requested,
+      wrapper_sha256:$wrapper,runtime_sha256:(if ($runtime|length)>0 then $runtime else null end),
+      preloader_sha256:(if ($preloader|length)>0 then $preloader else null end),
+      provider_exit_status:$exit_status,terminal_record_exists:$terminal_exists,
+      terminal_subtype:(if ($subtype|length)>0 then $subtype else null end),
+      terminal_error:$terminal_error,returned_model:(if ($returned|length)>0 then $returned else null end),
+      stderr_classification:$class}')" || return 1
+  QUALIFICATION_DIAGNOSTIC_PATH="$file"
+}
+
 AWAIT_RESULT_REASON=""
 await_result() { # await_result FILE LABEL
   local f="$1" label="$2" waited=0 empty=0 saw=0
@@ -481,11 +535,28 @@ RUN_TURN_PID=""
 RUN_TURN_ENV_FILE=""
 PLAIN_REVIEW_META=""
 PLAIN_REVIEW_OUT=""
+QUALIFICATION_ACTIVE=0
+QUALIFICATION_STREAM=""
+QUALIFICATION_RUNTIME_SHA=""
+QUALIFICATION_PRELOADER_SHA=""
+QUALIFICATION_WRAPPER_SHA=""
+QUALIFICATION_DIAGNOSTIC_PATH=""
 cleanup_run_turn_env() {
   [ -z "${RUN_TURN_SECRET_FILE:-}" ] || rm -f -- "$RUN_TURN_SECRET_FILE" 2>/dev/null || true
   RUN_TURN_SECRET_FILE=""
   [ -z "$RUN_TURN_ENV_FILE" ] || rm -f -- "$RUN_TURN_ENV_FILE" 2>/dev/null || true
   RUN_TURN_ENV_FILE=""
+}
+cleanup_qualification_probe() {
+  [ "$QUALIFICATION_ACTIVE" = 1 ] || return 0
+  stop_run_turn 2>/dev/null || true
+  [ -n "$QUALIFICATION_STREAM" ] || return 0
+  QUALIFICATION_DIAGNOSTIC_PATH=""
+  write_qualification_diagnostic "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.err" "${RUN_TURN_RC:-130}" \
+    "$QUALIFICATION_RUNTIME_SHA" "$QUALIFICATION_PRELOADER_SHA" timeout 2>/dev/null || true
+  [ -z "$QUALIFICATION_DIAGNOSTIC_PATH" ] || note "diagnostic    : $QUALIFICATION_DIAGNOSTIC_PATH"
+  rm -f "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.p" "$QUALIFICATION_STREAM.err" 2>/dev/null || true
+  QUALIFICATION_ACTIVE=0
 }
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
@@ -584,7 +655,7 @@ cancel_plain_turn() {
   [ -z "$PLAIN_REVIEW_META" ] || record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" interrupted-provider-turn || true
   exit 130
 }
-trap cleanup_run_turn_env EXIT
+trap 'cleanup_qualification_probe; cleanup_run_turn_env' EXIT
 
 # ---------------------------------------------------------------------------
 # THE REVIEW-OUTPUT CONTRACT (shared-db issue #1220)
@@ -855,11 +926,37 @@ cmd_doctor() {
     echo "session store : FAILED"; rc=1
   fi
   if [ "$live" = 1 ]; then
-    local tmp; tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
+    local tmp diagnostic provider_rc post_runtime_sha post_preloader_sha failure_override=""
+    tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
+    QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$tmp"
+    QUALIFICATION_RUNTIME_SHA="$runtime_sha"; QUALIFICATION_PRELOADER_SHA="$preloader_sha"
+    QUALIFICATION_WRAPPER_SHA="$(sha256_file "${BASH_SOURCE[0]}")"
     echo -n "live probe    : "
     run_turn "$(pwd)" "$tmp" "$tmp.p" review >/dev/null || true
-    if has_result "$tmp" && verify_returned_model "$tmp"; then echo "OK"; else echo "FAILED — terminal success and exact pinned model were not both proven"; rc=1; fi
+    provider_rc="${RUN_TURN_RC:-1}"
+    post_runtime_sha="$(qwen_runtime_sha256 2>/dev/null || true)"
+    post_preloader_sha="$(qwen_preloader_sha256 2>/dev/null || true)"
+    if [ "$runtime_sha" != "$post_runtime_sha" ] || [ "$preloader_sha" != "$post_preloader_sha" ] || \
+       [ "$QUALIFICATION_WRAPPER_SHA" != "$(sha256_file "${BASH_SOURCE[0]}")" ]; then
+      failure_override=wrapper-runtime-evidence-drift
+    fi
+    # The paid provider process has returned. Disable the EXIT-only interruption
+    # finalizer before parsing and writing the ordinary success/failure result.
+    QUALIFICATION_ACTIVE=0
+    if [ -z "$failure_override" ] && has_result "$tmp" && [ "$(model_from "$tmp")" = "$QWEN_MODEL" ] && [ "$provider_rc" = 0 ]; then echo "OK"
+    else
+      QUALIFICATION_DIAGNOSTIC_PATH=""
+      if write_qualification_diagnostic "$tmp" "$tmp.err" "$provider_rc" "$runtime_sha" "$preloader_sha" "$failure_override"; then
+        diagnostic="$QUALIFICATION_DIAGNOSTIC_PATH"
+        echo "FAILED — $(jq -r .failure_class "$diagnostic")"
+        echo "diagnostic    : $diagnostic"
+      else
+        echo "FAILED — diagnostic-write-failure"
+      fi
+      rc=1
+    fi
     rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
+    QUALIFICATION_STREAM=""
   fi
   doctor_worktrees
   return $rc

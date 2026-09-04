@@ -18,8 +18,14 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/good" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
+  [ -z "${MOCK_QWEN_CONTACT_FILE:-}" ] || printf 'one\n' >> "$MOCK_QWEN_CONTACT_FILE"
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+  if [ "${MOCK_QWEN_FAIL:-0}" = 1 ]; then
+    printf 'live probe    : FAILED — authentication-failure\n'
+    printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
+    exit 1
+  fi
 fi
 echo health ok
 EOF
@@ -95,6 +101,11 @@ check "Gemini live preflight performs a genuine live probe" "rm -f '$MOCK_GEMINI
 check "Qwen status enforces built-in quarantine until live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Qwen check cannot report healthy while credits block live qualification" "! $SCRIPT check qwen '$REPO' 2>&1 | grep -q 'health=ok'"
 check "successful Qwen live qualification durably releases quarantine" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"available\"'"
+MOCK_QWEN_CONTACT_FILE="$TMP/qwen-contact"; export MOCK_QWEN_CONTACT_FILE; : > "$MOCK_QWEN_CONTACT_FILE"
+check "failed Qwen requalification revokes the prior qualification" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && test ! -e '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+check "failed Qwen qualification is attempted exactly once" "test \"\$(wc -l < '$MOCK_QWEN_CONTACT_FILE')\" -eq 1"
+unset MOCK_QWEN_CONTACT_FILE
+check "Qwen can be qualified after an evidence-directed failure" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"available\"'"
 printf '%064d\n' 0 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
 check "Qwen runtime changes invalidate prior live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 printf '%064d\n' 0 | tr 0 a > "$AI_QWEN_TEST_RUNTIME_FILE"

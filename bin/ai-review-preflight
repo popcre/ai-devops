@@ -149,14 +149,18 @@ provider_wrapper() {
 }
 
 qualify_qwen() {
-  local wrapper out rc sha runtime_sha preloader_sha now file
+  local wrapper out rc sha before_sha runtime_sha preloader_sha now file
   wrapper="$(provider_wrapper qwen)"; [ -x "$wrapper" ] || die "Qwen wrapper is not executable: $wrapper"
+  file="$(qualification_file qwen)"; rm -f "$file"
+  before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
   set +e; out="$(timeout "${AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?; set -e
   [ "$rc" = 0 ] || { printf 'ai-review-preflight: Qwen live qualification failed; quarantine remains.\n%s\n' "$out" >&2; return 1; }
   runtime_sha="$(qwen_runtime_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact installed runtime hash; quarantine remains.\n' >&2; return 1; }
   preloader_sha="$(qwen_preloader_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact credential-preloader hash; quarantine remains.\n' >&2; return 1; }
-  sha="$(sha256sum "$wrapper" | awk '{print $1}')"; now="$(now_epoch)"; file="$(qualification_file qwen)"
+  sha="$(sha256sum "$wrapper" | awk '{print $1}')"; [ "$before_sha" = "$sha" ] || { printf 'ai-review-preflight: Qwen wrapper changed during qualification; quarantine remains.\n' >&2; return 1; }
+  now="$(now_epoch)"
   write_atomic "$file" "$(jq -nc --arg provider qwen --arg sha "$sha" --arg runtime "$runtime_sha" --arg preloader "$preloader_sha" --argjson at "$now" '{version:3,provider:$provider,wrapper_sha256:$sha,runtime_sha256:$runtime,preloader_sha256:$preloader,qualified_epoch:$at}')"
+  qwen_live_qualified || { rm -f "$file"; printf 'ai-review-preflight: Qwen qualification record did not validate after writing; quarantine remains.\n' >&2; return 1; }
   note "ai-review-preflight: Qwen live qualification recorded for wrapper $sha, runtime $runtime_sha, and credential preloader $preloader_sha."
 }
 
