@@ -28,13 +28,14 @@ What it does (idempotent - safe to re-run):
      and installs the managed SSH host aliases (~/.ssh/ai-devops.conf, Included
      from ~/.ssh/config), so `ssh vps` / `ssh vps2` / `ssh seafile` etc. work
      immediately. Uses cloudflared so it works on any network without Tailscale.
-  7. Wires the FULL MCP server set into Claude Desktop, Claude Code, and Codex
-     (each backed up first). The set is defined exactly once, in step 5d, and
-     every surface receives it, so a server added there reaches every client on
-     every machine and a fresh machine matches an established one.
+  7. Builds one MCP catalog, then writes an explicit server set for each client
+     (each backed up first). Claude Code stays lean at user scope; repository
+     MCP files add project tools. Claude Desktop and Codex retain their own
+     deliberately broader sets. A setup rerun also removes retired managed
+     entries instead of silently restoring them.
        - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
-       - no secret, plain npx      : playwright, chrome-devtools, ag-grid
+       - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
        - Codex-only native HTTP    : vercel (browser OAuth)
        - codex-cli                 : native `codex mcp-server`, absolute exe
      No token is ever written into either config; only URLs and op:// references.
@@ -177,8 +178,39 @@ if (Get-Command gh -ErrorAction SilentlyContinue) { Ok "gh" } else { throw "GitH
 if (-not (Get-Command op -ErrorAction SilentlyContinue)) { Ensure-Winget "AgileBits.1Password.CLI" "1Password CLI" }
 if (Get-Command op -ErrorAction SilentlyContinue) { Ok "op $(op --version 2>$null)" } else { throw "The 1Password CLI (op) is required." }
 
-if (-not (Get-Command npx -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
-if (Get-Command npx -ErrorAction SilentlyContinue) { Ok "node/npx" } else { Warn "npx not found; the supabase MCP (npx-based) will not start until Node is installed." }
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Ensure-Winget "OpenJS.NodeJS.LTS" "Node.js LTS" }
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "Node/npm is required for the managed MCP runtime." }
+Ok "node/npm"
+
+# Install one lockfile-pinned MCP runtime outside the repository. Server startup
+# then executes stable local .cmd files instead of asking npx to resolve packages
+# while Claude is already building the first request.
+Step "Pinned MCP runtime"
+$mcpRuntimeSource = Join-Path $RepoPath "config\mcp-runtime"
+$mcpRuntimeRoot = Join-Path $CfgDir "mcp-runtime"
+if (-not (Test-Path -LiteralPath (Join-Path $mcpRuntimeSource "package-lock.json"))) {
+  throw "Missing MCP runtime lockfile: $mcpRuntimeSource\package-lock.json"
+}
+New-Item -ItemType Directory -Force -Path $mcpRuntimeRoot | Out-Null
+Copy-Item -LiteralPath (Join-Path $mcpRuntimeSource "package.json") -Destination $mcpRuntimeRoot -Force
+Copy-Item -LiteralPath (Join-Path $mcpRuntimeSource "package-lock.json") -Destination $mcpRuntimeRoot -Force
+$env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+& npm.cmd ci --prefix $mcpRuntimeRoot --no-audit --no-fund --silent
+if ($LASTEXITCODE -ne 0) { throw "Pinned MCP runtime installation failed." }
+$mcpBinRoot = Join-Path $mcpRuntimeRoot "node_modules\.bin"
+$McpCommands = [ordered]@{
+  supabase = Join-Path $mcpBinRoot "mcp-server-supabase.cmd"
+  trigger = Join-Path $mcpBinRoot "trigger.cmd"
+  onepassword = Join-Path $mcpBinRoot "1password-mcp.cmd"
+  playwright = Join-Path $mcpBinRoot "playwright-mcp.cmd"
+  chrome = Join-Path $mcpBinRoot "chrome-devtools-mcp.cmd"
+  aggrid = Join-Path $mcpBinRoot "ag-mcp.cmd"
+  remote = Join-Path $mcpBinRoot "mcp-remote.cmd"
+}
+foreach ($commandPath in $McpCommands.Values) {
+  if (-not (Test-Path -LiteralPath $commandPath)) { throw "Pinned MCP command is missing: $commandPath" }
+}
+Ok "MCP commands installed from the repository lockfile"
 
 # Concrete machine topology and provider identifiers live in a separate private
 # repository. Sync it before any generated configuration consumes those values.
@@ -350,19 +382,16 @@ Set-Content -Path $RemoteLauncher -Value $remoteBody -Encoding ascii
 Ok "Wrote $RemoteLauncher"
 
 # --------------------------------------------------------------------------
-# 5d. The MCP server set - ONE definition, used by Claude and Codex
+# 5d. MCP server catalog - definitions shared, client membership separate
 # --------------------------------------------------------------------------
-# Defined once, deliberately. Separate hand-maintained lists are the root cause
-# of every gap this script has had: a server wired into one client silently never
-# existed in another, and servers this script did not define survived only on
-# machines that happened to already have them. Claude Desktop, Claude Code, and
-# Codex all consume this hashtable, so anything added here reaches every client
-# on every machine. Add new servers HERE and nowhere else.
-Step "Building the MCP server set"
-$McpServers = [ordered]@{}
+# Definitions stay centralized so command, version, and secret handling cannot
+# drift. Membership is explicit per client below: applying one universal list
+# re-added deliberately removed Claude servers and recreated prompt-cache waste.
+Step "Building the MCP server catalog"
+$McpServerCatalog = [ordered]@{}
 
-# supabase (stdio, npx). command=cmd /c launcher ... so the .cmd + npx.cmd both
-# run through a shell (spawn cannot run batch files directly). op run injects
+# supabase (stdio). command=cmd /c launcher ... so both .cmd files run through
+# a shell (spawn cannot run batch files directly). op run injects
 # SUPABASE_ACCESS_TOKEN (from mcp.env) into the server's environment.
 #
 # --read-only is NOT optional. Every schema/DDL/RLS change to the shared DB is
@@ -370,22 +399,21 @@ $McpServers = [ordered]@{}
 # enforces that rule; --project-ref caps the blast radius to the one project.
 # The legacy Dropbox script had --read-only; it was dropped when this script took
 # over, leaving the MCP write-capable against shared production.
-$McpServers["supabase"] = @{
+$McpServerCatalog["supabase"] = @{
   command = "cmd"
-  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y",
-           "@supabase/mcp-server-supabase@0.11.0", "--read-only",
+  args = @("/c", $Launcher, "cmd", "/c", $McpCommands.supabase, "--read-only",
            "--project-ref", $SupabaseProjectRef)
 }
 
 # devops-mcp + synology-monitor (remote/HTTP). Wired via the mcp-remote shim under
 # the remote launcher, so the bearer token is resolved from 1Password at launch -
 # never written into the config. Only the URL + op:// ref appear.
-$McpServers["devops-mcp"] = @{
+$McpServerCatalog["devops-mcp"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://mcp.designflow.app/mcp",
            "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token")
 }
-$McpServers["synology-monitor"] = @{
+$McpServerCatalog["synology-monitor"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
            "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token")
@@ -403,47 +431,47 @@ $McpServers["synology-monitor"] = @{
 # item UUID while mcp.env used the title, so recall-ai could never start; the
 # mismatch stayed hidden until 2026-08-24 because an earlier failure in the shared
 # refresh killed the server before this check ran.
-$McpServers["recall-ai"] = @{
+$McpServerCatalog["recall-ai"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
            "op://vibe_coding/recall-ai MCP/password",
            "--transport", "http-first")
 }
 
-# trigger (stdio, npx). Wrapped in the launcher so `op` injects
+# trigger (stdio). Wrapped in the launcher so `op` injects
 # TRIGGER_ACCESS_TOKEN (from mcp.env) at launch - no token in the config.
-$McpServers["trigger"] = @{
+$McpServerCatalog["trigger"] = @{
   command = "cmd"
-  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "trigger.dev@4.4.6", "mcp")
+  args = @("/c", $Launcher, "cmd", "/c", $McpCommands.trigger, "mcp")
 }
 
-# 1password (stdio, npx). The launcher reads the vault-locked service-account
+# 1password (stdio). The launcher reads the vault-locked service-account
 # token from the user file into OP_SERVICE_ACCOUNT_TOKEN - exactly the var this
 # MCP needs - so no token is written into the config either.
-$McpServers["1password"] = @{
+$McpServerCatalog["1password"] = @{
   command = "cmd"
-  args = @("/c", $Launcher, "cmd", "/c", "npx", "-y", "@u2giants/1password-mcp")
+  args = @("/c", $Launcher, "cmd", "/c", $McpCommands.onepassword)
 }
 
-# playwright / chrome-devtools / ag-grid - plain npx stdio servers, no secret.
+# playwright / chrome-devtools / ag-grid - pinned local stdio servers, no secret.
 # Vercel is intentionally absent from Claude. Claude requires the mcp-remote
 # OAuth bridge, whose failed/expired refresh loop repeatedly opens browser login
 # windows. Codex adds Vercel below using its supported native HTTP transport.
-$McpServers["playwright"] = @{
+$McpServerCatalog["playwright"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "@playwright/mcp@0.0.79")
+  args = @("/c", $McpCommands.playwright)
 }
-$McpServers["chrome-devtools"] = @{
+$McpServerCatalog["chrome-devtools"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "chrome-devtools-mcp@1.7.0")
+  args = @("/c", $McpCommands.chrome)
 }
-$McpServers["ag-grid"] = @{
+$McpServerCatalog["ag-grid"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "ag-mcp")
+  args = @("/c", $McpCommands.aggrid)
 }
-$McpServers["railway"] = @{
+$McpServerCatalog["railway"] = @{
   command = "cmd"
-  args = @("/c", "npx", "-y", "mcp-remote@0.1.38", "https://mcp.railway.com")
+  args = @("/c", $McpCommands.remote, "https://mcp.railway.com")
 }
 
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
@@ -475,7 +503,7 @@ $codexEnv = @{ MCP_TOOL_TIMEOUT = "3600000" }
 if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   # Absolute path: the MSIX sandbox does not inherit the user PATH, and an
   # absolute exe also sidesteps PATH resolution picking a broken shim.
-  $McpServers["codex-cli"] = @{
+  $McpServerCatalog["codex-cli"] = @{
     command = $codexExe
     args    = @("mcp-server")
     env     = $codexEnv
@@ -484,7 +512,7 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
 } elseif ($cmd = Get-Command codex -ErrorAction SilentlyContinue) {
   # No standalone package (e.g. npm-global install). Use what's on PATH, but say
   # so plainly - we have not proven this one's sandbox can write.
-  $McpServers["codex-cli"] = @{
+  $McpServerCatalog["codex-cli"] = @{
     command = $cmd.Source
     args    = @("mcp-server")
     env     = $codexEnv
@@ -495,8 +523,22 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   Warn "  Install Codex, run: codex login, then re-run this script."
 }
 
-$McpServerList = ($McpServers.Keys -join ", ")
-Ok "Server set: $McpServerList"
+$ManagedMcpServerNames = @($McpServerCatalog.Keys)
+$ClaudeCodeMcpNames = @("1password", "codex-cli")
+$ClaudeDesktopMcpNames = @("1password", "ag-grid", "codex-cli", "playwright", "recall-ai", "synology-monitor", "trigger")
+
+function Select-McpServers([string[]]$Names) {
+  $selected = [ordered]@{}
+  foreach ($name in $Names) {
+    if ($McpServerCatalog.Contains($name)) { $selected[$name] = $McpServerCatalog[$name] }
+  }
+  return $selected
+}
+
+$ClaudeCodeMcpServers = Select-McpServers $ClaudeCodeMcpNames
+$ClaudeDesktopMcpServers = Select-McpServers $ClaudeDesktopMcpNames
+Ok "Claude Code user set: $($ClaudeCodeMcpServers.Keys -join ', ')"
+Ok "Claude Desktop set: $($ClaudeDesktopMcpServers.Keys -join ', ')"
 
 # --------------------------------------------------------------------------
 # 5b. Restore the 916-alien SSH key (Windows dev machines -> hetz VPS)
@@ -595,7 +637,10 @@ if ($SkipDesktopMcp) {
     $desktopResult = Update-AiDevOpsJsonFileAtomic -Path $cfgPath -Depth 12 -Update {
       param($cfg)
       if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-      foreach ($name in $McpServers.Keys) { $cfg["mcpServers"][$name] = $McpServers[$name] }
+      foreach ($name in $ManagedMcpServerNames) {
+        if (-not $ClaudeDesktopMcpServers.Contains($name)) { $null = $cfg["mcpServers"].Remove($name) }
+      }
+      foreach ($name in $ClaudeDesktopMcpServers.Keys) { $cfg["mcpServers"][$name] = $ClaudeDesktopMcpServers[$name] }
       $null = $cfg["mcpServers"].Remove("vercel")
       return $cfg
     }
@@ -604,7 +649,8 @@ if ($SkipDesktopMcp) {
       Ok "  protected prior JSON: $($desktopResult.Backup)"
       Note "  recovery: Copy-Item -LiteralPath '$($desktopResult.Backup)' -Destination '$cfgPath' -Force"
     }
-    Ok "Wired token-free: $McpServerList - no tokens in the file"
+    $desktopMcpList = ($ClaudeDesktopMcpServers.Keys -join ", ")
+    Ok "Wired token-free: $desktopMcpList - no tokens in the file"
     Warn "KNOWN FAULT (seen 2026-08-20): the app itself rewrites this file and"
     Warn "  DELETES the whole mcpServers block - every other key survives, no error,"
     Warn "  no org blocklist involved. Settings > Developer (not Connectors) is the"
@@ -613,7 +659,7 @@ if ($SkipDesktopMcp) {
     Warn "  version has stopped honouring the file. Claude Code is NOT affected; it"
     Warn "  reads ~/.claude.json (step 7)."
     Warn "VALIDATE ON THIS MACHINE: fully quit and reopen Claude Desktop, then confirm"
-    Warn "  these MCPs show connected: $McpServerList."
+    Warn "  these MCPs show connected: $desktopMcpList."
   }
 }
 
@@ -717,10 +763,9 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
 # disk - which is why "my MCP servers keep disappearing" kept coming back. Do NOT
 # point this back at settings.json.
 #
-# It gets the SAME server set (step 5d) rather than its own list. Servers we do
-# not define (Windows-MCP, claude-in-chrome, ...) and all other keys in the file
-# are preserved untouched. Runs regardless of -SkipDesktopMcp (that flag is about
-# Claude Desktop only).
+# User scope intentionally contains only cross-project essentials. Repository
+# .mcp.json files add project tools. Managed entries no longer selected here are
+# removed; foreign servers and all other keys are preserved untouched.
 Step "Token-free MCP for Claude Code (~/.claude.json)"
 $ccConfig = Join-Path $HOME ".claude.json"
 if (-not (Test-Path $ccConfig)) {
@@ -729,11 +774,14 @@ if (-not (Test-Path $ccConfig)) {
 $ccResult = Update-AiDevOpsJsonFileAtomic -Path $ccConfig -Depth 12 -Update {
   param($cc)
   if (-not $cc.ContainsKey("mcpServers")) { $cc["mcpServers"] = @{} }
-  foreach ($name in $McpServers.Keys) { $cc["mcpServers"][$name] = $McpServers[$name] }
+  foreach ($name in $ManagedMcpServerNames) {
+    if (-not $ClaudeCodeMcpServers.Contains($name)) { $null = $cc["mcpServers"].Remove($name) }
+  }
+  foreach ($name in $ClaudeCodeMcpServers.Keys) { $cc["mcpServers"][$name] = $ClaudeCodeMcpServers[$name] }
   $null = $cc["mcpServers"].Remove("vercel")
   return $cc
 }
-Ok "Claude Code wired token-free: $McpServerList"
+Ok "Claude Code wired token-free: $($ClaudeCodeMcpServers.Keys -join ', ')"
 if ($ccResult.Backup) {
   Ok "  protected prior JSON: $($ccResult.Backup)"
   Note "  recovery: Copy-Item -LiteralPath '$($ccResult.Backup)' -Destination '$ccConfig' -Force"
@@ -749,7 +797,7 @@ if ($ccResult.Backup) {
     $legacyResult = Update-AiDevOpsJsonFileAtomic -Path $ccSettings -Depth 12 -Update {
       param($legacy)
       if ($legacy.ContainsKey("mcpServers")) {
-        $script:removed = @($McpServers.Keys | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
+        $script:removed = @($ManagedMcpServerNames | Where-Object { $legacy["mcpServers"].ContainsKey($_) })
         foreach ($name in $script:removed) { $legacy["mcpServers"].Remove($name) }
         if ($legacy["mcpServers"].Count -eq 0) { $legacy.Remove("mcpServers") }
       }
@@ -827,17 +875,16 @@ WScript.Quit exitCode
 }
 
 # --------------------------------------------------------------------------
-# 6c. Codex's OWN config (~/.codex/config.toml) - install the same complete MCP
-# set built above. Codex-specific transport details are applied to a copy so the
-# Claude Desktop/Code definitions remain unchanged.
+# 6c. Codex's OWN config (~/.codex/config.toml). Codex receives the complete
+# catalog, independently of the two Claude membership lists.
 # --------------------------------------------------------------------------
 Step "Wiring the complete MCP server set into Codex"
 $codexMcpSetup = Join-Path $RepoPath "bin\configure-codex-mcps.ps1"
 if (Test-Path -LiteralPath $codexMcpSetup) {
   $CodexMcpServers = [ordered]@{}
-  foreach ($name in $McpServers.Keys) {
+  foreach ($name in $McpServerCatalog.Keys) {
     $copy = [ordered]@{}
-    foreach ($key in $McpServers[$name].Keys) { $copy[$key] = $McpServers[$name][$key] }
+    foreach ($key in $McpServerCatalog[$name].Keys) { $copy[$key] = $McpServerCatalog[$name][$key] }
     $CodexMcpServers[$name] = $copy
   }
 
@@ -860,6 +907,9 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     PROGRAMFILES = $(if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' })
   }
   $CodexMcpServers['chrome-devtools']['startup_timeout_sec'] = 20
+  # Kept recoverable but parked: the Codex prefix census showed it is not in the
+  # first-turn tool list, and setup must not undo the live disabled state.
+  $CodexMcpServers['chrome-devtools']['enabled'] = $false
   if ($CodexMcpServers.Contains('codex-cli')) {
     $CodexMcpServers['codex-cli']['tool_timeout_sec'] = 3600
   }
@@ -921,7 +971,7 @@ Write-Host "  2. Run:  cmd /c `"$RemoteLauncher`" https://mcp.designflow.app/mcp
 Write-Host "     (mcp-remote should start and authenticate; Ctrl+C to stop)"
 Write-Host "  3. Run:  ssh vps whoami   (should print 'root'; first cloudflared use may open a browser to sign in)"
 Write-Host "  4. Fully quit and reopen Claude Desktop (MCP servers only re-read config on a full restart)."
-Write-Host "  5. Confirm these MCPs show connected: $McpServerList"
+Write-Host "  5. Confirm these MCPs show connected: $($ClaudeDesktopMcpServers.Keys -join ', ')"
 Write-Host "  6. Ask Claude or Codex: 'Ask GLM for a read-only second opinion.'"
 Write-Host ""
 Write-Host "One manual step this script cannot do for you:" -ForegroundColor Yellow

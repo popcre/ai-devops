@@ -22,6 +22,7 @@ $servers['vercel'] = [ordered]@{ url = 'https://mcp.vercel.com'; startup_timeout
 $servers['railway'] = [ordered]@{ command = 'railway'; args = @('mcp', 'proxy'); startup_timeout_sec = 20 }
 $servers['codex-cli']['env'] = [ordered]@{ MCP_TOOL_TIMEOUT = '3600000' }
 $servers['codex-cli']['tool_timeout_sec'] = 3600
+$servers['chrome-devtools']['enabled'] = $false
 
 try {
   @'
@@ -68,6 +69,7 @@ notifications = true
   Assert-True ($second.Contains("url = 'https://mcp.vercel.com'")) "uses native Vercel transport"
   Assert-True ($second.Contains("args = ['mcp', 'proxy']")) "uses Railway's authenticated CLI proxy"
   Assert-True ($second.Contains('tool_timeout_sec = 3600')) "allows long codex-cli calls"
+  Assert-True ($second.Contains('enabled = false')) "keeps Chrome DevTools parked but recoverable"
   Assert-True ((Get-ChildItem $testRoot -Filter 'config.toml.aidevops-*.bak').Count -eq 1) "creates one recoverable backup only when changed"
 } finally {
   $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)

@@ -62,11 +62,11 @@ if grep -q 'set "HOME=' bin/setup-opencode-glm.ps1; then ok "ai-glm shim pins HO
 else bad "ai-glm shim does not pin HOME"; fi
 
 echo "== MCP remote bridge version must be pinned =="
-if grep -q 'mcp-remote@0\.1\.38' bin/mcp-secret-launch.ps1 \
-  && grep -q 'mcp-remote@0\.1\.38' bin/setup-machine.ps1 \
+if jq -e '.dependencies["mcp-remote"] == "0.1.38"' config/mcp-runtime/package.json >/dev/null \
+  && grep -q "mcp-runtime\\\\node_modules\\\\.bin\\\\mcp-remote.cmd" bin/mcp-secret-launch.ps1 \
   && grep -q 'mcp-remote@0\.1\.38' bin/setup-secrets.sh \
   && ! grep -q 'mcp-remote@latest' bin/mcp-secret-launch.ps1 bin/setup-machine.ps1 bin/setup-secrets.sh; then
-  ok "mcp-remote is pinned to 0.1.38 in generated launch paths"
+  ok "Windows MCP runtime pins mcp-remote and launches its stable local command"
 else
   bad "mcp-remote launch paths are unpinned or disagree"
 fi
@@ -133,10 +133,14 @@ if grep -q '^model = "gpt-5.6-sol"' config/codex-portable.toml &&
   ok "portable Codex defaults pin safe effort without hard-coding a model"
 else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
-echo "== complete MCP set is managed for both clients =="
-if grep -q '\$McpServers\["chrome-devtools"\]' bin/setup-machine.ps1; then
-  ok "Claude MCP set includes Chrome DevTools"
-else bad "Claude MCP set does not include Chrome DevTools"; fi
+echo "== MCP catalog has explicit per-client membership =="
+if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeCodeMcpNames = @("1password", "codex-cli")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "ag-grid", "codex-cli", "playwright", "recall-ai", "synology-monitor", "trigger")' bin/setup-machine.ps1 &&
+   grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
+   grep -Fq 'if (-not $ClaudeDesktopMcpServers.Contains($name))' bin/setup-machine.ps1; then
+  ok "Claude Code user scope stays lean and cannot restore Chrome DevTools"
+else bad "Claude Code user scope is not explicitly frozen"; fi
 if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
    grep -q '\$CodexMcpServers' bin/setup-machine.ps1; then
   ok "Windows setup configures the complete MCP set for Codex"
@@ -147,13 +151,13 @@ if grep -Fq "\$CodexMcpServers['railway']" bin/setup-machine.ps1 &&
   ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
 else bad "Windows setup does not fully manage Railway"; fi
 for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger recall-ai 1password supabase; do
-  if grep -Fq "\$McpServers[\"$server\"]" bin/setup-machine.ps1; then
-    ok "shared MCP set includes $server"
+  if grep -Fq "\$McpServerCatalog[\"$server\"]" bin/setup-machine.ps1; then
+    ok "MCP catalog includes $server"
   else
-    bad "shared MCP set is missing $server"
+    bad "MCP catalog is missing $server"
   fi
 done
-if ! grep -Fq '$McpServers["vercel"]' bin/setup-machine.ps1 &&
+if ! grep -Fq '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 &&
    grep -Fq "\$CodexMcpServers['vercel']" bin/setup-machine.ps1; then
   ok "Vercel is Codex-only and cannot trigger Claude browser-auth loops"
 else

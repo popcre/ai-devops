@@ -25,14 +25,15 @@ done < <(jq -r '.winget | to_entries[] | [.key,.value] | @tsv' "$CATALOG")
 
 declare -A npm_files=(
   [vercel]="bin/reconcile-windows-package-exceptions.ps1 bin/setup_dev_computer_internal.ps1"
-  [trigger.dev]="bin/reconcile-windows-package-exceptions.ps1 bin/setup_dev_computer_internal.ps1 bin/setup-machine.ps1 bin/setup-secrets.sh"
+  [trigger.dev]="bin/reconcile-windows-package-exceptions.ps1 bin/setup_dev_computer_internal.ps1 bin/setup-secrets.sh"
   [@railway/cli]="bin/reconcile-windows-package-exceptions.ps1 bin/setup-machine.ps1"
-  [@supabase/mcp-server-supabase]="bin/setup-machine.ps1 bin/setup-secrets.sh"
-  [@playwright/mcp]="bin/setup-machine.ps1 bin/setup-secrets.sh"
-  [chrome-devtools-mcp]="bin/setup-machine.ps1 bin/configure-claude-desktop-chrome-devtools.ps1 bin/configure-codex-chrome-devtools.ps1"
+  [@supabase/mcp-server-supabase]="bin/setup-secrets.sh"
+  [@playwright/mcp]="bin/setup-secrets.sh"
+  [chrome-devtools-mcp]="bin/configure-claude-desktop-chrome-devtools.ps1 bin/configure-codex-chrome-devtools.ps1"
 )
 while IFS=$'\t' read -r package version; do
   version="${version%$'\r'}"
+  if [[ -z ${npm_files[$package]+x} ]]; then continue; fi
   missing=""
   for file in ${npm_files[$package]}; do
     grep -Fq "$package@$version" "$ROOT/$file" || missing="$missing $file"
@@ -41,7 +42,14 @@ while IFS=$'\t' read -r package version; do
   else bad "npm pin $package@$version is missing from:$missing"; fi
 done < <(jq -r '.npm | to_entries[] | [.key,.value] | @tsv' "$CATALOG")
 
-if ! grep -R -n -E '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp)@latest' \
+for package in trigger.dev @supabase/mcp-server-supabase @playwright/mcp chrome-devtools-mcp @u2giants/1password-mcp ag-mcp mcp-remote; do
+  expected="$(jq -r --arg package "$package" '.npm[$package]' "$CATALOG")"
+  actual="$(jq -r --arg package "$package" '.dependencies[$package]' "$ROOT/config/mcp-runtime/package.json")"
+  if [ "$actual" = "$expected" ]; then ok "MCP runtime pins $package@$expected"
+  else bad "MCP runtime pin for $package is $actual, expected $expected"; fi
+done
+
+if ! grep -R --exclude-dir=node_modules -n -E '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp)@latest' \
   "$ROOT/bin" "$ROOT/config" "$ROOT/.config" >/dev/null; then
   ok "recovery paths contain no mutable npm latest specifiers"
 else

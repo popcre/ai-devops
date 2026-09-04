@@ -26,3 +26,7 @@ wilassetcatfranchise
 # was rejected by CI with a message naming no file, and the cause took twenty
 # minutes to find.
 indistinguishability
+
+# The public npm organization name used by the MCP SDK packages in the pinned
+# runtime lockfile, not a project identifier.
+modelcontextprotocol

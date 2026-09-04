@@ -289,3 +289,65 @@ from `~/.claude/projects/**/*.jsonl` (Claude, `message.usage` plus `tool_use` an
 One correction worth repeating: Codex's `total_token_usage.input_tokens`
 **includes** `cached_input_tokens`. Subtracting is required, and failing to do so
 overstates fresh input by roughly a factor of five.
+
+---
+
+## 9. Follow-up results — 2026-09-04
+
+### Upstream defect
+
+Anthropic issue `anthropics/claude-code#92033` already described the same
+mid-session tool-list cache invalidation. The 506-session aggregate evidence
+from this analysis was added there rather than opening a duplicate.
+
+### Codex prefix census
+
+Codex CLI 0.153.2 exposed 11 core tools on a fresh first turn and no configured
+MCP tools. The billed first turn was 31,412 input tokens. Disabling `ag-grid`
+through a temporary named profile changed neither the tool list nor the input
+count. Therefore ambient MCP schemas do not explain the current floor and no
+Codex MCP removal is justified by this measurement.
+
+Ignoring user configuration reduced the same first turn by 3,942 tokens. That
+points to plugin/configuration context as the removable portion. The global
+safety instructions were not shortened because this test does not isolate them
+as the cause.
+
+### Claude post-relocation measurement
+
+From the relocation at 13:15:23Z onward, 177 tool-list mutations were followed
+by 46 full cache rewrites totaling 5,469,123 tokens. Earlier the same day there
+were 115 tool-list mutations and 31 full rewrites totaling about 2.0 million
+tokens. The relocation did not stop the defect, so pinning MCP startup commands
+remained warranted.
+
+### Durable installer repair
+
+The Windows installer now uses one definition catalog with explicit membership
+per client. Claude Code user scope contains only `1password` and `codex-cli`;
+project `.mcp.json` files add project tools. Claude Desktop retains its intended
+seven-server set, and Codex retains its independent set with Chrome DevTools
+parked but recoverable. Managed entries excluded from a client are removed on a
+rerun, so setup cannot silently restore the retired Claude entries.
+
+All npm-backed Windows MCP commands now come from one lockfile-pinned runtime
+under the protected machine configuration directory. MCP startup uses stable
+local command paths instead of resolving packages with `npx -y` mid-startup.
+
+### Claude Desktop and Headroom
+
+The live Windows user environment still points Claude Code at Headroom, but the
+Microsoft Store Desktop app does not inherit that setting. Its real MSIX config
+contains MCP, file-path, and preference settings but no model endpoint, and its
+embedded Claude Code process is launched without an endpoint override. Anthropic
+documents custom gateways for Claude Code, not for Claude Desktop. There is no
+supported way to route the signed-in Desktop product through Headroom, so the
+proxy does not save spend on that surface.
+
+### NAS project scope
+
+The repository-local `synology-monitor` entry is present and its earlier
+read-only data-path qualification remains valid. The duplicate Claude Code user
+entry had been restored by the old installer along with the other retired
+servers. The per-client installer repair removes that duplicate while preserving
+the project-scoped NAS capability.

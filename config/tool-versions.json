@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-21",
+  "reviewed_at": "2026-09-04",
   "winget": {
     "Git.Git": "2.54.0",
     "Microsoft.PowerShell": "7.6.5.0",
@@ -24,7 +24,10 @@
     "@railway/cli": "5.43.1",
     "@supabase/mcp-server-supabase": "0.11.0",
     "@playwright/mcp": "0.0.79",
-    "chrome-devtools-mcp": "1.7.0"
+    "chrome-devtools-mcp": "1.7.0",
+    "@u2giants/1password-mcp": "2.7.0",
+    "ag-mcp": "1.0.0",
+    "mcp-remote": "0.1.38"
   },
   "models": {
     "claude_review": "claude-opus-5",
