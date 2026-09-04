@@ -550,42 +550,48 @@ failure without its logs.
   ceiling, and only a real qualification run can settle it. `EDGE-ALIEN` still
   carries `ai-devops-windows-paused` and takes no CI until that run is spent.
 - **Re-measured 2026-09-04 after the third round of SentinelOne exclusions
-  landed. The script-engine exclusion is gone and the host is worse than it was
-  after round two.** Both hosts idle, no runner job live on either, three
-  consecutive passes agreeing to within one percent on each host. `EDGE-ALIEN`
-  runs SentinelOne 25.2.6.442 with Microsoft Defender real-time protection off;
-  `EDGE-DEV` runs no SentinelOne and *does* have Defender real-time protection
-  on, so the comparison is not scanner-against-nothing. Windows PowerShell is
-  5.1 on both.
-- **A compiled control separates hardware from scanning for the first time.** A
-  `for` loop of 200 million iterations compiled to .NET through `Add-Type` runs
-  in 100 ms on `EDGE-ALIEN` against 76 ms on `EDGE-DEV` - **1.32x**, and that is
-  the whole hardware gap, slightly better than the 1.6x previously assumed. Any
-  ratio above 1.32x is scanning, not the 2015 CPU.
-- **The identical arithmetic loop interpreted by PowerShell is 7.3x**
-  (5957 ms against 819 ms, one million iterations). Against the 1.32x hardware
-  control that is a **5.5x script-engine penalty**. After the second round of
-  exclusions this same measurement was 1.47x. The AMSI/script-scanning exclusion
-  that round two delivered is no longer in effect after round three.
-- Supporting numbers on the same passes, `EDGE-ALIEN` against `EDGE-DEV`:
-  100 `cmd.exe /c exit` spawns 4162 ms against 1578 ms (**2.6x**), 30
-  `git --version` spawns 2481 ms against 725 ms (**3.4x**), 300 file writes into
-  a temp tree 447 ms against 313 ms (**1.4x**). File writes remain excluded and
-  are close to hardware. Process creation was 2.1-2.5x after round two and is
-  2.6-3.4x now, so it did not improve either.
-- `SentinelAgent` CPU could not be read through `Get-Process` on this pass - it
-  reports zero because the agent runs as a protected process, which is absence
-  of evidence, not evidence of absence.
-- **Consequence.** Round three did not add the process-creation exclusion that
-  was asked for, and it lost the script exclusion that round two had won. The
-  suites are both spawn-heavy and PowerShell-heavy, so this is the worst of the
-  three states measured so far. Do not spend a qualification run on `EDGE-ALIEN`
-  in this condition. `EDGE-ALIEN` keeps `ai-devops-windows-paused` and takes no
-  CI. The request back to Nexustek is to restore whatever script/AMSI exclusion
-  was in place on 2026-09-03 and to add the process-creation hook exclusion for
-  the runner tree; the compiled control above gives them a 1.32x target to aim
-  at, and the PowerShell loop is the single number that proves the script
-  exclusion is live.
+  landed.** Both hosts idle, no runner job live on either. `EDGE-ALIEN` runs
+  SentinelOne 25.2.6.442 with Microsoft Defender real-time protection off;
+  `EDGE-DEV` runs no SentinelOne and does have Defender real-time protection on,
+  so this is not scanner-against-nothing. Windows PowerShell is 5.1 and the High
+  performance power plan is active on both. PowerShell script-block logging,
+  module logging and transcription are all unset on `EDGE-ALIEN`, and its
+  language mode is `FullLanguage`, so none of those explain anything below.
+- **A compiled control now separates hardware from scanning.** A 200-million
+  iteration `for` loop compiled to .NET through `Add-Type` runs in 97-103 ms on
+  `EDGE-ALIEN` against 74-78 ms on `EDGE-DEV`: **1.32x**. That is the whole
+  hardware gap, and it is better than the 1.6x previously assumed. Any ratio
+  above 1.32x is scanning, not the 2015 CPU.
+- **Process creation is the penalty that survived all three rounds.** 100
+  `cmd.exe /c exit` spawns take 3535-3552 ms on `EDGE-ALIEN` against 1383-1821 ms
+  on `EDGE-DEV` (**about 2.2x**), and 30 `git --version` spawns take
+  2384-2440 ms against 603-729 ms (**about 3.7x**). Against the 1.32x hardware
+  control that is a real spawn tax, and it is unchanged from the 2.1-2.5x
+  recorded after round two. File writes remain near hardware at 1.4x.
+- **Direct attribution, measured rather than inferred.** `SentinelAgent` CPU,
+  read through the `\Process(SentinelAgent)\% Processor Time` performance
+  counter because the agent runs as a protected process and `Get-Process` cannot
+  see its CPU time, averages **0.8%** of a core while the host is idle, **6.4%**
+  while a pure arithmetic loop runs, and **73%** while the host does nothing but
+  spawn `cmd.exe` processes. The agent is reacting to process creation and to
+  almost nothing else.
+- **A microbenchmark caution that cost this session a wrong conclusion.** The
+  measured PowerShell ratio depends heavily on how the loop is written. The same
+  arithmetic loop is about 1.5x at function scope and about 7.3x at script scope,
+  because script-scope variable lookup runs through far more engine machinery per
+  statement. A PowerShell loop ratio is therefore only comparable against another
+  measurement of *identical shape*. The function-scope figure of roughly 1.5x is
+  close to the 1.32x hardware control, so there is **no evidence that the
+  script/AMSI exclusion won in round two was lost.** An earlier version of this
+  entry claimed it had been; that claim came from comparing a script-scope loop
+  against an earlier measurement of unknown shape and it is withdrawn.
+- **Consequence.** Round three neither broke anything nor delivered the one
+  exclusion that matters here. The recoverable script-scanning penalty is still
+  recovered; the process-creation hook is still not excluded, and the suites are
+  spawn-heavy. `EDGE-ALIEN` keeps `ai-devops-windows-paused` and takes no CI. The
+  request back to Nexustek is narrow: exclude process creation for the runner
+  tree and its toolchain. The counter measurement above is the evidence, and
+  1.32x is the target to aim at.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
