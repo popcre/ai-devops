@@ -1,8 +1,24 @@
 {
   "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+    "devops-mcp": {
+      "args": [
+        "/c",
+        "C:\\Users\\ahazan\\.config\\ai-devops\\mcp-remote-launch.cmd",
+        "https://mcp.designflow.app/mcp",
+        "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token"
+      ],
+      "command": "cmd"
+    },
+    "synology-monitor": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "C:\\Users\\ahazan\\.config\\ai-devops\\mcp-remote-launch.cmd",
+        "https://nas-mcp.designflow.app/mcp",
+        "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"
+      ],
+      "env": {}
     }
   }
 }
