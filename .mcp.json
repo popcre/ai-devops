@@ -19,6 +19,13 @@
         "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"
       ],
       "env": {}
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
     }
   }
 }
