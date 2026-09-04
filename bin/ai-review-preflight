@@ -151,7 +151,7 @@ provider_wrapper() {
 qualify_qwen() {
   local wrapper out rc sha runtime_sha preloader_sha now file
   wrapper="$(provider_wrapper qwen)"; [ -x "$wrapper" ] || die "Qwen wrapper is not executable: $wrapper"
-  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; set -e
+  set +e; out="$(timeout "${AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?; set -e
   [ "$rc" = 0 ] || { printf 'ai-review-preflight: Qwen live qualification failed; quarantine remains.\n%s\n' "$out" >&2; return 1; }
   runtime_sha="$(qwen_runtime_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact installed runtime hash; quarantine remains.\n' >&2; return 1; }
   preloader_sha="$(qwen_preloader_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact credential-preloader hash; quarantine remains.\n' >&2; return 1; }

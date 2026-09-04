@@ -61,6 +61,7 @@ printf '%064d\n' 0 | tr 0 c > "$AI_QWEN_TEST_PRELOADER_FILE"
 printf '%064d\n' 0 | tr 0 a > "$MOCK_AGY_SHA_FILE"
 
 echo '== ai-review-preflight'
+grep -q 'AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800' "$SCRIPT" || { echo 'not ok Qwen live qualification has a realistic independent timeout'; exit 1; }
 mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"
 printf 'live-review-evidence\n' > "$REPO/.ai-review/sentinel"

@@ -77,11 +77,27 @@ preloader SHA-256
 `774520d5e12ed1fc586d7d30c8278310b779672b51a4ba24ed663b0d7ad44291`;
 Qwen 92/92; shared preflight 51/51; Gemini 62/62.
 
-No paid provider call was made. `EDGE-RUNN-ENVY` lacks the governed 1Password
-reference and CLI, so exact-model live qualification remains pending. GitHub
-assigned a new reviewer-safety job to the host only after the focused tests had
-finished; further work there stopped immediately. `EDGE-DEV` was checked and
-was busy, so its existing Qwen 0.21.15 installation was not touched.
+The governed 1Password bootstrap was installed on `EDGE-RUNN-ENVY` and the
+paused `EDGE-ALIEN` through protected stdin transfer; no value entered an
+argument, log, or repository. The original Qwen qualification path used the
+10-second general doctor timeout, which was shorter than a 0.23.0 runtime hash
+on either host and failed before provider contact. A dedicated bounded
+30-minute Qwen qualification timeout was added.
+
+Exact-model live qualification was then attempted once on each independent
+idle host. Both reached the guarded live probe with version 0.23.0, identical
+runtime and preloader hashes, managed 1Password reference, correct international
+endpoint, hardened child environment, and healthy session store. Both failed
+closed because no terminal success for exact `qwen3.8-max` was returned. Qwen
+therefore remains quarantined. This repeated cross-host result is now a
+provider/model response blocker, not a Windows capacity blocker; do not repeat
+an unchanged paid attempt.
+
+`EDGE-DEV` was checked and remained busy, so its existing Qwen 0.21.15
+installation was not touched. GitHub assigned a reviewer-safety job to
+`EDGE-RUNN-ENVY` only after the first focused tests had finished; work stopped
+there until the runner became idle again. `EDGE-ALIEN` was deliberately paused
+from GitHub scheduling throughout its qualification.
 
 ## Definition of done
 
