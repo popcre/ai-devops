@@ -1,3 +1,9 @@
+---
+issue: none    # no GitHub issue opened for this workstream
+status: OPEN
+owner: claude/reviewer-setup-audit-23cef2 (edge-dev Claude session, 2026-08-25)
+---
+
 # HANDOFF — reviewer cache and snapshot efficiency
 
 - **Status:** OPEN (scope cut on 2026-08-25 after adversarial review)

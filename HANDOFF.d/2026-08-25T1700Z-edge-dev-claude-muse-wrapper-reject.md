@@ -1,3 +1,9 @@
+---
+issue: none    # related open issues are #182 and #183; this workstream has none of its own
+status: OPEN
+owner: edge-dev Claude Opus 5 session, 2026-08-25 (no dedicated branch; nothing implemented)
+---
+
 # HANDOFF — `ai-muse` stale-turn rejection is undiagnosable and steers toward data loss
 
 - **Status:** OPEN — nothing implemented
