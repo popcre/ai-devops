@@ -165,17 +165,19 @@ harden_qwen_child_env() {
 # ---------------------------------------------------------------------------
 SELF_REAL="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 VERSION_TOOL="$(dirname "$SELF_REAL")/ai-provider-version"
-[ -x "$VERSION_TOOL" ] || VERSION_TOOL="$(command -v ai-provider-version 2>/dev/null || true)"
+# -f, not -x: a checkout that lost the executable bit is a packaging problem,
+# not a reason to refuse the install. It is run through bash below.
+[ -f "$VERSION_TOOL" ] || VERSION_TOOL="$(command -v ai-provider-version 2>/dev/null || true)"
 
 required_version() { # required_version PROVIDER  -> exact version, or empty when unpinned
-  [ -n "$VERSION_TOOL" ] && [ -x "$VERSION_TOOL" ]     || die "ai-provider-version is missing; refusing to install a provider without its version policy."
-  "$VERSION_TOOL" required "$1"
+  [ -n "$VERSION_TOOL" ] && [ -f "$VERSION_TOOL" ]     || die "ai-provider-version is missing; refusing to install a provider without its version policy."
+  bash "$VERSION_TOOL" required "$1"
 }
 
 reported_version() { # reported_version BINARY -> bare x.y.z, empty when unreadable
   local out; out="$("$1" --version 2>/dev/null | head -1 || true)"
   [ -n "$out" ] || return 0
-  "$VERSION_TOOL" parse "$out"
+  bash "$VERSION_TOOL" parse "$out"
 }
 
 BACKUP_ROOT="$HOME/.local/state/ai-devops/provider-cli/backups"

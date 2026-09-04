@@ -239,4 +239,21 @@ bash "$repo/bin/ai-provider-version" parse 'grok (no version here)' >/dev/null
 # --- an unpinned Grok is a policy error, never a reason to skip ------------
 grep -q 'pins no Grok version' "$script"
 
+# --- every shipped bin/ script keeps its executable bit -------------------
+# Git Bash reports every file as executable, so a mode-644 script passes on
+# Windows and fails on Linux CI only -- exactly how the version reader shipped
+# unrunnable. Assert the mode recorded in git, not the mode the local filesystem
+# claims, for anything with a shebang.
+nonexec=""
+while read -r mode _ _ path; do
+  [ "$mode" = 100755 ] && continue
+  head -1 "$repo/$path" | grep -q '^#!' && nonexec="$nonexec $path"
+done < <(git -C "$repo" ls-files -s bin/)
+if [ -n "$nonexec" ]; then
+  echo "FAIL: these bin/ entries are not executable in git:" >&2
+  printf '  %s
+' $nonexec >&2
+  exit 1
+fi
+
 echo 'PASS: provider CLI installer contract'

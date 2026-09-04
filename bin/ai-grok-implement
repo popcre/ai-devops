@@ -100,21 +100,23 @@ version_tool() {
   real="$(readlink -f "$self" 2>/dev/null || true)"
   [ -n "$real" ] && self="$real"
   dir="$(cd "$(dirname "$self")" && pwd)"
-  if [ -x "$dir/ai-provider-version" ]; then printf '%s' "$dir/ai-provider-version"; return 0; fi
+  # -f, not -x: a checkout that lost the executable bit is a packaging problem,
+  # not a reason to refuse every paid turn. The caller runs it through bash.
+  if [ -f "$dir/ai-provider-version" ]; then printf '%s' "$dir/ai-provider-version"; return 0; fi
   command -v ai-provider-version 2>/dev/null || true
 }
 
 supported_grok_version() {
   local tool; tool="$(version_tool)"
-  [ -n "$tool" ] && [ -x "$tool" ]     || die 'ai-provider-version is missing; refusing paid work without the exact supported Grok version.'
-  "$tool" required grok
+  [ -n "$tool" ] && [ -f "$tool" ]     || die 'ai-provider-version is missing; refusing paid work without the exact supported Grok version.'
+  bash "$tool" required grok
 }
 
 installed_grok_version() { # installed_grok_version BINARY
   local tool raw; tool="$(version_tool)"
   raw="$("$1" --version 2>/dev/null | head -1 || true)"
   [ -n "$raw" ] || { printf ''; return 0; }
-  "$tool" parse "$raw"
+  bash "$tool" parse "$raw"
 }
 
 require_supported_grok_version() { # require_supported_grok_version BINARY
