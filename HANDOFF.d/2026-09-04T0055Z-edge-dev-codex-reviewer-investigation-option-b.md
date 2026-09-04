@@ -59,7 +59,13 @@ Albert wants reviewers to perform deeper testing with shell and internet access,
 ## 7. Constraints and gotchas in force
 
 - Work directly on `main`; do not create a feature branch. Preserve all other sessions' dirty work and stage only owned files.
-- Do not run broad local suites while protected Windows CI is active on the shared `EDGE-DEV` host.
+- Do not run broad local suites on `EDGE-DEV` while a CI job is running **on
+  `edge-dev-win`, the runner hosted on that same machine**. This is a per-host
+  rule, not a pool-wide one: a job on `EDGE-RUNN-ENVY`, `EDGE-ALIEN`, or a
+  GitHub-hosted runner does **not** block a local suite here, and waiting on one
+  defeats the point of having a runner pool. Confirm this host specifically:
+  `gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) busy=\(.busy)"'`
+  and read the `edge-dev-win` row only.
 - This is a reviewer safety-path change and requires an independent exact-head final review before landing implementation.
 - Never expose secret values in prompts, argv, output, logs, reports, patches, tests, or commits. This public repository cannot contain raw transcripts or licensed/private inputs.
 - Investigation is advisory, not formal approval. Do not mutate the existing formal review profiles into capable modes.
