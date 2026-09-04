@@ -8,6 +8,8 @@ on:
   # waits forever for checks that never start.
   merge_group:
   workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
 
 concurrency:
   # A pull request is keyed on its *number*, not its head SHA. Keying on the SHA
@@ -25,7 +27,12 @@ permissions:
   contents: read
 
 jobs:
+  fast-classifier:
+    uses: ./.github/workflows/fast-classifier.yml
+
   linux-offline:
+    needs: fast-classifier
+    if: always() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -44,11 +51,16 @@ jobs:
         run: bash tests/test-all.sh
 
   windows-offline:
-    # Not run on merge_group: the edge-dev pool is two logical runners on one
-    # physical machine, and a queue rebuild restarted this job five times for a
-    # single pull request (issue #204). linux-offline is the queue gate; the
-    # Windows proof comes from the pull_request run on the exact head commit.
-    if: github.event_name != 'merge_group'
+    needs: fast-classifier
+    # Not run on merge_group: linux-offline is the queue gate, and the Windows
+    # proof comes from the pull_request run on the exact head commit (#204).
+    # Also skipped when the fast classifier proves the change is prose-only.
+    # Fail-closed: any classifier result other than a clean prose-only verdict
+    # runs the complete matrix.
+    if: >-
+      always() && github.event_name != 'merge_group' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
     # GitHub-hosted, on purpose. Self-hosted capacity was added to this
     # repository to have MORE Windows capacity, not to move off GitHub's
     # runners: hosted concurrency is unmetered on a public repository, so this
@@ -87,9 +99,16 @@ jobs:
         run: .\tests\test-all.ps1
 
   windows-reviewer-safety:
+    needs: fast-classifier
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
-    if: github.event_name != 'merge_group'
+    # Also skipped when the fast classifier proves the change is prose-only.
+    # Fail-closed: any classifier result other than a clean prose-only verdict
+    # runs the complete matrix.
+    if: >-
+      always() && github.event_name != 'merge_group' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
     # Self-hosted on the qualified pool, like windows-offline. Moving this job
     # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
     # stalled (#204), so this is not a return to hosted runners: it is a move
@@ -119,3 +138,27 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failures++ }
           }
           if ($failures -ne 0) { exit 1 }
+
+  report-scheduled-failure:
+    needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety]
+    if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the scheduled verification incident
+        shell: bash
+        run: |
+          title='Scheduled full verification is failing'
+          body="The complete scheduled matrix failed at $RUN_URL. Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
+          fi

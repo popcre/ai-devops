@@ -8,6 +8,10 @@ suite_started=$(date +%s)
 mapfile -t tests < <(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' | LC_ALL=C sort)
 for name in "${tests[@]}"; do
   count=$((count + 1)); printf '\n===== BASH %s =====\n' "$name"
+  # stdout is block-buffered when redirected, so a killed run can lose the
+  # marker for the suite it was actually in. stderr is unbuffered and reaches
+  # the CI progress reader immediately.
+  printf '===== BASH %s =====\n' "$name" >&2
   started=$(date +%s)
   bash "$ROOT/tests/$name" || failures=$((failures + 1))
   elapsed=$(( $(date +%s) - started ))
