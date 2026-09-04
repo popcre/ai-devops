@@ -202,28 +202,36 @@ the whole turn so far, so cost grows faster than the work does.
 ## Terminal output discipline
 
 Everything put into a conversation is re-sent to the model on every later turn,
-so one oversized dump is billed dozens of times. Never let a command put more
-than ~40 lines into the conversation.
+so one oversized dump is billed dozens of times. Keep routine output under ~40
+lines. Correctness always outranks this rule: when the full text is what you
+need to be right, read the full text and say why.
 
-- Reading a file: use a line window — `sed -n '120,180p' file`. Never `cat` a
-  file over 200 lines.
-- Cap anything open-ended: `| head -40`, `| tail -30`, `--max-count`.
-- git: `git --no-pager log --oneline -15`, `--stat` instead of a full diff,
-  `git status --short`.
-- gh: always project fields — `gh pr view <n> --json state,mergedAt` — never the
-  bare command, which prints the whole body and every comment.
+- Find before you read. `grep -n "pattern" file | head -20`, then read a window
+  around the hits. Never guess a line range blind.
+- Once you need more than about 150 lines of a file, read it in one pass instead
+  of paging it — repeated windows cost more than the single read.
+- Filter logs by what matters, not by position: grep for the error, then read
+  around it. `head`/`tail` alone will hide a failure in the middle.
+- git: `git --no-pager log --oneline -15`, `git status --short`. Use `--stat` to
+  orient, but read the actual diff before approving, merging, or changing code.
+- gh: project fields for a status check — `gh pr view <n> --json state,mergedAt`.
+  Read the body and review threads before any merge decision.
 - npm / pnpm: `--silent --no-progress`; pipe installs to `| tail -5`.
-- Tests: run quiet (`-q`, dot reporter). When green, report the summary line
-  only. When red, report the failing cases only — never the full log.
-- Anything genuinely long goes to a scratch file; then grep the file. Do not
-  read it back in full.
-- Never re-run a command to re-read output already in this conversation.
+- Tests: run quiet. When green, report the summary line including skipped and
+  ignored counts. When red, report the failing cases, with enough of each failure
+  to diagnose it.
+- Anything genuinely long goes to a scratch file; then grep the file.
+- Never re-run a command only to re-read output already in this conversation.
 
 ## Failed commands
 
-When a command fails, quote at most 5 lines of the error. Never paste a full
-stack trace or build log into the conversation. Do not retry the same command
-more than once — diagnose it, or say plainly that you are blocked and why.
+Quote the part of the error that identifies the cause — for a stack trace, the
+exception and the frames in our own code, not the whole trace. Do not paste an
+entire build log.
+
+Do not repeat a deterministic failing command without changing something. A
+transient failure — network, rate limit, lock contention, a still-running CI
+check — may be retried up to three times with backoff.
 
 ## Context and handoffs
 
