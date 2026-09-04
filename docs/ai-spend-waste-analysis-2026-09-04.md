@@ -377,3 +377,9 @@ sessions. Their median fresh input at the first recorded usage event was 24,315
 tokens. This replaces the earlier mixed CLI/GUI floor as the relevant baseline.
 After Codex Windows restarts, repeat the same GUI-only sample; CLI runs are not
 valid acceptance evidence for this change.
+
+Live account verification on 2026-09-04 found Claude's **Load tools when
+needed** mode already selected. Microsoft 365, Supabase, and Vercel remained
+available in the new-chat connector menu, but their tools were not pre-loaded.
+No connector was disabled: the efficient setting was already active and
+capability did not need to be reduced.
