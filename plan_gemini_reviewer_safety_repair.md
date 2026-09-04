@@ -34,7 +34,7 @@ stop and flag it.
 
 `bin/ai-gemini` drives Antigravity's `agy` CLI in a disposable repository copy
 for the public `u2giants/ai-devops` toolkit on `main`, on Windows and Ubuntu. It
-uses model `Gemini 3.7 Flash`, evidence packets, and named conversations.
+uses model `Gemini 3.8 Flash`, evidence packets, and named conversations.
 
 ## 3. What triggered this work
 
