@@ -344,7 +344,7 @@ Required wording:
 - Rewrite `skills/shared/shared-db-handover/SKILL.md`: path A stops mutation, writes or updates one outcome card/handover issue, and stops; there is no standing session to receive work. Path B closes out only outcomes the current delivery owner actually claims, never seeds a refill queue, and replaces the coordinator/sub-agent two-halves register with the standard past-facing outcome state.
 - Supersede `memory/shared-db/always-delegate-work-to-subagents.md`: a delivery owner may do the work in the main task; sub-agents are optional isolation, not a requirement that leaves a coordinator idle.
 
-Add drift tests that fail on active phrases including `REFILL REQUIRED NOW`, “three migration authors,” “fill every lane,” “prepare the next issue,” active Qwen rotation, reviewer scorecards on the database critical path, or a standing marker requirement. Allowlist whole historical files or fenced historical sections by stable identifier, never a line number. Allow evidence that Qwen is paused; fail only instructions that rotate work to it.
+Add drift tests that fail on active phrases including `REFILL REQUIRED NOW`, “three migration authors,” “fill every lane,” “prepare the next issue,” reviewer scorecards on the database critical path, or a standing marker requirement. Allowlist whole historical files or fenced historical sections by stable identifier, never a line number.
 
 Install only through the normal skill/global adoption commands. Never edit installed `~/.codex` or `~/.claude` copies by hand.
 
