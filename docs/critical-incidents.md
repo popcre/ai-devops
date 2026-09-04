@@ -378,8 +378,12 @@ keep holding the single runner until it is cancelled explicitly.
 
 **Prevention:**
 
-- **This machine hosts either the CI checks or a local test series, never both.**
-  Confirm the runner is idle first:
+- **A machine hosts either the CI checks or a local test series, never both.**
+  This is scoped to the one host, because the collision is a same-machine
+  process-name kill. The pool now has several Windows runners; a job on a
+  *different* runner does not block a local series here, and treating it as a
+  block serializes the pool for no benefit. Confirm the runner on **this** host
+  is idle first, and read only its row:
   ```bash
   gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) busy=\(.busy)"'
   ```

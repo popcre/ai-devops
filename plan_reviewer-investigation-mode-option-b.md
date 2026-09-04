@@ -163,7 +163,7 @@ That would remove the independent judge boundary and make existing governed work
 3. Resolve ownership of every overlapping dirty file. If an active session owns it, wait or implement in a non-overlapping file and serialize landing. Do not create a feature branch; this repository lands directly on `main`.
 4. Record exact current native versions, binary paths, `--help`, doctors, configured models, and sanitized environment behavior on Windows and Ubuntu under `tests/verification/reviewer-investigation-option-b/<UTC>-baseline/`. Do not store credentials or raw transcripts.
 5. Re-check the latest official stable version for OpenCode, Kimi Code, and Qwen Code. Record URLs, release dates, checksums/package identities, and the exact candidate versions.
-6. Check protected Windows CI/runner activity before any local full suite. If protected work is active, perform only focused read-only preparation and defer the local suite.
+6. Before any local full suite, check whether `edge-dev-win` — the runner on this same machine — is busy. Only that host blocks a local suite here; a busy `EDGE-RUNN-ENVY`, `EDGE-ALIEN`, or GitHub-hosted runner does not, and deferring to one needlessly serializes the whole pool. If `edge-dev-win` is busy, perform only focused read-only preparation and defer the local suite.
 
 **Verification gate:** the baseline artifact identifies current HEAD/origin ancestry, every dirty overlapping path and owner, installed and candidate provider versions, current doctors, and the exact safe point for each child issue. No implementation begins with ambiguous ownership.
 
