@@ -7,7 +7,7 @@
 | Protect the active Windows runs | COMPLETE FOR GEMINI | All local gates and live operations used a host proven idle immediately before launch; no active Windows job was cancelled, restarted, superseded, or interrupted |
 | Qwen 3.8 Max source preparation | OFFLINE GREEN ON IDLE POOL HOST | Stable `qwen3.8-max` pin; Qwen Code 0.23.0 installed on `EDGE-RUNN-ENVY` through the repo-owned installer with recoverable backup and verified child-secret hardening; non-live doctor passed with runtime SHA-256 `8f3cbb225324286bc163aa4ccd66405ba95ed357894d34ff781e57d139190c4a`; focused suite 92/92 |
 | Gemini 3.8 Flash activation | COMPLETE 2026-09-04 | PR #278 merged at `ed2c6180`; 64 Bash and 18 PowerShell suites passed; Antigravity 1.1.26 was governed-qualified on idle EDGE-DEV; installed preflight reports `available`; real review `issue261-proof` returned `APPROVE` with unchanged source |
-| Shared quarantine/preflight | GEMINI AVAILABLE; QWEN QUARANTINED | Gemini's current EDGE-DEV record binds exact wrapper, Antigravity 1.1.26 bytes, and `gemini-3.8-flash-high`; Qwen remains fail-closed under issue #259 evidence |
+| Shared quarantine/preflight | GEMINI AVAILABLE; QWEN QUARANTINED | Gemini's current EDGE-DEV record binds exact wrapper, Antigravity 1.1.26 bytes, and `gemini-3.8-flash-high`; Qwen is not retired; it remains quarantined in preflight with `failure_class: live-qualification-required` until a live qualification passes |
 | Qualification and reviewer rotation | GEMINI ACTIVE; QWEN PENDING | Gemini may receive governed read-only assignments on its qualified host. Qwen receives none until its own current live qualification succeeds |
 
 ## Goal
