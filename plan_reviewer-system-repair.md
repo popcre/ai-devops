@@ -135,7 +135,8 @@ What it contains, for this work:
 - `bin/ai-glm` (1,750 lines) — drives **Z.ai GLM** via OpenCode. Has both a
   read-only review agent and a separate implementation agent.
 - `bin/ai-kimi` (1,177 lines) — drives **Kimi Code CLI** the same way.
-- `bin/ai-qwen` — **Qwen**. Excluded from new rotation (locked decision, §8).
+- `bin/ai-qwen` — **Qwen**. Treated like any other reviewer; eligible once its
+  own live qualification passes preflight.
 - `bin/ai-codex-review`, `bin/ai-deepseek-agent` — other providers, out of scope
   for the first pass (§4).
 - `bin/ai-review-sandbox` (184 lines) — turns a linked Git worktree into a
@@ -380,7 +381,10 @@ each is a known dead end.
 
 - **2026-08-17 — Read-only, exact-head, terminal-verdict, fail-closed rules all
   stay.** Speed comes only from removing waste.
-- **2026-08-17 — Qwen stays out of new rotation.**
+- **2026-08-17 — Qwen stays out of new rotation. SUPERSEDED 2026-09-04 by owner
+  instruction: Qwen is no longer retired and is treated like any other
+  reviewer. It is still gated only by the ordinary preflight quarantine
+  (`live-qualification-required`), not by any standing exclusion.**
 - **2026-08-17 — #1113 is application-owned offline Item Master work.** Its
   correct destination is a private `popcre/designflow-item-master` issue, and
   its private artifact must not be published or moved until a safe private
