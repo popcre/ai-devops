@@ -351,3 +351,35 @@ read-only data-path qualification remains valid. The duplicate Claude Code user
 entry had been restored by the old installer along with the other retired
 servers. The per-client installer repair removes that duplicate while preserving
 the project-scoped NAS capability.
+
+## 10. Windows GUI correction and follow-up
+
+The earlier Codex profile recommendation does not apply to Albert's normal
+workflow. Named profiles are selected when starting the command-line client;
+Codex Windows has no profile selector. No CLI-only saving is counted here.
+
+The two GUI applications have different practical controls:
+
+- Claude Desktop cannot be routed through Headroom through a supported setting.
+  Its signed-in app configuration has no model-endpoint field, so Headroom
+  contributes no saving on that surface.
+- Claude Desktop connectors can be enabled per conversation. Use its **On
+  demand** tool-access mode and avoid changing the connector set after a long
+  conversation has accumulated; a changed tool list can invalidate the cached
+  prefix measured in section 2.1.
+- Codex Windows reads the normal Codex configuration but does not expose named
+  profiles. Its supported `[skills].max_context_tokens` setting is now seeded at
+  2,000 tokens in `config/codex-portable.toml`, bounding the always-loaded skill
+  catalog without uninstalling skills or removing their capabilities.
+
+A GUI-only sample of the 120 newest Codex records found 89 Codex Desktop
+sessions. Their median fresh input at the first recorded usage event was 24,315
+tokens. This replaces the earlier mixed CLI/GUI floor as the relevant baseline.
+After Codex Windows restarts, repeat the same GUI-only sample; CLI runs are not
+valid acceptance evidence for this change.
+
+Live account verification on 2026-09-04 found Claude's **Load tools when
+needed** mode already selected. Microsoft 365, Supabase, and Vercel remained
+available in the new-chat connector menu, but their tools were not pre-loaded.
+No connector was disabled: the efficient setting was already active and
+capability did not need to be reduced.

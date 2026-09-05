@@ -6,5 +6,10 @@ model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 
+# Bound the always-loaded skill catalog in the Windows GUI without removing
+# installed skills or their explicit invocation paths.
+[skills]
+max_context_tokens = 2000
+
 [windows]
 sandbox = "elevated"

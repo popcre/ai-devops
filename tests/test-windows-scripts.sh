@@ -133,6 +133,12 @@ if grep -q '^model = "gpt-5.6-sol"' config/codex-portable.toml &&
   ok "portable Codex defaults pin safe effort without hard-coding a model"
 else bad "portable Codex defaults are unsafe or model-pinned"; fi
 
+if grep -A1 '^\[skills\]$' config/codex-portable.toml | grep -q '^max_context_tokens = 2000$'; then
+  ok "portable Codex defaults bound the Windows GUI skill catalog"
+else
+  bad "portable Codex defaults leave the Windows GUI skill catalog unbounded"
+fi
+
 echo "== MCP catalog has explicit per-client membership =="
 if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
    grep -Fq '$ClaudeCodeMcpNames = @("1password", "codex-cli")' bin/setup-machine.ps1 &&
