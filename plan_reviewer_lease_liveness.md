@@ -23,13 +23,19 @@ wording — this plan builds on top of all four.
 
 | # | Step | State | Evidence |
 |---|---|---|---|
-| 0 | Design written, registered in `AGENTS.md`, cross-linked from #283 and shared-db#2345 | ✅ done | this file |
-| 1 | `activityFingerprintForLease` — third-party-readable liveness fact for one lease | ⬜ not started | shared-db#2345 |
-| 2 | `--probe-silent-reviewer` — records a first silence observation (create-only) | ⬜ not started | shared-db#2345 |
-| 3 | `--reclaim-silent-reviewer` — releases only on a confirmed, unchanged second observation | ⬜ not started | shared-db#2345 |
-| 4 | `--reviewer-capacity` reports `silence-probed` / `silence-reclaimable` and last activity | ⬜ not started | shared-db#2345 |
-| 5 | Reviewer allocation queue — a waiting lane is recorded and served in order | ⬜ not started | shared-db#2345 |
-| 6 | Proof against a genuinely working lane, plus the 4-minute near-miss case | ⬜ not started | shared-db#2345 |
+| 0 | Design written, registered in `AGENTS.md`, cross-linked from #283 and shared-db#2345 | ✅ done | this file; PR `popcre/ai-devops#287` merged as `4ea84aca` |
+| 1 | `activityFingerprintForLease` — third-party-readable liveness fact for one lease | ✅ implemented | PR `u2giants/shared-db#2351`, guarded-merged as `1110dfd8` |
+| 2 | `--probe-silent-reviewer` — records a first silence observation (create-only) | ✅ implemented | PR `u2giants/shared-db#2351`, guarded-merged as `1110dfd8` |
+| 3 | `--reclaim-silent-reviewer` — releases only on a confirmed, unchanged second observation | ✅ implemented | PR `u2giants/shared-db#2351`, guarded-merged as `1110dfd8` |
+| 4 | `--reviewer-capacity` reports `silence-probed` / `silence-reclaimable` and last activity | ✅ implemented | PR `u2giants/shared-db#2351`, guarded-merged as `1110dfd8` |
+| 5 | Reviewer allocation queue — a waiting lane is recorded and served in order | ✅ implemented | PR `u2giants/shared-db#2351`, guarded-merged as `1110dfd8` |
+| 6 | Proof against a genuinely working lane, plus the 4-minute near-miss case | ✅ done | exact-head independent review approved; 855-test suite and GitHub checks passed |
+
+**Complete — implemented and merged, 2026-09-05.** A separately started shared-db
+repository-maintenance session executed every step against this design in
+`u2giants/shared-db#2351`. `TERMINAL_FAILURE_CODES` is still six, the silence
+probe and release use their own ref namespaces, and the allocation queue is live.
+Do not restart implementation.
 
 ---
 
