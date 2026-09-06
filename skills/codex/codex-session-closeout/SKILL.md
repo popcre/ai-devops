@@ -1,6 +1,6 @@
 ---
 name: codex-session-closeout
-description: One-phrase Codex end-of-session closer. Use when the user says "wrap up", "update the .md files", "close out this session", "is everything pushed and committed?", or asks for docs, handoff, secrets, git, deploy state, worktree/branch cleanup, or a prompt for the next session before ending.
+description: One-phrase Codex end-of-session closer. Use when the user says "wrap up", "update the .md files", "close out this session", "is everything pushed and committed?", or asks for docs, handoff, secrets, git, deploy state, worktree/branch cleanup, or a prompt for the next session before ending. In a shared-database or orchestrator session it first runs the `shared-db-handover` gate.
 ---
 
 # Codex Session Closeout
@@ -43,6 +43,24 @@ already in flight or writing it down for the next session.
   it, why it was deferred, and the exact next step. A deferred item that is not
   written down is lost work, and that is the failure this rule exists to
   prevent.
+
+## Step 0 — the shared-database gate (run this FIRST, before step 1)
+
+Before anything else, answer this out loud in the session: **did this session
+touch the shared Supabase database or `u2giants/shared-db`, dispatch sub-agents,
+or hold an `orchestrator-marker` issue?**
+
+Check rather than assume — `gh issue list --repo u2giants/shared-db --label
+orchestrator-marker --state open` and the session's own history. If the answer
+to ANY of those is yes, **stop and run the `shared-db-handover` skill now**; it
+owns the whole close-out for this session, including the marker, the `db-work`
+queue, and one handoff block per sub-agent. Come back to the procedure below
+only for the parts that skill does not cover.
+
+Bare "wrap up" is enough to trigger this gate. Albert never has to name the
+shared-db skill, the issue commands, the labels, or a path letter — if he did,
+this gate would be broken. A generic handoff from a shared-db session is
+incomplete, and so is an orchestrator session that ends with its marker open.
 
 ## Procedure
 
