@@ -20,10 +20,12 @@
 set -euo pipefail
 
 # Preserve every invocation outcome before reusable session metadata changes.
-_AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
-source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
-reviewer_event_guard glm "$_AI_EVENT_SELF" "$@"
-unset _AI_EVENT_SELF
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+  source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+  reviewer_event_guard glm "$_AI_EVENT_SELF" "$@"
+  unset _AI_EVENT_SELF
+fi
 
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 OC_HOME="$CFG_DIR/opencode"

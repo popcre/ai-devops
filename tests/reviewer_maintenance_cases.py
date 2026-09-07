@@ -465,6 +465,19 @@ esac
         return subprocess.run([self.bash, str(self.wrapper), provider, operation], env=env,
                               cwd=self.toolkit, capture_output=True, text=True, timeout=30, **kwargs)
 
+    def test_sourcing_grok_functions_does_not_launch_an_invocation(self):
+        # The existing Grok regression suite loads definitions from a temporary
+        # library without copying the installed toolkit or executing its CLI.
+        library = self.root / "grok-functions.sh"
+        source = (ROOT / "bin/ai-grok-review").read_text()
+        library.write_text(source.split("\nCMD=", 1)[0] + "\n")
+        result = subprocess.run([self.bash, "-c", 'source "$1"; declare -F await_result',
+                                 "fixture", str(library)], capture_output=True, text=True,
+                                env={**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("await_result", result.stdout)
+        self.assertFalse(self.ledger.exists())
+
     def test_guard_preserves_stdin_stdout_stderr_exit(self):
         result = self.guard(operation="stream", input="unchanged input\n")
         self.assertEqual(result.returncode, 7, result.stderr)
