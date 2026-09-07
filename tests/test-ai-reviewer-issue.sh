@@ -133,5 +133,12 @@ check "ambiguous metadata cannot capture a scoreboard row" "test ! -e '$ambiguou
 check "missing summary is refused" "! $SCRIPT record --provider grok --repo '$TMP/repo'"
 check "unsafe provider name is refused" "! $SCRIPT record --provider '../bad' --summary bad --repo '$TMP/repo'"
 
+PYTHON="$(command -v python3 || command -v python)"
+export AI_REVIEWER_BASH="$BASH"
+if "$PYTHON" "$ROOT/tests/reviewer_maintenance_cases.py"; then
+  ok 'maintenance schema, continuity, reconciliation and atomicity contract'
+else
+  bad 'maintenance schema, continuity, reconciliation and atomicity contract'
+fi
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

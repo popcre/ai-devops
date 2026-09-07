@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # ai-muse - persistent, named Muse Spark review conversations.
 set -euo pipefail
+
+# Preserve every invocation outcome before reusable session metadata changes.
+_AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+reviewer_event_guard muse "$_AI_EVENT_SELF" "$@"
+unset _AI_EVENT_SELF
 umask 077
 
 SELF="${BASH_SOURCE[0]}"

@@ -25,6 +25,7 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 

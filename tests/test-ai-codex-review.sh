@@ -9,6 +9,7 @@ bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q
 git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf '.ai/\n' > "$R/.gitignore"; printf 'base\n' > "$R/a.txt"

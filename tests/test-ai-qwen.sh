@@ -16,6 +16,7 @@ ai_test_measure_spawn_baseline
 
 mkdir -p "$REPO_ROOT/.ai"
 TMP="$(mktemp -d "$REPO_ROOT/.ai/qwen-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_QWEN_STATE_DIR="$TMP/state"
 export AI_QWEN_CALLER=codex
 export AI_QWEN_POLL_INTERVAL=1

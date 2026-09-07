@@ -6,6 +6,7 @@ PASS=0; FAIL=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q; git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf '.ai/\n' > "$R/.gitignore"; printf 'base\n' > "$R/a.txt"; git -C "$R" add .gitignore a.txt; git -C "$R" commit -qm init
 printf 'changed\n' >> "$R/a.txt"; printf 'new\n' > "$R/new file.txt"; printf '\000\377' > "$R/new.bin"

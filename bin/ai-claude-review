@@ -2,6 +2,12 @@
 # ai-claude-review — fail-closed Claude Opus 5 review of an exact source state.
 set -euo pipefail
 
+# Preserve every invocation outcome before reusable session metadata changes.
+_AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+reviewer_event_guard claude "$_AI_EVENT_SELF" "$@"
+unset _AI_EVENT_SELF
+
 VERSION="1.0.0"
 MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
