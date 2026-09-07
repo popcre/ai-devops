@@ -1305,3 +1305,22 @@ Two `ai-codex-review diff-review` runs against the same head `63d8441b37bf41fa7d
 - Run `20260903T124954-688215-10953`, 214s, verdict APPROVE after the owner ruling was supplied in the brief. No defects at any severity. It did not simply accept the ruling: it re-derived why prerequisite guards, migration ordering and the foreign key make the second author decision safe, and cited exact file lines throughout.
 
 Objective notes: cited line numbers were accurate in both runs; the verdict body agreed with the final line in both runs; no decision word leaked outside the final section once the brief matched the wrapper's own two-line `## Verdict` contract. A first attempt failed with "Codex verdict must be the one final two-line section" because the brief imposed a different verdict format than the wrapper enforces — a brief must not override the wrapper's format contract.
+
+
+## Field observation — shared-db preview recovery, 2026-09-07
+
+Scope: independent exact-head reviews of [shared-db PR #2528](https://github.com/u2giants/shared-db/pull/2528), the bounded preview-ledger recovery for [issue #2506](https://github.com/u2giants/shared-db/issues/2506). This is execution and review evidence, not a new overall model ranking.
+
+GLM returned `zai-coding-plan/glm-5.3` through pinned OpenCode 1.18.12. The named session `popsg-2506-rehearsal-reset-glm` and server session `ses_f832735f6ffeyRkTnwIP7GOCnx` were reused across the initial review and two refreshed-head reviews. All three saved reports returned APPROVE:
+
+- `acd7f70410df278363f34eca13368ca2be675bc7`, requested 17:13:03Z: provider input 3,813; output 1,304; reasoning 1,710; cache read 66,176; cache write 0.
+- `76ac27f90840d9647918a1e44f4ad28899e59a4f`, requested 17:47:23Z: input 598; output 1,457; reasoning 1,327; cache read 103,232; cache write 0.
+- `5629a0102544d6e62385f7ba6facd292500a90b2`, requested 18:11:39Z: input 910; output 1,349; reasoning 101; cache read 117,824; cache write 0.
+
+These are the provider's separate counters, not inferred totals or savings. Request timestamps are not elapsed durations. Cost and elapsed latency were not available in these reports.
+
+The final review explicitly rechecked the changed base, preview-only refusal, exact run/artifact bindings, exclusive recovery lock, same-version replay safety, and the report-only agent-contract gate. It distinguished static inspection from tests and live GitHub state that it could not verify inside the review sandbox. The refreshed diff was reported byte-identical to the earlier reviewed patch; this observation does not substitute for a current-head verdict. The matching create-only replacement verdict is `refs/db-review-verdict-replacements/2506-2528-5629a0102544d6e62385f7ba6facd292500a90b2-1696`, object `92ae823ecb5e40d4cfeb62dfd2d1e11e1d03742e`. Review approval alone is not preview, merge, or production acceptance.
+
+Grok assignment sequence 1696 failed before a successful session or recordable verdict. The captured refusal says the wrapper exited 1 and its stderr reason was not recognized. Incident `20260907T181116Z-hetz-grok-2854232` preserves the evidence. Installed version 1.0.5 versus qualified 1.0.13 was an observed discrepancy; it is **not a proven cause** of this failure. No model-quality verdict, token count, cost, or latency can be inferred from that attempt. The failure remained a wrapper-availability observation, separate from GLM's successful review.
+
+Evidence retained privately on vps2: the three dated `glm-popsg-2506-rehearsal-reset-glm-20260907T*.md` reports in the recovery worktree's `.ai/reviews/`, final governed log `/tmp/orch-2536-2506-glm-next.log`, and the incident package under `/worksp/ai-devops/.ai/reviewer-issues/20260907T181116Z-hetz-grok-2854232`. Raw reports and incident contents are not copied into this public document.
