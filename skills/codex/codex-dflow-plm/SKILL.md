@@ -65,3 +65,14 @@ When ready:
 3. Create or update PRs from the user branch to `develop`.
 4. Verify sandbox deploy when the repo's deploy path supports it.
 5. Report PR URLs, commit SHAs, tests, and anything Uma needs to know.
+
+## Session End
+
+Shipping is not closing. "Ship For Uma" above is the ship step only — it does
+not update the docs, sweep secrets, write a handoff, or close the workspace.
+
+When the user says "wrap up", "close out this session", "we're done here", or
+any end-of-session variant — including project-prefixed ones like "dflow wrap
+up" — **run the `codex-session-closeout` skill**, which owns the full close and
+calls back here for the ship step. Never treat a wrap-up as a request to ship
+and stop.
