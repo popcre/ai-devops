@@ -42,6 +42,11 @@ diagnose the failure first.
 
 ## Required repair closure
 
+Durable incremental log-scan checkpoints are planned in
+`plan_reviewer-log-repair-checkpoints.md` at the ai-devops repository root.
+Read its STATUS table before implementing or changing that workflow. Until it
+is complete, incident status does not prove how far provider logs were scanned.
+
 Recording the failure is only the first half of the lifecycle. Whenever you
 claim that reviewer behavior was repaired, close every affected incident in the
 same workflow with `ai-reviewer-issue resolve` before reporting completion.
@@ -58,3 +63,7 @@ it never rewrites or deletes the original evidence package. Run
 `ai-reviewer-issue list` and inspect every affected record before making the
 final repair claim. This closure audit is standard operating procedure for all
 reviewer repairs.
+
+Resolved incidents remain in their original incident directories with their
+append-only resolution records. Never move them into a `resolved.md` file or a
+second archive.
