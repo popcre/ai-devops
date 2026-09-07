@@ -131,7 +131,32 @@ printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
 
+# A CLI recorder can supervise the actual review worker. Crash the owner of
+# this fixture's repository lock, then let its supervisor reap it. Never use
+# PID zero as a missing-worker fallback: kill(0) targets the entire test group.
+fixture_pid(){ [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] && [ "$1" -gt 1 ]; }
+crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
+  local supervisor="$1" provider="$2" label="$3" dir worker='' rc=0
+  for dir in "$AI_QWEN_STATE_DIR"/locks/repo--*.lock.d; do
+    [ -f "$dir/label" ] && [ "$(cat "$dir/label")" = "$label" ] || continue
+    worker="$(cat "$dir/pid" 2>/dev/null | tr -d '\r\n')"; break
+  done
+  if ! fixture_pid "$supervisor" || ! fixture_pid "$provider" || ! fixture_pid "$worker"; then
+    bad 'crash fixture requires positive recorded worker and provider identities'
+    if fixture_pid "$supervisor"; then
+      kill -TERM -- "$supervisor" 2>/dev/null || true
+      wait "$supervisor" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  kill -KILL -- "$worker" 2>/dev/null || true
+  kill -KILL -- "$provider" 2>/dev/null || true
+  wait "$supervisor" 2>/dev/null || rc=$?
+  [ "$rc" -ne 0 ] || { bad 'crashed review worker must report a nonzero result'; return 1; }
+}
+
 echo 'ai-qwen tests'
+check 'missing crash worker cannot signal the test process group' '( kill(){ printf called > "$TMP/invalid-crash-signal"; }; wait(){ :; }; crash_recorded_worker 0 0 missing >/dev/null 2>&1; rc=$?; [ "$rc" -ne 0 ] && [ ! -e "$TMP/invalid-crash-signal" ] )'
 check 'syntax is valid' "bash -n '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$QWEN_HOME_DIR/.ai-devops-private-home-v1\" ]' '$SCRIPT'"
 check 'help exits zero' 'run --help'
@@ -265,19 +290,22 @@ cp "$TMP/a-before-live-drift" "$REPO/a.txt"
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" new crash-new --prompt wait >/dev/null 2>&1) & CRASH_NEW_PID=$!
 for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
-CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
+CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'new paid turn is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_NEW_META'"
-kill -KILL "$CRASH_NEW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_NEW_PID" 2>/dev/null || true
+crash_recorded_worker "$CRASH_NEW_PID" "$CRASH_CHILD" review:crash-new || exit 1
 CALLS_AFTER_CRASH_NEW="$(wc -l < "$TMP/argv.txt")"; run new crash-new --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_CRASH_NEW" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'crashed new review cannot be charged again under the same name' || bad 'crashed new review cannot be charged again under the same name'
 
-echo review > "$TMP/mode"; run new crash-followup --prompt review >/dev/null 2>&1
+echo review > "$TMP/mode"
+if ! run new crash-followup --prompt review >/dev/null 2>&1; then
+  bad 'follow-up crash fixture must start before termination is attempted'; exit 1
+fi
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask crash-followup --prompt wait >/dev/null 2>&1) & CRASH_FOLLOW_PID=$!
 for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
-CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
+CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'follow-up is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_FOLLOW_META'"
-kill -KILL "$CRASH_FOLLOW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_FOLLOW_PID" 2>/dev/null || true
+crash_recorded_worker "$CRASH_FOLLOW_PID" "$CRASH_CHILD" ask:crash-followup || exit 1
 CALLS_AFTER_CRASH_FOLLOW="$(wc -l < "$TMP/argv.txt")"; run ask crash-followup --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_CRASH_FOLLOW" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'crashed follow-up cannot resume the uncertain provider conversation' || bad 'crashed follow-up cannot resume the uncertain provider conversation'
 
