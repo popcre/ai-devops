@@ -52,7 +52,7 @@ actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
 manifest_bash="$(jq -r '.bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
-check 'manifest declares 64 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 64 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 64 ]"
+check 'manifest declares 65 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 65 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 65 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'

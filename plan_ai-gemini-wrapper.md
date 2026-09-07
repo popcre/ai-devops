@@ -370,7 +370,7 @@ The suite must include named checks for:
 - Model comes from the documented configurable value.
 - `agy models` availability and auth failure classification.
 - Exact `/model` success and mismatch refusal.
-- `/usage` parsing for five-hour/weekly fractions and reset times; missing fields remain explicit `unavailable`, never zero.
+- `/usage` parsing for five-hour/weekly fractions and reset times; missing fields remain explicit `unavailable`, never zero. **Shipped 2026-09-06** as `bin/ai-gemini-usage`, covered by `tests/test-ai-gemini-usage.sh`. It is a separate command, not part of `bin/ai-gemini`, because that wrapper's bytes are pinned by the live-qualification record and editing it would re-quarantine every Gemini review for an allowance query that needs none of its containment. Still outstanding: surfacing the allowance inside `bin/ai-review-preflight` status and `bin/ai-review-scoreboard` fields.
 - New conversation stores the exact conversation ID; `ask` resumes by `--conversation`, never `--continue`.
 - Frozen prefix/config/directory/model drift refusal.
 - Per-session and per-repository locks, including stale-lock recovery.

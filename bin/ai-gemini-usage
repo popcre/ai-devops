@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# ai-gemini-usage - report Antigravity subscription allowance and reset times.
+#
+# This is a read-only allowance query. It never copies a repository, never runs
+# a review, and never starts a conversation, so it deliberately lives outside
+# bin/ai-gemini: that wrapper's bytes are pinned by the live-qualification
+# record, and editing it would re-quarantine every Gemini review.
+#
+# Missing or unparseable fields are reported as "unavailable" and never as
+# zero. A zero remaining fraction is a real exhausted bucket; a missing field
+# is an unknown, and the two must never be confused by a gate that reads this.
+set -euo pipefail
+VERSION=0.1.0
+MODEL_GROUP_PREFIX='gemini-'
+TIMEOUT="${AI_GEMINI_USAGE_TIMEOUT:-60}"
+OUTPUT=text
+MIN_PERCENT=''
+
+die(){ printf 'ai-gemini-usage: error: %s\n' "$*" >&2; exit 1; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+
+usage(){ cat <<'EOF'
+Usage: ai-gemini-usage [--json] [--min-percent N]
+
+Reports the remaining weekly and 5-hour allowance for every Antigravity model
+group, with the UTC time each bucket refreshes.
+
+  --json           emit machine-readable JSON instead of text
+  --min-percent N  exit 3 if any Gemini bucket is below N percent remaining.
+                   Exits 1 (not 3, and not 0) when the Gemini buckets cannot
+                   be read at all, so an unreadable allowance never passes
+                   silently as headroom.
+
+Environment:
+  AI_GEMINI_BIN            explicit path to the agy runtime
+  AI_GEMINI_USAGE_TIMEOUT  seconds to wait for agy (default 60)
+EOF
+}
+
+raw_agy(){
+  local a
+  for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do
+    [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }
+  done
+  die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) OUTPUT=json; shift ;;
+    --min-percent)
+      [ "$#" -ge 2 ] || die '--min-percent requires a number'
+      case "$2" in ''|*[!0-9]*) die '--min-percent requires a whole number 0-100' ;; esac
+      [ "$2" -le 100 ] || die '--min-percent requires a whole number 0-100'
+      MIN_PERCENT="$2"; shift 2 ;;
+    --version) printf 'ai-gemini-usage %s\n' "$VERSION"; exit 0 ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+
+need jq
+AGY="$(raw_agy)"
+OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT
+
+# MSYS_NO_PATHCONV keeps Git Bash from rewriting the /usage slash command into
+# a Windows path before agy ever sees it.
+rc=0
+MSYS_NO_PATHCONV=1 timeout "$TIMEOUT" "$AGY" --output-format json \
+  --print-timeout "${TIMEOUT}s" --print '/usage' > "$OUT" 2>/dev/null || rc=$?
+[ "$rc" -eq 0 ] || die "allowance request failed or timed out after ${TIMEOUT}s (exit $rc)"
+
+jq -e '.status=="SUCCESS" and .command.name=="usage" and (.command.data.groups|type=="array")' "$OUT" >/dev/null 2>&1 \
+  || die 'allowance response was not a readable /usage result'
+
+NOW_EPOCH="$(date -u +%s)"
+NORMALIZED="$(jq -c --argjson now "$NOW_EPOCH" --arg checked "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  def pct: if type=="number" then (.*1000|round)/10 else null end;
+  def secs($t): if ($t|type)=="string"
+                then (try (($t|fromdateiso8601) - $now) catch null)
+                else null end;
+  {
+    provider: "gemini",
+    checked_at: $checked,
+    groups: [ .command.data.groups[]? | {
+      name: (.name // "unavailable"),
+      buckets: [ .buckets[]? | {
+        id: (.id // "unavailable"),
+        name: (.name // "unavailable"),
+        window: (.window // "unavailable"),
+        remaining_percent: (.remaining_fraction | pct),
+        reset_time: (.reset_time // null),
+        seconds_until_reset: secs(.reset_time)
+      } ]
+    } ]
+  }' "$OUT" | tr -d '\r')" || die 'could not normalize the allowance response'
+
+fmt_reset(){ # seconds -> "in 3h 8m", or "unavailable"
+  local s="$1"
+  case "$s" in ''|null) printf 'unavailable'; return ;; esac
+  [ "$s" -gt 0 ] 2>/dev/null || { printf 'now'; return; }
+  local d h m
+  d=$(( s / 86400 )); h=$(( (s % 86400) / 3600 )); m=$(( (s % 3600) / 60 ))
+  if [ "$d" -gt 0 ]; then printf 'in %dd %dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf 'in %dh %dm' "$h" "$m"
+  else printf 'in %dm' "$m"; fi
+}
+
+if [ "$OUTPUT" = json ]; then
+  printf '%s\n' "$NORMALIZED" | jq .
+else
+  printf 'Antigravity allowance (checked %s)\n' "$(printf '%s' "$NORMALIZED" | jq -r .checked_at | tr -d '\r')"
+  while IFS=$'\t' read -r group name pct reset secs; do
+    [ -n "$group" ] || continue
+    [ "$pct" = null ] && pct=unavailable || pct="${pct}%"
+    [ "$reset" = null ] && reset=unavailable
+    printf '  %-22s %-26s %-12s resets %-21s %s\n' \
+      "$group" "$name" "$pct" "$reset" "$(fmt_reset "$secs")"
+  # jq on Windows terminates rows with CRLF; a surviving CR turns the last
+  # field into a value that fails every numeric test downstream.
+  done < <(printf '%s' "$NORMALIZED" | jq -r '.groups[] | .name as $g | .buckets[] | [$g,.name,(.remaining_percent//"null"|tostring),(.reset_time//"null"),(.seconds_until_reset//"null"|tostring)] | @tsv' | tr -d '\r')
+fi
+
+[ -n "$MIN_PERCENT" ] || exit 0
+
+READABLE="$(printf '%s' "$NORMALIZED" | jq --arg p "$MODEL_GROUP_PREFIX" \
+  '[.groups[].buckets[] | select(.id|startswith($p)) | select(.remaining_percent!=null)] | length' | tr -d '\r')"
+[ "$READABLE" -gt 0 ] || die 'no readable Gemini allowance bucket; refusing to report headroom that was never measured'
+
+LOW="$(printf '%s' "$NORMALIZED" | jq -r --arg p "$MODEL_GROUP_PREFIX" --argjson min "$MIN_PERCENT" \
+  '[.groups[].buckets[] | select(.id|startswith($p)) | select(.remaining_percent!=null) | select(.remaining_percent < $min) | "\(.name) at \(.remaining_percent)%"] | join("; ")' | tr -d '\r')"
+if [ -n "$LOW" ]; then
+  printf 'ai-gemini-usage: below the %s%% floor: %s\n' "$MIN_PERCENT" "$LOW" >&2
+  exit 3
+fi
+exit 0

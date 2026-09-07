@@ -12,6 +12,7 @@
     "test-ai-devops-doctor-codex-probe.sh",
     "test-ai-devops-doctor-install-state.sh",
     "test-ai-facts.sh",
+    "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
