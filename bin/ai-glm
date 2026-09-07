@@ -1615,7 +1615,7 @@ cmd_server() {
                # native OpenCode child alive. Stop only the verified loopback
                # listener; never kill an unrelated process that owns this port.
                set +e
-               powershell.exe -NoProfile -Command "\$c=Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort $PORT -ErrorAction SilentlyContinue; if (\$c) { \$p=Get-Process -Id \$c.OwningProcess -ErrorAction Stop; if (\$p.ProcessName -notmatch 'opencode') { exit 42 }; Stop-Process -Id \$p.Id -Force }" >/dev/null 2>&1
+               powershell.exe -NoProfile -Command "try { \$c=Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort $PORT -ErrorAction SilentlyContinue; if (\$c) { \$p=Get-Process -Id \$c.OwningProcess -ErrorAction Stop; if (\$p.ProcessName -notmatch 'opencode') { exit 42 }; Stop-Process -Id \$p.Id -Force -ErrorAction Stop }; exit 0 } catch { exit 1 }" >/dev/null 2>&1
                local stop_rc=$?
                set -e
                [ "$stop_rc" -ne 42 ] || die "port 127.0.0.1:$PORT belongs to a non-OpenCode process; it was not stopped and the task was not restarted."
