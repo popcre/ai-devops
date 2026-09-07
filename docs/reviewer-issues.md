@@ -1,5 +1,9 @@
 # Reviewer issue recording
 
+The implementation plan for durable maintenance-round log checkpoints is
+[`plan_reviewer-log-repair-checkpoints.md`](../plan_reviewer-log-repair-checkpoints.md).
+Read its STATUS table before implementing or changing incremental repair scans.
+
 ## Grok lock scope
 
 Grok reviews are not globally or repository-wide serialized. Only the same
@@ -114,6 +118,10 @@ Resolution files are append-only records under the incident's `resolutions/`
 directory. The original `issue.json`, logs, and captured evidence remain
 unchanged. `list` reports the latest status (`open`, `partially-resolved`, or
 `resolved`), and `show` joins the latest resolution into its displayed JSON.
+
+Resolved incidents stay in their original directories. Do not move them into a
+`resolved.md` file or a second archive: the incident plus its append-only
+resolution is the machine-readable audit record.
 
 Before the final repair claim, audit `ai-reviewer-issue list`, resolve every
 affected record, and cite the exact commit plus test, independent-review,
