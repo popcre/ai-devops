@@ -1,5 +1,10 @@
 # Reviewer issue recording
 
+For richer exact-run failure diagnostics and non-generating quota checks, read
+the STATUS table in the [diagnostics and quota plan](../plan_reviewer-diagnostics-quota-preflight.md)
+before implementation. Unknown capacity must remain explicit; it is not proof
+of availability or permission to disable a reviewer.
+
 The implementation plan for durable maintenance-round log checkpoints is
 [`plan_reviewer-log-repair-checkpoints.md`](../plan_reviewer-log-repair-checkpoints.md).
 Read its STATUS table before implementing or changing incremental repair scans.
