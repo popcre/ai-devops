@@ -56,7 +56,27 @@ QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max}"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
-QWEN_CODING_PLAN_BASE_URL="${AI_QWEN_CODING_PLAN_BASE_URL:-https://coding-intl.dashscope.aliyuncs.com/v1}"
+QWEN_CODING_PLAN_ENDPOINT='https://coding-intl.dashscope.aliyuncs.com/v1'
+QWEN_MODELSTUDIO_ENDPOINT='https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+# Which international Alibaba endpoint the managed credential belongs to. The
+# subscription Coding Plan and the pay-per-token Model Studio plan use the same
+# governed 1Password reference and the same hardened environment variable; only
+# the endpoint differs, so the credential pipeline is never duplicated.
+QWEN_ENDPOINT_FILE="$CFG_DIR/qwen-endpoint"
+if [ -n "${AI_QWEN_CODING_PLAN_BASE_URL:-}" ]; then
+  QWEN_CODING_PLAN_BASE_URL="$AI_QWEN_CODING_PLAN_BASE_URL"
+elif [ -s "$QWEN_ENDPOINT_FILE" ]; then
+  QWEN_CODING_PLAN_BASE_URL="$(tr -d " 	
+" < "$QWEN_ENDPOINT_FILE")"
+else
+  QWEN_CODING_PLAN_BASE_URL="$QWEN_CODING_PLAN_ENDPOINT"
+fi
+case "$QWEN_CODING_PLAN_BASE_URL" in
+  "$QWEN_CODING_PLAN_ENDPOINT") QWEN_PLAN_LABEL='Coding Plan (subscription)' ;;
+  "$QWEN_MODELSTUDIO_ENDPOINT") QWEN_PLAN_LABEL='Model Studio (pay per token)' ;;
+  *) printf 'ai-qwen: error: the Qwen endpoint must be one of the two pinned international Alibaba endpoints.
+' >&2; exit 1 ;;
+esac
 QWEN_HOME_DIR="${AI_QWEN_HOME:-${QWEN_HOME:-$HOME/.qwen}}"
 if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
   QWEN_BASH_BIN="${AI_QWEN_BASH_BIN:-/usr/bin/bash}"; QWEN_ENV_BIN="${AI_QWEN_ENV_BIN:-/usr/bin/env}"
@@ -160,6 +180,46 @@ secure_qwen_home() {
   protect_windows_path "$QWEN_HOME_DIR" directory || return 1
   printf 'private home enforced by ai-qwen\n' > "$QWEN_HOME_DIR/.ai-devops-private-home-v1" || return 1
   chmod 600 "$QWEN_HOME_DIR/.ai-devops-private-home-v1" 2>/dev/null || return 1
+}
+
+# Qwen refuses to run non-interactively unless an auth type is selected, and it
+# resolves the API-key variable from the selected model's provider entry. Both
+# live in settings.json, which the interactive UI rewrites and version upgrades
+# migrate, so a hand-configured login is not a durable production dependency.
+# The wrapper owns that selection: it reinstalls its own governed entry on every
+# run, preserves unrelated settings and third-party providers, and fails closed
+# rather than letting a paid call start against unproven auth.
+ensure_qwen_auth_settings() {
+  local settings="$QWEN_HOME_DIR/settings.json" tmp current
+  current='{}'
+  if [ -s "$settings" ]; then
+    current="$(cat "$settings")" || return 1
+    printf '%s' "$current" | jq -e . >/dev/null 2>&1 || return 1
+  fi
+  tmp="$(mktemp "$QWEN_HOME_DIR/tmp/.qwen-settings.XXXXXX")" || return 1
+  chmod 600 "$tmp" 2>/dev/null || true
+  if ! printf '%s' "$current" | MSYS2_ARG_CONV_EXCL='*' jq --arg model "$QWEN_MODEL" --arg url "$QWEN_CODING_PLAN_BASE_URL" --arg env BAILIAN_CODING_PLAN_API_KEY '
+      . as $cur
+      | ($cur.modelProviders.openai // [] | map(select((.envKey // "") != $env))) as $foreign
+      | $cur
+      | .security = (.security // {})
+      | .security.auth = (.security.auth // {})
+      | .security.auth.selectedType = "openai"
+      | del(.security.auth.enforcedType)
+      | .modelProviders = (.modelProviders // {})
+      | .modelProviders.openai = ([{id:$model, name:("[ai-devops] " + $model), baseUrl:$url, envKey:$env}] + $foreign)
+      | .model = (.model // {})
+      | .model.name = $model
+      | .model.baseUrl = $url
+      ' > "$tmp" 2>/dev/null; then rm -f "$tmp"; return 1; fi
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$settings" || { rm -f "$tmp"; return 1; }
+  chmod 600 "$settings" 2>/dev/null || true
+  protect_windows_path "$settings" file || return 1
+  MSYS2_ARG_CONV_EXCL='*' jq -e --arg model "$QWEN_MODEL" --arg url "$QWEN_CODING_PLAN_BASE_URL" --arg env BAILIAN_CODING_PLAN_API_KEY '
+    .security.auth.selectedType == "openai"
+    and ((.modelProviders.openai // []) | any(.id == $model and .baseUrl == $url and .envKey == $env))
+    ' < "$settings" >/dev/null 2>&1 || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -359,6 +419,20 @@ has_result() { # has_result FILE
 session_id_from() { tail -5 "$1" | jq -r 'select(.type=="result")|.session_id // empty' 2>/dev/null | tail -1; }
 model_from() { jq -r 'select(.type=="assistant")|.message.model // empty' "$1" 2>/dev/null | tail -1; }
 
+# Qwen reports transport-layer refusals (401, quota, capacity) as ordinary
+# assistant text inside an otherwise successful terminal record. That must never
+# reach a reviewer as an answer, and it must be named as a provider outage.
+provider_api_error() { # provider_api_error FILE
+  local msg
+  [ -s "$1" ] || return 1
+  msg="$(jq -r 'select(.type=="result" and (.result|type=="string")) | .result' "$1" 2>/dev/null     | grep -m1 -E '^\[API Error:' || true)"
+  if [ -z "$msg" ]; then
+    msg="$(jq -r 'select(.type=="assistant") | (.message.content // [])[] | select(.type=="text") | .text' "$1" 2>/dev/null       | grep -m1 -E '^\[API Error:' || true)"
+  fi
+  [ -n "$msg" ] || return 1
+  printf '%s' "$msg"
+}
+
 qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA
   local stream="$1" stderr="$2" provider_rc="$3" runtime_sha="$4" preloader_sha="$5" returned
   returned="$(model_from "$stream")"
@@ -369,6 +443,7 @@ qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADE
   elif grep -Eqi 'model[^[:alnum:]]+(unavailable|unsupported|unknown|invalid|not found|rejected)|404' "$stderr"; then printf 'requested-model-unavailable'
   elif [ -n "$returned" ] && [ "$returned" != "$QWEN_MODEL" ]; then printf 'returned-model-mismatch'
   elif tail -20 "$stream" | jq -e 'select(.type=="result" and (.is_error==true or .subtype=="error"))' >/dev/null 2>&1; then printf 'terminal-result-error'
+  elif provider_api_error "$stream" >/dev/null; then printf 'provider-api-error'
   elif [ "$provider_rc" != 0 ]; then printf 'provider-process-transport-failure'
   elif [ ! -s "$stream" ]; then printf 'empty-provider-stream'
   elif ! tail -20 "$stream" | jq -e 'select(.type=="result")' >/dev/null 2>&1; then printf 'missing-terminal-result'
@@ -561,17 +636,19 @@ cleanup_qualification_probe() {
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
   local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload; qwen="$(resolve_qwen)"
-  local args=(--model "$QWEN_MODEL" --output-format stream-json --safe-mode
+  local args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
     --max-session-turns "$MAX_TURNS" --max-wall-time "$MAX_WALL_TIME"
     --max-tool-calls "$MAX_TOOL_CALLS" --max-subagent-depth 1)
   [ -z "$sid" ] || args+=(--resume "$sid")
+  # The provider key lives in the Qwen process environment so it survives the
+  # runtime's startup relaunch, so EVERY mode depends on the installer-patched
+  # common child sanitizer stripping it from agent-controlled children. Review
+  # mode's excluded tools are a second layer, not the only one.
+  assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before running Qwen."
   if [ "$mode" = review ]; then
     args+=(--approval-mode plan --exclude-tools shell,write,edit)
   elif [ "$mode" = implement ]; then
     # Preserve the complete implementation toolset, including shell and tests.
-    # The installer-patched common child sanitizer strips the provider key from
-    # every agent-controlled child process before this mode is allowed to run.
-    assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before implementation."
     args+=(--sandbox --approval-mode yolo)
   fi
   # Current Qwen supports stdin, keeping the brief out of the process list.
@@ -580,7 +657,11 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   case "$QWEN_BASH_BIN:$QWEN_ENV_BIN" in /*:/*) ;; *) die 'trusted Bash/env executable paths must be absolute.' ;; esac
   secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before credential resolution.'
   : > "$out"
-  [ "$QWEN_CODING_PLAN_BASE_URL" = 'https://coding-intl.dashscope.aliyuncs.com/v1' ] || die 'Qwen Coding Plan endpoint must be the pinned international Alibaba endpoint.'
+  case "$QWEN_CODING_PLAN_BASE_URL" in
+    "$QWEN_CODING_PLAN_ENDPOINT"|"$QWEN_MODELSTUDIO_ENDPOINT") ;;
+    *) die 'Qwen endpoint must be one of the two pinned international Alibaba endpoints.' ;;
+  esac
+  ensure_qwen_auth_settings || die 'could not install the governed Qwen auth selection in the private Qwen home; no provider call was made.'
   preload="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/qwen-provider-env-preload.cjs"
   [ -f "$preload" ] || die 'repository-owned Qwen secret-environment preloader is missing.'
   RUN_TURN_SECRET_FILE="$(mktemp "$QWEN_HOME_DIR/tmp/.qwen-secret.XXXXXX")" || die 'could not reserve private Qwen secret handoff.'
@@ -696,7 +777,10 @@ extract_answer() { # extract_answer FILE
   local text verdict_count terminal
   ANSWER_DEFECT=""
   text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed 's/\r$//' | sed '/^$/d')"
-  if [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
+  local api_error; api_error="$(provider_api_error "$1" || true)"
+  if [ -n "$api_error" ]; then
+    ANSWER_DEFECT="the provider refused the call and returned no review: $api_error"
+  elif [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
     ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
   else
     verdict_count="$(printf '%s\n' "$text" | grep -Ec '^## Verdict[[:space:]]*$' || true)"
@@ -908,8 +992,14 @@ cmd_doctor() {
   if [ -f "$MCP_ENV" ] && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$MCP_ENV"; then
     echo "credential    : managed 1Password reference"
     echo "endpoint      : $QWEN_CODING_PLAN_BASE_URL"
+    echo "billing plan  : $QWEN_PLAN_LABEL"
   else
     echo "credential    : provider-managed or unavailable"
+  fi
+  if secure_qwen_home 2>/dev/null && ensure_qwen_auth_settings 2>/dev/null; then
+    echo "auth selection: governed (openai auth type pinned to $QWEN_MODEL at the managed endpoint)"
+  else
+    echo "auth selection: FAILED — the governed Qwen auth entry could not be installed"; rc=1
   fi
   echo "read-only     : safe mode + plan mode + shell/write/edit excluded"
   if assert_qwen_child_env_hardened 2>/dev/null; then
@@ -943,7 +1033,7 @@ cmd_doctor() {
     # The paid provider process has returned. Disable the EXIT-only interruption
     # finalizer before parsing and writing the ordinary success/failure result.
     QUALIFICATION_ACTIVE=0
-    if [ -z "$failure_override" ] && has_result "$tmp" && [ "$(model_from "$tmp")" = "$QWEN_MODEL" ] && [ "$provider_rc" = 0 ]; then echo "OK"
+    if [ -z "$failure_override" ] && has_result "$tmp" && [ "$(model_from "$tmp")" = "$QWEN_MODEL" ] && [ "$provider_rc" = 0 ]        && ! provider_api_error "$tmp" >/dev/null; then echo "OK"
     else
       QUALIFICATION_DIAGNOSTIC_PATH=""
       if write_qualification_diagnostic "$tmp" "$tmp.err" "$provider_rc" "$runtime_sha" "$preloader_sha" "$failure_override"; then
@@ -1372,7 +1462,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     else
       workdir="$repo"
     fi
-    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$workdir" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
+    write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$workdir" '.review_dir=$d | .boundary_migration_warned=true' < "$meta")"
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
   source_head_before="$current_head"; source_tree_before="$current_tree"
