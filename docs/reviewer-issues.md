@@ -111,6 +111,9 @@ ai-reviewer-issue resolve <issue-id> --status resolved \
 ```
 
 Use `resolved` only when every symptom in the original package is proven fixed.
+For a repair committed in another repository, add `--repair-repo <worktree-path>`.
+The recorder validates the commit in that repository and records its canonical
+repository path; omitting this option keeps the toolkit repository default.
 Use `partially-resolved` and state what remains when the proof covers only part
 of a multi-symptom report. With no adequate proof, leave the incident open.
 
