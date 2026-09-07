@@ -620,7 +620,7 @@ class Maintenance:
 def configuration(toolkit):
     registry = read_json(toolkit / "config/reviewer-registry.json")
     providers = sorted(k for k, v in registry["providers"].items() if v["registry_state"] == "registered")
-    base = physical(os.environ.get("AI_REVIEWER_STATE_BASE", os.environ.get("HOME", str(Path.home())) + "/.local/state/ai-devops"))
+    base = physical(os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops")
     scoreboard = Path(os.environ.get("AI_REVIEW_SCOREBOARD_FILE", str(Path(os.environ.get(
         "AI_REVIEW_SCOREBOARD_DIR", str(base / "review-scoreboard"))) / "reviews.jsonl")))
     events = physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(base / "reviewer-events")))

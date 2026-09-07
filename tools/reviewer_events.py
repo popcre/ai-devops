@@ -14,7 +14,9 @@ from reviewer_maintenance import Blocked, encoded, now, physical, require, snaps
 
 
 def location():
-    base = os.environ.get("AI_REVIEWER_STATE_BASE", os.environ.get("HOME", str(Path.home())) + "/.local/state/ai-devops")
+    if os.environ.get("AI_REVIEW_EVENT_DIR"):
+        return physical(os.environ["AI_REVIEW_EVENT_DIR"])
+    base = os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops"
     return physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(Path(base) / "reviewer-events")))
 
 

@@ -465,6 +465,18 @@ esac
         return subprocess.run([self.bash, str(self.wrapper), provider, operation], env=env,
                               cwd=self.toolkit, capture_output=True, text=True, timeout=30, **kwargs)
 
+    def test_explicit_home_or_state_does_not_require_windows_profile_discovery(self):
+        for setting, base in (({"HOME": str(self.root)}, self.root / ".local/state/ai-devops"),
+                              ({"AI_REVIEWER_STATE_BASE": str(self.root)}, self.root)):
+            with self.subTest(setting=setting), patch.dict(os.environ, setting, clear=True), \
+                    patch.object(Path, "home", side_effect=RuntimeError("No Windows profile")):
+                expected = m.physical(base / "reviewer-events")
+                self.assertEqual(events.location(), expected)
+                self.assertEqual(m.configuration(ROOT)["sources"][0]["root"], str(expected))
+        with patch.dict(os.environ, {"AI_REVIEW_EVENT_DIR": str(self.root)}, clear=True), \
+                patch.object(Path, "home", side_effect=RuntimeError("No Windows profile")):
+            self.assertEqual(events.location(), m.physical(self.root))
+
     def test_sourcing_grok_functions_does_not_launch_an_invocation(self):
         # The existing Grok regression suite loads definitions from a temporary
         # library without copying the installed toolkit or executing its CLI.
