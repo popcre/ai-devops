@@ -524,6 +524,10 @@ check "ask keeps the frozen permissions"  "grep -q -- '--deny Bash' '$TMP/argv.t
 
 # 4 -------------------------------------------------------------------------
 echo "== no_flag_passthrough =="
+run new explicit-diff --review-kind diff --prompt x >/dev/null 2>&1
+[ $? -eq 0 ] && ok "explicit diff review kind uses the existing review" || bad "explicit diff review kind uses the existing review"
+run new unsupported-kind --review-kind implementation --prompt x >/dev/null 2>&1
+[ $? -ne 0 ] && ok "unsupported review kind is rejected" || bad "unsupported review kind is rejected"
 run new t2 --prompt x --permission-mode auto >/dev/null 2>&1
 [ $? -ne 0 ] && ok "arbitrary grok flags are rejected" || bad "arbitrary grok flags are rejected"
 run new t2 --prompt x --always-approve >/dev/null 2>&1

@@ -247,6 +247,24 @@ check "windows launch failure is nonzero" "! server_fixture 1 launchfail start >
 check "never healthy start is bounded and nonzero" "! server_fixture 0 never start >/dev/null 2>&1"
 check "linux restart also waits for readiness" "server_fixture 0 delayed restart 2>&1 | grep -q 'restarted and healthy'"
 
+if command -v powershell.exe >/dev/null 2>&1; then
+  # Exercise the actual emitted PowerShell with fake OS cmdlets. No real task,
+  # listener or process is touched, including on a developer machine.
+  WIN_RESTART_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+    source "$AI_GLM_SOURCE"; IS_WINDOWS=1
+    schtasks(){ :; }; server_up(){ return 0; }
+    powershell.exe(){
+      local code="${@: -1}"
+      if [[ "$code" == *Stop-Process* ]]; then
+        command powershell.exe -NoProfile -Command "function Get-NetTCPConnection { Write-Error missing -ErrorAction SilentlyContinue }; function Stop-Process { throw \"must not stop anything\" }; $code"
+      else return 1; fi
+    }
+    cmd_server restart' 2>&1)"; WIN_RESTART_RC=$?
+  [ "$WIN_RESTART_RC" -eq 0 ] && printf '%s' "$WIN_RESTART_OUT" | grep -q 'restarted and healthy' && ok "Windows restart succeeds when ending the task already removed its listener" || bad "Windows restart succeeds when ending the task already removed its listener"
+else
+  printf '  SKIP Windows restart PowerShell regression (Windows only)\n'
+fi
+
 echo "== completion rule =="
 check "requires finish==stop"               "grep -q 'finish\" = \"stop\"' '$AI_GLM' || grep -q 'finish\" = \"stop' '$AI_GLM'"
 check "requires two idle polls"             "grep -q 'idle\" -ge 2' '$AI_GLM' || grep -q 'idle -ge 2' '$AI_GLM'"

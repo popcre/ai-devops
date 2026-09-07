@@ -1196,6 +1196,7 @@ Options:
   --prompt-file FILE   the brief, read from a file (no argv size limit)
   --max-turns N        turn ceiling for THIS call (default $DEFAULT_MAX_TURNS)
   --base REF           base of the comparison in the evidence packet
+  --review-kind diff   explicitly select the existing diff evidence contract
   --tests CMD          run CMD and record its exact result in the packet
   --decision TEXT      the one-sentence decision being asked for
   --assert-head SHA    refuse unless the repository is really at SHA. The wrapper
@@ -1576,6 +1577,7 @@ while [ $# -gt 0 ]; do
     --prompt-file)  OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
     --max-turns)    OPT_MAX_TURNS="${2:-}"; shift 2 ;;
     --base)         OPT_BASE="${2:-}"; shift 2 ;;
+    --review-kind)  [ "${2:-}" = diff ] || die '--review-kind supports only diff; use the prompt to describe other advisory questions.'; shift 2 ;;
     --tests)        OPT_TESTS="${2:-}"; shift 2 ;;
     --decision)     OPT_DECISION="${2:-}"; shift 2 ;;
     --assert-head)  OPT_ASSERT_HEAD="${2:-}"; shift 2 ;;

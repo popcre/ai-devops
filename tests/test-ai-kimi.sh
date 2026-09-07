@@ -109,7 +109,10 @@ case "$mode" in
   interruptpartial)
     printf 'cancelled work\n' > interrupt-partial.txt
     while :; do sleep 1; done ;;
-  slow) sleep "${AI_KIMI_TEST_SLOW_SECONDS:-30}" ;;
+  slow)
+    # Repository text must never override the worker's measured deadline.
+    printf '{"role":"tool","content":"Example: permission denied EACCES mkdir; quota exceeded; credentials"}\n'
+    sleep "${AI_KIMI_TEST_SLOW_SECONDS:-30}" ;;
 esac
 exit 0
 STUBEOF

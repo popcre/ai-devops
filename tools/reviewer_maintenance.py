@@ -72,7 +72,9 @@ def physical(path):
 def read_json(path):
     path = physical(path)
     try:
-        return json.loads(path.read_bytes())
+        value = json.loads(path.read_bytes())
+        require(isinstance(value, dict), f"JSON object required: {path}")
+        return value
     except (ValueError, OSError):
         raise Blocked(f"unreadable or invalid JSON: {path}") from None
 
@@ -155,6 +157,9 @@ def snapshot(path, kind, previous=None, limit=None):
 def validate_round(record):
     require(record.get("schema_version") == 1, "unknown maintenance schema")
     safe_id(record.get("id"))
+    require("parent" in record, "missing parent boundary")
+    if record["parent"] is not None:
+        safe_id(record["parent"])
     require(record.get("status") in {"started", "completed"}, "invalid round status")
     for field in ("host", "tool_version", "started_at", "configuration_sha256"):
         require(isinstance(record.get(field), str) and record[field], f"missing {field}")
@@ -193,6 +198,9 @@ class Maintenance:
         self.directory = self.issues / "maintenance"
         self.configuration = sources
         self.configuration_sha = digest(encoded(sources))
+        version = re.search(r'^VERSION="([^"]+)"$', (self.toolkit / "bin/ai-reviewer-issue").read_text(), re.M)
+        require(version is not None, "tool version is unavailable")
+        self.version = version.group(1)
 
     def records(self):
         physical(self.directory)
@@ -237,11 +245,11 @@ class Maintenance:
                 result[str(path)] = (spec, path)
         return result
 
-    def candidates(self, data, spec, path, lower):
+    def candidates(self, data, spec, path, lower, carry_ids=frozenset()):
         if spec["kind"] == "log" or not data:
             return []
         if spec.get("adapter") == "invocations":
-            return self.invocations(data, path, lower)
+            return self.invocations(data, path, lower, carry_ids)
         lines = data[lower:].splitlines() if spec["kind"] == "jsonl" else [data]
         found = []
         for line in lines:
@@ -276,7 +284,7 @@ class Maintenance:
                           "source": str(path), "classification": "reviewer-outcome-needs-classification"})
         return found
 
-    def invocations(self, data, path, lower):
+    def invocations(self, data, path, lower, carry_ids):
         starts, finishes, offset = {}, {}, 0
         for line in data.splitlines(keepends=True):
             offset += len(line)
@@ -296,15 +304,18 @@ class Maintenance:
                                          if k not in {"event", "timestamp"}) and
                     type(finish.get("exit_code")) is int, f"invocation finish has no exact start: {path}")
         found = []
-        for rid, (start, _) in starts.items():
+        for rid, (start, start_position) in starts.items():
             finish, position = finishes.get(rid, (None, 0))
             worker_missing = bool(finish and finish["exit_code"] == 0 and start.get("operation") == "async-submission"
                                   and not any(s.get("parent_run_id") == rid for s, _ in starts.values()))
             if finish and not worker_missing and (position <= lower or finish["exit_code"] == 0):
                 continue
             event = start if worker_missing else (finish or start)
+            candidate_id = digest(encoded(event))
+            if (not finish or worker_missing) and max(position, start_position) <= lower and candidate_id not in carry_ids:
+                continue
             join = {k: join_digest(k, event[k]) for k in ("run_id", "repo", "head", "caller") if event.get(k)}
-            found.append({"id": digest(encoded(event)), "provider": event["provider"], "join": join,
+            found.append({"id": candidate_id, "provider": event["provider"], "join": join,
                           "event_sha256": digest(encoded(event)), "source": str(path),
                           "classification": "failed-invocation" if finish and not worker_missing else "completion-unproven"})
         return found
@@ -331,6 +342,7 @@ class Maintenance:
             for path in old:
                 require(path in discovered, f"source disappeared from discovery: {path}")
             sources, candidates = {}, {}
+            carry_ids = {candidate["id"] for candidate in (last or {}).get("carry_forward", [])}
             blockers = list(self.configuration.get("blockers", []))
             for key, (spec, path) in discovered.items():
                 lower = old[key]["upper"] if key in old else {
@@ -341,28 +353,29 @@ class Maintenance:
                 sources[key] = {"lower": lower, "upper": upper}
                 if upper["offset"] == lower["offset"] and spec.get("adapter") != "invocations":
                     continue
-                for candidate in self.candidates(data, spec, path, lower["offset"]):
+                for candidate in self.candidates(data, spec, path, lower["offset"], carry_ids):
                     candidates[candidate["id"]] = candidate
             for candidate in (last or {}).get("carry_forward", []):
                 # An observed ongoing invocation is automatically rediscovered
                 # while unfinished; its later terminal event accounts for it.
                 if candidate.get("carry_kind") != "in-progress":
                     candidates[candidate["id"]] = candidate
-            if last is None:
-                for path in sorted(self.issues.glob("*/issue.json")):
-                    issue = read_json(path)
-                    iid = safe_id(issue.get("id"))
-                    require(path.parent.name == iid, "legacy incident directory identity mismatch")
-                    resolutions = sorted(physical(path.parent / "resolutions").glob("*.json"))
-                    if resolutions and read_json(resolutions[-1]).get("status") == "resolved":
-                        continue
-                    identity = digest(encoded(issue))
-                    candidate = {"id": identity, "provider": issue["provider"], "join": {},
-                                 "event_sha256": identity, "source": str(path),
-                                 "classification": "existing-incident", "existing_issue_id": iid}
-                    candidates[identity] = candidate
+            carried_issues = {outcome["issue_id"] for outcome in (last or {}).get("outcomes", [])
+                              if outcome.get("kind") == "incident" and outcome["candidate_id"] in carry_ids}
+            for path in sorted(self.issues.glob("*/issue.json")):
+                issue = read_json(path)
+                iid = safe_id(issue.get("id"))
+                require(path.parent.name == iid, "legacy incident directory identity mismatch")
+                resolutions = sorted(physical(path.parent / "resolutions").glob("*.json"))
+                if iid in carried_issues or (resolutions and read_json(resolutions[-1]).get("status") == "resolved"):
+                    continue
+                identity = digest(encoded(issue))
+                candidate = {"id": identity, "provider": issue["provider"], "join": {},
+                             "event_sha256": identity, "source": str(path),
+                             "classification": "existing-incident", "existing_issue_id": iid}
+                candidates[identity] = candidate
             record = {"schema_version": 1, "id": uuid.uuid4().hex, "status": "started",
-                      "host": socket.gethostname(), "tool_version": "1.5.0", "started_at": now(),
+                      "host": socket.gethostname(), "tool_version": self.version, "started_at": now(),
                       "parent": last["id"] if last else None, "configuration_sha256": self.configuration_sha,
                       "sources": sources, "candidates": sorted(candidates.values(), key=lambda c: c["id"]),
                       "blockers": blockers}
@@ -406,20 +419,21 @@ class Maintenance:
         resolution = read_json(resolutions[-1])
         require(resolution.get("status") in {"resolved", "partially-resolved"}, "invalid incident resolution")
         require(resolution.get("repair_commits") and resolution.get("evidence"), "resolution lacks closure proof")
+        repair_repo = physical(resolution.get("repair_repository") or self.toolkit)
         for commit in resolution["repair_commits"]:
-            self.commit(commit)
-            merged = subprocess.run(["git", "-C", str(self.toolkit), "merge-base", "--is-ancestor",
+            self.commit(commit, repair_repo)
+            merged = subprocess.run(["git", "-C", str(repair_repo), "merge-base", "--is-ancestor",
                                      commit, "refs/remotes/origin/main"], capture_output=True)
             require(merged.returncode == 0, "linked incident repair is not on fetched origin/main")
         for ref in resolution["evidence"]:
             self.evidence(ref)
         return resolution
 
-    def commit(self, commit):
+    def commit(self, commit, repository=None):
         require(isinstance(commit, str) and re.fullmatch(r"[0-9a-fA-F]{40}", commit), "exact repair commit required")
-        result = subprocess.run(["git", "-C", str(self.toolkit), "cat-file", "-e", commit + "^{commit}"],
+        result = subprocess.run(["git", "-C", str(repository or self.toolkit), "cat-file", "-e", commit + "^{commit}"],
                                 capture_output=True)
-        require(result.returncode == 0, "repair commit not found in toolkit history")
+        require(result.returncode == 0, "repair commit not found in its recorded repository")
 
     def outcome(self, round_id, candidate_id, issue_id=None, reason=None, evidence=None, carry=None):
         with locked(self.directory):
@@ -468,11 +482,12 @@ class Maintenance:
             matches = [event for event in events if digest(encoded(event)) == candidate["event_sha256"]]
             require(len(matches) == 1, "candidate lacks a unique frozen event")
             event = matches[0]
-            require(event.get("repo") and event.get("head"),
+            repository = event.get("repo") or event.get("repository_root")
+            require(repository and event.get("head"),
                     "event lacks repository or head identity; manual incident reconciliation required")
             lifecycle = {"schema_version": 1, "provider": event["provider"], "run_id": event.get("run_id") or "",
                          "session_id": event.get("session_id"), "event_sha256": candidate["event_sha256"],
-                         "repository_root": event["repo"], "head": event["head"], "caller": event.get("caller") or "",
+                         "repository_root": repository, "head": event["head"], "caller": event.get("caller") or "",
                          "source_digest": event.get("source_digest") or ""}
             details = physical(details_file)
             require(details.is_file(), "incident details file not found")

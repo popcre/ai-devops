@@ -64,7 +64,8 @@ Completion requires a private JSON proof document containing `repair_commit`
 (nonempty file paths or evidence URLs). The first round additionally requires
 `legacy_audit`: the review of pre-journal evidence described below. Local files
 are fingerprinted. The round and every linked repair commit must be present in
-the toolkit's fetched `origin/main`; refresh upstream before completing.
+the toolkit's fetched `origin/main`; linked repairs use their recorded repair
+repository's fetched `origin/main`. Refresh upstream in each before completing.
 
 ```bash
 ai-reviewer-issue maintenance complete ROUND-ID --proof PRIVATE-COMPLETION.json
@@ -75,6 +76,20 @@ proof, or publication failure leave the preceding completed checkpoint intact.
 Repeated completion is idempotent. Concurrent writers use a private directory
 lock and immutable publication; a lock left by a killed owner requires inspection
 of that exact owner before recovery, never an age-based automatic unlock.
+
+The separate invocation ledger uses a kernel-owned file lock. Windows and Linux
+release it automatically when its writer exits or dies; an existing `.append.lock`
+file does not mean a writer is active and must not be deleted. Tests prove that a
+live owner retains the lock and a killed owner releases it. If appending the
+terminal record fails, the wrapper preserves its report and records no false
+success: callers receive a bookkeeping failure and the start remains visible.
+
+Do not rotate or compact either ledger: retention is outside version 1. If a
+source is replaced, keep the active round and last completed checkpoint, preserve
+both generations, and investigate the exact source named by `show`. Restore
+continuity only through the source owner's reviewed recovery procedure with all
+bytes accounted for. If continuity cannot be proven, leave the round blocked;
+never delete checkpoint history or reset an offset to manufacture a clean round.
 
 ## Structured source inventory
 
@@ -123,7 +138,8 @@ are installed. It cannot reconstruct overwritten historical turns. Before the
 first completion, privately audit the existing provider metadata, lifecycle
 failures, owned logs, and known DeepSeek repository sidecars, record newly found
 defects, and attach that audit as `legacy_audit`. Existing unresolved incidents
-are automatically included in the first round. An unresolved historical coverage
+are automatically included, and later new/reopened incidents are rediscovered
+even without a new provider event. An unresolved historical coverage
 gap is a blocker, not permission to assert that old logs were fully examined.
 Do not use a synthetic installation proof to claim a real incident backlog clear.
 
@@ -134,6 +150,11 @@ Replacement, rotation, truncation, disappearance, malformed JSONL, a partial fin
 line at capture, and linked paths fail closed. Source files are never edited.
 The Python 3 helper is an internal part of `ai-reviewer-issue`, using the runtime
 already required by the toolkit installer; it is not a separate service.
+
+For richer exact-run failure diagnostics and non-generating quota checks, read
+the STATUS table in the [diagnostics and quota plan](../plan_reviewer-diagnostics-quota-preflight.md)
+before implementation. Unknown capacity must remain explicit; it is not proof
+of availability or permission to disable a reviewer.
 
 The implementation plan for durable maintenance-round log checkpoints is
 [`plan_reviewer-log-repair-checkpoints.md`](../plan_reviewer-log-repair-checkpoints.md).
@@ -246,6 +267,9 @@ ai-reviewer-issue resolve <issue-id> --status resolved \
 ```
 
 Use `resolved` only when every symptom in the original package is proven fixed.
+For a repair committed in another repository, add `--repair-repo <worktree-path>`.
+The recorder validates the commit in that repository and records its canonical
+repository path; omitting this option keeps the toolkit repository default.
 Use `partially-resolved` and state what remains when the proof covers only part
 of a multi-symptom report. With no adequate proof, leave the incident open.
 

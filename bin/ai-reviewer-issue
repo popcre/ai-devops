@@ -34,6 +34,7 @@ Usage:
                            [--lifecycle-state PATH]
   ai-reviewer-issue resolve <issue-id> --status resolved|partially-resolved
                            --summary "repair outcome" --repair-commit SHA
+                           [--repair-repo PATH]
                            --evidence PATH-OR-URL [--repair-commit SHA ...]
                            [--evidence PATH-OR-URL ...]
                            [--details TEXT | --details-file PATH]
@@ -58,6 +59,8 @@ Details and error files are copied in full after common credentials are redacted
 Reports remain local under the ai-devops checkout and are never committed.
 Resolve appends a separate, immutable repair record; it never edits the original
 incident package. Use partially-resolved whenever any recorded symptom remains.
+Repair commits are verified in the toolkit by default. Use --repair-repo for a
+fix owned by another repository; its canonical root is recorded with the commits.
 EOF
 }
 
@@ -340,7 +343,7 @@ show_issue(){
 }
 
 resolve_issue(){
-  local id="${1:-}" status="" summary="" safe_summary="" details="" details_file="" arg
+  local id="${1:-}" status="" summary="" safe_summary="" details="" details_file="" arg repair_repo="$TOOLKIT_ROOT"
   local file issue_dir issue_parent resolved_issue resolution_dir resolved_resolution timestamp destination tmp details_tmp commit full reference maintenance waited=0
   local -a commits=() evidence=() full_commits=()
   [ -n "$id" ] || die "resolve requires one issue id."
@@ -354,6 +357,7 @@ resolve_issue(){
       --details) [ "$#" -gt 0 ] || die "--details requires a value."; details="$1"; shift ;;
       --details-file) [ "$#" -gt 0 ] || die "--details-file requires a path."; details_file="$1"; shift ;;
       --repair-commit) [ "$#" -gt 0 ] || die "--repair-commit requires a SHA."; commits+=("$1"); shift ;;
+      --repair-repo) [ "$#" -gt 0 ] || die "--repair-repo requires a path."; repair_repo="$1"; shift ;;
       --evidence) [ "$#" -gt 0 ] || die "--evidence requires a path or URL."; evidence+=("$1"); shift ;;
       *) die "unknown resolve option: $arg" ;;
     esac
@@ -384,9 +388,10 @@ resolve_issue(){
   done
   RESOLVE_MAINTENANCE_LOCK="$maintenance/.writer-lock"
   trap 'rmdir "$RESOLVE_MAINTENANCE_LOCK" 2>/dev/null || true' EXIT
+  repair_repo="$(git -C "$repair_repo" rev-parse --show-toplevel 2>/dev/null)" || die "repair repository is not a Git working tree."
   for commit in "${commits[@]}"; do
     [[ "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || die "invalid repair commit: $commit"
-    full="$(git -C "$TOOLKIT_ROOT" rev-parse --verify "$commit^{commit}" 2>/dev/null)" || die "repair commit not found in toolkit history: $commit"
+    full="$(git -C "$repair_repo" rev-parse --verify "$commit^{commit}" 2>/dev/null)" || die "repair commit not found in the selected repository: $commit"
     full_commits+=("$full")
   done
   for reference in "${evidence[@]}"; do
@@ -409,11 +414,12 @@ resolve_issue(){
   if [ -n "$details_file" ]; then redact_text < "$details_file" > "$details_tmp"
   else printf '%s' "$details" | redact_text > "$details_tmp"; fi
   jq -n --arg status "$status" --arg summary "$safe_summary" --arg resolved_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg repair_repo "$repair_repo" \
     --rawfile details "$details_tmp" \
     --argjson commits "$(printf '%s\n' "${full_commits[@]}" | jq -R . | jq -s .)" \
     --argjson evidence "$(printf '%s\n' "${evidence[@]}" | jq -R . | jq -s .)" \
     '{schema_version:1,status:$status,summary:$summary,resolved_at:$resolved_at,
-      repair_commits:$commits,evidence:$evidence,details:(if $details=="" then null else $details end)}' > "$tmp"
+      repair_repository:$repair_repo,repair_commits:$commits,evidence:$evidence,details:(if $details=="" then null else $details end)}' > "$tmp"
   rm -f "$details_tmp"
   chmod 600 "$tmp" 2>/dev/null || true
   if ! ln "$tmp" "$destination" 2>/dev/null; then

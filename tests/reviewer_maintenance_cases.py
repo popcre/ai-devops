@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("maintenance", ROOT / "tools/reviewer_maintenance.py")
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+sys.path.insert(0, str(ROOT / "tools"))
+import reviewer_events as events
 
 
 class MaintenanceCases(unittest.TestCase):
@@ -184,7 +186,7 @@ esac
         self.ledger.chmod(0)
         self.addCleanup(self.ledger.chmod, 0o600)
         if os.name == "nt":
-            self.skipTest("Windows ACL unreadability is exercised by the Windows private-storage gate")
+            self.skipTest("POSIX mode-bit denial; Windows access is governed by ACLs")
         with self.assertRaisesRegex(m.Blocked, "unreadable"):
             self.engine.start()
 
@@ -582,6 +584,75 @@ wait "$job"
         self.assertEqual(len(next_round["candidates"]), 1)
         self.assertEqual(next_round["candidates"][0]["classification"], "failed-invocation")
 
+    def test_confirmed_cancelled_start_is_not_rediscovered(self):
+        self.invocation(finish=False)
+        record = self.engine.start()
+        self.nondefect(record, "user-cancellation")
+        self.complete(record)
+        self.assertFalse(self.engine.start()["candidates"])
+
+    def test_reopened_incident_is_discovered_after_checkpoint(self):
+        iid = self.issue({}, "resolved")
+        record = self.engine.start()
+        self.assertFalse(record["candidates"])
+        self.complete(record)
+        resolution = self.engine.issues / iid / "resolutions/1.json"
+        changed = json.loads(resolution.read_text())
+        changed["status"] = "partially-resolved"
+        (resolution.parent / "2.json").write_text(json.dumps(changed))
+        self.assertEqual(self.engine.start()["candidates"][0]["existing_issue_id"], iid)
+
+    def test_cross_repository_repair_is_verified_in_its_owner(self):
+        repo = self.root / "repair-repo"
+        subprocess.run(["git", "clone", "-q", str(self.toolkit), str(repo)], check=True)
+        for args in (["config", "user.name", "Test"], ["config", "user.email", "test@example.com"]):
+            subprocess.run(["git", "-C", str(repo), *args], check=True)
+        (repo / "repair.txt").write_text("Separate repository owns this repair.\n")
+        subprocess.run(["git", "-C", str(repo), "add", "repair.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "repair"], check=True)
+        sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", sha], check=True)
+        self.invocation()
+        record = self.engine.start()
+        iid = self.issue(record["candidates"][0], "resolved")
+        resolution = self.engine.issues / iid / "resolutions/1.json"
+        content = json.loads(resolution.read_text())
+        content.update(repair_repository=str(repo), repair_commits=[sha])
+        resolution.write_text(json.dumps(content))
+        self.engine.outcome(record["id"], record["candidates"][0]["id"], issue_id=iid)
+        self.complete(record)
+
+    def test_event_lock_releases_on_death_but_not_while_owner_lives(self):
+        script = '''import sys,time
+sys.path.insert(0,sys.argv[1])
+from reviewer_events import event_lock
+with event_lock(sys.argv[2]):
+ print("locked",flush=True)
+ time.sleep(60)
+'''
+        child = subprocess.Popen([sys.executable, "-c", script, str(ROOT / "tools"), str(self.root)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "locked")
+            with patch.object(events.time, "monotonic", side_effect=[0, 11]):
+                with self.assertRaises(events.Blocked):
+                    with events.event_lock(self.root):
+                        self.fail("live owner lock was taken")
+            child.kill()
+            child.wait(timeout=5)
+            with events.event_lock(self.root):
+                pass
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+            child.stdout.close()
+            child.stderr.close()
+
 
 if __name__ == "__main__":
-    unittest.main(verbosity=1)
+    suite = unittest.main(verbosity=1, exit=False)
+    failed = len(suite.result.failures) + len(suite.result.errors)
+    skipped = len(suite.result.skipped)
+    print(f"MAINTENANCE_COUNTS passed={suite.result.testsRun - failed - skipped} failed={failed} skipped={skipped}")
+    sys.exit(0 if suite.result.wasSuccessful() else 1)

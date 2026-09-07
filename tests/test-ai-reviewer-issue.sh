@@ -3,7 +3,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-reviewer-issue"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
@@ -106,6 +106,12 @@ wait "$first_pid"; first_rc=$?; wait "$second_pid"; second_rc=$?
 check "concurrent resolution writers both append successfully" "test '$first_rc' -eq 0 && test '$second_rc' -eq 0"
 check "concurrent resolution writers preserve both records" "test \"\$(find '$AI_REVIEWER_ISSUE_DIR/$concurrent_id/resolutions' -type f -name '*.json' | wc -l | tr -d ' ')\" -eq 2"
 check "path returns the configured directory" "test \"$($SCRIPT path)\" = '$AI_REVIEWER_ISSUE_DIR'"
+cross_repo_id="$(printf '%s\n' "$($SCRIPT record --provider gemini --summary 'Repair belongs to the coordinating repository.' --repo "$TMP/repo")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+check "foreign repair commit is not guessed from the incident repository" "! $SCRIPT resolve '$cross_repo_id' --status resolved --summary repaired --repair-commit '$HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+check "explicit repair repository accepts its own commit" "$SCRIPT resolve '$cross_repo_id' --status resolved --summary repaired --repair-repo '$TMP/repo' --repair-commit '$HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+check "resolution records exact commit repository provenance" "$SCRIPT show '$cross_repo_id' | jq -e '.resolution.repair_repository==\"$REPO_CANON\" and .resolution.repair_commits[0]==\"$HEAD\"'"
+check "selected repository must contain the repair commit" "! $SCRIPT resolve '$cross_repo_id' --status resolved --summary repaired --repair-repo '$TMP/repo' --repair-commit '$TOOLKIT_HEAD' --evidence tests/test-ai-reviewer-issue.sh"
+check "non-repository repair path is refused" "! $SCRIPT resolve '$cross_repo_id' --status resolved --summary repaired --repair-repo '$TMP/state' --repair-commit '$HEAD' --evidence tests/test-ai-reviewer-issue.sh"
 uncorrelated="$($SCRIPT record --provider grok --summary 'Identifiers unavailable.' --repo "$TMP/repo")"
 uncorrelated_id="$(printf '%s\n' "$uncorrelated" | sed -n 's/^ai-reviewer-issue: recorded //p')"
 uncorrelated_report="$AI_REVIEWER_ISSUE_DIR/$uncorrelated_id"
@@ -135,10 +141,16 @@ check "unsafe provider name is refused" "! $SCRIPT record --provider '../bad' --
 
 PYTHON="$(command -v python3 || command -v python)"
 export AI_REVIEWER_BASH="$BASH"
-if "$PYTHON" "$ROOT/tests/reviewer_maintenance_cases.py"; then
-  ok 'maintenance schema, continuity, reconciliation and atomicity contract'
+maintenance_rc=0
+maintenance_counts="$("$PYTHON" "$ROOT/tests/reviewer_maintenance_cases.py")" || maintenance_rc=$?
+maintenance_counts="${maintenance_counts//$'\r'/}"
+if [[ "$maintenance_counts" =~ ^MAINTENANCE_COUNTS[[:space:]]passed=([0-9]+)[[:space:]]failed=([0-9]+)[[:space:]]skipped=([0-9]+)$ ]]; then
+  PASS=$((PASS + BASH_REMATCH[1])); FAIL=$((FAIL + BASH_REMATCH[2])); SKIP=$((SKIP + BASH_REMATCH[3]))
+  if [ "$maintenance_rc" -ne 0 ] && [ "${BASH_REMATCH[2]}" -eq 0 ]; then
+    bad 'maintenance runner failed without a counted test failure'
+  fi
 else
-  bad 'maintenance schema, continuity, reconciliation and atomicity contract'
+  bad 'maintenance runner did not return valid assertion counts'
 fi
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
