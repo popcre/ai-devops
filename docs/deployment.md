@@ -23,6 +23,12 @@ in `bin/`. These tools do not change secrets, MCP, SSH, packages, or services.
 The generic executable loop in `install.sh` remains the Ubuntu fresh-install
 owner and is intentionally unchanged.
 
+A new script in `bin/` is therefore NOT a usable command on Windows until it
+also has a row in `config/machine-tools.tsv`. Ubuntu picks it up from the
+`install.sh` glob, which hides the gap; the Windows launchers come only from
+the catalog. Add the row in the same change that adds the script, or sessions
+will be told to run a command that does not exist on the machine.
+
 ## Install
 
 ```bash
