@@ -1143,12 +1143,18 @@ review_worker() { # JOB-DIR PROMPT-FILE
     exit 0
   fi
   reason="provider-process-failed"
-  [ "$RUN_TURN_TIMED_OUT" = 1 ] && reason="timed-out"
-  [ "$RUN_TURN_STARTUP_FAILED" = 1 ] && reason="startup-timeout"
-  grep -Eqi 'created under a different directory' "$out" "$out.err" 2>/dev/null && reason="directory-mismatch"
-  grep -Eqi 'EPERM|EACCES|permission denied|mkdir' "$out" "$out.err" 2>/dev/null && reason="execution-context-denied"
-  grep -Eqi 'usage limit|billing cycle|quota (reached|exceeded)|purchase extra usage' "$out" "$out.err" 2>/dev/null && reason="usage-limit"
-  [ "$reason" = provider-process-failed ] && grep -Eqi 'auth|credential|provider|no providers' "$out" "$out.err" 2>/dev/null && reason="credentials-unavailable"
+  # A measured deadline is authoritative. Tool results can quote arbitrary
+  # repository text, including error examples; they are not runtime diagnostics.
+  if [ "$RUN_TURN_TIMED_OUT" = 1 ]; then
+    reason="timed-out"
+  elif [ "$RUN_TURN_STARTUP_FAILED" = 1 ]; then
+    reason="startup-timeout"
+  else
+    grep -Eqi 'created under a different directory' "$out.err" 2>/dev/null && reason="directory-mismatch"
+    grep -Eqi 'EPERM|EACCES|permission denied' "$out.err" 2>/dev/null && reason="execution-context-denied"
+    grep -Eqi 'usage limit|billing cycle|quota (reached|exceeded)|purchase extra usage' "$out" "$out.err" 2>/dev/null && reason="usage-limit"
+    [ "$reason" = provider-process-failed ] && grep -Eqi 'auth|credential|provider|no providers' "$out.err" 2>/dev/null && reason="credentials-unavailable"
+  fi
   terminal_phase="failed"; [ "$reason" = timed-out ] && terminal_phase="timed-out"
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" --arg r "$reason" --argjson rc "$rc" '.phase="finalizing"|.terminal_reason=$r|.exit_code=$rc|.updated=$u' || exit 2
   if ! finalize_review_artifact "$meta" "$out" incomplete "$reason"; then
