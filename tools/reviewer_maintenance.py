@@ -66,7 +66,10 @@ def physical(path):
             require(not stat.S_ISLNK(info.st_mode) and
                     not (getattr(info, "st_file_attributes", 0) & 0x400),
                     f"linked path refused: {part}")
-    return path
+    # Windows gives the same directory both native long and DOS 8.3 names.
+    # Canonicalize only AFTER rejecting every original reparse/link component;
+    # resolving first would erase the evidence of an unsafe linked path.
+    return path.resolve()
 
 
 def read_json(path):
@@ -410,8 +413,9 @@ class Maintenance:
             event_bound = issue.get("join", {}).get("event_sha256") == candidate["event_sha256"]
             require(event_bound or (join.get("caller") and join.get("repo") and join.get("head") and
                     (join.get("run_id") or join.get("session_id"))), "candidate lacks an exact incident join")
-            require(all(value == join_digest(key, exact.get(key, "")) for key, value in join.items()),
-                    "incident exact run/session/source join mismatch")
+            mismatched = [key for key, value in join.items()
+                          if value != join_digest(key, exact.get(key, ""))]
+            require(not mismatched, "incident exact run/session/source join mismatch: " + ", ".join(mismatched))
         if not closure:
             return None
         resolutions = sorted(physical(directory / "resolutions").glob("*.json"))

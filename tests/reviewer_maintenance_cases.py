@@ -547,6 +547,35 @@ wait "$job"
         self.assertEqual(issue["repository"]["head"], row["head"])
         self.assertEqual(issue["join"]["run_id"], row["run_id"])
 
+    @unittest.skipUnless(os.name == "nt", "Windows DOS path aliases")
+    def test_record_candidate_accepts_same_repository_short_path(self):
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(self.toolkit), buffer, len(buffer))
+        self.assertTrue(0 < size < len(buffer), "cannot obtain native repository path")
+        short = buffer.value
+        if os.path.normcase(short) == os.path.normcase(str(self.toolkit)):
+            self.skipTest("volume does not provide distinct DOS short names")
+        self.assertEqual(m.join_digest("repo", short), m.join_digest("repo", self.toolkit))
+        row = {"schema_version": 1, "provider": "grok", "event": "finished", "run_id": "short-path",
+               "repo": short, "head": self.sha, "caller": "codex", "timestamp": "same-time", "exit_code": 1}
+        self.write({**row, "event": "started"})
+        self.write(row)
+        record = self.engine.start()
+        details = self.root / "details.txt"
+        details.write_text("Synthetic short-path identity fixture.\n")
+        with patch.dict(os.environ, {"AI_REVIEWER_BASH": self.bash,
+                                    "AI_REVIEWER_STATE_BASE": str(self.root / "state")}):
+            result = self.engine.record_incident(record["id"], record["candidates"][0]["id"], "Short-path failure", details)
+        issue = json.loads((self.engine.issues / result["issue_id"] / "issue.json").read_text())
+        self.assertEqual(m.join_digest("repo", issue["repository"]["root"]), m.join_digest("repo", short))
+
+    def test_repository_canonicalization_never_hides_symlink(self):
+        alias = self.root / "repository-alias"
+        self.symlink(alias, self.toolkit, True)
+        with self.assertRaisesRegex(m.Blocked, "linked path refused"):
+            m.join_digest("repo", alias)
+
     def test_old_scoreboard_event_joins_by_digest_without_invented_run(self):
         self.config["sources"][0].pop("adapter")
         self.engine = m.Maintenance(self.toolkit, self.root / "issues", self.config)
