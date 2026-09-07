@@ -152,9 +152,25 @@ The Python 3 helper is an internal part of `ai-reviewer-issue`, using the runtim
 already required by the toolkit installer; it is not a separate service.
 
 For richer exact-run failure diagnostics and non-generating quota checks, read
-the STATUS table in the [diagnostics and quota plan](../plan_reviewer-diagnostics-quota-preflight.md)
-before implementation. Unknown capacity must remain explicit; it is not proof
-of availability or permission to disable a reviewer.
+the STATUS table in the [diagnostics and quota plan](../plan_reviewer-diagnostics-quota-preflight.md).
+Unknown capacity remains explicit; it is not proof of availability or permission
+to disable a reviewer.
+
+## Exact-run diagnostics and capacity preflight
+
+Kimi, Grok, and GLM record a bounded exact-run diagnostic envelope through
+the shared lifecycle validator. It contains phases, safe terminal observations,
+local health and cancellation certainty, plus the capacity result; it never
+contains prompts, responses, unrestricted provider text, commands, environment,
+or credentials. `ai-reviewer-issue` copies only an exact matching envelope into
+the private incident package and accepts older runs with no envelope.
+
+Before each affected review submission, `ai-review-preflight capacity <provider>
+--json` returns `available`, `exhausted`, or `unknown`. Exhausted stops before
+generation. Unknown prints one explanation and preserves the review capability.
+The installed Kimi, Grok, and GLM interfaces currently return unknown without
+network access because none has a qualified structured non-generating capacity
+contract. The measured matrix is in `tests/verification/reviewer-diagnostics-quota/`.
 
 The implementation plan for durable maintenance-round log checkpoints is
 [`plan_reviewer-log-repair-checkpoints.md`](../plan_reviewer-log-repair-checkpoints.md).
@@ -215,6 +231,7 @@ The command automatically captures:
 - the repository, branch, current commit, remote, and existing working changes;
 - the computer and shell;
 - exact-run structured metadata, with sensitive fields removed;
+- the exact matching bounded diagnostic envelope, when present;
 - exact report paths owned by the matched metadata, copied in full;
 - exact log paths owned by the matched metadata, copied in full;
 - the exact matching scoreboard record;

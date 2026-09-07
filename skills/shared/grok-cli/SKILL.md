@@ -22,6 +22,11 @@ ai-grok-review list | show <name> | transcript <name> | delete <name>
 ai-grok-review doctor
 ```
 
+Every review turn performs one bounded non-generating capacity preflight before
+the exact paid-work reservation. `exhausted` submits nothing; `unknown` remains
+visible and continues. Grok Build 1.0.13 has no qualified structured quota
+command, so it currently returns `unknown` without network access.
+
 `list` shows active Grok work and retained exact-work protections across every clone owned by the current reviewer OS account, while completed
 sessions remain limited to the current checkout. Equivalent GitHub HTTPS, SSH,
 case, `.git`, and local-clone origins share duplicate detection, but they do not

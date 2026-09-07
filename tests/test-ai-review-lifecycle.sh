@@ -45,6 +45,37 @@ check "identity_never_retains_remote_credential" "! grep -q secret <<<'$IDENTITY
 check "identity_has_exact_head_and_source_digest" \
   "[ \"\$(jq -r .head <<<'$IDENTITY')\" = \"\$(git -C '$R' rev-parse HEAD)\" ] && jq -e '.source_digest|test(\"^[0-9a-f]{64}$\")' <<<'$IDENTITY'"
 
+DIAG="$($SCRIPT observe --provider grok --repo "$R" --run-id diagnostic-one --session-id session-one --caller codex --phase launch --observation provider-started --elapsed 0)"
+check "diagnostic envelope records exact join identity without begin" "jq -e '.provider==\"grok\" and .run_id==\"diagnostic-one\" and .session_id==\"session-one\" and .caller==\"codex\" and (.events|length)==1' '$DIAG'"
+check "diagnostic observation acquires no assignment lock" "test -z \"\$(find '$AI_REVIEW_LIFECYCLE_DIR/locks' -type d -name '*diagnostic-one*' -print -quit 2>/dev/null)\""
+$SCRIPT observe --provider grok --repo "$R" --run-id diagnostic-one --session-id session-one --caller codex --phase terminal --observation provider-completed --elapsed 4 --terminal-reason end-turn --cancellation-initiator provider --cancellation-confirmation not-requested >/dev/null
+check "terminal diagnostic preserves launch and terminal summaries" "jq -e '.launch_summary.phase==\"launch\" and .terminal_summary.phase==\"terminal\" and .current.provider_terminal_reason==\"end-turn\"' '$DIAG'"
+check "foreign diagnostic join is rejected" "! $SCRIPT observe --provider grok --repo '$R' --run-id diagnostic-one --session-id other --caller codex --phase terminal --observation provider-completed --elapsed 5"
+check "invalid diagnostic enum is rejected" "! $SCRIPT observe --provider grok --repo '$R' --run-id invalid-enum --caller codex --phase invented --observation provider-started --elapsed 0"
+check "diagnostic path traversal is rejected" "! $SCRIPT observe --provider grok --repo '$R' --run-id ../escape --caller codex --phase launch --observation provider-started --elapsed 0"
+$SCRIPT observe --provider kimi --repo "$R" --run-id capped --caller codex --phase awaiting-provider --observation provider-waiting --elapsed 1 >/dev/null
+CAPPED="$(find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -path '*/kimi/codex/capped.json' -print -quit)"
+SEED="$TMP/capped-seed.json"
+jq '.events=[range(0;64) as $i | (.current + {elapsed_seconds:$i})] | .truncated=false' "$CAPPED" > "$SEED" && mv "$SEED" "$CAPPED"
+$SCRIPT observe --provider kimi --repo "$R" --run-id capped --caller codex --phase awaiting-provider --observation provider-waiting --elapsed 65 >/dev/null
+check "diagnostic history is capped and marked truncated" "jq -e '.truncated==true and (.events|length)<=64 and (.events|length)>1' '$CAPPED'"
+check "diagnostic envelope remains below 32 KiB" "test \"\$(wc -c < '$CAPPED')\" -le 32768"
+CONCURRENT="$($SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase launch --observation provider-started --elapsed 0)"
+$SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase terminal --observation provider-completed --elapsed 2 --cancellation-confirmation not-requested >/dev/null & CONCURRENT_ONE=$!
+$SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase terminal --observation wrapper-cancelled --elapsed 2 --cancellation-initiator signal --cancellation-confirmation unconfirmed >/dev/null & CONCURRENT_TWO=$!
+wait "$CONCURRENT_ONE"; CONCURRENT_ONE_RC=$?; wait "$CONCURRENT_TWO"; CONCURRENT_TWO_RC=$?
+check "concurrent diagnostic updates are serialized without lost evidence" "test '$CONCURRENT_ONE_RC' -eq 0 -a '$CONCURRENT_TWO_RC' -eq 0 && jq -e '([.events[].last_observation_type]|index(\"provider-completed\")!=null) and ([.events[].last_observation_type]|index(\"wrapper-cancelled\")!=null)' '$CONCURRENT'"
+mkdir "$CONCURRENT.update-lock"; printf '99999999\n' > "$CONCURRENT.update-lock/pid"
+$SCRIPT observe --provider glm --repo "$R" --run-id concurrent --caller codex --phase finalizing --observation stale-lock-recovered --elapsed 3 >/dev/null
+check "dead diagnostic lock owner is reclaimed without losing the run" "test ! -e '$CONCURRENT.update-lock' && jq -e '[.events[].last_observation_type]|index(\"stale-lock-recovered\")!=null' '$CONCURRENT'"
+DIAG_LINK="$(dirname "$DIAG")/symlinked.json"
+if ln -s "$DIAG" "$DIAG_LINK" 2>/dev/null && [ -L "$DIAG_LINK" ]; then
+  check "linked diagnostic record is rejected" "! $SCRIPT observe --provider grok --repo '$R' --run-id symlinked --session-id session-one --caller codex --phase terminal --observation provider-completed --elapsed 1"
+  rm -f "$DIAG_LINK"
+else
+  ok "linked diagnostic record rejection is platform-gated"
+fi
+
 STATE="$($SCRIPT begin --provider grok --repo "$R" --run-id run-one --session-id session-one --caller codex)"
 check "begin_runs_mandatory_preflight" "grep -q '^check grok ' '$AI_TEST_PREFLIGHT_LOG'"
 check "begin_records_running_state" "[ \"\$(jq -r .status '$STATE')\" = running ]"

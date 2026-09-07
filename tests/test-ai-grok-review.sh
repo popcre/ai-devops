@@ -60,6 +60,9 @@ isolation_homes_match(){
 }
 check "missing local runtime is named distinctly" "grep -q 'local_dependency_unavailable: grok binary not found' '$SCRIPT'"
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
+check "both Grok dispatches gate capacity before exact-work reservation" "test \"\$(grep -c 'if ! capacity_gate' '$SCRIPT')\" -eq 2 && test \"\$(grep -c 'record_diagnostic.*capacity-checked' '$SCRIPT')\" -eq 2 && grep -q \"exhausted).*return 3\" '$SCRIPT'"
+check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
+check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
 
 TMP="$(mktemp -d)"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -88,6 +91,7 @@ cleanup() {
 trap cleanup EXIT
 
 export AI_GROK_STATE_DIR="$TMP/state"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_SANDBOX_PROGRESS_FILE="$TMP/source-digest.progress"
 export AI_GROK_AUTH_HOME="$TMP/no-auth"
@@ -435,6 +439,18 @@ echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
+CAP_NOW="$(date -u +%FT%TZ)"
+GROK_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"grok",state:"exhausted",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+rm -f "$TMP/provider-contacted"
+GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
+check "exhausted Grok capacity submits zero model turns" "test '$GROK_BLOCKED_RC' -ne 0 && test ! -e '$TMP/provider-contacted' && printf '%s' \"\$GROK_BLOCKED\" | grep -q 'not submitted'"
+check "exhausted Grok capacity creates no session record" "! grep -R -l capacity-exhausted '$AI_GROK_STATE_DIR/session-records' 2>/dev/null"
+GROK_AVAILABLE="$(jq -nc --arg now "$(date -u +%FT%TZ)" '{schema_version:1,provider:"grok",state:"available",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+rm -f "$TMP/provider-contacted"
+AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" run new capacity-available --prompt review >/dev/null 2>&1
+check "available Grok capacity submits one intended model turn" "test -e '$TMP/provider-contacted'"
+check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep -q available"
+
 echo "ai-grok-review tests"
 
 SESSION_RECORDS_BEFORE="$(find "$AI_GROK_STATE_DIR/session-records" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
@@ -706,11 +722,14 @@ check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$
 # replaced with functions that abort, so a marker can only exist if it was
 # written first. This is the executable form of the 2026-08-23 Claude finding.
 SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
+SIGNAL_BAD_STATE="$TMP/on-paid-signal-not-a-directory"; printf 'occupied\n' > "$SIGNAL_BAD_STATE"
 (
   . "$TMP/lib.sh"
-  STATE_DIR="$AI_GROK_STATE_DIR"
+  STATE_DIR="$SIGNAL_BAD_STATE"
   mkdir -p "$SIGNAL_LOCK"; printf '%s\n' "$$" > "$SIGNAL_LOCK/pid"
   ACTIVE_PAID_LOCK="$SIGNAL_LOCK"; ACTIVE_SESSION_LOCK=''
+  ACTIVE_DIAG_REPO="$REPO"; ACTIVE_DIAG_RUN=signal-diagnostic; ACTIVE_DIAG_SESSION=signal-diagnostic
+  CAPACITY_JSON='{"schema_version":1,"provider":"grok","state":"unknown"}'
   ACTIVE_GROK_CHILD=99999999
   request_active_grok_stop() { exit 99; }
   stop_active_grok_tree()    { exit 99; }
@@ -718,6 +737,7 @@ SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
 ) >/dev/null 2>&1
 SIGNAL_RC=$?
 check "on_paid_signal records remote uncertainty before any fallible cleanup"   "test -f '$SIGNAL_LOCK/remote-uncertain' && test '$SIGNAL_RC' -eq 99"
+check "diagnostic storage failure cannot skip paid-work shutdown" "test '$SIGNAL_RC' -eq 99"
 check "on_paid_signal warns instead of trusting the uncertainty marker write"   "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'retaining the paid-work lock for manual reconciliation'"
 ABANDONED_WORK="$TMP/work--abandoned.lock.d"; mkdir -p "$ABANDONED_WORK"; printf '99999999\n' > "$ABANDONED_WORK/pid"; printf 'new:abandoned\n' > "$ABANDONED_WORK/label"
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$ABANDONED_WORK" new:abandoned github.com/example/reviewer-fixture abandoned "$REPO" abandoned-work prompt-digest source-id 1 ) >"$TMP/abandoned.out" 2>&1

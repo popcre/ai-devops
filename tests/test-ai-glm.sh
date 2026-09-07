@@ -30,6 +30,7 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 export AI_GLM_STATE_DIR="$TMP/state"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
@@ -38,6 +39,14 @@ echo "== static checks =="
 check "ai-glm is executable"                "test -x '$AI_GLM'"
 check "ai-glm parses"                       "bash -n '$AI_GLM'"
 check "GLM password is streamed to curl instead of exposed in argv" "grep -q 'curl_auth_config | curl --config -' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM'"
+check "both GLM review dispatches gate capacity before send_prompt" "test \"\$(grep -c 'if ! capacity_gate' '$AI_GLM')\" -eq 2 && grep -q \"exhausted).*return 3\" '$AI_GLM'"
+check "GLM diagnostics distinguish local health and permission transport" "grep -q 'local-health-timeout' '$AI_GLM' && grep -q 'permission-endpoint-timeout' '$AI_GLM'"
+check "GLM review health observation preserves the prior 30-second tolerance" "grep -q 'AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT:-30' '$AI_GLM'"
+check "GLM submission transport failure records terminal truth" "test \"\$(grep -c 'terminal provider-submit-failed' '$AI_GLM')\" -eq 2"
+GLM_CAP_NOW="$(date -u +%FT%TZ)"
+GLM_EXHAUSTED="$(jq -nc --arg now "$GLM_CAP_NOW" '{schema_version:1,provider:"glm",state:"exhausted",checked_at:$now,provider_version:"opencode-1.18.12",credential_profile_scope:"fixture-profile",model_scope:"zai-coding-plan/glm-5.3",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+GLM_CAP_RC="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_RESPONSE="$GLM_EXHAUSTED" AI_REVIEW_PREFLIGHT_BIN="$REPO_ROOT/bin/ai-review-preflight" AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; set +e; capacity_gate >/dev/null 2>&1; printf "%s" "$?"')"
+check "exhausted GLM capacity returns its refusal state" "test '$GLM_CAP_RC' -eq 3"
 check "setup-opencode-glm.sh parses"        "bash -n '$REPO_ROOT/bin/setup-opencode-glm.sh'"
 check "retired launcher is gone"            "test ! -e '$REPO_ROOT/bin/ai-glm-agent'"
 check "retired launcher not on PATH"        "! command -v ai-glm-agent"
