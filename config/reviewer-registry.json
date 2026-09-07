@@ -36,7 +36,7 @@
     },
     "qwen": {
       "registry_state": "registered",
-      "reason": "Un-retired by owner instruction 2026-09-04; gated only by its own live preflight qualification."
+      "reason": "Live-qualified 2026-09-07: live probe OK and a real bounded review returned a valid verdict on qwen3.8-max. Runs on the Model Studio pay-per-token lane; the Coding Plan subscription key is dead."
     }
   }
 }

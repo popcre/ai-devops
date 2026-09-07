@@ -70,7 +70,13 @@ if (process.env.BAILIAN_CODING_PLAN_API_KEY && !names.includes('BAILIAN_CODING_P
 fs.appendFileSync(path.join(root, 'argv.txt'), `${process.argv.slice(2).join(' ')}\n`);
 fs.writeFileSync(path.join(root, 'qwen-credential-names'), `${names.sort().join('\n')}\n`);
 fs.writeFileSync(path.join(root, 'qwen-env'), `${Object.keys(process.env).sort().map((key) => `${key}=${process.env[key]}`).join('\n')}\n`);
-const child = spawnSync(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(path.join(root, 'qwen-tool-child-env'))}, Object.keys(process.env).sort().map(k => k+'='+process.env[k]).join('\\n')+'\\n')`], { env: process.env });
+// Model the shipped runtime: tool children go through sanitizeChildEnv, which
+// strips the internal secret names; the startup relaunch does not.
+const sanitizedChildEnv = { ...process.env };
+for (const name of ['BAILIAN_CODING_PLAN_API_KEY', 'QWEN_SERVER_TOKEN', 'QWEN_DAEMON_TOKEN']) delete sanitizedChildEnv[name];
+const child = spawnSync(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(path.join(root, 'qwen-tool-child-env'))}, Object.keys(process.env).sort().map(k => k+'='+process.env[k]).join('\\n')+'\\n')`], { env: sanitizedChildEnv });
+const relaunch = spawnSync(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(path.join(root, 'qwen-relaunch-key'))}, process.env.BAILIAN_CODING_PLAN_API_KEY || 'absent')`], { env: process.env });
+if (relaunch.status !== 0) process.exit(71);
 if (child.status !== 0) process.exit(70);
 if (process.argv[2] === '--version') { console.log('0.21.11'); process.exit(0); }
 if (process.argv[2] === 'sessions') { console.log(JSON.stringify({sessionId:'qwen-session-1', filePath:path.join(root, 'transcript.jsonl')})); process.exit(0); }
@@ -174,8 +180,8 @@ INITIAL_OUT="$(run new review-1 --prompt 'review this' 2>&1)"; INITIAL_RC=$?
 [ "$INITIAL_RC" -eq 0 ] || printf '  diagnostic: initial review: %s\n' "$INITIAL_OUT"
 check 'initial review completes successfully' "test '$INITIAL_RC' -eq 0"
 printf 'preload-test-secret\n' > "$TMP/preload-secret"; chmod 600 "$TMP/preload-secret"
-PRELOAD_PROOF="$(AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const child=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,has:Object.hasOwn(process.env,"BAILIAN_CODING_PLAN_API_KEY"),enumerable:Object.keys(process.env).includes("BAILIAN_CODING_PLAN_API_KEY"),child:child.stdout,deleted:!fs.existsSync(process.env.PRELOAD_TEST_FILE)}));')"
-check 'Qwen preloader exposes the key only to direct runtime lookup and deletes its handoff' "printf '%s' '$PRELOAD_PROOF' | jq -e '.direct==\"preload-test-secret\" and .has==true and .enumerable==false and .child==\"absent\" and .deleted==true'"
+PRELOAD_PROOF="$(AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout}));')"
+check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and stays strippable for tool children' "printf '%s' '$PRELOAD_PROOF' | jq -e '.direct==\"preload-test-secret\" and .handoffVar==false and .handoffFile==false and .reexec==\"preload-test-secret\" and .toolChild==\"absent\"'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   check 'Qwen runtime home has a private Windows ACL before provider contact' "test -f '$AI_QWEN_HOME/.ai-devops-private-home-v1' && ! icacls.exe \"\$(cygpath -w '$AI_QWEN_HOME')\" | grep -Ei 'BUILTIN\\\\Users|Authenticated Users|Everyone'"
 else
@@ -338,6 +344,7 @@ PATCH="$(/usr/bin/find "$REPO/.ai/reviews" -name 'qwen-impl-1-*.patch' | head -1
 check 'implementation requires Qwen sandbox' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt'"
 check 'implementation preserves the complete shell/write/edit toolset' "grep -q -- '--approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools shell' '$TMP/argv.txt'"
 check 'implementation requires installed child-process credential hardening' "grep -q 'assert_qwen_child_env_hardened || die' '$SCRIPT'"
+check 'every mode, review included, requires installed child-process credential hardening' "grep -A4 '^  assert_qwen_child_env_hardened || die' '$SCRIPT' | grep -q '= review ]'"
 check 'implementation exports a patch' "test -n '$PATCH' && grep -q qwen.txt '$PATCH'"
 check 'implementation does not touch live checkout' "test ! -e '$REPO/qwen.txt'"
 check 'implementation removes disposable worktree' "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
@@ -464,7 +471,8 @@ CREDENTIAL_OUT="$(run new credential-boundary --prompt review 2>&1)"; CREDENTIAL
 unset BASH_ENV ENV
 [ "$CREDENTIAL_RC" -eq 0 ] || printf '  diagnostic: credential boundary: %s\n' "$CREDENTIAL_OUT"
 check 'managed provider call gives op a one-variable reference file' "test \"\$(wc -l < '$TMP/op-env-file' | tr -d ' ')\" = 1 && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' '$TMP/op-env-file'"
-check 'managed Qwen OS environment contains no real provider key' "! grep -q '^BAILIAN_CODING_PLAN_API_KEY=' '$TMP/qwen-env' && ! grep -q 'fake-qwen-only' '$TMP/qwen-env' && ! grep -Eq 'DEVOPS|OP_SERVICE|SUPABASE|RANDOM' '$TMP/qwen-credential-names'"
+check 'the real provider key reaches Qwen only under the one name Qwen strips from its children' "test \"\$(grep -c 'fake-qwen-only' '$TMP/qwen-env')\" = 1 && grep -q '^BAILIAN_CODING_PLAN_API_KEY=fake-qwen-only$' '$TMP/qwen-env' && ! grep -Eq 'DEVOPS|OP_SERVICE|SUPABASE|RANDOM' '$TMP/qwen-credential-names'"
+check 'the Qwen startup relaunch still receives the provider key' "test \"\$(cat '$TMP/qwen-relaunch-key')\" = fake-qwen-only"
 check 'Qwen secret handoff is removed after every provider turn' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
 check 'agent-controlled Qwen children cannot inherit the real provider key' "! grep -q '^BAILIAN_CODING_PLAN_API_KEY=' '$TMP/qwen-tool-child-env' && ! grep -q 'fake-qwen-only' '$TMP/qwen-tool-child-env'"
 check 'real Qwen provider key uses one private self-deleting handoff and is removed before Qwen exec' "grep -q 'chmod 600 \"\$RUN_TURN_SECRET_FILE\"' '$SCRIPT' && grep -q 'unset BAILIAN_CODING_PLAN_API_KEY keep_qwen_key' '$SCRIPT' && grep -q 'AI_QWEN_SECRET_FILE=' '$SCRIPT'"
