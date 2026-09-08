@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-08T00:00:00Z",
+  "method": "Metadata-only GitHub default-branch inventory. The audit reads only declared instruction surfaces; it never opens raw transcripts or licensed source rows.",
+  "disposition": "retain-until-phase-3-routing-migration",
+  "headingOwnership": {
+    "repository purpose and invariants": "repository-fact",
+    "documentation map, task router, or decision tree": "task-route",
+    "credentials, deployment, test, or change procedure": "procedure",
+    "machine, environment, or host fact": "machine-fact",
+    "incident, pending work, or historical decision": "historical-or-live-fact"
+  },
+  "repositories": [
+    {"id":"popcre/ai-devops","surfaces":["AGENTS.md","CLAUDE.md","docs/task-router.md"],"snapshot":[["AGENTS.md",6437,4,"dd93d7423c484c6f921fd6d06269cbd6211758d943806ec28f8a79e537bfce32"],["CLAUDE.md",1139,1,"ada1395914c1e004bc8b5a67672ca84fa8aad9b9ab3adb1fe5ffe0bc063ade4e"],["docs/task-router.md",8683,2,"7325041109f608d7600ca7dbfd12d1888f3c5f6b4883207a7432ab7447cf6e9c"]]},
+    {"id":"popcre/designflow-backend","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",34040,19,"a6e4d5a6ff67d03dd8248bdef6b8575d0423b395135c5fdb705603e6709f9b1f"],["CLAUDE.md",2632,7,"923af26dc8b82660d72e56a800f7c908d1abde97674f327c7afe434f54112f9a"]]},
+    {"id":"popcre/designflow-bff","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",22670,23,"c6d8d0bf56216fb60cea6de99c191a093a7554e2be389b1618e13ef88db9b364"],["CLAUDE.md",1763,6,"cd4dbc5a8e7da154a769e14d668d12b2b9e7a5c4c9bfd6b00d35dc97661b9bef"]]},
+    {"id":"popcre/designflow-data-syncing","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",22917,26,"1e095875319eae75c6788533c2f63b60818319e2a0fc008f5a75200679b85231"],["CLAUDE.md",2438,8,"5d046ec02e0c44900b09851cab69eb2e3b1e101912ce40cb0da9dde3e7e2db73"]]},
+    {"id":"popcre/designflow-frontend","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",60493,29,"3a5074b4b691469d68e2dabfaf3d55975f6b49c7c2fa60a8f09f30c194eec4de"],["CLAUDE.md",3609,7,"b2713c2c6be55db5680c3e8564a7b69e363f0da1b4613c02b33192433b959775"]]},
+    {"id":"popcre/designflow-item-master","surfaces":["AGENTS.md"],"snapshot":[["AGENTS.md",9099,7,"f7c68de982bfcf94b20273ddd998d504554944ea27574db9aeb37c139835eed2"]]},
+    {"id":"popcre/designflow-tracking","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",23496,18,"4098d7764c60607a26117d4eeb813fc60e15d1545018b0861904e1fc55d12a28"],["CLAUDE.md",2452,8,"362027d0ba69a351f871be2a0b2d601541d4be9ca882b6b2788c7ff974982869"]]},
+    {"id":"u2giants/shared-db","surfaces":["AGENTS.md"],"snapshot":[["AGENTS.md",121743,61,"b6855338830079be48594af2b3f7e329e454ed03b08a312bf71ad94182369b74"]]},
+    {"id":"u2giants/theoracle","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",141345,77,"6df0633ce4867c17a25b8ab84276b1df25baba3c1d15efa7f3717a62d75f22ac"],["CLAUDE.md",1782,5,"7455389d652b15a0a2ea48c6e7d6c3a9284c8bf992a88356335a666bf381eea2"]]},
+    {"id":"u2giants/licensor-source-data","surfaces":["HANDOFF.md"],"snapshot":[["HANDOFF.md",606,1,"ca8330074fd98e0e6aeb1a0a803e9d1c486a91fa645424d66877cbe900e77ff7"]]},
+    {"id":"u2giants/ai-devops-transcripts","surfaces":["README.md","claude_chats/README.md","codex_chats/README.md"],"snapshot":[["README.md",813,1,"c2cc3c08bcc0b20d914fd6fd9a99095d61e5c1031bc2776b785186c99b9aedc8"],["claude_chats/README.md",4490,9,"d953e38a192409a293bad26411044c1eac435c222f4fce08726b4b8a65ae5456"],["codex_chats/README.md",761,3,"01278e1b4c1a83e0306586475c755b7b8974e5fa62e604fb65f4b940d17f23b6"]]},
+    {"id":"u2giants/popcrm-web","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",70570,52,"8a34168af251fcee84e8848338212dd28c4dbfd2ab900ec801836fc0d3b463b5"],["CLAUDE.md",1945,1,"e6bb590688c179700646134b0783bfd947459867bc804ec2b5ac1c8b1e0e2d6a"]]},
+    {"id":"u2giants/poppim-web","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",46301,45,"5beb0ae2958b4e626c96ffe777e4715e1ca32c8b6cdeb6c279b77397cea05c48"],["CLAUDE.md",2510,6,"ba050e916f01e5737c5382c8e3b59bd47a5872b8552f76ac7f6477df9ef1225c"]]},
+    {"id":"u2giants/popdam3","surfaces":["AGENTS.md","CLAUDE.md"],"snapshot":[["AGENTS.md",111989,77,"4ee8691a5fb3106eb9f6d293603c8d1d645df9c5df150743dc5c5ace665ba600"],["CLAUDE.md",5664,7,"2b4e1c42d60c5b5ba877acae4f1f3c760d381e073a03c9be03b7c5ac5eb9ccdd"]]},
+    {"id":"u2giants/backrest-wiz","surfaces":["AGENTS.md"],"snapshot":[["AGENTS.md",929,2,"2c10867f26d3822f4de06ec1e9d3bb3f95f9a7f6cd8f6903949219ae2d0758a8"]]},
+    {"id":"popcre/infrastructure","surfaces":["popcre-albert/AGENTS.md"],"snapshot":[["popcre-albert/AGENTS.md",1262,4,"71a7bb487d73ce1d570d7225d01b3593ceb74b1b90fbc6418dda99b4fd172e18"]]},
+    {"id":"u2giants/ansible","surfaces":["AGENTS.md","CLAUDE.md","HANDOFF.md"],"snapshot":[["AGENTS.md",31289,30,"557331cf2adcf129ae1624ced44cb4a2c035ed0a10c5604404d0d99cee96f213"],["CLAUDE.md",1204,3,"4e47db24dc197e7349c9e5eb6ba7421b1da2de00829e6c13424e49c33893689a"],["HANDOFF.md",30394,31,"8b7871da18735598220195f82c036ac47bbc1150e35d5f06a9557e066cdefaba"]]}
+  ]
+}

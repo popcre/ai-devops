@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "description": "Canonical repositories covered by the cross-repository task-gate rollout. Metadata only: this inventory never stores private source rows or transcript content.",
+  "lastVerifiedAt": "2026-09-08T00:00:00Z",
+  "repositories": [
+    {"id":"popcre/ai-devops","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md","docs/task-router.md"],"workflow":"feature-branch-pr","specialGates":["reviewer-safety","installation"]},
+    {"id":"popcre/designflow-backend","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","shared-db-boundary"]},
+    {"id":"popcre/designflow-bff","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","shared-db-boundary"]},
+    {"id":"popcre/designflow-data-syncing","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","shared-db-boundary"]},
+    {"id":"popcre/designflow-frontend","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","ui-live-proof","shared-db-boundary"]},
+    {"id":"popcre/designflow-item-master","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","shared-db-boundary"]},
+    {"id":"popcre/designflow-tracking","defaultBranch":"develop","privacy":"private","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"sandbox-pr","specialGates":["designflow-merge","shared-db-boundary"]},
+    {"id":"u2giants/shared-db","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md"],"workflow":"feature-branch-pr","specialGates":["shared-db-structure","curated-master-data","production-target-proof"]},
+    {"id":"u2giants/theoracle","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"feature-branch-pr","specialGates":["release","migration","licensed-fixture","production-authorization"]},
+    {"id":"u2giants/licensor-source-data","defaultBranch":"main","privacy":"private-licensed","routingFiles":["HANDOFF.md"],"workflow":"main-only","specialGates":["licensed-evidence","shared-db-governed-load"]},
+    {"id":"u2giants/ai-devops-transcripts","defaultBranch":"main","privacy":"private-transcripts","routingFiles":["README.md","claude_chats/README.md","codex_chats/README.md"],"workflow":"main-only","specialGates":["raw-transcript-prohibited"]},
+    {"id":"u2giants/popcrm-web","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"main-only","specialGates":["ui-live-proof","shared-db-boundary","deployment"]},
+    {"id":"u2giants/poppim-web","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"main-only","specialGates":["ui-live-proof","shared-db-boundary","deployment"]},
+    {"id":"u2giants/popdam3","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md"],"workflow":"main-only","specialGates":["ui-live-proof","shared-db-boundary","deployment"]},
+    {"id":"u2giants/backrest-wiz","defaultBranch":"main","privacy":"private","routingFiles":["AGENTS.md"],"workflow":"main-only","specialGates":["deployment","infrastructure"]},
+    {"id":"popcre/infrastructure","defaultBranch":"main","privacy":"private","routingFiles":["popcre-albert/AGENTS.md"],"workflow":"feature-branch-pr","specialGates":["infrastructure","production-authorization"]},
+    {"id":"u2giants/ansible","defaultBranch":"main","privacy":"public","routingFiles":["AGENTS.md","CLAUDE.md","HANDOFF.md"],"workflow":"feature-branch-pr","specialGates":["infrastructure","production-authorization"]}
+  ]
+}

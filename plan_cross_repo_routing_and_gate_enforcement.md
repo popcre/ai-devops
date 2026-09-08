@@ -12,7 +12,7 @@
 
 | Phase | Deliverable | Status | Fresh-session restart point |
 |---|---|---|---|
-| 0 | Freeze the canonical repository inventory and capture routing/gate baselines | OPEN | Start at Step 0.1; re-resolve remotes and default branches before writing |
+| 0 | Freeze the canonical repository inventory and capture routing/gate baselines | COMPLETE — 2026-09-08 inventory evidence | Start at Step 1.1; re-resolve the exact branch head before writing |
 | 1 | Define the shared routing and gate-policy contracts | OPEN | Start at Step 1.1 after Phase 0 evidence is committed |
 | 2 | Implement and qualify the central `ai-devops` engine | OPEN | Start at Step 2.1 with the approved contracts; do not edit consumer repos yet |
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | OPEN | Start at Step 3.1 after exact-head central tests pass |
