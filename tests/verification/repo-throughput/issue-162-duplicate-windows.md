@@ -21,25 +21,24 @@ The schema-2 suite manifest is the assertion map:
   Selection retained any suite that exercises or depends on Git Bash paths,
   CRLF, `cygpath`, `USERPROFILE`/`AppData`, Windows ACLs, PowerShell, native
   process trees, Windows symlink behavior, or Windows installer behavior.
-- `windows_reviewer_safety_bash` owns Codex and Grok review exactly once on an
-  ordinary pull request.
-- `windows_offline_bash` owns the other 21 Windows-sensitive suites. Their
-  measured baseline sum was 3,296 seconds. The remaining 44 Bash suites are
+- `windows_reviewer_safety_bash` names the Codex and Grok early-signal repeat.
+  Issue #260 owns removing that intentional overlap with a failover contract.
+- `windows_offline_bash` owns all 23 Windows-sensitive suites. Their measured
+  baseline sum was 4,763 seconds. The remaining 44 Bash suites are
   still complete on Linux and all full-matrix backstops.
 - `powershell` remains complete discovery: all 18 suites run in every Windows
   offline job.
 
 `tests/test-workflow-policy.sh` proves that discovery and the manifest are
-identical, all three Windows groups are unique subsets, the two ordinary
-Windows groups are disjoint, and their union is the full Windows-sensitive
-set. A stale or duplicate mapping fails closed.
+identical, all Windows groups are unique subsets, hosted Windows equals the
+full Windows-sensitive set, and the reviewer list matches its manifest subset.
+A stale, duplicate, or invalid mapping fails closed.
 
 ## Event map
 
 | Event | Before | After |
 |---|---|---|
-| trusted pull request | all Bash plus all PowerShell in `windows-offline`; Codex/Grok repeated in reviewer lane | 21 offline Windows-sensitive Bash plus all PowerShell; Codex/Grok once in reviewer lane |
-| untrusted fork pull request | complete hosted Windows; reviewer lane blocked | unchanged complete hosted Windows; reviewer lane remains blocked |
+| pull request | all Bash plus all PowerShell in `windows-offline`; Codex/Grok repeated in reviewer lane | 23 Windows-sensitive Bash plus all PowerShell; Codex/Grok early-signal repeat remains owned by #260 |
 | merge group | Linux compatibility gate; both Windows jobs skipped | unchanged; run `34259726634` passed the gate in about 12 minutes |
 | schedule | all Bash plus all PowerShell, plus reviewer lane | unchanged complete backstop |
 | manual | all Bash plus all PowerShell, plus reviewer lane; exact-SHA success reuse | unchanged complete backstop |

@@ -143,14 +143,11 @@ jobs:
           }
       - name: Complete offline Windows and Bash suites
         shell: pwsh
-        env:
-          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          if ($env:GITHUB_EVENT_NAME -eq 'pull_request' -and
-              $env:PR_HEAD_REPOSITORY -eq $env:GITHUB_REPOSITORY) {
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
             .\tests\test-all.ps1 -WindowsPullRequest
           } else {
-            # Scheduled, manual, and untrusted fork verification remain complete.
+            # Scheduled and manual verification remain the complete backstop.
             .\tests\test-all.ps1
           }
 

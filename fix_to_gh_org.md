@@ -412,11 +412,6 @@ blocked self-merges.
 
 ##### Why `windows-reviewer-safety` is NOT a required check
 
-> Historical decision record: issue #162 later removed this duplication for
-> trusted pull requests while preserving complete scheduled, manual,
-> qualification, local, and untrusted-fork Windows runs. The reasoning below
-> describes the pre-#162 workflow.
-
 This was reviewed by GLM (`glm-5.3`) and the reasoning it produced overturned
 the two options that were on the table. **Verified independently before
 acting**, so do not undo it on intuition:

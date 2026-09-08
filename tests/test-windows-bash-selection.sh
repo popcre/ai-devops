@@ -37,5 +37,9 @@ printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-linux-only.sh
 run --windows-offline --list >/dev/null 2>&1; duplicate_rc=$?
 check 'a duplicate Windows assignment fails instead of repeating work' '[ "$duplicate_rc" -eq 2 ]'
 
+printf '{' >"$MANIFEST"
+run --windows-offline --list >/dev/null 2>&1; invalid_rc=$?
+check 'invalid manifest JSON fails with a configuration error' '[ "$invalid_rc" -eq 2 ]'
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
