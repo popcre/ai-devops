@@ -14,6 +14,7 @@ check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
 ai_test_measure_spawn_baseline
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 mkdir -p "$TMP/bin" "$TMP/state" "$TMP/copies"
 
 cat > "$TMP/bin/sandbox" <<'EOF'
@@ -96,6 +97,8 @@ check 'doctor rejects unknown options instead of overstating a live check' "! '$
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
+mkdir -p "$TMP/tools"
+cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$TMP/tools/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"

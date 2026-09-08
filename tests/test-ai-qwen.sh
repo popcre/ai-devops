@@ -16,6 +16,7 @@ ai_test_measure_spawn_baseline
 
 mkdir -p "$REPO_ROOT/.ai"
 TMP="$(mktemp -d "$REPO_ROOT/.ai/qwen-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_QWEN_STATE_DIR="$TMP/state"
 export AI_QWEN_CALLER=codex
 export AI_QWEN_POLL_INTERVAL=1
@@ -136,7 +137,32 @@ printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
 
+# A CLI recorder can supervise the actual review worker. Crash the owner of
+# this fixture's repository lock, then let its supervisor reap it. Never use
+# PID zero as a missing-worker fallback: kill(0) targets the entire test group.
+fixture_pid(){ [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] && [ "$1" -gt 1 ]; }
+crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
+  local supervisor="$1" provider="$2" label="$3" dir worker='' rc=0
+  for dir in "$AI_QWEN_STATE_DIR"/locks/repo--*.lock.d; do
+    [ -f "$dir/label" ] && [ "$(cat "$dir/label")" = "$label" ] || continue
+    worker="$(cat "$dir/pid" 2>/dev/null | tr -d '\r\n')"; break
+  done
+  if ! fixture_pid "$supervisor" || ! fixture_pid "$provider" || ! fixture_pid "$worker"; then
+    bad 'crash fixture requires positive recorded worker and provider identities'
+    if fixture_pid "$supervisor"; then
+      kill -TERM -- "$supervisor" 2>/dev/null || true
+      wait "$supervisor" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  kill -KILL -- "$worker" 2>/dev/null || true
+  kill -KILL -- "$provider" 2>/dev/null || true
+  wait "$supervisor" 2>/dev/null || rc=$?
+  [ "$rc" -ne 0 ] || { bad 'crashed review worker must report a nonzero result'; return 1; }
+}
+
 echo 'ai-qwen tests'
+check 'missing crash worker cannot signal the test process group' '( kill(){ printf called > "$TMP/invalid-crash-signal"; }; wait(){ :; }; crash_recorded_worker 0 0 missing >/dev/null 2>&1; rc=$?; [ "$rc" -ne 0 ] && [ ! -e "$TMP/invalid-crash-signal" ] )'
 check 'syntax is valid' "bash -n '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$QWEN_HOME_DIR/.ai-devops-private-home-v1\" ]' '$SCRIPT'"
 check 'help exits zero' 'run --help'
@@ -270,19 +296,22 @@ cp "$TMP/a-before-live-drift" "$REPO/a.txt"
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" new crash-new --prompt wait >/dev/null 2>&1) & CRASH_NEW_PID=$!
 for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
-CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
+CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'new paid turn is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_NEW_META'"
-kill -KILL "$CRASH_NEW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_NEW_PID" 2>/dev/null || true
+crash_recorded_worker "$CRASH_NEW_PID" "$CRASH_CHILD" review:crash-new || exit 1
 CALLS_AFTER_CRASH_NEW="$(wc -l < "$TMP/argv.txt")"; run new crash-new --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_CRASH_NEW" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'crashed new review cannot be charged again under the same name' || bad 'crashed new review cannot be charged again under the same name'
 
-echo review > "$TMP/mode"; run new crash-followup --prompt review >/dev/null 2>&1
+echo review > "$TMP/mode"
+if ! run new crash-followup --prompt review >/dev/null 2>&1; then
+  bad 'follow-up crash fixture must start before termination is attempted'; exit 1
+fi
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask crash-followup --prompt wait >/dev/null 2>&1) & CRASH_FOLLOW_PID=$!
 for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
-CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || echo 0)"
+CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'follow-up is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_FOLLOW_META'"
-kill -KILL "$CRASH_FOLLOW_PID" 2>/dev/null || true; kill -KILL "$CRASH_CHILD" 2>/dev/null || true; wait "$CRASH_FOLLOW_PID" 2>/dev/null || true
+crash_recorded_worker "$CRASH_FOLLOW_PID" "$CRASH_CHILD" ask:crash-followup || exit 1
 CALLS_AFTER_CRASH_FOLLOW="$(wc -l < "$TMP/argv.txt")"; run ask crash-followup --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_CRASH_FOLLOW" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'crashed follow-up cannot resume the uncertain provider conversation' || bad 'crashed follow-up cannot resume the uncertain provider conversation'
 
@@ -378,7 +407,7 @@ echo "== #1220: silence must never read as APPROVE =="
 # the tail from '## Verdict' (discarding findings that sat above it) and treated a
 # run that ended with no verdict as a review with nothing to say. Exercised
 # directly, because these are pure-text defects.
-sed -n '/^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
+sed -n '/^provider_api_error() {/,/^}/p; /^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
 probe(){ bash -c '. "$1"; ANSWER_DEFECT=""; extract_answer "$2" >/dev/null; printf "%s" "$ANSWER_DEFECT"' _ "$TMP/extract.sh" "$1"; }
 
 printf '%s\n' '{"type":"result","is_error":false,"result":"I have read the files. Let me verify a few things before finalizing findings."}' > "$TMP/noverdict.jsonl"
@@ -392,6 +421,14 @@ check 'a stream with no answer at all is reported as a defect' "printf '%s' \"\$
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding one\n## Verdict\nAPPROVE"}' > "$TMP/good.jsonl"
 GOOD="$(probe "$TMP/good.jsonl")"
 check 'a complete review is NOT flagged as a defect' "[ -z \"\$GOOD\" ]"
+
+printf '%s\n' '{"type":"result","is_error":false,"result":"[API Error: synthetic refusal]"}' > "$TMP/api-error.jsonl"
+API_ERROR="$(probe "$TMP/api-error.jsonl")"
+check 'a terminal provider refusal is classified before verdict parsing' "printf '%s' \"\$API_ERROR\" | grep -q 'provider refused the call'"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"[API Error: synthetic refusal]"}]}}' > "$TMP/assistant-api-error.jsonl"
+cat "$TMP/good.jsonl" >> "$TMP/assistant-api-error.jsonl"
+ASSISTANT_API_ERROR="$(probe "$TMP/assistant-api-error.jsonl")"
+check 'an assistant provider refusal cannot become an approved review' "printf '%s' \"\$ASSISTANT_API_ERROR\" | grep -q 'provider refused the call'"
 
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding\n## Verdict\nMAYBE"}' > "$TMP/invalid-verdict.jsonl"
 INVALID="$(probe "$TMP/invalid-verdict.jsonl")"

@@ -4,15 +4,19 @@
 
 | Step | Status | Updated | Evidence |
 |---|---|---|---|
-| 1. Define the checkpoint and maintenance-round schemas | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
-| 2. Add safe source discovery and bounded interval reading | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
-| 3. Add maintenance-round start, inspect, and complete commands | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
-| 4. Join discovered failures to the incident ledger | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
-| 5. Add tests for normal, concurrent, rotated, truncated, and failed rounds | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
-| 6. Update operating instructions and install the finished tool | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
+| 1. Define the checkpoint and maintenance-round schemas | Implemented; final review pending | 2026-09-07 | Validation in `tools/reviewer_maintenance.py`; focused schema fixtures |
+| 2. Add safe source discovery and bounded interval reading | Implemented; CI pending | 2026-09-07 | Exact JSONL boundaries, prefix/file identity checks, nine-provider invocation journal plus scoreboard |
+| 3. Add maintenance-round start, inspect, and complete commands | Implemented; CI pending | 2026-09-07 | `ai-reviewer-issue maintenance start/show/complete`; immutable records and parent chain |
+| 4. Join discovered failures to the incident ledger | Implemented; CI pending | 2026-09-07 | `classify`, `record`, `carry-forward`; frozen event identities and serialized resolution/completion |
+| 5. Add tests for normal, concurrent, rotated, truncated, and failed rounds | Focused verification in progress | 2026-09-07 | `tests/reviewer_maintenance_cases.py` through existing issue suite; full Windows/Linux CI still pending |
+| 6. Update operating instructions and install the finished tool | Documentation implemented; installation pending | 2026-09-07 | Reviewer-issues guide, shared skill, help and router updated; install only after merge |
 | 7. Independently review, merge, install, and prove the first live round | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
 
-**Fresh-session start:** Step 1. No implementation has started. Read this entire plan before changing code. For a multi-session implementation, re-read all remaining phases before each context cut.
+**Fresh-session start:** Phase 4 verification. Implementation is on isolated branch
+`codex/reviewer-checkpoints-308` in `C:\repos\ai-devops-worktrees\checkpoints-308`.
+Read Sections 6–8 and all remaining qualification steps before proceeding. No
+merge, installation, first real repair-round completion, or issue closure is
+claimed by the implementation statuses above.
 
 **Linked handoff:** [`HANDOFF.d/2026-09-07T1647Z-edge-dev-codex-reviewer-log-checkpoints.md`](HANDOFF.d/2026-09-07T1647Z-edge-dev-codex-reviewer-log-checkpoints.md)
 
@@ -101,6 +105,32 @@ GitHub issue [#308](https://github.com/popcre/ai-devops/issues/308) owns the imp
 8. **Scan indefinitely until logs stop changing. Rejected.** Reviewer activity may be continuous. Each round uses a frozen upper bound; later activity is intentionally deferred.
 
 ## 8. Design decisions already made (2026-09-07)
+
+### Owner-authorized source prerequisite, 2026-09-07
+
+Inventory proved that the seven advisory wrappers do not preserve a complete
+append-only history in their reusable session metadata. Albert explicitly
+authorized including durable recording in this task. All nine registered
+wrappers therefore share a start/terminal invocation journal; existing wrapper
+permissions, provider calls, credential boundaries, report gates, and cancellation
+remain owned by the original wrappers. The scoreboard remains a separate required
+cross-check. Supporting metadata and raw transcripts are not mistaken for an
+append-only event ledger.
+
+The journal establishes forward coverage from installation. It cannot recover
+overwritten earlier turns. The first checkpoint requires a private `legacy_audit`
+of existing evidence, and includes every existing unresolved incident; any unknown
+historical gap prevents a truthful real-world completion. A controlled fixture
+proof demonstrates installation and resumption without asserting a real backlog
+clear. Only the current EDGE-DEV installation is in this task's host scope;
+Windows and Linux CI both remain required, and no fleet-wide checkpoint is claimed.
+
+An unfinished invocation may be explicitly classified `in-progress` with current
+worker evidence. It is carried until its exact terminal event arrives, so freezing
+the interval does not require all reviewers to become idle. Unconfirmed dead
+workers remain findings requiring investigation. Partial incident repairs use a
+separate immutable carry-forward record. Python 3 is reused from the existing
+installer dependency set; the shared helpers stay under `tools/`, owned by #308.
 
 ### LOCKED — do not relitigate
 

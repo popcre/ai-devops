@@ -62,6 +62,7 @@ check "missing local runtime is named distinctly" "grep -q 'local_dependency_una
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 # Git Bash can spell the Network Service temp directory as /tmp while native
 # Windows children report its physical /c/Windows/ServiceProfiles/... path.
 # Keep every fixture, progress fingerprint, and saved review path in one

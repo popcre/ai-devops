@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # ai-codex-review — fail-closed, read-only Codex review of an exact source state.
 set -euo pipefail
+
+# Preserve every invocation outcome before reusable session metadata changes.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+  source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+  reviewer_event_guard codex "$_AI_EVENT_SELF" "$@"
+  unset _AI_EVENT_SELF
+fi
 umask 077
 
 VERSION="2.1.0"

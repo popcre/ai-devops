@@ -10,7 +10,7 @@
 # code or provider sessions.
 set -euo pipefail
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SCRIPT_SOURCE" ]; do
   SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -41,6 +41,17 @@ Usage:
   ai-reviewer-issue list
   ai-reviewer-issue show <issue-id>
   ai-reviewer-issue path
+  ai-reviewer-issue maintenance start [--resume ROUND-ID]
+  ai-reviewer-issue maintenance show
+  ai-reviewer-issue maintenance record ROUND-ID CANDIDATE-ID
+                           --summary TEXT --details-file PATH
+  ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
+                           --issue ISSUE-ID [--carry-forward PATH --evidence PATH]
+  ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
+                           --reason REASON --evidence PATH-OR-URL
+  ai-reviewer-issue maintenance complete ROUND-ID --proof PATH
+  ai-reviewer-issue maintenance carry-forward ROUND-ID CANDIDATE-ID
+                           --remaining PATH --evidence PATH-OR-URL
 
 The record command captures complete matching review reports, recent provider
 logs, reviewer metadata, scoreboard outcome, repository state, and machine facts.
@@ -171,7 +182,7 @@ capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER
 }
 
 record_issue(){
-  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" root now stamp host id report_dir
+  local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" observed_head="" event_sha256="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" metadata_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
   local report_count=0 log_count=0 scoreboard_count=0
   while [ "$#" -gt 0 ]; do
@@ -199,6 +210,10 @@ record_issue(){
     provider="$(jq -r .provider "$lifecycle_state")"; repo="$(jq -r .repository_root "$lifecycle_state")"
     run_id="$(jq -r .run_id "$lifecycle_state")"; session_id="$(jq -r '.session_id // empty' "$lifecycle_state")"
     caller="$(jq -r .caller "$lifecycle_state")"; source_digest="$(jq -r .source_digest "$lifecycle_state")"
+    observed_head="$(jq -r '.head // empty' "$lifecycle_state")"
+    [ -z "$observed_head" ] || [[ "$observed_head" =~ ^[0-9a-fA-F]{40}$ ]] || die "invalid lifecycle head."
+    event_sha256="$(jq -r '.event_sha256 // empty' "$lifecycle_state")"
+    [ -z "$event_sha256" ] || [[ "$event_sha256" =~ ^[0-9a-f]{64}$ ]] || die "invalid event digest."
   fi
   safe_provider "$provider" || die "provider must use only letters, numbers, dot, dash, or underscore."
   [ -n "$summary" ] || die "--summary is required."
@@ -222,7 +237,14 @@ record_issue(){
     remote="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
     status_short="$(git -C "$root" status --short --untracked-files=no 2>/dev/null || true)"
   fi
-  metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller" "$source_digest")" || metadata_status=$?
+  if [ -n "$observed_head" ] && [ "$observed_head" != "$head" ]; then
+    head="$observed_head"; branch=""; status_short=""
+  fi
+  if [ -n "$lifecycle_state" ]; then
+    metadata_source="$lifecycle_state"
+  else
+    metadata_source="$(exact_json "$STATE_BASE/$provider" "$run_id" "$session_id" "$root" "$head" "$caller" "$source_digest")" || metadata_status=$?
+  fi
   if [ -n "$metadata_source" ] && jq -e . "$metadata_source" >/dev/null 2>&1; then
     metadata_copy="$report_dir/reviewer-metadata.redacted.json"
     sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
@@ -266,10 +288,10 @@ record_issue(){
     --arg shell "${SHELL:-unavailable}" --arg metadata_source "$metadata_source" \
     --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
     --arg details_file "$details_file" --arg details "$details" \
-    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" \
+    --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" --arg event_sha256 "$event_sha256" \
     --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" \
     '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
-      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end)},
+      join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end),event_sha256:(if $event_sha256=="" then null else $event_sha256 end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
       repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
       machine:{hostname:$host,os:$os,shell:$shell},
@@ -322,7 +344,7 @@ show_issue(){
 
 resolve_issue(){
   local id="${1:-}" status="" summary="" safe_summary="" details="" details_file="" arg repair_repo="$TOOLKIT_ROOT"
-  local file issue_dir issue_parent resolved_issue resolution_dir resolved_resolution timestamp destination tmp details_tmp commit full reference
+  local file issue_dir issue_parent resolved_issue resolution_dir resolved_resolution timestamp destination tmp details_tmp commit full reference maintenance waited=0
   local -a commits=() evidence=() full_commits=()
   [ -n "$id" ] || die "resolve requires one issue id."
   shift || true
@@ -354,6 +376,18 @@ resolve_issue(){
   issue_parent="$(boundary_dir "$ISSUE_DIR")" || die "cannot resolve reviewer issue directory."
   resolved_issue="$(boundary_dir "$issue_dir")" || die "cannot resolve incident directory: $id"
   [ "$(dirname "$resolved_issue")" = "$issue_parent" ] || die "incident directory escapes reviewer issue storage: $id"
+  # Serialize status changes with checkpoint completion. Concurrent resolvers
+  # retain the existing append-only behavior and wait only for this short audit.
+  maintenance="$ISSUE_DIR/maintenance"
+  [ ! -L "$maintenance" ] || die "refusing linked maintenance storage."
+  mkdir -p "$maintenance"
+  [ "$(dirname "$(boundary_dir "$maintenance")")" = "$issue_parent" ] || die "maintenance storage escapes incident storage."
+  while ! mkdir "$maintenance/.writer-lock" 2>/dev/null; do
+    [ "$waited" -lt 100 ] || die "maintenance writer is busy; retry after its audit."
+    sleep 0.1; waited=$((waited + 1))
+  done
+  RESOLVE_MAINTENANCE_LOCK="$maintenance/.writer-lock"
+  trap 'rmdir "$RESOLVE_MAINTENANCE_LOCK" 2>/dev/null || true' EXIT
   repair_repo="$(git -C "$repair_repo" rev-parse --show-toplevel 2>/dev/null)" || die "repair repository is not a Git working tree."
   for commit in "${commits[@]}"; do
     [[ "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || die "invalid repair commit: $commit"
@@ -399,6 +433,10 @@ resolve_issue(){
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  maintenance)
+    python="$(command -v python3 || command -v python)" || die "maintenance requires Python 3."
+    export AI_REVIEWER_BASH="$BASH"
+    exec "$python" "$TOOLKIT_ROOT/tools/reviewer_maintenance.py" --toolkit "$TOOLKIT_ROOT" --issues "$ISSUE_DIR" "$@" ;;
   record) record_issue "$@" ;;
   resolve) resolve_issue "$@" ;;
   list) [ "$#" -eq 0 ] || die "list takes no arguments."; list_issues ;;

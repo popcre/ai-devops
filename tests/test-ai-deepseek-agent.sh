@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -u
+# Offline fixtures must not inherit a live key or a credential re-entry marker.
+unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
 PASS=0; FAIL=0; SKIP=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
@@ -13,6 +15,7 @@ ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
 skip() { printf '  skip %s\n' "$1"; SKIP=$((SKIP+1)); }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
 git -C "$TMP/repo" init -q; git -C "$TMP/repo" config user.email test@example.com; git -C "$TMP/repo" config user.name Test

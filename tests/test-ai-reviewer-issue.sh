@@ -3,7 +3,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-reviewer-issue"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
@@ -139,5 +139,18 @@ check "ambiguous metadata cannot capture a scoreboard row" "test ! -e '$ambiguou
 check "missing summary is refused" "! $SCRIPT record --provider grok --repo '$TMP/repo'"
 check "unsafe provider name is refused" "! $SCRIPT record --provider '../bad' --summary bad --repo '$TMP/repo'"
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+PYTHON="$(command -v python3 || command -v python)"
+export AI_REVIEWER_BASH="$BASH"
+maintenance_rc=0
+maintenance_counts="$("$PYTHON" "$ROOT/tests/reviewer_maintenance_cases.py")" || maintenance_rc=$?
+maintenance_counts="${maintenance_counts//$'\r'/}"
+if [[ "$maintenance_counts" =~ ^MAINTENANCE_COUNTS[[:space:]]passed=([0-9]+)[[:space:]]failed=([0-9]+)[[:space:]]skipped=([0-9]+)$ ]]; then
+  PASS=$((PASS + BASH_REMATCH[1])); FAIL=$((FAIL + BASH_REMATCH[2])); SKIP=$((SKIP + BASH_REMATCH[3]))
+  if [ "$maintenance_rc" -ne 0 ] && [ "${BASH_REMATCH[2]}" -eq 0 ]; then
+    bad 'maintenance runner failed without a counted test failure'
+  fi
+else
+  bad 'maintenance runner did not return valid assertion counts'
+fi
+printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

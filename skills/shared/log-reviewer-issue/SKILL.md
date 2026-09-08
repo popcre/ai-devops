@@ -42,10 +42,25 @@ diagnose the failure first.
 
 ## Required repair closure
 
-Durable incremental log-scan checkpoints are planned in
+For a maintenance sweep, first run `ai-reviewer-issue maintenance show`, then
+start a round or explicitly resume its active ID. The frozen candidates define
+the interval: classify each against an exact existing incident or use
+`maintenance record` to preserve its event identity and record a new incident.
+Do not start a sweep while merely recording a newly reported failure.
+
+After the closure audit below, use `maintenance complete` with merged repair,
+test, independent-review, installation, and live evidence. A partial repair also
+needs `maintenance carry-forward` with the remaining-work document and proof.
+An unfinished invocation needs current worker proof for `in-progress` and stays
+carried until a terminal event accounts for it. The first round requires a
+private pre-journal audit; new invocation recording cannot reconstruct overwritten
+history. Follow `docs/reviewer-issues.md` for commands and source coverage.
+Resolved incidents remain in place; never create a Markdown archive.
+
+Implementation and installation evidence are tracked in
 `plan_reviewer-log-repair-checkpoints.md` at the ai-devops repository root.
-Read its STATUS table before implementing or changing that workflow. Until it
-is complete, incident status does not prove how far provider logs were scanned.
+Read its STATUS table before changing this workflow. Only completed maintenance
+records prove a scanned boundary; incident status alone never does.
 
 Recording the failure is only the first half of the lifecycle. Whenever you
 claim that reviewer behavior was repaired, close every affected incident in the

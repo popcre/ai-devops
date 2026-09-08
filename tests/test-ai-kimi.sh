@@ -22,6 +22,7 @@ check "missing local runtime is never a provider failure" "grep -q 'PREFLIGHT_CL
 check "local runtime failure says Kimi was not contacted" "grep -q 'LOCAL Kimi runtime.*not a Kimi provider fault' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_KIMI_STATE_DIR="$TMP/state"
 export AI_REVIEW_SANDBOX_DIR="$TMP/review-sandboxes"
 export AI_KIMI_CALLER="claude"
