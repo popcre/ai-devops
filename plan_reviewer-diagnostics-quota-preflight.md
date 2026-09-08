@@ -2,20 +2,21 @@
 
 Owner: reviewer infrastructure, [issue #312](https://github.com/popcre/ai-devops/issues/312).
 Planning baseline: `586de2511d680f2d69e5cd4d550a7d4485ea0c76`, September 7, 2026.
-Implementation is locally complete through step 4 on an isolated branch. Step 5
-remains open until exact-head review, CI, merge, installation, and live proof.
+Implementation completed September 8, 2026 through isolated PR #324, merged as
+`a570069a95d06c271895a33565785c2784e32a8b`, installed and live-qualified on
+EDGE-DEV without overlapping another session's reviewer lane.
 Handoff: [execution brief](HANDOFF.d/2026-09-07T1807Z-edge-dev-codex-reviewer-diagnostics-quota.md).
 
 ## STATUS
 
-| Step | State, September 7 | Evidence needed to mark done |
+| Step | State, September 8 | Completion evidence |
 |---|---|---|
 | 0. Qualify existing interfaces and ownership | local complete | Capability matrix records pinned versions, official sources, unsupported interfaces, and every review dispatch path |
 | 1. Add bounded diagnostic contract | local complete | Lifecycle 38/38 and incident recorder 116/116 with 4 platform skips after the final code rebase |
 | 2. Instrument Kimi, Grok and GLM | local complete | Kimi 218/218, Grok 225/225, and GLM 251/251 after the final Windows lock and exact-run evidence repairs |
 | 3. Implement non-generating quota preflight | local complete | Preflight 78/78 proves tri-state validation, one request, strict scope/freshness, and zero network for unsupported interfaces |
 | 4. Integrate review dispatch | local complete | Provider fixtures prove exhausted Kimi and Grok dispatches submit zero model turns; normal provider suites remain green |
-| 5. Qualify, install and close evidence | in progress | Independent review, merged SHA, CI and controlled live proof |
+| 5. Qualify, install and close evidence | complete | Exact-head Claude Opus approval run `20260908T105928-2146209-12719`; PR #324 required CI and merge; current Windows launchers/skills; installed Kimi, Grok and GLM synthetic APPROVE results; Kimi quota incident `20260907T165823Z-edge-dev-kimi-66135` resolved |
 
 ## 1. Ultimate goal
 
