@@ -1,3 +1,7 @@
+param(
+  [switch]$WindowsPullRequest
+)
+
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $bash = if ($IsWindows) { 'C:\Program Files\Git\bin\bash.exe' } else { (Get-Command bash).Source }
@@ -5,12 +9,15 @@ $pwsh = (Get-Command pwsh).Source
 $failures = 0
 $timings = [System.Collections.Generic.List[object]]::new()
 
-Write-Host '===== COMPLETE OFFLINE BASH SUITE ====='
+$bashScope = if ($WindowsPullRequest) { 'WINDOWS-SENSITIVE' } else { 'COMPLETE' }
+Write-Host "===== $bashScope OFFLINE BASH SUITE ====="
 $started = Get-Date
-& $bash (Join-Path $PSScriptRoot 'test-all.sh')
+$bashArgs = @((Join-Path $PSScriptRoot 'test-all.sh'))
+if ($WindowsPullRequest) { $bashArgs += '--windows-offline' }
+& $bash @bashArgs
 if ($LASTEXITCODE -ne 0) { $failures++ }
 $elapsed = [int]((Get-Date) - $started).TotalSeconds
-$timings.Add([pscustomobject]@{ Seconds = $elapsed; Suite = 'test-all.sh (complete Bash suite)' })
+$timings.Add([pscustomobject]@{ Seconds = $elapsed; Suite = "test-all.sh ($($bashScope.ToLowerInvariant()) Bash suite)" })
 Write-Host "----- BASH SUITE took ${elapsed}s -----"
 
 $tests = @(Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter 'test-*.ps1' |
@@ -29,6 +36,7 @@ Write-Host "`nWINDOWS SUITE TIMINGS slowest-first"
 $timings | Sort-Object Seconds -Descending |
   ForEach-Object { Write-Host ("{0,6} {1}" -f $_.Seconds, $_.Suite) }
 
-Write-Host "`nOFFLINE COMPLETE SUMMARY bash=1 powershell=$($tests.Count) failures=$failures"
+$bashSummaryScope = $bashScope.ToLowerInvariant()
+Write-Host "`nOFFLINE COMPLETE SUMMARY bash=1 bash_scope=$bashSummaryScope powershell=$($tests.Count) failures=$failures"
 if ($failures -ne 0) { exit 1 }
 exit 0
