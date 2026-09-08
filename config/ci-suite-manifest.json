@@ -54,6 +54,7 @@
     "test-pop-business-rules-skill.sh",
     "test-public-boundary.sh",
     "test-repository-policy.sh",
+    "test-repository-coverage.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
     "test-shared-db-routing-rules.sh",
