@@ -28,12 +28,14 @@ Self-hosting fixes two separate things:
 The cost is real and accepted: verification only happens while that machine is on
 and logged in.
 
-### The hosted lane still runs these suites, and still goes red at random
+### Why the reviewer suites have their own lane
 
-`windows-offline` runs on GitHub-hosted `windows-2025` and executes the full Bash
-suite, so it re-runs the reviewer suites that `windows-reviewer-safety` already
-proves on the qualified pool. On the hosted image that is intermittently red on
-`main` itself, with a recognisable signature:
+For trusted pull-request branches, `windows-offline` runs the Windows-sensitive
+Bash set except Codex and Grok; `windows-reviewer-safety` owns those two suites
+on the qualified pool. Scheduled, manual, qualification, and untrusted-fork
+runs retain the complete hosted Windows Bash matrix. Before issue #162, the two
+reviewer suites also ran in every hosted pull-request matrix and intermittently
+went red on `main` itself with a recognisable signature:
 
 - `test-ai-grok-review.sh` takes 2000s or more against a ~650s green baseline,
   and total `BASH SUITE TIMINGS seconds=` lands near 5700-5800 instead of ~4400.

@@ -72,10 +72,13 @@
   ],
   "windows_sensitive_bash": [
     "test-ai-adopt-globals.sh",
+    "test-ai-claude-permissions.sh",
+    "test-ai-claude-review.sh",
     "test-ai-codex-memories.sh",
     "test-ai-codex-review.sh",
     "test-ai-deepseek-agent.sh",
     "test-ai-gemini.sh",
+    "test-ai-gemini-usage.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -89,6 +92,7 @@
     "test-install-ai-provider-clis.sh",
     "test-installer-parity.sh",
     "test-line-endings.sh",
+    "test-mcp-launch-lock.sh",
     "test-windows-scripts.sh"
   ],
   "windows_reviewer_safety_bash": [
@@ -97,9 +101,12 @@
   ],
   "windows_offline_bash": [
     "test-ai-adopt-globals.sh",
+    "test-ai-claude-permissions.sh",
+    "test-ai-claude-review.sh",
     "test-ai-codex-memories.sh",
     "test-ai-deepseek-agent.sh",
     "test-ai-gemini.sh",
+    "test-ai-gemini-usage.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-install-skills.sh",
@@ -112,6 +119,7 @@
     "test-install-ai-provider-clis.sh",
     "test-installer-parity.sh",
     "test-line-endings.sh",
+    "test-mcp-launch-lock.sh",
     "test-windows-scripts.sh"
   ],
   "powershell": [
