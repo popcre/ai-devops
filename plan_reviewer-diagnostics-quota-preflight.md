@@ -5,7 +5,7 @@ Planning baseline: `586de2511d680f2d69e5cd4d550a7d4485ea0c76`, September 7, 2026
 Implementation completed September 8, 2026 through isolated PR #324, merged as
 `a570069a95d06c271895a33565785c2784e32a8b`, installed and live-qualified on
 EDGE-DEV without overlapping another session's reviewer lane.
-Handoff: [execution brief](HANDOFF.d/2026-09-07T1807Z-edge-dev-codex-reviewer-diagnostics-quota.md).
+Handoff: the execution brief `HANDOFF.d/2026-09-07T1807Z-edge-dev-codex-reviewer-diagnostics-quota.md` was retired in `eb3a87bc`; git history preserves it.
 
 ## STATUS
 

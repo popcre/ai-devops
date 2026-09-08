@@ -123,6 +123,35 @@ the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
 provider qualification must live under `tests/probes/` and remains an explicit
 release gate, never CI.
 
+### Running only the relevant suites
+
+`bash tests/test-all.sh` with no arguments still runs every Bash suite and is
+the authoritative local gate. While diagnosing one failed check, narrow the run
+instead of paying for the whole set:
+
+```bash
+bash tests/test-all.sh --only grok-review
+```
+
+`--only <pattern>` matches the suite file name as a substring and fails with
+exit 2 when nothing matches, so a typo never looks like a clean run. Add
+`--list` to any invocation to print the selection without executing it.
+
+```bash
+bash tests/test-all.sh --changed-since origin/main
+```
+
+`--changed-since <ref>` classifies the changed paths with the same
+`tools/ci/classify-changes.sh` that routes CI, then maps them onto coarse
+categories: a documentation-only range selects no suite and says so; a
+`skills/` change selects the skills-facing suites; a `.github/workflows/`
+change selects the workflow-policy suites; a PowerShell-only change selects no
+Bash suite and points at `tests/test-all.ps1`; anything else selects every
+suite. This is deliberately coarse - there is no per-suite dependency graph -
+so a narrowed run is a fast first signal, never a substitute for the complete
+run before shipping. `tests/lib-selection.sh` holds the logic and
+`tests/test-test-selection.sh` proves it in the fast workflow.
+
 `tests/test-session-conduct-policy.sh` protects the bounded CI-waiting and
 shared-infrastructure growth rules. Update that test with any deliberate change
 to those standing rules; do not weaken it simply to shorten guidance.
