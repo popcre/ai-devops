@@ -108,6 +108,7 @@ IMPL_AGENT="${AI_KIMI_IMPL_AGENT:-$SELF_DIR/../config/kimi/local-implement.md}"
 REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$SELF_DIR/ai-review-preflight}"
 REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$SELF_DIR/ai-review-lifecycle}"
 CAPACITY_JSON=''
+ACTIVE_DIAG_STARTED_EPOCH=0
 
 die()  { printf 'ai-kimi: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-kimi: warning: %s\n' "$*" >&2; }
@@ -128,12 +129,15 @@ capacity_gate() {
 }
 
 record_diagnostic() { # REPO RUN SESSION PHASE OBSERVATION [EXTRA...]
-  local repo="$1" run="$2" session="$3" phase="$4" observation="$5" quota=""; local -a args; shift 5
+  local repo="$1" run="$2" session="$3" phase="$4" observation="$5" quota="" now elapsed=0; local -a args; shift 5
   if [ -n "$CAPACITY_JSON" ]; then
     if ! quota="$(mktemp "$STATE_DIR/.capacity.XXXXXX" 2>/dev/null)"; then warn 'Kimi diagnostic evidence could not create private temporary storage; the review result is unchanged.'; return 0; fi
     if ! printf '%s\n' "$CAPACITY_JSON" > "$quota"; then rm -f "$quota"; warn 'Kimi diagnostic evidence could not be staged; the review result is unchanged.'; return 0; fi
   fi
-  args=(observe --provider kimi --repo "$repo" --run-id "$run" --session-id "$session" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed 0)
+  if [[ "$ACTIVE_DIAG_STARTED_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACTIVE_DIAG_STARTED_EPOCH" -gt 0 ]; then
+    now="$(date +%s)"; elapsed="$((now - ACTIVE_DIAG_STARTED_EPOCH))"; [ "$elapsed" -ge 0 ] || elapsed=0
+  fi
+  args=(observe --provider kimi --repo "$repo" --run-id "$run" --session-id "$session" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed "$elapsed")
   [ -z "$quota" ] || args+=(--quota-file "$quota"); args+=("$@")
   "$REVIEW_LIFECYCLE_BIN" "${args[@]}" >/dev/null 2>&1 \
     || warn 'Kimi diagnostic evidence could not be recorded; the review result is unchanged.'
@@ -981,19 +985,20 @@ write_job_state() { # META JSON-PATCH
 }
 
 create_review_job() { # NAME REPO RID MODE SESSION-ID PROMPT-FILE
-  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid stamp canonical upstream
+  local name="$1" repo="$2" rid="$3" mode="$4" sid="$5" pf="$6" dir meta now jobid stamp canonical upstream diagid diag_epoch
   dir="$(job_dir "$rid" "$name")"; meta="$dir/job.json"
   mkdir -p "$dir" || die "could not create durable Kimi job state."
   chmod 0700 "$dir" 2>/dev/null || true
-  now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"; upstream="$(require_upstream_identity "$repo")"
+  now="$(date -u +%FT%TZ)"; jobid="${rid}-${CALLER}-${name}"; upstream="$(require_upstream_identity "$repo")"; diag_epoch="$(date +%s)"
+  diagid="$(printf '%s\n%s\n%s\n' "$jobid" "$diag_epoch" "$$-$RANDOM" | sha256sum | cut -c1-32)"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"; canonical="$dir/review-$stamp.md"
   write_meta "$meta" "$(jq -n --arg id "$jobid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg upstream "$upstream" \
     --arg head "$(git -C "$repo" rev-parse HEAD)" --arg caller "$CALLER" --arg name "$name" --arg mode "$mode" \
-    --arg sid "$sid" --arg model "$KIMI_MODEL" --arg home_hash "$(safe_home_hash)" --arg created "$now" \
+    --arg sid "$sid" --arg model "$KIMI_MODEL" --arg home_hash "$(safe_home_hash)" --arg created "$now" --arg diagnostic "$diagid" --argjson diag_epoch "$diag_epoch" \
     --arg out "$dir/stream.jsonl" --arg log "$dir/worker.log" --arg canonical "$canonical" --arg cancel "$dir/cancel.request" \
     '{version:1,job_id:$id,repo:$repo,repo_remote:$remote,upstream_identity:$upstream,head:$head,caller:$caller,name:$name,mode:$mode,
       kimi_session_id:(if $sid=="" then null else $sid end),model:$model,kimi_home_sha256:$home_hash,
-      created:$created,updated:$created,phase:"preflight",worker_pid:null,kimi_child_pid:null,
+      created:$created,updated:$created,phase:"preflight",diagnostic_run_id:$diagnostic,diagnostic_started_epoch:$diag_epoch,worker_pid:null,kimi_child_pid:null,
       last_output_at:null,last_output_size:0,terminal_reason:null,exit_code:null,
       cancel_request:$cancel,artifact_paths:{stream:$out,log:$log,canonical:$canonical,repository:null},
       artifact_kind:null,artifact_sha256:null,quota_result:null}')"
@@ -1122,7 +1127,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
   local dir="$1" pf="$2" meta out repo workdir repo_lock owned_repo_lock name mode sid before source_before rc reason new_sid stale=false provider_started provider_seconds defect terminal_phase diag_run
   meta="$dir/job.json"; [ -f "$meta" ] || exit 2
   repo="$(jq -r .repo "$meta")"; name="$(jq -r .name "$meta")"; mode="$(jq -r .mode "$meta")"
-  diag_run="$(jq -r .job_id "$meta")"; CAPACITY_JSON="$(jq -c '.quota_result // empty' "$meta")"
+  diag_run="$(jq -r '.diagnostic_run_id // .job_id' "$meta")"; ACTIVE_DIAG_STARTED_EPOCH="$(jq -r '.diagnostic_started_epoch // 0' "$meta")"; CAPACITY_JSON="$(jq -c '.quota_result // empty' "$meta")"
   workdir="$(jq -r '.review_workspace // .repo' "$meta")"
   repo_lock="$(jq -r '.repo_lock // ""' "$meta")"
   owned_repo_lock="$repo_lock"
@@ -1216,7 +1221,7 @@ review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 start_review_job() { # NAME [CONTINUE]
-  local name="$1" cont="${2:-0}" repo rid upstream lockid existing sid stored_upstream recorded_workspace="" pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase
+  local name="$1" cont="${2:-0}" repo rid upstream lockid existing sid stored_upstream recorded_workspace="" pf dir pid repo_lock prep_started prep_seconds source_before_prepare startup_waited=0 phase diag_run
   valid_name "$name" || die "invalid session name '$name' (letters, digits, . _ -)"
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; dir="$(job_dir "$rid" "$name")"
   if [ -f "$dir/job.json" ] && ! job_is_terminal "$dir/job.json"; then
@@ -1261,16 +1266,23 @@ start_review_job() { # NAME [CONTINUE]
   chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
   create_review_job "$name" "$repo" "$rid" review "$sid" "$pf"
   write_job_state "$dir/job.json" --argjson quota "$CAPACITY_JSON" '.quota_result=$quota'
-  record_diagnostic "$repo" "$rid-$CALLER-$name" "$name" preflight capacity-checked
+  diag_run="$(jq -r .diagnostic_run_id "$dir/job.json")"; ACTIVE_DIAG_STARTED_EPOCH="$(jq -r .diagnostic_started_epoch "$dir/job.json")"
+  record_diagnostic "$repo" "$diag_run" "$name" preflight capacity-checked
   write_job_state "$dir/job.json" --arg workspace "$REVIEW_DIR" --arg lock "$repo_lock" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg packet "$PACKET_HASH" --arg kind "$OPT_REVIEW_KIND" --argjson prep "$prep_seconds" --argjson snapshot "$REVIEW_SNAPSHOT_SECONDS" --argjson packet_seconds "$REVIEW_PACKET_SECONDS" --argjson tests "$REVIEW_TEST_SECONDS" '.review_workspace=$workspace|.repo_lock=$lock|.base=$base|.head=$head|.packet_sha256=$packet|.review_kind=$kind|.timing={snapshot_seconds:$snapshot,test_seconds:$tests,packet_seconds:$packet_seconds,pre_provider_seconds:$prep,provider_seconds:null,model_steps:"unavailable"}'
   if ! pid="$(launch_review_worker "$dir" "$pf")"; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
-    record_diagnostic "$repo" "$rid-$CALLER-$name" "$name" terminal worker-start-failed --failure-class worker-start-failed --cancellation-confirmation not-requested
+    record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-failed --cancellation-confirmation not-requested
     cleanup_review_transients "$dir" "$pf"
     die "could not start durable Kimi worker"
   fi
-  [ -n "$pid" ] || { lock_release "$repo_lock"; write_job_state "$dir/job.json" '.phase="failed"|.terminal_reason="worker-start-failed"'; cleanup_review_transients "$dir" "$pf"; die "could not start durable Kimi worker"; }
+  if [ -z "$pid" ]; then
+    lock_release "$repo_lock"
+    write_job_state "$dir/job.json" '.phase="failed"|.terminal_reason="worker-start-failed"'
+    record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-failed --cancellation-confirmation not-requested
+    cleanup_review_transients "$dir" "$pf"
+    die "could not start durable Kimi worker"
+  fi
   while [ "$startup_waited" -lt "$STARTUP_TIMEOUT" ]; do
     phase="$(jq -r .phase "$dir/job.json")"
     [ "$phase" != preflight ] && break
@@ -1279,6 +1291,7 @@ start_review_job() { # NAME [CONTINUE]
   if [ "${phase:-preflight}" = preflight ]; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
+    record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-ack-timeout --deadline-kind startup-timeout --cancellation-confirmation not-requested
     # The detached bootstrap exceeded the bounded acknowledgement window.
     # Removing its exact prompt makes an abnormally late worker fail closed
     # before contacting Kimi; run_turn refuses a missing or empty prompt.

@@ -43,6 +43,7 @@ check "both GLM review dispatches gate capacity before send_prompt" "test \"\$(g
 check "GLM diagnostics distinguish local health and permission transport" "grep -q 'local-health-timeout' '$AI_GLM' && grep -q 'permission-endpoint-timeout' '$AI_GLM'"
 check "GLM review health observation preserves the prior 30-second tolerance" "grep -q 'AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT:-30' '$AI_GLM'"
 check "GLM submission transport failure records terminal truth" "test \"\$(grep -c 'terminal provider-submit-failed' '$AI_GLM')\" -eq 2"
+check "GLM diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$AI_GLM' && ! grep -q -- '--elapsed 0' '$AI_GLM'"
 GLM_CAP_NOW="$(date -u +%FT%TZ)"
 GLM_EXHAUSTED="$(jq -nc --arg now "$GLM_CAP_NOW" '{schema_version:1,provider:"glm",state:"exhausted",checked_at:$now,provider_version:"opencode-1.18.12",credential_profile_scope:"fixture-profile",model_scope:"zai-coding-plan/glm-5.3",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
 GLM_CAP_RC="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_RESPONSE="$GLM_EXHAUSTED" AI_REVIEW_PREFLIGHT_BIN="$REPO_ROOT/bin/ai-review-preflight" AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; set +e; capacity_gate >/dev/null 2>&1; printf "%s" "$?"')"

@@ -135,6 +135,7 @@ ACTIVE_TURN_RECORD=''
 ACTIVE_DIAG_REPO=''
 ACTIVE_DIAG_RUN=''
 ACTIVE_DIAG_SESSION=''
+ACTIVE_DIAG_STARTED_EPOCH=0
 PENDING_REVIEW_BASE=''
 PENDING_REVIEW_DIR=''
 PROMPT_BODY_DIGEST=''
@@ -162,7 +163,7 @@ capacity_gate() {
 }
 
 record_diagnostic() { # REPO RUN SESSION PHASE OBSERVATION [EXTRA...]
-  local repo="$1" run="$2" session="$3" phase="$4" observation="$5" quota=""; local -a args; shift 5
+  local repo="$1" run="$2" session="$3" phase="$4" observation="$5" quota="" now elapsed=0; local -a args; shift 5
   if ! quota="$(mktemp "$STATE_DIR/.capacity.XXXXXX" 2>/dev/null)"; then
     warn 'Grok diagnostic evidence could not create private temporary storage; the review result is unchanged.'
     return 0
@@ -170,7 +171,10 @@ record_diagnostic() { # REPO RUN SESSION PHASE OBSERVATION [EXTRA...]
   if ! printf '%s\n' "$CAPACITY_JSON" > "$quota"; then
     rm -f "$quota"; warn 'Grok diagnostic evidence could not be staged; the review result is unchanged.'; return 0
   fi
-  args=(observe --provider grok --repo "$repo" --run-id "$run" --session-id "$session" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed 0 --quota-file "$quota"); args+=("$@")
+  if [[ "$ACTIVE_DIAG_STARTED_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACTIVE_DIAG_STARTED_EPOCH" -gt 0 ]; then
+    now="$(date +%s)"; elapsed="$((now - ACTIVE_DIAG_STARTED_EPOCH))"; [ "$elapsed" -ge 0 ] || elapsed=0
+  fi
+  args=(observe --provider grok --repo "$repo" --run-id "$run" --session-id "$session" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed "$elapsed" --quota-file "$quota"); args+=("$@")
   "$REVIEW_LIFECYCLE_BIN" "${args[@]}" >/dev/null 2>&1 || warn 'Grok diagnostic evidence could not be recorded; the review result is unchanged.'
   rm -f "$quota"
   return 0
@@ -1406,6 +1410,7 @@ cmd_new() {
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" new "$name" "$GROK_MODEL" "$source_id" "$prompt_digest" 1)"; rid_lock="$(work_lock_path "$workid")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   if ! capacity_gate; then release_boundary "$repo" "grok-$name"; rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
   record_diagnostic "$repo" "$workid" "$name" preflight capacity-checked
   if ! reserve_new_session "$upstream" "$name" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
@@ -1525,6 +1530,7 @@ $REVIEW_HEAD only."
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   if ! capacity_gate; then rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
   record_diagnostic "$repo" "$workid" "$name" preflight capacity-checked
   if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi

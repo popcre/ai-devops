@@ -22,6 +22,8 @@ check "missing local runtime is never a provider failure" "grep -q 'PREFLIGHT_CL
 check "local runtime failure says Kimi was not contacted" "grep -q 'LOCAL Kimi runtime.*not a Kimi provider fault' '$SCRIPT'"
 check "exhausted capacity fails before a Kimi review job is created" "sed -n '/start_review_job()/,/create_review_job/p' '$SCRIPT' | awk '/capacity_gate/{gate=NR} /create_review_job/{create=NR} END{exit !(gate>0 && create>gate)}' && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "worker launch failure records a terminal diagnostic" "grep -q 'terminal worker-start-failed.*failure-class worker-start-failed' '$SCRIPT'"
+check "every Kimi startup failure path records terminal evidence" "test \"\$(grep -c 'terminal worker-start-failed' '$SCRIPT')\" -eq 3"
+check "Kimi diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -150,6 +152,9 @@ run wait capacity-available >/dev/null 2>&1
 KIMI_AVAILABLE_AFTER="$(turn_count)"
 check "available Kimi capacity submits exactly one model turn" "test '$KIMI_AVAILABLE_AFTER' -eq $((KIMI_AVAILABLE_BEFORE + 1))"
 check "available Kimi capacity is retained with the job" "run status capacity-available | jq -e '.quota_result.state==\"available\" and .quota_result.credential_profile_scope==\"fixture-profile\"'"
+KIMI_AVAILABLE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--capacity-available/job.json' -print -quit)"
+check "Kimi diagnostics use a unique exact-run id instead of the reusable job id" "jq -e '.diagnostic_run_id | test(\"^[0-9a-f]{32}$\")' '$KIMI_AVAILABLE_META' && test \"\$(jq -r .diagnostic_run_id '$KIMI_AVAILABLE_META')\" != \"\$(jq -r .job_id '$KIMI_AVAILABLE_META')\""
+check "Kimi exact-run diagnostics retain measured nonnegative elapsed time" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$KIMI_AVAILABLE_META')\"'\" and any(.events[]; .last_observation_type==\"capacity-checked\" and .elapsed_seconds>=0))' {} + | grep -q capacity-checked"
 
 # --- measured timing budgets --------------------------------------------------
 # Every wait ceiling below is derived from one measured wrapper round trip
@@ -315,6 +320,7 @@ OUT="$(AI_KIMI_TEST_FAIL_WORKER_START=1 run start worker-start-failure --prompt 
 [ $RC -ne 0 ] && ok "detached launch failure refuses immediately" || bad "detached launch failure refuses immediately"
 check "detached launch failure is durable and typed" "run status worker-start-failure | jq -e '.phase == \"failed\" and .terminal_reason == \"worker-start-failed\"'"
 WORKER_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--worker-start-failure/job.json' -print -quit)"
+check "detached launch failure retains its exact terminal diagnostic" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$WORKER_FAIL_META')\"'\" and .terminal_summary.phase==\"terminal\" and .terminal_summary.failure_class==\"worker-start-failed\")' {} + | grep -q worker-start-failed"
 check "detached launch failure removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$WORKER_FAIL_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
 check "pre-worker shell errors are covered by the transient cleanup trap" "grep -A6 'pf=.*mktemp.*.kimi-prompt' '$SCRIPT' | grep -q 'trap.*cleanup_review_transients'"
 OUT="$(run start missing-prompt-file --prompt-file "$TMP/not-present" 2>&1)"; RC=$?

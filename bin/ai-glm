@@ -83,7 +83,7 @@ WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
 REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
 CAPACITY_JSON=''
-ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''
+ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''; ACTIVE_DIAG_STARTED_EPOCH=0
 
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
@@ -124,8 +124,11 @@ capacity_gate() {
 
 record_diagnostic() { # PHASE OBSERVATION [EXTRA...]
   [ -n "$ACTIVE_DIAG_RUN" ] || return 0
-  local phase="$1" observation="$2" quota=""; local -a args; shift 2
-  args=(observe --provider glm --repo "$ACTIVE_DIAG_REPO" --run-id "$ACTIVE_DIAG_RUN" --session-id "$ACTIVE_DIAG_SESSION" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed 0)
+  local phase="$1" observation="$2" quota="" now elapsed=0; local -a args; shift 2
+  if [[ "$ACTIVE_DIAG_STARTED_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACTIVE_DIAG_STARTED_EPOCH" -gt 0 ]; then
+    now="$(date +%s)"; elapsed="$((now - ACTIVE_DIAG_STARTED_EPOCH))"; [ "$elapsed" -ge 0 ] || elapsed=0
+  fi
+  args=(observe --provider glm --repo "$ACTIVE_DIAG_REPO" --run-id "$ACTIVE_DIAG_RUN" --session-id "$ACTIVE_DIAG_SESSION" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed "$elapsed")
   if printf '%s\n' "$CAPACITY_JSON" | jq -e '.schema_version==1' >/dev/null 2>&1; then
     if ! quota="$(mktemp "$STATE_DIR/.capacity.XXXXXX" 2>/dev/null)"; then warn 'GLM diagnostic evidence could not create private temporary storage; the review result is unchanged.'; return 0; fi
     if ! printf '%s\n' "$CAPACITY_JSON" > "$quota"; then rm -f "$quota"; warn 'GLM diagnostic evidence could not be staged; the review result is unchanged.'; return 0; fi
@@ -1014,7 +1017,7 @@ cmd_new() {
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
   rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
-  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"
+  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
   lock="$(lock_path "$rid" "$name")"
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
@@ -1056,7 +1059,7 @@ cmd_new() {
 cmd_ask() {
   local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
-  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"
+  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
   [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
   sid="$(jq -r .opencode_session_id "$mp")"

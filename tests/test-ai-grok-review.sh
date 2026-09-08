@@ -63,6 +63,7 @@ check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider 
 check "both Grok dispatches gate capacity before exact-work reservation" "test \"\$(grep -c 'if ! capacity_gate' '$SCRIPT')\" -eq 2 && test \"\$(grep -c 'record_diagnostic.*capacity-checked' '$SCRIPT')\" -eq 2 && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
 check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
+check "Grok diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -792,6 +793,21 @@ mkdir -p "$MSYS_VISIBLE_LOCK"; printf '99999999\n' > "$MSYS_VISIBLE_LOCK/pid"; p
 check "Windows process-table witness prevents reclaim when kill cannot see the live supervisor" \
   "test '$MSYS_VISIBLE_RC' -ne 0 && grep -q -x '99999999' '$MSYS_VISIBLE_LOCK/pid'"
 rm -rf "$MSYS_VISIBLE_LOCK"
+FINISHED_EVENT_DIR="$TMP/finished-events"; mkdir -p "$FINISHED_EVENT_DIR"
+FINISHED_EVENT_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+printf '{"run_id":"%s","event":"started"}\n{"run_id":"%s","event":"finished"}\n' "$FINISHED_EVENT_ID" "$FINISHED_EVENT_ID" > "$FINISHED_EVENT_DIR/events.jsonl"
+FINISHED_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--finished-supervisor.lock.d"
+mkdir -p "$FINISHED_SESSION_LOCK"; printf '99999999\n' > "$FINISHED_SESSION_LOCK/pid"; printf '99999998\n' > "$FINISHED_SESSION_LOCK/supervisor-pid"; printf '%s\n' "$FINISHED_EVENT_ID" > "$FINISHED_SESSION_LOCK/event-run-id"; printf 'ask:finished-supervisor\n' > "$FINISHED_SESSION_LOCK/label"
+(
+  . "$TMP/lib.sh"
+  AI_REVIEW_EVENT_DIR="$FINISHED_EVENT_DIR"
+  uname() { printf 'Linux\n'; }
+  kill() { return 1; }
+  session_lock_acquire "$FINISHED_SESSION_LOCK" ask:replacement
+) >/dev/null 2>&1; FINISHED_SESSION_RC=$?
+check "terminal invocation evidence permits safe supervised stale-lock recovery" \
+  "test '$FINISHED_SESSION_RC' -eq 0 && ! grep -q -x '99999999' '$FINISHED_SESSION_LOCK/pid'"
+rm -rf "$FINISHED_SESSION_LOCK"
 run new stale-session --prompt x >/dev/null 2>&1
 STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_SESSION_ID="$(printf 'grok\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" stale-session | sha256sum | cut -c1-24)"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--$STALE_SESSION_ID.lock.d"
 mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid"; printf 'ask:stale-session\n' > "$STALE_SESSION_LOCK/label"

@@ -12,7 +12,7 @@ Handoff: [execution brief](HANDOFF.d/2026-09-07T1807Z-edge-dev-codex-reviewer-di
 |---|---|---|
 | 0. Qualify existing interfaces and ownership | local complete | Capability matrix records pinned versions, official sources, unsupported interfaces, and every review dispatch path |
 | 1. Add bounded diagnostic contract | local complete | Lifecycle 38/38 and incident recorder 116/116 with 4 platform skips after the final code rebase |
-| 2. Instrument Kimi, Grok and GLM | local complete | Kimi 213/213, Grok 223/223, and GLM 250/250 after the final Windows lock repair |
+| 2. Instrument Kimi, Grok and GLM | local complete | Kimi 218/218, Grok 225/225, and GLM 251/251 after the final Windows lock and exact-run evidence repairs |
 | 3. Implement non-generating quota preflight | local complete | Preflight 78/78 proves tri-state validation, one request, strict scope/freshness, and zero network for unsupported interfaces |
 | 4. Integrate review dispatch | local complete | Provider fixtures prove exhausted Kimi and Grok dispatches submit zero model turns; normal provider suites remain green |
 | 5. Qualify, install and close evidence | in progress | Independent review, merged SHA, CI and controlled live proof |
