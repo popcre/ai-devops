@@ -163,15 +163,17 @@ qwen_runtime_root() {
 }
 
 qwen_runtime_sha256() {
-  local root file rel hash node=""
+  local root node="" node_rel
   root="$(qwen_runtime_root)" || return 1
   if [ -x "$root/node/bin/node" ]; then node="$root/node/bin/node"
   elif [ -x "$root/node/node.exe" ]; then node="$root/node/node.exe"
   else return 1; fi
-  {
-    while IFS= read -r -d '' file; do rel="${file#"$root"/}"; hash="$(sha256_file "$file")" || exit 1; printf '%s  %s\n' "$hash" "$rel"; done < <(find "$root/bin" "$root/lib" -type f -print0 | sort -z)
-    printf '%s  %s\n' "$(sha256_file "$node")" "${node#"$root"/}"
-  } | sha256sum | awk '{print $1}'
+  node_rel="${node#"$root"/}"
+  # Hash every runtime entry and its relative path in one normalized stream.
+  # The former one-process-per-file manifest took minutes on Windows.
+  (cd "$root" && tar --format=gnu --sort=name --mtime=@0 --owner=0 --group=0 \
+    --numeric-owner --mode=go-rwx,u+rwX -cf - bin lib "$node_rel") \
+    | sha256sum | awk '{print $1}'
 }
 
 qwen_preloader_sha256() {
@@ -929,7 +931,7 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen list | show <name> | transcript <name> | delete <name>
-  ai-qwen doctor [--live]
+  ai-qwen doctor [--identity | --live]
 
 'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
 read-only for reviews, but an implementation continuation (write run) for an
@@ -976,8 +978,16 @@ doctor_worktrees() {
 }
 
 cmd_doctor() {
-  local live=0 qwen rc=0 runtime_sha="" preloader_sha=""
-  [ "${1:-}" = "--live" ] && live=1
+  local mode="${1:-}" live=0 qwen rc=0 runtime_sha="" preloader_sha=""
+  if [ "$mode" = "--identity" ]; then
+    runtime_sha="$(qwen_runtime_sha256)" && [ -n "$runtime_sha" ] \
+      || die 'installed Qwen runtime identity is unavailable.'
+    preloader_sha="$(qwen_preloader_sha256)" && [ -n "$preloader_sha" ] \
+      || die 'Qwen credential-preloader identity is unavailable.'
+    printf 'IDENTITY runtime_sha256=%s preloader_sha256=%s\n' "$runtime_sha" "$preloader_sha"
+    return 0
+  fi
+  [ "$mode" = "--live" ] && live=1
   secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before checking the session store.'
   need jq; qwen="$(resolve_qwen)"
   echo "qwen binary   : $qwen"
@@ -1676,13 +1686,14 @@ cmd_reset_context() {
 
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
-ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_LIVE=""
+ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_LIVE=""; OPT_IDENTITY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
     --json)        OPT_JSON=1; shift ;;
     --live)        OPT_LIVE="--live"; shift ;;
+    --identity)    OPT_IDENTITY="--identity"; shift ;;
     -h|--help)     usage; exit 0 ;;
     --*)           die "unknown option '$1'. This wrapper deliberately does not forward arbitrary qwen flags; if you need a capability it lacks, say so rather than calling qwen directly." ;;
     *)             [ -z "$ARG" ] && ARG="$1" || die "unexpected argument '$1'"; shift ;;
@@ -1699,7 +1710,7 @@ case "$CMD" in
   transcript) [ -n "$ARG" ] || die "usage: ai-qwen transcript <name>";  cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-qwen delete <name>";      cmd_delete "$ARG" ;;
   reset-context) [ -n "$ARG" ] || die "usage: ai-qwen reset-context <name> …"; cmd_reset_context "$ARG" ;;
-  doctor)     cmd_doctor "$OPT_LIVE" ;;
+  doctor)     [ -z "$OPT_LIVE" ] || [ -z "$OPT_IDENTITY" ] || die 'doctor accepts either --identity or --live, not both.'; cmd_doctor "${OPT_IDENTITY:-$OPT_LIVE}" ;;
   -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
   *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
 esac
