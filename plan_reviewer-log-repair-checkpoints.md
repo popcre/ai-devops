@@ -4,21 +4,25 @@
 
 | Step | Status | Updated | Evidence |
 |---|---|---|---|
-| 1. Define the checkpoint and maintenance-round schemas | Implemented; final review pending | 2026-09-07 | Validation in `tools/reviewer_maintenance.py`; focused schema fixtures |
-| 2. Add safe source discovery and bounded interval reading | Implemented; CI pending | 2026-09-07 | Exact JSONL boundaries, prefix/file identity checks, nine-provider invocation journal plus scoreboard |
-| 3. Add maintenance-round start, inspect, and complete commands | Implemented; CI pending | 2026-09-07 | `ai-reviewer-issue maintenance start/show/complete`; immutable records and parent chain |
-| 4. Join discovered failures to the incident ledger | Implemented; CI pending | 2026-09-07 | `classify`, `record`, `carry-forward`; frozen event identities and serialized resolution/completion |
-| 5. Add tests for normal, concurrent, rotated, truncated, and failed rounds | Focused verification in progress | 2026-09-07 | `tests/reviewer_maintenance_cases.py` through existing issue suite; full Windows/Linux CI still pending |
-| 6. Update operating instructions and install the finished tool | Documentation implemented; installation pending | 2026-09-07 | Reviewer-issues guide, shared skill, help and router updated; install only after merge |
-| 7. Independently review, merge, install, and prove the first live round | ⬜ open | 2026-09-07 | Pending implementation under issue #308 |
+| 1. Define the checkpoint and maintenance-round schemas | Complete | 2026-09-08 | Versioned validation in `tools/reviewer_maintenance.py`; schema and refusal fixtures passed |
+| 2. Add safe source discovery and bounded interval reading | Complete | 2026-09-08 | Exact boundaries, prefix/file identity checks, nine-provider durable journal and scoreboard cross-check |
+| 3. Add maintenance-round start, inspect, and complete commands | Complete | 2026-09-08 | Installed two-round proof passed; immutable records, exact inherited boundary and parent chain |
+| 4. Join discovered failures to the incident ledger | Complete | 2026-09-08 | Exact joins, explicit classification and carry-forward tested; original evidence preserved |
+| 5. Add tests for normal, concurrent, rotated, truncated, and failed rounds | Complete | 2026-09-08 | All three CI suites passed in run `34173126280`; exact merge queue passed in `34178027688` |
+| 6. Update operating instructions and install the finished tool | Complete | 2026-09-08 | Canonical EDGE-DEV installation and both shared skill copies verified; configuration preserved |
+| 7. Independently review, merge, install, and prove the first live round | Complete | 2026-09-08 | PR #314 merged as `f1facf60189670b43e07b95399a769eedb493cf1`; exact-head APPROVE and [redacted installed proof](tests/verification/reviewer-reliability/issue-308-checkpoints.md) |
 
-**Fresh-session start:** Phase 4 verification. Implementation is on isolated branch
-`codex/reviewer-checkpoints-308` in `C:\repos\ai-devops-worktrees\checkpoints-308`.
-Read Sections 6–8 and all remaining qualification steps before proceeding. No
-merge, installation, first real repair-round completion, or issue closure is
-claimed by the implementation statuses above.
+**Fresh-session start:** This checkpoint implementation and EDGE-DEV rollout are
+complete. Read the [verification record](tests/verification/reviewer-reliability/issue-308-checkpoints.md)
+for exact source, tests, review, installation and controlled two-round evidence.
+The real backlog was not cleared; its first maintenance round still requires a
+private legacy audit. The separate default Qwen fast-check limitation is tracked
+in [issue #322](https://github.com/popcre/ai-devops/issues/322), not unfinished
+checkpoint implementation.
 
-**Linked handoff:** [`HANDOFF.d/2026-09-07T1647Z-edge-dev-codex-reviewer-log-checkpoints.md`](HANDOFF.d/2026-09-07T1647Z-edge-dev-codex-reviewer-log-checkpoints.md)
+**Handoff retired:** The [predecessor planning handoff](https://github.com/popcre/ai-devops/blob/15d696cdf5b3c90e1d1b9df9dd52dddffba5ffab/HANDOFF.d/2026-09-07T1647Z-edge-dev-codex-reviewer-log-checkpoints.md)
+is preserved in Git history. Its commit is on main, its obligations are fulfilled,
+and its unique decisions and rejected approaches remain in this plan.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -72,6 +76,10 @@ GitHub issue [#308](https://github.com/popcre/ai-devops/issues/308) owns the imp
 - Deleting or compacting old incident packages. Retention policy may be designed separately only if privacy or disk usage later requires it.
 
 ## 5. Current state of the code
+
+The merged implementation and installed evidence are described in STATUS and the
+verification record above. The following is the **historical planning baseline**;
+its line references and missing-capability descriptions are retained as context.
 
 - `bin/ai-reviewer-issue:22` selects the private incident directory; `:158-168` reads the reviewer scoreboard; `:170-287` records one immutable incident package.
 - `bin/ai-reviewer-issue:268-281` writes `issue.json` schema version 3 with `created_at`, exact join identifiers, repository identity, machine identity, and captured evidence counts.
@@ -251,18 +259,18 @@ Keep the existing `tests/test-ai-reviewer-issue.sh` assertions green. Run the re
 
 ### Definition of done
 
-- [ ] Versioned started/completed maintenance-round schemas exist and validate.
-- [ ] The installed command shows the last completed boundary and any active round.
-- [ ] A new round reads only the proven interval between the prior completion and its frozen upper boundary.
-- [ ] Rotation, truncation, replacement, corruption, and concurrent writers fail safely without checkpoint advancement.
-- [ ] Every candidate is linked to an incident or explicitly classified with evidence.
-- [ ] Completion refuses open/unaccounted work and preserves partially resolved carry-forward.
-- [ ] Existing issue evidence remains in place; no `resolved.md` or archive is created.
-- [ ] Focused and full required tests pass on Windows/Git Bash and Linux.
-- [ ] Exact-head independent reviewer approval exists for the final code.
-- [ ] The PR is merged through protected `main`; the exact commit is confirmed on `origin/main`.
-- [ ] The merged toolkit is installed on the in-scope host(s), and a two-round live proof demonstrates correct resumption.
-- [ ] Redacted proof is committed under `tests/verification/`; issue #308 is closed; plan STATUS is current; the handoff is retired when all work is truly complete.
+- [x] Versioned started/completed maintenance-round schemas exist and validate.
+- [x] The installed command shows the last completed boundary and any active round.
+- [x] A new round reads only the proven interval between the prior completion and its frozen upper boundary.
+- [x] Rotation, truncation, replacement, corruption, and concurrent writers fail safely without checkpoint advancement.
+- [x] Every candidate is linked to an incident or explicitly classified with evidence.
+- [x] Completion refuses open/unaccounted work and preserves partially resolved carry-forward.
+- [x] Existing issue evidence remains in place; no `resolved.md` or archive is created.
+- [x] Focused and full required tests pass on Windows/Git Bash and Linux.
+- [x] Exact-head independent reviewer approval exists for the final code.
+- [x] The PR is merged through protected `main`; the exact commit is confirmed on `origin/main`.
+- [x] The merged toolkit is installed on the in-scope host(s), and a two-round live proof demonstrates correct resumption.
+- [x] Redacted proof is committed under `tests/verification/`; issue #308 is closed; plan STATUS is current; the handoff is retired when all work is truly complete.
 
 ### Risks and rollback
 
@@ -272,11 +280,11 @@ Keep the existing `tests/test-ai-reviewer-issue.sh` assertions green. Run the re
 - **Machine-local checkpoints do not create fleet-wide truth.** Version 1 reports its hostname and covered sources explicitly. A future fleet aggregator is separate work and must not be implied.
 - **A success record might be mistaken for a defect or vice versa.** Candidate extraction should be conservative; classification remains explicit and auditable.
 
-### Open questions with decision criteria
+### Decisions taken
 
-- **Command naming:** implementer may choose `maintenance` or `audit`; choose the clearest help text and lowest compatibility risk.
-- **Latest-completed lookup:** derive from immutable filenames unless tests show an unacceptable cost; only then add an atomically replaced cache pointer whose loss cannot lose history.
-- **Provider coverage gaps:** if any registered provider lacks durable structured events, stop that provider's round as unsupported and open a scoped follow-up. Do not silently treat raw text heuristics as complete coverage.
+- **Command naming:** `maintenance` groups the round lifecycle without changing the existing incident commands.
+- **Latest-completed lookup:** derive it from immutable completed records and their validated parent chain; no mutable cache pointer is required.
+- **Provider coverage gaps:** Albert authorized durable recording as part of this implementation. All nine registered wrappers now share that journal; missing recorder coverage blocks a round, and raw-text heuristics are not treated as complete history.
 
 ## Mandatory plan self-audit
 
