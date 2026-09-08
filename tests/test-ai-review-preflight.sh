@@ -27,6 +27,7 @@ cat > "$AI_REVIEW_REGISTRY_FILE" <<'REGEOF'
 REGEOF
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_PREFLIGHT_TIMEOUT=3
+export AI_REVIEW_CAPACITY_CONFIG="$ROOT/config/reviewer-capacity.json"
 
 REPO="$TMP/repo"; mkdir -p "$REPO"; git -C "$REPO" init -q; git -C "$REPO" config user.name Test; git -C "$REPO" config user.email t@example.com
 echo x > "$REPO/a"; git -C "$REPO" add a; git -C "$REPO" commit -qm init
@@ -88,6 +89,23 @@ mkdir -p "$REPO/.ai-review"
 printf '%s\n' "$REPO" > "$REPO/.ai-review/.ai-review-packet"
 printf 'live-review-evidence\n' > "$REPO/.ai-review/sentinel"
 check "valid provider passes offline checks" "$SCRIPT check grok '$REPO' | grep -q 'packet=verified'"
+check "unsupported Kimi capacity is explicit unknown" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reason==\"unsupported-interface\" and .reset_at==null'"
+check "unsupported capacity separates qualified policy from observed version" "$SCRIPT capacity kimi --json | jq -e '.provider_version==\"unverified\" and .qualified_version==\"0.36.1\"'"
+check "capacity requires its JSON contract flag" "! $SCRIPT capacity kimi"
+check "capacity timeout comes from the strict policy" "AI_REVIEW_CAPACITY_TIMEOUT= $SCRIPT capacity kimi --json | jq -e '.state==\"unknown\"'"
+check "unsupported capacity performs no network request" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_COUNT_FILE='$TMP/no-contact' $SCRIPT capacity grok --json | jq -e '.state==\"unknown\"' && test ! -e '$TMP/no-contact'"
+NOW_ISO="$(date -u +%FT%TZ)"
+CAP_COUNT="$TMP/capacity-count"; : > "$CAP_COUNT"
+AVAILABLE="$(jq -nc --arg now "$NOW_ISO" '{schema_version:1,provider:"kimi",state:"available",checked_at:$now,provider_version:"0.36.1",credential_profile_scope:"local-profile",model_scope:"kimi-code/k3",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+check "qualified available capacity validates" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_COUNT_FILE='$CAP_COUNT' AI_REVIEW_CAPACITY_TEST_RESPONSE='$AVAILABLE' $SCRIPT capacity kimi --json | jq -e '.state==\"available\" and .credential_profile_scope==\"local-profile\"'"
+check "capacity probe is attempted exactly once" "test \"\$(wc -l < '$CAP_COUNT')\" -eq 1"
+EXHAUSTED="$(jq -nc --arg now "$NOW_ISO" '{schema_version:1,provider:"grok",state:"exhausted",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"local-profile",model_scope:null,source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+check "qualified exhaustion validates without invented reset" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_RESPONSE='$EXHAUSTED' $SCRIPT capacity grok --json | jq -e '.state==\"exhausted\" and .reset_at==null'"
+check "wrong credential scope becomes unknown" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_EXPECTED_PROFILE=other-profile AI_REVIEW_CAPACITY_TEST_RESPONSE='$EXHAUSTED' $SCRIPT capacity grok --json | jq -e '.state==\"unknown\" and .reason==\"wrong-scope\"'"
+MALFORMED='{"schema_version":1,"provider":"glm","state":"exhausted","checked_at":"bad","provider_version":"1","credential_profile_scope":null,"model_scope":null,"source_kind":"http-429","reason":"reported-exhaustion","reset_at":null}'
+check "429 and unscoped exhaustion cannot become quota truth" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_RESPONSE='$MALFORMED' $SCRIPT capacity glm --json | jq -e '.state==\"unknown\" and .reason==\"malformed-response\"'"
+STALE="$(jq -nc '{schema_version:1,provider:"kimi",state:"available",checked_at:"2020-01-01T00:00:00Z",provider_version:"0.36.1",credential_profile_scope:"local-profile",model_scope:null,source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+check "stale capacity becomes explicit unknown" "AI_DEVOPS_TEST_MODE=1 AI_REVIEW_CAPACITY_TEST_RESPONSE='$STALE' $SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reason==\"stale-response\"'"
 check "live review packet is never touched" "grep -qx 'live-review-evidence' '$REPO/.ai-review/sentinel'"
 check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
@@ -137,7 +155,7 @@ check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | 
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
-NOAUTH_OUT="$(HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
+NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
 [ "$NOAUTH_RC" -ne 0 ] && ! printf '%s' "$NOAUTH_OUT" | grep -q 'health=ok' && ok "DeepSeek without key or governed reference cannot pass offline preflight" || bad "DeepSeek without key or governed reference cannot pass offline preflight"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"

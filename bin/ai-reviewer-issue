@@ -115,6 +115,22 @@ exact_json(){ # DIRECTORY RUN SESSION REPO HEAD CALLER SOURCE_DIGEST
   esac
 }
 
+exact_diagnostic(){ # DIRECTORY PROVIDER RUN SESSION REPO CALLER SOURCE_DIGEST
+  local dir="$1" provider="$2" run="$3" session="$4" repo="$5" caller="$6" source="$7" matches repo_key record_root record_key
+  [ -d "$dir" ] && [ -n "$run" ] && [ -n "$caller" ] || return 0
+  repo_key="$(boundary_dir "$repo")" || return 1
+  matches="$(find "$dir" -type f -name '*.json' -print0 2>/dev/null | while IFS= read -r -d '' f; do
+    [ ! -L "$f" ] || continue
+    record_root="$(jq -r '.repository_root // empty' "$f" 2>/dev/null)"
+    record_key="$(boundary_dir "$record_root")" || continue
+    [ "$record_key" = "$repo_key" ] || continue
+    jq -e --arg provider "$provider" --arg run "$run" --arg session "$session" --arg repo "$repo" --arg caller "$caller" --arg source "$source" \
+      '.schema_version==1 and .provider==$provider and .run_id==$run and ((.session_id//"")==$session) and .caller==$caller and ($source=="" or .source_digest==$source)' "$f" >/dev/null 2>&1 && printf '%s\n' "$f"
+  done)"
+  [ "$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')" -le 1 ] || return 2
+  printf '%s' "$matches"
+}
+
 sanitize_json(){ # sanitize_json SOURCE DESTINATION
   jq 'walk(if type == "object" then
         with_entries(select((.key | ascii_downcase) as $k |
@@ -183,8 +199,8 @@ capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER
 
 record_issue(){
   local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" observed_head="" event_sha256="" root now stamp host id report_dir
-  local metadata_source="" metadata_copy="" metadata_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
-  local report_count=0 log_count=0 scoreboard_count=0
+  local metadata_source="" metadata_copy="" metadata_status=0 diagnostic_source="" diagnostic_copy="" diagnostic_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
+  local report_count=0 log_count=0 scoreboard_count=0 diagnostic_count=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --provider) provider="${2:-}"; shift 2 ;;
@@ -250,6 +266,12 @@ record_issue(){
     sanitize_json "$metadata_source" "$metadata_copy" || die "could not redact reviewer metadata."
     chmod 0600 "$metadata_copy" 2>/dev/null || true
   fi
+  diagnostic_source="$(exact_diagnostic "${AI_REVIEW_LIFECYCLE_DIR:-$STATE_BASE/review-lifecycle}/diagnostics" "$provider" "$run_id" "$session_id" "$root" "$caller" "$source_digest")" || diagnostic_status=$?
+  if [ "$diagnostic_status" -eq 0 ] && [ -n "$diagnostic_source" ] && jq -e . "$diagnostic_source" >/dev/null 2>&1; then
+    diagnostic_copy="$report_dir/reviewer-diagnostic.redacted.json"
+    sanitize_json "$diagnostic_source" "$diagnostic_copy" || die "could not redact reviewer diagnostic envelope."
+    chmod 0600 "$diagnostic_copy" 2>/dev/null || true; diagnostic_count=1
+  fi
 
   write_artifact_inventory "$root" "$report_dir/recent-review-artifacts.txt"
   : > "$report_dir/captured-review-reports.txt"
@@ -289,7 +311,8 @@ record_issue(){
     --arg metadata_copy "$metadata_copy" --arg error_source "$error_file" --arg command "$safe_command" \
     --arg details_file "$details_file" --arg details "$details" \
     --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" --arg event_sha256 "$event_sha256" \
-    --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" \
+    --arg diagnostic_source "$diagnostic_source" --arg diagnostic_copy "$diagnostic_copy" \
+    --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" --argjson diagnostic_count "$diagnostic_count" \
     '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
       join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end),event_sha256:(if $event_sha256=="" then null else $event_sha256 end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
@@ -303,6 +326,8 @@ record_issue(){
         recent_provider_logs_captured:$log_count,
         latest_scoreboard_entry:(if $scoreboard_count>0 then "latest-scoreboard-entry.json" else null end),
         latest_scoreboard_entry_captured:$scoreboard_count,
+        exact_diagnostic_envelope:(if $diagnostic_count>0 then "reviewer-diagnostic.redacted.json" else null end),
+        exact_diagnostic_envelope_captured:$diagnostic_count,
         session_details:(if ($details_file=="" and $details=="") then null else "details.redacted.txt" end),
         complete_error_log:(if $error_source=="" then null else "error.redacted.txt" end)}}' \
     > "$report_dir/issue.json"

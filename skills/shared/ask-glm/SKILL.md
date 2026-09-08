@@ -26,6 +26,12 @@ ai-glm list | show <name> | transcript <name> | diff <name>
 ai-glm abort <name> | delete <name> | doctor | server status
 ```
 
+Every review turn performs one bounded non-generating capacity preflight before
+`send_prompt`. `exhausted` submits nothing; `unknown` remains visible and
+continues. OpenCode's local statistics are historical usage, not authoritative
+remaining Z.ai plan capacity, so the current adapter returns `unknown` without
+network access.
+
 Do **not** run `opencode`, `opencode run`, `opencode serve`, or curl the server's HTTP
 API. `ai-glm` owns the server URL, credentials, API shapes, model pin, locking, and
 read-only enforcement. Bypassing it bypasses all of that.

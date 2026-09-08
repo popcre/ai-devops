@@ -8,7 +8,7 @@
 # assigning the same unhealthy provider again.
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
@@ -30,6 +30,9 @@ if [ -z "$REGISTRY_FILE" ]; then
   done
   [ -n "$REGISTRY_FILE" ] || REGISTRY_FILE="$REGISTRY_REAL_DIR/../config/reviewer-registry.json"
 fi
+CAPACITY_CONFIG="${AI_REVIEW_CAPACITY_CONFIG:-$REGISTRY_REAL_DIR/../config/reviewer-capacity.json}"
+CAPACITY_TIMEOUT="${AI_REVIEW_CAPACITY_TIMEOUT:-}"
+CAPACITY_MAX_AGE="${AI_REVIEW_CAPACITY_MAX_AGE:-30}"
 
 die()  { printf 'ai-review-preflight: error: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
@@ -39,6 +42,74 @@ valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deep
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 qualification_file() { printf '%s/%s-live-qualified.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
+
+capacity_unknown() { # PROVIDER REASON [OBSERVED-VERSION] [SOURCE] [QUALIFIED-VERSION]
+  jq -nc --arg provider "$1" --arg reason "$2" --arg version "${3:-unknown}" \
+    --arg source "${4:-unsupported}" --arg qualified "${5:-}" --arg checked "$(date -u +%FT%TZ)" \
+    '{schema_version:1,provider:$provider,state:"unknown",checked_at:$checked,
+      provider_version:$version,qualified_version:(if $qualified=="" then null else $qualified end),credential_profile_scope:null,model_scope:null,
+      source_kind:$source,reason:$reason,reset_at:null}'
+}
+
+validate_capacity_result() { # PROVIDER JSON
+  local provider="$1" value="$2" checked_epoch now age expected_profile="${AI_REVIEW_CAPACITY_EXPECTED_PROFILE:-}" expected_model="${AI_REVIEW_CAPACITY_EXPECTED_MODEL:-}"
+  printf '%s\n' "$value" | jq -e --arg p "$provider" --arg expected_profile "$expected_profile" --arg expected_model "$expected_model" '
+    .schema_version==1 and .provider==$p and
+    (.state|IN("available","exhausted","unknown")) and
+    (.checked_at|type=="string") and
+    (.provider_version|type=="string" and length>0 and length<=128) and
+    ((.qualified_version==null) or (.qualified_version|type=="string" and length>0 and length<=128)) and
+    ((.credential_profile_scope==null) or (.credential_profile_scope|type=="string" and length>0 and length<=128)) and
+    ((.model_scope==null) or (.model_scope|type=="string" and length>0 and length<=128)) and
+    (.source_kind|type=="string" and test("^[A-Za-z0-9._-]{1,64}$")) and
+    (.reason|type=="string" and IN("reported-capacity","reported-exhaustion","unsupported-interface","unsupported-version","timeout","malformed-response","transport-error","authentication-error","stale-response","wrong-scope","unscopable")) and
+    ((.reset_at==null) or (.reset_at|type=="string" and (try fromdateiso8601 catch null)!=null)) and
+    (if .state=="available" then .reason=="reported-capacity" and .credential_profile_scope!=null
+     elif .state=="exhausted" then .reason=="reported-exhaustion" and .credential_profile_scope!=null
+     else true end)' >/dev/null 2>&1 || return 1
+  [ -z "$expected_profile" ] || [ "$(printf '%s\n' "$value" | jq -r '.credential_profile_scope // ""')" = "$expected_profile" ] || return 3
+  [ -z "$expected_model" ] || [ "$(printf '%s\n' "$value" | jq -r '.model_scope // ""')" = "$expected_model" ] || return 3
+  checked_epoch="$(printf '%s\n' "$value" | jq -r '.checked_at|fromdateiso8601' 2>/dev/null)" || return 1
+  now="$(now_epoch)"; age=$((now - checked_epoch))
+  [ "$age" -ge 0 ] && [ "$age" -le "$CAPACITY_MAX_AGE" ] || return 2
+}
+
+capacity_result() { # PROVIDER
+  local provider="$1" value="" version="unknown" source="unsupported" reason="unsupported-interface" rc
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  need jq
+  if [ -z "$CAPACITY_TIMEOUT" ]; then
+    CAPACITY_TIMEOUT="$(jq -r '.timeout_seconds // 5' "$CAPACITY_CONFIG" 2>/dev/null || printf 5)"
+  fi
+  case "$CAPACITY_TIMEOUT" in ''|0|*[!0-9]*) die 'capacity timeout must be a positive whole number of seconds.';; esac
+  [ "$CAPACITY_TIMEOUT" -le 5 ] || die 'capacity timeout may not exceed five seconds.'
+
+  # Hostile tests inject an already-captured provider response. Production never
+  # evaluates a configured command or guesses an endpoint.
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_CAPACITY_TEST_RESPONSE:-}" ]; then
+    [ -z "${AI_REVIEW_CAPACITY_TEST_COUNT_FILE:-}" ] || printf 'request\n' >> "$AI_REVIEW_CAPACITY_TEST_COUNT_FILE"
+    value="$AI_REVIEW_CAPACITY_TEST_RESPONSE"
+    if validate_capacity_result "$provider" "$value"; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0) printf '%s\n' "$value" | jq -c .; return 0;;
+      2) capacity_unknown "$provider" stale-response "$(printf '%s' "$value" | jq -r '.provider_version // "unknown"' 2>/dev/null || printf unknown)" synthetic-fixture; return 0;;
+      3) capacity_unknown "$provider" wrong-scope "$(printf '%s' "$value" | jq -r '.provider_version // "unknown"' 2>/dev/null || printf unknown)" synthetic-fixture; return 0;;
+      *) capacity_unknown "$provider" malformed-response unknown synthetic-fixture; return 0;;
+    esac
+  fi
+
+  if [ -f "$CAPACITY_CONFIG" ]; then
+    version="$(jq -r --arg p "$provider" '.providers[$p].qualified_version // "unknown"' "$CAPACITY_CONFIG" 2>/dev/null || printf unknown)"
+    source="$(jq -r --arg p "$provider" '.providers[$p].source_kind // "unsupported"' "$CAPACITY_CONFIG" 2>/dev/null || printf unsupported)"
+    reason="$(jq -r --arg p "$provider" '.providers[$p].reason // "unsupported-interface"' "$CAPACITY_CONFIG" 2>/dev/null || printf unsupported-interface)"
+  fi
+  value="$(capacity_unknown "$provider" "$reason" unverified "$source" "$version")"
+  if validate_capacity_result "$provider" "$value"; then
+    printf '%s\n' "$value"
+  else
+    capacity_unknown "$provider" malformed-response unverified config "$version"
+  fi
+}
 gemini_live_qualified() {
   local file wrapper expected actual expected_agy actual_agy expected_agy_sha actual_agy_sha expected_model actual_model out rc
   file="$(qualification_file gemini)"; [ -f "$file" ] || return 1
@@ -310,11 +381,18 @@ Usage:
   ai-review-preflight status [provider]
   ai-review-preflight usable [provider]
   ai-review-preflight explain <failure-class>
+  ai-review-preflight capacity <provider> --json
 EOF
 }
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  capacity)
+    provider="${1:-}"; shift || true
+    [ "${1:-}" = --json ] || die 'capacity requires --json.'
+    shift
+    [ "$#" -eq 0 ] || die "unexpected argument '$1'."
+    capacity_result "$provider" ;;
   check)
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done

@@ -60,6 +60,10 @@ isolation_homes_match(){
 }
 check "missing local runtime is named distinctly" "grep -q 'local_dependency_unavailable: grok binary not found' '$SCRIPT'"
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
+check "both Grok dispatches gate capacity before exact-work reservation" "test \"\$(grep -c 'if ! capacity_gate' '$SCRIPT')\" -eq 2 && test \"\$(grep -c 'record_diagnostic.*capacity-checked' '$SCRIPT')\" -eq 2 && grep -q \"exhausted).*return 3\" '$SCRIPT'"
+check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
+check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
+check "Grok diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 
 TMP="$(mktemp -d)"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -88,6 +92,7 @@ cleanup() {
 trap cleanup EXIT
 
 export AI_GROK_STATE_DIR="$TMP/state"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_SANDBOX_PROGRESS_FILE="$TMP/source-digest.progress"
 export AI_GROK_AUTH_HOME="$TMP/no-auth"
@@ -165,7 +170,7 @@ case "$mode" in
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
-  hold)      touch "$TMPDIR_FOR_TEST/hold-started"
+  hold)      printf '%s\n' "$$" >> "$TMPDIR_FOR_TEST/hold-started"
              printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
              trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
              # The hold is released by the test, or terminated by the wrapper's
@@ -257,6 +262,32 @@ work_lock_labelled() {
 # lock from an earlier section while the session under test had not started.
 ask_session_lock_held() {
   grep -qs -x "ask:$1" "$AI_GROK_STATE_DIR"/locks/session--*.lock.d/label 2>/dev/null
+}
+
+ask_session_lock_supervised() {
+  local label="$1" lock supervisor event_run
+  for lock in "$AI_GROK_STATE_DIR"/locks/session--*.lock.d; do
+    [ -d "$lock" ] || continue
+    grep -qs -x "ask:$label" "$lock/label" || continue
+    supervisor="$(cat "$lock/supervisor-pid" 2>/dev/null || true)"
+    event_run="$(cat "$lock/event-run-id" 2>/dev/null || true)"
+    [[ "$supervisor" =~ ^[0-9]+$ ]] || continue
+    [[ "$event_run" =~ ^[0-9a-f]{32}$ ]] || continue
+    test_process_alive "$supervisor" || continue
+    jq -s -e --arg run "$event_run" \
+      '[.[] | select(.run_id == $run)] | length == 1 and .[0].event == "started"' \
+      "$AI_REVIEW_EVENT_DIR/events.jsonl" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+test_process_alive() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null && return 0
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$pid" '$1 == p { found=1 } END { exit !found }' ;;
+    *) return 1 ;;
+  esac
 }
 
 # fixture_note_if_timed_out OUTPUT LABEL — a run that is not testing the wait
@@ -434,6 +465,18 @@ rm -rf "$MARK_FAIL_LOCK"
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
+
+CAP_NOW="$(date -u +%FT%TZ)"
+GROK_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"grok",state:"exhausted",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+rm -f "$TMP/provider-contacted"
+GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
+check "exhausted Grok capacity submits zero model turns" "test '$GROK_BLOCKED_RC' -ne 0 && test ! -e '$TMP/provider-contacted' && printf '%s' \"\$GROK_BLOCKED\" | grep -q 'not submitted'"
+check "exhausted Grok capacity creates no session record" "! grep -R -l capacity-exhausted '$AI_GROK_STATE_DIR/session-records' 2>/dev/null"
+GROK_AVAILABLE="$(jq -nc --arg now "$(date -u +%FT%TZ)" '{schema_version:1,provider:"grok",state:"available",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+rm -f "$TMP/provider-contacted"
+AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" run new capacity-available --prompt review >/dev/null 2>&1
+check "available Grok capacity submits one intended model turn" "test -e '$TMP/provider-contacted'"
+check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep -q available"
 
 echo "ai-grok-review tests"
 
@@ -706,11 +749,14 @@ check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$
 # replaced with functions that abort, so a marker can only exist if it was
 # written first. This is the executable form of the 2026-08-23 Claude finding.
 SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
+SIGNAL_BAD_STATE="$TMP/on-paid-signal-not-a-directory"; printf 'occupied\n' > "$SIGNAL_BAD_STATE"
 (
   . "$TMP/lib.sh"
-  STATE_DIR="$AI_GROK_STATE_DIR"
+  STATE_DIR="$SIGNAL_BAD_STATE"
   mkdir -p "$SIGNAL_LOCK"; printf '%s\n' "$$" > "$SIGNAL_LOCK/pid"
   ACTIVE_PAID_LOCK="$SIGNAL_LOCK"; ACTIVE_SESSION_LOCK=''
+  ACTIVE_DIAG_REPO="$REPO"; ACTIVE_DIAG_RUN=signal-diagnostic; ACTIVE_DIAG_SESSION=signal-diagnostic
+  CAPACITY_JSON='{"schema_version":1,"provider":"grok","state":"unknown"}'
   ACTIVE_GROK_CHILD=99999999
   request_active_grok_stop() { exit 99; }
   stop_active_grok_tree()    { exit 99; }
@@ -718,6 +764,22 @@ SIGNAL_LOCK="$TMP/on-paid-signal-ordering.lock.d"
 ) >/dev/null 2>&1
 SIGNAL_RC=$?
 check "on_paid_signal records remote uncertainty before any fallible cleanup"   "test -f '$SIGNAL_LOCK/remote-uncertain' && test '$SIGNAL_RC' -eq 99"
+SIGNAL_STOP_CALLED="$TMP/on-paid-signal-stop-called"
+SIGNAL_DIAG_LOCK="$TMP/on-paid-signal-diagnostic-failure.lock.d"
+(
+  . "$TMP/lib.sh"
+  STATE_DIR="$SIGNAL_BAD_STATE"
+  mkdir -p "$SIGNAL_DIAG_LOCK"; printf '%s\n' "$$" > "$SIGNAL_DIAG_LOCK/pid"
+  ACTIVE_PAID_LOCK="$SIGNAL_DIAG_LOCK"; ACTIVE_SESSION_LOCK=''
+  ACTIVE_DIAG_REPO="$REPO"; ACTIVE_DIAG_RUN=signal-diagnostic; ACTIVE_DIAG_SESSION=signal-diagnostic
+  CAPACITY_JSON='{"schema_version":1,"provider":"grok","state":"unknown"}'
+  ACTIVE_GROK_CHILD=99999999
+  request_active_grok_stop() { printf 'called\n' > "$SIGNAL_STOP_CALLED"; return 0; }
+  stop_active_grok_tree()    { return 1; }
+  on_paid_signal
+) >"$TMP/on-paid-signal-diagnostic-failure.out" 2>&1
+SIGNAL_DIAG_RC=$?
+check "diagnostic storage failure cannot skip paid-work shutdown" "test -f '$SIGNAL_STOP_CALLED' && test '$SIGNAL_DIAG_RC' -eq 130 && grep -q 'diagnostic evidence could not create private temporary storage' '$TMP/on-paid-signal-diagnostic-failure.out'"
 check "on_paid_signal warns instead of trusting the uncertainty marker write"   "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'retaining the paid-work lock for manual reconciliation'"
 ABANDONED_WORK="$TMP/work--abandoned.lock.d"; mkdir -p "$ABANDONED_WORK"; printf '99999999\n' > "$ABANDONED_WORK/pid"; printf 'new:abandoned\n' > "$ABANDONED_WORK/label"
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$ABANDONED_WORK" new:abandoned github.com/example/reviewer-fixture abandoned "$REPO" abandoned-work prompt-digest source-id 1 ) >"$TMP/abandoned.out" 2>&1
@@ -734,6 +796,33 @@ check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()
 check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
 check "POSIX supervisor escalates before the wrapper fallback" "grep -q 'time.monotonic() + 3' '$REPO_ROOT/bin/ai-process-supervisor'"
+MSYS_VISIBLE_LOCK="$AI_GROK_STATE_DIR/locks/session--msys-visible.lock.d"
+mkdir -p "$MSYS_VISIBLE_LOCK"; printf '99999999\n' > "$MSYS_VISIBLE_LOCK/pid"; printf '4242\n' > "$MSYS_VISIBLE_LOCK/supervisor-pid"; printf 'ask:msys-visible\n' > "$MSYS_VISIBLE_LOCK/label"
+(
+  . "$TMP/lib.sh"
+  uname() { printf 'MINGW64_NT\n'; }
+  kill() { return 1; }
+  ps() { printf '      PID PPID PGID WINPID TTY UID STIME COMMAND\n     4242 1 1 4242 ? 1 00:00 bash\n'; }
+  session_lock_acquire "$MSYS_VISIBLE_LOCK" ask:challenger
+) >/dev/null 2>&1; MSYS_VISIBLE_RC=$?
+check "Windows process-table witness prevents reclaim when kill cannot see the live supervisor" \
+  "test '$MSYS_VISIBLE_RC' -ne 0 && grep -q -x '99999999' '$MSYS_VISIBLE_LOCK/pid'"
+rm -rf "$MSYS_VISIBLE_LOCK"
+FINISHED_EVENT_DIR="$TMP/finished-events"; mkdir -p "$FINISHED_EVENT_DIR"
+FINISHED_EVENT_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+printf '{"run_id":"%s","event":"started"}\n{"run_id":"%s","event":"finished"}\n' "$FINISHED_EVENT_ID" "$FINISHED_EVENT_ID" > "$FINISHED_EVENT_DIR/events.jsonl"
+FINISHED_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--finished-supervisor.lock.d"
+mkdir -p "$FINISHED_SESSION_LOCK"; printf '99999999\n' > "$FINISHED_SESSION_LOCK/pid"; printf '99999998\n' > "$FINISHED_SESSION_LOCK/supervisor-pid"; printf '%s\n' "$FINISHED_EVENT_ID" > "$FINISHED_SESSION_LOCK/event-run-id"; printf 'ask:finished-supervisor\n' > "$FINISHED_SESSION_LOCK/label"
+(
+  . "$TMP/lib.sh"
+  AI_REVIEW_EVENT_DIR="$FINISHED_EVENT_DIR"
+  uname() { printf 'Linux\n'; }
+  kill() { return 1; }
+  session_lock_acquire "$FINISHED_SESSION_LOCK" ask:replacement
+) >/dev/null 2>&1; FINISHED_SESSION_RC=$?
+check "terminal invocation evidence permits safe supervised stale-lock recovery" \
+  "test '$FINISHED_SESSION_RC' -eq 0 && ! grep -q -x '99999999' '$FINISHED_SESSION_LOCK/pid'"
+rm -rf "$FINISHED_SESSION_LOCK"
 run new stale-session --prompt x >/dev/null 2>&1
 STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_SESSION_ID="$(printf 'grok\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" stale-session | sha256sum | cut -c1-24)"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--$STALE_SESSION_ID.lock.d"
 mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid"; printf 'ask:stale-session\n' > "$STALE_SESSION_LOCK/label"
@@ -779,14 +868,29 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # reliable progress signal: wait while it is alive, but still fail if it exits
 # before publishing both locks or reaches its own bounded timeout.
 poll_worker_until "$ASK_A_PID" "$(budget 80 480)" 'both named ask turns hold their own session locks' \
-  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
-check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
-# The duplicate needs the same wide ceiling as the turns it must lose to. It
-# builds its own review packet BEFORE reaching the lock check, so on a slow
-# runner a normal ceiling fires first and it reports a timeout instead of the
-# refusal - failing this check for a reason that is not a wrapper defect.
-DUP_ASK="$(AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
-check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already running'"
+  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && ask_session_lock_supervised ask-a && ask_session_lock_supervised ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2 && test \"\$(wc -l < '$TMP/hold-started')\" -ge 2" || true
+check "different_named_sessions_can_ask_concurrently" "ask_session_lock_supervised ask-a && ask_session_lock_supervised ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2 && test \"\$(wc -l < '$TMP/hold-started')\" -ge 2"
+# Run the challenger asynchronously so a broken serialization guard cannot
+# consume the owner's whole timeout and cascade into the uncertainty checks.
+# Entering the provider stub is already decisive failure evidence: a duplicate
+# turn must be refused at the session lock before any provider contact.
+DUP_ARGV_BEFORE="$(wc -l < "$TMP/argv.txt")"
+( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/dup-ask.out" 2>&1; printf '%s\n' "$?" >"$TMP/dup-ask.rc" ) & DUP_ASK_PID=$!
+poll_worker_until "$DUP_ASK_PID" "$(budget 20 60)" 'the duplicate ask was refused or reached the provider fixture' \
+  "test -f '$TMP/dup-ask.rc' || test \"\$(wc -l < '$TMP/argv.txt')\" -gt '$DUP_ARGV_BEFORE'" || true
+DUP_REACHED_PROVIDER=0
+if [ ! -f "$TMP/dup-ask.rc" ]; then
+  DUP_REACHED_PROVIDER=1
+  printf '  fixture: duplicate ask reached the provider; owner-a=%s owner-b=%s session-locks=%s work-locks=%s\n' \
+    "$(test_process_alive "$ASK_A_PID" && printf alive || printf dead)" \
+    "$(test_process_alive "$ASK_B_PID" && printf alive || printf dead)" \
+    "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'session--*.lock.d' | wc -l)" \
+    "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" >&2
+  touch "$TMP/release-grok"
+fi
+wait "$DUP_ASK_PID" 2>/dev/null || true
+DUP_ASK="$(cat "$TMP/dup-ask.out" 2>/dev/null || true)"; DUP_ASK_RC="$(cat "$TMP/dup-ask.rc" 2>/dev/null || echo 1)"
+check "same_next_ask_turn_is_serialized" "test '$DUP_REACHED_PROVIDER' -eq 0 && test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # Terminated by the test below, so it must not reach its own ceiling first:

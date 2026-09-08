@@ -26,6 +26,11 @@ ai-kimi list | show <name> | transcript <name> | delete <name>
 ai-kimi doctor
 ```
 
+Every review dispatch performs one bounded non-generating capacity preflight.
+`exhausted` stops before Kimi is contacted; `unknown` is visible and continues.
+Kimi 0.36.1 exposes usage only in its interactive UI, so the automatic result is
+currently honest `unknown`, not an inferred allowance state.
+
 The wrapper owns the model pin, the read-only enforcement, the completion rule, the
 session bookkeeping, and the worktree isolation for write runs. It deliberately refuses
 to forward arbitrary `kimi` flags. **If it seems to be missing something you need, say so

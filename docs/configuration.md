@@ -73,6 +73,18 @@ machine configuration.
 
 None. There are no feature flags in this toolkit.
 
+## Reviewer capacity checks
+
+`config/reviewer-capacity.json` is the secret-free qualification policy for
+non-generating capacity checks. The shared defaults are one request, no retry,
+and a five-second maximum. Machine overrides may point
+`AI_REVIEW_CAPACITY_CONFIG` at an equally strict policy and may lower
+`AI_REVIEW_CAPACITY_TIMEOUT`; they may not turn an unqualified endpoint into
+capacity truth. Unsupported interfaces return `unknown` without network access.
+`AI_REVIEW_CAPACITY_MAX_AGE` defaults to 30 seconds. Optional
+`AI_REVIEW_CAPACITY_EXPECTED_PROFILE` and `AI_REVIEW_CAPACITY_EXPECTED_MODEL`
+make a supported adapter reject a result scoped to another account or model.
+
 ## Kimi wrapper settings
 
 These are process settings for `ai-kimi`, not entries to add to committed config:
@@ -99,6 +111,7 @@ The cross-platform GLM launcher reads these managed entries from
 | `ZAI_API_KEY` | Coding Plan authentication. Exported as `ZHIPU_API_KEY` for OpenCode's built-in `zai-coding-plan` provider | 1Password reference only; never plaintext |
 | `AI_GLM_PORT` | Loopback port for the OpenCode GLM server | `4096` |
 | `AI_GLM_CALLER` | Which agent owns the session (`claude` or `codex`) | `claude` |
+| `AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT` | One bounded local health observation before a review. It preserves the prior launch tolerance. | `30` seconds |
 
 The GLM model, agent, tools, and permissions are pinned in `config/opencode/`,
 not in environment variables. See [glm-opencode.md](glm-opencode.md).

@@ -89,7 +89,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   unset _AI_EVENT_SELF
 fi
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
 CALLER="${AI_GROK_CALLER:-claude}"
@@ -132,14 +132,53 @@ ACTIVE_ISOLATED_HOME=''
 ACTIVE_PAID_LOCK=''
 ACTIVE_SESSION_LOCK=''
 ACTIVE_TURN_RECORD=''
+ACTIVE_DIAG_REPO=''
+ACTIVE_DIAG_RUN=''
+ACTIVE_DIAG_SESSION=''
+ACTIVE_DIAG_STARTED_EPOCH=0
 PENDING_REVIEW_BASE=''
 PENDING_REVIEW_DIR=''
 PROMPT_BODY_DIGEST=''
+CAPACITY_JSON=''
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
+REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
 
 die()  { printf 'ai-grok-review: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-grok-review: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+capacity_gate() {
+  local out state
+  out="$("$REVIEW_PREFLIGHT_BIN" capacity grok --json 2>/dev/null || true)"
+  if ! printf '%s\n' "$out" | jq -e '.schema_version==1 and .provider=="grok" and (.state|IN("available","exhausted","unknown"))' >/dev/null 2>&1; then
+    out="$(jq -nc --arg at "$(date -u +%FT%TZ)" '{schema_version:1,provider:"grok",state:"unknown",checked_at:$at,provider_version:"unknown",credential_profile_scope:null,model_scope:null,source_kind:"wrapper",reason:"malformed-response",reset_at:null}')"
+  fi
+  CAPACITY_JSON="$(printf '%s\n' "$out" | jq -c .)"; state="$(jq -r .state <<<"$CAPACITY_JSON")"
+  case "$state" in
+    exhausted) warn 'Grok review was not submitted because the qualified capacity check reports exhausted.'; return 3;;
+    unknown) warn "Grok capacity is unknown ($(jq -r .reason <<<"$CAPACITY_JSON")); continuing under the existing review guards.";;
+  esac
+}
+
+record_diagnostic() { # REPO RUN SESSION PHASE OBSERVATION [EXTRA...]
+  local repo="$1" run="$2" session="$3" phase="$4" observation="$5" quota="" now elapsed=0; local -a args; shift 5
+  if ! quota="$(mktemp "$STATE_DIR/.capacity.XXXXXX" 2>/dev/null)"; then
+    warn 'Grok diagnostic evidence could not create private temporary storage; the review result is unchanged.'
+    return 0
+  fi
+  if ! printf '%s\n' "$CAPACITY_JSON" > "$quota"; then
+    rm -f "$quota"; warn 'Grok diagnostic evidence could not be staged; the review result is unchanged.'; return 0
+  fi
+  if [[ "$ACTIVE_DIAG_STARTED_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACTIVE_DIAG_STARTED_EPOCH" -gt 0 ]; then
+    now="$(date +%s)"; elapsed="$((now - ACTIVE_DIAG_STARTED_EPOCH))"; [ "$elapsed" -ge 0 ] || elapsed=0
+  fi
+  args=(observe --provider grok --repo "$repo" --run-id "$run" --session-id "$session" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed "$elapsed" --quota-file "$quota"); args+=("$@")
+  "$REVIEW_LIFECYCLE_BIN" "${args[@]}" >/dev/null 2>&1 || warn 'Grok diagnostic evidence could not be recorded; the review result is unchanged.'
+  rm -f "$quota"
+  return 0
+}
 
 # ---------------------------------------------------------------------------
 # Grok binary resolution.
@@ -585,26 +624,79 @@ preserve_uncertain_paid_turn() { # preserve lock before any fallible tree cleanu
     || warn 'could not confirm local reviewer-tree termination; paid work remains blocked for manual reconciliation.'
 }
 
+session_lock_owner_alive() { # DIR OWNER
+  local dir="$1" owner="$2" supervisor
+  kill -0 "$owner" 2>/dev/null && return 0
+  # Under load, Git Bash on Windows can return ESRCH for a live sibling MSYS
+  # process. Its own process table still reports that PID, so consult it before
+  # declaring a lock stale. This is read-only and stays inside the local host.
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$owner" '$1 == p { found=1 } END { exit !found }' && return 0 ;;
+  esac
+  supervisor="$(cat "$dir/supervisor-pid" 2>/dev/null || true)"
+  [[ "$supervisor" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$supervisor" 2>/dev/null && return 0
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$supervisor" '$1 == p { found=1 } END { exit !found }' ;;
+    *) return 1 ;;
+  esac
+}
+
+session_lock_write_owner() { # DIR
+  local dir="$1"
+  printf '%s\n' "$$" > "$dir/pid"
+  if [[ "${AI_REVIEW_EVENT_OWNER_PID:-}" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$AI_REVIEW_EVENT_OWNER_PID" > "$dir/supervisor-pid"
+  fi
+  if [[ "${AI_REVIEW_EVENT_RUN_ID:-}" =~ ^[0-9a-f]{32}$ ]]; then
+    printf '%s\n' "$AI_REVIEW_EVENT_RUN_ID" > "$dir/event-run-id"
+  fi
+}
+
+session_lock_supervisor_finished() { # DIR
+  local dir="$1" run events base
+  run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] || return 1
+  if [ -n "${AI_REVIEW_EVENT_DIR:-}" ]; then
+    events="$AI_REVIEW_EVENT_DIR/events.jsonl"
+  else
+    base="${AI_REVIEWER_STATE_BASE:-${HOME}/.local/state/ai-devops}"
+    events="$base/reviewer-events/events.jsonl"
+  fi
+  [ -f "$events" ] || return 1
+  jq -s -e --arg run "$run" \
+    '[.[] | select(.run_id == $run)] as $rows | ($rows | length) == 2 and $rows[0].event == "started" and $rows[1].event == "finished"' \
+    "$events" >/dev/null 2>&1
+}
+
 session_lock_acquire() { # local-only serialization; paid uncertainty is owned by the repository lock
-  local dir="$1" label="$2" owner quarantine moved_owner
+  local dir="$1" label="$2" owner quarantine moved_owner moved_supervisor supervisor event_run moved_event_run
   mkdir -p "$(dirname "$dir")"
   if mkdir "$dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+    session_lock_write_owner "$dir"; printf '%s\n' "$label" > "$dir/label"; return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [[ "$owner" =~ ^[0-9]+$ ]] || { warn "malformed session lock $(basename "$dir") blocks this session."; return 1; }
-  kill -0 "$owner" 2>/dev/null && return 1
+  session_lock_owner_alive "$dir" "$owner" && return 1
+  supervisor="$(cat "$dir/supervisor-pid" 2>/dev/null || true)"
+  event_run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  if [ -n "$supervisor" ] && ! session_lock_supervisor_finished "$dir"; then
+    warn "supervised session lock $(basename "$dir") has no terminal invocation evidence; retaining it instead of risking a concurrent provider turn."
+    return 1
+  fi
   quarantine="$dir.stale.$$.$RANDOM"
   mv "$dir" "$quarantine" 2>/dev/null || return 1
   moved_owner="$(cat "$quarantine/pid" 2>/dev/null || true)"
-  if [ "$moved_owner" != "$owner" ] || kill -0 "$moved_owner" 2>/dev/null; then
+  moved_supervisor="$(cat "$quarantine/supervisor-pid" 2>/dev/null || true)"
+  moved_event_run="$(cat "$quarantine/event-run-id" 2>/dev/null || true)"
+  if [ "$moved_owner" != "$owner" ] || [ "$moved_supervisor" != "$supervisor" ] || [ "$moved_event_run" != "$event_run" ] || session_lock_owner_alive "$quarantine" "$moved_owner"; then
     [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
     warn "session lock ownership changed during recovery: $(basename "$dir")"
     return 1
   fi
   rm -rf -- "$quarantine"
   mkdir "$dir" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"
+  session_lock_write_owner "$dir"; printf '%s\n' "$label" > "$dir/label"
   warn "reclaimed a stale local-only session lock from process $owner"
 }
 
@@ -689,6 +781,7 @@ stop_active_grok_tree() {
 }
 
 on_paid_signal() {
+  local stopped=0
   # Same ordering contract as preserve_uncertain_paid_turn: EXIT cleanup is
   # disarmed first, then paid-work uncertainty is recorded, and only afterwards
   # is the fallible process-tree stop attempted. A local stop never proves the
@@ -697,7 +790,10 @@ on_paid_signal() {
   [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK" \
     || warn 'could not write the uncertainty marker; retaining the paid-work lock for manual reconciliation.'
   [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
-  if request_active_grok_stop || stop_active_grok_tree; then
+  if request_active_grok_stop || stop_active_grok_tree; then stopped=1; fi
+  [ -z "$ACTIVE_DIAG_RUN" ] || record_diagnostic "$ACTIVE_DIAG_REPO" "$ACTIVE_DIAG_RUN" "$ACTIVE_DIAG_SESSION" terminal local-signal \
+    --signal caught --cancellation-initiator signal --cancellation-confirmation unconfirmed --failure-class interrupted
+  if [ "$stopped" = 1 ]; then
     warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
   else
     warn 'local wrapper stopped but could not confirm termination of its Grok process tree; remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
@@ -1316,6 +1412,9 @@ cmd_new() {
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" new "$name" "$GROK_MODEL" "$source_id" "$prompt_digest" 1)"; rid_lock="$(work_lock_path "$workid")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
+  if ! capacity_gate; then release_boundary "$repo" "grok-$name"; rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
+  record_diagnostic "$repo" "$workid" "$name" preflight capacity-checked
   if ! reserve_new_session "$upstream" "$name" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
   if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "an earlier Grok review using this exact session name ended without a confirmed result, so it is held for reconciliation. Grok is available; other reviews in this repository are unaffected. Use a different session name, or reconcile the held one first."; fi
   if ! lock_acquire "$rid_lock" "new:$name" "$upstream" "$name" "$repo" "$workid" "$prompt_digest" "$source_id" 1; then
@@ -1324,9 +1423,16 @@ cmd_new() {
   fi
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
   ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
+  ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
+  record_diagnostic "$repo" "$workid" "$name" launch provider-started
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
+    if [ "$rc" = 124 ]; then
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-deadline --exit-code "$rc" --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class timed-out
+    else
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
+    fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -1357,6 +1463,11 @@ cmd_new() {
 
   finish_turn "$repo" "$name" "$out" "$turns"
   local st=$?
+  if [ "$st" -eq 0 ]; then
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
+  else
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+  fi
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1421,6 +1532,9 @@ $REVIEW_HEAD only."
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" ask "$name" "$sid" "$source_id" "$prompt_digest" "$next_turn")"; rid_lock="$(work_lock_path "$workid")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
+  if ! capacity_gate; then rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
+  record_diagnostic "$repo" "$workid" "$name" preflight capacity-checked
   if ! reserve_session_turn "$upstream" "$name" "$next_turn" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
   ACTIVE_TURN_RECORD="$(turn_record_path "$upstream" "$CALLER" "$name" "$next_turn")"
   if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "an earlier turn of this exact Grok session ended without a confirmed result, so it is held for reconciliation. Grok is available; other reviews in this repository are unaffected. Reconcile the held session before continuing it."; fi
@@ -1430,9 +1544,16 @@ $REVIEW_HEAD only."
   fi
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
   ACTIVE_PAID_LOCK="$rid_lock"; ACTIVE_SESSION_LOCK="$sess_lock"
+  ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
+  record_diagnostic "$repo" "$workid" "$name" launch provider-started
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
+    if [ "$rc" = 124 ]; then
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-deadline --exit-code "$rc" --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class timed-out
+    else
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
+    fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -1461,6 +1582,11 @@ $REVIEW_HEAD only."
 
   finish_turn "$repo" "$name" "$out" "$turns"
   local st=$?
+  if [ "$st" -eq 0 ]; then
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
+  else
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+  fi
   rm -f "$pf" "$out" "$out.err"
   return $st
 }

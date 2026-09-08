@@ -7,7 +7,7 @@
 # join fields used by ai-reviewer-issue.
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
 PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$SCRIPT_DIR/ai-review-preflight}"
@@ -75,6 +75,109 @@ state_checked(){
   case "$parent/" in "$base"/*) ;; *) die "lifecycle state is outside managed storage: $state";; esac
   jq -e '.schema_version==1 and (.status|type=="string")' "$state" >/dev/null 2>&1 || die "invalid lifecycle state: $state"
   printf '%s' "$state"
+}
+
+diagnostic_file(){ # PROVIDER REPOSITORY-KEY CALLER RUN
+  printf '%s/diagnostics/%s/%s/%s/%s.json' "$STATE_DIR" "$2" "$1" "$3" "$4"
+}
+
+diagnostic_unlock(){ rm -f "$1/pid" 2>/dev/null || true; rmdir "$1" 2>/dev/null || true; }
+
+valid_phase(){ case "$1" in preflight|launch|awaiting-provider|awaiting-local-service|finalizing|terminal) return 0;; *) return 1;; esac; }
+valid_health(){ case "$1" in ''|healthy|unreachable|timed-out|unknown) return 0;; *) return 1;; esac; }
+valid_cancel_initiator(){ case "$1" in ''|wrapper-deadline|user-command|signal|provider|unknown) return 0;; *) return 1;; esac; }
+valid_cancel_confirmation(){ case "$1" in ''|confirmed|unconfirmed|not-requested) return 0;; *) return 1;; esac; }
+valid_safe_atom(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) [ "${#1}" -le 64 ];; esac; }
+
+diagnostic_observe(){
+  local provider="" repo="" run="" session="" caller="" phase="" observation="" elapsed="0" exit_code="" signal="" deadline="" terminal_reason="" health="" initiator="" requested_at="" confirmation="" failure="" quota_file=""
+  local identity key file dir lock now event row tmp size attempts=0 remote upstream owner stale
+  while [ "$#" -gt 0 ]; do case "$1" in
+    --provider) provider="${2:-}"; shift 2;; --repo) repo="${2:-}"; shift 2;;
+    --run-id) run="${2:-}"; shift 2;; --session-id) session="${2:-}"; shift 2;;
+    --caller) caller="${2:-}"; shift 2;; --phase) phase="${2:-}"; shift 2;;
+    --observation) observation="${2:-}"; shift 2;; --elapsed) elapsed="${2:-}"; shift 2;;
+    --exit-code) exit_code="${2:-}"; shift 2;; --signal) signal="${2:-}"; shift 2;;
+    --deadline-kind) deadline="${2:-}"; shift 2;; --terminal-reason) terminal_reason="${2:-}"; shift 2;;
+    --local-health) health="${2:-}"; shift 2;; --cancellation-initiator) initiator="${2:-}"; shift 2;;
+    --cancellation-requested-at) requested_at="${2:-}"; shift 2;; --cancellation-confirmation) confirmation="${2:-}"; shift 2;;
+    --failure-class) failure="${2:-}"; shift 2;; --quota-file) quota_file="${2:-}"; shift 2;;
+    *) die "unknown observe option: $1";; esac; done
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  valid_id "$run" || die "--run-id must be a safe non-empty identifier."
+  valid_id "$caller" || die "--caller must be a safe non-empty identifier."
+  [ -z "$session" ] || valid_id "$session" || die "--session-id is invalid."
+  valid_phase "$phase" || die "invalid diagnostic phase."
+  valid_safe_atom "$observation" || die "invalid observation type."
+  [ -n "$observation" ] || die "--observation is required."
+  case "$elapsed" in ''|*[!0-9]*) die "--elapsed must be a non-negative integer.";; esac
+  if [ -n "$exit_code" ] && ! [[ "$exit_code" =~ ^-?[0-9]+$ ]]; then die "--exit-code must be an integer."; fi
+  [ -z "$signal" ] || valid_safe_atom "$signal" || die "invalid signal identifier."
+  [ -z "$deadline" ] || valid_safe_atom "$deadline" || die "invalid deadline kind."
+  [ -z "$terminal_reason" ] || valid_safe_atom "$terminal_reason" || die "invalid terminal reason."
+  valid_health "$health" || die "invalid local health result."
+  valid_cancel_initiator "$initiator" || die "invalid cancellation initiator."
+  valid_cancel_confirmation "$confirmation" || die "invalid cancellation confirmation."
+  [ -z "$failure" ] || valid_safe_atom "$failure" || die "invalid failure class."
+  if [ -n "$requested_at" ]; then printf '%s\n' "$requested_at" | jq -e 'fromdateiso8601' >/dev/null 2>&1 || die "invalid cancellation request timestamp."; fi
+  if [ -n "$quota_file" ]; then
+    [ -f "$quota_file" ] && [ ! -L "$quota_file" ] || die "quota result is not a regular file."
+    jq -e '.schema_version==1 and (.state|IN("available","exhausted","unknown")) and (.provider|type=="string") and (.reason|type=="string")' "$quota_file" >/dev/null 2>&1 || die "invalid quota result."
+    [ "$(jq -r .provider "$quota_file")" = "$provider" ] || die "quota result provider does not match."
+  fi
+  repo="$(canon "$repo")"; remote="$(git -C "$repo" remote get-url origin 2>/dev/null || true)"
+  if [ -n "$remote" ]; then upstream="$(normalize_remote "$remote")" || die "could not normalize origin remote."
+  else upstream="local://$(sha "$repo")"; fi
+  key="$(sha "$upstream")"; file="$(diagnostic_file "$provider" "$key" "$caller" "$run")"; dir="$(dirname "$file")"; lock="$file.update-lock"
+  if [ ! -f "$file" ]; then identity="$(identity_json "$repo")"; fi
+  mkdir -p "$dir"; chmod 0700 "$STATE_DIR" "$dir" 2>/dev/null || true
+  [ ! -L "$dir" ] && [ ! -L "$file" ] && [ ! -L "$lock" ] || die "refusing linked diagnostic storage."
+  while ! mkdir "$lock" 2>/dev/null; do
+    attempts=$((attempts+1)); owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then
+      stale="$lock.stale.$$.$RANDOM"
+      if mv "$lock" "$stale" 2>/dev/null; then rm -f "$stale/pid" 2>/dev/null || true; rmdir "$stale" 2>/dev/null || true; attempts=0; continue; fi
+    fi
+    [ "$attempts" -lt 100 ] || die "diagnostic update is busy."
+    sleep 0.02
+  done
+  printf '%s\n' "$$" > "$lock/pid" || { diagnostic_unlock "$lock"; die "could not record diagnostic lock ownership."; }
+  trap 'diagnostic_unlock "$lock"' EXIT INT TERM
+  now="$(date -u +%FT%TZ)"
+  event="$(jq -nc --arg at "$now" --arg phase "$phase" --arg observation "$observation" --argjson elapsed "$elapsed" \
+    --arg exit "$exit_code" --arg signal "$signal" --arg deadline "$deadline" --arg terminal "$terminal_reason" --arg health "$health" \
+    --arg initiator "$initiator" --arg requested "$requested_at" --arg confirmation "$confirmation" --arg failure "$failure" \
+    '{observed_at:$at,phase:$phase,elapsed_seconds:$elapsed,last_observation_type:$observation,
+      wrapper_exit_code:(if $exit=="" then null else ($exit|tonumber) end),wrapper_signal:(if $signal=="" then null else $signal end),
+      deadline_kind:(if $deadline=="" then null else $deadline end),provider_terminal_reason:(if $terminal=="" then null else $terminal end),
+      local_health:(if $health=="" then null else $health end),
+      cancellation:{initiator:(if $initiator=="" then null else $initiator end),requested_at:(if $requested=="" then null else $requested end),confirmation:(if $confirmation=="" then null else $confirmation end)},
+      failure_class:(if $failure=="" then null else $failure end)}')"
+  if [ -f "$file" ]; then
+    jq -e --arg p "$provider" --arg r "$run" --arg c "$caller" --arg s "$session" --arg root "$repo" \
+      '.schema_version==1 and .provider==$p and .run_id==$r and .caller==$c and .repository_root==$root and ((.session_id//"")==$s)' "$file" >/dev/null 2>&1 \
+      || { diagnostic_unlock "$lock"; trap - EXIT INT TERM; die "diagnostic join identity does not match existing record."; }
+    row="$(jq --argjson event "$event" --arg now "$now" --arg phase "$phase" --arg quota_file "$quota_file" \
+      '(.events|length) as $old_count | .updated_at=$now | .current=$event |
+       .events=((.events + [$event]) | if length>64 then .[-64:] else . end) |
+       .truncated=(.truncated or ($old_count>=64)) |
+       (if $phase=="launch" and .launch_summary==null then .launch_summary=$event else . end) |
+       if $phase=="terminal" then .terminal_summary=$event else . end' "$file")"
+  else
+    row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg now "$now" --argjson event "$event" \
+      '{schema_version:1,provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,
+        repository_root:$identity.repository_root,head:$identity.head,source_digest:$identity.source_digest,created_at:$now,updated_at:$now,
+        launch_summary:(if $event.phase=="launch" then $event else null end),terminal_summary:(if $event.phase=="terminal" then $event else null end),
+        current:$event,events:[$event],truncated:false,quota_result:null}')"
+  fi
+  if [ -n "$quota_file" ]; then row="$(jq --slurpfile quota "$quota_file" '.quota_result=$quota[0]' <<<"$row")"; fi
+  tmp="$(mktemp "$dir/.diagnostic.XXXXXX")"; printf '%s\n' "$row" > "$tmp"; chmod 0600 "$tmp" 2>/dev/null || true
+  while size="$(wc -c < "$tmp" | tr -d ' ')" && [ "$size" -gt 32768 ]; do
+    row="$(jq 'if (.events|length)>1 then .events=.events[1:]|.truncated=true else . end' "$tmp")"; printf '%s\n' "$row" > "$tmp"
+    [ "$(jq '.events|length' "$tmp")" -gt 1 ] || break
+  done
+  [ "$(wc -c < "$tmp" | tr -d ' ')" -le 32768 ] || { rm -f "$tmp"; diagnostic_unlock "$lock"; trap - EXIT INT TERM; die "diagnostic envelope exceeds 32 KiB."; }
+  mv -f "$tmp" "$file"; diagnostic_unlock "$lock"; trap - EXIT INT TERM; printf '%s\n' "$file"
 }
 
 release_lock(){ # STATE
@@ -176,11 +279,12 @@ join(){
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;
   begin) shift; begin "$@";; finish) shift; terminal finish "$@";; fail) shift; terminal fail "$@";;
+  observe) shift; diagnostic_observe "$@";;
   join) shift; [ "$#" -eq 1 ] || die "join requires one state file."; join "$1";;
   --version) printf 'ai-review-lifecycle %s\n' "$VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;;
 esac

@@ -79,6 +79,11 @@ LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
 SERVER_START_TIMEOUT="${AI_GLM_SERVER_START_TIMEOUT:-30}"
 POLL_SECS=5
 JSON_OUT=0
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
+REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
+CAPACITY_JSON=''
+ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''; ACTIVE_DIAG_STARTED_EPOCH=0
 
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
@@ -103,6 +108,48 @@ esac
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 need curl; need jq; need git
+
+capacity_gate() {
+  local out state
+  out="$("$REVIEW_PREFLIGHT_BIN" capacity glm --json 2>/dev/null || true)"
+  if ! printf '%s\n' "$out" | jq -e '.schema_version==1 and .provider=="glm" and (.state|IN("available","exhausted","unknown"))' >/dev/null 2>&1; then
+    out="$(jq -nc --arg at "$(date -u +%FT%TZ)" '{schema_version:1,provider:"glm",state:"unknown",checked_at:$at,provider_version:"unknown",credential_profile_scope:null,model_scope:null,source_kind:"wrapper",reason:"malformed-response",reset_at:null}')"
+  fi
+  CAPACITY_JSON="$(printf '%s\n' "$out" | jq -c .)"; state="$(jq -r .state <<<"$CAPACITY_JSON")"
+  case "$state" in
+    exhausted) warn 'GLM review was not submitted because the qualified capacity check reports exhausted.'; return 3;;
+    unknown) warn "GLM capacity is unknown ($(jq -r .reason <<<"$CAPACITY_JSON")); continuing under the existing review guards.";;
+  esac
+}
+
+record_diagnostic() { # PHASE OBSERVATION [EXTRA...]
+  [ -n "$ACTIVE_DIAG_RUN" ] || return 0
+  local phase="$1" observation="$2" quota="" now elapsed=0; local -a args; shift 2
+  if [[ "$ACTIVE_DIAG_STARTED_EPOCH" =~ ^[0-9]+$ ]] && [ "$ACTIVE_DIAG_STARTED_EPOCH" -gt 0 ]; then
+    now="$(date +%s)"; elapsed="$((now - ACTIVE_DIAG_STARTED_EPOCH))"; [ "$elapsed" -ge 0 ] || elapsed=0
+  fi
+  args=(observe --provider glm --repo "$ACTIVE_DIAG_REPO" --run-id "$ACTIVE_DIAG_RUN" --session-id "$ACTIVE_DIAG_SESSION" --caller "$CALLER" --phase "$phase" --observation "$observation" --elapsed "$elapsed")
+  if printf '%s\n' "$CAPACITY_JSON" | jq -e '.schema_version==1' >/dev/null 2>&1; then
+    if ! quota="$(mktemp "$STATE_DIR/.capacity.XXXXXX" 2>/dev/null)"; then warn 'GLM diagnostic evidence could not create private temporary storage; the review result is unchanged.'; return 0; fi
+    if ! printf '%s\n' "$CAPACITY_JSON" > "$quota"; then rm -f "$quota"; warn 'GLM diagnostic evidence could not be staged; the review result is unchanged.'; return 0; fi
+    args+=(--quota-file "$quota")
+  fi
+  args+=("$@")
+  "$REVIEW_LIFECYCLE_BIN" "${args[@]}" >/dev/null 2>&1 || warn 'GLM diagnostic evidence could not be recorded; the review result is unchanged.'
+  [ -z "$quota" ] || rm -f "$quota"
+  return 0
+}
+
+require_review_server() {
+  if [ ! -s "$PW_FILE" ]; then
+    record_diagnostic awaiting-local-service local-health-unavailable --local-health unknown --failure-class local-dependency-unavailable
+    require_server
+  fi
+  if ! server_up "${AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT:-30}"; then
+    record_diagnostic awaiting-local-service local-health-timeout --local-health timed-out --failure-class local-service-timeout
+    local_service_fatal
+  fi
+}
 
 # --------------------------------------------------------------------------------
 # HTTP. Every request is authenticated; the server 401s otherwise.
@@ -746,11 +793,13 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
       *) code=permission-invalid-response; summary="blocked an invalid or unsupported permission response on the first observable poll" ;;
     esac
     if [ "$code" = transport-failed ]; then
+      record_diagnostic awaiting-local-service permission-endpoint-timeout --local-health timed-out --failure-class transport-failed
       msg="GLM run stopped: ${err}. This is a LOCAL transport failure, not a permission
        problem: the wrapper never received a permission request, so nothing was refused.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
        Check the server first: ai-glm doctor, then ai-glm server status. $guidance."
     else
+      record_diagnostic finalizing permission-failed --local-health healthy --failure-class "$code"
       msg="GLM permission failed: ${err:-unknown response}${stuck:+ (tool: $stuck)}.
        $(permission_diagnostic "$HTTP_STATUS" "$mode" "$category" "$HTTP_BODY")
        $guidance. For an outside-directory file, place a safe copy under
@@ -805,7 +854,10 @@ send_prompt() { # send_prompt SID PROMPT_FILE
   local sid="$1" pf="$2" body
   body="$(mktemp)"
   jq -Rs '{prompt:{text:.}}' < "$pf" > "$body"
-  api POST "/api/session/$sid/prompt" "$body" > /dev/null
+  if ! api POST "/api/session/$sid/prompt" "$body" > /dev/null; then
+    rm -f "$body"
+    return 1
+  fi
   rm -f "$body"
 }
 
@@ -869,6 +921,7 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
        .failure_detected_at=$now' --arg now "$(date -u +%FT%TZ)" || return 1
     return 124
   fi
+  record_diagnostic terminal provider-deadline --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class turn-timeout
   die "GLM turn did not complete within ${TIMEOUT}s (last finish='$finish'${stuck:+, tool still running: $stuck}).
        Run: ai-glm abort $2"
 }
@@ -959,12 +1012,13 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report lock
+  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
-  require_server
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
-  rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
+  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
+  require_review_server
   lock="$(lock_path "$rid" "$name")"
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
@@ -972,31 +1026,41 @@ cmd_new() {
   prepare_review "$root" "$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   boundary="$REVIEW_DIR"
   prefix_packet_preamble "$pf"
+  if ! capacity_gate; then release_boundary "$root" "$name"; rm -f "$pf"; lock_release "$lock"; return 1; fi
+  record_diagnostic preflight capacity-checked --local-health healthy
   sid="$(create_session "$name" glm-review "$boundary")"
   if ! write_meta "$mp" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg n "$name" --arg sid "$sid" --arg r "$root" --arg b "$boundary" --arg remote "$(repo_remote "$root")" --arg rid "$rid" \
       --arg c "$CALLER" --arg m "$MODEL" --arg p "$PROVIDER" --arg ts "$(date -u +%FT%TZ)" \
-      --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
+      --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" \
       '{schema_version:2, name:$n, type:"review", opencode_session_id:$sid, repository_root:$r, boundary_root:$b, repository_remote:$remote,
         repository_id:$rid, caller:$c, agent:"glm-review", provider:$p, model:$m,
         base:$base, head:$head, packet_sha256:$pkthash,
-        created_at:$ts, last_activity_at:$ts, status:"active"}')"; then
+        created_at:$ts, last_activity_at:$ts, status:"active",last_diagnostic_run_id:$diagnostic,quota_result:$quota}')"; then
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
   fi
-  send_prompt "$sid" "$pf"; rm -f "$pf"
+  record_diagnostic launch provider-started
+  if ! send_prompt "$sid" "$pf"; then
+    rm -f "$pf"
+    record_diagnostic terminal provider-submit-failed --local-health unknown --failure-class transport-failed --cancellation-confirmation not-requested
+    die "GLM prompt submission failed before a provider result was available. Run: ai-glm doctor"
+  fi
+  rm -f "$pf"
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
 cmd_ask() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head
-  require_server
-  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
+  ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
+  require_review_server
   [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
   sid="$(jq -r .opencode_session_id "$mp")"
   [ "$(jq -r .type "$mp")" = "review" ] || die "session '$name' is not a review session."
@@ -1031,7 +1095,16 @@ rebuilt for the new head; treat any verdict from this session as applying to
 $REVIEW_HEAD only."
   fi
   prefix_packet_preamble "$pf"
-  send_prompt "$sid" "$pf"; rm -f "$pf"
+  if ! capacity_gate; then rm -f "$pf"; lock_release "$lock"; return 1; fi
+  write_meta "$mp" "$(jq --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" '.last_diagnostic_run_id=$diagnostic|.quota_result=$quota' "$mp")"
+  record_diagnostic preflight capacity-checked --local-health healthy
+  record_diagnostic launch provider-started
+  if ! send_prompt "$sid" "$pf"; then
+    rm -f "$pf"
+    record_diagnostic terminal provider-submit-failed --local-health unknown --failure-class transport-failed --cancellation-confirmation not-requested
+    die "GLM prompt submission failed before a provider result was available. Run: ai-glm doctor"
+  fi
+  rm -f "$pf"
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
@@ -1045,6 +1118,7 @@ $REVIEW_HEAD only."
   write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
