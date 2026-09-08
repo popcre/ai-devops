@@ -407,7 +407,7 @@ echo "== #1220: silence must never read as APPROVE =="
 # the tail from '## Verdict' (discarding findings that sat above it) and treated a
 # run that ended with no verdict as a review with nothing to say. Exercised
 # directly, because these are pure-text defects.
-sed -n '/^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
+sed -n '/^provider_api_error() {/,/^}/p; /^extract_answer() {/,/^}/p' "$SCRIPT" > "$TMP/extract.sh"
 probe(){ bash -c '. "$1"; ANSWER_DEFECT=""; extract_answer "$2" >/dev/null; printf "%s" "$ANSWER_DEFECT"' _ "$TMP/extract.sh" "$1"; }
 
 printf '%s\n' '{"type":"result","is_error":false,"result":"I have read the files. Let me verify a few things before finalizing findings."}' > "$TMP/noverdict.jsonl"
@@ -421,6 +421,14 @@ check 'a stream with no answer at all is reported as a defect' "printf '%s' \"\$
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding one\n## Verdict\nAPPROVE"}' > "$TMP/good.jsonl"
 GOOD="$(probe "$TMP/good.jsonl")"
 check 'a complete review is NOT flagged as a defect' "[ -z \"\$GOOD\" ]"
+
+printf '%s\n' '{"type":"result","is_error":false,"result":"[API Error: synthetic refusal]"}' > "$TMP/api-error.jsonl"
+API_ERROR="$(probe "$TMP/api-error.jsonl")"
+check 'a terminal provider refusal is classified before verdict parsing' "printf '%s' \"\$API_ERROR\" | grep -q 'provider refused the call'"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"[API Error: synthetic refusal]"}]}}' > "$TMP/assistant-api-error.jsonl"
+cat "$TMP/good.jsonl" >> "$TMP/assistant-api-error.jsonl"
+ASSISTANT_API_ERROR="$(probe "$TMP/assistant-api-error.jsonl")"
+check 'an assistant provider refusal cannot become an approved review' "printf '%s' \"\$ASSISTANT_API_ERROR\" | grep -q 'provider refused the call'"
 
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding\n## Verdict\nMAYBE"}' > "$TMP/invalid-verdict.jsonl"
 INVALID="$(probe "$TMP/invalid-verdict.jsonl")"

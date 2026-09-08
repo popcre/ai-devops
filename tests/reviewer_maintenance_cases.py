@@ -126,7 +126,8 @@ esac
         second = self.engine.start()
         self.assertEqual(len(second["candidates"]), 1)
         self.assertNotEqual(first["candidates"][0]["id"], second["candidates"][0]["id"])
-        self.assertEqual(second["sources"][str(self.ledger)]["lower"], first["sources"][str(self.ledger)]["upper"])
+        source = str(m.physical(self.ledger))
+        self.assertEqual(second["sources"][source]["lower"], first["sources"][source]["upper"])
 
     def test_success_is_not_a_failure(self):
         self.invocation(code=0)
@@ -440,7 +441,7 @@ esac
 
     def test_missing_boundary_schema_is_refused(self):
         record = self.engine.start()
-        del record["sources"][str(self.ledger)]["upper"]
+        del record["sources"][str(m.physical(self.ledger))]["upper"]
         with self.assertRaises(m.Blocked):
             m.validate_round(record)
 
