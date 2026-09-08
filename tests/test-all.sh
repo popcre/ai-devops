@@ -76,7 +76,7 @@ elif [ "$windows_offline" = true ]; then
     printf '%s\n' "${all_tests[@]}" | grep -Fxq "$name" || {
       printf 'test-all.sh: windows_offline_bash names an undiscovered suite: %s\n' "$name" >&2; exit 2; }
   done
-  reason='Windows-sensitive Bash not already assigned to reviewer safety'
+  reason='Windows-sensitive Bash set'
 else
   tests=("${all_tests[@]}")
 fi
