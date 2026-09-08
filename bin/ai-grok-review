@@ -620,26 +620,79 @@ preserve_uncertain_paid_turn() { # preserve lock before any fallible tree cleanu
     || warn 'could not confirm local reviewer-tree termination; paid work remains blocked for manual reconciliation.'
 }
 
+session_lock_owner_alive() { # DIR OWNER
+  local dir="$1" owner="$2" supervisor
+  kill -0 "$owner" 2>/dev/null && return 0
+  # Under load, Git Bash on Windows can return ESRCH for a live sibling MSYS
+  # process. Its own process table still reports that PID, so consult it before
+  # declaring a lock stale. This is read-only and stays inside the local host.
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$owner" '$1 == p { found=1 } END { exit !found }' && return 0 ;;
+  esac
+  supervisor="$(cat "$dir/supervisor-pid" 2>/dev/null || true)"
+  [[ "$supervisor" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$supervisor" 2>/dev/null && return 0
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$supervisor" '$1 == p { found=1 } END { exit !found }' ;;
+    *) return 1 ;;
+  esac
+}
+
+session_lock_write_owner() { # DIR
+  local dir="$1"
+  printf '%s\n' "$$" > "$dir/pid"
+  if [[ "${AI_REVIEW_EVENT_OWNER_PID:-}" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$AI_REVIEW_EVENT_OWNER_PID" > "$dir/supervisor-pid"
+  fi
+  if [[ "${AI_REVIEW_EVENT_RUN_ID:-}" =~ ^[0-9a-f]{32}$ ]]; then
+    printf '%s\n' "$AI_REVIEW_EVENT_RUN_ID" > "$dir/event-run-id"
+  fi
+}
+
+session_lock_supervisor_finished() { # DIR
+  local dir="$1" run events base
+  run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] || return 1
+  if [ -n "${AI_REVIEW_EVENT_DIR:-}" ]; then
+    events="$AI_REVIEW_EVENT_DIR/events.jsonl"
+  else
+    base="${AI_REVIEWER_STATE_BASE:-${HOME}/.local/state/ai-devops}"
+    events="$base/reviewer-events/events.jsonl"
+  fi
+  [ -f "$events" ] || return 1
+  jq -s -e --arg run "$run" \
+    '[.[] | select(.run_id == $run)] as $rows | ($rows | length) == 2 and $rows[0].event == "started" and $rows[1].event == "finished"' \
+    "$events" >/dev/null 2>&1
+}
+
 session_lock_acquire() { # local-only serialization; paid uncertainty is owned by the repository lock
-  local dir="$1" label="$2" owner quarantine moved_owner
+  local dir="$1" label="$2" owner quarantine moved_owner moved_supervisor supervisor event_run moved_event_run
   mkdir -p "$(dirname "$dir")"
   if mkdir "$dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+    session_lock_write_owner "$dir"; printf '%s\n' "$label" > "$dir/label"; return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [[ "$owner" =~ ^[0-9]+$ ]] || { warn "malformed session lock $(basename "$dir") blocks this session."; return 1; }
-  kill -0 "$owner" 2>/dev/null && return 1
+  session_lock_owner_alive "$dir" "$owner" && return 1
+  supervisor="$(cat "$dir/supervisor-pid" 2>/dev/null || true)"
+  event_run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  if [ -n "$supervisor" ] && ! session_lock_supervisor_finished "$dir"; then
+    warn "supervised session lock $(basename "$dir") has no terminal invocation evidence; retaining it instead of risking a concurrent provider turn."
+    return 1
+  fi
   quarantine="$dir.stale.$$.$RANDOM"
   mv "$dir" "$quarantine" 2>/dev/null || return 1
   moved_owner="$(cat "$quarantine/pid" 2>/dev/null || true)"
-  if [ "$moved_owner" != "$owner" ] || kill -0 "$moved_owner" 2>/dev/null; then
+  moved_supervisor="$(cat "$quarantine/supervisor-pid" 2>/dev/null || true)"
+  moved_event_run="$(cat "$quarantine/event-run-id" 2>/dev/null || true)"
+  if [ "$moved_owner" != "$owner" ] || [ "$moved_supervisor" != "$supervisor" ] || [ "$moved_event_run" != "$event_run" ] || session_lock_owner_alive "$quarantine" "$moved_owner"; then
     [ -e "$dir" ] || mv "$quarantine" "$dir" 2>/dev/null || true
     warn "session lock ownership changed during recovery: $(basename "$dir")"
     return 1
   fi
   rm -rf -- "$quarantine"
   mkdir "$dir" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"
+  session_lock_write_owner "$dir"; printf '%s\n' "$label" > "$dir/label"
   warn "reclaimed a stale local-only session lock from process $owner"
 }
 

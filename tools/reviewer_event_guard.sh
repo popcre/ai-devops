@@ -11,6 +11,11 @@ reviewer_event_guard(){
   # may launch between DeepSeek's credential handoff and its secret scrub.
   [ "$provider" != deepseek ] || [ "${AI_DEEPSEEK_REEXEC:-}" != 1 ] || return 0
   if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] && [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ]; then
+    # The outer event recorder remains alive for the full invocation. Keep its
+    # PID as a shell-local liveness witness for Windows, where a sibling MSYS
+    # shell can briefly fail to see the inner wrapper PID via `kill -0`.
+    AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$AI_REVIEW_EVENT_PARENT}"
+    export -n AI_REVIEW_EVENT_OWNER_PID
     unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER
     return 0
   fi
@@ -26,7 +31,8 @@ reviewer_event_guard(){
   name="AI_${provider^^}_REVIEW_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   [ "$provider" != kimi ] || [ "${1:-}" != start ] || operation=async-submission
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
-  export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id"
+  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
+  export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
   # Forward only to this invocation's child; never search process names or
   # change another review's state. A killed supervisor leaves an unmatched start.
   trap 'received=TERM; [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true' TERM

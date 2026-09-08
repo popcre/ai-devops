@@ -169,7 +169,7 @@ case "$mode" in
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
-  hold)      touch "$TMPDIR_FOR_TEST/hold-started"
+  hold)      printf '%s\n' "$$" >> "$TMPDIR_FOR_TEST/hold-started"
              printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
              trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
              # The hold is released by the test, or terminated by the wrapper's
@@ -261,6 +261,32 @@ work_lock_labelled() {
 # lock from an earlier section while the session under test had not started.
 ask_session_lock_held() {
   grep -qs -x "ask:$1" "$AI_GROK_STATE_DIR"/locks/session--*.lock.d/label 2>/dev/null
+}
+
+ask_session_lock_supervised() {
+  local label="$1" lock supervisor event_run
+  for lock in "$AI_GROK_STATE_DIR"/locks/session--*.lock.d; do
+    [ -d "$lock" ] || continue
+    grep -qs -x "ask:$label" "$lock/label" || continue
+    supervisor="$(cat "$lock/supervisor-pid" 2>/dev/null || true)"
+    event_run="$(cat "$lock/event-run-id" 2>/dev/null || true)"
+    [[ "$supervisor" =~ ^[0-9]+$ ]] || continue
+    [[ "$event_run" =~ ^[0-9a-f]{32}$ ]] || continue
+    test_process_alive "$supervisor" || continue
+    jq -s -e --arg run "$event_run" \
+      '[.[] | select(.run_id == $run)] | length == 1 and .[0].event == "started"' \
+      "$AI_REVIEW_EVENT_DIR/events.jsonl" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+test_process_alive() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null && return 0
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) ps -W 2>/dev/null | awk -v p="$pid" '$1 == p { found=1 } END { exit !found }' ;;
+    *) return 1 ;;
+  esac
 }
 
 # fixture_note_if_timed_out OUTPUT LABEL — a run that is not testing the wait
@@ -754,6 +780,18 @@ check "live doctor cleans its neutral runtime directory" "sed -n '/^cmd_doctor()
 check "installed symlink resolves the repository-owned process supervisor" "sed -n '/supervisor=.*ai-process-supervisor/,/process-tree ownership/p' '$SCRIPT' | grep -q 'readlink -f'"
 check "timeout restores shell fail-fast state before returning" "sed -n '/RUN_TURN_RC=124/,+3p' '$SCRIPT' | grep -q 'set -e'"
 check "POSIX supervisor escalates before the wrapper fallback" "grep -q 'time.monotonic() + 3' '$REPO_ROOT/bin/ai-process-supervisor'"
+MSYS_VISIBLE_LOCK="$AI_GROK_STATE_DIR/locks/session--msys-visible.lock.d"
+mkdir -p "$MSYS_VISIBLE_LOCK"; printf '99999999\n' > "$MSYS_VISIBLE_LOCK/pid"; printf '4242\n' > "$MSYS_VISIBLE_LOCK/supervisor-pid"; printf 'ask:msys-visible\n' > "$MSYS_VISIBLE_LOCK/label"
+(
+  . "$TMP/lib.sh"
+  uname() { printf 'MINGW64_NT\n'; }
+  kill() { return 1; }
+  ps() { printf '      PID PPID PGID WINPID TTY UID STIME COMMAND\n     4242 1 1 4242 ? 1 00:00 bash\n'; }
+  session_lock_acquire "$MSYS_VISIBLE_LOCK" ask:challenger
+) >/dev/null 2>&1; MSYS_VISIBLE_RC=$?
+check "Windows process-table witness prevents reclaim when kill cannot see the live supervisor" \
+  "test '$MSYS_VISIBLE_RC' -ne 0 && grep -q -x '99999999' '$MSYS_VISIBLE_LOCK/pid'"
+rm -rf "$MSYS_VISIBLE_LOCK"
 run new stale-session --prompt x >/dev/null 2>&1
 STALE_META="$(find "$AI_GROK_STATE_DIR/sessions" -name 'claude--stale-session.json' -print -quit)"; STALE_SESSION_ID="$(printf 'grok\n%s\n%s\n%s' 'github.com/example/reviewer-fixture' "$AI_GROK_CALLER" stale-session | sha256sum | cut -c1-24)"; STALE_SESSION_LOCK="$AI_GROK_STATE_DIR/locks/session--$STALE_SESSION_ID.lock.d"
 mkdir -p "$STALE_SESSION_LOCK"; printf '99999999\n' > "$STALE_SESSION_LOCK/pid"; printf 'ask:stale-session\n' > "$STALE_SESSION_LOCK/label"
@@ -799,14 +837,29 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # reliable progress signal: wait while it is alive, but still fail if it exits
 # before publishing both locks or reaches its own bounded timeout.
 poll_worker_until "$ASK_A_PID" "$(budget 80 480)" 'both named ask turns hold their own session locks' \
-  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2" || true
-check "different_named_sessions_can_ask_concurrently" "test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2"
-# The duplicate needs the same wide ceiling as the turns it must lose to. It
-# builds its own review packet BEFORE reaching the lock check, so on a slow
-# runner a normal ceiling fires first and it reports a timeout instead of the
-# refusal - failing this check for a reason that is not a wrapper defect.
-DUP_ASK="$(AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next 2>&1)"; DUP_ASK_RC=$?
-check "same_next_ask_turn_is_serialized" "test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already running'"
+  "ask_session_lock_held ask-a && ask_session_lock_held ask-b && ask_session_lock_supervised ask-a && ask_session_lock_supervised ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2 && test \"\$(wc -l < '$TMP/hold-started')\" -ge 2" || true
+check "different_named_sessions_can_ask_concurrently" "ask_session_lock_supervised ask-a && ask_session_lock_supervised ask-b && test \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' | wc -l)\" -ge 2 && test \"\$(wc -l < '$TMP/hold-started')\" -ge 2"
+# Run the challenger asynchronously so a broken serialization guard cannot
+# consume the owner's whole timeout and cascade into the uncertainty checks.
+# Entering the provider stub is already decisive failure evidence: a duplicate
+# turn must be refused at the session lock before any provider contact.
+DUP_ARGV_BEFORE="$(wc -l < "$TMP/argv.txt")"
+( AI_GROK_WAIT_TIMEOUT="$(budget 40 120)" run ask ask-a --prompt next >"$TMP/dup-ask.out" 2>&1; printf '%s\n' "$?" >"$TMP/dup-ask.rc" ) & DUP_ASK_PID=$!
+poll_worker_until "$DUP_ASK_PID" "$(budget 20 60)" 'the duplicate ask was refused or reached the provider fixture' \
+  "test -f '$TMP/dup-ask.rc' || test \"\$(wc -l < '$TMP/argv.txt')\" -gt '$DUP_ARGV_BEFORE'" || true
+DUP_REACHED_PROVIDER=0
+if [ ! -f "$TMP/dup-ask.rc" ]; then
+  DUP_REACHED_PROVIDER=1
+  printf '  fixture: duplicate ask reached the provider; owner-a=%s owner-b=%s session-locks=%s work-locks=%s\n' \
+    "$(test_process_alive "$ASK_A_PID" && printf alive || printf dead)" \
+    "$(test_process_alive "$ASK_B_PID" && printf alive || printf dead)" \
+    "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'session--*.lock.d' | wc -l)" \
+    "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' | wc -l)" >&2
+  touch "$TMP/release-grok"
+fi
+wait "$DUP_ASK_PID" 2>/dev/null || true
+DUP_ASK="$(cat "$TMP/dup-ask.out" 2>/dev/null || true)"; DUP_ASK_RC="$(cat "$TMP/dup-ask.rc" 2>/dev/null || echo 1)"
+check "same_next_ask_turn_is_serialized" "test '$DUP_REACHED_PROVIDER' -eq 0 && test '$DUP_ASK_RC' -ne 0 && printf '%s' \"$DUP_ASK\" | grep -q 'already running'"
 touch "$TMP/release-grok"; wait "$ASK_A_PID"; wait "$ASK_B_PID"; echo ok > "$TMP/mode"
 rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # Terminated by the test below, so it must not reach its own ceiling first:
