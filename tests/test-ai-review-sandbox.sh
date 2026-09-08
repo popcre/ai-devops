@@ -248,7 +248,7 @@ git -C "$MERGE_SRC" config user.email t@example.com
 git -C "$MERGE_SRC" config user.name Test
 echo base > "$MERGE_SRC/base.txt"
 git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm init
-git init -q --bare "$MERGE_ORIGIN"
+git init -q --bare --initial-branch=main "$MERGE_ORIGIN"
 git -C "$MERGE_SRC" remote add origin "$MERGE_ORIGIN"
 git -C "$MERGE_SRC" push -q -u origin main
 git -C "$MERGE_SRC" checkout -q -b topic

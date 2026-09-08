@@ -226,7 +226,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   # CARRY THE BASE BRANCHES ACROSS. `git clone` puts the source's branches under
   # refs/remotes/origin/, and `remote remove origin` deletes every one of them, so
   # the snapshot ends up with NO refs at all. ai-review-packet's base resolution
-  # tries `main`, `master`, `origin/main`, `origin/master` in that order and --
+  # prefers fetched `origin/main`/`origin/master`, then local `main`/`master`, and --
   # because none of them can exist here -- silently falls through to HEAD~1.
   #
   # On an ordinary linear branch that is merely narrow. On a MERGE commit it is

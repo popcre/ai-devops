@@ -181,7 +181,7 @@ check "bad_base_is_refused_loudly"            "'$SCRIPT' remove '$R'; ! '$SCRIPT
 # file in the review.
 STALE="$TMP/stale-base"
 ORIGIN="$TMP/stale-origin.git"
-git init -q --bare "$ORIGIN"
+git init -q --bare --initial-branch=main "$ORIGIN"
 git clone -q "$R" "$STALE"
 git -C "$STALE" remote set-url origin "$ORIGIN"
 git -C "$STALE" checkout -q -B main "$BASE_SHA"
