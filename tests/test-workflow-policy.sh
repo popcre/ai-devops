@@ -52,10 +52,20 @@ actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
 manifest_bash="$(jq -r '.bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
-check 'manifest declares 66 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 66 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 66 ]"
+windows_sensitive="$(jq -r '.windows_sensitive_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+windows_offline="$(jq -r '.windows_offline_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+windows_reviewer="$(jq -r '.windows_reviewer_safety_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+windows_union="$(printf '%s\n%s\n' "$windows_offline" "$windows_reviewer" | sed '/^$/d' | LC_ALL=C sort)"
+check 'manifest declares 67 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 67 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 67 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
+check 'Windows groups are unique subsets of Bash discovery' \
+  '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
+check 'ordinary Windows jobs partition every sensitive Bash suite exactly once' \
+  '[ "$windows_union" = "$windows_sensitive" ] && [ -z "$(comm -12 <(printf "%s\n" "$windows_offline") <(printf "%s\n" "$windows_reviewer"))" ]'
+check 'reviewer lane owns exactly Codex and Grok safety suites' \
+  '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ]'
 
 # A pull-request run must be superseded by a newer push to the same pull
 # request. Keying the group on the head SHA made that impossible and filled the
@@ -88,6 +98,15 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 [ "$windows_skips" -eq 2 ] || {
   printf 'FAIL: both Windows jobs must be skipped on merge_group
 ' >&2
+  exit 1
+}
+# Pull requests use the disjoint Windows-sensitive assignment. Schedule and
+# workflow_dispatch keep the no-argument complete runner as the backstop.
+grep -Fq "if (\$env:GITHUB_EVENT_NAME -eq 'pull_request')" "$workflow" &&
+grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest' "$workflow" &&
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
+grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" || {
+  printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
 # Windows verification runs in two lanes at once, and both must stay present.
@@ -175,6 +194,8 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   assert_rejected unique-manual-group
   sed '0,/!cancelled()/s//!always()/' "$workflow" >"$mutation_dir/cancellation-insensitive-job.yml"
   assert_rejected cancellation-insensitive-job
+  sed '/-WindowsPullRequest/d' "$workflow" >"$mutation_dir/full-windows-pr.yml"
+  assert_rejected full-windows-pr
 fi
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
