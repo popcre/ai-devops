@@ -781,6 +781,7 @@ stop_active_grok_tree() {
 }
 
 on_paid_signal() {
+  local stopped=0
   # Same ordering contract as preserve_uncertain_paid_turn: EXIT cleanup is
   # disarmed first, then paid-work uncertainty is recorded, and only afterwards
   # is the fallible process-tree stop attempted. A local stop never proves the
@@ -789,9 +790,10 @@ on_paid_signal() {
   [ -z "$ACTIVE_PAID_LOCK" ] || mark_remote_uncertain "$ACTIVE_PAID_LOCK" \
     || warn 'could not write the uncertainty marker; retaining the paid-work lock for manual reconciliation.'
   [ -z "$ACTIVE_SESSION_LOCK" ] || lock_release "$ACTIVE_SESSION_LOCK"
+  if request_active_grok_stop || stop_active_grok_tree; then stopped=1; fi
   [ -z "$ACTIVE_DIAG_RUN" ] || record_diagnostic "$ACTIVE_DIAG_REPO" "$ACTIVE_DIAG_RUN" "$ACTIVE_DIAG_SESSION" terminal local-signal \
     --signal caught --cancellation-initiator signal --cancellation-confirmation unconfirmed --failure-class interrupted
-  if request_active_grok_stop || stop_active_grok_tree; then
+  if [ "$stopped" = 1 ]; then
     warn 'local wrapper stopped and its Grok process tree was terminated; provider cancellation is not confirmed and remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
   else
     warn 'local wrapper stopped but could not confirm termination of its Grok process tree; remote work may still run and bill. Paid work remains blocked pending manual reconciliation.'
