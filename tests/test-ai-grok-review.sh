@@ -764,7 +764,22 @@ SIGNAL_BAD_STATE="$TMP/on-paid-signal-not-a-directory"; printf 'occupied\n' > "$
 ) >/dev/null 2>&1
 SIGNAL_RC=$?
 check "on_paid_signal records remote uncertainty before any fallible cleanup"   "test -f '$SIGNAL_LOCK/remote-uncertain' && test '$SIGNAL_RC' -eq 99"
-check "diagnostic storage failure cannot skip paid-work shutdown" "test '$SIGNAL_RC' -eq 99"
+SIGNAL_STOP_CALLED="$TMP/on-paid-signal-stop-called"
+SIGNAL_DIAG_LOCK="$TMP/on-paid-signal-diagnostic-failure.lock.d"
+(
+  . "$TMP/lib.sh"
+  STATE_DIR="$SIGNAL_BAD_STATE"
+  mkdir -p "$SIGNAL_DIAG_LOCK"; printf '%s\n' "$$" > "$SIGNAL_DIAG_LOCK/pid"
+  ACTIVE_PAID_LOCK="$SIGNAL_DIAG_LOCK"; ACTIVE_SESSION_LOCK=''
+  ACTIVE_DIAG_REPO="$REPO"; ACTIVE_DIAG_RUN=signal-diagnostic; ACTIVE_DIAG_SESSION=signal-diagnostic
+  CAPACITY_JSON='{"schema_version":1,"provider":"grok","state":"unknown"}'
+  ACTIVE_GROK_CHILD=99999999
+  request_active_grok_stop() { printf 'called\n' > "$SIGNAL_STOP_CALLED"; return 0; }
+  stop_active_grok_tree()    { return 1; }
+  on_paid_signal
+) >"$TMP/on-paid-signal-diagnostic-failure.out" 2>&1
+SIGNAL_DIAG_RC=$?
+check "diagnostic storage failure cannot skip paid-work shutdown" "test -f '$SIGNAL_STOP_CALLED' && test '$SIGNAL_DIAG_RC' -eq 130 && grep -q 'diagnostic evidence could not create private temporary storage' '$TMP/on-paid-signal-diagnostic-failure.out'"
 check "on_paid_signal warns instead of trusting the uncertainty marker write"   "sed -n '/^on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'retaining the paid-work lock for manual reconciliation'"
 ABANDONED_WORK="$TMP/work--abandoned.lock.d"; mkdir -p "$ABANDONED_WORK"; printf '99999999\n' > "$ABANDONED_WORK/pid"; printf 'new:abandoned\n' > "$ABANDONED_WORK/label"
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$ABANDONED_WORK" new:abandoned github.com/example/reviewer-fixture abandoned "$REPO" abandoned-work prompt-digest source-id 1 ) >"$TMP/abandoned.out" 2>&1
