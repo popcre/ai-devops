@@ -53,6 +53,7 @@ pipeline. The recovery procedure lives in
 | Standing behavior, trigger quality, false completion, “instructions not working,” or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Preserve client parity, safety gates, and private-data boundaries |
 | Tool, workflow, prompt, install, model, secret, or machine setup | The matching row in [`docs/task-router.md`](docs/task-router.md) | Read the affected verification header before edits |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | [`docs/task-router.md`](docs/task-router.md) | Resolve current status; preserve safety behavior |
+| Combined reviewer reliability and cache/session qualification | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md) STATUS | Reuse existing provider work; no completion without installed evidence |
 | Shared database or POP business rules | Matching shared-db or `pop-business-rules` skill | Reading is open; governed structure and private-data boundaries remain |
 | Repository or worktree cleanup | `cleanup-worktree`, relevant open handoff, [`docs/critical-incidents.md`](docs/critical-incidents.md) | Preserve every unique change before removal |
 | Continue unfinished work | Matching OPEN file in [`HANDOFF.d/`](HANDOFF.d/), newest relevant first | Do not read unrelated handoffs |
