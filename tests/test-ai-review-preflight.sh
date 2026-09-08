@@ -36,11 +36,11 @@ cat > "$TMP/bin/good" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   [ -z "${MOCK_QWEN_MODE_LOG:-}" ] || printf '%s\n' "${2:-ordinary}" >> "$MOCK_QWEN_MODE_LOG"
-  if [ "${2:-}" = --identity ]; then
-    [ "${MOCK_QWEN_IDENTITY_FAIL:-0}" = 0 ] || exit 70
-    printf 'IDENTITY runtime_sha256=%s preloader_sha256=%s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")" "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
-    [ "${MOCK_QWEN_IDENTITY_DUPLICATE:-0}" = 0 ] || printf 'IDENTITY runtime_sha256=%s preloader_sha256=%s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")" "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
-    [ "${MOCK_QWEN_IDENTITY_EXTRA:-0}" = 0 ] || printf 'unexpected extra output\n'
+  if [ "${2:-}" = --preflight ]; then
+    [ "${MOCK_QWEN_PREFLIGHT_FAIL:-0}" = 0 ] || exit 70
+    printf 'PREFLIGHT runtime_sha256=%s preloader_sha256=%s launcher=present auth=governed\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")" "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+    [ "${MOCK_QWEN_PREFLIGHT_DUPLICATE:-0}" = 0 ] || printf 'PREFLIGHT runtime_sha256=%s preloader_sha256=%s launcher=present auth=governed\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")" "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+    [ "${MOCK_QWEN_PREFLIGHT_EXTRA:-0}" = 0 ] || printf 'unexpected extra output\n'
     exit 0
   fi
   [ "${2:-}" = --live ] || { [ "${MOCK_QWEN_NORMAL_DOCTOR_FAIL:-0}" = 0 ] || exit 124; }
@@ -146,10 +146,10 @@ check "Qwen check cannot report healthy while credits block live qualification" 
 check "successful Qwen live qualification durably releases quarantine" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 MOCK_QWEN_MODE_LOG="$TMP/qwen-mode-log"; export MOCK_QWEN_MODE_LOG; : > "$MOCK_QWEN_MODE_LOG"
 check "Qwen qualification and status avoid the ordinary slow doctor" "MOCK_QWEN_NORMAL_DOCTOR_FAIL=1 $SCRIPT qualify qwen && MOCK_QWEN_NORMAL_DOCTOR_FAIL=1 $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"' && ! grep -qx ordinary '$MOCK_QWEN_MODE_LOG'"
-check "default Qwen preflight uses one bounded identity doctor" ": > '$MOCK_QWEN_MODE_LOG'; MOCK_QWEN_NORMAL_DOCTOR_FAIL=1 $SCRIPT check qwen '$REPO' | grep -q 'health=ok' && test \"\$(grep -cx -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && ! grep -qx ordinary '$MOCK_QWEN_MODE_LOG'"
-check "duplicate Qwen identity output fails closed" "MOCK_QWEN_IDENTITY_DUPLICATE=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
-check "extra Qwen identity output fails closed" "MOCK_QWEN_IDENTITY_EXTRA=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
-check "failed Qwen identity command fails closed" "MOCK_QWEN_IDENTITY_FAIL=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+check "default Qwen preflight uses one bounded launcher and auth health check" ": > '$MOCK_QWEN_MODE_LOG'; MOCK_QWEN_NORMAL_DOCTOR_FAIL=1 $SCRIPT check qwen '$REPO' | grep -q 'health=ok' && test \"\$(grep -cx -- --preflight '$MOCK_QWEN_MODE_LOG')\" -eq 1 && ! grep -qx ordinary '$MOCK_QWEN_MODE_LOG'"
+check "duplicate Qwen preflight output fails closed" "MOCK_QWEN_PREFLIGHT_DUPLICATE=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+check "extra Qwen preflight output fails closed" "MOCK_QWEN_PREFLIGHT_EXTRA=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+check "failed Qwen preflight command fails closed" "MOCK_QWEN_PREFLIGHT_FAIL=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
 unset MOCK_QWEN_MODE_LOG
 MOCK_QWEN_CONTACT_FILE="$TMP/qwen-contact"; export MOCK_QWEN_CONTACT_FILE; : > "$MOCK_QWEN_CONTACT_FILE"
 check "failed Qwen requalification revokes the prior qualification" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && test ! -e '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
