@@ -60,3 +60,5 @@ jobs:
           done
       - name: Workflow policy
         run: bash tests/test-workflow-policy.sh
+      - name: Suite selection
+        run: bash tests/test-test-selection.sh

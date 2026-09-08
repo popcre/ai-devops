@@ -59,6 +59,7 @@
     "test-shared-db-routing-rules.sh",
     "test-skill-trigger-eval-auth.sh",
     "test-skill-trigger-policy.sh",
+    "test-test-selection.sh",
     "test-tool-version-pins.sh",
     "test-transcript-destination-check.sh",
     "test-ubuntu-install-stages.sh",
