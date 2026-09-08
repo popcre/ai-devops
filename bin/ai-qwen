@@ -11,7 +11,7 @@
 #   ai-qwen implement <name> [--prompt T | --prompt-file F | stdin]   create/continue write run
 #   ai-qwen reset-context <name> [--prompt T | --prompt-file F]       visible recovery
 #   ai-qwen list | show <name> | transcript <name> | delete <name>
-#   ai-qwen doctor [--live]
+#   ai-qwen doctor [--identity | --live]
 #
 # Review sessions are structurally read-only: safe mode disables local hooks,
 # extensions, skills, and MCP servers; plan mode plus excluded shell/write/edit
