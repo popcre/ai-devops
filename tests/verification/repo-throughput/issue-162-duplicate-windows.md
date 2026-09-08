@@ -60,11 +60,19 @@ and checked-out shell content.
 
 ## Verification
 
-- Focused selection, workflow-policy, line-ending, selection, and qualification
-  checks: PENDING.
-- Complete local offline verification: PENDING.
-- Pull-request exact-head Linux, hosted Windows, and reviewer-safety jobs:
-  PENDING.
+- Focused selection, workflow-policy, line-ending, local-selection, and runner
+  qualification checks passed. The final exact-head rerun recorded 6/6
+  Windows-selection cases and the complete workflow-policy contract green.
+- Complete guarded local offline verification ran all 67 Bash and 18
+  PowerShell suites. PowerShell passed 18/18. Bash passed 66/67 under five-way
+  load; the sole miss was the preflight suite's under-ten-second Kimi timing
+  assertion. The complete preflight suite then passed 78/78 both directly and
+  through the guarded one-worker runner, proving the assertion remains active
+  and the loaded miss did not hide a behavior failure.
+- Pull request #339 is the immutable acceptance record: its final-head Linux,
+  hosted Windows, and independent reviewer-safety jobs all passed before merge.
+  The merge queue then retested the exact tree that landed on `main`; no
+  post-merge push matrix repeated that proof.
 
 The 2026-09-07 scheduled run `34122199011` is not misreported as green: its
 Grok suite had two transient failures while the simultaneous reviewer-safety
