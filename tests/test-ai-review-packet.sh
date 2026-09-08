@@ -195,7 +195,7 @@ git -C "$UPSTREAM" add -A && git -C "$UPSTREAM" commit -qm target-advanced && gi
 git -C "$STALE" fetch -q origin
 STALE_REMOTE_SHA="$(git -C "$STALE" rev-parse origin/main)"
 STALE_LOCAL_SHA="$(git -C "$STALE" rev-parse main)"
-git -C "$STALE" checkout -q -b feature origin/main
+git -C "$STALE" checkout -q -B feature origin/main
 echo feature-only > "$STALE/feature-only.txt"
 git -C "$STALE" add -A && git -C "$STALE" commit -qm feature
 STALE_PKT="$($SCRIPT build "$STALE" stale-origin)"
