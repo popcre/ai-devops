@@ -359,12 +359,13 @@ The original final budgets were set on 2026-08-14. Albert authorized a second
 instruction audit on 2026-08-21, so the startup budgets were ratcheted to the
 new measured sizes after the safety and parity checks passed.
 
-| Budget | Baseline 2026-08-12 | Measured 2026-08-21 | Change | `budget` (warns above) | `target` (next cut) |
+| Budget | Baseline 2026-08-12 | Accepted measurement | Change | `budget` (warns above) | `target` (next cut) |
 |---|---:|---:|---:|---:|---:|
-| Always-loaded globals | 33,311 bytes | 13,871 | **−58.4%** | 13,871 | 12,500 |
-| Startup-routed repo entry files | 50,729 bytes | 11,987 | **−76.4%** | 11,987 | 11,000 |
-| Claude skill manifest | 21,521 bytes | 23,709 | +10.2% | 22,777 | 20,000 |
-| Codex skill manifest | 14,015 bytes | 22,526 | +60.7% | 14,847 | 13,000 |
+| Always-loaded globals | 33,311 bytes | 12,449 | **−62.6%** | 12,449 | 12,000 |
+| Startup-routed repo entry files | 50,729 bytes | 7,439 | **−85.3%** | 7,439 | 7,000 |
+| Claude skill manifest | 21,521 bytes | 15,293 | **−28.9%** | 15,293 | 14,500 |
+| Codex skill manifest | 14,015 bytes | 12,904 | **−7.9%** | 12,904 | 12,500 |
+| Effective installed globals | — | 21,808 | — | 21,808 | 20,500 |
 
 Each `budget` is **the size that was actually running on all three rolled-out
 machines when every safety and routing probe passed** — a measurement, not the
@@ -373,9 +374,15 @@ run. Ratchet `budget` down toward `target` only after a measured reduction has
 landed and its behavior tests still pass. **Never raise a budget to silence a
 warning.**
 
-The two manifests have continued to grow as skills were added; the current
-audit measures 23,709 Claude bytes and 22,526 Codex bytes, so both still warn.
-Their lever is shorter, measured trigger descriptions, not deleting skills.
+The manifest lever remains shorter, measured trigger descriptions, not deleting
+skills. Generate current measurements instead of copying them into this
+historical decision record.
+
+**Ratchet on 2026-09-08.** Issue-specific routes and changing runner history
+moved from `AGENTS.md` to task-triggered [`task-router.md`](task-router.md).
+The Windows CRLF startup measurement is 7,439 bytes; a normalized LF checkout
+is smaller. `CLAUDE.md` and `HANDOFF.md` remained compact, single-purpose
+adapters and needed no content move.
 
 ### Ratchet on 2026-08-21: rare procedures left startup context
 
