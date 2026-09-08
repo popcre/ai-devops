@@ -273,6 +273,14 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
 
   printf '%s\n' "$MARKER" >> "$build/.git/info/exclude"
   printf 'AI-REVIEW-SANDBOX.md\n' >> "$build/.git/info/exclude"
+  # Windows PowerShell drops its module-analysis cache into the CURRENT DIRECTORY
+  # when it cannot resolve LocalApplicationData, which is what a reviewer's stripped
+  # environment produces. That file is a Windows tool cache, not repository content,
+  # but an untracked file is an untracked file: the read-only guard read it as the
+  # reviewer editing the tree and discarded four completed reviews. Exclude that one
+  # path so a tool cache cannot masquerade as a reviewer edit. Every tracked file and
+  # every other untracked file is still compared.
+  printf '/Microsoft/Windows/PowerShell/ModuleAnalysisCache\n' >> "$build/.git/info/exclude"
   cat > "$build/AI-REVIEW-SANDBOX.md" <<EOF
 # Review snapshot — not the working copy
 
