@@ -156,6 +156,11 @@ run before shipping. `tests/lib-selection.sh` holds the logic and
 shared-infrastructure growth rules. Update that test with any deliberate change
 to those standing rules; do not weaken it simply to shorten guidance.
 
+The cross-repository plan for moving scope classification ahead of reviewer,
+CI-wait, shipping, database, deployment, and production entry points is
+[`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md).
+It extends the existing change classifier; do not create per-repository copies.
+
 ### Running the suites concurrently on one machine
 
 `tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is

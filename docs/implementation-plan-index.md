@@ -15,6 +15,7 @@ record merely to reduce the file count.
 |---|---|---|
 | [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 2; the throughput prerequisites are complete |
 | [`plan_ast-grep-multi-machine-management.md`](../plan_ast-grep-multi-machine-management.md) | [#187](https://github.com/popcre/ai-devops/issues/187) | In flight in PR #192; do not duplicate it |
+| [`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md) | [#335](https://github.com/popcre/ai-devops/issues/335) | Phase 0; freeze the canonical repo inventory and routing/gate baselines |
 | [`plan_full-strategy-remediation.md`](../plan_full-strategy-remediation.md) | [#62](https://github.com/popcre/ai-devops/issues/62) | First non-complete STATUS row; externally blocked work stays explicit |
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
 | [`plan_pop-business-rules-skill.md`](../plan_pop-business-rules-skill.md) | [#35](https://github.com/popcre/ai-devops/issues/35) | Live trigger evidence remains before closure |
