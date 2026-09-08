@@ -241,26 +241,33 @@ check "remove_refuses_unmarked_dir"             "! '$SCRIPT' remove '$WT' guarde
 # merge brought in from main -- so the reviewer judged files the change never
 # touched. Two Codex runs on shared-db PR #2155 did exactly that.
 MERGE_SRC="$TMP/mergerepo"
+MERGE_ORIGIN="$TMP/merge-origin.git"
 mkdir -p "$MERGE_SRC"
 git -C "$MERGE_SRC" init -q -b main
 git -C "$MERGE_SRC" config user.email t@example.com
 git -C "$MERGE_SRC" config user.name Test
 echo base > "$MERGE_SRC/base.txt"
 git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm init
+git init -q --bare "$MERGE_ORIGIN"
+git -C "$MERGE_SRC" remote add origin "$MERGE_ORIGIN"
+git -C "$MERGE_SRC" push -q -u origin main
 git -C "$MERGE_SRC" checkout -q -b topic
 echo change > "$MERGE_SRC/the-actual-change.txt"
 git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm topic
-git -C "$MERGE_SRC" checkout -q main
-echo unrelated > "$MERGE_SRC/not-part-of-the-change.txt"
-git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm main-moved
-git -C "$MERGE_SRC" checkout -q topic
-git -C "$MERGE_SRC" merge -q --no-ff -m 'Merge main into topic' main
+MERGE_UPSTREAM="$TMP/merge-upstream"
+git clone -q "$MERGE_ORIGIN" "$MERGE_UPSTREAM"
+git -C "$MERGE_UPSTREAM" config user.email t@example.com
+git -C "$MERGE_UPSTREAM" config user.name Test
+echo unrelated > "$MERGE_UPSTREAM/not-part-of-the-change.txt"
+git -C "$MERGE_UPSTREAM" add -A && git -C "$MERGE_UPSTREAM" commit -qm main-moved && git -C "$MERGE_UPSTREAM" push -q origin main
+git -C "$MERGE_SRC" fetch -q origin
+git -C "$MERGE_SRC" merge -q --no-ff -m 'Merge origin/main into topic' origin/main
 MERGE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" mergebase)"
-MERGE_MAIN_SHA="$(git -C "$MERGE_SRC" rev-parse main)"
+MERGE_MAIN_SHA="$(git -C "$MERGE_SRC" rev-parse origin/main)"
 MERGE_HEAD_SHA="$(git -C "$MERGE_SRC" rev-parse topic)"
-SNAP_MAIN_SHA="$(git -C "$MERGE_SNAP" rev-parse main 2>/dev/null || true)"
+SNAP_MAIN_SHA="$(git -C "$MERGE_SNAP" rev-parse origin/main 2>/dev/null || true)"
 SNAP_HEAD_SHA="$(git -C "$MERGE_SNAP" rev-parse HEAD)"
-check "snapshot_carries_the_base_branch"       "[ '$SNAP_MAIN_SHA' = '$MERGE_MAIN_SHA' ]"
+check "snapshot_carries_the_fetched_base_branch" "[ '$SNAP_MAIN_SHA' = '$MERGE_MAIN_SHA' ]"
 check "snapshot_head_is_still_detached"        "! git -C '$MERGE_SNAP' symbolic-ref -q HEAD"
 check "snapshot_head_is_the_merge_commit"      "[ '$SNAP_HEAD_SHA' = '$MERGE_HEAD_SHA' ]"
 MERGE_PKT="$("$REPO_ROOT/bin/ai-review-packet" build "$MERGE_SNAP" mergebase)"
