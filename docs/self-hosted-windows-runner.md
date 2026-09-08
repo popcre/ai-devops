@@ -30,12 +30,13 @@ and logged in.
 
 ### Why the reviewer suites have their own lane
 
-For trusted pull-request branches, `windows-offline` runs the Windows-sensitive
-Bash set except Codex and Grok; `windows-reviewer-safety` owns those two suites
-on the qualified pool. Scheduled, manual, qualification, and untrusted-fork
-runs retain the complete hosted Windows Bash matrix. Before issue #162, the two
-reviewer suites also ran in every hosted pull-request matrix and intermittently
-went red on `main` itself with a recognisable signature:
+For pull requests, `windows-offline` runs the Windows-sensitive Bash set and all
+PowerShell suites; `windows-reviewer-safety` repeats Codex and Grok on the
+qualified pool as an early signal. Scheduled, manual, and qualification runs
+retain the complete hosted Windows Bash matrix. The remaining reviewer overlap
+is owned by issue #260 because removing it safely needs a failover contract.
+On the hosted image those two suites can intermittently go red on `main` itself
+with a recognisable signature:
 
 - `test-ai-grok-review.sh` takes 2000s or more against a ~650s green baseline,
   and total `BASH SUITE TIMINGS seconds=` lands near 5700-5800 instead of ~4400.
@@ -52,8 +53,8 @@ clean example on `main` with no pull request involved. Only `linux-offline` is a
 required check, so this does not block a merge.
 
 Do not raise a timeout to make these pass; that discards the signal the two-lane
-split exists to preserve. Removing the reviewer suites from the hosted lane is
-tracked in [#260](https://github.com/popcre/ai-devops/issues/260).
+split exists to preserve. Safe removal of this last overlap remains tracked in
+[#260](https://github.com/popcre/ai-devops/issues/260).
 
 ## Security — read this before adding another runner
 

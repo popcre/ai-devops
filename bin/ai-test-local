@@ -3,8 +3,8 @@
 #
 # GitHub Actions runs three jobs: linux-offline (all Bash), windows-offline
 # (Windows-sensitive Bash plus all PowerShell), and windows-reviewer-safety
-# (Codex and Grok). Scheduled/manual and untrusted-fork Windows runs stay
-# complete. The local default below also remains the complete backstop.
+# (an early Codex/Grok repeat). Scheduled/manual Windows and the local default
+# below remain complete backstops.
 #
 # This runs the same suites, unchanged, across worker slots on this machine.
 # It is a local pre-check, not a replacement for CI: GitHub is still the authority
