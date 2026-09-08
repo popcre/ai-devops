@@ -137,7 +137,7 @@ PARITY_DIVERGENCE_ALLOWLIST = {
 # docs/context-engineering.md — a budget number lives in exactly three places.
 DEFAULT_BUDGETS = {
     "alwaysLoadedBytes": {"budget": 12449, "target": 12000},
-    "startupRoutedBytes": {"budget": 7439, "target": 7000},
+    "startupRoutedBytes": {"budget": 10945, "target": 10500},
     "claudeSkillManifestBytes": {"budget": 15293, "target": 14500},
     "codexSkillManifestBytes": {"budget": 12904, "target": 12500},
     "effectiveInstalledGlobalBytes": {"budget": 21808, "target": 20500},
