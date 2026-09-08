@@ -5,7 +5,8 @@ This is the compact, current specification for Claude/Codex context in
 table of [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
 
 - Always-loaded globals contain only universal behavior and safety rules.
-- `AGENTS.md` is this repository's task router; `CLAUDE.md` is a small adapter.
+- `AGENTS.md` holds repository invariants and the category router;
+  `docs/task-router.md` holds specialized routes; `CLAUDE.md` is a small adapter.
 - Procedures live in task-triggered skills/docs; machine facts live in the
   machine atlas and are preserved by `ai-adopt-globals`.
 - Portable facts live in the protected Markdown hub and are read through
