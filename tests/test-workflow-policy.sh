@@ -99,7 +99,7 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 ' >&2
   exit 1
 }
-# Pull requests use the disjoint Windows-sensitive assignment. Schedule and
+# Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the no-argument complete runner as the backstop.
 grep -Fq "if (\$env:GITHUB_EVENT_NAME -eq 'pull_request')" "$workflow" &&
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest' "$workflow" &&
