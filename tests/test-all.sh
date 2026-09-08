@@ -67,9 +67,9 @@ elif [ -n "$changed_since" ]; then
   fi
 elif [ "$windows_offline" = true ]; then
   [ -f "$MANIFEST" ] || { printf 'test-all.sh: Windows suite manifest is missing: %s\n' "$MANIFEST" >&2; exit 2; }
-  mapfile -t tests < <(jq -er '.windows_offline_bash[]' "$MANIFEST" 2>/dev/null | tr -d '\r') || {
+  jq -e '.windows_offline_bash | type == "array" and length > 0 and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
     printf 'test-all.sh: Windows suite manifest has no valid windows_offline_bash group\n' >&2; exit 2; }
-  [ "${#tests[@]}" -gt 0 ] || { printf 'test-all.sh: windows_offline_bash must not be empty\n' >&2; exit 2; }
+  mapfile -t tests < <(jq -r '.windows_offline_bash[]' "$MANIFEST" | tr -d '\r')
   [ "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#tests[@]}" ] || {
     printf 'test-all.sh: windows_offline_bash contains a duplicate suite\n' >&2; exit 2; }
   for name in "${tests[@]}"; do
