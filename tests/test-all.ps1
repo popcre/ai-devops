@@ -1,5 +1,6 @@
 param(
-  [switch]$WindowsPullRequest
+  [switch]$WindowsPullRequest,
+  [switch]$ExcludeReviewerSafety
 )
 
 $ErrorActionPreference = 'Continue'
@@ -14,6 +15,10 @@ Write-Host "===== $bashScope OFFLINE BASH SUITE ====="
 $started = Get-Date
 $bashArgs = @((Join-Path $PSScriptRoot 'test-all.sh'))
 if ($WindowsPullRequest) { $bashArgs += '--windows-offline' }
+if ($ExcludeReviewerSafety) {
+  if (-not $WindowsPullRequest) { throw '-ExcludeReviewerSafety requires -WindowsPullRequest.' }
+  $bashArgs += '--exclude-reviewer-safety'
+}
 & $bash @bashArgs
 if ($LASTEXITCODE -ne 0) { $failures++ }
 $elapsed = [int]((Get-Date) - $started).TotalSeconds
