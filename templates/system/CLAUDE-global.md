@@ -119,6 +119,13 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 
 ## Safety rules that apply everywhere
 
+- **Declare the task class, then recheck before a stronger gate.** When work in
+  a repository begins, declare what it is with `ai-task-gates start --class
+  <class>`, and follow that repository's own task-gate policy. Before anything
+  stronger than editing files — a paid review, a pull-request wait, a shipment,
+  a deployment, a database or infrastructure change, a production action — run
+  `ai-task-gates check --before <action>`. If the change set outgrew the
+  declared class, redeclare it and say so; never work around a refusal.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files—never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks

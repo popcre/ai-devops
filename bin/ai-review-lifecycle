@@ -13,6 +13,22 @@ STATE_DIR="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecy
 PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$SCRIPT_DIR/ai-review-preflight}"
 SCOREBOARD="${AI_REVIEW_SCOREBOARD_BIN:-$SCRIPT_DIR/ai-review-scoreboard}"
 DIGEST="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$SCRIPT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+GATE_LIB=""
+for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  GATE_LIB="$(cd "$candidate" && pwd)/tools/lib/task-gates.sh"
+  break
+done
+[ -n "$GATE_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the task-gate library\n' >&2; exit 1; }
+# shellcheck source=../tools/lib/task-gates.sh
+. "$GATE_LIB"
 
 die(){ printf 'ai-review-lifecycle: error: %s\n' "$*" >&2; exit 1; }
 valid_provider(){ case "$1" in claude|codex|deepseek|gemini|glm|grok|kimi|muse|qwen) return 0;; *) return 1;; esac; }
@@ -189,11 +205,13 @@ release_lock(){ # STATE
 }
 
 begin(){
-  local provider="" repo="" run="" session="" caller="" base="" mode=standard identity key lock token state now preflight_rc=0 preflight_out row
+  local provider="" repo="" run="" session="" caller="" base="" mode=standard owner_request="" identity key lock token state now preflight_rc=0 preflight_out row
+  local -a gate_args=()
   while [ "$#" -gt 0 ]; do case "$1" in
     --provider) provider="${2:-}"; shift 2;; --repo) repo="${2:-}"; shift 2;;
     --run-id) run="${2:-}"; shift 2;; --session-id) session="${2:-}"; shift 2;;
     --caller) caller="${2:-}"; shift 2;; --base) base="${2:-}"; shift 2;;
+    --owner-request) owner_request="${2:-}"; shift 2;;
     --preflight) mode="${2:-}"; shift 2;; *) die "unknown begin option: $1";; esac; done
   valid_provider "$provider" || die "unknown provider '$provider'."
   valid_id "$run" || die "--run-id must be a safe non-empty identifier."
@@ -201,6 +219,18 @@ begin(){
   [ -z "$session" ] || valid_id "$session" || die "--session-id is invalid."
   case "$mode" in standard|live) ;; none) [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die "preflight may be skipped only by hostile tests.";; *) die "--preflight must be standard or live.";; esac
   identity="$(identity_json "$repo")"; repo="$(jq -r .repository_root <<<"$identity")"
+  # The task gate runs before the assignment lock, before any state file, and
+  # before the provider preflight, so a review the change set does not call for
+  # starts no process and spends no call.
+  # bin/ai-review is the only supported front door and hands both of these on,
+  # because from here neither the review mode nor Albert's request is visible.
+  [ -n "$owner_request" ] || owner_request="${AI_REVIEW_OWNER_REQUEST:-}"
+  [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
+  if [ "${AI_REVIEW_GATE_MODE:-}" = plan-review ]; then
+    : # a plan review decides what the work is; it cannot be gated on the work
+  else
+  ( cd "$repo" && tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" )     || die "task gate refused this review; no lock, no state, and no provider call were created."
+  fi
   key="$(sha "$(jq -r .normalized_upstream <<<"$identity")|$provider|$caller|$run")"
   lock="$STATE_DIR/locks/$key.lock"; token="$$-$(date +%s)-$RANDOM"
   state="$STATE_DIR/runs/$(jq -r .repository_key <<<"$identity")/$provider/$caller/$run.json"
@@ -279,7 +309,7 @@ join(){
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--owner-request TEXT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;

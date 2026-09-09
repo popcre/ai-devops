@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/popcre/ai-devops/blob/main/config/task-gates.schema.json",
+  "title": "Task classification and gate policy",
+  "description": "The contract read by bin/ai-task-gates. The central file is config/task-gates.json in popcre/ai-devops. A consumer repository ships a much smaller file of the same shape at .ai-devops/task-gates.json, carrying only `paths` and `gates`. Resolution takes the STRONGEST class per path across the central default, every matching central rule, and the consumer declaration, so a consumer can only strengthen a class and can never weaken one.",
+  "type": "object",
+  "required": ["schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "_comment": {
+      "description": "Free prose for the humans reading the file. Ignored by the tool.",
+      "type": ["string", "array"],
+      "items": { "type": "string" }
+    },
+    "actions": {
+      "description": "Every action a session can ask permission for. Central file only; an action name used anywhere else must appear here.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "change_classes": {
+      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged or owner-requested away.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["rank", "protected", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "rank": { "type": "integer", "minimum": 0 },
+          "protected": { "type": "boolean" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "default": {
+      "description": "The baseline applied to every repository, before its own central rules and its own declaration.",
+      "type": "object",
+      "required": ["fallback_class", "paths", "gates"],
+      "additionalProperties": false,
+      "properties": {
+        "fallback_class": {
+          "type": "string",
+          "description": "The class for a changed path that matches no glob. It must never be the weakest class, or an unrecognised file would quietly downgrade the task."
+        },
+        "paths": { "$ref": "#/$defs/pathRules" },
+        "gates": { "$ref": "#/$defs/gateTable" }
+      }
+    },
+    "rules": {
+      "description": "Per-repository additions to the baseline. EVERY rule whose `match` matches applies; matching is additive, never exclusive.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["match"],
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shell glob matched against the canonical owner/repo identity, for example */designflow-*."
+          },
+          "_comment": { "type": ["string", "array"], "items": { "type": "string" } },
+          "paths": { "$ref": "#/$defs/pathRules" },
+          "gates": { "$ref": "#/$defs/gateTable" }
+        }
+      }
+    },
+    "paths": {
+      "description": "Consumer declaration only: the repository's own path rules, added on top of everything central.",
+      "$ref": "#/$defs/pathRules"
+    },
+    "gates": {
+      "description": "Consumer declaration only: extra required proofs and forbidden actions, unioned with the central gate for the same class.",
+      "$ref": "#/$defs/gateTable"
+    }
+  },
+  "$defs": {
+    "pathRules": {
+      "description": "Ordered list mapping a changed path to the class it implies. Order does not decide the outcome — the strongest matching class does.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["glob", "class"],
+        "additionalProperties": false,
+        "properties": {
+          "glob": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shell glob matched against a repository-relative changed path, for example db/migrations/**."
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A key of change_classes."
+          }
+        }
+      }
+    },
+    "gateTable": {
+      "description": "Which gates apply to a class, kept deliberately separate from which class a path implies.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "required": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Proofs that must exist before this class of work may ship."
+          },
+          "forbidden_actions": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Action names this class refuses. A refusal for a protected class is final."
+          }
+        }
+      }
+    }
+  }
+}

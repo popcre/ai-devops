@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+# ai-task-gates — declare a task class, then prove the real change set still
+# matches it before anything expensive or risky starts.
+#
+# The problem this solves: prose describing a gate does not stop a session from
+# selecting a stronger gate than its diff needs, and nothing durable records
+# "this is a documentation-only task" so the claim can be rechecked later.
+#
+#   ai-task-gates start --class prose --reason "trim AGENTS.md"
+#   ai-task-gates check --before review
+#
+# `check` recomputes the complete working change set — committed branch changes
+# plus staged, unstaged, untracked, deleted, both sides of a rename, and
+# submodule changes — resolves the central contract plus any consumer
+# declaration, and refuses to let the protected action start on a mismatch.
+#
+# Exit status
+#   0  allowed
+#   1  usage or internal error
+#   3  blocked: a stronger gate is required, or the action is forbidden
+#   4  cannot classify: fail closed
+set -uo pipefail
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$SCRIPT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+ROOT=""
+for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  ROOT="$(cd "$candidate" && pwd)"
+  break
+done
+# A gate that cannot find its own library must say so, not quietly allow.
+[ -n "$ROOT" ] || { printf 'ai-task-gates: cannot find tools/lib/task-gates.sh\n' >&2; exit 4; }
+# shellcheck source=../tools/lib/task-gates.sh
+. "$ROOT/tools/lib/task-gates.sh"
+
+POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
+STATE_DIR="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
+REPO_POLICY_BIN="${AI_REPO_POLICY_BIN:-$SCRIPT_DIR/ai-repo-policy}"
+CONSUMER_FILE_NAME=".ai-devops/task-gates.json"
+
+EX_BLOCKED=3
+EX_UNCLASSIFIED=4
+
+die(){ printf 'ai-task-gates: error: %s\n' "$*" >&2; exit 1; }
+fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX_UNCLASSIFIED"; }
+blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
+
+usage(){
+  cat <<'EOF'
+usage: ai-task-gates <command> [options]
+
+  start --class CLASS [--reason TEXT] [--base REF]
+        Record the intended task class for this repository and worktree.
+  check --before ACTION [--acknowledge TEXT] [--owner-request TEXT]
+        Recompute the change set and decide whether ACTION may start.
+  explain [--json] [--base REF] [--paths-from FILE|-]
+        Show the resolved identity, change set, class, and gates.
+  status | end
+        Show or clear the recorded intent for this repository and worktree.
+  classify EVENT
+        Legacy coarse CI classification; reads paths on stdin.
+  version
+
+ACTION is one of: review pr-wait ship deploy database infrastructure production
+EOF
+}
+
+# --------------------------------------------------------------------------
+# Contract loading
+# --------------------------------------------------------------------------
+jqr(){ jq -r "$@" | tr -d '\r'; }
+require_jq(){ command -v jq >/dev/null 2>&1 || die 'jq is required.'; }
+
+load_policy(){
+  [ -f "$POLICY_FILE" ] || fail_closed "policy file not found: $POLICY_FILE"
+  jq -e '.schema_version == 1 and (.change_classes|type=="object") and (.rules|type=="array") and (.default|type=="object")' \
+    "$POLICY_FILE" >/dev/null 2>&1 || fail_closed "invalid task-gate contract: $POLICY_FILE"
+  load_class_table
+}
+
+# The class table is read once. Classification asks for a rank on every rule of
+# every changed path, and a jq process per question is slow enough on Windows to
+# be felt as a pause before every gate.
+declare -A TG_RANK=() TG_PROT=()
+load_class_table(){
+  local class rank protected
+  while IFS=$'	' read -r class rank protected; do
+    [ -n "$class" ] || continue
+    TG_RANK["$class"]="$rank"; TG_PROT["$class"]="$protected"
+  done < <(jqr '.change_classes|to_entries[]|[.key,(.value.rank|tostring),(.value.protected|tostring)]|@tsv' "$POLICY_FILE")
+  [ "${#TG_RANK[@]}" -gt 0 ] || fail_closed "no change classes declared in $POLICY_FILE"
+}
+class_rank(){ printf '%s' "${TG_RANK[$1]:-}"; }
+class_protected(){ printf '%s' "${TG_PROT[$1]:-}"; }
+valid_class(){ [ -n "${TG_RANK[$1]:-}" ]; }
+valid_action(){ jq -e --arg a "$1" '.actions|index($a)!=null' "$POLICY_FILE" >/dev/null 2>&1; }
+
+# Every path rule that applies to this identity: central defaults first, then
+# every matching central rule, then the consumer declaration. Resolution takes
+# the STRONGEST class per path across all of them, so a later source can only
+# strengthen a class and can never weaken one.
+applicable_path_rules(){
+  local identity="$1" pattern
+  jqr '.default.paths[]|[.glob,.class]|@tsv' "$POLICY_FILE"
+  while IFS= read -r pattern; do
+    [ -n "$pattern" ] || continue
+    tg_identity_match "$pattern" "$identity" || continue
+    jqr --arg m "$pattern" '.rules[]|select(.match==$m)|(.paths//[])[]|[.glob,.class]|@tsv' "$POLICY_FILE"
+  done < <(jqr '.rules[].match' "$POLICY_FILE")
+  [ -f "$CONSUMER_FILE" ] || return 0
+  # resolve_repo already refused a declaration that is not valid JSON.
+  jqr '(.paths//[])[]|[.glob,.class]|@tsv' "$CONSUMER_FILE" 2>/dev/null
+}
+
+# Merged gate for one class: union of required proofs and forbidden actions
+# from the central default, every matching central rule, and the consumer file.
+merged_gate(){
+  local identity="$1" class="$2" pattern
+  {
+    jqr --arg c "$class" '(.default.gates[$c].required//[])[]' "$POLICY_FILE"
+    while IFS= read -r pattern; do
+      [ -n "$pattern" ] || continue
+      tg_identity_match "$pattern" "$identity" || continue
+      jqr --arg m "$pattern" --arg c "$class" \
+        '.rules[]|select(.match==$m)|(.gates[$c].required//[])[]' "$POLICY_FILE"
+    done < <(jqr '.rules[].match' "$POLICY_FILE")
+    [ -f "$CONSUMER_FILE" ] && jqr --arg c "$class" '(.gates[$c].required//[])[]' "$CONSUMER_FILE" 2>/dev/null
+  } | LC_ALL=C sort -u | sed 's/^/required\t/'
+  {
+    jqr --arg c "$class" '(.default.gates[$c].forbidden_actions//[])[]' "$POLICY_FILE"
+    while IFS= read -r pattern; do
+      [ -n "$pattern" ] || continue
+      tg_identity_match "$pattern" "$identity" || continue
+      jqr --arg m "$pattern" --arg c "$class" \
+        '.rules[]|select(.match==$m)|(.gates[$c].forbidden_actions//[])[]' "$POLICY_FILE"
+    done < <(jqr '.rules[].match' "$POLICY_FILE")
+    [ -f "$CONSUMER_FILE" ] && jqr --arg c "$class" '(.gates[$c].forbidden_actions//[])[]' "$CONSUMER_FILE" 2>/dev/null
+  } | LC_ALL=C sort -u | sed 's/^/forbidden\t/'
+}
+
+# --------------------------------------------------------------------------
+# Repository context
+# --------------------------------------------------------------------------
+IDENTITY=""; IDENTITY_RESOLVED=false; TOPLEVEL=""; CONSUMER_FILE=""; BASE_REF=""
+
+resolve_repo(){
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail_closed 'not inside a Git repository.'
+  TOPLEVEL="$(git rev-parse --show-toplevel)"
+  IDENTITY="$(tg_identity)"
+  case "$IDENTITY" in local/*) IDENTITY_RESOLVED=false ;; *) IDENTITY_RESOLVED=true ;; esac
+  CONSUMER_FILE="$TOPLEVEL/$CONSUMER_FILE_NAME"
+  # Validate here, in the main shell. The readers below run inside command
+  # substitutions, where an exit would end only the subshell and the run would
+  # quietly continue on the central rules alone - dropping exactly the stricter
+  # local rules a corrupt declaration should have made us stop for.
+  if [ -f "$CONSUMER_FILE" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
+    fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
+  fi
+}
+
+# The base to diff committed work against. An explicit --base wins, then the
+# base recorded by `start`, then the merge base with the repository's own main
+# branch. A repository with no base (fresh, detached, no upstream) is not an
+# error: the working tree alone is then the whole change set.
+resolve_base(){
+  local requested="$1" recorded main
+  if [ -n "$requested" ]; then
+    BASE_REF="$(git rev-parse --verify --quiet "$requested^{commit}" 2>/dev/null)" \
+      || fail_closed "base ref not found: $requested"
+    return 0
+  fi
+  recorded="$(state_field base)"
+  if [ -n "$recorded" ] && git rev-parse --verify --quiet "$recorded^{commit}" >/dev/null 2>&1; then
+    BASE_REF="$(git rev-parse "$recorded^{commit}")"; return 0
+  fi
+  main=""
+  if [ -x "$REPO_POLICY_BIN" ]; then
+    main="$("$REPO_POLICY_BIN" 2>/dev/null | jqr '.main_branch // empty' 2>/dev/null || true)"
+  fi
+  [ -n "$main" ] || main=main
+  for candidate in "origin/$main" "$main"; do
+    git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1 || continue
+    BASE_REF="$(git merge-base HEAD "$candidate" 2>/dev/null || true)"
+    [ -n "$BASE_REF" ] && return 0
+  done
+  BASE_REF=""
+}
+
+# The complete observed change set. Rename detection is disabled on purpose so
+# that both the deleted source and the added destination are classified: a
+# migration renamed to a Markdown note must not become a prose-only task.
+change_set(){
+  local status_line path
+  if [ -n "$BASE_REF" ]; then
+    git diff --no-renames --name-only "$BASE_REF" HEAD 2>/dev/null || true
+  fi
+  while IFS= read -r -d '' status_line; do
+    path="${status_line:3}"
+    [ -n "$path" ] || continue
+    printf '%s\n' "$path"
+  done < <(git status --porcelain=v1 -z --untracked-files=all --no-renames 2>/dev/null)
+  # A modified submodule appears above as its own path; also surface a
+  # submodule whose recorded commit moved without a worktree status entry.
+  git diff --no-renames --name-only --ignore-submodules=none HEAD 2>/dev/null || true
+}
+
+# --------------------------------------------------------------------------
+# Classification
+# --------------------------------------------------------------------------
+OBSERVED_CLASS=""; OBSERVED_RANK=0; CHANGED_PATHS=""; CHANGED_COUNT=0
+declare -a CONTRIBUTORS=()
+
+classify_paths(){
+  local identity="$1" paths="$2" fallback rules path glob class rank best best_rank
+  fallback="$(jqr '.default.fallback_class' "$POLICY_FILE")"
+  valid_class "$fallback" || fail_closed "fallback_class '$fallback' is not a declared change class"
+  rules="$(applicable_path_rules "$identity")"
+
+  OBSERVED_CLASS=""; OBSERVED_RANK=0; CONTRIBUTORS=(); CHANGED_COUNT=0
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    CHANGED_COUNT=$((CHANGED_COUNT + 1))
+    # The fallback applies only when nothing matched. Seeding `best` with it
+    # would silently swallow every class weaker than the fallback.
+    best=""; best_rank=-1
+    while IFS=$'\t' read -r glob class; do
+      [ -n "$glob" ] || continue
+      valid_class "$class" || fail_closed "path rule '$glob' names undeclared class '$class'"
+      tg_glob_match "$glob" "$path" || continue
+      rank="${TG_RANK[$class]}"
+      if [ "$rank" -gt "$best_rank" ]; then best="$class"; best_rank="$rank"; fi
+    done <<< "$rules"
+    if [ -z "$best" ]; then best="$fallback"; best_rank="${TG_RANK[$fallback]}"; fi
+    CONTRIBUTORS+=("$best	$path")
+    if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; fi
+  done <<< "$paths"
+
+  if [ "$CHANGED_COUNT" -eq 0 ]; then
+    OBSERVED_CLASS="none"; OBSERVED_RANK=0
+  fi
+}
+
+# --------------------------------------------------------------------------
+# Intent state. Kept in the user state root, never inside the repository, so it
+# can never be committed as project state. The key is the canonical identity
+# plus the worktree path, so two linked worktrees of one clone stay isolated.
+# --------------------------------------------------------------------------
+state_key(){ printf '%s\0%s' "$IDENTITY" "$TOPLEVEL" | sha256sum | cut -d' ' -f1; }
+state_path(){ printf '%s/%s.json' "$STATE_DIR" "$(state_key)"; }
+
+state_field(){
+  local file; file="$(state_path)"
+  [ -f "$file" ] || return 0
+  jqr --arg f "$1" '.[$f] // empty' "$file" 2>/dev/null || true
+}
+
+state_write(){
+  local file; file="$(state_path)"
+  mkdir -p "$STATE_DIR" || die "cannot create state directory: $STATE_DIR"
+  chmod 0700 "$STATE_DIR" 2>/dev/null || true
+  printf '%s\n' "$1" > "$file.tmp" && mv -f "$file.tmp" "$file"
+}
+
+state_record_override(){
+  local kind="$1" action="$2" reason="$3" observed="$4" file
+  file="$(state_path)"
+  [ -f "$file" ] || return 0
+  jq --arg k "$kind" --arg a "$action" --arg r "$reason" --arg o "$observed" \
+     --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '.overrides = ((.overrides // []) + [{kind:$k,action:$a,reason:$r,observed_class:$o,at:$t}])' \
+     "$file" > "$file.tmp" && mv -f "$file.tmp" "$file"
+}
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+cmd_start(){
+  local class="" reason="" base=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --class) class="${2:-}"; shift 2 ;;
+      --reason) reason="${2:-}"; shift 2 ;;
+      --base) base="${2:-}"; shift 2 ;;
+      *) die "unknown option for start: $1" ;;
+    esac
+  done
+  [ -n "$class" ] || die 'start requires --class.'
+  require_jq; load_policy; resolve_repo
+  valid_class "$class" || die "unknown change class: $class"
+  resolve_base "$base"
+  state_write "$(jq -nc \
+    --arg v 1 --arg identity "$IDENTITY" --arg worktree "$TOPLEVEL" \
+    --arg class "$class" --arg reason "$reason" --arg base "$BASE_REF" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:($v|tonumber),identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,started_at:$at,overrides:[]}')"
+  printf 'task class "%s" recorded for %s (%s)\n' "$class" "$IDENTITY" "$TOPLEVEL"
+  [ -n "$BASE_REF" ] && printf 'base: %s\n' "${BASE_REF:0:12}"
+  return 0
+}
+
+cmd_status(){
+  require_jq; load_policy; resolve_repo
+  local file; file="$(state_path)"
+  if [ ! -f "$file" ]; then printf 'no task class recorded for %s (%s)\n' "$IDENTITY" "$TOPLEVEL"; return 0; fi
+  cat "$file"
+}
+
+cmd_end(){
+  require_jq; load_policy; resolve_repo
+  rm -f "$(state_path)"
+  printf 'task class cleared for %s (%s)\n' "$IDENTITY" "$TOPLEVEL"
+}
+
+prepare(){
+  local base="$1" paths_from="$2"
+  require_jq; load_policy; resolve_repo
+  if [ -n "$paths_from" ]; then
+    if [ "$paths_from" = - ]; then CHANGED_PATHS="$(cat)"; else
+      [ -f "$paths_from" ] || die "paths file not found: $paths_from"
+      CHANGED_PATHS="$(cat "$paths_from")"
+    fi
+    BASE_REF=""
+  else
+    resolve_base "$base"
+    CHANGED_PATHS="$(change_set | LC_ALL=C sort -u)"
+  fi
+  classify_paths "$IDENTITY" "$CHANGED_PATHS"
+}
+
+cmd_explain(){
+  local as_json=false base="" paths_from=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) as_json=true; shift ;;
+      --base) base="${2:-}"; shift 2 ;;
+      --paths-from) paths_from="${2:-}"; shift 2 ;;
+      *) die "unknown option for explain: $1" ;;
+    esac
+  done
+  prepare "$base" "$paths_from"
+  local declared gate required forbidden line
+  declared="$(state_field declared_class)"
+  gate="$(merged_gate "$IDENTITY" "$OBSERVED_CLASS" 2>/dev/null || true)"
+  required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
+
+  if [ "$as_json" = true ]; then
+    printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
+      --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
+      --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg policy "$POLICY_FILE" \
+      --arg required "$required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" '
+      {schema_version:1,
+       repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
+       base:$base, policy_file:$policy,
+       changed_count:($count|tonumber),
+       declared_class:(if $declared=="" then null else $declared end),
+       observed_class:$observed,
+       required_gates:(if $required=="" then [] else ($required|split(",")) end),
+       forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
+       changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
+    return 0
+  fi
+
+  printf 'repository       : %s%s\n' "$IDENTITY" "$([ "$IDENTITY_RESOLVED" = true ] || printf ' (unresolved remote)')"
+  printf 'worktree         : %s\n' "$TOPLEVEL"
+  printf 'base             : %s\n' "${BASE_REF:-<none>}"
+  printf 'declared class   : %s\n' "${declared:-<not declared>}"
+  printf 'observed class   : %s (%s changed path(s))\n' "$OBSERVED_CLASS" "$CHANGED_COUNT"
+  printf 'required gates   : %s\n' "${required:-<none>}"
+  printf 'forbidden actions: %s\n' "${forbidden:-<none>}"
+  if [ "$CHANGED_COUNT" -gt 0 ]; then
+    printf 'changes:\n'
+    for line in "${CONTRIBUTORS[@]}"; do printf '  %-18s %s\n' "${line%%	*}" "${line#*	}"; done
+  fi
+}
+
+cmd_check(){
+  local action="" acknowledge="" owner_request="" base=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --before) action="${2:-}"; shift 2 ;;
+      --acknowledge) acknowledge="${2:-}"; shift 2 ;;
+      --owner-request) owner_request="${2:-}"; shift 2 ;;
+      --base) base="${2:-}"; shift 2 ;;
+      *) die "unknown option for check: $1" ;;
+    esac
+  done
+  [ -n "$action" ] || die 'check requires --before ACTION.'
+  require_jq; load_policy
+  valid_action "$action" || die "unknown action: $action"
+  prepare "$base" ""
+
+  # Fail closed where it matters: an unresolvable repository identity must not
+  # be allowed to reach a database, deployment, infrastructure, or production
+  # helper on central defaults alone.
+  if [ "$IDENTITY_RESOLVED" != true ]; then
+    case "$action" in
+      deploy|database|infrastructure|production)
+        fail_closed "repository identity is unresolved; refusing to start '$action'." ;;
+    esac
+  fi
+
+  if [ "$OBSERVED_CLASS" = none ]; then
+    printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"
+    return 0
+  fi
+
+  local declared declared_rank protected
+  declared="$(state_field declared_class)"
+  if [ -z "$declared" ]; then
+    declared="$OBSERVED_CLASS"
+    printf 'ai-task-gates: note: no task class was declared; using the observed class "%s".\n' "$OBSERVED_CLASS" >&2
+  fi
+  valid_class "$declared" || fail_closed "recorded task class '$declared' is not a declared change class (stale or corrupt state)."
+  declared_rank="${TG_RANK[$declared]}"
+  protected="$(class_protected "$OBSERVED_CLASS")"
+
+  # 1. Scope drift: the work grew past what was declared.
+  if [ "$OBSERVED_RANK" -gt "$declared_rank" ]; then
+    local detail line
+    detail=""
+    for line in "${CONTRIBUTORS[@]}"; do
+      [ "${line%%	*}" = "$OBSERVED_CLASS" ] || continue
+      detail="$detail  ${line#*	}"$'\n'
+    done
+    if [ "$protected" = true ]; then
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, ask Albert for the missing authority, or take these files out of the change set.' \
+        "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
+    fi
+    if [ -z "$acknowledge" ]; then
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s\nThese files escalated the task class:\n%sRe-declare with `ai-task-gates start --class %s`, or re-run with --acknowledge "<reason>" if the escalation is in scope.' \
+        "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
+    fi
+    state_record_override acknowledge "$action" "$acknowledge" "$OBSERVED_CLASS"
+    printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
+  fi
+
+  # 2. Forbidden action for the observed class.
+  local gate forbidden required
+  gate="$(merged_gate "$IDENTITY" "$OBSERVED_CLASS")"
+  forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p')"
+  required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
+    if [ "$protected" = true ]; then
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nThis cannot be overridden here. It needs Albert naming the exact resource and action.' \
+        "$action" "$OBSERVED_CLASS" "$IDENTITY")"
+    fi
+    if [ -z "$owner_request" ]; then
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nIf Albert explicitly asked for it, re-run with --owner-request "<reason>".' \
+        "$action" "$OBSERVED_CLASS" "$IDENTITY" "${required:-<none>}")"
+    fi
+    state_record_override owner-request "$action" "$owner_request" "$OBSERVED_CLASS"
+    printf 'ai-task-gates: "%s" allowed by explicit owner request: %s\n' "$action" "$owner_request"
+    return 0
+  fi
+
+  printf 'ai-task-gates: "%s" may start for a "%s" change in %s.\n' "$action" "$OBSERVED_CLASS" "$IDENTITY"
+  [ -n "$required" ] && printf 'required gates: %s\n' "$required"
+  return 0
+}
+
+# --------------------------------------------------------------------------
+main(){
+  local command="${1:-}"; [ $# -gt 0 ] && shift
+  case "$command" in
+    start) cmd_start "$@" ;;
+    check) cmd_check "$@" ;;
+    explain) cmd_explain "$@" ;;
+    status) cmd_status "$@" ;;
+    end) cmd_end "$@" ;;
+    classify)
+      [ $# -ge 1 ] || die 'classify requires an event name.'
+      tg_legacy_classify "$1" ;;
+    version) printf 'ai-task-gates %s\n' "$VERSION" ;;
+    ''|-h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

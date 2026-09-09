@@ -9,6 +9,10 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD="$ROOT/bin/ai-pr-wait"
+# The wait behaviour below is what these cases are about, so the task gate is
+# switched off for them and exercised on its own at the end of this file.
+export AI_DEVOPS_TEST_MODE=1
+export AI_TASK_GATES_MODE=none
 pass=0; fail=0
 check() {
   if eval "$2" >/dev/null 2>&1; then printf '  ok   %s\n' "$1"; pass=$(( pass + 1 ))
@@ -101,6 +105,38 @@ STRAYS="$(cd "$ROOT" && git grep -l -E "gh pr view[^\\n]*--json[^\\n]*state" -- 
   while read -r f; do grep -qE '^\s*(while|until)\b' "$f" && printf '%s ' "$f"; done)"
 check "nothing else in the repository hand-rolls a pull-request wait loop" \
   "test -z '$STRAYS'"
+
+# --------------------------------------------------------------------------
+# Task gate. A documentation-only pull request must not start a long wait at
+# all, and the owner may still ask for one.
+# --------------------------------------------------------------------------
+GR="$TMP/gated"; mkdir -p "$GR"; git -C "$GR" init -q --initial-branch=main
+git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
+git -C "$GR" remote add origin 'https://github.com/popcre/ai-devops.git'
+printf 'base\n' > "$GR/README.md"; git -C "$GR" add -A; git -C "$GR" commit -qm init
+printf 'a note\n' > "$GR/docs.md"
+export AI_TASK_GATES_DIR="$TMP/gates"
+( cd "$GR" && "$ROOT/bin/ai-task-gates" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
+
+# The refusal text carries backticks, so it is kept in a file rather than in a
+# shell variable the check would re-expand.
+GATE_OUT="$TMP/gate-refusal.txt"
+( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops ) >"$GATE_OUT" 2>&1; RC=$?
+check "a documentation-only pull request does not start a long wait" "test '$RC' -eq 3"
+check "the refusal names the admin squash merge instead" \
+  "grep -qF -- 'gh pr merge --squash --admin' '$GATE_OUT'"
+check "the refusal explains which gate applied" \
+  "grep -q ai-task-gates '$GATE_OUT'"
+
+OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 --owner-request 'Albert asked for the wait' 2>&1 )"; RC=$?
+check "an owner-requested wait passes the gate and reaches the normal checks" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'positive whole number'"
+
+printf 'select 1;\n' > "$GR/migration.sql"
+OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops 2>&1 )"; RC=$?
+check "work that outgrew its declared class still refuses the wait" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q migration.sql"
+rm -f "$GR/migration.sql"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

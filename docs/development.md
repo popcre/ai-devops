@@ -37,6 +37,33 @@ ai-devops doctor             # full health check
 ai-workspace-status          # exercise the git snapshot tool
 ```
 
+### Declaring the task class
+
+Work in this repository is classified before it starts, so an expensive or
+risky action cannot begin by accident:
+
+```bash
+ai-task-gates start --class code --reason "fixing the reviewer lock"
+```
+
+`ai-task-gates check --before review` (or `pr-wait`, `ship`, `deploy`,
+`database`, `infrastructure`, `production`) recomputes the complete change set —
+committed, staged, unstaged, untracked, deleted, both sides of a rename, and
+submodules — and refuses when the work has outgrown what was declared. The
+reviewer lifecycle, `ai-pr-wait`, and `ai-review` call it themselves before any
+lock, state file, or paid call exists, so a refusal costs nothing.
+
+If the work legitimately grew, declare it again with the stronger class. A
+protected class cannot be argued past: `--acknowledge` and `--owner-request`
+apply only to unprotected classes.
+
+Changing the policy means changing `config/task-gates.json`, keeping it valid
+against `config/task-gates.schema.json`:
+
+```bash
+python tools/ci/validate-task-gates.py config/task-gates.json
+```
+
 Add a new tool: drop an executable script in `bin/`, then re-run `./install.sh`
 (the symlink loop picks up any file in `bin/` automatically). Update `AGENTS.md`
 and `README.md` to list it.
@@ -114,14 +141,16 @@ pwsh -NoProfile -File tests/test-all.ps1
 ```
 
 On Ubuntu, run `bash tests/test-all.sh`. The GitHub `verify` workflow runs the
-same deterministic Bash set on Linux and the complete Bash plus PowerShell set
-on Windows. A separate `windows-reviewer-safety` job repeats the Codex and Grok
-reviewer suites in parallel so a Windows-only safety regression is reported
-without waiting for the complete Windows matrix; the complete matrix remains
-the authoritative all-test gate. New offline tests named `tests/test-*.sh` or
-`tests/test-*.ps1` are discovered automatically in sorted order. Paid or live
-provider qualification must live under `tests/probes/` and remains an explicit
-release gate, never CI.
+complete deterministic Bash set on Linux. For ordinary pull requests, Windows
+runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
+the separate `windows-reviewer-safety` lane repeats Codex and Grok as an early
+signal. Issue #260 owns removing that remaining intentional overlap with a
+failover contract. Scheduled, manual, qualification, and local no-argument runs
+keep the complete Bash plus PowerShell matrix. The exact assignment is
+fail-closed in `config/ci-suite-manifest.json`.
+New offline tests named `tests/test-*.sh` or `tests/test-*.ps1` are discovered
+automatically in sorted order. Paid or live provider qualification must live
+under `tests/probes/` and remains an explicit release gate, never CI.
 
 ### Running only the relevant suites
 
@@ -155,6 +184,11 @@ run before shipping. `tests/lib-selection.sh` holds the logic and
 `tests/test-session-conduct-policy.sh` protects the bounded CI-waiting and
 shared-infrastructure growth rules. Update that test with any deliberate change
 to those standing rules; do not weaken it simply to shorten guidance.
+
+The cross-repository plan for moving scope classification ahead of reviewer,
+CI-wait, shipping, database, deployment, and production entry points is
+[`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md).
+It extends the existing change classifier; do not create per-repository copies.
 
 ### Running the suites concurrently on one machine
 

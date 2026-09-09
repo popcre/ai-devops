@@ -20,15 +20,15 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
-| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | engineering complete, pending closeout; the qualified pool is **two independent physical hosts** - `EDGE-RUNN-ENVY` and `edge-dev-win` - both carrying `ai-devops-windows-qualified`; reboot/failover proof PASSED on both 2026-09-03 (each recovers unattended, rejoins the pool with nobody signed in, and has independently carried a complete `windows-reviewer-safety` job while the other was out of the pool); Windows work stays deliberately two lanes - `windows-offline` on GitHub-hosted `windows-2025` because hosted concurrency is unmetered on a public repository, `windows-reviewer-safety` on the qualified pool for flake reproducibility - because the pool is **extra** capacity and never a replacement for GitHub's runners; `edge-dev` is a qualified pool member and was **never** retired; third host `EDGE-ALIEN` is parked on `ai-devops-windows-paused` and placed **on ice by the owner 2026-09-03** - do not work on it until he says it is ready; downstream drift checks completed 2026-09-02 (B3-E1) and 2026-09-03 (two-host supersession) | Merges `36bd7a5fb2868916dfe12aac19e6e8c2db1a1d38`, `7e9210d1`, `694a496c`, `ce8483ca`, `e1c9f0d6`; failover proof in [#209 comment 5531835428](https://github.com/popcre/ai-devops/issues/209#issuecomment-5531835428) and unattended-recovery proof in [#209 comment 5532328750](https://github.com/popcre/ai-devops/issues/209#issuecomment-5532328750); post-reboot job `33802110064` succeeded on `edge-dev-win`; EDR diagnosis in [#209 comment 5513464456](https://github.com/popcre/ai-devops/issues/209#issuecomment-5513464456); dead-pool detection built for [#222](https://github.com/popcre/ai-devops/issues/222) in [#245](https://github.com/popcre/ai-devops/pull/245); [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md); [`docs/windows-runner-interruptions-2026-09-01.md`](docs/windows-runner-interruptions-2026-09-01.md); hosted lane and `edge-dev` onboarding in [#229](https://github.com/popcre/ai-devops/pull/229) |
-| 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | open | — |
-| 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
-| 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
+| 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | done | Closeout merge `baa3ac1`; engineering and live failover evidence remain in [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md) |
+| 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
+| 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
+| 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
 | 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209 | — |
 | 8 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
 | 9 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
 | 10 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
-| 11 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | open; after #165 | — |
+| 11 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
 | 12 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
@@ -336,6 +336,16 @@ later session must not re-derive them.
 **Change:** time suites, run only Windows-sensitive Bash ordinarily, keep complete scheduled set, inject a Windows defect, prove exact-tree equivalence before narrowing post-merge runs, and correct concurrency identity.
 
 **Gates:** before/after timings; injected defect caught; no undocumented exact-tree third matrix; obsolete ordinary runs cancel without destroying merge-group evidence; `git ls-files --eol` proves line endings.
+
+**Completion note (2026-09-08):** Pull requests now run the measured 23-suite
+Windows-sensitive Bash set plus all 18 PowerShell suites on the hosted lane;
+scheduled, manual, qualification, and no-argument runs remain complete. The
+Codex/Grok early-signal repeat remains explicitly owned by #260. The evidence
+artifact above records timings, injected defects, event/concurrency behavior,
+line-ending proof, and complete-suite results. The downstream B4 through E1
+specifications remain valid: #210 consumes this mapping and timing baseline,
+#164 keeps the existing merge-group compatibility gate, #167 is now unblocked,
+and #166 remains last.
 
 #### B4. #163 — local selection
 

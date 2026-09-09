@@ -120,6 +120,11 @@ All **required** checks should pass. Warnings about optional tools are fine.
   what your installed `claude` / `codex` accept (see `docs/model-setup.md`).
 - Onboard your application repos separately (see `docs/repo-onboarding.md`).
   This toolkit does **not** modify application repos automatically.
+- Task classification needs nothing extra. `install.sh` symlinks
+  `bin/ai-task-gates` with every other tool, and the policy it reads
+  (`config/task-gates.json`) ships in this repository, so a restored machine
+  enforces the same gates as every other machine. Confirm with
+  `ai-task-gates version`.
 
 ## What is NOT restored (by design)
 

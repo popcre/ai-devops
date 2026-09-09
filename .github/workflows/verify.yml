@@ -143,7 +143,13 @@ jobs:
           }
       - name: Complete offline Windows and Bash suites
         shell: pwsh
-        run: .\tests\test-all.ps1
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            .\tests\test-all.ps1 -WindowsPullRequest
+          } else {
+            # Scheduled and manual verification remain the complete backstop.
+            .\tests\test-all.ps1
+          }
 
   windows-reviewer-safety:
     needs: [fast-classifier, manual-preflight]

@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check>' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check>' '       ai-review <claude|codex> <mode> --owner-request "<why Albert asked for it>"' '       ai-review doctor'; }
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
@@ -10,6 +10,40 @@ case "${1:-}" in
   -h|--help|help|'') usage; exit 0 ;;
   *) printf 'ai-review: error: %s is advisory or quarantined and cannot satisfy an approval gate. Use claude or codex.\n' "${1:-unknown}" >&2; exit 2 ;;
 esac
-shift; mode="${1:-}"; [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+shift; mode="${1:-}"
+owner_request=""
+if [ "$#" -eq 3 ] && [ "${2:-}" = --owner-request ]; then owner_request="$3"; set -- "$1"; fi
+[ "$#" -eq 1 ] || { usage >&2; exit 2; }
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
+# The approval gate is the front door, so the task gate belongs here: a review
+# the change set does not call for must not reach a provider wrapper at all.
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$ROOT"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+GATE_LIB=""
+for candidate in "$REAL_DIR/.." "$ROOT/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  GATE_LIB="$(cd "$candidate" && pwd)/tools/lib/task-gates.sh"
+  break
+done
+[ -n "$GATE_LIB" ] || { printf 'ai-review: cannot find the task-gate library; no reviewer was started.\n' >&2; exit 3; }
+# shellcheck source=../tools/lib/task-gates.sh
+. "$GATE_LIB"
+# The provider wrappers call `ai-review-lifecycle begin`, which runs the gate
+# again. It cannot see the mode or the owner request from there, so hand both
+# on. This is the only supported front door, so this is the only place they
+# can come from.
+export AI_REVIEW_GATE_MODE="$mode"
+export AI_REVIEW_OWNER_REQUEST="$owner_request"
+# A plan review runs before the work exists and is how a session decides what
+# the work is. Gating it on the class of a change set that has not been
+# written yet would refuse the very step that sets the class.
+if [ "$mode" = plan-review ]; then exec "$wrapper" "$mode"; fi
+gate_args=()
+[ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
+tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
 exec "$wrapper" "$mode"
