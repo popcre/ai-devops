@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
     --windows-offline) windows_offline=true; shift ;;
     --exclude-reviewer-safety) exclude_reviewer_safety=true; shift ;;
     --list) list_only=true; shift ;;
-    -h|--help) sed -n '2,9p' "$ROOT/tests/test-all.sh"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$ROOT/tests/test-all.sh"; exit 0 ;;
     *) printf 'test-all.sh: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done

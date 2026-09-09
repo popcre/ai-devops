@@ -11,6 +11,10 @@ bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1" >&2; }
 check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 run() { AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$ROOT/tests/test-all.sh" "$@"; }
 
+help="$(bash "$ROOT/tests/test-all.sh" --help)"
+check 'help lists the guarded reviewer exclusion and list mode' \
+  "printf '%s' \"\$help\" | grep -q -- '--exclude-reviewer-safety' && printf '%s' \"\$help\" | grep -q -- '--list'"
+
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-linux-only.sh"
 printf '#!/usr/bin/env bash\nexit 17\n' >"$SUITES/test-windows-defect.sh"
 printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-windows-defect.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
@@ -21,7 +25,7 @@ if [ "$list_rc" -eq 0 ] && [ "$(printf '%s\n' "$listed" | grep -c '^test-')" -eq
   ok 'ordinary Windows selection contains every declared suite'
 else
   printf '       rc=%s got=%q error=%s\n' "$list_rc" "$listed" "$(cat "$TMP/list.err")" >&2
-  bad 'ordinary Windows selection contains only the declared suite'
+  bad 'ordinary Windows selection contains every declared suite'
 fi
 omitted="$(run --windows-offline --exclude-reviewer-safety --list 2>"$TMP/omit.err")"; omitted_rc=$?
 if [ "$omitted_rc" -eq 0 ] && [ "$(printf '%s\n' "$omitted" | tail -1)" = 'test-linux-only.sh' ] &&
