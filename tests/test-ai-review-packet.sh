@@ -183,6 +183,8 @@ STALE="$TMP/stale-base"
 ORIGIN="$TMP/stale-origin.git"
 git init -q --bare --initial-branch=main "$ORIGIN"
 git clone -q "$R" "$STALE"
+git -C "$STALE" config user.email t@example.com
+git -C "$STALE" config user.name Test
 git -C "$STALE" remote set-url origin "$ORIGIN"
 git -C "$STALE" checkout -q -B main "$BASE_SHA"
 git -C "$STALE" push -q -u origin main
