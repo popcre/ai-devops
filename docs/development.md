@@ -37,6 +37,33 @@ ai-devops doctor             # full health check
 ai-workspace-status          # exercise the git snapshot tool
 ```
 
+### Declaring the task class
+
+Work in this repository is classified before it starts, so an expensive or
+risky action cannot begin by accident:
+
+```bash
+ai-task-gates start --class code --reason "fixing the reviewer lock"
+```
+
+`ai-task-gates check --before review` (or `pr-wait`, `ship`, `deploy`,
+`database`, `infrastructure`, `production`) recomputes the complete change set —
+committed, staged, unstaged, untracked, deleted, both sides of a rename, and
+submodules — and refuses when the work has outgrown what was declared. The
+reviewer lifecycle, `ai-pr-wait`, and `ai-review` call it themselves before any
+lock, state file, or paid call exists, so a refusal costs nothing.
+
+If the work legitimately grew, declare it again with the stronger class. A
+protected class cannot be argued past: `--acknowledge` and `--owner-request`
+apply only to unprotected classes.
+
+Changing the policy means changing `config/task-gates.json`, keeping it valid
+against `config/task-gates.schema.json`:
+
+```bash
+python tools/ci/validate-task-gates.py config/task-gates.json
+```
+
 Add a new tool: drop an executable script in `bin/`, then re-run `./install.sh`
 (the symlink loop picks up any file in `bin/` automatically). Update `AGENTS.md`
 and `README.md` to list it.

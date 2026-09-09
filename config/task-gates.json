@@ -1,0 +1,525 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "Central task-gate contract. It answers two separate questions:",
+    "  1. what changed  -> a change class, from `paths`",
+    "  2. which gates apply -> required proofs and forbidden actions, from `gates`",
+    "A consumer repository ships only `.ai-devops/task-gates.json`, holding",
+    "optional extra `paths` and optional extra `gates`. It carries no `match`:",
+    "the file already belongs to one repository. Resolution takes the STRONGEST",
+    "class over every changed path across both central and local",
+    "matches, so a local declaration can strengthen a gate and can never weaken",
+    "one. See docs/context-spec.md for the full contract."
+  ],
+  "actions": [
+    "review",
+    "pr-wait",
+    "ship",
+    "deploy",
+    "database",
+    "infrastructure",
+    "production"
+  ],
+  "change_classes": {
+    "prose": {
+      "rank": 10,
+      "protected": false,
+      "description": "Ordinary documentation, plans, handoffs, and notes."
+    },
+    "code": {
+      "rank": 20,
+      "protected": false,
+      "description": "Source, tests, configuration, and workflows."
+    },
+    "reviewer-safety": {
+      "rank": 30,
+      "protected": true,
+      "description": "Reviewer lifecycle, provider wrappers, sandboxing, and evidence integrity."
+    },
+    "ui-live-workflow": {
+      "rank": 40,
+      "protected": true,
+      "description": "User interface or an authenticated live workflow needing visual proof."
+    },
+    "shared-db": {
+      "rank": 50,
+      "protected": true,
+      "description": "Shared database structure, migrations, security rules, or curated master data."
+    },
+    "deployment": {
+      "rank": 60,
+      "protected": true,
+      "description": "Deployment definitions, pipelines, and release wiring."
+    },
+    "infrastructure": {
+      "rank": 70,
+      "protected": true,
+      "description": "Terraform, Terragrunt, Ansible, and other infrastructure definitions."
+    },
+    "production": {
+      "rank": 80,
+      "protected": true,
+      "description": "Anything that mutates or gates live production state."
+    },
+    "private-evidence": {
+      "rank": 90,
+      "protected": true,
+      "description": "Licensed rows, raw transcripts, and other private evidence."
+    }
+  },
+  "default": {
+    "fallback_class": "code",
+    "paths": [
+      {
+        "glob": "**/*.md",
+        "class": "prose"
+      },
+      {
+        "glob": "**/*.txt",
+        "class": "prose"
+      },
+      {
+        "glob": "*.ps1",
+        "class": "code"
+      },
+      {
+        "glob": "*.psm1",
+        "class": "code"
+      },
+      {
+        "glob": "*.psd1",
+        "class": "code"
+      },
+      {
+        "glob": "skills/**",
+        "class": "code"
+      },
+      {
+        "glob": ".github/workflows/*",
+        "class": "code"
+      },
+      {
+        "glob": "**/Dockerfile",
+        "class": "deployment"
+      },
+      {
+        "glob": "**/docker-compose*.yml",
+        "class": "deployment"
+      },
+      {
+        "glob": "**/cloudbuild*.yaml",
+        "class": "deployment"
+      },
+      {
+        "glob": "**/*.tf",
+        "class": "infrastructure"
+      },
+      {
+        "glob": "**/*.tfvars",
+        "class": "infrastructure"
+      },
+      {
+        "glob": "**/*.hcl",
+        "class": "infrastructure"
+      },
+      {
+        "glob": "**/migrations/**",
+        "class": "shared-db"
+      },
+      {
+        "glob": "**/*.sql",
+        "class": "shared-db"
+      }
+    ],
+    "gates": {
+      "prose": {
+        "required": [],
+        "forbidden_actions": [
+          "review",
+          "pr-wait",
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "code": {
+        "required": [
+          "local-tests"
+        ],
+        "forbidden_actions": [
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "reviewer-safety": {
+        "required": [
+          "local-tests",
+          "exact-head-independent-review"
+        ],
+        "forbidden_actions": [
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "ui-live-workflow": {
+        "required": [
+          "local-tests",
+          "visual-proof",
+          "authenticated-workflow-proof"
+        ],
+        "forbidden_actions": [
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "shared-db": {
+        "required": [
+          "local-tests",
+          "shared-db-branch-and-pr",
+          "target-identity-proof",
+          "orchestrator-claim"
+        ],
+        "forbidden_actions": [
+          "deploy",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "deployment": {
+        "required": [
+          "local-tests",
+          "owner-authorization"
+        ],
+        "forbidden_actions": [
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "infrastructure": {
+        "required": [
+          "local-tests",
+          "owner-authorization",
+          "read-only-by-default"
+        ],
+        "forbidden_actions": [
+          "database",
+          "production"
+        ]
+      },
+      "production": {
+        "required": [
+          "exact-resource-and-action-authorization"
+        ],
+        "forbidden_actions": []
+      },
+      "private-evidence": {
+        "required": [
+          "privacy-classification",
+          "no-raw-content-read"
+        ],
+        "forbidden_actions": [
+          "review",
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      }
+    }
+  },
+  "rules": [
+    {
+      "match": "*/ai-devops",
+      "paths": [
+        {
+          "glob": "bin/ai-review",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-review-*",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-claude-review",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-codex-review",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-grok-review",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-deepseek-agent",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-gemini*",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-glm",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-kimi",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-muse",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-qwen",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-reviewer-issue",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "bin/ai-task-gates",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/lib/task-gates.sh",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "config/task-gates.json",
+          "class": "reviewer-safety"
+        },
+        {
+          "glob": "tools/reviewer_*",
+          "class": "reviewer-safety"
+        }
+      ],
+      "gates": {}
+    },
+    {
+      "match": "popcre/designflow-*",
+      "paths": [
+        {
+          "glob": "**/*.component.ts",
+          "class": "ui-live-workflow"
+        },
+        {
+          "glob": "**/*.component.html",
+          "class": "ui-live-workflow"
+        },
+        {
+          "glob": "supabase/**",
+          "class": "shared-db"
+        }
+      ],
+      "gates": {
+        "prose": {
+          "required": [
+            "no-self-merge"
+          ],
+          "forbidden_actions": []
+        },
+        "code": {
+          "required": [
+            "no-self-merge",
+            "sandbox-branch-pr-to-develop"
+          ],
+          "forbidden_actions": []
+        },
+        "ui-live-workflow": {
+          "required": [
+            "no-self-merge",
+            "sandbox-branch-pr-to-develop"
+          ],
+          "forbidden_actions": []
+        },
+        "shared-db": {
+          "required": [
+            "route-to-shared-db-repository"
+          ],
+          "forbidden_actions": [
+            "database"
+          ]
+        }
+      }
+    },
+    {
+      "match": "u2giants/shared-db",
+      "paths": [
+        {
+          "glob": "migrations/**",
+          "class": "shared-db"
+        },
+        {
+          "glob": "master-data/**",
+          "class": "shared-db"
+        },
+        {
+          "glob": "policies/**",
+          "class": "shared-db"
+        }
+      ],
+      "gates": {
+        "shared-db": {
+          "required": [
+            "governed-issue-claim",
+            "preview-target-proof",
+            "production-promotion-authorization"
+          ],
+          "forbidden_actions": []
+        }
+      }
+    },
+    {
+      "match": "u2giants/theoracle",
+      "paths": [
+        {
+          "glob": "**/release/**",
+          "class": "deployment"
+        },
+        {
+          "glob": "**/fixtures/licensed/**",
+          "class": "private-evidence"
+        }
+      ],
+      "gates": {
+        "deployment": {
+          "required": [
+            "release-marker-review"
+          ],
+          "forbidden_actions": []
+        },
+        "production": {
+          "required": [
+            "current-chat-resource-and-action-authorization"
+          ],
+          "forbidden_actions": []
+        }
+      }
+    },
+    {
+      "match": "u2giants/popcrm-web",
+      "paths": [
+        {
+          "glob": "src/**",
+          "class": "ui-live-workflow"
+        }
+      ],
+      "gates": {}
+    },
+    {
+      "match": "u2giants/poppim-web",
+      "paths": [
+        {
+          "glob": "src/**",
+          "class": "ui-live-workflow"
+        }
+      ],
+      "gates": {}
+    },
+    {
+      "match": "u2giants/popdam3",
+      "paths": [
+        {
+          "glob": "src/**",
+          "class": "ui-live-workflow"
+        }
+      ],
+      "gates": {}
+    },
+    {
+      "match": "u2giants/backrest-wiz",
+      "paths": [],
+      "gates": {}
+    },
+    {
+      "match": "u2giants/licensor-source-data",
+      "paths": [
+        {
+          "glob": "**",
+          "class": "private-evidence"
+        }
+      ],
+      "gates": {
+        "private-evidence": {
+          "required": [
+            "licensed-row-containment"
+          ],
+          "forbidden_actions": []
+        }
+      }
+    },
+    {
+      "match": "u2giants/ai-devops-transcripts",
+      "paths": [
+        {
+          "glob": "**",
+          "class": "private-evidence"
+        }
+      ],
+      "gates": {
+        "private-evidence": {
+          "required": [
+            "never-open-raw-transcript-archives"
+          ],
+          "forbidden_actions": []
+        }
+      }
+    },
+    {
+      "match": "popcre/infrastructure",
+      "paths": [
+        {
+          "glob": "**",
+          "class": "infrastructure"
+        }
+      ],
+      "gates": {
+        "infrastructure": {
+          "required": [
+            "exact-resource-and-action-authorization"
+          ],
+          "forbidden_actions": [
+            "production"
+          ]
+        }
+      }
+    },
+    {
+      "match": "u2giants/ansible",
+      "paths": [
+        {
+          "glob": "playbooks/**",
+          "class": "infrastructure"
+        },
+        {
+          "glob": "roles/**",
+          "class": "infrastructure"
+        },
+        {
+          "glob": "inventory/**",
+          "class": "infrastructure"
+        }
+      ],
+      "gates": {
+        "infrastructure": {
+          "required": [
+            "exact-resource-and-action-authorization"
+          ],
+          "forbidden_actions": [
+            "production"
+          ]
+        }
+      }
+    }
+  ]
+}
