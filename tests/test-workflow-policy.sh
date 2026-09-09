@@ -102,8 +102,9 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the no-argument complete runner as the backstop.
 grep -Fq "if (\$env:GITHUB_EVENT_NAME -eq 'pull_request')" "$workflow" &&
+grep -Fq '.\tests\test-all.ps1 -QwenPullRequest' "$workflow" &&
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest' "$workflow" &&
-[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 3 ] &&
 grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1

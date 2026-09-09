@@ -145,7 +145,21 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            .\tests\test-all.ps1 -WindowsPullRequest
+            $changed = @(git diff --no-renames --name-only "origin/$env:GITHUB_BASE_REF...HEAD")
+            $qwenTouched = @($changed | Where-Object { $_ -in @('bin/ai-qwen', 'bin/ai-review-preflight') }).Count -gt 0
+            $qwenAllowed = @(
+              'bin/ai-qwen', 'bin/ai-review-preflight',
+              'tests/test-ai-qwen.sh', 'tests/test-ai-review-preflight.sh',
+              'tests/test-all.sh', 'tests/test-all.ps1',
+              'tests/test-windows-bash-selection.sh',
+              'config/ci-suite-manifest.json', '.github/workflows/verify.yml'
+            )
+            $other = @($changed | Where-Object { $_ -notin $qwenAllowed })
+            if ($qwenTouched -and $other.Count -eq 0) {
+              .\tests\test-all.ps1 -QwenPullRequest
+            } else {
+              .\tests\test-all.ps1 -WindowsPullRequest
+            }
           } else {
             # Scheduled and manual verification remain the complete backstop.
             .\tests\test-all.ps1
