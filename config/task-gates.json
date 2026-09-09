@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "description": "Central task-gate contract. Consumer repositories may add declared path rules, but may only strengthen protected classes and gates.",
+  "actions": ["formal-review", "pr-wait", "ship", "deployment", "database", "infrastructure", "production"],
+  "classes": {
+    "ordinary-prose": {"precedence": 10, "requiredGates": [], "forbiddenActions": []},
+    "code-configuration": {"precedence": 20, "requiredGates": ["focused-verification"], "forbiddenActions": []},
+    "reviewer-safety": {"precedence": 30, "requiredGates": ["focused-verification", "independent-exact-head-review"], "forbiddenActions": []},
+    "ui-live-workflow": {"precedence": 40, "requiredGates": ["focused-verification", "visual-and-authenticated-proof"], "forbiddenActions": []},
+    "shared-database": {"precedence": 50, "requiredGates": ["shared-db-branch-pr", "target-identity-proof"], "forbiddenActions": ["database"]},
+    "deployment": {"precedence": 60, "requiredGates": ["deployment-proof"], "forbiddenActions": []},
+    "infrastructure": {"precedence": 70, "requiredGates": ["exact-resource-authorization"], "forbiddenActions": ["infrastructure"]},
+    "production": {"precedence": 80, "requiredGates": ["exact-resource-action-authorization", "production-proof"], "forbiddenActions": ["production"]},
+    "private-licensed-evidence": {"precedence": 90, "requiredGates": ["private-data-boundary"], "forbiddenActions": ["ship"]}
+  },
+  "protectedClasses": ["reviewer-safety", "ui-live-workflow", "shared-database", "deployment", "infrastructure", "production", "private-licensed-evidence"],
+  "resolution": {
+    "mixedChanges": "highest-precedence",
+    "unknownPath": "code-configuration",
+    "unknownRepository": "deny",
+    "missingPolicy": "deny",
+    "intentMismatch": "stop-before-action",
+    "explicitOverride": {"required": true, "recordReason": true, "cannotDowngradeProtected": true}
+  },
+  "repositoryDeclarations": [
+    {"match": "popcre/ai-devops", "minimumClasses": ["reviewer-safety", "deployment"]},
+    {"match": "popcre/designflow-*", "minimumClasses": ["ui-live-workflow", "shared-database"]},
+    {"match": "u2giants/shared-db", "minimumClasses": ["shared-database", "production"]},
+    {"match": "u2giants/theoracle", "minimumClasses": ["production", "private-licensed-evidence", "deployment"]},
+    {"match": "u2giants/licensor-source-data", "minimumClasses": ["private-licensed-evidence", "shared-database"]},
+    {"match": "u2giants/ai-devops-transcripts", "minimumClasses": ["private-licensed-evidence"]},
+    {"match": "u2giants/popcrm-web", "minimumClasses": ["ui-live-workflow", "deployment"]},
+    {"match": "u2giants/poppim-web", "minimumClasses": ["ui-live-workflow", "deployment"]},
+    {"match": "u2giants/popdam3", "minimumClasses": ["ui-live-workflow", "deployment"]},
+    {"match": "u2giants/backrest-wiz", "minimumClasses": ["deployment", "infrastructure"]},
+    {"match": "popcre/infrastructure", "minimumClasses": ["infrastructure", "production"]},
+    {"match": "u2giants/ansible", "minimumClasses": ["infrastructure", "production"]}
+  ]
+}

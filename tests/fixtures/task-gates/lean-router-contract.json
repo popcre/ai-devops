@@ -1,0 +1,11 @@
+{
+  "rootRouterRequired": ["repository-purpose", "invariant-safety-boundaries", "high-frequency-task-routes", "specialized-route-links"],
+  "rootRouterForbidden": ["full-procedures", "machine-facts", "volatile-live-facts", "history"],
+  "triggers": [
+    {"task": "documentation-only", "loads": ["repository-purpose", "invariant-safety-boundaries", "documentation-route"], "doesNotLoad": ["database-procedure", "production-procedure", "reviewer-procedure"]},
+    {"task": "shared-database", "loads": ["repository-purpose", "invariant-safety-boundaries", "shared-database-route", "database-procedure"]},
+    {"task": "production", "loads": ["repository-purpose", "invariant-safety-boundaries", "production-route", "production-procedure"]},
+    {"task": "ui-live-workflow", "loads": ["repository-purpose", "invariant-safety-boundaries", "ui-route", "ui-proof-procedure"]}
+  ],
+  "noLossDisposition": ["keep", "move", "consolidate", "remove-with-proof"]
+}

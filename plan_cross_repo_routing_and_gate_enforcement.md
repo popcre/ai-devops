@@ -13,8 +13,8 @@
 | Phase | Deliverable | Status | Fresh-session restart point |
 |---|---|---|---|
 | 0 | Freeze the canonical repository inventory and capture routing/gate baselines | COMPLETE — 2026-09-08 inventory evidence | Start at Step 1.1; re-resolve the exact branch head before writing |
-| 1 | Define the shared routing and gate-policy contracts | OPEN | Start at Step 1.1 after Phase 0 evidence is committed |
-| 2 | Implement and qualify the central `ai-devops` engine | OPEN | Start at Step 2.1 with the approved contracts; do not edit consumer repos yet |
+| 1 | Define the shared routing and gate-policy contracts | COMPLETE — version 1 policy and lean-router contract | Start at Step 2.1 with the approved contracts; do not edit consumer repos yet |
+| 2 | Implement and qualify the central `ai-devops` engine | OPEN | Start at Step 2.1 with policy version 1; do not edit consumer repos yet |
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | OPEN | Start at Step 3.1 after exact-head central tests pass |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | OPEN | Start at Step 4.1 using the pilot evidence and current inventory |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |

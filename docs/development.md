@@ -160,6 +160,9 @@ The cross-repository plan for moving scope classification ahead of reviewer,
 CI-wait, shipping, database, deployment, and production entry points is
 [`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md).
 It extends the existing change classifier; do not create per-repository copies.
+Its versioned contract is [`../config/task-gates.json`](../config/task-gates.json).
+Until the central command is installed, this declaration defines the required
+behavior but does not authorize a consumer repository to implement a local copy.
 
 ### Running the suites concurrently on one machine
 

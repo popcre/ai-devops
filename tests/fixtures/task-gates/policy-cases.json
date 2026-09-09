@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {"name": "ordinary prose", "classes": ["ordinary-prose"], "expected": "ordinary-prose"},
+    {"name": "code change", "classes": ["ordinary-prose", "code-configuration"], "expected": "code-configuration"},
+    {"name": "reviewer safety wins over code", "classes": ["code-configuration", "reviewer-safety"], "expected": "reviewer-safety"},
+    {"name": "UI and deployment use the stronger class", "classes": ["ui-live-workflow", "deployment"], "expected": "deployment"},
+    {"name": "production wins mixed changes", "classes": ["ordinary-prose", "shared-database", "production"], "expected": "production"},
+    {"name": "private evidence is never downgraded", "classes": ["production", "private-licensed-evidence"], "expected": "private-licensed-evidence"}
+  ],
+  "invalidOverrides": [
+    {"base": "production", "override": "ordinary-prose"},
+    {"base": "shared-database", "override": "code-configuration"},
+    {"base": "private-licensed-evidence", "override": "ordinary-prose"}
+  ]
+}

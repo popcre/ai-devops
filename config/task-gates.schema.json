@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://popcre.github.io/ai-devops/task-gates.schema.json",
+  "title": "AI DevOps task-gate policy",
+  "type": "object",
+  "required": ["schemaVersion", "actions", "classes", "protectedClasses", "resolution", "repositoryDeclarations"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "description": {"type": "string", "minLength": 1},
+    "actions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "classes": {
+      "type": "object", "minProperties": 9,
+      "additionalProperties": {
+        "type": "object", "required": ["precedence", "requiredGates", "forbiddenActions"], "additionalProperties": false,
+        "properties": {
+          "precedence": {"type": "integer", "minimum": 0},
+          "requiredGates": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "forbiddenActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "protectedClasses": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "resolution": {
+      "type": "object", "required": ["mixedChanges", "unknownPath", "unknownRepository", "missingPolicy", "intentMismatch", "explicitOverride"], "additionalProperties": false,
+      "properties": {
+        "mixedChanges": {"const": "highest-precedence"}, "unknownPath": {"const": "code-configuration"}, "unknownRepository": {"const": "deny"}, "missingPolicy": {"const": "deny"}, "intentMismatch": {"const": "stop-before-action"},
+        "explicitOverride": {"type": "object", "required": ["required", "recordReason", "cannotDowngradeProtected"], "additionalProperties": false, "properties": {"required": {"const": true}, "recordReason": {"const": true}, "cannotDowngradeProtected": {"const": true}}}
+      }
+    },
+    "repositoryDeclarations": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["match", "minimumClasses"], "additionalProperties": false, "properties": {"match": {"type": "string", "minLength": 1}, "minimumClasses": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}}}}
+  }
+}
