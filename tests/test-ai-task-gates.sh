@@ -81,6 +81,28 @@ cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'
 EOF
 check 'a local rule cannot downgrade a protected class' "[ \"\$(class_of 'bin/ai-review-lifecycle')\" = reviewer-safety ]"
 check 'a local rule may strengthen a class' "[ \"\$(class_of 'docs/runbook.md')\" = deployment ]"
+
+# The first real consumer declaration is this repository's own. It must retain
+# the central reviewer-safety class even if a second local rule tries to lower
+# it, and it must strengthen installer paths to deployment.
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/class/.ai-devops/task-gates.json"
+check 'the ai-devops pilot retains reviewer-safety for the review front door' \
+  "[ \"\$(class_of 'bin/ai-review')\" = reviewer-safety ]"
+check 'the ai-devops pilot protects the pull-request wait gate' \
+  "[ \"\$(class_of 'bin/ai-pr-wait')\" = reviewer-safety ]"
+check 'the ai-devops pilot protects the policy validator' \
+  "[ \"\$(class_of 'tools/ci/validate-task-gates.py')\" = reviewer-safety ]"
+check 'the ai-devops pilot protects its own declaration' \
+  "[ \"\$(class_of '.ai-devops/task-gates.json')\" = reviewer-safety ]"
+check 'the ai-devops pilot classifies Windows installation as deployment' \
+  "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = deployment ]"
+check 'the ai-devops pilot preserves the deploy refusal for installer paths' \
+  "printf 'install.sh\\n' | ( cd '$TMP/class' && '$GATES' explain --json --paths-from - ) | jq -e '.forbidden_actions | index(\"deploy\")' >/dev/null"
+jq '.paths += [{"glob":"bin/ai-review","class":"prose"}]' \
+  "$TMP/class/.ai-devops/task-gates.json" > "$TMP/class/.ai-devops/task-gates.tmp"
+mv "$TMP/class/.ai-devops/task-gates.tmp" "$TMP/class/.ai-devops/task-gates.json"
+check 'the ai-devops pilot cannot weaken the central reviewer class' \
+  "[ \"\$(class_of 'bin/ai-review')\" = reviewer-safety ]"
 # A corrupt local declaration must stop the run, not silently drop the stricter
 # local rules and carry on with the central ones.
 printf 'not json at all
@@ -270,6 +292,8 @@ VALIDATE="$ROOT/tools/ci/validate-task-gates.py"
 PY_BIN="$(command -v python3 || command -v python)"
 check 'the shipped contract validates against the schema' \
   "'$PY_BIN' '$VALIDATE' '$ROOT/config/task-gates.json'"
+check 'the ai-devops pilot declaration validates against the schema' \
+  "'$PY_BIN' '$VALIDATE' '$ROOT/.ai-devops/task-gates.json'"
 SCHEMA_TMP="$TMP/schema"; mkdir -p "$SCHEMA_TMP"
 "$PY_BIN" - "$SCHEMA_TMP" "$ROOT/config/task-gates.json" <<'EOF'
 import json, pathlib, sys
