@@ -11,25 +11,50 @@ owner: claude/cross-repo-routing-gates-0bafa0 (landed; Phase 3 is unowned)
 **Put all of these to Albert in ONE message before starting work. Do not trip
 over them one at a time.**
 
+**Albert answered all four of these on 2026-09-09. They are settled. Do not
+re-ask them; the answers are recorded below with what they oblige you to do.**
+
 Blocking:
 
 - **None.** Nothing blocks Phase 3. Start it.
 
 A wrong guess is recoverable, but wasteful:
 
-1. **Two agents worked #335 in parallel on 2026-09-08 and both built the same
-   inventory.** A Codex task and this Claude session each froze the 17-repository
-   inventory independently; the two files clashed when this work merged.
-   Recommendation: **one agent owns #335 from here.** Before starting Phase 3,
-   check for a live Codex task named `Implement cross-repo gate plan #340` and
-   ask Albert which one continues. Cost of guessing wrong: the whole of Phase 3
-   done twice, on four repositories.
+1. **ANSWERED — the parallel Codex work is named, and it has NOT finished.**
+   Albert asked which Codex session it was and whether it was done. The answer,
+   read off GitHub on 2026-09-09:
+
+   - The Codex work ran on branch **`codex/issue-335-routing-gates`**. It landed
+     two pull requests: **#340** "feat: add task-gate routing baseline"
+     (merged 2026-09-09T00:10:56Z) and **#342** "docs: hand off Issue #335
+     Phase 0" (merged 2026-09-09T00:29:30Z). #340 is the merge that collided
+     with this session's work across five files.
+   - It then opened a **second** branch, **`codex/issue-335-gate-contracts`**,
+     as pull request **#343** "Define cross-repository task-gate contract",
+     created 2026-09-09T00:34Z. **#343 is still OPEN and has not been touched
+     since it was created.** So: no, that Codex session did not finish.
+   - **#343 is now duplicate, superseded work.** It claims "Closes #335 phase 1"
+     and changes eleven files — the central policy, its schema, the fixtures, the
+     plan file, the workflow-policy test — every one of which this session's #345
+     already delivered and merged. It cannot merge as it stands.
+
+   **What the next session must do about it, before any Phase 3 work:** put
+   #343 to Albert with a recommendation to **close it unmerged**, saying plainly
+   that everything in it now exists on the main line, and that leaving it open
+   invites a third collision. Then confirm with Albert that **one agent owns
+   #335 from here** — the answer to the original question — and check for any
+   live Codex task still running against these branches before starting.
+   *You'll know it worked when* #343 is closed or explicitly kept, and Albert
+   has named the single owner in writing.
 2. **Phase 3 touches four repositories on four separate branches, one of which is
    DesignFlow.** DesignFlow goes to `develop` and is never self-merged, so that
    pilot ends with a pull request somebody else merges. Recommendation: **do the
    three self-mergeable pilots first** (`ai-devops`, `shared-db`, `theoracle`)
    and open the DesignFlow one last, so a wait on another person does not hold
-   up the rest.
+   up the rest. **ANSWERED 2026-09-09: Albert agreed. Do the three
+   self-mergeable pilots first and open the DesignFlow pull request last.** This
+   is now an instruction, not a suggestion; step 6 below already runs in that
+   order.
 
 Not part of this work, and nobody is on it:
 
@@ -40,13 +65,20 @@ Not part of this work, and nobody is on it:
    reports three failures on a clean tree. In plain terms: the rule that stops a
    session from quitting early is enforced for one AI and not the other.
    Recommendation: **add the three phrases to the Claude template**, as its own
-   small change, not inside #335. It predates this work.
+   small change, not inside #335. It predates this work. **ANSWERED 2026-09-09:
+   Albert said yes. Do it — as a separate pull request of its own, not folded
+   into #335.** *You'll know it worked when* the strict context audit reports
+   zero failures on a clean tree.
 4. **The pull-request wait command misreports its own timeout.** After a
    transient read failure it announces it gave up on a 180-minute deadline that
    had not remotely elapsed — it did this twice today, seconds after starting.
    The wait itself worked and merged correctly; only the message is wrong, and it
    would make a future session believe a pull request had stalled for three hours
    when it had not. Recommendation: **open a small issue** to fix the message.
+   **ANSWERED 2026-09-09: Albert said yes — open the issue.** Repair the message
+   so it reports the real cause and the real elapsed time; do not remove or
+   weaken the deadline itself. *You'll know it worked when* an induced transient
+   read failure prints a retry notice and no timeout claim.
 
 Already settled — do NOT re-ask:
 
@@ -55,6 +87,8 @@ Already settled — do NOT re-ask:
   declarations only (2026-09-08).
 - A local policy may strengthen a gate and can never weaken one (2026-09-08).
 - Raw transcripts and licensed source rows are never inspected (2026-09-08).
+- All four §0 items above were answered by Albert on 2026-09-09; the answers are
+  written into the items themselves. Do not put them to him again.
 - #335 stays OPEN until Phase 5 acceptance passes. It was closed once by mistake
   after Phase 0 and had to be reopened. Do not use a closing keyword in a pull
   request body before then (2026-09-09).
@@ -228,9 +262,16 @@ Phase 3 is four pilots, on four separate branches, each in its own current-upstr
 worktree. Read `plan_cross_repo_routing_and_gate_enforcement.md` Step 3.1 onwards
 for the full text; this is the operating summary.
 
-1. **Settle §0 item 1 with Albert first** — confirm no Codex task is also on
-   #335. *You'll know it worked when* Albert has named the single owner, in
-   writing, in the chat.
+1. **Clear the stale Codex pull request first, then confirm ownership.** See
+   §0 item 1: Codex pull request **#343** (`codex/issue-335-gate-contracts`) is
+   still open and is now fully superseded by #345. Put it to Albert with a
+   recommendation to close it unmerged, and confirm the single owner of #335.
+   *You'll know it worked when* #343 is closed or explicitly kept, and Albert has
+   named the owner in writing. Two side jobs, both approved by Albert on
+   2026-09-09 and both **separate from #335**: add the three closeout phrases to
+   the Claude global template (§0 item 3), and open an issue for the wrong
+   timeout message on the pull-request wait (§0 item 4). Neither blocks Phase 3;
+   do not fold either into a #335 pull request.
 2. **Install the toolkit on this machine and confirm the gate survives it:**
    `./install.sh`, then from any repository run `ai-task-gates version` and
    `ai-task-gates explain`. *You'll know it worked when* both succeed when run as
