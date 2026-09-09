@@ -81,6 +81,13 @@ cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'
 EOF
 check 'a local rule cannot downgrade a protected class' "[ \"\$(class_of 'bin/ai-review-lifecycle')\" = reviewer-safety ]"
 check 'a local rule may strengthen a class' "[ \"\$(class_of 'docs/runbook.md')\" = deployment ]"
+# A corrupt local declaration must stop the run, not silently drop the stricter
+# local rules and carry on with the central ones.
+printf 'not json at all
+' > "$TMP/class/.ai-devops/task-gates.json"
+check 'a corrupt consumer declaration refuses to classify'   "rc 4 '$TMP/class' explain"
+check 'the refusal names the declaration file'   "( cd '$TMP/class' && \"$GATES\" explain 2>&1 ) | grep -q 'not valid JSON'"
+check 'a corrupt consumer declaration also fails closed before an action'   "rc 4 '$TMP/class' check --before ship"
 rm -rf "$TMP/class/.ai-devops"
 
 printf 'the complete change set\n'

@@ -102,8 +102,8 @@ applicable_path_rules(){
     jqr --arg m "$pattern" '.rules[]|select(.match==$m)|(.paths//[])[]|[.glob,.class]|@tsv' "$POLICY_FILE"
   done < <(jqr '.rules[].match' "$POLICY_FILE")
   [ -f "$CONSUMER_FILE" ] || return 0
-  jqr '(.paths//[])[]|[.glob,.class]|@tsv' "$CONSUMER_FILE" 2>/dev/null || \
-    fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
+  # resolve_repo already refused a declaration that is not valid JSON.
+  jqr '(.paths//[])[]|[.glob,.class]|@tsv' "$CONSUMER_FILE" 2>/dev/null
 }
 
 # Merged gate for one class: union of required proofs and forbidden actions
@@ -143,6 +143,13 @@ resolve_repo(){
   IDENTITY="$(tg_identity)"
   case "$IDENTITY" in local/*) IDENTITY_RESOLVED=false ;; *) IDENTITY_RESOLVED=true ;; esac
   CONSUMER_FILE="$TOPLEVEL/$CONSUMER_FILE_NAME"
+  # Validate here, in the main shell. The readers below run inside command
+  # substitutions, where an exit would end only the subshell and the run would
+  # quietly continue on the central rules alone - dropping exactly the stricter
+  # local rules a corrupt declaration should have made us stop for.
+  if [ -f "$CONSUMER_FILE" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
+    fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
+  fi
 }
 
 # The base to diff committed work against. An explicit --base wins, then the
