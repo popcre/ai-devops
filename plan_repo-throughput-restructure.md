@@ -22,7 +22,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
 | 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | done | Closeout merge `baa3ac1`; engineering and live failover evidence remain in [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
-| 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | open | — |
+| 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
 | 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209 | — |
 | 8 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
@@ -336,6 +336,16 @@ later session must not re-derive them.
 **Change:** time suites, run only Windows-sensitive Bash ordinarily, keep complete scheduled set, inject a Windows defect, prove exact-tree equivalence before narrowing post-merge runs, and correct concurrency identity.
 
 **Gates:** before/after timings; injected defect caught; no undocumented exact-tree third matrix; obsolete ordinary runs cancel without destroying merge-group evidence; `git ls-files --eol` proves line endings.
+
+**Completion note (2026-09-08):** Pull requests now run the measured 23-suite
+Windows-sensitive Bash set plus all 18 PowerShell suites on the hosted lane;
+scheduled, manual, qualification, and no-argument runs remain complete. The
+Codex/Grok early-signal repeat remains explicitly owned by #260. The evidence
+artifact above records timings, injected defects, event/concurrency behavior,
+line-ending proof, and complete-suite results. The downstream B4 through E1
+specifications remain valid: #210 consumes this mapping and timing baseline,
+#164 keeps the existing merge-group compatibility gate, #167 is now unblocked,
+and #166 remains last.
 
 #### B4. #163 — local selection
 
