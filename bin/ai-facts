@@ -68,7 +68,7 @@ search_without_rg() { # QUERY JSON LIMIT
         printf './%s:%s:%s\n' "$rel" "$line" "$text"
       fi
       count=$((count + 1))
-    done < <(grep -a -n -i -F -- "$query" "$file" 2>/dev/null || true)
+    done < <(grep -a -h -n -i -F -- "$query" "$file" 2>/dev/null || true)
   done < <(markdown_files)
   if [ "$json" -eq 1 ] && ! jq -s . "$tmp"; then rm -f "$tmp"; return 1; fi
   rm -f "$tmp"; FACTS_TMP=""
