@@ -13,19 +13,27 @@ run() { AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$ROOT
 
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-linux-only.sh"
 printf '#!/usr/bin/env bash\nexit 17\n' >"$SUITES/test-windows-defect.sh"
-printf '%s\n' '{"windows_offline_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
+printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-windows-defect.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
 chmod +x "$SUITES"/*.sh
 
 listed="$(run --windows-offline --list 2>"$TMP/list.err")"; list_rc=$?
-if [ "$list_rc" -eq 0 ] && [ "$(printf '%s\n' "$listed" | tail -1)" = 'test-windows-defect.sh' ] &&
-   [ "$(printf '%s\n' "$listed" | grep -c '^test-')" -eq 1 ]; then
-  ok 'ordinary Windows selection contains only the declared suite'
+if [ "$list_rc" -eq 0 ] && [ "$(printf '%s\n' "$listed" | grep -c '^test-')" -eq 2 ]; then
+  ok 'ordinary Windows selection contains every declared suite'
 else
   printf '       rc=%s got=%q error=%s\n' "$list_rc" "$listed" "$(cat "$TMP/list.err")" >&2
   bad 'ordinary Windows selection contains only the declared suite'
 fi
+omitted="$(run --windows-offline --exclude-reviewer-safety --list 2>"$TMP/omit.err")"; omitted_rc=$?
+if [ "$omitted_rc" -eq 0 ] && [ "$(printf '%s\n' "$omitted" | tail -1)" = 'test-linux-only.sh' ] &&
+   ! printf '%s\n' "$omitted" | grep -q '^test-windows-defect.sh$'; then
+  ok 'hosted split omits exactly the reviewer-owned suite'
+else
+  bad 'hosted split omits exactly the reviewer-owned suite'
+fi
 run --windows-offline >/dev/null 2>&1; selected_rc=$?
 check 'an injected Windows-suite defect fails the selected run' '[ "$selected_rc" -ne 0 ]'
+run --windows-offline --exclude-reviewer-safety >/dev/null 2>&1; split_rc=$?
+check 'the hosted split passes only because fallback owns the injected reviewer defect' '[ "$split_rc" -eq 0 ]'
 run >/dev/null 2>&1; complete_rc=$?
 check 'the unchanged no-argument complete run still sees the defect' '[ "$complete_rc" -ne 0 ]'
 
@@ -36,6 +44,10 @@ check 'a stale Windows mapping fails instead of dropping coverage' '[ "$stale_rc
 printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-linux-only.sh"]}' >"$MANIFEST"
 run --windows-offline --list >/dev/null 2>&1; duplicate_rc=$?
 check 'a duplicate Windows assignment fails instead of repeating work' '[ "$duplicate_rc" -eq 2 ]'
+
+printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
+run --exclude-reviewer-safety --list >/dev/null 2>&1; unsafe_rc=$?
+check 'reviewer exclusion without Windows lane context fails closed' '[ "$unsafe_rc" -eq 2 ]'
 
 printf '{' >"$MANIFEST"
 run --windows-offline --list >/dev/null 2>&1; invalid_rc=$?

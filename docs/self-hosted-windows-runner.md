@@ -33,8 +33,12 @@ and logged in.
 For pull requests, `windows-offline` runs the Windows-sensitive Bash set and all
 PowerShell suites; `windows-reviewer-safety` repeats Codex and Grok on the
 qualified pool as an early signal. Scheduled, manual, and qualification runs
-retain the complete hosted Windows Bash matrix. The remaining reviewer overlap
-is owned by issue #260 because removing it safely needs a failover contract.
+retain the complete hosted Windows Bash matrix. The ordinary pull-request
+hosted matrix omits Codex and Grok only after assigning them to that lane. A
+hosted watchdog observes the self-hosted job: if it is skipped or fails, does
+not start within 10 minutes, or does not complete within 32 minutes,
+`windows-reviewer-fallback` runs both omitted suites on `windows-2025`. This is
+the fail-closed contract delivered by issue #260.
 On the hosted image those two suites can intermittently go red on `main` itself
 with a recognisable signature:
 

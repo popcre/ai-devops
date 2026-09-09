@@ -10,7 +10,7 @@
 
 **Active handoff:** [`HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md`](HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md)
 
-This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. Live work is owned only by #159 and children #160–#169.
+This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. Live work is owned only by #159 and its registered children, including #209, #210, and #260.
 
 ## STATUS — read this first
 
@@ -24,12 +24,13 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
-| 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209 | — |
-| 8 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
-| 9 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
-| 10 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
-| 11 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
-| 12 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
+| 7 | [#260](https://github.com/popcre/ai-devops/issues/260) | Remove duplicate hosted Codex/Grok runs with fail-closed fallback | done | [`tests/verification/repo-throughput/issue-260-reviewer-overlap.md`](tests/verification/repo-throughput/issue-260-reviewer-overlap.md) |
+| 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209/#260 | — |
+| 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
+| 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
+| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
+| 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
+| 13 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
@@ -346,6 +347,16 @@ line-ending proof, and complete-suite results. The downstream B4 through E1
 specifications remain valid: #210 consumes this mapping and timing baseline,
 #164 keeps the existing merge-group compatibility gate, #167 is now unblocked,
 and #166 remains last.
+
+#### B3a. #260 — fail-closed reviewer-lane deduplication
+
+**Completion note (2026-09-09):** Ordinary pull requests run Codex and Grok on
+the qualified reviewer lane only. The hosted matrix begins its remaining work
+in parallel, while a hosted watchdog releases a `windows-2025` fallback if the
+self-hosted job is skipped, fails, misses a 10-minute start deadline, or misses
+its 32-minute completion deadline. Scheduled, manual, qualification, and direct
+no-argument runs remain complete. Timing and injected-failure evidence is in
+[`tests/verification/repo-throughput/issue-260-reviewer-overlap.md`](tests/verification/repo-throughput/issue-260-reviewer-overlap.md).
 
 #### B4. #163 — local selection
 
