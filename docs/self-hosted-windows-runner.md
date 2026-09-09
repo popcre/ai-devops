@@ -88,22 +88,23 @@ checkout:
 | `edge-dev-win` | `C:\actions-runner` | `GitHubActionsRunner-aidevops` |
 | `edge-dev-win-2` | `C:\actions-runner-2` | `GitHubActionsRunner-aidevops-2` |
 
-Two exist so `windows-offline` and `windows-reviewer-safety` run **in parallel**
-rather than one queueing behind the other; with a single runner a full pass took
-roughly twice as long in wall clock. Do not add a third without a reason — each
-one competes for the same cores, and oversubscribing this machine is what starves
-a runner's heartbeat (see the 2026-08-28 entry in
+Two were originally created so the old `edge-dev` routes could run **in
+parallel** rather than queueing behind each other; with a single runner a full
+pass took roughly twice as long in wall clock. Do not add a third without a
+reason — each one competes for the same cores, and oversubscribing this machine
+is what starves a runner's heartbeat (see the 2026-08-28 entry in
 [`critical-incidents.md`](critical-incidents.md)).
 
 The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
 `X64` labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]`
 selects.
 
-Since 2026-09-02 the two heavy `verify` Windows jobs no longer select this
-label: `windows-offline` and `windows-reviewer-safety` run on
-`ai-devops-windows-qualified`, a pool of dedicated hosts documented in
+Since 2026-09-02 the heavy `verify` Windows jobs no longer select this label:
+`windows-offline` uses GitHub-hosted Windows, `windows-blacksmith` uses an
+ephemeral Blacksmith runner, and `windows-reviewer-safety` uses the
+`ai-devops-windows-qualified` dedicated pool documented in
 [`independent-windows-runner-setup.md`](independent-windows-runner-setup.md).
-These two runners still serve every other workflow that asks for `edge-dev`.
+The desktop runners still serve every other workflow that asks for `edge-dev`.
 
 Neither is a Windows service — installing one requires an elevated shell. Both
 run from scheduled tasks triggered at logon for the interactive user.

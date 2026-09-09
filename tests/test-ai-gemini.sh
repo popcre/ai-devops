@@ -176,7 +176,7 @@ check 'rejected provider output is durably linked from session state' "jq -e '.f
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
 CURRENT_ACCOUNT="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().Name' | tr -d '\r\n')"
 CURRENT_SID="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
-check 'preserved failure evidence uses a private Windows ACL' "test -n '$CURRENT_SID' && acl=\$(icacls \"\$(cygpath -w \"\$(jq -r .failure_artifact '$BAD_META')\")\"); printf '%s\\n' \"\$acl\" | grep -Fqi \"$CURRENT_ACCOUNT:(F)\" || { test -n '$CURRENT_SID' && printf '%s\\n' \"\$acl\" | grep -Fqi \"$CURRENT_SID:(F)\"; }"
+check 'preserved failure evidence uses a private Windows ACL' "acl=\$(icacls \"\$(cygpath -w \"\$(jq -r .failure_artifact '$BAD_META')\")\"); { test -n '$CURRENT_ACCOUNT' && printf '%s\\n' \"\$acl\" | grep -Fqi \"$CURRENT_ACCOUNT:(F)\"; } || { test -n '$CURRENT_SID' && printf '%s\\n' \"\$acl\" | grep -Fqi \"$CURRENT_SID:(F)\"; }"
 else
   check 'preserved failure evidence is private' "test \"\$(stat -c %a \"\$(jq -r .failure_artifact '$BAD_META')\")\" = 600"
 fi
