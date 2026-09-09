@@ -58,7 +58,7 @@ python tools/ci/validate-task-gates.py config/task-gates.json
 
 | Suite | Result |
 |---|---|
-| `tests/test-ai-task-gates.sh` | 68 passed, 0 failed |
+| `tests/test-ai-task-gates.sh` | 70 passed, 0 failed |
 | `tests/test-ai-review-lifecycle.sh` | 46 passed, 0 failed |
 | `tests/test-ai-pr-wait.sh` | 26 passed, 0 failed |
 | `tests/test-workflow-policy.sh` | all assertions pass after the declared suite count moved from 66 to 67 |
@@ -117,3 +117,24 @@ findings, all fixed here:
 
 `ai-review codex final-check` could not run: its sandbox policy blocked every
 read-only command, including the first required read.
+
+### Second round
+
+Re-reviewed at `c5a418fb`, and rejected again on four points, all fixed:
+
+1. Blocker. `install.sh` symlinks every `bin/*` onto PATH, and bash reports the
+   symlink path. All four new call sites computed the repository from that path,
+   so on an installed system the approval-gate front door and the reviewer
+   lifecycle would have died outright, the gate would have exited 4 on every
+   run, and the pull-request wait would have skipped its gate silently. Each
+   caller now resolves through `readlink -f` first, as `bin/ai-review-preflight`
+   already did, and refuses loudly if the library is genuinely absent. Covered
+   by two symlink cases and two detached-copy cases in the suite.
+2. `bin/ai-review` itself was not covered by the `reviewer-safety` class: the
+   `bin/ai-review-*` glob requires the trailing hyphen. It is now listed
+   explicitly.
+3. The policy's own prose told consumer repositories to ship a `match` key that
+   the schema rejects and the reader never uses. The prose now matches.
+4. Raised as a note, and acted on: gating `plan-review` would have refused the
+   step that decides what the work is, before any work exists. `plan-review` is
+   now exempt, with the reason stated in the code.

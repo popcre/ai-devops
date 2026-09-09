@@ -113,8 +113,21 @@ if [ -z "$REPO" ]; then
 fi
 # Nothing has been waited on yet, so this is the cheapest possible place to
 # refuse a wait the change set does not call for.
-GATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools/lib" 2>/dev/null && pwd)/task-gates.sh"
-if [ -f "$GATE_LIB" ]; then
+PR_WAIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$PR_WAIT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+GATE_LIB=""
+for candidate in "$REAL_DIR/.." "$PR_WAIT_DIR/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  GATE_LIB="$(cd "$candidate" && pwd)/tools/lib/task-gates.sh"
+  break
+done
+if [ -n "$GATE_LIB" ]; then
   # shellcheck source=../tools/lib/task-gates.sh
   . "$GATE_LIB"
   gate_args=()

@@ -13,8 +13,22 @@ STATE_DIR="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecy
 PREFLIGHT="${AI_REVIEW_PREFLIGHT_BIN:-$SCRIPT_DIR/ai-review-preflight}"
 SCOREBOARD="${AI_REVIEW_SCOREBOARD_BIN:-$SCRIPT_DIR/ai-review-scoreboard}"
 DIGEST="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$SCRIPT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+GATE_LIB=""
+for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  GATE_LIB="$(cd "$candidate" && pwd)/tools/lib/task-gates.sh"
+  break
+done
+[ -n "$GATE_LIB" ] || { printf 'ai-review-lifecycle: error: cannot find the task-gate library\n' >&2; exit 1; }
 # shellcheck source=../tools/lib/task-gates.sh
-. "$(cd "$SCRIPT_DIR/.." && pwd)/tools/lib/task-gates.sh"
+. "$GATE_LIB"
 
 die(){ printf 'ai-review-lifecycle: error: %s\n' "$*" >&2; exit 1; }
 valid_provider(){ case "$1" in claude|codex|deepseek|gemini|glm|grok|kimi|muse|qwen) return 0;; *) return 1;; esac; }

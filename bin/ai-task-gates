@@ -23,7 +23,21 @@ set -uo pipefail
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$SCRIPT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+ROOT=""
+for candidate in "$REAL_DIR/.." "$SCRIPT_DIR/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  ROOT="$(cd "$candidate" && pwd)"
+  break
+done
+# A gate that cannot find its own library must say so, not quietly allow.
+[ -n "$ROOT" ] || { printf 'ai-task-gates: cannot find tools/lib/task-gates.sh\n' >&2; exit 4; }
 # shellcheck source=../tools/lib/task-gates.sh
 . "$ROOT/tools/lib/task-gates.sh"
 

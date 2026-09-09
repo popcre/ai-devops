@@ -243,6 +243,28 @@ check 'an unknown action is a usage error, not a silent allow' "rc 1 '$TMP/gate'
 check 'an unknown class is a usage error' "rc 1 '$TMP/gate' start --class imaginary"
 check 'version prints' "out '$TMP/gate' version | grep -q '^ai-task-gates '"
 
+printf 'installed on PATH through a symlink\n'
+# install.sh symlinks every bin/* into /usr/local/bin, and bash reports the
+# symlink path in BASH_SOURCE. A gate that resolved its library and policy from
+# that path would find neither, and would then either die or allow everything.
+LINKDIR="$TMP/usrlocalbin"; mkdir -p "$LINKDIR"
+if ln -s "$ROOT/bin/ai-task-gates" "$LINKDIR/ai-task-gates" 2>/dev/null && [ -L "$LINKDIR/ai-task-gates" ]; then
+  check 'the gate still runs when invoked through its installed symlink' \
+    "env -u AI_TASK_GATES_FILE '$LINKDIR/ai-task-gates' version >/dev/null"
+  check 'the gate still classifies when invoked through its installed symlink' \
+    "( cd '$TMP/class' && printf 'bin/ai-review-lifecycle\n' | env -u AI_TASK_GATES_FILE '$LINKDIR/ai-task-gates' explain --json --paths-from - ) | jq -e '.observed_class==\"reviewer-safety\"' >/dev/null"
+else
+  printf '  skip symlink cases (this filesystem does not make real symlinks)\n'
+fi
+
+# A copy that is genuinely detached from the repository - no symlink to follow -
+# must refuse loudly rather than run with no policy and allow everything.
+ORPHAN="$TMP/orphan"; mkdir -p "$ORPHAN"; cp "$ROOT/bin/ai-task-gates" "$ORPHAN/ai-task-gates"
+ORPHAN_OUT="$( cd "$TMP/class" && env -u AI_TASK_GATES_FILE "$ORPHAN/ai-task-gates" version 2>&1 )"; ORPHAN_RC=$?
+check 'a gate detached from its library refuses instead of allowing' "[ '$ORPHAN_RC' -eq 4 ]"
+check 'and says what it could not find' \
+  "printf '%s' \"\$ORPHAN_OUT\" | grep -q 'tools/lib/task-gates.sh'"
+
 printf 'the policy matches its published schema\n'
 VALIDATE="$ROOT/tools/ci/validate-task-gates.py"
 PY_BIN="$(command -v python3 || command -v python)"

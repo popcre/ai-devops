@@ -17,8 +17,26 @@ if [ "$#" -eq 3 ] && [ "${2:-}" = --owner-request ]; then owner_request="$3"; se
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
 # The approval gate is the front door, so the task gate belongs here: a review
 # the change set does not call for must not reach a provider wrapper at all.
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$ROOT"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+GATE_LIB=""
+for candidate in "$REAL_DIR/.." "$ROOT/.."; do
+  [ -f "$candidate/tools/lib/task-gates.sh" ] || continue
+  GATE_LIB="$(cd "$candidate" && pwd)/tools/lib/task-gates.sh"
+  break
+done
+[ -n "$GATE_LIB" ] || { printf 'ai-review: cannot find the task-gate library; no reviewer was started.\n' >&2; exit 3; }
 # shellcheck source=../tools/lib/task-gates.sh
-. "$(cd "$ROOT/.." && pwd)/tools/lib/task-gates.sh"
+. "$GATE_LIB"
+# A plan review runs before the work exists and is how a session decides what
+# the work is. Gating it on the class of a change set that has not been
+# written yet would refuse the very step that sets the class.
+if [ "$mode" = plan-review ]; then exec "$wrapper" "$mode"; fi
 gate_args=()
 [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
 tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }

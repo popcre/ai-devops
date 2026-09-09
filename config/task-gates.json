@@ -4,9 +4,10 @@
     "Central task-gate contract. It answers two separate questions:",
     "  1. what changed  -> a change class, from `paths`",
     "  2. which gates apply -> required proofs and forbidden actions, from `gates`",
-    "A consumer repository ships only `.ai-devops/task-gates.json`: a `match`,",
-    "optional extra `paths`, and optional extra `gates`. Resolution takes the",
-    "STRONGEST class over every changed path across both central and local",
+    "A consumer repository ships only `.ai-devops/task-gates.json`, holding",
+    "optional extra `paths` and optional extra `gates`. It carries no `match`:",
+    "the file already belongs to one repository. Resolution takes the STRONGEST",
+    "class over every changed path across both central and local",
     "matches, so a local declaration can strengthen a gate and can never weaken",
     "one. See docs/context-spec.md for the full contract."
   ],
@@ -237,6 +238,10 @@
     {
       "match": "*/ai-devops",
       "paths": [
+        {
+          "glob": "bin/ai-review",
+          "class": "reviewer-safety"
+        },
         {
           "glob": "bin/ai-review-*",
           "class": "reviewer-safety"
