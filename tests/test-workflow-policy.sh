@@ -56,7 +56,7 @@ windows_sensitive="$(jq -r '.windows_sensitive_bash[]' "$manifest" | tr -d '\r' 
 windows_offline="$(jq -r '.windows_offline_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 windows_reviewer="$(jq -r '.windows_reviewer_safety_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 reviewer_workflow_count="$(grep -Fc "foreach (\$test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh'))" "$workflow")"
-check 'manifest declares 67 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 67 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 67 ]"
+check 'manifest declares 68 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 68 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 68 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'

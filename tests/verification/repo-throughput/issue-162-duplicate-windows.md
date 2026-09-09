@@ -14,8 +14,9 @@ review took 1,149 seconds in `windows-offline`, or 1,467 duplicated seconds.
 
 The schema-2 suite manifest is the assertion map:
 
-- `bash` is complete discovery: 67 suites after this change's new injection
-  test. Linux, scheduled/manual Windows, qualification, and local no-argument
+- `bash` is complete discovery: 68 suites, including this change's injection
+  test and the repository-coverage suite merged while the pull request was in
+  flight. Linux, scheduled/manual Windows, qualification, and local no-argument
   verification still run all of them.
 - `windows_sensitive_bash` contains 23 conservative platform-sensitive suites.
   Selection retained any suite that exercises or depends on Git Bash paths,
@@ -63,12 +64,13 @@ and checked-out shell content.
 - Focused selection, workflow-policy, line-ending, local-selection, and runner
   qualification checks passed. The final exact-head rerun recorded 6/6
   Windows-selection cases and the complete workflow-policy contract green.
-- Complete guarded local offline verification ran all 67 Bash and 18
-  PowerShell suites. PowerShell passed 18/18. Bash passed 66/67 under five-way
-  load; the sole miss was the preflight suite's under-ten-second Kimi timing
-  assertion. The complete preflight suite then passed 78/78 both directly and
-  through the guarded one-worker runner, proving the assertion remains active
-  and the loaded miss did not hide a behavior failure.
+- Complete guarded local offline verification at the pre-rebase 67-suite head
+  ran all 67 Bash and 18 PowerShell suites. PowerShell passed 18/18. Bash passed
+  66/67 under five-way load; the sole miss was the preflight suite's
+  under-ten-second Kimi timing assertion. The complete preflight suite then
+  passed 78/78 both directly and through the guarded one-worker runner, proving
+  the assertion remains active and the loaded miss did not hide a behavior
+  failure. Final-head CI covers all 68 current Bash suites.
 - Pull request #339 is the immutable acceptance record: its final-head Linux,
   hosted Windows, and independent reviewer-safety jobs all passed before merge.
   The merge queue then retested the exact tree that landed on `main`; no
