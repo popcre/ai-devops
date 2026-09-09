@@ -222,8 +222,15 @@ begin(){
   # The task gate runs before the assignment lock, before any state file, and
   # before the provider preflight, so a review the change set does not call for
   # starts no process and spends no call.
+  # bin/ai-review is the only supported front door and hands both of these on,
+  # because from here neither the review mode nor Albert's request is visible.
+  [ -n "$owner_request" ] || owner_request="${AI_REVIEW_OWNER_REQUEST:-}"
   [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
+  if [ "${AI_REVIEW_GATE_MODE:-}" = plan-review ]; then
+    : # a plan review decides what the work is; it cannot be gated on the work
+  else
   ( cd "$repo" && tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" )     || die "task gate refused this review; no lock, no state, and no provider call were created."
+  fi
   key="$(sha "$(jq -r .normalized_upstream <<<"$identity")|$provider|$caller|$run")"
   lock="$STATE_DIR/locks/$key.lock"; token="$$-$(date +%s)-$RANDOM"
   state="$STATE_DIR/runs/$(jq -r .repository_key <<<"$identity")/$provider/$caller/$run.json"

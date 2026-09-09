@@ -198,5 +198,28 @@ check "the refusal names the file that escalated the class" \
   "printf '%s' \"\$GATE_OUT2\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
 
+# The wrappers call `begin` for every mode and cannot see the mode or Albert's
+# request, so `bin/ai-review` hands both on. These cases run the real front door
+# with a stub wrapper, which is the path the shipped code actually takes.
+FRONT="$REPO_ROOT/bin/ai-review"
+STUB="$TMP/stub-wrapper"
+cat > "$STUB" <<STUBEOF
+#!/usr/bin/env bash
+AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" \
+  "$SCRIPT" begin --provider grok --repo "$GR" --run-id "front-\$1" --caller codex
+STUBEOF
+chmod +x "$STUB"
+
+FRONT_OUT="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review 2>&1 )"; FRONT_RC=$?
+check "the front door refuses a paid diff review of a documentation change" "[ '$FRONT_RC' -ne 0 ]"
+
+FRONT_PLAN="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude plan-review 2>&1 )"; PLAN_RC=$?
+check "a plan review still runs, because it is what decides the class" \
+  "[ '$PLAN_RC' -eq 0 ] && [ -f \"\$FRONT_PLAN\" ]"
+
+FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --owner-request 'Albert asked for the wording review' 2>&1 )"; OWNER_RC=$?
+check "an owner request reaches the gate the lifecycle runs" \
+  "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

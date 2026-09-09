@@ -33,6 +33,12 @@ done
 [ -n "$GATE_LIB" ] || { printf 'ai-review: cannot find the task-gate library; no reviewer was started.\n' >&2; exit 3; }
 # shellcheck source=../tools/lib/task-gates.sh
 . "$GATE_LIB"
+# The provider wrappers call `ai-review-lifecycle begin`, which runs the gate
+# again. It cannot see the mode or the owner request from there, so hand both
+# on. This is the only supported front door, so this is the only place they
+# can come from.
+export AI_REVIEW_GATE_MODE="$mode"
+export AI_REVIEW_OWNER_REQUEST="$owner_request"
 # A plan review runs before the work exists and is how a session decides what
 # the work is. Gating it on the class of a change set that has not been
 # written yet would refuse the very step that sets the class.

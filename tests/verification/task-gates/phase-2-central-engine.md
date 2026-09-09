@@ -59,7 +59,7 @@ python tools/ci/validate-task-gates.py config/task-gates.json
 | Suite | Result |
 |---|---|
 | `tests/test-ai-task-gates.sh` | 70 passed, 0 failed |
-| `tests/test-ai-review-lifecycle.sh` | 46 passed, 0 failed |
+| `tests/test-ai-review-lifecycle.sh` | 49 passed, 0 failed |
 | `tests/test-ai-pr-wait.sh` | 26 passed, 0 failed |
 | `tests/test-workflow-policy.sh` | all assertions pass after the declared suite count moved from 66 to 67 |
 | complete offline Bash suite (`tests/test-all.sh`) | 67 suites, 1 failure, pre-existing |
@@ -138,3 +138,28 @@ Re-reviewed at `c5a418fb`, and rejected again on four points, all fixed:
 4. Raised as a note, and acted on: gating `plan-review` would have refused the
    step that decides what the work is, before any work exists. `plan-review` is
    now exempt, with the reason stated in the code.
+
+### Third round
+
+Re-reviewed at `3c553a01`, rejected on six points, all fixed:
+
+1. Blocking. The `plan-review` exemption did not work end to end. Both provider
+   wrappers call `ai-review-lifecycle begin` for every mode, and the lifecycle
+   could not see the mode, so it ran the gate anyway and refused a plan review
+   of a plan document.
+2. Blocking. `--owner-request` never reached the gate that actually enforces,
+   for the same reason. The documented override did not exist in practice.
+3. The tests proved the override by calling `begin --owner-request` directly, a
+   call no shipped code makes, so both defects passed the suite.
+   `bin/ai-review` now exports the mode and the owner request, the lifecycle
+   honours both, and three new cases in `tests/test-ai-review-lifecycle.sh`
+   drive the real front door with a stub wrapper rather than the inner command.
+4. `bin/ai-pr-wait` skipped its gate silently when the library was missing while
+   the other two refused loudly. It now refuses loudly as well.
+5. `tools/lib/task-gates.sh` treated any gate exit other than 3 or 4 as an
+   allow, so an internal failure was read as a yes. It now refuses.
+6. `bin/ai-pr-wait --help` had been widened far enough to print a line of code.
+
+Suites after the fixes: gates 70/0, lifecycle 49/0, pr-wait 26/0,
+claude-review 33/0, codex-review 41/0, review-preflight 78/0,
+provider CLI installer contract PASS.

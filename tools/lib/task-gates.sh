@@ -136,6 +136,8 @@ tg_preflight_gate() {
   case "$rc" in
     0) return 0 ;;
     3|4) printf '%s\n' "$out" >&2; return "$rc" ;;
-    *) return 0 ;;
+    # Anything else is the gate itself failing. Fail closed: a gate that cannot
+    # answer must not be read as a yes.
+    *) printf 'task gate failed (exit %s); refusing rather than guessing:\n%s\n' "$rc" "$out" >&2; return 4 ;;
   esac
 }
