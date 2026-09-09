@@ -85,7 +85,16 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install offline test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq ripgrep shellcheck
+        run: |
+          # The runner image carries unrelated third-party feeds. A transient
+          # Chrome index mismatch ejected this exact head from the merge queue
+          # three times before project tests started (runs 34385010191,
+          # 34385198205, and 34385457668). These tools come from Ubuntu, so
+          # refresh only Ubuntu's signed source and leave the other feeds alone.
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=-
+          sudo apt-get install -y jq ripgrep shellcheck
       - name: Syntax
         run: |
           find bin tests -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do

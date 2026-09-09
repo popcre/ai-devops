@@ -43,3 +43,12 @@ Pull-request run `34366159903` at `c425583a` passed all executed jobs:
   `windows-reviewer-fallback` correctly skipped.
 - Linux passed in 11m36s. The workflow completed successfully without a local
   suite competing with any active Windows runner.
+
+## Merge-queue dependency repair
+
+Merge-group runs `34385010191`, `34385198205`, and `34385457668` were ejected
+before project tests because the runner's unrelated Google Chrome apt feed
+served a package index whose hash did not match its release file. The Linux job
+now refreshes Ubuntu's signed source only before installing the same `jq`,
+`ripgrep`, and `shellcheck` packages; policy mutation proves the third-party
+source isolation cannot disappear silently.
