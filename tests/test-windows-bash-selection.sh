@@ -53,6 +53,13 @@ printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"],"windows_reviewer_
 run --exclude-reviewer-safety --list >/dev/null 2>&1; unsafe_rc=$?
 check 'reviewer exclusion without Windows lane context fails closed' '[ "$unsafe_rc" -eq 2 ]'
 
+printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"]}' >"$MANIFEST"
+run --windows-offline --exclude-reviewer-safety --list >/dev/null 2>&1; missing_reviewer_rc=$?
+check 'missing reviewer assignment fails instead of creating a coverage gap' '[ "$missing_reviewer_rc" -eq 2 ]'
+
+pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -ExcludeReviewerSafety >/dev/null 2>&1; powershell_guard_rc=$?
+check 'PowerShell reviewer exclusion requires pull-request selection' '[ "$powershell_guard_rc" -ne 0 ]'
+
 printf '{' >"$MANIFEST"
 run --windows-offline --list >/dev/null 2>&1; invalid_rc=$?
 check 'invalid manifest JSON fails with a configuration error' '[ "$invalid_rc" -eq 2 ]'

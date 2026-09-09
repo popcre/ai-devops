@@ -18,7 +18,8 @@
   qualified self-hosted lane owns those two suites.
 - A hosted watcher observes the reviewer job. Skip/failure, no start within 10
   minutes, or no completion within 42 minutes releases a hosted fallback that
-  runs both omitted suites. Scheduled, manual, qualification, and direct
+  runs both omitted suites. A watchdog error also releases the fallback rather
+  than treating its missing output as success. Scheduled, manual, qualification, and direct
   no-argument execution remain complete.
 
 ## Injected failures

@@ -224,7 +224,7 @@ jobs:
             const completionDeadline = Date.now() + 42 * 60 * 1000;
             while (Date.now() < completionDeadline) {
               const {data} = await github.rest.actions.listJobsForWorkflowRun({
-                ...context.repo, run_id: context.runId, filter: 'latest'
+                ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100
               });
               const job = data.jobs.find(candidate => candidate.name === 'windows-reviewer-safety');
               if (job && job.status === 'completed') {
@@ -249,7 +249,8 @@ jobs:
       always() && !cancelled() && github.event_name == 'pull_request' &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true') &&
-      needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true'
+      (needs['reviewer-safety-start-deadline'].result != 'success' ||
+       needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
     runs-on: windows-2025
     timeout-minutes: 30
     steps:

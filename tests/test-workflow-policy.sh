@@ -181,6 +181,7 @@ grep -Fq "candidate.name === 'windows-reviewer-safety'" "$workflow" &&
 grep -Fq "job.status === 'queued'" "$workflow" &&
 grep -Fq 'const startDeadline = Date.now() + 10 * 60 * 1000' "$workflow" &&
 grep -Fq 'const completionDeadline = Date.now() + 42 * 60 * 1000' "$workflow" &&
+grep -Fq "needs['reviewer-safety-start-deadline'].result != 'success'" "$workflow" &&
 grep -Fq "core.setOutput('fallback_required', 'true')" "$workflow" &&
 grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true'" "$workflow" || {
   printf 'FAIL: a reviewer lane that does not start or succeed must release the hosted fallback\n' >&2
@@ -209,6 +210,8 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   assert_rejected full-windows-pr
   sed "/needs\['reviewer-safety-start-deadline'\].outputs.fallback_required == 'true'/d" "$workflow" >"$mutation_dir/reviewer-gap.yml"
   assert_rejected reviewer-gap
+  sed "/needs\['reviewer-safety-start-deadline'\].result != 'success'/d" "$workflow" >"$mutation_dir/watchdog-error-gap.yml"
+  assert_rejected watchdog-error-gap
   sed "/job.status === 'queued'/d" "$workflow" >"$mutation_dir/unbounded-reviewer-queue.yml"
   assert_rejected unbounded-reviewer-queue
 fi
