@@ -12,7 +12,7 @@ name: runner-pool-watchdog
 # check has to come from outside the pool.
 #
 # The blind spot this closes: `linux-offline` is the only required check on
-# main, and both Windows jobs are skipped on `merge_group`. So a completely
+# main, and all three Windows jobs are skipped on `merge_group`. So a completely
 # dead Windows pool does not block merging and produces no red signal
 # anywhere - Windows coverage just silently disappears.
 
