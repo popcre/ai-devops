@@ -261,7 +261,11 @@ jobs:
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
     runs-on: windows-2025
-    timeout-minutes: 30
+    # This is an emergency hosted path, not the qualified timing signal. Run
+    # 34387666739 reached Grok but was killed by the original 30-minute bound;
+    # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes keeps
+    # the fallback bounded without weakening any assertion.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

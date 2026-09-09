@@ -53,6 +53,16 @@ now refreshes Ubuntu's signed source only before installing the same `jq`,
 `ripgrep`, and `shellcheck` packages; policy mutation proves the third-party
 source isolation cannot disappear silently.
 
+## Live fallback proof
+
+Run `34387666739` made the qualified lane fail on the known Grok
+timing assertions after 223 passes. The watchdog detected the failure and
+started `windows-reviewer-fallback` on `windows-2025`, proving the live failure
+route. The fallback reached Grok but its initial 30-minute job ceiling cancelled
+the process before completion; prior hosted evidence measured Grok alone at
+41m20s. The fallback ceiling is therefore 60 minutes: bounded above that
+measured worst case without changing or weakening any assertion.
+
 ## Corrected-head local verification
 
 Commit `5f64ad8b` passed the focused workflow policy suite, the 12-case Windows
