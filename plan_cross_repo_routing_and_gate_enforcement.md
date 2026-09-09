@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-09T0833Z-edge-dev-claude-issue-335-phase-three-pilots.md`](HANDOFF.d/2026-09-09T0833Z-edge-dev-claude-issue-335-phase-three-pilots.md)
+**Active handoff:** [`HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md`](HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md)
 
 **Decision date:** 2026-09-08
 
@@ -15,7 +15,7 @@
 | 0 | Freeze the canonical repository inventory and capture routing/gate baselines | DONE 2026-09-08 | `config/repository-coverage.json` (17 identities) and `tests/verification/task-gates/routing-baseline.{json,md}` are committed |
 | 1 | Define the shared routing and gate-policy contracts | DONE 2026-09-08 | `config/task-gates.json`, `config/task-gates.schema.json`, `tools/ci/validate-task-gates.py`, lean-router content model in `docs/context-spec.md` |
 | 2 | Implement and qualify the central `ai-devops` engine | DONE 2026-09-08 | `bin/ai-task-gates` plus enforcement in `bin/ai-review`, `bin/ai-pr-wait`, `bin/ai-review-lifecycle`; evidence under `tests/verification/task-gates/` |
-| 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | OPEN | Start at Step 3.1; the central engine is landed, so begin with the four pilot declarations on four separate branches |
+| 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | OPEN | Start at Step 4.1 using the pilot evidence and current inventory |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |
 
@@ -48,7 +48,7 @@ GitHub repositories, not every local clone or worktree.
 | Group | Canonical repositories | Required local distinction |
 |---|---|---|
 | Shared tooling | `popcre/ai-devops` | Public toolkit; reviewer-safety paths retain exact-head independent review; documentation-only changes retain the immediate merge path |
-| DesignFlow | `popcre/designflow-backend`, `designflow-bff`, `designflow-data-syncing`, `designflow-frontend`, `designflow-item-master`, `designflow-tracking` | Sandbox branch and PR to `develop`; never self-merge; frontend/UI work retains visual and authenticated workflow proof; shared schema changes route to `u2giants/shared-db` |
+| DesignFlow | `popcre/designflow-backend`, `designflow-bff`, `designflow-data-syncing`, `designflow-frontend`, `designflow-item-master`, `designflow-tracking` | Normal product delivery remains sandbox branch and PR to `develop`; for the #335 rollout Albert selected direct, live `sandbox-albert` acceptance without a `develop`/Uma wait. Frontend/UI work retains visual and authenticated workflow proof; shared schema changes route to `u2giants/shared-db` |
 | Shared database | `u2giants/shared-db` | Structural changes keep orchestrator, claim, reviewer, preview, target-identity, and production-promotion gates |
 | Oracle | `u2giants/theoracle` | Release, migration, licensed-fixture, and live production gates remain explicit; no production mutation without current authorization |
 | Licensed/private evidence | `u2giants/licensor-source-data`, `u2giants/ai-devops-transcripts` | Licensed rows and raw transcripts remain private; the routing audit must not open raw transcript archives |
@@ -369,8 +369,10 @@ local tests; PR workflow compliance; live `ai-task-gates explain` resolves the
 correct identity and gates from both canonical checkout and a linked worktree.
 
 Do not combine these four repos into one branch or PR. `shared-db` work here is
-repository maintenance and authorizes no schema/data action. DesignFlow remains
-Uma-review/merge-only.
+repository maintenance and authorizes no schema/data action. The DesignFlow
+pilot was initially opened for Uma as #179; Albert redirected acceptance to the
+live `sandbox-albert` branch on 2026-09-09, so #179 closed unmerged and the
+verified pilot landed directly at `ea8f6029`.
 
 #### Step 3.2 — pilot review and rollback rehearsal
 
@@ -391,7 +393,10 @@ the pilots expose a common gap; never patch consumers inconsistently.
 
 Roll out to backend, BFF, data-syncing, item-master, and tracking. Preserve the
 same workflow family while declaring service-specific database, deployment, and
-test gates. Use separate sandbox branches and PRs; do not self-merge.
+test gates. For this #335 rollout, land and verify each repository on its current
+`sandbox-albert` branch as Albert directed on 2026-09-09; do not wait on
+`develop` or Uma. This does not change the normal product-delivery rule outside
+this rollout.
 
 #### Step 4.2 — application and private-data repositories
 
