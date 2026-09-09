@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check>' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check>' '       ai-review <claude|codex> <mode> --owner-request "<why Albert asked for it>"' '       ai-review doctor'; }
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
@@ -10,6 +10,16 @@ case "${1:-}" in
   -h|--help|help|'') usage; exit 0 ;;
   *) printf 'ai-review: error: %s is advisory or quarantined and cannot satisfy an approval gate. Use claude or codex.\n' "${1:-unknown}" >&2; exit 2 ;;
 esac
-shift; mode="${1:-}"; [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+shift; mode="${1:-}"
+owner_request=""
+if [ "$#" -eq 3 ] && [ "${2:-}" = --owner-request ]; then owner_request="$3"; set -- "$1"; fi
+[ "$#" -eq 1 ] || { usage >&2; exit 2; }
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
+# The approval gate is the front door, so the task gate belongs here: a review
+# the change set does not call for must not reach a provider wrapper at all.
+# shellcheck source=../tools/lib/task-gates.sh
+. "$(cd "$ROOT/.." && pwd)/tools/lib/task-gates.sh"
+gate_args=()
+[ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
+tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
 exec "$wrapper" "$mode"

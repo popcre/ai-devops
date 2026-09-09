@@ -12,10 +12,10 @@
 
 | Phase | Deliverable | Status | Fresh-session restart point |
 |---|---|---|---|
-| 0 | Freeze the canonical repository inventory and capture routing/gate baselines | OPEN | Start at Step 0.1; re-resolve remotes and default branches before writing |
-| 1 | Define the shared routing and gate-policy contracts | OPEN | Start at Step 1.1 after Phase 0 evidence is committed |
-| 2 | Implement and qualify the central `ai-devops` engine | OPEN | Start at Step 2.1 with the approved contracts; do not edit consumer repos yet |
-| 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | OPEN | Start at Step 3.1 after exact-head central tests pass |
+| 0 | Freeze the canonical repository inventory and capture routing/gate baselines | DONE 2026-09-08 | `config/repository-coverage.json` (17 identities) and `tests/verification/task-gates/routing-baseline.{json,md}` are committed |
+| 1 | Define the shared routing and gate-policy contracts | DONE 2026-09-08 | `config/task-gates.json`, `config/task-gates.schema.json`, `tools/ci/validate-task-gates.py`, lean-router content model in `docs/context-spec.md` |
+| 2 | Implement and qualify the central `ai-devops` engine | DONE 2026-09-08 | `bin/ai-task-gates` plus enforcement in `bin/ai-review`, `bin/ai-pr-wait`, `bin/ai-review-lifecycle`; evidence under `tests/verification/task-gates/` |
+| 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | OPEN | Start at Step 3.1; the central engine is landed, so begin with the four pilot declarations on four separate branches |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | OPEN | Start at Step 4.1 using the pilot evidence and current inventory |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |
 

@@ -9,6 +9,12 @@ ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 
+# The existing cases below are about lifecycle ownership, not task gates, so the
+# gate is switched off for them. The gate has its own cases at the end of this
+# file, where it is switched back on.
+export AI_DEVOPS_TEST_MODE=1
+export AI_TASK_GATES_MODE=none
+
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q
 git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
@@ -152,6 +158,45 @@ STATE_SUBSTANTIVE="$($SCRIPT begin --provider kimi --repo "$R" --run-id substant
 $SCRIPT finish --state "$STATE_SUBSTANTIVE" --verdict APPROVE --report "$REPORT" --elapsed 5 >/dev/null
 check "an approval backed by a substantive report still completes"   "jq -e '.verdict==\"APPROVE\" and .status==\"completed\"' '$STATE_SUBSTANTIVE'"
 
+
+# --------------------------------------------------------------------------
+# Task gate. A review the change set does not call for must be refused BEFORE
+# any assignment lock, any state file, or any provider call exists.
+# --------------------------------------------------------------------------
+GR="$TMP/gated"; mkdir -p "$GR"; git -C "$GR" init -q --initial-branch=main
+git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
+git -C "$GR" remote add origin 'https://github.com/popcre/ai-devops.git'
+printf 'base\n' > "$GR/README.md"; git -C "$GR" add -A; git -C "$GR" commit -qm init
+printf 'a note\n' > "$GR/docs.md"
+
+export AI_TASK_GATES_DIR="$TMP/gates"
+export AI_TASK_GATES_BIN="$REPO_ROOT/bin/ai-task-gates"
+( cd "$GR" && "$AI_TASK_GATES_BIN" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
+
+GATE_LOG="$TMP/gate-preflight.log"
+gated_begin(){
+  local run="$1"; shift
+  ( cd "$GR" && AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" \
+      "$SCRIPT" begin --provider grok --repo "$GR" --run-id "$run" --caller codex "$@" )
+}
+
+GATE_OUT="$(gated_begin gate-blocked 2>&1)"; GATE_RC=$?
+check "a documentation-only change does not start a paid review" "[ '$GATE_RC' -ne 0 ]"
+check "the refusal explains which gate applies" "printf '%s' \"\$GATE_OUT\" | grep -q ai-task-gates"
+check "no provider preflight ran for the refused review" "[ ! -s '$GATE_LOG' ]"
+check "no lifecycle state was created for the refused review" \
+  "[ -z \"\$(find '$AI_REVIEW_LIFECYCLE_DIR/runs' -type f -name 'gate-blocked.json' -print -quit 2>/dev/null)\" ]"
+
+GATE_STATE="$(gated_begin gate-owner --owner-request 'Albert asked for a review of the wording')"
+check "an owner-requested review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
+check "the owner-requested review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
+
+printf 'select 1;\n' > "$GR/migration.sql"
+GATE_OUT2="$(gated_begin gate-escalated 2>&1)"; GATE_RC2=$?
+check "work that outgrew its declared class refuses the review" "[ '$GATE_RC2' -ne 0 ]"
+check "the refusal names the file that escalated the class" \
+  "printf '%s' \"\$GATE_OUT2\" | grep -q migration.sql"
+rm -f "$GR/migration.sql"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

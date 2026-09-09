@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "measured": "2026-09-08",
+  "method": "GitHub repository contents metadata (name plus byte size) on each canonical default branch. No file body was fetched from any repository classified private-licensed or private-transcripts.",
+  "note": "Byte size is a diagnostic, never a blocking rule. A router that is large because it carries unique safety instructions is correct; a router that is large because it embeds a procedure owned elsewhere is the defect this program repairs.",
+  "repositories": [
+    {"identity": "popcre/ai-devops",                "AGENTS.md": 6196,   "CLAUDE.md": 1139, "HANDOFF.md": 665,   "README.md": 12565, "router_bytes": 8000},
+    {"identity": "popcre/designflow-backend",       "AGENTS.md": 34040,  "CLAUDE.md": 2632, "HANDOFF.md": 665,   "README.md": 2387,  "router_bytes": 37337},
+    {"identity": "popcre/designflow-bff",           "AGENTS.md": 22670,  "CLAUDE.md": 1763, "HANDOFF.md": 647,   "README.md": 8068,  "router_bytes": 25080},
+    {"identity": "popcre/designflow-data-syncing",  "AGENTS.md": 22917,  "CLAUDE.md": 2438, "HANDOFF.md": 647,   "README.md": 6384,  "router_bytes": 26002},
+    {"identity": "popcre/designflow-frontend",      "AGENTS.md": 60493,  "CLAUDE.md": 3609, "HANDOFF.md": 647,   "README.md": 3823,  "router_bytes": 64749},
+    {"identity": "popcre/designflow-item-master",   "AGENTS.md": 9099,   "CLAUDE.md": 0,    "HANDOFF.md": 647,   "README.md": 8000,  "router_bytes": 9746},
+    {"identity": "popcre/designflow-tracking",      "AGENTS.md": 23496,  "CLAUDE.md": 2452, "HANDOFF.md": 647,   "README.md": 2438,  "router_bytes": 26595},
+    {"identity": "u2giants/shared-db",              "AGENTS.md": 121743, "CLAUDE.md": 0,    "HANDOFF.md": 3186,  "README.md": 8404,  "router_bytes": 124929},
+    {"identity": "u2giants/theoracle",              "AGENTS.md": 141345, "CLAUDE.md": 1782, "HANDOFF.md": 647,   "README.md": 2950,  "router_bytes": 143774},
+    {"identity": "u2giants/licensor-source-data",   "AGENTS.md": 0,      "CLAUDE.md": 0,    "HANDOFF.md": 606,   "README.md": 12882, "router_bytes": 606},
+    {"identity": "u2giants/ai-devops-transcripts",  "AGENTS.md": 0,      "CLAUDE.md": 0,    "HANDOFF.md": 0,     "README.md": 813,   "router_bytes": 0},
+    {"identity": "u2giants/popcrm-web",             "AGENTS.md": 70570,  "CLAUDE.md": 1945, "HANDOFF.md": 665,   "README.md": 1400,  "router_bytes": 73180},
+    {"identity": "u2giants/poppim-web",             "AGENTS.md": 46301,  "CLAUDE.md": 2510, "HANDOFF.md": 0,     "README.md": 2044,  "router_bytes": 48811},
+    {"identity": "u2giants/popdam3",                "AGENTS.md": 111989, "CLAUDE.md": 5664, "HANDOFF.md": 655,   "README.md": 7094,  "router_bytes": 118308},
+    {"identity": "u2giants/backrest-wiz",           "AGENTS.md": 929,    "CLAUDE.md": 0,    "HANDOFF.md": 655,   "README.md": 1918,  "router_bytes": 1584},
+    {"identity": "popcre/infrastructure",           "AGENTS.md": 0,      "CLAUDE.md": 0,    "HANDOFF.md": 0,     "README.md": 0,     "router_bytes": 0},
+    {"identity": "u2giants/ansible",                "AGENTS.md": 31289,  "CLAUDE.md": 1204, "HANDOFF.md": 30394, "README.md": 2388,  "router_bytes": 62887}
+  ],
+  "totals": {
+    "repositories": 17,
+    "with_root_agents_md": 14,
+    "without_root_agents_md": ["u2giants/licensor-source-data", "u2giants/ai-devops-transcripts", "popcre/infrastructure"],
+    "router_bytes_total": 771588,
+    "router_bytes_median": 26595,
+    "router_bytes_max": 143774
+  }
+}

@@ -249,6 +249,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review |
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |
+| `ai-task-gates start|check|explain|status|end` | Declare what a task is and refuse an action the change set does not call for |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,

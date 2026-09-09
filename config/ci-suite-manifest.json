@@ -39,6 +39,7 @@
     "test-ai-reviewer-issue.sh",
     "test-ai-run-task.sh",
     "test-ai-sync-memory-public-containment.sh",
+    "test-ai-task-gates.sh",
     "test-ai-test-local.sh",
     "test-ai-verify-run.sh",
     "test-client-globals-required-phrases.sh",

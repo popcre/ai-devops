@@ -15,7 +15,11 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N]
+#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--owner-request TEXT]
+#
+# A documentation-only change does not wait for checks. This command refuses to
+# start a long wait for one, and says so, unless Albert asked for the wait in
+# the current chat and you pass --owner-request with his reason.
 #
 # Exit status:
 #   0  merged
@@ -29,10 +33,11 @@ REPO=''
 TIMEOUT_MINUTES=180
 INTERVAL=60
 API_TIMEOUT_SECONDS=30
+OWNER_REQUEST=''
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo|--timeout-minutes|--interval|--api-timeout-seconds)
+    --repo|--timeout-minutes|--interval|--api-timeout-seconds|--owner-request)
       option="$1"
       [ $# -ge 2 ] && [ -n "$2" ] || { printf 'ai-pr-wait: %s requires a value\n' "$option" >&2; exit 3; }
       case "$option" in
@@ -40,10 +45,11 @@ while [ $# -gt 0 ]; do
         --timeout-minutes) TIMEOUT_MINUTES="$2" ;;
         --interval) INTERVAL="$2" ;;
         --api-timeout-seconds) API_TIMEOUT_SECONDS="$2" ;;
+        --owner-request) OWNER_REQUEST="$2" ;;
       esac
       shift 2
       ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     -*) printf 'ai-pr-wait: unknown option %s\n' "$1" >&2; exit 3 ;;
     *) PR="$1"; shift ;;
   esac
@@ -104,6 +110,19 @@ bounded_gh() {
 if [ -z "$REPO" ]; then
   REPO="$(bounded_gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
   [ -n "$REPO" ] || { printf 'ai-pr-wait: cannot determine the repository; pass --repo\n' >&2; exit 3; }
+fi
+# Nothing has been waited on yet, so this is the cheapest possible place to
+# refuse a wait the change set does not call for.
+GATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools/lib" 2>/dev/null && pwd)/task-gates.sh"
+if [ -f "$GATE_LIB" ]; then
+  # shellcheck source=../tools/lib/task-gates.sh
+  . "$GATE_LIB"
+  gate_args=()
+  [ -z "$OWNER_REQUEST" ] || gate_args=(--owner-request "$OWNER_REQUEST")
+  if ! tg_preflight_gate pr-wait "${gate_args[@]+"${gate_args[@]}"}"; then
+    printf 'ai-pr-wait: a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
+    exit 3
+  fi
 fi
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
