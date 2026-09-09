@@ -15,8 +15,8 @@ review took 1,149 seconds in `windows-offline`, or 1,467 duplicated seconds.
 The schema-2 suite manifest is the assertion map:
 
 - `bash` is complete discovery: 68 suites, including this change's injection
-  test and the repository-coverage suite merged while the pull request was in
-  flight. Linux, scheduled/manual Windows, qualification, and local no-argument
+  test and the repository-coverage suite merged into `main` while the pull
+  request was in flight. Linux, scheduled/manual Windows, qualification, and local no-argument
   verification still run all of them.
 - `windows_sensitive_bash` contains 23 conservative platform-sensitive suites.
   Selection retained any suite that exercises or depends on Git Bash paths,
@@ -25,7 +25,7 @@ The schema-2 suite manifest is the assertion map:
 - `windows_reviewer_safety_bash` names the Codex and Grok early-signal repeat.
   Issue #260 owns removing that intentional overlap with a failover contract.
 - `windows_offline_bash` owns all 23 Windows-sensitive suites. Their measured
-  baseline sum was 4,763 seconds. The remaining 44 Bash suites are
+  baseline sum was 4,763 seconds. The remaining 45 Bash suites are
   still complete on Linux and all full-matrix backstops.
 - `powershell` remains complete discovery: all 18 suites run in every Windows
   offline job.
