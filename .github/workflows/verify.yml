@@ -171,11 +171,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - name: Verify offline test dependencies
         shell: pwsh
         run: |
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The Blacksmith Windows runner image does not provide jq.'
+          }
+          if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+            throw 'The configured Python runtime is unavailable.'
           }
       - name: Complete offline Windows and Bash suites
         shell: pwsh

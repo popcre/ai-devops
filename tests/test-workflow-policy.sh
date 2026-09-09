@@ -35,6 +35,7 @@ check 'scheduled failures create or update an issue' "grep -q '^  report-schedul
 check 'reviewer Windows job runs on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
 check 'long Windows matrix keeps the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 1 ]"
 check 'Blacksmith Windows is an additional visible lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 1 ] && grep -q '^  windows-blacksmith:' '$workflow'"
+check 'Blacksmith Windows installs the required Python runtime' "sed -n '/^  windows-blacksmith:/,/^  windows-reviewer-safety:/p' '$workflow' | grep -q 'actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1' && sed -n '/^  windows-blacksmith:/,/^  windows-reviewer-safety:/p' '$workflow' | grep -q \"python-version: '3.13'\""
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 

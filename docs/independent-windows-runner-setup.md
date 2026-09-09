@@ -427,7 +427,8 @@ failure without its logs.
   not added.
 - Windows CI runs in three lanes at once, on purpose. `windows-offline`, the long
   matrix, takes GitHub's hosted `windows-2025` image. `windows-blacksmith` runs
-  the same assignment on an ephemeral Blacksmith Windows runner, and
+  the same assignment on an ephemeral Blacksmith Windows runner, installing the
+  Python runtime that its base image does not expose, and
   `windows-reviewer-safety` takes the qualified self-hosted pool, where a timing
   flake can be reproduced on a known physical machine. Both added providers are
   **extra** Windows capacity, never replacements for GitHub's runners; routing
