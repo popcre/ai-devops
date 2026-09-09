@@ -57,10 +57,14 @@ printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"]}' >"$MANIFEST"
 run --windows-offline --exclude-reviewer-safety --list >/dev/null 2>&1; missing_reviewer_rc=$?
 check 'missing reviewer assignment fails instead of creating a coverage gap' '[ "$missing_reviewer_rc" -eq 2 ]'
 
-powershell_guard_output="$(pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -ExcludeReviewerSafety 2>&1)"
-powershell_guard_rc=$?
-check 'PowerShell reviewer exclusion requires pull-request selection' \
-  '[ "$powershell_guard_rc" -ne 0 ] && printf "%s" "$powershell_guard_output" | grep -Fq -- "-ExcludeReviewerSafety requires -WindowsPullRequest."'
+if command -v pwsh >/dev/null 2>&1; then
+  powershell_guard_output="$(pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -ExcludeReviewerSafety 2>&1)"
+  powershell_guard_rc=$?
+  check 'PowerShell reviewer exclusion requires pull-request selection' \
+    '[ "$powershell_guard_rc" -ne 0 ] && printf "%s" "$powershell_guard_output" | grep -Fq -- "-ExcludeReviewerSafety requires -WindowsPullRequest."'
+else
+  ok 'PowerShell reviewer exclusion guard skipped because pwsh is unavailable'
+fi
 
 printf '{' >"$MANIFEST"
 run --windows-offline --list >/dev/null 2>&1; invalid_rc=$?
