@@ -44,8 +44,9 @@ Unassigned sections: **0**.
 - `bin/ai-review` resolves to protected `reviewer-safety`; a deliberately weaker
   local rule cannot downgrade it.
 - Declared installation entrypoints on Ubuntu and Windows, the canonical
-  machine-setup entrypoint, and the launcher catalog resolve to protected
-  `deployment` without losing the pre-existing deploy refusal.
+  machine-setup entrypoint, and the launcher catalog resolve to `installation`.
+  Deployment is refused until an explicit owner request is recorded, after
+  which the supported installer remains usable.
 - The required focused tests validate the declaration, strongest-class
   resolution, machine-tool ownership, and installed command behavior.
 
@@ -57,7 +58,7 @@ created the managed system-path launcher; `ai-task-gates version` returned
 `1.0.0`, and `ai-task-gates explain` from the linked pilot worktree resolved
 `popcre/ai-devops` plus the local `installed-routing-proof` requirement.
 
-Focused verification: task gates 78 passed / 0 failed; repository coverage and
+Focused verification: task gates 79 passed / 0 failed; repository coverage and
 routing identity audit PASS; machine-tool catalog
 PASS; Windows installer 8/8 PASS; workflow policy PASS; schema validation and
 `git diff --check` PASS. Rollback uses the normal supported path: restore the

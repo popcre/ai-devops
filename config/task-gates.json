@@ -31,6 +31,11 @@
       "protected": false,
       "description": "Source, tests, configuration, and workflows."
     },
+    "installation": {
+      "rank": 25,
+      "protected": false,
+      "description": "Toolkit installers, machine setup, and local command catalogs requiring an explicit owner request before installation."
+    },
     "reviewer-safety": {
       "rank": 30,
       "protected": true,
@@ -146,6 +151,18 @@
       "code": {
         "required": [
           "local-tests"
+        ],
+        "forbidden_actions": [
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "installation": {
+        "required": [
+          "local-tests",
+          "owner-authorization"
         ],
         "forbidden_actions": [
           "deploy",

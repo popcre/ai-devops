@@ -11,22 +11,22 @@
     { "glob": "tools/lib/task-gates.sh", "class": "reviewer-safety" },
     { "glob": "tools/ci/validate-task-gates.py", "class": "reviewer-safety" },
     { "glob": "config/task-gates*.json", "class": "reviewer-safety" },
-    { "glob": "install.sh", "class": "deployment" },
-    { "glob": "update.sh", "class": "deployment" },
-    { "glob": "uninstall.sh", "class": "deployment" },
-    { "glob": "bin/bootstrap-*.ps1", "class": "deployment" },
-    { "glob": "bin/install-*", "class": "deployment" },
-    { "glob": "bin/setup-machine.ps1", "class": "deployment" },
-    { "glob": "config/machine-tools.tsv", "class": "deployment" }
+    { "glob": "install.sh", "class": "installation" },
+    { "glob": "update.sh", "class": "installation" },
+    { "glob": "uninstall.sh", "class": "installation" },
+    { "glob": "bin/bootstrap-*.ps1", "class": "installation" },
+    { "glob": "bin/install-*", "class": "installation" },
+    { "glob": "bin/setup-machine.ps1", "class": "installation" },
+    { "glob": "config/machine-tools.tsv", "class": "installation" }
   ],
   "gates": {
     "reviewer-safety": {
       "required": ["installed-routing-proof"],
       "forbidden_actions": []
     },
-    "deployment": {
+    "installation": {
       "required": ["recoverable-config-backup", "installed-command-smoke-proof"],
-      "forbidden_actions": ["deploy"]
+      "forbidden_actions": []
     }
   }
 }

@@ -84,7 +84,7 @@ check 'a local rule may strengthen a class' "[ \"\$(class_of 'docs/runbook.md')\
 
 # The first real consumer declaration is this repository's own. It must retain
 # the central reviewer-safety class even if a second local rule tries to lower
-# it, and it must strengthen installer paths to deployment.
+# it, and it must strengthen installer paths without disabling installation.
 cp "$ROOT/.ai-devops/task-gates.json" "$TMP/class/.ai-devops/task-gates.json"
 check 'the ai-devops pilot retains reviewer-safety for the review front door' \
   "[ \"\$(class_of 'bin/ai-review')\" = reviewer-safety ]"
@@ -94,10 +94,16 @@ check 'the ai-devops pilot protects the policy validator' \
   "[ \"\$(class_of 'tools/ci/validate-task-gates.py')\" = reviewer-safety ]"
 check 'the ai-devops pilot protects its own declaration' \
   "[ \"\$(class_of '.ai-devops/task-gates.json')\" = reviewer-safety ]"
-check 'the ai-devops pilot classifies Windows installation as deployment' \
-  "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = deployment ]"
-check 'the ai-devops pilot preserves the deploy refusal for installer paths' \
-  "printf 'install.sh\\n' | ( cd '$TMP/class' && '$GATES' explain --json --paths-from - ) | jq -e '.forbidden_actions | index(\"deploy\")' >/dev/null"
+check 'the ai-devops pilot classifies Windows installation separately' \
+  "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = installation ]"
+git -C "$TMP/class" add .ai-devops/task-gates.json
+git -C "$TMP/class" commit -qm 'add pilot declaration'
+printf '#!/usr/bin/env bash\n' > "$TMP/class/install.sh"
+check 'installation refuses deployment without an owner request' \
+  "rc 3 '$TMP/class' check --before deploy"
+check 'an explicit owner request preserves the supported installation path' \
+  "rc 0 '$TMP/class' check --before deploy --owner-request 'Albert requested installation'"
+rm -f "$TMP/class/install.sh"
 jq '.paths += [{"glob":"bin/ai-review","class":"prose"}]' \
   "$TMP/class/.ai-devops/task-gates.json" > "$TMP/class/.ai-devops/task-gates.tmp"
 mv "$TMP/class/.ai-devops/task-gates.tmp" "$TMP/class/.ai-devops/task-gates.json"
