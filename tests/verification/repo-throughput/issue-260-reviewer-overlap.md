@@ -33,6 +33,12 @@
 
 ## After measurement
 
-Pending the first exact-head pull-request run. Record the run, SHA, hosted job
-duration, reviewer job duration, and whether the fallback was correctly skipped
-or released before merge.
+Pull-request run `34366159903` at `c425583a` passed all executed jobs:
+
+- Hosted `windows-offline`: 60m42s job / 60m31s test step, down 20m44s
+  (25.5%) from the 81m15s baseline step.
+- Qualified `windows-reviewer-safety`: 18m36s job / 18m28s test step.
+- The hosted watcher observed reviewer success and passed in 21m21s;
+  `windows-reviewer-fallback` correctly skipped.
+- Linux passed in 11m36s. The workflow completed successfully without a local
+  suite competing with any active Windows runner.
