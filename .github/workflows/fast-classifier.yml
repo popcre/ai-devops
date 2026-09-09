@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   classify:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
       run_long: ${{ steps.classify.outputs.run_long }}

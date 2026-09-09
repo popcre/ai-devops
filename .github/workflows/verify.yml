@@ -38,7 +38,7 @@ permissions:
 jobs:
   manual-preflight:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
       contents: read
@@ -78,7 +78,7 @@ jobs:
   linux-offline:
     needs: [fast-classifier, manual-preflight]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -118,7 +118,7 @@ jobs:
     # once. The self-hosted lane keeps windows-reviewer-safety below, where a
     # timing flake can be reproduced on a known physical machine - the two
     # lanes now run in parallel.
-    runs-on: windows-2025
+    runs-on: blacksmith-4vcpu-windows-2025
     # Measured 2026-09-02 on the current suites, not estimated. Hosted
     # windows-2025: 73m23s complete (run 33658549626) and one run cancelled by
     # the old 75-minute ceiling at 75m11s (run 33675127243). Self-hosted
@@ -199,7 +199,7 @@ jobs:
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     permissions:
       contents: read
