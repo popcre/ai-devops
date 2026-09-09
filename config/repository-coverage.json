@@ -13,7 +13,7 @@
       "workflow_family": "feature-branch-pr",
       "policy_source": "central",
       "routing_files": ["AGENTS.md", "CLAUDE.md", "HANDOFF.md", "README.md"],
-      "special_gates": ["reviewer-safety", "prose-fast-path"],
+      "special_gates": ["reviewer-safety", "installation", "prose-fast-path"],
       "aliases": ["u2giants/ai-devops"]
     },
     {
