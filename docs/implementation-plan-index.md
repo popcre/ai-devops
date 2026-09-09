@@ -19,7 +19,7 @@ record merely to reduce the file count.
 | [`plan_full-strategy-remediation.md`](../plan_full-strategy-remediation.md) | [#62](https://github.com/popcre/ai-devops/issues/62) | First non-complete STATUS row; externally blocked work stays explicit |
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
 | [`plan_pop-business-rules-skill.md`](../plan_pop-business-rules-skill.md) | [#35](https://github.com/popcre/ai-devops/issues/35) | Live trigger evidence remains before closure |
-| [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | Continue the first eligible open child; #166 remains last |
+| [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | #162 complete; continue #210, then the first eligible open child; #166 remains last |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
 | [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md) | [#333](https://github.com/popcre/ai-devops/issues/333) | Step 2.1; only provider-returned cache reporting remains |
 | [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Step 0, then provider children #254-#257 |

@@ -25,7 +25,10 @@ No further owner decision blocks Phase 0.
 - A live local inventory on 2026-09-08 found 17 unique canonical remotes. The
   repeated `ai-devops` and `shared-db` folders are clones/worktrees, not separate
   rollout targets.
-- No implementation has started. Every STATUS row is OPEN; resume Step 0.1.
+- Phase 0 is committed as metadata-only evidence: `config/repository-coverage.json`
+  has one row for every canonical remote and
+  `tests/verification/task-gates/routing-baseline.json` snapshots every permitted
+  routing surface. Resume at Phase 1 / Step 1.1 after this exact branch lands.
 
 ## 2. Failed attempts
 
@@ -56,12 +59,11 @@ No further owner decision blocks Phase 0.
 
 ## 4. Exact next steps
 
-1. Start Phase 0.1 from the plan; refresh remotes and saved projects.
-2. Add the canonical coverage manifest and validation without editing consumer
-   repositories.
-3. Produce the routing census/no-loss ledger for all 17 repos.
-4. Commit Phase 0 evidence, update STATUS and this handoff, then take the first
-   fresh-session cut before policy design.
+1. Start Phase 1.1 from the plan; select the smallest backwards-compatible
+   policy schema location and define fail-closed protected classes.
+2. Add table-driven policy fixtures, including protected-class downgrade refusal.
+3. Do not edit consumer repositories until the central policy and classifier
+   contracts have landed.
 
 ## 5. Constraints
 

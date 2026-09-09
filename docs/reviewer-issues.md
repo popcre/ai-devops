@@ -1,5 +1,10 @@
 # Reviewer issue recording
 
+For the current end-to-end repair and cache/session qualification work, read
+the STATUS in [the reviewer reliability and efficiency plan](../plan_reviewer-reliability-and-efficiency.md)
+first. It reuses the completed checkpoint/diagnostic tooling and existing provider
+work; it does not replace this incident lifecycle or authorize closing unexplained failures.
+
 ## Repair-round checkpoints
 
 Begin a maintenance sweep with `ai-reviewer-issue maintenance show`, then
