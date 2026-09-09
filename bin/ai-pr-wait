@@ -134,7 +134,17 @@ if [ -n "$GATE_LIB" ]; then
   gate_args=()
   [ -z "$OWNER_REQUEST" ] || gate_args=(--owner-request "$OWNER_REQUEST")
   if ! tg_preflight_gate pr-wait "${gate_args[@]+"${gate_args[@]}"}"; then
-    printf 'ai-pr-wait: a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
+    # The gate has already said why. Only add the admin-merge shortcut when the
+    # change set really is prose; after a class escalation it is wrong advice,
+    # and it would be the last line the caller reads.
+    GATE_BIN="$(cd "$(dirname "$GATE_LIB")/../../bin" 2>/dev/null && pwd)/ai-task-gates"
+    OBSERVED=""
+    [ -x "$GATE_BIN" ] && OBSERVED="$("$GATE_BIN" explain --json 2>/dev/null | jq -r '.observed_class // empty' 2>/dev/null | tr -d '\r')"
+    if [ "$OBSERVED" = prose ]; then
+      printf 'ai-pr-wait: a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
+    else
+      printf 'ai-pr-wait: no wait was started.\n' >&2
+    fi
     exit 3
   fi
 fi

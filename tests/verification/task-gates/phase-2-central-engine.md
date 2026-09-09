@@ -163,3 +163,14 @@ Re-reviewed at `3c553a01`, rejected on six points, all fixed:
 Suites after the fixes: gates 70/0, lifecycle 49/0, pr-wait 26/0,
 claude-review 33/0, codex-review 41/0, review-preflight 78/0,
 provider CLI installer contract PASS.
+
+### Fourth round — APPROVE
+
+Reviewed at `cfe03bd8`: no blockers, verdict APPROVE. Two message-only findings
+were fixed afterwards: the pull-request wait no longer suggests an admin squash
+merge after a class escalation, and the protected-class refusal now names
+re-declaring at the stronger class as the honest route, matching `AGENTS.md`.
+The reviewer also asked that the two review-mode environment variables be
+documented as a drift guardrail rather than a boundary, and that the README stop
+implying a plan review can be started from a provider wrapper directly; both are
+now written down.

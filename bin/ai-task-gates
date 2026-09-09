@@ -432,8 +432,8 @@ cmd_check(){
       detail="$detail  ${line#*	}"$'\n'
     done
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged away. Ask Albert for the missing authority, or take these files out of the change set.' \
-        "$action" "$declared" "$OBSERVED_CLASS" "$detail")"
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, ask Albert for the missing authority, or take these files out of the change set.' \
+        "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
     fi
     if [ -z "$acknowledge" ]; then
       blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s\nThese files escalated the task class:\n%sRe-declare with `ai-task-gates start --class %s`, or re-run with --acknowledge "<reason>" if the escalation is in scope.' \

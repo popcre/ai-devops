@@ -64,3 +64,13 @@ rechecks the complete change set before any expensive or risky action. A
 protected class — reviewer safety, shared database, deployment, infrastructure,
 production, private evidence — can never be acknowledged or owner-requested
 away, and anything the tool cannot classify is refused rather than allowed.
+
+### The review-mode variables are a guardrail, not a boundary
+
+`bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_OWNER_REQUEST` so
+the reviewer lifecycle, which the provider wrappers call for every mode, can see
+the review mode and Albert's request. They keep an honest caller from being
+refused; they are not a security boundary. Anyone who can set an environment
+variable in the session can already run the provider wrapper directly. Export
+neither by hand: a request left set in a shell would re-authorize every later
+review in it, each one recorded as if newly asked for.
