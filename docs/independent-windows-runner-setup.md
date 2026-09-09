@@ -425,14 +425,14 @@ failure without its logs.
 - Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
   label `ai-devops-windows` kept for requalification. The `edge-dev` label was
   not added.
-- Windows CI runs in two lanes at once, on purpose. `windows-offline`, the long
-  matrix, takes GitHub's hosted `windows-2025` image, where concurrency is
-  unmetered on a public repository and a run never waits for a machine.
+- Windows CI runs in three lanes at once, on purpose. `windows-offline`, the long
+  matrix, takes GitHub's hosted `windows-2025` image. `windows-blacksmith` runs
+  the same assignment on an ephemeral Blacksmith Windows runner, and
   `windows-reviewer-safety` takes the qualified self-hosted pool, where a timing
-  flake can be reproduced on a known physical machine. The self-hosted pool is
-  **extra** Windows capacity, never a replacement for GitHub's runners; routing
-  both jobs to a one-host pool on 2026-09-02 serialised the whole repository and
-  left six verify runs queued behind one desktop.
+  flake can be reproduced on a known physical machine. Both added providers are
+  **extra** Windows capacity, never replacements for GitHub's runners; routing
+  both original jobs to a one-host pool on 2026-09-02 serialised the whole
+  repository and left six verify runs queued behind one desktop.
 - `edge-dev` is being onboarded into the qualified pool rather than retired, so
   the pool holds more than one machine and a single failure cannot stop the
   self-hosted lane. It is a candidate until a green `qualify Windows runner` job
@@ -603,7 +603,7 @@ that job *queued*, not failed, so it never reports. `windows-offline` is
 unaffected: it runs in GitHub's hosted lane, which is exactly why that lane was
 kept. This does not
 freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
-and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
+and all three Windows jobs are skipped on `merge_group`. The damage is silent loss of
 reviewer-suite proof, which is the gap recorded in
 [`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
 

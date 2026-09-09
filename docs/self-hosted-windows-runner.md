@@ -2,9 +2,9 @@
 
 **Added:** 2026-08-27, with PR
 [#142](https://github.com/popcre/ai-devops/pull/142).
-**Applies to:** `windows-offline` and `windows-reviewer-safety` in
+**Applies to:** the qualified `windows-reviewer-safety` lane in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml).
-`linux-offline` is unchanged and still runs on GitHub's `ubuntu-24.04`.
+The GitHub-hosted and Blacksmith Windows lanes remain separate capacity.
 
 ## Why this exists
 
@@ -165,7 +165,6 @@ $t = gh api --method POST repos/popcre/ai-devops/actions/runners/registration-to
 
 ## Going back to hosted runners
 
-Change both Windows jobs in `.github/workflows/verify.yml` back to
-`runs-on: windows-2025`. Nothing else in the repository depends on the runners,
-and the required check names do not change either way — which is deliberate, so
-ruleset `21564317` needs no edit to move in either direction.
+Change `windows-reviewer-safety` in `.github/workflows/verify.yml` to
+`runs-on: windows-2025`. The GitHub-hosted and Blacksmith offline lanes remain
+unchanged. Nothing else in the repository depends on the local runners.

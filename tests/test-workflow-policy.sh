@@ -19,21 +19,22 @@ reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-f
 check 'complete Windows job keeps measured headroom' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 75 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 3 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 3 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 3 ]"
+check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 4 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
-# Windows verification runs in two lanes at once (issue #209): the long offline
-# matrix on GitHub's hosted image, where concurrency is unmetered, and the
-# reviewer safety suites on the qualified self-hosted pool, where a timing
-# flake can be reproduced on a known physical machine. Neither lane may route
-# to the daily-use EDGE-DEV computer or a bare candidate host.
+# Windows verification runs in three lanes at once: the long offline matrix on
+# GitHub's hosted image, an independent copy on Blacksmith, and the reviewer
+# safety suites on the qualified self-hosted pool, where a timing flake can be
+# reproduced on a known physical machine. None may route to the daily-use
+# EDGE-DEV computer or a bare candidate host.
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
 check 'reviewer Windows job runs on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
 check 'long Windows matrix keeps the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 1 ]"
+check 'Blacksmith Windows is an additional visible lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 1 ] && grep -q '^  windows-blacksmith:' '$workflow'"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -90,12 +91,12 @@ grep -Fq '|| github.sha' "$workflow" || {
   printf 'FAIL: manual verification must remain scoped to its immutable source SHA\n' >&2
   exit 1
 }
-# Neither Windows job may run on merge_group; a queue rebuild restarts them,
+# None of the Windows jobs may run on merge_group; a queue rebuild restarts them,
 # and the long suite holds a qualified pool host for the better part of an hour.
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
-[ "$windows_skips" -eq 2 ] || {
-  printf 'FAIL: both Windows jobs must be skipped on merge_group
+[ "$windows_skips" -eq 3 ] || {
+  printf 'FAIL: all Windows jobs must be skipped on merge_group
 ' >&2
   exit 1
 }
@@ -103,12 +104,12 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 # workflow_dispatch keep the no-argument complete runner as the backstop.
 grep -Fq "if (\$env:GITHUB_EVENT_NAME -eq 'pull_request')" "$workflow" &&
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest' "$workflow" &&
-[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 4 ] &&
 grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
-# Windows verification runs in two lanes at once, and both must stay present.
+# Windows verification runs in three lanes at once, and all must stay present.
 # The self-hosted pool was added to this repository to have MORE Windows
 # capacity than GitHub's runners alone, not to replace them: routing every
 # Windows job to a one-host pool serialised the whole repository on
@@ -162,7 +163,7 @@ grep -Fq 'run.id !== current' "$workflow" || {
   exit 1
 }
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 3 ] || {
+[ "$cancel_aware_jobs" -eq 4 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
@@ -198,4 +199,4 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
 fi
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }
-printf 'PASS: fast routing and both Windows lanes are preserved; manual proof cannot be cancelled automatically, exact-SHA successes deduplicate, provenance is required, and PR supersession remains enabled\n'
+printf 'PASS: fast routing and all three Windows lanes are preserved; manual proof cannot be cancelled automatically, exact-SHA successes deduplicate, provenance is required, and PR supersession remains enabled\n'
