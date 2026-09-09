@@ -52,3 +52,10 @@ served a package index whose hash did not match its release file. The Linux job
 now refreshes Ubuntu's signed source only before installing the same `jq`,
 `ripgrep`, and `shellcheck` packages; policy mutation proves the third-party
 source isolation cannot disappear silently.
+
+## Corrected-head local verification
+
+Commit `5f64ad8b` passed the focused workflow policy suite, the 12-case Windows
+Bash selection and injected-failure suite, and all 79 task-gates assertions.
+The PowerShell guard requires its exact refusal message when `pwsh` is present
+and skips explicitly on Linux hosts where PowerShell 7 is not installed.
