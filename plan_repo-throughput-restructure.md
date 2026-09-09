@@ -354,7 +354,7 @@ and #166 remains last.
 the qualified reviewer lane only. The hosted matrix begins its remaining work
 in parallel, while a hosted watchdog releases a `windows-2025` fallback if the
 self-hosted job is skipped, fails, misses a 10-minute start deadline, or misses
-its 32-minute completion deadline. Scheduled, manual, qualification, and direct
+its 42-minute completion deadline. Scheduled, manual, qualification, and direct
 no-argument runs remain complete. Timing and injected-failure evidence is in
 [`tests/verification/repo-throughput/issue-260-reviewer-overlap.md`](tests/verification/repo-throughput/issue-260-reviewer-overlap.md).
 

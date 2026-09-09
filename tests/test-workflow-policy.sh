@@ -169,7 +169,7 @@ cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
-if sed -n '/^  linux-offline:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | grep -Fq 'if: always()'; then
+if sed -n '/^  linux-offline:/,/^  report-scheduled-failure:/p' "$workflow" | grep -Fq 'if: always()'; then
   printf 'FAIL: always() would keep superseded pull-request work running after cancellation\n' >&2
   exit 1
 fi
@@ -179,6 +179,8 @@ grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" "$
 }
 grep -Fq "candidate.name === 'windows-reviewer-safety'" "$workflow" &&
 grep -Fq "job.status === 'queued'" "$workflow" &&
+grep -Fq 'const startDeadline = Date.now() + 10 * 60 * 1000' "$workflow" &&
+grep -Fq 'const completionDeadline = Date.now() + 42 * 60 * 1000' "$workflow" &&
 grep -Fq "core.setOutput('fallback_required', 'true')" "$workflow" &&
 grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true'" "$workflow" || {
   printf 'FAIL: a reviewer lane that does not start or succeed must release the hosted fallback\n' >&2

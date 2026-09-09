@@ -36,7 +36,7 @@ qualified pool as an early signal. Scheduled, manual, and qualification runs
 retain the complete hosted Windows Bash matrix. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning them to that lane. A
 hosted watchdog observes the self-hosted job: if it is skipped or fails, does
-not start within 10 minutes, or does not complete within 32 minutes,
+not start within 10 minutes, or does not complete within 42 minutes,
 `windows-reviewer-fallback` runs both omitted suites on `windows-2025`. This is
 the fail-closed contract delivered by issue #260.
 On the hosted image those two suites can intermittently go red on `main` itself
@@ -57,8 +57,8 @@ clean example on `main` with no pull request involved. Only `linux-offline` is a
 required check, so this does not block a merge.
 
 Do not raise a timeout to make these pass; that discards the signal the two-lane
-split exists to preserve. Safe removal of this last overlap remains tracked in
-[#260](https://github.com/popcre/ai-devops/issues/260).
+split exists to preserve. The fail-closed removal of this overlap was delivered
+in [#260](https://github.com/popcre/ai-devops/issues/260).
 
 ## Security — read this before adding another runner
 

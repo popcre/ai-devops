@@ -206,7 +206,7 @@ jobs:
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true')
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: read
@@ -219,7 +219,9 @@ jobs:
         with:
           script: |
             const startDeadline = Date.now() + 10 * 60 * 1000;
-            const completionDeadline = Date.now() + 32 * 60 * 1000;
+            // A job may use the full 10-minute start allowance and its own
+            // 30-minute execution ceiling. Keep both inside this deadline.
+            const completionDeadline = Date.now() + 42 * 60 * 1000;
             while (Date.now() < completionDeadline) {
               const {data} = await github.rest.actions.listJobsForWorkflowRun({
                 ...context.repo, run_id: context.runId, filter: 'latest'
@@ -239,7 +241,7 @@ jobs:
               await new Promise(resolve => setTimeout(resolve, 15000));
             }
             core.setOutput('fallback_required', 'true');
-            core.warning('Reviewer lane did not complete within 32 minutes; hosted fallback is required.');
+            core.warning('Reviewer lane did not complete within 42 minutes; hosted fallback is required.');
 
   windows-reviewer-fallback:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
@@ -252,6 +254,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Run reviewer suites omitted from the hosted matrix
         shell: pwsh
         run: |

@@ -17,7 +17,7 @@
 - Ordinary hosted pull-request execution subtracts exactly Codex and Grok; the
   qualified self-hosted lane owns those two suites.
 - A hosted watcher observes the reviewer job. Skip/failure, no start within 10
-  minutes, or no completion within 32 minutes releases a hosted fallback that
+  minutes, or no completion within 42 minutes releases a hosted fallback that
   runs both omitted suites. Scheduled, manual, qualification, and direct
   no-argument execution remain complete.
 
