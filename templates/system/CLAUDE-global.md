@@ -59,10 +59,10 @@ Rules for the block:
 
 ## Finishing the job
 
-- Before ending a turn, check every deliverable the request named against
-  something real. Groundwork is not delivery.
-- If something is unfinished and nothing blocks it, keep working. Ending the
-  turn early is the error; no wording rescues it. You were already authorized.
+- Account for the whole job before ending a turn: check every deliverable the
+  request named against something real. Preparation is not delivery.
+- If something is unfinished and nothing blocks it, keep working.
+  Ending the turn is the error; no wording rescues it. You were already authorized.
 - Anything left unfinished, waiting, or blocked becomes one bullet in the
   `**Still open**` block — not a paragraph, not a section.
 - Recommend and take reversible in-scope choices. Never present menus.
