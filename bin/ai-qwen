@@ -11,7 +11,7 @@
 #   ai-qwen implement <name> [--prompt T | --prompt-file F | stdin]   create/continue write run
 #   ai-qwen reset-context <name> [--prompt T | --prompt-file F]       visible recovery
 #   ai-qwen list | show <name> | transcript <name> | delete <name>
-#   ai-qwen doctor [--identity | --preflight | --live]
+#   ai-qwen doctor [--identity | --live]
 #
 # Review sessions are structurally read-only: safe mode disables local hooks,
 # extensions, skills, and MCP servers; plan mode plus excluded shell/write/edit
@@ -164,6 +164,9 @@ qwen_runtime_root() {
 
 qwen_runtime_sha256() {
   local root node="" node_rel
+  command -v tar >/dev/null 2>&1 || { echo 'ai-qwen: GNU tar is required to fingerprint the installed Qwen runtime.' >&2; return 1; }
+  tar --version 2>/dev/null | head -1 | grep -q 'GNU tar' \
+    || { echo 'ai-qwen: GNU tar is required to fingerprint the installed Qwen runtime.' >&2; return 1; }
   root="$(qwen_runtime_root)" || return 1
   if [ -x "$root/node/bin/node" ]; then node="$root/node/bin/node"
   elif [ -x "$root/node/node.exe" ]; then node="$root/node/node.exe"
@@ -939,7 +942,7 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen list | show <name> | transcript <name> | delete <name>
-  ai-qwen doctor [--identity | --preflight | --live]
+  ai-qwen doctor [--identity | --live]
 
 'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
 read-only for reviews, but an implementation continuation (write run) for an
@@ -993,16 +996,6 @@ cmd_doctor() {
     preloader_sha="$(qwen_preloader_sha256)" && [ -n "$preloader_sha" ] \
       || die 'Qwen credential-preloader identity is unavailable.'
     printf 'IDENTITY runtime_sha256=%s preloader_sha256=%s\n' "$runtime_sha" "$preloader_sha"
-    return 0
-  fi
-  if [ "$mode" = "--preflight" ]; then
-    runtime_sha="$(qwen_runtime_sha256)" && [ -n "$runtime_sha" ] \
-      || die 'installed Qwen runtime identity is unavailable.'
-    preloader_sha="$(qwen_preloader_sha256)" && [ -n "$preloader_sha" ] \
-      || die 'Qwen credential-preloader identity is unavailable.'
-    qwen="$(resolve_qwen)"; [ -n "$qwen" ] || die 'Qwen launcher is unavailable.'
-    qwen_auth_settings_valid || die 'governed Qwen authentication selection is unavailable or invalid.'
-    printf 'PREFLIGHT runtime_sha256=%s preloader_sha256=%s launcher=present auth=governed\n' "$runtime_sha" "$preloader_sha"
     return 0
   fi
   [ "$mode" = "--live" ] && live=1
@@ -1710,7 +1703,7 @@ while [ $# -gt 0 ]; do
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
     --json)        OPT_JSON=1; shift ;;
-    --live|--identity|--preflight)
+    --live|--identity)
       [ -z "$OPT_DOCTOR_MODE" ] || die 'doctor accepts only one mode.'
       OPT_DOCTOR_MODE="$1"; shift ;;
     -h|--help)     usage; exit 0 ;;
