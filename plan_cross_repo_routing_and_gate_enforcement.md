@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-08T1845Z-edge-dev-codex-cross-repo-routing-gates.md`](HANDOFF.d/2026-09-08T1845Z-edge-dev-codex-cross-repo-routing-gates.md)
+**Active handoff:** [`HANDOFF.d/2026-09-09T0833Z-edge-dev-claude-issue-335-phase-three-pilots.md`](HANDOFF.d/2026-09-09T0833Z-edge-dev-claude-issue-335-phase-three-pilots.md)
 
 **Decision date:** 2026-09-08
 
