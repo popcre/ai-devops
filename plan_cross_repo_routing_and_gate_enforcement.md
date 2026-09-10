@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-10T1244Z-edge-dev-codex-issue-335-phase4-closeout.md`](HANDOFF.d/2026-09-10T1244Z-edge-dev-codex-issue-335-phase4-closeout.md)
+**Active handoff:** [`HANDOFF.d/2026-09-10T1643Z-edge-dev-codex-issue-335-phase4-fresh-session.md`](HANDOFF.d/2026-09-10T1643Z-edge-dev-codex-issue-335-phase4-fresh-session.md)
 
 The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
 Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
@@ -392,17 +392,18 @@ the pilots expose a common gap; never patch consumers inconsistently.
 
 ### Phase 4 — full repository rollout
 
-**Execution update, 2026-09-10:** 12 of 17 repository policies are landed. The
-five remaining candidates are green at their recorded heads but deliberately unmerged:
-`u2giants/popcrm-web#8`, `u2giants/poppim-web#6`, `u2giants/popdam3#122`,
-`u2giants/backrest-wiz#7`, and `u2giants/ansible#14`. Each merge starts existing
-production automation; Ansible runs the real serialized Phase 1 apply against
-the `hetzner` production target. Those effects require explicit current-chat
-authorization. Issue #335 was closed as completed on 2026-09-10 at 12:49:50Z
-despite this incomplete gate and must be reopened. Backrest Wiz also retains an
-unresolved qualified-review proof after three bounded provider failures. Do not update the 17-row
-coverage gate or start Phase 5 until all five land and their live results are
-verified.
+**Execution update, 2026-09-10:** 13 of 17 repository policies are landed.
+`u2giants/ansible#14` merged as `5e66e72c` after Albert's exact current-chat
+authorization for its serialized Phase 1 apply to the `hetzner` production
+target. Its production run `34502571521` completed successfully (`ok=59`,
+`changed=1`, `unreachable=0`, `failed=0`). The four remaining green candidates
+are deliberately unmerged: `u2giants/popcrm-web#8`, `u2giants/poppim-web#6`,
+`u2giants/popdam3#122`, and `u2giants/backrest-wiz#7`. Each merge starts
+existing production automation and requires explicit current-chat authorization.
+Issue #335 was reopened after its premature closure. Backrest Wiz retains an
+unresolved qualified exact-head review proof after bounded provider failures.
+Do not update the 17-row coverage gate or start Phase 5 until all four land and
+their live results are verified.
 
 #### Step 4.1 — DesignFlow remainder
 
