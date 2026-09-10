@@ -150,6 +150,13 @@ printed.
   launches are not evidence and must not be polled indefinitely.
 - Issue #335 may be closed again by unrelated coordination. Completion remains
   governed by the plan's 17-row gate, not ticket state alone.
+- Closeout found one genuinely stale handoff:
+  `HANDOFF.d/2026-09-01T1709Z-edge-dev-codex-issue-161-fast-ci.md`, owner
+  `codex/issue-161-fast-ci`; Issue #161 is closed. Retire it only in the session
+  that verifies every obligation was carried forward. The 0400Z, 1244Z, and
+  1359Z Issue #335 handoffs are mechanically flagged by the currently closed
+  ticket but are not genuinely finished; keep them until #335 is reopened and
+  the 17-row gate passes.
 
 ## Self-audit
 
