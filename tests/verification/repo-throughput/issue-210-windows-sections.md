@@ -83,6 +83,24 @@ Runner-minutes rise very slightly, by three extra checkouts. On a public
 repository those minutes are unmetered, so the trade is wall clock and
 failure-detection time bought for nothing that is billed.
 
+## Measured live on the change itself
+
+Run 34420312687, the ordinary pull-request lane of this branch. All four
+sections started together on four separate hosted machines, the complete
+backstop correctly did not run, and the aggregate published one green result.
+
+| Job | Result | Wall clock |
+| --- | --- | --- |
+| `windows-offline-section (1)` | success | 19 m |
+| `windows-offline-section (2)` | success | 16 m |
+| `windows-offline-section (3)` | success | 14 m |
+| `windows-offline-section (4)` | success | 15 m |
+| `windows-offline-complete` | skipped | — |
+| `windows-offline` (aggregate) | success | under 1 m |
+
+The worst section measured 19 minutes against the predicted 18.3 and the
+20-minute bound, and against a 60-63 minute job before the change.
+
 ## Every assertion preserved
 
 - **Coverage is proved at run time, not just in a policy test.** A section runs
