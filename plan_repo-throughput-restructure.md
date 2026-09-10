@@ -28,9 +28,10 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
 | 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | done | [`tests/verification/repo-throughput/issue-164-merge-queue-convergence.md`](tests/verification/repo-throughput/issue-164-merge-queue-convergence.md) |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | done | [`tests/verification/repo-throughput/issue-167-shared-harness.md`](tests/verification/repo-throughput/issue-167-shared-harness.md) |
-| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | in progress; after #160/#163 | GLM pending-turn repair and Kimi/Qwen pure-helper extraction are under exact-head review. |
+| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | source merged; live rotation handoff pending | Merge `26e893db03754b6668238c266142f8e61abb01bc`; exact-head GLM approval of `cd293e9f`; qualified Windows reviewer-safety run `34532381626` passed on current main. Kimi remains pending removal from the shared-db allocator by its active owner. |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
-| 13 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | — |
+| 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
+| 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
