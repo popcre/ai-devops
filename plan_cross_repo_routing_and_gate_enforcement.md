@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md`](HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md)
+**Active handoff:** [`HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md`](HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md)
 
 The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
 Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
@@ -418,6 +418,10 @@ classes must remain denied without exact current-chat resource/action authority.
 landed commit/PR, routing before/after, trigger-eval result, local verification,
 and remaining exception. Mixed or missing coverage fails the phase. Re-run the
 diverse pilot suite after any schema version change.
+
+At the end of Phase 4, re-read every Phase 5 step through plan completion and
+record any assumption, identifier, delivery path, or acceptance gate that Phase
+4 changed or invalidated before writing the Phase 5 handoff.
 
 **Fresh-session cut:** all 17 repositories must show landed coverage before
 cross-machine installation or closure begins.
