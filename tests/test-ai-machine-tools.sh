@@ -23,6 +23,7 @@ touch "$target/ai-kimi"
 if bash "$repo/bin/install-machine-tools.sh" --target-dir "$target" >"$tmp/conflict" 2>&1; then exit 1; fi
 grep -q 'refusing to replace unrelated file' "$tmp/conflict"
 grep -q $'ai-glm\tbin/ai-glm\tcmd-only-external\tyes\tnone\tsetup-opencode-glm.ps1' "$repo/config/machine-tools.tsv"
+grep -q $'ai-task-gates\tbin/ai-task-gates\tbash+cmd\tyes\tnone\tinstall-machine-tools.ps1' "$repo/config/machine-tools.tsv"
 grep -q 'install-machine-tools.ps1' "$repo/bin/setup-machine.ps1"
 ! grep -q 'foreach (\$grokWrapper' "$repo/bin/setup-machine.ps1"
 grep -q "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." "$repo/bin/ai-install-skills"

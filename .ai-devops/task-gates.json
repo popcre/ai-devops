@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "_comment": "AI DevOps strengthens reviewer and installer paths beyond the central defaults. The strongest matching class always wins.",
+  "paths": [
+    { "glob": ".ai-devops/**", "class": "reviewer-safety" },
+    { "glob": "bin/ai-review", "class": "reviewer-safety" },
+    { "glob": "bin/ai-review-*", "class": "reviewer-safety" },
+    { "glob": "bin/ai-*-review", "class": "reviewer-safety" },
+    { "glob": "bin/ai-pr-wait", "class": "reviewer-safety" },
+    { "glob": "bin/ai-task-gates", "class": "reviewer-safety" },
+    { "glob": "tools/lib/task-gates.sh", "class": "reviewer-safety" },
+    { "glob": "tools/ci/validate-task-gates.py", "class": "reviewer-safety" },
+    { "glob": "config/task-gates*.json", "class": "reviewer-safety" },
+    { "glob": "install.sh", "class": "installation" },
+    { "glob": "update.sh", "class": "installation" },
+    { "glob": "uninstall.sh", "class": "installation" },
+    { "glob": "bin/bootstrap-*.ps1", "class": "installation" },
+    { "glob": "bin/install-*", "class": "installation" },
+    { "glob": "bin/setup-machine.ps1", "class": "installation" },
+    { "glob": "config/machine-tools.tsv", "class": "installation" }
+  ],
+  "gates": {
+    "reviewer-safety": {
+      "required": ["installed-routing-proof"],
+      "forbidden_actions": []
+    },
+    "installation": {
+      "required": ["recoverable-config-backup", "installed-command-smoke-proof"],
+      "forbidden_actions": []
+    }
+  }
+}

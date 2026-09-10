@@ -143,11 +143,12 @@ pwsh -NoProfile -File tests/test-all.ps1
 On Ubuntu, run `bash tests/test-all.sh`. The GitHub `verify` workflow runs the
 complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
-the separate `windows-reviewer-safety` lane repeats Codex and Grok as an early
-signal. Issue #260 owns removing that remaining intentional overlap with a
-failover contract. Scheduled, manual, qualification, and local no-argument runs
-keep the complete Bash plus PowerShell matrix. The exact assignment is
-fail-closed in `config/ci-suite-manifest.json`.
+the separate `windows-reviewer-safety` lane owns Codex and Grok. A hosted
+watchdog runs those omitted suites on `windows-2025` if the qualified lane does
+not report success. Scheduled, manual, qualification, and local no-argument
+runs keep the complete Bash plus PowerShell matrix. The exact assignment and
+fallback are fail-closed in `config/ci-suite-manifest.json` and the workflow
+policy tests.
 New offline tests named `tests/test-*.sh` or `tests/test-*.ps1` are discovered
 automatically in sorted order. Paid or live provider qualification must live
 under `tests/probes/` and remains an explicit release gate, never CI.

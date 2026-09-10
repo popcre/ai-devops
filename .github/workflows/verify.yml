@@ -85,7 +85,16 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install offline test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq ripgrep shellcheck
+        run: |
+          # The runner image carries unrelated third-party feeds. A transient
+          # Chrome index mismatch ejected this exact head from the merge queue
+          # three times before project tests started (runs 34385010191,
+          # 34385198205, and 34385457668). These tools come from Ubuntu, so
+          # refresh only Ubuntu's signed source and leave the other feeds alone.
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=-
+          sudo apt-get install -y jq ripgrep shellcheck
       - name: Syntax
         run: |
           find bin tests -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do
@@ -111,7 +120,10 @@ jobs:
     # GitHub-hosted, on purpose. Self-hosted capacity was added to this
     # repository to have MORE Windows capacity, not to move off GitHub's
     # runners: hosted concurrency is unmetered on a public repository, so this
-    # long matrix never waits for a machine. It ran on windows-2025 from
+    # long matrix never waits for a machine. On pull requests it omits only the
+    # Codex/Grok suites proved by windows-reviewer-safety; the bounded hosted
+    # fallback below restores them if that lane does not report success. It ran
+    # on windows-2025 from
     # 2026-04 until 2026-08-29 without a runner-caused failure. Routing it to
     # the single-host self-hosted pool on 2026-09-02 serialised the whole
     # repository behind one desktop and left fourteen verify runs queued at
@@ -145,7 +157,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            .\tests\test-all.ps1 -WindowsPullRequest
+            .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety
           } else {
             # Scheduled and manual verification remain the complete backstop.
             .\tests\test-all.ps1
@@ -166,7 +178,7 @@ jobs:
        needs.fast-classifier.outputs.run_long == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # Self-hosted on the qualified pool, like windows-offline. Moving this job
+    # Self-hosted on the qualified pool. Moving this job
     # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
     # stalled (#204), so this is not a return to hosted runners: it is a move
     # to a dedicated, qualified, otherwise idle machine. The reviewer suite
@@ -196,8 +208,81 @@ jobs:
           }
           if ($failures -ne 0) { exit 1 }
 
+  reviewer-safety-start-deadline:
+    needs: [fast-classifier, manual-preflight]
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      fallback_required: ${{ steps.watch.outputs.fallback_required }}
+    steps:
+      - name: Bound the self-hosted reviewer lane start
+        id: watch
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const startDeadline = Date.now() + 10 * 60 * 1000;
+            // A job may use the full 10-minute start allowance and its own
+            // 30-minute execution ceiling. Keep both inside this deadline.
+            const completionDeadline = Date.now() + 42 * 60 * 1000;
+            while (Date.now() < completionDeadline) {
+              const {data} = await github.rest.actions.listJobsForWorkflowRun({
+                ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100
+              });
+              const job = data.jobs.find(candidate => candidate.name === 'windows-reviewer-safety');
+              if (job && job.status === 'completed') {
+                const fallback = job.conclusion === 'success' ? 'false' : 'true';
+                core.setOutput('fallback_required', fallback);
+                core.info(`Reviewer lane completed conclusion=${job.conclusion}; fallback_required=${fallback}.`);
+                return;
+              }
+              if ((!job || job.status === 'queued') && Date.now() >= startDeadline) {
+                core.setOutput('fallback_required', 'true');
+                core.warning('Reviewer lane did not start within 10 minutes; hosted fallback is required.');
+                return;
+              }
+              await new Promise(resolve => setTimeout(resolve, 15000));
+            }
+            core.setOutput('fallback_required', 'true');
+            core.warning('Reviewer lane did not complete within 42 minutes; hosted fallback is required.');
+
+  windows-reviewer-fallback:
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
+    if: >-
+      always() && !cancelled() && github.event_name == 'pull_request' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true') &&
+      (needs['reviewer-safety-start-deadline'].result != 'success' ||
+       needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
+    runs-on: windows-2025
+    # This is an emergency hosted path, not the qualified timing signal. Run
+    # 34387666739 reached Grok but was killed by the original 30-minute bound;
+    # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes keeps
+    # the fallback bounded without weakening any assertion.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Run reviewer suites omitted from the hosted matrix
+        shell: pwsh
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          $failures = 0
+          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
+            & $bash $test
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+          }
+          if ($failures -ne 0) { exit 1 }
+
   report-scheduled-failure:
-    needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety]
+    needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety, windows-reviewer-fallback]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-24.04
     timeout-minutes: 3

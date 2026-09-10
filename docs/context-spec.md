@@ -59,6 +59,12 @@ which gates that class must pass. `config/task-gates.schema.json` is the
 contract; `tools/ci/validate-task-gates.py` enforces it. A repository may ship
 its own `.ai-devops/task-gates.json`, which can only strengthen a class.
 
+Toolkit installation is a distinct non-protected class: it keeps deployment
+refused until an explicit owner request is recorded, then permits the supported
+installer to run. It must not be modelled as protected `deployment`, because a
+forbidden action on a protected class has no authorization path and would make
+the installer permanently unusable.
+
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. A
 protected class — reviewer safety, shared database, deployment, infrastructure,
