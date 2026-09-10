@@ -30,10 +30,16 @@ and logged in.
 
 ### Why the reviewer suites have their own lane
 
-For pull requests, `windows-offline` runs the Windows-sensitive Bash set and all
-PowerShell suites; `windows-reviewer-safety` owns Codex and Grok on the
-qualified pool as an early signal. Scheduled, manual, and qualification runs
-retain the complete hosted Windows Bash matrix. The ordinary pull-request
+For pull requests, `windows-offline-section` runs the Windows-sensitive Bash set
+and all PowerShell suites, divided into four declared sections on four
+independent hosted machines (issue #210); `windows-reviewer-safety` owns Codex
+and Grok on the qualified pool as an early signal. The section boundaries live
+in `config/ci-suite-manifest.json`, and `tests/test-all.sh` refuses to run a
+section unless the declared sections reconstitute the lane exactly. Scheduled,
+manual, and qualification runs ignore the sections entirely and retain the
+complete hosted Windows Bash matrix in `windows-offline-complete`. A single
+aggregate job keeps the stable name `windows-offline` and fails closed on any
+lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning them to that lane. A
 hosted watchdog observes the self-hosted job: if it is skipped or fails, does
 not start within 10 minutes, or does not complete within 42 minutes,

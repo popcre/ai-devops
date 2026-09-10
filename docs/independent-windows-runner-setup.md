@@ -425,9 +425,13 @@ failure without its logs.
 - Promoted on 2026-09-02: label `ai-devops-windows-qualified` added, candidate
   label `ai-devops-windows` kept for requalification. The `edge-dev` label was
   not added.
-- Windows CI runs in two lanes at once, on purpose. `windows-offline`, the long
-  matrix, takes GitHub's hosted `windows-2025` image, where concurrency is
-  unmetered on a public repository and a run never waits for a machine.
+- Windows CI runs in two lanes at once, on purpose. The long matrix takes
+  GitHub's hosted `windows-2025` image, where concurrency is unmetered on a
+  public repository and a run never waits for a machine. Since issue #210 an
+  ordinary pull request splits that matrix into four sections on four
+  independent hosted machines, and scheduled and manual runs keep the complete
+  unsectioned matrix; `windows-offline` is now the aggregate that publishes one
+  stable result for whichever shape ran.
   `windows-reviewer-safety` takes the qualified self-hosted pool, where a timing
   flake can be reproduced on a known physical machine. The self-hosted pool is
   **extra** Windows capacity, never a replacement for GitHub's runners; routing

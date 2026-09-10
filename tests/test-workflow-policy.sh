@@ -14,16 +14,17 @@ check() {
 }
 classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
 
-windows_timeout="$(sed -n '/^  windows-offline:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
+windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
+section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows job keeps measured headroom' '[ -n "$windows_timeout" ] && [ "$windows_timeout" -ge 75 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 5 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 5 ]"
+check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 6 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 5 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 6 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
@@ -36,7 +37,7 @@ check 'scheduled failures create or update an issue' "grep -q '^  report-schedul
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
 check 'reviewer Windows job runs on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
-check 'long Windows matrix and reviewer fallback keep the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 2 ]"
+check 'sections, complete matrix and reviewer fallback keep the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 3 ]"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -69,6 +70,36 @@ check 'Windows groups are unique subsets of Bash discovery' \
 check 'manifest Windows coverage is complete before the reviewer split' '[ "$windows_offline" = "$windows_sensitive" ]'
 check 'reviewer lane owns exactly Codex and Grok safety suites' \
   '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ] && [ "$reviewer_workflow_count" -eq 2 ] && [ -z "$(comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow")"
+aggregate_block="$(sed -n '/^  windows-offline:$/,/^  windows-reviewer-safety:/p' "$workflow")"
+shard_union="$(jq -r '.windows_offline_shards[][]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+shard_count="$(jq '.windows_offline_shards | length' "$manifest" | tr -d '\r')"
+shard_smallest="$(jq '[.windows_offline_shards[] | length] | min' "$manifest" | tr -d '\r')"
+powershell_owner="$(jq -r '.windows_offline_powershell_shard' "$manifest" | tr -d '\r')"
+sections_declared="$(printf '%s\n' "$section_block" | sed -n 's/^[[:space:]]*section:[[:space:]]*//p' | tr -d '\r' | head -1)"
+sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
+check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
+  '[ "$shard_union" = "$hosted_without_reviewer" ] && [ "$(printf "%s\n" "$shard_union" | LC_ALL=C sort -u)" = "$shard_union" ]'
+check 'every declared section carries work' \
+  '[ "$shard_count" -ge 2 ] && [ "$shard_smallest" -ge 1 ]'
+check 'the PowerShell suites are owned by exactly one existing section' \
+  '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
+check 'the workflow runs exactly the sections the manifest declares' \
+  '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
+# Sections run at the same time on independent hosted machines, and one failing
+# section must never hide the other three.
+check 'sections run on independent hosted machines and all keep reporting' \
+  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qE "^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$"'
+# #166 restores `windows-offline` as a required context, so it must keep that
+# exact name and stay fail-closed: any lane result other than success, or a skip
+# the classifier did not justify, fails the aggregate.
+check 'one stable aggregate publishes the whole Windows lane' \
+  '[ -n "$aggregate_block" ] && printf "%s" "$aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]"'
+check 'the aggregate fails closed on anything but a justified skip' \
+  'printf "%s" "$aggregate_block" | grep -qF "failing closed" && printf "%s" "$aggregate_block" | grep -qF "exit 1"'
+# The scheduled backstop must watch the complete matrix, never a section of it.
+check 'the scheduled reporter watches the complete Windows matrix' \
+  "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -qF 'windows-offline-complete'"
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
   '[ -z "$(comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
@@ -107,10 +138,11 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 }
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the no-argument complete runner as the backstop.
-grep -Fq "if (\$env:GITHUB_EVENT_NAME -eq 'pull_request')" "$workflow" &&
-grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety' "$workflow" &&
+grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
 [ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
-grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" || {
+grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" &&
+sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -Fq "github.event_name == 'pull_request'" &&
+sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -Fq "github.event_name != 'pull_request'" || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
@@ -135,8 +167,8 @@ windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows
   exit 1
 }
 hosted_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
-[ "$hosted_pool" -eq 2 ] || {
-  printf "FAIL: the long Windows matrix and reviewer fallback must both keep GitHub's hosted lane\n" >&2
+[ "$hosted_pool" -eq 3 ] || {
+  printf "FAIL: the sections, the complete matrix and the reviewer fallback must all keep GitHub's hosted lane\n" >&2
   exit 1
 }
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
@@ -168,7 +200,7 @@ grep -Fq 'run.id !== current' "$workflow" || {
   exit 1
 }
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 5 ] || {
+[ "$cancel_aware_jobs" -eq 7 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }

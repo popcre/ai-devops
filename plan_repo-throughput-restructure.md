@@ -25,7 +25,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
 | 7 | [#260](https://github.com/popcre/ai-devops/issues/260) | Remove duplicate hosted Codex/Grok runs with fail-closed fallback | done | [`tests/verification/repo-throughput/issue-260-reviewer-overlap.md`](tests/verification/repo-throughput/issue-260-reviewer-overlap.md) |
-| 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209/#260 | — |
+| 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
 | 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
 | 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
@@ -380,6 +380,25 @@ aggregate result. Scheduled full coverage remains the backstop.
 **Gates:** every suite appears exactly once; injected defects fail the aggregate;
 no ordinary section has p90 above 20 minutes without a named bounded exception;
 runner-minutes, wall time, queue waste and failure-detection time improve.
+
+**Completion note (2026-09-09):** An ordinary pull request now runs the
+Windows-sensitive lane as four declared, balanced sections on four independent
+GitHub-hosted machines, and one aggregate job keeps the stable name
+`windows-offline`. The reviewer lane is deliberately left as #260 built it: the
+qualified pool resolves to one host, so sectioning it would be apparent
+parallelism on a single machine, and it already finishes in about nine minutes.
+Measured worst section is 18.3 minutes against the 20-minute bound, down from a
+60-63 minute job; `test-ai-kimi.sh` at 1,098 seconds is the named bounded
+exception that sets the floor and is the reason three sections were rejected.
+Hosted runner-minutes rise about 0.6 minutes for three extra checkouts, which
+are unmetered on a public repository. Coverage is enforced at run time, not only
+in a policy test: a section runs only if the declared sections reconstitute the
+lane exactly, and a bad mapping exits 2. Scheduled, manual, qualification and
+no-argument runs pass no section and remain the complete backstop, and #260's
+fail-closed reviewer coverage is untouched. Timings, the section mapping and
+injected-failure evidence are in [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md).
+#166 remains last and can require `windows-offline` without knowing how many
+sections exist.
 
 ### Phase C — convergence and cutover
 
