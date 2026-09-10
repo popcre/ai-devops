@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-10T1643Z-edge-dev-codex-issue-335-phase4-fresh-session.md`](HANDOFF.d/2026-09-10T1643Z-edge-dev-codex-issue-335-phase4-fresh-session.md)
+**Active handoff:** [`HANDOFF.d/2026-09-10T1921Z-edge-dev-codex-issue-335-release-repair.md`](HANDOFF.d/2026-09-10T1921Z-edge-dev-codex-issue-335-release-repair.md)
 
 The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
 Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
@@ -392,7 +392,19 @@ the pilots expose a common gap; never patch consumers inconsistently.
 
 ### Phase 4 — full repository rollout
 
-**Execution update, 2026-09-10:** 13 of 17 repository policies are landed.
+**Execution update, 2026-09-10:** All 17 repository policies are landed, but
+Phase 4 is still incomplete because two of the final automatic production
+releases failed and the central coverage gate remains unrun. POP CRM #8 merged
+as `acc367ff` and its production job proved the merged commit serving; PopDAM
+#122 merged as `562dc999` and its `popdam / production` deployment reported
+success. POP PIM #6 merged as `8ff0c71c`, built its image, then failed because
+its Coolify restart used GET and received HTTP 405. Backrest Wiz #7 merged as
+`daf86a69`, built its image, then failed because the production host was denied
+access to GHCR and therefore retained a prior image. Both release repairs need
+new exact current-chat production authority. Do not update the 17-row coverage
+gate or start Phase 5 until both live releases are verified.
+
+**Prior release update, 2026-09-10:** 13 of 17 repository policies were landed.
 `u2giants/ansible#14` merged as `5e66e72c` after Albert's exact current-chat
 authorization for its serialized Phase 1 apply to the `hetzner` production
 target. Its production run `34502571521` completed successfully (`ok=59`,
