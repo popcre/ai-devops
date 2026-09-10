@@ -464,6 +464,18 @@ printf '%s\n' '{"type":"result","is_error":false,"result":"finding\n## Verdict\n
 INVALID="$(probe "$TMP/invalid-verdict.jsonl")"
 check 'an invalid verdict word is rejected' "printf '%s' \"\$INVALID\" | grep -q 'APPROVE, REJECT, or BLOCKED'"
 
+GOVERNED_HEAD=0123456789abcdef0123456789abcdef01234567
+printf '%s\n' "{\"type\":\"result\",\"is_error\":false,\"result\":\"coverage and findings\\nVERDICT: APPROVE $GOVERNED_HEAD\"}" > "$TMP/governed.jsonl"
+sed -n '/^provider_api_error() {/,/^}/p; /^extract_answer() {/,/^}/p; /^report_answer_defect() {/,/^}/p' "$SCRIPT" > "$TMP/extract-governed.sh"
+GOVERNED="$(bash -c 'ANSWER_DEFECT=""; OPT_GOVERNED_VERDICT="$3"; source "$1"; extract_answer "$2"; report_answer_defect governed "$2"' _ "$TMP/extract-governed.sh" "$TMP/governed.jsonl" "$GOVERNED_HEAD" 2>&1)"
+check 'a governed SHA-bound verdict preserves the full report' "printf '%s' \"\$GOVERNED\" | grep -q 'coverage and findings' && printf '%s' \"\$GOVERNED\" | grep -q \"VERDICT: APPROVE $GOVERNED_HEAD\""
+printf '%s\n' "{\"type\":\"result\",\"is_error\":false,\"result\":\"coverage\\nVERDICT: APPROVE ffffffffffffffffffffffffffffffffffffffff\"}" > "$TMP/governed-wrong-head.jsonl"
+GOVERNED_WRONG="$(bash -c 'ANSWER_DEFECT=""; OPT_GOVERNED_VERDICT="$3"; source "$1"; extract_answer "$2" >/dev/null; report_answer_defect governed "$2"' _ "$TMP/extract-governed.sh" "$TMP/governed-wrong-head.jsonl" "$GOVERNED_HEAD" 2>&1 || true)"
+check 'a governed verdict for the wrong head is rejected' "printf '%s' \"\$GOVERNED_WRONG\" | grep -q 'bound to $GOVERNED_HEAD'"
+printf '%s\n' '{"type":"result","is_error":false,"result":"coverage\n## Verdict\nAPPROVE"}' > "$TMP/governed-standard-format.jsonl"
+GOVERNED_STANDARD="$(bash -c 'ANSWER_DEFECT=""; OPT_GOVERNED_VERDICT="$3"; source "$1"; extract_answer "$2" >/dev/null; report_answer_defect governed "$2"' _ "$TMP/extract-governed.sh" "$TMP/governed-standard-format.jsonl" "$GOVERNED_HEAD" 2>&1 || true)"
+check 'ordinary verdict format is rejected in governed mode' "printf '%s' \"\$GOVERNED_STANDARD\" | grep -q 'exactly one SHA-bound VERDICT line'"
+
 printf '%s\n' '{"type":"result","is_error":false,"result":"## Verdict\nREJECT\nmore analysis\n## Verdict\nAPPROVE"}' > "$TMP/multiple-verdicts.jsonl"
 MULTIPLE="$(probe "$TMP/multiple-verdicts.jsonl")"
 check 'multiple verdict sections are rejected' "printf '%s' \"\$MULTIPLE\" | grep -q 'exactly one'"
