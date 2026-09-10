@@ -649,7 +649,11 @@ AW="$TMP/await.jsonl"; : > "$AW"
 ( sleep 2; printf '{"role":"assistant","content":"still working"}\n' > "$AW"
   sleep 2; cat "$TMP/fixture.jsonl" > "$AW" ) &
 BG=$!
-sed '/^CMD=/,$d' "$SCRIPT" > "$TMP/lib.sh"
+# The extracted library normally resolves its helper relative to itself.  Keep
+# that dependency pointed at the real checkout so this terminal-record fixture
+# executes the same functions as the installed wrapper.
+sed '/^CMD=/,$d' "$SCRIPT" | \
+  sed "s|source \"\$SELF_DIR/../tools/lib/provider-wrapper-common.sh\"|source \"$REPO_ROOT/tools/lib/provider-wrapper-common.sh\"|" > "$TMP/lib.sh"
 START=$(date +%s)
 ( set +e; . "$TMP/lib.sh"; await_result "$AW" test ) >/dev/null 2>&1
 RC=$?; ELAPSED=$(( $(date +%s) - START )); wait $BG 2>/dev/null
