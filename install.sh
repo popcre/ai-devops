@@ -117,9 +117,9 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 install_dependencies() {
-  local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh)
+  local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh tar)
   local missing=() command_name
-  for command_name in git curl jq rg unzip python3 pip3 gh; do
+  for command_name in git curl jq rg unzip python3 pip3 gh tar; do
     command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -130,7 +130,7 @@ install_dependencies() {
     $SUDO apt-get update -y || return 1
     $SUDO apt-get install -y "${apt_packages[@]}" || return 1
   fi
-  require_commands git curl jq rg unzip python3 pip3 gh
+  require_commands git curl jq rg unzip python3 pip3 gh tar
 }
 
 install_node_toolchain() {
