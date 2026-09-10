@@ -173,6 +173,16 @@ BAD_META="$(meta_for badverdict)"
 check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
 CURRENT_ACCOUNT="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().Name' | tr -d '\r\n')"
+CURRENT_SID="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+ACL_TARGET="$(cygpath -w "$(jq -r .failure_artifact "$BAD_META")")"
+printf 'ACL diagnostic: account=%s sid=%s target=%s\n' "$CURRENT_ACCOUNT" "$CURRENT_SID" "$ACL_TARGET"
+set +e
+icacls "$ACL_TARGET"
+ACL_DIAGNOSTIC_RC=$?
+powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) (Get-Acl -LiteralPath $Path).Access | ForEach-Object { try { $Sid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $Sid = "UNRESOLVED:$($_.IdentityReference.Value)" }; "ACL diagnostic ACE: sid=$Sid type=$($_.AccessControlType) rights=$($_.FileSystemRights) inherited=$($_.IsInherited)" } }' "$ACL_TARGET"
+ACL_NORMALIZE_RC=$?
+set -e
+printf 'ACL diagnostic: icacls_rc=%s normalize_rc=%s\n' "$ACL_DIAGNOSTIC_RC" "$ACL_NORMALIZE_RC"
 check 'preserved failure evidence uses a private Windows ACL' "icacls \"\$(cygpath -w \"\$(jq -r .failure_artifact '$BAD_META')\")\" | grep -Fqi \"$CURRENT_ACCOUNT:(F)\""
 else
   check 'preserved failure evidence is private' "test \"\$(stat -c %a \"\$(jq -r .failure_artifact '$BAD_META')\")\" = 600"
