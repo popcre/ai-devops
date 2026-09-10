@@ -51,6 +51,22 @@ Therefore #167 adds no per-suite path mapping. No-argument, scheduled, manual,
 and qualification selections remain complete; pull-request Windows coverage
 continues to use the stable aggregate check independently of section count.
 
+## Complete-matrix finalization allowance
+
+The exact-head manual matrices on `c0199e8f` established a separate workflow
+boundary: runs `34445127896` and `34445717137` completed the substantive full
+Windows suite at 99m56s and 99m59s, respectively, but GitHub cancelled the job
+at its 100-minute ceiling before finalization could publish a successful job
+result. The stable aggregate therefore failed closed even though the suite had
+passed. This was not an assertion failure and it is not addressed by narrowing
+the complete backstop.
+
+The complete-matrix ceiling is now exactly 105 minutes: the existing bounded
+100-minute suite allowance plus five minutes for checkout cleanup and result
+publication. `tests/test-workflow-policy.sh` rejects any other value, so this
+is a measured finalization allowance rather than an open-ended timeout increase.
+The focused policy test passed after the repair.
+
 ## Landing evidence
 
 The pull-request and complete scheduled/manual matrix run IDs are recorded here
