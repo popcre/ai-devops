@@ -66,9 +66,11 @@ one). Each was a real failing run, not a starvation rebuild.
 of the `gh-readonly-queue/main/pr-<N>-<sha>` ref, resolves that pull request's
 head commit, and refuses to pass unless:
 
-- the live GraphQL merge-queue entry is frozen to the same pull-request head
-  whose verification is being checked. Squash merge groups have one parent and
-  a new tree, so the pull-request head is deliberately not an ancestor;
+- one GraphQL snapshot shows both the PR's current head and its live
+  merge-group commit, and the latter equals the workflow commit. GitHub rebuilds
+  the entry when the PR head changes, so the exact PR head read in that same
+  snapshot is the one whose verification must be checked. Squash merge groups
+  have one parent and a new tree, so the PR head is not an ancestor;
 - a `verify.yml` run on event `pull_request` exists for that exact commit;
 - every such run has finished and concluded `success` — an in-progress run is not
   evidence, and an older failing run on the same commit still rejects;
@@ -110,9 +112,13 @@ by the group commit. The old check therefore rejected valid squash groups.
 Run `34437374341` then exercised the first proposed correction against a live group.
 It proved the REST commit-to-pulls endpoint is empty while the synthetic commit
 is still queued, returning exit 1 rather than a false pass. The final gate uses
-the live GraphQL `mergeQueueEntry.headCommit` instead, which exposes the exact
-PR head frozen by GitHub for this queue entry, and then demands completed
-exact-head pull-request evidence.
+one live GraphQL snapshot: `pullRequest.headRefOid` is the PR head and
+`mergeQueueEntry.headCommit.oid` is the synthetic group commit. The latter must
+equal the workflow's `github.sha`; GitHub then rebuilds the entry if the former
+changes. Run `34439264770` proved the intermediate interpretation was also
+fail-closed: it correctly returned exit 1 instead of treating the synthetic
+group SHA as a PR head. The entry was explicitly dequeued before its non-required
+failure could be ignored by the current ruleset.
 
 ## What was deliberately not changed
 

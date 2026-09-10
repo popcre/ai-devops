@@ -29,10 +29,9 @@ write_stubs() {
   cat > "$TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "pr view") cat "$STUB_DIR/head_sha" ;;
   "run list") cat "$STUB_DIR/runs" ;;
   "run view") cat "$STUB_DIR/jobs" ;;
-  "api graphql") cat "$STUB_DIR/queued_head" ;;
+  "api graphql") cat "$STUB_DIR/queue_state" ;;
   *) exit 1 ;;
 esac
 STUB
@@ -45,8 +44,7 @@ RUN() { PATH="$TMP/bin:$PATH" bash "$CMD" "$@" 2>&1; }
 REF='refs/heads/gh-readonly-queue/main/pr-357-b418c2c25ffe877fd3c3987b0aad68483f382078'
 GOOD_HEAD='0178be4a0178be4a0178be4a0178be4a0178be4a'
 set_world() {
-  printf '%s\n' "$1" > "$TMP/head_sha"
-  printf '%s\n' "$2" > "$TMP/queued_head"
+  printf '%s|%s\n' "$1" "$2" > "$TMP/queue_state"
   printf '%s' "$3" > "$TMP/runs"
   printf '%s' "$4" > "$TMP/jobs"
 }
@@ -54,7 +52,7 @@ set_world() {
 check "the evidence gate exists and is executable" "test -x '$CMD'"
 check "it parses as valid bash" "bash -n '$CMD'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tsuccess\nlinux-offline\tsuccess\n')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tsuccess\nlinux-offline\tsuccess\n')"
 
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "matching, complete, successful evidence is accepted" \
@@ -72,47 +70,47 @@ check "a ref that is not a merge-queue ref is refused" \
 OUT="$(RUN --ref 'refs/heads/gh-readonly-queue/main/pr-abc-1234' --merge-group-sha deadbeef)"; RC=$?
 check "a ref with no readable pull-request number is refused" "test '$RC' -eq 2"
 
-set_world '' "$GOOD_HEAD" '' ''
+set_world '' deadbeef '' ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "an unreadable pull-request head is a configuration error, not a pass" "test '$RC' -eq 2"
 
-# The live queue entry must be frozen to the same head whose proof is checked.
+# This workflow must still be the live queue entry for the named PR.
 set_world "$GOOD_HEAD" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$(printf '9001\tcompleted\tsuccess\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
-check "evidence for a head different from the live queue entry is rejected as stale" \
-  "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'queue froze head'"
+check "evidence from a superseded merge-group workflow is rejected as stale" \
+  "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'not workflow commit'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" '' ''
+set_world "$GOOD_HEAD" deadbeef '' ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "silence is not evidence: no run at all is rejected" \
   "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'no verify.yml run exists'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tin_progress\t\n')" ''
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "an unfinished run is not evidence" \
   "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'not evidence'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tcompleted\tfailure\n')" ''
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tfailure\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "a failed run is not evidence" "test '$RC' -eq 1"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'linux-offline\tsuccess\n')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'linux-offline\tsuccess\n')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "a run that never ran a required job is rejected" \
   "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'never ran the required job'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf 'windows-offline\tskipped\n')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "a required job that was skipped is rejected, not read as success" \
   "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'concluded skipped'"
 
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9001\tcompleted\tsuccess\n')" ''
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "a run reporting no jobs cannot confirm coverage" "test '$RC' -eq 1"
 
 # Two runs on the same commit: the older one failing must not be papered over
 # by a newer success, because a failure on that commit is a real signal.
-set_world "$GOOD_HEAD" "$GOOD_HEAD" "$(printf '9002\tcompleted\tsuccess\n9001\tcompleted\tfailure\n')" ''
+set_world "$GOOD_HEAD" deadbeef "$(printf '9002\tcompleted\tsuccess\n9001\tcompleted\tfailure\n')" ''
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
 check "a failed earlier run on the same commit still rejects" "test '$RC' -eq 1"
 
