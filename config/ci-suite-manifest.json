@@ -144,5 +144,37 @@
     "test-windows-json-atomic.ps1",
     "test-windows-private-file.ps1",
     "test-windows-source-gate.ps1"
-  ]
+  ],
+  "windows_offline_shards": [
+    [
+      "test-ai-kimi.sh"
+    ],
+    [
+      "test-ai-adopt-globals.sh",
+      "test-ai-deepseek-agent.sh",
+      "test-ai-gemini-usage.sh",
+      "test-ai-grok-implement.sh",
+      "test-ai-install-skills.sh",
+      "test-ai-machine-tools.sh",
+      "test-ai-memory-sync.sh",
+      "test-ai-muse.sh",
+      "test-ai-test-local.sh",
+      "test-install-ai-provider-clis.sh",
+      "test-mcp-launch-lock.sh"
+    ],
+    [
+      "test-ai-claude-permissions.sh",
+      "test-ai-gemini.sh",
+      "test-ai-glm.sh",
+      "test-installer-parity.sh",
+      "test-line-endings.sh",
+      "test-windows-scripts.sh"
+    ],
+    [
+      "test-ai-claude-review.sh",
+      "test-ai-codex-memories.sh",
+      "test-ai-qwen.sh"
+    ]
+  ],
+  "windows_offline_powershell_shard": 2
 }

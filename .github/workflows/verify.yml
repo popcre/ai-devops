@@ -104,15 +104,71 @@ jobs:
       - name: Complete offline Bash suite
         run: bash tests/test-all.sh
 
-  windows-offline:
+  # Ordinary pull requests divide the Windows-sensitive lane into four declared,
+  # balanced sections that run at the same time on four independent GitHub-hosted
+  # machines (#210). Hosted concurrency is unmetered on a public repository, so
+  # this is real parallelism on separate hardware, not four processes competing
+  # for one desktop - the failure mode the issue explicitly forbids. The section
+  # boundaries live in config/ci-suite-manifest.json and are sized from the
+  # measured per-suite timings of runs 34394706703, 34377910065 and 34366159903;
+  # tests/test-all.sh refuses to run a section unless the declared sections
+  # reconstitute the whole lane exactly, so a coverage gap is a configuration
+  # error rather than a quiet pass.
+  windows-offline-section:
     needs: [fast-classifier, manual-preflight]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change is prose-only.
     # Fail-closed: any classifier result other than a clean prose-only verdict
+    # runs every section.
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
+    strategy:
+      # One failing section must never hide the result of the other three:
+      # the whole point of sectioning is that a useful failure arrives early
+      # and the rest of the evidence still lands.
+      fail-fast: false
+      matrix:
+        section: [1, 2, 3, 4]
+    runs-on: windows-2025
+    # The longest single suite in the lane, test-ai-kimi.sh, measured 1,048-1,098
+    # seconds across the three sampled runs, and it alone sets the floor for any
+    # section: no split can make a section shorter than its slowest indivisible
+    # suite. Four sections put the measured worst section at about 18.3 minutes
+    # against the issue's 20-minute p90 bound, with hosted checkout overhead
+    # measured at roughly 15 seconds. This 35-minute ceiling is sized to bound a
+    # genuine hang with headroom over that worst section; it is not a target.
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify offline test dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The pinned Windows runner image does not provide jq.'
+          }
+      - name: Windows-sensitive section ${{ matrix.section }} of 4
+        shell: pwsh
+        run: |
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
+
+  # Scheduled, manual and qualification verification stay complete and
+  # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
+  # backstop that proves every suite in one place must not depend on the section
+  # mapping being correct.
+  windows-offline-complete:
+    needs: [fast-classifier, manual-preflight]
+    # Not run on merge_group: linux-offline is the queue gate, and the Windows
+    # proof comes from the pull_request run on the exact head commit (#204).
+    # Fail-closed: any classifier result other than a clean prose-only verdict
     # runs the complete matrix.
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
+      github.event_name != 'pull_request' &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
@@ -120,28 +176,20 @@ jobs:
     # GitHub-hosted, on purpose. Self-hosted capacity was added to this
     # repository to have MORE Windows capacity, not to move off GitHub's
     # runners: hosted concurrency is unmetered on a public repository, so this
-    # long matrix never waits for a machine. On pull requests it omits only the
-    # Codex/Grok suites proved by windows-reviewer-safety; the bounded hosted
-    # fallback below restores them if that lane does not report success. It ran
-    # on windows-2025 from
+    # long matrix never waits for a machine. It ran on windows-2025 from
     # 2026-04 until 2026-08-29 without a runner-caused failure. Routing it to
     # the single-host self-hosted pool on 2026-09-02 serialised the whole
     # repository behind one desktop and left fourteen verify runs queued at
     # once. The self-hosted lane keeps windows-reviewer-safety below, where a
-    # timing flake can be reproduced on a known physical machine - the two
-    # lanes now run in parallel.
+    # timing flake can be reproduced on a known physical machine.
     runs-on: windows-2025
-    # Measured 2026-09-02 on the current suites, not estimated. Hosted
+    # Measured 2026-09-02 on the complete suites, not estimated. Hosted
     # windows-2025: 73m23s complete (run 33658549626) and one run cancelled by
     # the old 75-minute ceiling at 75m11s (run 33675127243). Self-hosted
-    # EDGE-RUNN-ENVY over four runs the same day: 58m40s to 62m18s. So hosted
-    # hardware is roughly 18% slower here and the previous 75-minute ceiling
-    # sat inside the run-to-run spread, which is why it killed a healthy run.
-    # This ceiling is sized from those measurements to bound a genuine hang; it
-    # is NOT a target and NOT a repair. The matrix outgrew its old 62-minute
-    # figure through the 2026-08 reviewer expansions, and splitting it is the
-    # real fix - that work belongs to #162 and #210, and #166 must set the
-    # required-check ceiling from a completed run rather than from this bound.
+    # EDGE-RUNN-ENVY over four runs the same day: 58m40s to 62m18s. This
+    # ceiling is sized from those measurements to bound a genuine hang; it is
+    # NOT a target. #166 must set the required-check ceiling from a completed
+    # run rather than from this bound.
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -156,12 +204,62 @@ jobs:
       - name: Complete offline Windows and Bash suites
         shell: pwsh
         run: |
-          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety
-          } else {
-            # Scheduled and manual verification remain the complete backstop.
-            .\tests\test-all.ps1
-          }
+          .\tests\test-all.ps1
+
+  # One stable aggregate result for the whole Windows offline lane, whatever
+  # shape that lane took for this event. The name is deliberately unchanged so
+  # #166 can restore `windows-offline` as a required context without having to
+  # know how many sections exist. It is fail-closed: a section that did not
+  # report success fails the aggregate, and `skipped` is accepted only when the
+  # fast classifier actually proved the change was prose-only.
+  windows-offline:
+    needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]
+    if: >-
+      !cancelled() && github.event_name != 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate the Windows offline lane
+        env:
+          EVENT: ${{ github.event_name }}
+          CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
+          RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
+          RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
+          SECTION_RESULT: ${{ needs.windows-offline-section.result }}
+          COMPLETE_RESULT: ${{ needs.windows-offline-complete.result }}
+        run: |
+          set -uo pipefail
+          printf 'event=%s classifier=%s run_long=%s sections=%s complete=%s\n' \
+            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$SECTION_RESULT" "$COMPLETE_RESULT"
+
+          # A legitimate whole-lane skip: the classifier succeeded and proved the
+          # change is prose-only, or a manual run declined the expensive jobs.
+          prose_only=false
+          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_LONG" != 'true' ]; then
+            prose_only=true
+          fi
+          if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
+            prose_only=true
+          fi
+
+          if [ "$EVENT" = 'pull_request' ]; then
+            lane_result="$SECTION_RESULT"
+            lane_name='the four Windows sections'
+          else
+            lane_result="$COMPLETE_RESULT"
+            lane_name='the complete Windows matrix'
+          fi
+
+          if [ "$lane_result" = 'success' ]; then
+            printf 'windows-offline: %s succeeded.\n' "$lane_name"
+            exit 0
+          fi
+          if [ "$lane_result" = 'skipped' ] && [ "$prose_only" = true ]; then
+            printf 'windows-offline: %s was skipped because the change is prose-only.\n' "$lane_name"
+            exit 0
+          fi
+          printf 'windows-offline: %s reported %s; failing closed.\n' "$lane_name" "$lane_result" >&2
+          exit 1
 
   windows-reviewer-safety:
     needs: [fast-classifier, manual-preflight]
@@ -282,7 +380,7 @@ jobs:
           if ($failures -ne 0) { exit 1 }
 
   report-scheduled-failure:
-    needs: [fast-classifier, linux-offline, windows-offline, windows-reviewer-safety, windows-reviewer-fallback]
+    needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety, windows-reviewer-fallback]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-24.04
     timeout-minutes: 3
