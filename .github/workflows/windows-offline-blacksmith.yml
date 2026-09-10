@@ -1,0 +1,88 @@
+name: windows-offline-blacksmith
+
+# Opt-in, paid alternative to the free windows-offline-section lane in
+# verify.yml (issue #210). This workflow never runs on its own: it exists so
+# that when the free GitHub-hosted lane is unusually slow to start, someone
+# can deliberately choose to pay for near-instant Blacksmith-hosted machines
+# instead. It must never be wired into any automatic trigger (pull_request,
+# schedule, merge_group, workflow_run) - Albert decided (2026-09-10) that
+# Blacksmith is a manual "I'm willing to pay for speed right now" choice, not
+# a fallback GitHub routes to on its own.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit SHA to verify on Blacksmith
+        required: true
+        type: string
+      requester_task:
+        description: Originating task or session
+        required: true
+        type: string
+      purpose:
+        description: Why this paid run is needed right now
+        required: true
+        type: string
+
+concurrency:
+  # Keyed on the ref, not the input as a whole: a second dispatch against the
+  # same branch supersedes the first rather than paying for two runs at once.
+  group: windows-offline-blacksmith-${{ github.event.inputs.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-offline-blacksmith-section:
+    strategy:
+      # One failing section must not hide the other three - same reasoning as
+      # the free lane's windows-offline-section in verify.yml.
+      fail-fast: false
+      matrix:
+        section: [1, 2, 3, 4]
+    runs-on: blacksmith-4vcpu-windows-2025
+    # The free hosted lane bounds the same work at 35 minutes (verify.yml).
+    # Blacksmith measured roughly 2x faster per suite on 2026-09-10 evidence
+    # (tests/verification/repo-throughput/issue-210-blacksmith-baseline-20260910.md),
+    # so this keeps headroom without paying for a much longer ceiling.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+      - name: Record provenance
+        shell: pwsh
+        run: |
+          Write-Host "requester_task: ${{ github.event.inputs.requester_task }}"
+          Write-Host "purpose: ${{ github.event.inputs.purpose }}"
+          Write-Host "ref: ${{ github.event.inputs.ref }}"
+      - name: Verify offline test dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The Blacksmith Windows runner image does not provide jq.'
+          }
+      - name: Windows-sensitive section ${{ matrix.section }} of 4 (Blacksmith)
+        shell: pwsh
+        run: |
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
+
+  windows-offline-blacksmith:
+    needs: [windows-offline-blacksmith-section]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate the Blacksmith Windows lane
+        env:
+          RESULT: ${{ needs.windows-offline-blacksmith-section.result }}
+        run: |
+          set -uo pipefail
+          if [ "$RESULT" = 'success' ]; then
+            printf 'windows-offline-blacksmith: all four Blacksmith sections succeeded.\n'
+            exit 0
+          fi
+          printf 'windows-offline-blacksmith: sections reported %s; failing closed.\n' "$RESULT" >&2
+          exit 1
