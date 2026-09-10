@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md`](HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md)
+**Active handoff:** [`HANDOFF.d/2026-09-10T1244Z-edge-dev-codex-issue-335-phase4-closeout.md`](HANDOFF.d/2026-09-10T1244Z-edge-dev-codex-issue-335-phase4-closeout.md)
 
 The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
 Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
@@ -19,7 +19,7 @@ Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
 | 1 | Define the shared routing and gate-policy contracts | DONE 2026-09-08 | `config/task-gates.json`, `config/task-gates.schema.json`, `tools/ci/validate-task-gates.py`, lean-router content model in `docs/context-spec.md` |
 | 2 | Implement and qualify the central `ai-devops` engine | DONE 2026-09-08 | `bin/ai-task-gates` plus enforcement in `bin/ai-review`, `bin/ai-pr-wait`, `bin/ai-review-lifecycle`; evidence under `tests/verification/task-gates/` |
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
-| 4 | Roll out thin policies and lean routers to all remaining repositories | OPEN | Start at Step 4.1 using the pilot evidence and current inventory |
+| 4 | Roll out thin policies and lean routers to all remaining repositories | PARTIAL 2026-09-10 — 12/17 landed | Five green PRs at recorded heads remain held because merging starts production automation: POP CRM #8, POP PIM #6, PopDAM #122, Backrest Wiz #7, and Ansible #14. Reopen #335, obtain exact production authority, resolve Backrest's reviewer proof, then merge and verify these five before central coverage closeout |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
@@ -391,6 +391,18 @@ flows proceed; no unique instruction becomes unreachable.
 the pilots expose a common gap; never patch consumers inconsistently.
 
 ### Phase 4 — full repository rollout
+
+**Execution update, 2026-09-10:** 12 of 17 repository policies are landed. The
+five remaining candidates are green at their recorded heads but deliberately unmerged:
+`u2giants/popcrm-web#8`, `u2giants/poppim-web#6`, `u2giants/popdam3#122`,
+`u2giants/backrest-wiz#7`, and `u2giants/ansible#14`. Each merge starts existing
+production automation; Ansible runs the real serialized Phase 1 apply against
+the `hetzner` production target. Those effects require explicit current-chat
+authorization. Issue #335 was closed as completed on 2026-09-10 at 12:49:50Z
+despite this incomplete gate and must be reopened. Backrest Wiz also retains an
+unresolved qualified-review proof after three bounded provider failures. Do not update the 17-row
+coverage gate or start Phase 5 until all five land and their live results are
+verified.
 
 #### Step 4.1 — DesignFlow remainder
 

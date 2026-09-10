@@ -4,11 +4,15 @@ status: OPEN
 owner: codex/issue-335-phase4-closeout-20260910
 ---
 
-# HANDOFF — Issue #335 Phase 4 after data-syncing and Item Master landing (2026-09-10 12:44Z, edge-dev/codex)
+# HANDOFF — Issue #335 Phase 4 closeout after 12 of 17 repository landings (updated 2026-09-10, edge-dev/codex)
 
 ## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
 
-None — nothing in this workstream needs Albert. The next session must not ask him to choose branches, deployment mechanics, or whether to continue.
+One exact authority decision is open. Five green candidates cannot be
+merged under the current instruction because each merge starts existing
+production automation. Albert must explicitly authorize the five merges and
+their automatic production releases. For Ansible that authorization must name
+the real serialized Phase 1 apply against the `hetzner` production target.
 
 Already settled — do not re-ask:
 
@@ -17,6 +21,9 @@ Already settled — do not re-ask:
 - Issue #335 DesignFlow acceptance lands directly on current `sandbox-albert`; automatic sandbox builds caused by the authorized push are observed read-only. Codex does not operate deployment controls (2026-09-09/10).
 - DesignFlow PRs to `develop` remain Uma-owned and must not be self-merged. Issue #335 acceptance does not wait for those merges (2026-09-09/10).
 - Phase 5 cannot start until all 17 coverage rows are landed and Phase 5 is re-read for drift (2026-09-09).
+- Issue #335 must remain open through Phase 5. It was incorrectly closed as
+  completed at `2026-09-10T12:49:50Z` while five Phase 4 rows remained unlanded;
+  reopen it before continuing closeout.
 - PR #330 is unrelated Qwen work and must not be cancelled, rerun, or diagnosed here (2026-09-09).
 
 ## 1. What this application is
@@ -29,11 +36,47 @@ The central version-1 engine is `bin/ai-task-gates`. Consumer repositories recei
 
 This continuation resumed Phase 4 at `designflow-data-syncing`, after backend and BFF were already complete. The objective was to preserve each service's stronger local boundaries while landing the smallest repository-specific policy and proving refusal, rollback, unchanged tests, exact-head review, GitHub gates, build identity, and ready sandbox revision.
 
-The session completed data-syncing. A concurrently finishing predecessor also landed Item Master during closeout. The next session must reconcile Item Master's independent-review evidence, then continue with tracking and Steps 4.2–4.3. No application behavior, database, data, deployment controls, infrastructure, or production state was changed.
+The session completed data-syncing. A concurrently finishing predecessor also
+landed Item Master during closeout. A later continuation reconciled Item Master,
+completed tracking, prepared all Step 4.2 repositories, and completed Step 4.3
+source work. Twelve policies are now landed. Five green candidates remain held
+because their merges start production automation. No database, application-data,
+deployment-control, infrastructure, or production mutation occurred during the
+rollout work recorded here.
 
 ## 3. Current state — what is true right now
 
-Phase 4 remains OPEN; Issue [#335](https://github.com/popcre/ai-devops/issues/335) is OPEN. Phases 0–3 remain complete. The authoritative status table is in `plan_cross_repo_routing_and_gate_enforcement.md`; the preceding detailed handoff is `HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md`.
+Phase 4 remains PARTIAL at 12/17; Issue
+[#335](https://github.com/popcre/ai-devops/issues/335) is incorrectly CLOSED as
+completed. Phases 0–3 remain complete. The authoritative status table is in
+`plan_cross_repo_routing_and_gate_enforcement.md`; the preceding detailed
+handoff is `HANDOFF.d/2026-09-10T0400Z-edge-dev-codex-issue-335-phase4-continuation.md`.
+
+### Later continuation — current authoritative state
+
+- `designflow-item-master` independent review was reconciled and approved at
+  `987bb145`; do not repeat it. `designflow-tracking` landed on
+  `sandbox-albert` at `c3531b11`, with its local suite, exact-head review,
+  GitHub verification, automatic Cloud Build, and ready sandbox revision
+  verified. PR #38 to `develop` remains Uma-owned and is not a Phase 4 blocker.
+- `u2giants/licensor-source-data#70` merged as `1413b0c1`; privacy/refusal
+  verification passed and no licensed rows were opened or transmitted.
+- `u2giants/ai-devops-transcripts#1` merged as `a36b4777`; privacy/refusal
+  verification passed and no raw transcripts were opened or transmitted.
+- `popcre/infrastructure#28` merged as `222c7a6d`; verification passed and no
+  apply or resource mutation occurred.
+- Five exact-head candidates remain unmerged solely because their merges start
+  production automation: POP CRM #8 (`ee319d44`), POP PIM #6 (`d5ab6897`),
+  PopDAM #122 (`e41c9f56`), Backrest Wiz #7 (`27f4c72f`), and Ansible #14
+  (`7c2bebec`). All GitHub checks are green. POP CRM's exact-head review
+  approved subject to the production-release boundary; POP PIM and PopDAM
+  reviews found their policies sound but rejected shipping without production
+  authority. Do not rerun those reviews unless a head changes. Backrest's
+  independent reviewer could not qualify after three bounded attempts and is
+  the only unresolved reviewer proof. Ansible's task-gate, Linux lint/syntax,
+  and read-only host-diff checks passed; exact-head review found the source
+  internally sound but correctly rejected shipping because merging runs the
+  real production Phase 1 apply.
 
 ### DesignFlow data-syncing — complete
 
@@ -44,22 +87,37 @@ Phase 4 remains OPEN; Issue [#335](https://github.com/popcre/ai-devops/issues/33
 - Automatic Cloud Build `b2be4099-829c-4af1-9c3a-359548bfc4dc` succeeded with digest `sha256:ee589bf18906e707ca3d35c40f9d5f0898f65887f5ab17e3b1c2890dba04b607`.
 - Ready revision `popcre-albert-sync-sandbox-00101-54z` serves 100% of traffic and uses the image tagged with exact commit `7d961fe`.
 
-### DesignFlow Item Master — landed during closeout
+### DesignFlow Item Master — complete (original closeout snapshot retained)
 
 - Remote `sandbox-albert` is `987bb1453f1dd91e7e0a77926228adfeb3b0e288`; open PR [#55](https://github.com/popcre/designflow-item-master/pull/55) targets `develop` and remains Uma-owned.
 - The committed evidence file reports 27/27 focused checks, central schema validation, 38/38 Jest suites, and 230/230 tests with no skips or snapshots.
 - Exact-head GitHub runs passed: Task Gates push `34439328669`, Task Gates PR `34439354866`, and Forbid Shared DB Bypass PR `34439354982`.
 - Automatic Cloud Build `b01a6d8d-4779-43d1-8e53-1a2c86761dfd` succeeded. Ready revision `popcre-albert-item-sandbox-00124-772` serves 100% of traffic using the image tagged with exact commit `987bb14`.
-- The isolated Item Master worktree disappeared after landing, so this session could not retain or inspect its private independent-review report. Treat independent-review proof as the only Item Master evidence item needing reconciliation; do not repeat implementation, tests, GitHub runs, or build verification unless the landed head changes.
+- The isolated Item Master worktree disappeared during the original closeout,
+  but the later continuation completed a new exact-landed-head review for
+  `987bb145` and received approval. That former evidence gap is closed; do not
+  repeat implementation, tests, review, GitHub runs, or build verification
+  unless the landed head changes.
 
 ### Remaining Phase 4 work
 
-- Step 4.1: `designflow-tracking` after Item Master review-proof reconciliation.
-- Step 4.2: `popcrm-web`, `poppim-web`, `popdam3`, `backrest-wiz`, `licensor-source-data`, and `ai-devops-transcripts`.
-- Step 4.3: `popcre/infrastructure` and `u2giants/ansible`.
-- Central `config/repository-coverage.json` still needs all complete landed evidence rows and the final mixed/missing guard. Do not start Phase 5 before all 17 rows are complete.
+- Reopen Issue #335; its completed closure conflicts with the plan and five open
+  rollout PRs.
+- Obtain Albert's explicit authorization for the five production-triggering
+  merges. For Ansible, name the serialized Phase 1 apply to `hetzner`.
+- Immediately re-resolve each PR head, base, checks, main movement, and automatic
+  release behavior; merge only the authorized exact head, then verify the live
+  production result. Do not infer authorization from an old message.
+- Resolve Backrest's missing qualified independent review before its merge if
+  reviewer qualification is available; do not weaken or bypass the reviewer
+  gate merely to finish the row.
+- Update central `config/repository-coverage.json` only after all five land,
+  record all 17 evidence rows, and run the final mixed/missing guard. Do not
+  start Phase 5 before this passes.
 
-This ai-devops closeout is documentation-only on branch `codex/issue-335-phase4-closeout-20260910`. It adds only this handoff file and must be merged to `main` before the session closes.
+The original closeout was documentation-only. This later documentation audit
+updates this handoff and the authoritative plan together so their status and
+restart point match live GitHub evidence.
 
 ## 4. Everything we tried that did NOT work
 
@@ -74,19 +132,31 @@ This ai-devops closeout is documentation-only on branch `codex/issue-335-phase4-
 - The correct high-risk paths come from the service's actual enforcement code, not from generic copied globs. Data-syncing required `helpers/api-key-auth.js`, `config/http.js`, database connection/pool files, `config/table-schema-map.js`, model shape, and its mirrored `shared-db/` tree.
 - Long-running exact-head reviews and shared worktrees make SHA drift likely. A verdict is valid only for the commit named in the report; the reliable recovery is a fresh detached worktree at the landed remote head and a direct-parent review brief.
 - Automatic sandbox deployment is an accepted consequence of the authorized branch push, but a green build alone is insufficient. Acceptance records exact commit, GitHub jobs, build id/digest, ready revision, and 100% traffic through read-only queries.
-- Item Master is structurally landed and live. Only its private exact-head independent-review artifact was unavailable after its worktree was removed; that is an evidence-reconciliation gap, not a reason to redo the implementation.
+- Item Master is landed, live, and independently approved at exact head
+  `987bb145`; its former missing-artifact gap was reconciled and must not be
+  repeated.
 - The open shared-db orchestrator marker `u2giants/shared-db#2669` belongs to another active orchestrator, not this session. Do not modify or close it.
 
 ## 6. Exact next steps
 
-1. Start from a fresh current `origin/main` ai-devops worktree; read `AGENTS.md`, the plan STATUS table, this handoff, and the earlier 0400Z handoff. Re-resolve Issue #335, open PRs, worktrees, and remote heads. You will know this worked when Phase 4 is first OPEN, data-syncing `7d961fe` and Item Master `987bb14` remain ancestors/heads as appropriate, and no competing Phase 4 process owns the target worktree.
-2. Reconcile Item Master's independent review without repeating completed gates: search for an exact-head report for `987bb14`; if none is available, create a clean detached worktree at `origin/sandbox-albert` and run one direct-parent `ai-review claude final-check`. You will know it worked when an APPROVE report explicitly names `987bb145...`; if the branch moved, review the new landed head and record the ancestry.
-3. Continue Step 4.1 with `designflow-tracking`: read its full `AGENTS.md` and active handoffs, declare the task class, work from current `origin/sandbox-albert` in an isolated worktree, measure routing, and add only the service-specific thin policy, refusal/rollback fixture, verification-only workflow, evidence note, ignore rule, and lean route if needed. You will know the candidate is ready when focused/schema checks, unchanged repository tests, and an exact-commit/direct-parent independent review pass.
-4. Immediately before the tracking push, fetch and compare `origin/sandbox-albert` with the candidate's direct parent. Rebuild and retest on movement; never force-push. After the push, verify every exact-head GitHub job, automatic Cloud Build id/digest, ready revision, exact image tag, and 100% sandbox traffic. Leave its `develop` PR for Uma. You will know tracking is complete when the full evidence chain names one landed SHA.
-5. Execute Step 4.2 in the plan's order across the six application/private repositories. For `licensor-source-data` and `ai-devops-transcripts`, inspect only metadata, policies, routers, and tests—never licensed rows or raw transcript archives. You will know each row is complete when its highest-risk dry fixture refuses correctly, its policy is landed, and its repository delivery rules are satisfied.
-6. Execute Step 4.3 for `popcre/infrastructure` and `u2giants/ansible` using fixtures/read-only inspection only. You will know each is complete when apply/deploy scenarios refuse before action and read-only evidence confirms no resource changed.
-7. Update all 17 central coverage rows with policy version, landed commit/PR, routing before/after, trigger result, local verification, and remaining exception. Re-run the four-pilot suite only if the central schema changes. You will know Phase 4 is complete when the mixed/missing guard passes with no incomplete row.
-8. Only after all 17 rows pass, re-read every Phase 5 step through plan completion, record drift, write the next handoff, and stop. Do not start Phase 5 in the Phase 4 session. You will know the cut is sound when a fresh session can begin at Step 5.1 without chat context.
+1. Start from a fresh current `origin/main` ai-devops worktree; read `AGENTS.md`,
+   the plan STATUS table, this handoff, and the earlier 0400Z handoff. Re-resolve
+   Issue #335 and the five open PRs. Reopen #335 because its current completed
+   closure is contradicted by the plan and unlanded rows.
+2. Obtain the exact current-chat production authority described in §0. Without
+   it, keep all five PRs open and do not trigger their releases or Ansible apply.
+3. Re-resolve and merge POP CRM #8, POP PIM #6, PopDAM #122, Backrest Wiz #7,
+   and Ansible #14 only within that authority. Preserve every repository's
+   existing gate; for Backrest, resolve the unavailable qualified-review proof
+   rather than bypassing it. Verify each automatic production release or apply
+   through the repository's real acceptance evidence.
+4. Update all 17 central coverage rows with policy version, landed commit/PR,
+   routing before/after, trigger result, local verification, and remaining
+   exception. Re-run the four-pilot suite only if the central schema changes.
+   Phase 4 is complete only when the mixed/missing guard passes with no
+   incomplete row.
+5. Only then re-read every Phase 5 step through plan completion, record drift,
+   write the next handoff, and stop. Do not start Phase 5 in this session.
 
 ## 7. Constraints and gotchas in force
 
@@ -95,7 +165,7 @@ This ai-devops closeout is documentation-only on branch `codex/issue-335-phase4-
 - No raw transcripts, licensed rows, secrets, private evidence, database writes, application-data writes, deployment-control changes, infrastructure mutation, or production mutation.
 - Use `C:\Program Files\Git\bin\bash.exe` on Windows. Preserve session ids for commands exceeding the 30-second output window.
 - Exact-head DesignFlow review briefs must name the candidate commit, direct parent, and owned file list; do not review the whole divergent sandbox-to-develop history.
-- Keep Issue #335 open. Do not start Phase 5, close #159/#166, or change shared installed commands before the 17-row Phase 4 gate passes.
+- Reopen and keep Issue #335 open. Do not start Phase 5, close #159/#166, or change shared installed commands before the 17-row Phase 4 gate passes.
 
 ## 8. Access and environment
 
@@ -108,7 +178,11 @@ This ai-devops closeout is documentation-only on branch `codex/issue-335-phase4-
 
 ## 9. Open questions and risks
 
-- No owner question is open. Item Master's independent-review artifact may exist in a removed temporary worktree; absence is safely resolved by one new exact-landed-head read-only review.
+- The owner decision in §0 is open. Do not merge the five production-triggering
+  PRs until Albert explicitly authorizes their automatic releases and the
+  Ansible Phase 1 apply to `hetzner`.
+- Issue #335 is closed as completed even though Phase 4 is 12/17 and five rollout
+  PRs remain open. Reopen it before continuing closeout.
 - Remote branches may advance between testing and push. Treat every SHA outside the completed evidence above as historical until fetched immediately before action.
 - A future repository may reveal a genuine conflict between local rules and central policy. Stop only that repository, continue safe independent rows, and ask Albert only if avoiding a weakening requires a materially different outcome.
 - Central coverage evidence has not yet been updated with the completed DesignFlow rows. Avoid changing the shared schema unless a common gap is proven; any schema change requires rerunning all four pilots.
@@ -116,10 +190,17 @@ This ai-devops closeout is documentation-only on branch `codex/issue-335-phase4-
 ## Self-audit
 
 1. Yes. Sections 1–3 explain the system, purpose, exact commits, PRs, tests, jobs, builds, revisions, traffic, and unfinished scope for a newcomer.
-2. Yes. Sections 4–5 preserve collision history, rejected review findings, bounded-wait behavior, exact-head drift, and the distinction between Item Master implementation completion and review-proof reconciliation.
+2. Yes. Sections 4–5 preserve collision history, rejected review findings,
+   bounded-wait behavior, exact-head drift, and Item Master's completed
+   review-proof reconciliation.
 3. Yes. Sections 0–9 cover background, goal, intended result, current Git/deploy state, failures, findings, constraints, access, risks, and ordered verification gates.
 4. Yes. Each step in §6 ends with an observable success condition and identifies repository, branch route, or evidence required.
 5. Yes. Sections 1, 3, 7, and 8 define the repositories, engine, branches, services, host, project, region, review entry, and evidence identifiers.
-6. Yes. A line-by-line sweep of §§1–9 found no sentence requiring Albert's judgment. The only owner references are already-settled decisions in §0; the conditional future conflict in §9 explicitly requires escalation only if it occurs.
+6. Yes. A line-by-line sweep of §§1–9 found exactly one current owner decision:
+   §0's production authority for five merges, including the named Ansible apply.
+   All other owner references are settled decisions or bounded future conflicts.
 
-Final synthesis: Yes, a brand-new developer can continue without chat (§§1–8); yes, they have the same operational knowledge and dead ends (§§3–5); yes, every required execution dimension is present (§§0–9); and yes, Albert reading only §0 sees the complete decision state—there are no open owner decisions.
+Final synthesis after the later audit: a brand-new developer can continue from
+§6 without chat; §§3–5 preserve the operational evidence and dead ends; §§0–9
+cover every required execution dimension; and §0 now exposes the one real owner
+decision instead of incorrectly claiming there are none.
