@@ -6,6 +6,9 @@
 
 **Active handoff:** [`HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md`](HANDOFF.d/2026-09-09T1949Z-edge-dev-codex-issue-335-phase-four-rollout.md)
 
+The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
+Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
+
 **Decision date:** 2026-09-08
 
 ## STATUS
