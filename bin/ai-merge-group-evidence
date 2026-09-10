@@ -81,22 +81,26 @@ esac
 REPO_ARGS=()
 [ -n "$REPO" ] && REPO_ARGS=(--repo "$REPO")
 
-HEAD_SHA="$(gh pr view "$PR_NUMBER" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --json headRefOid --jq .headRefOid 2>/dev/null)"
+# A squash merge-group commit has one parent and a new tree. The REST
+# commit-to-pulls association is empty while that synthetic commit is still in
+# the queue, so it cannot gate the live build. Read the PR's current head and
+# its live merge-group commit atomically from GraphQL. GitHub removes/rebuilds
+# the queue entry when the PR head changes; matching this workflow's SHA to the
+# live entry therefore binds the evidence query to this exact queued version.
+[ -n "$REPO" ] || REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
+[ -n "$REPO" ] || die 'could not determine the GitHub repository'
+REPO_OWNER="${REPO%%/*}"
+REPO_NAME="${REPO#*/}"
+[ -n "$REPO_OWNER" ] && [ -n "$REPO_NAME" ] && [ "$REPO_OWNER" != "$REPO_NAME" ] || die "invalid GitHub repository $REPO"
+QUEUE_STATE="$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid mergeQueueEntry{headCommit{oid}}}}}' -F owner="$REPO_OWNER" -F name="$REPO_NAME" -F number="$PR_NUMBER" --jq '[.data.repository.pullRequest.headRefOid,.data.repository.pullRequest.mergeQueueEntry.headCommit.oid]|join("|")' 2>/dev/null)"
+IFS='|' read -r HEAD_SHA QUEUED_GROUP <<EOF
+$QUEUE_STATE
+EOF
 case "$HEAD_SHA" in
   ''|*[!0-9a-fA-F]*) die "could not read the head commit of pull request $PR_NUMBER" ;;
 esac
-
-# A squash merge-group commit has one parent and a new tree. Ask GitHub which
-# pull requests the synthetic commit represents and require the number encoded
-# in the queue ref to be among them. GitHub removes/rebuilds a queued entry when
-# its head changes; HEAD_SHA above is then also the exact commit whose
-# pull-request verification must have passed.
-[ -n "$REPO" ] || REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
-[ -n "$REPO" ] || die 'could not determine the GitHub repository'
-ASSOCIATED_PRS="$(gh api "repos/$REPO/commits/$MERGE_GROUP_SHA/pulls" --jq '.[].number' 2>/dev/null)"
-if ! printf '%s\n' "$ASSOCIATED_PRS" | grep -Fxq "$PR_NUMBER"; then
-  reject "GitHub does not associate merge group $MERGE_GROUP_SHA with pull request $PR_NUMBER; its evidence would be stale"
-fi
+[ -n "$QUEUED_GROUP" ] || reject "pull request $PR_NUMBER has no readable live merge-queue entry"
+[ "$QUEUED_GROUP" = "$MERGE_GROUP_SHA" ] || reject "pull request $PR_NUMBER is now queued as $QUEUED_GROUP, not workflow commit $MERGE_GROUP_SHA; its evidence would be stale"
 
 RUNS="$(gh run list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --workflow "$WORKFLOW" --event pull_request --commit "$HEAD_SHA" --limit 20 --json databaseId,conclusion,status --jq '.[] | [.databaseId, .status, .conclusion] | @tsv' 2>/dev/null)"
 [ -n "$RUNS" ] || reject "no $WORKFLOW run exists for head commit $HEAD_SHA of pull request $PR_NUMBER"
