@@ -114,12 +114,32 @@ the plan's stated counts. PR #357 replaces this manifest shape with its own
 4-section schema; the post-merge shape must be re-read before designing
 Blacksmith sections on top of it.
 
-## Next step
+## Next step (superseded — see below)
 
-Hold. Do not touch `claude/issue-210-windows-sharding` / PR #357 while
+~~Hold. Do not touch `claude/issue-210-windows-sharding` / PR #357 while
 "#159 ai-devops throughput" is actively driving it. Once #357 merges,
 re-read `config/ci-suite-manifest.json` and `.github/workflows/verify.yml`
 on `origin/main`, and redesign the Blacksmith addition (sibling dispatchable
 workflow + orchestrator + cannot-start recovery, from
 `plan_blacksmith-windows-throughput.md` §9 Phase B onward) against that
-landed 4-section layout instead of this document's original 3+3 split.
+landed 4-section layout instead of this document's original 3+3 split.~~
+
+**Update, 2026-09-10:** the orchestrator/automatic-routing design described
+above was abandoned. Albert decided Blacksmith stays strictly manual and
+paid — never auto-routed. What actually shipped instead: PR #367 added
+`.github/workflows/windows-offline-blacksmith.yml` (`workflow_dispatch`-only,
+mirrors #357's 4-section split, `-ExcludeReviewerSafety`) plus
+`.github/workflows/windows-queue-watchdog.yml` (comments on a PR asking
+Albert to tell Claude to route it to Blacksmith if the free lane is slow to
+start — Albert has no runner-queue visibility himself). Both workflows were
+proven live: two real `workflow_dispatch` runs against `origin/main`
+(`34449903830`, `34453239757`) confirmed Blacksmith runners genuinely pick up
+and execute jobs. One real bug found and fixed in PR #372 (Blacksmith's
+deeper default TEMP path tripped the Windows 260-char path limit — see
+`windows-offline-blacksmith.yml`'s TEMP-shortening step). One real bug found
+and NOT fixed — `tests/test-ai-gemini.sh`'s Windows ACL check fails on
+Blacksmith only; it touches evidence-protection code gated behind
+independent review by this repo's `AGENTS.md`. Tracked in
+[popcre/ai-devops#373](https://github.com/popcre/ai-devops/issues/373); see
+that issue and `HANDOFF.d/` for the current handoff. This baseline document
+is now historical — no further action needed against it.
