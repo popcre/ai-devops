@@ -67,7 +67,19 @@ publication. `tests/test-workflow-policy.sh` rejects any other value, so this
 is a measured finalization allowance rather than an open-ended timeout increase.
 The focused policy test passed after the repair.
 
-## Landing evidence
+## Complete exact-head evidence
 
-The pull-request and complete scheduled/manual matrix run IDs are recorded here
-after exact-head verification and merge.
+Manual run [34479418193](https://github.com/popcre/ai-devops/actions/runs/34479418193)
+completed successfully on `3ec1af0a23ff4cccc882f0a335d04e80e48f9ddd`.
+Its unsectioned `windows-offline-complete` backstop ran from 12:54:53Z to
+14:36:26Z (101m33s), then the stable `windows-offline` aggregate published
+success at 14:36:35Z. The same run also passed `linux-offline` and the qualified
+`windows-reviewer-safety` lane; its conditional section and fallback jobs were
+correctly skipped for the manual complete-matrix route.
+
+This is the first complete-matrix result after the 105-minute guardrail. It
+preserves the entire full Windows-and-Bash suite, proves result publication, and
+leaves 3m27s inside the fixed job bound. A later documentation-only handoff
+commit does not alter the tested workflow or harness source; final independent
+approval and pull-request gates are bound to the current branch head before
+merge.
