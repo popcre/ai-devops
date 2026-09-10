@@ -14,7 +14,11 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 ## STATUS — read this first
 
-A fresh session starts with **#165**, then **#160**. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
+A fresh session starts with **#210**, using the Blacksmith qualification findings
+from PR #355 and [`docs/blacksmith-windows-runners.md`](docs/blacksmith-windows-runners.md).
+Do not redo completed #165/#160 work. Final cutover #166 always runs last. Update
+this table in the same commit as completed work; cite a commit, CI run, or
+`tests/verification/` artifact, never an issue number alone.
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
@@ -24,7 +28,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
-| 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | open; after #161/#162/#209 | — |
+| 7 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | partial; prerequisites done, 3+3 design settled, implementation open | [`plan_blacksmith-windows-throughput.md`](plan_blacksmith-windows-throughput.md); [`docs/blacksmith-windows-runners.md`](docs/blacksmith-windows-runners.md) |
 | 8 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
 | 9 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
 | 10 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
@@ -47,6 +51,27 @@ Four consequences bind later phases. Do not re-derive them.
 Also open and now likely superseded: PR #115 (`ci: stop superseded merge-group runs from starving the live candidate`, last touched 2026-08-26) attacks the same starvation from the merge-queue side. Reconcile or close it before #164.
 
 Natural context cuts are after #160, after #163, and before #166. Use `fresh-session` and reread the next phase at each cut.
+
+### Unplanned additive capacity work — PR #355 (2026-09-09)
+
+Blacksmith's migration wizard proposed replacing existing hosted runner labels.
+The open branch was repaired to preserve GitHub-hosted Windows and the qualified
+local reviewer lane while adding a separate Blacksmith Windows job. Qualification
+found and repaired explicit Python, Windows identity, and single-file `grep`
+portability differences. The exact evidence, failed attempts, cost model, and
+current PR state are recorded in
+[`docs/blacksmith-windows-runners.md`](docs/blacksmith-windows-runners.md) and
+[`HANDOFF.d/2026-09-10T0007Z-edge-dev-codex-blacksmith-windows-pool.md`](HANDOFF.d/2026-09-10T0007Z-edge-dev-codex-blacksmith-windows-pool.md).
+
+PR #355's current complete duplicate Blacksmith lane is qualification evidence,
+not the approved steady state. Albert decided on 2026-09-10 that Blacksmith must
+carry real exclusive shards because a small overlapping sentinel does not solve
+the throughput problem. The locked 3+3 design and its separately cancellable
+fallback workflow are specified in
+[`plan_blacksmith-windows-throughput.md`](plan_blacksmith-windows-throughput.md).
+Do not merge or describe that design as implemented until the plan's current-main
+conflict resolution, exact-head CI, fault qualification, and exact-head review
+are complete.
 
 ## 1. Ultimate goal
 
