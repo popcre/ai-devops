@@ -42,5 +42,10 @@ No failure-evidence contents were printed.
   commit `5458ef5c`: Linux and hosted Windows sections 2, 3, and 4 passed. At
   evidence capture time section 1 and the reviewer lane were still running.
 
-The final acceptance gate remains a complete four-section Blacksmith dispatch
-against the merge commit on `main`.
+## Final acceptance
+
+PR #385 merged through the queue as
+`1fcc63510702d393086563f3e0dfa06df3491ccc`. Post-merge Blacksmith run
+[34536475882](https://github.com/popcre/ai-devops/actions/runs/34536475882)
+then passed all four sections and the aggregate job against `main`. Issue #373
+closed on 2026-09-10.
