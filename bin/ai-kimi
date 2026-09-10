@@ -110,6 +110,8 @@ REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$SELF_DIR/ai-review-lifecycle}"
 CAPACITY_JSON=''
 ACTIVE_DIAG_STARTED_EPOCH=0
 
+source "$SELF_DIR/../tools/lib/provider-wrapper-common.sh"
+
 die()  { printf 'ai-kimi: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-kimi: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
@@ -447,7 +449,7 @@ require_upstream_identity() {
   identity="$(upstream_identity "$1")" || die "cannot identify this repository's shared upstream. Set origin to an unambiguous network repository; no paid Kimi review was started."
   printf '%s' "$identity"
 }
-valid_name() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
+valid_name() { provider_wrapper_valid_name "$1"; }
 
 meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
@@ -557,7 +559,7 @@ await_result() { # await_result FILE LABEL [CHILD-EXIT]
   return 1
 }
 
-sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+sha256_file() { provider_wrapper_sha256_file "$1"; }
 
 valid_impl_record() { # valid_impl_record RID NAME META
   local rid="$1" name="$2" meta="$3" dir manifest patch base
