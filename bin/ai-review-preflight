@@ -125,15 +125,20 @@ gemini_live_qualified() {
   [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ] && [ "$expected_model" = "$actual_model" ]
 }
 qwen_live_qualified() {
-  local file wrapper expected actual expected_runtime actual_runtime expected_preloader actual_preloader
+  local file wrapper expected actual expected_runtime actual_runtime expected_preloader actual_preloader out rc count lines
   file="$(qualification_file qwen)"; [ -f "$file" ] || return 1
   wrapper="$(provider_wrapper qwen)"; [ -f "$wrapper" ] || return 1
   expected="$(jq -r '.wrapper_sha256 // empty' "$file" 2>/dev/null)"
   expected_runtime="$(jq -r '.runtime_sha256 // empty' "$file" 2>/dev/null)"
   expected_preloader="$(jq -r '.preloader_sha256 // empty' "$file" 2>/dev/null)"
   actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
-  actual_runtime="$(qwen_runtime_sha "$wrapper" || true)"
-  actual_preloader="$(qwen_preloader_sha "$wrapper" || true)"
+  set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] || return 1
+  count="$(printf '%s\n' "$out" | grep -Ec '^IDENTITY runtime_sha256=[0-9a-f]{64} preloader_sha256=[0-9a-f]{64}$' || true)"
+  lines="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+  [ "$count" -eq 1 ] && [ "$lines" -eq 1 ] || return 1
+  actual_runtime="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY runtime_sha256=\([0-9a-f]\{64\}\) preloader_sha256=[0-9a-f]\{64\}$/\1/p')"
+  actual_preloader="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY runtime_sha256=[0-9a-f]\{64\} preloader_sha256=\([0-9a-f]\{64\}\)$/\1/p')"
   [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ -n "$expected_runtime" ] && [ "$expected_runtime" = "$actual_runtime" ] && [ -n "$expected_preloader" ] && [ "$expected_preloader" = "$actual_preloader" ]
 }
 qwen_runtime_sha() { # WRAPPER [DOCTOR_OUTPUT]
