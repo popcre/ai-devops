@@ -27,8 +27,8 @@
       "reason": "Rotation reviewer."
     },
     "kimi": {
-      "registry_state": "registered",
-      "reason": "Rotation reviewer."
+      "registry_state": "absent",
+      "reason": "Temporarily removed from reviewer rotation by owner instruction on 2026-09-10: the Kimi account is out of credit. Historical evidence and wrapper safety checks remain retained; re-entry requires a reviewed registry change backed by a live well-formed verdict."
     },
     "muse": {
       "registry_state": "registered",
