@@ -55,6 +55,7 @@
     "test-mcp-launch-lock.sh",
     "test-muse-opencode-contract.sh",
     "test-pop-business-rules-skill.sh",
+    "test-provider-wrapper-common.sh",
     "test-public-boundary.sh",
     "test-repository-policy.sh",
     "test-repository-coverage.sh",
