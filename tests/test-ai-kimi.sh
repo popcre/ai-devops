@@ -15,9 +15,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-kimi"
 PASS=0; FAIL=0
-ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 check "missing local runtime is never a provider failure" "grep -q 'PREFLIGHT_CLASS=\"local_dependency_unavailable\"' '$SCRIPT' && ! grep -q 'PREFLIGHT_CLASS=\"provider-unavailable\"' '$SCRIPT'"
 check "local runtime failure says Kimi was not contacted" "grep -q 'LOCAL Kimi runtime.*not a Kimi provider fault' '$SCRIPT'"
 check "exhausted capacity fails before a Kimi review job is created" "sed -n '/start_review_job()/,/create_review_job/p' '$SCRIPT' | awk '/capacity_gate/{gate=NR} /create_review_job/{create=NR} END{exit !(gate>0 && create>gate)}' && grep -q \"exhausted).*return 3\" '$SCRIPT'"

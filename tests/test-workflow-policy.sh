@@ -75,7 +75,7 @@ check 'the queue evidence gate demands both Windows lanes' \
 check 'the queue evidence gate reports on every event, not only merge groups' \
   "! awk '/^  merge-group-evidence:/{f=1;next} f&&/^  [a-z]/{exit} f' '$workflow' | grep -q \"if: .*event_name == 'merge_group'\""
 
-check 'manifest declares 70 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 70 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 70 ]"
+check 'manifest declares 71 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 71 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 71 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'

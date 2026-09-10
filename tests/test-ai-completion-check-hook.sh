@@ -13,9 +13,7 @@ HOOK="$ROOT/bin/ai-completion-check-hook"
 INSTALL="$ROOT/bin/ai-install-completion-check-hook"
 MEMINSTALL="$ROOT/bin/ai-install-memory-hook"
 PASS=0; FAIL=0
-ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export XDG_STATE_HOME="$TMP/state"
