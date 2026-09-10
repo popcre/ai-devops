@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/fast-classifier.yml
 
   linux-offline:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, merge-group-evidence]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
