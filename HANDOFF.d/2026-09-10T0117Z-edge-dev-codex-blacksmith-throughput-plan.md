@@ -30,11 +30,18 @@ not add meaningful capacity or solve 90–120 minute delivery stalls.
 
 The complete build specification is
 [`../plan_blacksmith-windows-throughput.md`](../plan_blacksmith-windows-throughput.md).
-All eight steps are open. PR #355 head `92ba1e9a` contains useful qualification
-repairs but still duplicates the full Windows pack and was last observed
-conflicted with `main`. The plan, this handoff, and earlier session docs are
-uncommitted at the moment this file is authored; the planning session must commit
-and push only these owned docs before reporting delivery.
+All eight steps are open. PR #355 head is documentation commit `762f3105`;
+the preceding code head `92ba1e9a` contains useful qualification repairs but
+still duplicates the full Windows pack. PR #355 remains OPEN and DIRTY against
+current `main`. The plan, this handoff, and earlier session docs were committed
+and pushed in `762f3105`.
+
+Exact code-head run `34418585172` completed after the plan was written. Linux,
+GitHub-hosted Windows, and qualified local reviewer jobs passed; Blacksmith job
+`102688877305` failed after about 50 minutes. Its logs still report three
+`test-ai-facts.sh` fallback-search failures and the `test-ai-gemini.sh`
+private-ACL failure despite `92ba1e9a` containing `grep -h` and the guarded
+name-or-SID assertion. Those repairs are not proven on Blacksmith.
 
 ## 4. Everything we tried that did NOT work
 
@@ -43,6 +50,11 @@ as the throughput answer, GitHub-only despite owner intent, Blacksmith-exclusive
 work without recovery, queued-job timeouts/`needs` fallback, ephemeral runner
 probing, rerouting red tests, substring shard selection, premature required
 checks, and a dishonest 15-minute target.
+
+The final qualification disproved the assumption that `grep -h` and the
+name-or-SID ACL assertion fully repaired Blacksmith. Do not repeat the unchanged
+50-minute run. First reproduce or instrument those commands in a short
+Blacksmith diagnostic shard, then repair the root cause.
 
 ## 5. Root causes and key findings
 
@@ -82,6 +94,9 @@ pickup deadline, per-shard timeout, and Blacksmith backstop cadence; plan §13
 gives the evidence criterion for each. Principal risks are silent Blacksmith
 queueing, green-washing provider failures, fork coverage loss, shard imbalance,
 and premature merge-queue requirements; the plan specifies recovery/rollback.
+The immediate technical risk is that two Blacksmith portability failures remain
+unexplained on code head `92ba1e9a`; treat them as Step 1 diagnostic inputs, not
+accepted flakes.
 
 ## Self-audit
 

@@ -131,11 +131,14 @@ PR #355 currently:
 - forces `grep -h` in the portable fact fallback;
 - guards Blacksmith/local jobs from fork PRs and skips Windows on `merge_group`.
 
-This state is qualification evidence, not the throughput solution. The last live
-snapshot reported PR #355 conflicted with current `main`, and exact-head run
-`34418585172` was still waiting on the two full Windows jobs. Re-resolve both
-facts before work. Any push or rebase invalidates the prior Claude exact-head
-approval for `92ba1e9a`.
+This state is qualification evidence, not the throughput solution. PR #355
+remains conflicted with current `main`. Exact code-head run `34418585172`
+completed with Linux, GitHub Windows, and local reviewer lanes green, but its
+Blacksmith job `102688877305` failed the same three fact-search fallback checks
+and private-ACL check despite the attempted `grep -h` and guarded name-or-SID
+repairs. Do not rerun that unchanged 50-minute path: Step 1 must first reproduce
+or instrument those exact commands in a short Blacksmith diagnostic. Any push or
+rebase invalidates the prior Claude exact-head approval for `92ba1e9a`.
 
 Uncommitted session documentation currently exists in this worktree:
 
