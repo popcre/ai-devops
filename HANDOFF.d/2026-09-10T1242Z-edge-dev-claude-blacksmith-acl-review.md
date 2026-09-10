@@ -6,18 +6,22 @@ owner: edge-dev / claude (was worktree edge-dev-win-runner-status-e5faf9)
 
 # Blacksmith Windows CI lane — live-proven, one failure needs independent review
 
-## 0. Decision needed from Albert (the one blocking item)
+## 0. Decision from Albert: APPROVED (2026-09-10) — get the review
 
-**Does Albert want independent review requested for a fix to `bin/ai-gemini`'s
-`secure_private()` function and `tests/test-ai-gemini.sh`'s matching ACL
-check?** That is the only way to clear the last failing Blacksmith section.
-This repo's `AGENTS.md` requires independent review before anyone touches
-reviewer wrappers, evidence tools, or safety tests — `secure_private()` sets
-the Windows ACL that protects failure evidence, so it qualifies. Tracked in
+**Albert confirmed: yes, request independent review** for a fix to
+`bin/ai-gemini`'s `secure_private()` function and `tests/test-ai-gemini.sh`'s
+matching ACL check. This is the only way to clear the last failing Blacksmith
+section. This repo's `AGENTS.md` requires independent review before anyone
+touches reviewer wrappers, evidence tools, or safety tests —
+`secure_private()` sets the Windows ACL that protects failure evidence, so it
+qualifies. Tracked in
 [popcre/ai-devops#373](https://github.com/popcre/ai-devops/issues/373).
 
-If Albert says yes: get a second reviewer (Codex, Grok, or another qualified
-reviewer per this repo's reviewer roster) to look at issue #373's two
+**Next session: do not re-ask this question — go straight to lining up the
+review** per the steps below.
+
+Get a second reviewer (Codex, Grok, or another qualified reviewer per this
+repo's reviewer roster) to look at issue #373's two
 hypotheses and pick a fix. If Albert says no or "later": leave issue #373
 open and the Blacksmith lane running with 3 of 4 sections green; this is not
 blocking normal use of the lane, since Blacksmith stays opt-in/manual anyway.
