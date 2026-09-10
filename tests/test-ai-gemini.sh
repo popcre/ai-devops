@@ -79,7 +79,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.2'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.3'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -172,8 +172,18 @@ check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
 BAD_META="$(meta_for badverdict)"
 check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
-CURRENT_ACCOUNT="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().Name' | tr -d '\r\n')"
-check 'preserved failure evidence uses a private Windows ACL' "icacls \"\$(cygpath -w \"\$(jq -r .failure_artifact '$BAD_META')\")\" | grep -Fqi \"$CURRENT_ACCOUNT:(F)\""
+CURRENT_SID="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+ACL_TARGET="$(cygpath -w "$(jq -r .failure_artifact "$BAD_META")")"
+check 'preserved failure evidence allows only the current SID and trusted system SIDs with inheritance disabled' "powershell.exe -NoProfile -NonInteractive -Command '& { param([string]\$Path,[string]\$ExpectedSid) \$Acl = New-Object Security.AccessControl.FileSecurity(\$Path, [Security.AccessControl.AccessControlSections]::Access); if (-not \$Acl.AreAccessRulesProtected) { exit 1 }; \$Full = [Security.AccessControl.FileSystemRights]::FullControl; \$CurrentHasFull = \$false; foreach (\$Rule in @(\$Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { \$RuleSid = \$Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if (\$RuleSid -notin @(\$ExpectedSid, \"S-1-5-18\", \"S-1-5-32-544\")) { exit 1 }; if (\$RuleSid -eq \$ExpectedSid -and ((\$Rule.FileSystemRights -band \$Full) -eq \$Full)) { \$CurrentHasFull = \$true } }; if (-not \$CurrentHasFull) { exit 1 } }' '$ACL_TARGET' '$CURRENT_SID'"
+
+ACL_FAILURE_FILES_BEFORE="$(find "$TMP/state/failures" -type f 2>/dev/null | wc -l)"
+mkdir -p "$TMP/fail-icacls-bin"; printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/fail-icacls-bin/icacls"; /usr/bin/chmod +x "$TMP/fail-icacls-bin/icacls"
+check 'a failing icacls rejects output without leaving a readable artifact' "! PATH='$TMP/fail-icacls-bin:$PATH' new_run '$R4' icacls-fail badverdict; meta=\$(meta_for icacls-fail); test \"\$(jq -r '.failure_artifact // empty' \"\$meta\")\" = '' && test '$ACL_FAILURE_FILES_BEFORE' -eq \"\$(find '$TMP/state/failures' -type f 2>/dev/null | wc -l)\""
+
+ACL_FAILURE_DIR="$TMP/state/failures"
+MSYS2_ARG_CONV_EXCL='*' icacls "$(cygpath -w "$ACL_FAILURE_DIR")" /grant '*S-1-1-0:(OI)(CI)(F)' >/dev/null
+check 'an unexpected permissive ACE rejects output without leaving a readable artifact' "! new_run '$R4' unexpected-ace badverdict; meta=\$(meta_for unexpected-ace); test \"\$(jq -r '.failure_artifact // empty' \"\$meta\")\" = '' && test '$ACL_FAILURE_FILES_BEFORE' -eq \"\$(find '$TMP/state/failures' -type f 2>/dev/null | wc -l)\""
+MSYS2_ARG_CONV_EXCL='*' icacls "$(cygpath -w "$ACL_FAILURE_DIR")" /remove:g '*S-1-1-0' >/dev/null
 else
   check 'preserved failure evidence is private' "test \"\$(stat -c %a \"\$(jq -r .failure_artifact '$BAD_META')\")\" = 600"
 fi
