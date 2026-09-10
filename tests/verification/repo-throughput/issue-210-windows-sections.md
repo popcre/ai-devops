@@ -120,7 +120,7 @@ The worst section measured 19 minutes against the predicted 18.3 and the
 
 ## Injected-failure evidence
 
-`tests/test-windows-bash-selection.sh` — 22 passed, 0 failed, including live
+`tests/test-windows-bash-selection.sh` — 23 passed, 0 failed, including live
 PowerShell. New section cases, all proved against injected fixtures:
 
 - the declared sections partition the ordinary lane with nothing lost or repeated
@@ -133,6 +133,7 @@ PowerShell. New section cases, all proved against injected fixtures:
 - a manifest with no declared sections refuses to run one
 - a section that does not own the PowerShell suites says so and skips them
 - PowerShell sectioning is refused outside the ordinary pull-request lane
+- a section argument with anything but one `<i>/<n>` pair is refused
 
 Guard matrix on `tests/test-all.sh`, exit codes only:
 
@@ -143,6 +144,9 @@ Guard matrix on `tests/test-all.sh`, exit codes only:
 | section index above total | 2 | 2 |
 | section index zero | 2 | 2 |
 | malformed `1of4` | 2 | 2 |
+| two separators `1/2/4` | 2 | 2 |
+| missing index `/4` | 2 | 2 |
+| missing count `1/` | 2 | 2 |
 | declared count disagrees (`1/3`) | 2 | 2 |
 | valid section | 0 | 0 |
 | unsectioned lane unchanged | 0 | 0 |

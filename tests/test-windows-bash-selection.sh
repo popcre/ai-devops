@@ -116,6 +116,14 @@ run --windows-offline --shard 1/2 --list >/dev/null 2>&1; sec_context_rc=$?
 check 'a section request that disagrees with the declaration fails closed' \
   '[ "$sec_count_rc" -eq 2 ] && [ "$sec_zero_rc" -eq 2 ] && [ "$sec_context_rc" -eq 2 ]'
 
+# Splitting on the first and last slash independently would read `1/2/2` as
+# section 1 of 2 and run a real but wrong selection instead of failing.
+run --windows-offline --exclude-reviewer-safety --shard 1/2/2 --list >/dev/null 2>&1; sec_slash_rc=$?
+run --windows-offline --exclude-reviewer-safety --shard /2 --list >/dev/null 2>&1; sec_head_rc=$?
+run --windows-offline --exclude-reviewer-safety --shard 1/ --list >/dev/null 2>&1; sec_tail_rc=$?
+check 'a section argument with anything but one <i>/<n> pair is refused' \
+  '[ "$sec_slash_rc" -eq 2 ] && [ "$sec_head_rc" -eq 2 ] && [ "$sec_tail_rc" -eq 2 ]'
+
 printf '%s\n' '{"windows_offline_bash":["test-sec-a.sh","test-sec-c.sh","test-windows-defect.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
 run --windows-offline --exclude-reviewer-safety --shard 1/2 --list >/dev/null 2>&1; sec_absent_rc=$?
 check 'a manifest with no declared sections refuses to run one' '[ "$sec_absent_rc" -eq 2 ]'

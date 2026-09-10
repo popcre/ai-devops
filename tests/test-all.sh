@@ -47,14 +47,13 @@ shard_index=''; shard_total=''
 if [ -n "$shard" ]; then
   [ "$windows_offline" = true ] && [ "$exclude_reviewer_safety" = true ] || {
     printf 'test-all.sh: --shard requires --windows-offline --exclude-reviewer-safety\n' >&2; exit 2; }
-  shard_index="${shard%%/*}"; shard_total="${shard##*/}"
-  case "$shard" in
-    */*) : ;;
-    *) shard_index=''; shard_total='' ;;
-  esac
-  case "$shard_index$shard_total" in
-    ''|*[!0-9]*) printf 'test-all.sh: --shard must be <i>/<n>, got %s\n' "$shard" >&2; exit 2 ;;
-  esac
+  # Exactly one slash. Splitting on the first and last slash independently
+  # would read `1/2/4` as section 1 of 4 and run a real, wrong selection.
+  shard_index="${shard%%/*}"; shard_total="${shard#*/}"
+  case "$shard_index" in *[!0-9]*|'') shard_index='' ;; esac
+  case "$shard_total" in *[!0-9]*|'') shard_total='' ;; esac
+  [ -n "$shard_index" ] && [ -n "$shard_total" ] || {
+    printf 'test-all.sh: --shard must be <i>/<n>, got %s\n' "$shard" >&2; exit 2; }
   [ "$shard_total" -ge 1 ] || {
     printf 'test-all.sh: --shard count must be at least 1, got %s\n' "$shard_total" >&2; exit 2; }
   [ "$shard_index" -ge 1 ] && [ "$shard_index" -le "$shard_total" ] || {
