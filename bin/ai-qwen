@@ -783,6 +783,14 @@ extract_answer() { # extract_answer FILE
     ANSWER_DEFECT="the provider refused the call and returned no review: $api_error"
   elif [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
     ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
+  elif [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then
+    verdict_count="$(printf '%s\n' "$text" | grep -Ec '^VERDICT: (APPROVE|REVISE|REJECT) [0-9a-f]{40}[[:space:]]*$' || true)"
+    terminal="$(printf '%s\n' "$text" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+    if [ "$verdict_count" -ne 1 ]; then
+      ANSWER_DEFECT="the governed answer must contain exactly one SHA-bound VERDICT line (found $verdict_count)"
+    elif ! printf '%s\n' "$terminal" | grep -Eq "^VERDICT: (APPROVE|REVISE|REJECT) ${OPT_GOVERNED_VERDICT}[[:space:]]*$"; then
+      ANSWER_DEFECT="the final nonblank line must be a governed verdict bound to ${OPT_GOVERNED_VERDICT}"
+    fi
   else
     verdict_count="$(printf '%s\n' "$text" | grep -Ec '^## Verdict[[:space:]]*$' || true)"
     terminal="$(printf '%s\n' "$text" | sed '/^[[:space:]]*$/d' | tail -n 2)"
@@ -807,7 +815,7 @@ report_answer_defect() { # report_answer_defect NAME STREAM_PATH
   return 1
 }
 
-PROMPT_FOOTER="
+STANDARD_PROMPT_FOOTER="
 
 ---
 Formatting requirement: put all findings and narration first. The final two
@@ -816,6 +824,27 @@ REJECT, or BLOCKED. Example:
 ## Verdict
 APPROVE
 Do not use any other verdict heading or put text after the verdict word."
+
+governed_prompt_footer() {
+  cat <<EOF
+
+
+---
+Governed verdict requirement: put all findings and narration first. The final
+nonblank line must be exactly one of:
+VERDICT: APPROVE ${OPT_GOVERNED_VERDICT}
+VERDICT: REVISE ${OPT_GOVERNED_VERDICT}
+VERDICT: REJECT ${OPT_GOVERNED_VERDICT}
+Do not use a Verdict heading, a bare decision word, or any other verdict line.
+For this governed call, this requirement overrides only the sealed manifest's
+ordinary section 9 output format; every evidence and review requirement remains.
+EOF
+}
+
+assert_governed_review_head() {
+  [ -z "${OPT_GOVERNED_VERDICT:-}" ] || [ "$OPT_GOVERNED_VERDICT" = "$REVIEW_HEAD" ] \
+    || die "--governed-verdict names $OPT_GOVERNED_VERDICT but the sealed review head is $REVIEW_HEAD."
+}
 
 build_prompt_file() {
   local dest="$1" body="$1.body"
@@ -831,7 +860,9 @@ build_prompt_file() {
     printf 'Read %s/MANIFEST.md first and verify its sealed evidence before judging the code.\n\n' "$PACKET_REL" > "$dest"
     cat "$body" >> "$dest"; rm -f "$body"
   else mv -f "$body" "$dest"; fi
-  printf '%s' "$PROMPT_FOOTER" >> "$dest"
+  if [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then governed_prompt_footer >> "$dest"
+  else printf '%s' "$STANDARD_PROMPT_FOOTER" >> "$dest"
+  fi
 }
 
 verify_returned_model() { # verify_returned_model STREAM
@@ -917,8 +948,8 @@ usage() {
   cat <<EOF
 ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
 
-  ai-qwen new <name>       [--prompt TEXT | --prompt-file FILE | stdin]
-  ai-qwen ask <name>       [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen new <name>       [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen ask <name>       [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen list | show <name> | transcript <name> | delete <name>
@@ -1346,6 +1377,7 @@ start_session() { # start_session NAME MODE
     workdir="$(review_boundary "$repo" "qwen-$name")"
     LIFECYCLE_REVIEW_DIR="$workdir"
     prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+    assert_governed_review_head
     if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
       die "the source repository changed while Qwen evidence was being prepared; no provider call was made. Start a new named Qwen review."
     fi
@@ -1443,7 +1475,10 @@ cmd_ask() {
   repo="$(repo_root)"; rid="$(repo_id "$repo")"
   meta="$(find_meta "$rid" "$name")"
   sid="$(jq -r .qwen_session_id "$meta")"; mode="$(jq -r .mode "$meta")"
-  if [ "$mode" = implement ]; then rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return; fi
+  if [ "$mode" = implement ]; then
+    [ -z "${OPT_GOVERNED_VERDICT:-}" ] || die '--governed-verdict cannot continue an implementation session.'
+    rid="$(rid_from_meta "$meta")"; continue_implementation "$name" "$rid" "$meta"; return
+  fi
   status="$(jq -r '.status // "active"' "$meta")"
   [ "$status" = active ] || die "review session '$name' requires recovery ($status) because its provider conversation may have advanced beyond accepted evidence. Inspect the recorded recovery_stream, then delete and start a new named Qwen review."
 
@@ -1484,6 +1519,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY"
   prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+  assert_governed_review_head
   [ "$source_head_before" = "$(git -C "$repo" rev-parse HEAD)" ] && [ "$source_tree_before" = "$(tree_state "$repo")" ] \
     || die "the source repository changed while rebuilding the sealed Qwen evidence; no provider call was made. Start a new named Qwen review."
   [ "$REVIEW_HEAD" = "$expected_head" ] && [ "$WORKING_TREE_HASH" = "$expected_tree" ] && [ "$PACKET_HASH" = "$expected_packet" ] \
@@ -1688,11 +1724,16 @@ cmd_reset_context() {
 
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
-ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_DOCTOR_MODE=""
+ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_DOCTOR_MODE=""; OPT_GOVERNED_VERDICT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
+    --governed-verdict)
+      OPT_GOVERNED_VERDICT="${2:-}"
+      printf '%s' "$OPT_GOVERNED_VERDICT" | grep -Eq '^[0-9a-fA-F]{40}$' || die '--governed-verdict requires an exact 40-character commit SHA.'
+      OPT_GOVERNED_VERDICT="$(printf '%s' "$OPT_GOVERNED_VERDICT" | tr '[:upper:]' '[:lower:]')"
+      shift 2 ;;
     --json)        OPT_JSON=1; shift ;;
     --live|--identity)
       [ -z "$OPT_DOCTOR_MODE" ] || die 'doctor accepts only one mode.'
@@ -1703,6 +1744,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 need jq
+[ -z "$OPT_GOVERNED_VERDICT" ] || { [ "$CMD" = new ] || [ "$CMD" = ask ]; } || die '--governed-verdict applies only to read-only new or ask turns.'
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-qwen new <name> …";       start_session "$ARG" review ;;
