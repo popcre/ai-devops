@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ai-merge-group-evidence — prove, from inside a merge-queue run, that the
+# queued pull request's own head commit already carries the full verification
+# this repository chose not to repeat on the queue.
+#
+# WHY THIS EXISTS. Issue #204 removed the long Windows jobs from `merge_group`
+# and removed `windows-offline` from the ruleset's required contexts: a required
+# check that never reports on a merge group hangs every queue entry for the full
+# 120-minute `check_response_timeout_minutes`. The trade was deliberate and it
+# works — merge-group runs since 2026-09-03 have a p90 of 12.3 minutes — but it
+# left the Windows proof resting on an *assumption*: that the pull-request run
+# on the exact queued head commit passed. Nothing checked it. A pull request
+# whose Windows verification never ran, ran on an earlier commit, or ran and
+# failed could still reach the queue and merge on the strength of a green Linux
+# gate alone. GitHub's squash merge queue creates a new single-parent commit;
+# the pull-request head is deliberately not its ancestor.
+#
+# This command closes that gap without putting the long jobs back on the queue.
+# It is fail-closed: silence is never evidence, a run on a different commit is
+# never evidence, and a run that is still in progress is never evidence.
+#
+# Usage:
+#   ai-merge-group-evidence --ref <merge-group-ref> --merge-group-sha <sha>
+#     [--repo OWNER/NAME] [--workflow verify.yml] [--require <job-name>]...
+#
+# `--require` may be repeated; each named job must have concluded `success` in
+# the pull-request run on the queued head commit. With no `--require`, the run's
+# own conclusion is the only requirement.
+#
+# Exit status:
+#   0  the queued commit carries matching, complete, successful evidence
+#   1  evidence is missing, stale, mismatched, or unsuccessful
+#   2  usage or environment error (never treated as evidence)
+set -uo pipefail
+
+REF=''
+MERGE_GROUP_SHA=''
+REPO=''
+WORKFLOW='verify.yml'
+REQUIRED_JOBS=()
+
+die() { printf 'ai-merge-group-evidence: %s\n' "$1" >&2; exit 2; }
+reject() { printf 'ai-merge-group-evidence: %s\n' "$1" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ref|--merge-group-sha|--repo|--workflow|--require)
+      option="$1"
+      [ $# -ge 2 ] && [ -n "$2" ] || die "$option requires a value"
+      case "$option" in
+        --ref) REF="$2" ;;
+        --merge-group-sha) MERGE_GROUP_SHA="$2" ;;
+        --repo) REPO="$2" ;;
+        --workflow) WORKFLOW="$2" ;;
+        --require) REQUIRED_JOBS+=("$2") ;;
+      esac
+      shift 2 ;;
+    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument $1" ;;
+  esac
+done
+
+[ -n "$REF" ] || die 'a merge-group ref is required (--ref)'
+[ -n "$MERGE_GROUP_SHA" ] || die 'the merge-group commit is required (--merge-group-sha)'
+command -v gh >/dev/null 2>&1 || die 'the GitHub CLI is not available'
+command -v git >/dev/null 2>&1 || die 'git is not available'
+
+# refs/heads/gh-readonly-queue/main/pr-357-<base sha>. Anything else is not a
+# merge-queue ref, and guessing a pull-request number from it would be worse
+# than refusing.
+case "$REF" in
+  *gh-readonly-queue/*/pr-*) : ;;
+  *) die "not a merge-queue ref: $REF" ;;
+esac
+tail_part="${REF##*/pr-}"
+PR_NUMBER="${tail_part%%-*}"
+case "$PR_NUMBER" in
+  ''|*[!0-9]*) die "could not read a pull-request number from $REF" ;;
+esac
+
+REPO_ARGS=()
+[ -n "$REPO" ] && REPO_ARGS=(--repo "$REPO")
+
+HEAD_SHA="$(gh pr view "$PR_NUMBER" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --json headRefOid --jq .headRefOid 2>/dev/null)"
+case "$HEAD_SHA" in
+  ''|*[!0-9a-fA-F]*) die "could not read the head commit of pull request $PR_NUMBER" ;;
+esac
+
+# A squash merge-group commit has one parent and a new tree. Ask GitHub which
+# pull requests the synthetic commit represents and require the number encoded
+# in the queue ref to be among them. GitHub removes/rebuilds a queued entry when
+# its head changes; HEAD_SHA above is then also the exact commit whose
+# pull-request verification must have passed.
+[ -n "$REPO" ] || REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
+[ -n "$REPO" ] || die 'could not determine the GitHub repository'
+ASSOCIATED_PRS="$(gh api "repos/$REPO/commits/$MERGE_GROUP_SHA/pulls" --jq '.[].number' 2>/dev/null)"
+if ! printf '%s\n' "$ASSOCIATED_PRS" | grep -Fxq "$PR_NUMBER"; then
+  reject "GitHub does not associate merge group $MERGE_GROUP_SHA with pull request $PR_NUMBER; its evidence would be stale"
+fi
+
+RUNS="$(gh run list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --workflow "$WORKFLOW" --event pull_request --commit "$HEAD_SHA" --limit 20 --json databaseId,conclusion,status --jq '.[] | [.databaseId, .status, .conclusion] | @tsv' 2>/dev/null)"
+[ -n "$RUNS" ] || reject "no $WORKFLOW run exists for head commit $HEAD_SHA of pull request $PR_NUMBER"
+
+RUN_ID=''
+while IFS="$(printf '\t')" read -r id status conclusion; do
+  [ -n "$id" ] || continue
+  [ "$status" = 'completed' ] || reject "the $WORKFLOW run $id for head commit $HEAD_SHA has not finished ($status); an unfinished run is not evidence"
+  [ "$conclusion" = 'success' ] || reject "the $WORKFLOW run $id for head commit $HEAD_SHA concluded $conclusion"
+  RUN_ID="$id"
+done <<EOF
+$RUNS
+EOF
+
+[ -n "$RUN_ID" ] || reject "no usable $WORKFLOW run for head commit $HEAD_SHA"
+
+if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
+  JOBS="$(gh run view "$RUN_ID" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --json jobs --jq '.jobs[] | [.name, .conclusion] | @tsv' 2>/dev/null)"
+  [ -n "$JOBS" ] || reject "run $RUN_ID reports no jobs; its coverage cannot be confirmed"
+  for job in "${REQUIRED_JOBS[@]}"; do
+    line="$(printf '%s\n' "$JOBS" | awk -F'\t' -v want="$job" '$1 == want { print $2; exit }')"
+    [ -n "$line" ] || reject "run $RUN_ID never ran the required job $job on head commit $HEAD_SHA"
+    [ "$line" = 'success' ] || reject "the required job $job concluded $line in run $RUN_ID"
+  done
+fi
+
+printf 'ai-merge-group-evidence: pull request %s head %s verified by %s run %s\n' "$PR_NUMBER" "$HEAD_SHA" "$WORKFLOW" "$RUN_ID"

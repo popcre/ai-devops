@@ -26,7 +26,7 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 6 | [#163](https://github.com/popcre/ai-devops/issues/163) | Targeted local test selection | done | Merge `9682ec00062619261a545c25188da50195b1a807`; [`tests/verification/repo-throughput/issue-163-local-selection.md`](tests/verification/repo-throughput/issue-163-local-selection.md) |
 | 7 | [#260](https://github.com/popcre/ai-devops/issues/260) | Remove duplicate hosted Codex/Grok runs with fail-closed fallback | done | [`tests/verification/repo-throughput/issue-260-reviewer-overlap.md`](tests/verification/repo-throughput/issue-260-reviewer-overlap.md) |
 | 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
-| 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | open | — |
+| 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | done | [`tests/verification/repo-throughput/issue-164-merge-queue-convergence.md`](tests/verification/repo-throughput/issue-164-merge-queue-convergence.md) |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | open; after #161–#163 | — |
 | 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | open; after #160/#163 | — |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |

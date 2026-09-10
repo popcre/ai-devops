@@ -25,6 +25,7 @@
     "test-ai-memory-index-hook.sh",
     "test-ai-memory-sync-fanout.sh",
     "test-ai-memory-sync.sh",
+    "test-ai-merge-group-evidence.sh",
     "test-ai-model-call.sh",
     "test-ai-muse.sh",
     "test-ai-pr-wait.sh",

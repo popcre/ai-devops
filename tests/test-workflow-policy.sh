@@ -61,7 +61,21 @@ windows_offline="$(jq -r '.windows_offline_bash[]' "$manifest" | tr -d '\r' | LC
 windows_reviewer="$(jq -r '.windows_reviewer_safety_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 reviewer_workflow_count="$(grep -Fc "foreach (\$test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh'))" "$workflow")"
 hosted_without_reviewer="$(comm -23 <(printf "%s\n" "$windows_offline") <(printf "%s\n" "$windows_reviewer"))"
-check 'manifest declares 69 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 69 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 69 ]"
+# The queue gate carries no long jobs by design (#204), so the only thing
+# standing between a queued commit and main is proof that the pull-request run
+# on that exact commit passed. Losing this job would restore the silent trust
+# #164 removed, and nothing else in this suite would notice.
+check 'the merge queue proves the queued commit carries its own full verification' \
+  "grep -q 'merge-group-evidence:' '$workflow' && grep -q 'ai-merge-group-evidence --ref' '$workflow'"
+check 'the queue evidence gate demands both Windows lanes' \
+  "grep -q -- '--require windows-offline' '$workflow' && grep -q -- '--require windows-reviewer-safety' '$workflow'"
+# It must report on ordinary pull requests too. A required context that is
+# silent on one event either hangs the queue for the full response timeout or
+# blocks every pull request permanently - both halves of the #204 incident.
+check 'the queue evidence gate reports on every event, not only merge groups' \
+  "! awk '/^  merge-group-evidence:/{f=1;next} f&&/^  [a-z]/{exit} f' '$workflow' | grep -q \"if: .*event_name == 'merge_group'\""
+
+check 'manifest declares 70 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 70 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 70 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
