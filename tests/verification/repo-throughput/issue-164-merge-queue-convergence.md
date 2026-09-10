@@ -120,6 +120,19 @@ fail-closed: it correctly returned exit 1 instead of treating the synthetic
 group SHA as a PR head. The entry was explicitly dequeued before its non-required
 failure could be ignored by the current ruleset.
 
+Run `34440507656` was the genuine injected-failure demonstration on real group
+commit `3d42a82b`. The temporary configuration required a nonexistent
+`injected-failure-proof` job and made `linux-offline` depend on the evidence
+gate. The gate failed closed even earlier because exact-head pull-request run
+`34439723342` was still queued, and the injected dependency made
+`linux-offline` skip. This proved the live gate and downstream refusal reacted
+without running another suite; the focused test separately exercises the
+missing-job branch. GitHub nevertheless landed the queued commit because
+`merge-group-evidence` is not a required context until #166 and this ruleset
+accepted the skipped Linux context. The injected requirement and dependency
+were removed immediately in the recovery PR; #166 must make the evidence job
+itself required rather than relying on a skipped dependent job.
+
 ## What was deliberately not changed
 
 - The `merge_group` concurrency key stays `github.ref`. `base_ref` is always
