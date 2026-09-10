@@ -71,7 +71,7 @@ as PR #372, merged via merge queue (`mergedAt: 2026-09-10T08:04:20Z`, merge
 commit `6c3042db29b6a98320bdc503d7d976fbfcea9367`). **Verified fixed** in run
 2 above — section 1 now passes.
 
-## 3. Bug found, NOT fixed: ACL check fails on Blacksmith (issue #373)
+## 3. Bug found, NOT YET fixed: ACL check fails on Blacksmith (issue #373)
 
 `tests/test-ai-gemini.sh` line ~178, check `"preserved failure evidence uses
 a private Windows ACL"`:
@@ -85,23 +85,48 @@ output is printed in this check's failure path, and there's no way to get a
 shell into the ephemeral Blacksmith machine after the fact to inspect
 further without a code change.
 
-Root of the mismatch is likely `bin/ai-gemini` line 71, `secure_private()`:
-it grants the ACL via the raw SID (`icacls ... /grant:r "*${sid}:(F)"`), not
-the display name the test greps for, and never checks `icacls`'s own exit
-code (`>/dev/null 2>&1`, no `||` fallback). Two live hypotheses, not yet
-distinguished:
-1. Blacksmith's runner account SID doesn't resolve to a display name the way
-   GitHub-hosted's does — `icacls` prints the raw SID, the grant succeeded,
-   and this is a false-negative test on Blacksmith specifically.
-2. `icacls` is silently failing on Blacksmith due to a different privilege
-   model there — the ACL is never actually applied, a real (if narrow)
-   security gap on that runner class.
+`bin/ai-gemini` line 71, `secure_private()` grants the ACL via the raw SID
+(`icacls ... /grant:r "*${sid}:(F)"`), while the test's own check reads
+`icacls`'s output text for the resolved display **name**.
 
-**Why I didn't fix or even instrument this myself:** `bin/ai-gemini`'s
-`secure_private()` and `tests/test-ai-gemini.sh`'s matching check are
-reviewer-safety / evidence-protection code. This repo's `AGENTS.md` requires
-independent review for changes here, even a minor diagnostic addition — see
-decision needed in section 0.
+**Independent review obtained (Codex, plan-review, 2026-09-10) — verdict
+REJECT / hypothesis 1 confirmed.** Full report:
+`.ai/reviews/codex-plan-review-20260910T162556-5686-2968.md` (local review
+evidence, Git-ignored by design — not committed; also posted as a comment on
+[issue #373](https://github.com/popcre/ai-devops/issues/373#issuecomment-5622033494)).
+Findings:
+- **This is a false-negative test, not a real security gap.** `icacls`'s exit
+  status is the *last* command in `secure_private()`, so it does propagate as
+  the function's return value — my original write-up in this file was wrong
+  to say the exit code is silently discarded. The artifact-link check earlier
+  in the same test already proves `secure_private()` returned success, so the
+  ACL grant call *is* succeeding on Blacksmith. The test's `grep` for a
+  resolved display name is just too narrow for how that runner's identity
+  resolves.
+- **Two additional real gaps Codex found while reviewing:** (a) the test
+  doesn't actually prove privacy — it only checks the current user has Full
+  Control, never that no *other* identity also has permissive access, and
+  `icacls .../grant:r` only replaces that SID's own explicit grants, so
+  pre-existing grants to other identities can survive; (b) if production code
+  changes, the wrapper's version constant and the test's matching assertion
+  both need bumping (`bin/ai-gemini` line ~15, `tests/test-ai-gemini.sh` line
+  ~84).
+- **Recommended fix, in order:** (1) one throwaway Blacksmith dispatch with a
+  temporary diagnostic branch of the test — print current SID/name, `icacls`
+  status/output, and ACE identities normalized to SIDs (never artifact
+  contents) — to confirm before touching anything permanent; (2) change the
+  test to match by SID instead of display name; (3) add a check that rejects
+  unexpected Allow ACEs and confirms inheritance is disabled; (4) add
+  regression tests for a failing `icacls`, a pre-seeded permissive ACE,
+  disabled inheritance, and SID-only output.
+
+**Still not fixed — this plan-review is not the required final review.**
+`AGENTS.md` requires a **read-only exact-head final review before merge** for
+any actual diff to this reviewer-safety path; the plan-review above only
+validated the approach before code was written. The next session should
+write the fix per the recommendation above, then run
+`bin/ai-review codex final-check` (or `claude final-check`) against that real
+diff before merging.
 
 The Blacksmith lane already runs `-ExcludeReviewerSafety`, so this does not
 touch the reviewer-safety CI path itself; it's the general offline suite's
@@ -132,12 +157,17 @@ Gemini-provider evidence self-check, and it fails only on Blacksmith.
 
 ## 6. Exact next action for the next session
 
-1. Ask Albert (or check whether he already answered) the question in section 0.
-2. If yes: get independent review on issue #373's two hypotheses, apply
-   whichever fix it recommends to `bin/ai-gemini` and/or
-   `tests/test-ai-gemini.sh`, then re-dispatch
-   `windows-offline-blacksmith.yml` against `main` to confirm all 4 sections
-   pass.
-3. Close issue #373 and delete this handoff file once that's proven.
-4. Optionally (not blocking): dispatch a genuinely slow PR run to prove
+The section-0 decision is resolved and the plan-review is done (section 3
+above). Remaining:
+
+1. Implement the fix per section 3's recommendation: SID-based diagnostic
+   dispatch first, then the SID-match + unexpected-ACE-rejection fix, then
+   the regression tests.
+2. Get the required **exact-head final review** (`bin/ai-review codex
+   final-check` or `claude final-check`) on the real diff before merging —
+   the plan-review already done does not substitute for this.
+3. Re-dispatch `windows-offline-blacksmith.yml` against `main` to confirm all
+   4 sections pass.
+4. Close issue #373 and delete this handoff file once that's proven.
+5. Optionally (not blocking): dispatch a genuinely slow PR run to prove
    `windows-queue-watchdog.yml` posts its comment in production.
