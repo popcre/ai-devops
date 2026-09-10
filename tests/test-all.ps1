@@ -1,6 +1,5 @@
 param(
-  [switch]$WindowsPullRequest,
-  [switch]$QwenPullRequest
+  [switch]$WindowsPullRequest
 )
 
 $ErrorActionPreference = 'Continue'
@@ -10,13 +9,11 @@ $pwsh = (Get-Command pwsh).Source
 $failures = 0
 $timings = [System.Collections.Generic.List[object]]::new()
 
-if ($WindowsPullRequest -and $QwenPullRequest) { throw 'Choose only one Windows Bash scope.' }
-$bashScope = if ($QwenPullRequest) { 'QWEN-AFFECTED' } elseif ($WindowsPullRequest) { 'WINDOWS-SENSITIVE' } else { 'COMPLETE' }
+$bashScope = if ($WindowsPullRequest) { 'WINDOWS-SENSITIVE' } else { 'COMPLETE' }
 Write-Host "===== $bashScope OFFLINE BASH SUITE ====="
 $started = Get-Date
 $bashArgs = @((Join-Path $PSScriptRoot 'test-all.sh'))
 if ($WindowsPullRequest) { $bashArgs += '--windows-offline' }
-if ($QwenPullRequest) { $bashArgs += '--windows-qwen' }
 & $bash @bashArgs
 if ($LASTEXITCODE -ne 0) { $failures++ }
 $elapsed = [int]((Get-Date) - $started).TotalSeconds
