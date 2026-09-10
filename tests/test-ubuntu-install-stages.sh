@@ -40,5 +40,9 @@ grep -Fq 'run_stage required "Protected Muse review profile"' "$ROOT/install.sh"
   fail 'Ubuntu install does not provision the protected Muse profile as a required stage'
 grep -Fq '"$REPO_ROOT/bin/setup-opencode-muse.sh"' "$ROOT/install.sh" ||
   fail 'Ubuntu install does not invoke the repository-owned Muse setup'
+grep -Fq 'apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh tar)' "$ROOT/install.sh" ||
+  fail 'Ubuntu dependency installation does not include GNU tar for Qwen runtime fingerprints'
+grep -Fq 'require_commands git curl jq rg unzip python3 pip3 gh tar' "$ROOT/install.sh" ||
+  fail 'Ubuntu dependency verification does not require GNU tar for Qwen runtime fingerprints'
 
 echo 'PASS: required stages fail truthfully, privileged config artifacts publish safely, optional failures warn, and Node tools verify independently'

@@ -93,12 +93,13 @@ else
     || { printf 'ai-qwen: error: executable overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
   QWEN_BASH_BIN=/usr/bin/bash; QWEN_ENV_BIN=/usr/bin/env
 fi
-MAX_TURNS="${AI_QWEN_MAX_TURNS:-30}"
-MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
-MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
+REVIEW_MAX_TURNS="${AI_QWEN_MAX_TURNS:-120}"
+REVIEW_MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-120}"
+REVIEW_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-30m}"
+IMPLEMENT_MAX_TURNS="${AI_QWEN_MAX_TURNS:-30}"
+IMPLEMENT_MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
+IMPLEMENT_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
 
-WAIT_TIMEOUT="${AI_QWEN_WAIT_TIMEOUT:-900}"
-POLL_INTERVAL="${AI_QWEN_POLL_INTERVAL:-5}"
 QWEN_CREDENTIAL_BOUNDARY='
 keep_qwen_key="${BAILIAN_CODING_PLAN_API_KEY:-}"
 allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bin="$6"; preload="$7"; secret_file="$8"; shift 8
@@ -277,14 +278,6 @@ resolve_qwen() {
     printf '%s' "$c"; return 0
   done
   die "qwen binary not found. Set AI_QWEN_BIN, or install Qwen Code. Looked on PATH, the official standalone locations, and /usr/local/bin."
-}
-
-qwen_procs() {
-  if command -v pgrep >/dev/null 2>&1; then
-    pgrep -x qwen 2>/dev/null || true
-  else
-    ps -W 2>/dev/null | grep -i '[q]wen' || true
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -510,36 +503,18 @@ write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELO
 }
 
 AWAIT_RESULT_REASON=""
-await_result() { # await_result FILE LABEL
-  local f="$1" label="$2" waited=0 empty=0 saw=0
+await_result() { # await_result FILE
+  local f="$1"
   AWAIT_RESULT_REASON=""
-  while [ "$waited" -lt "$WAIT_TIMEOUT" ]; do
-    has_result "$f" && return 0
-    # Fast-fail ONLY if a qwen process was positively seen and then vanished.
-    # If detection never matched, we do not trust it and wait the full timeout —
-    # a detection miss must never abort a healthy slow run.
-    if [ -n "$(qwen_procs)" ]; then saw=1; empty=0
-    elif [ "$saw" = 1 ]; then
-      empty=$((empty + 1))
-      if [ "$empty" -ge 2 ]; then
-        note ""
-        note "ai-qwen: Qwen is no longer running but never emitted a terminal success result."
-        note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
-        note "  elapsed  : ${waited}s"
-        note "  diagnose : ai-qwen doctor"
-        AWAIT_RESULT_REASON="process-ended"
-        return 1
-      fi
-    fi
-    sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))
-    [ $((waited % 60)) -eq 0 ] && note "  … $label still running (${waited}s)"
-  done
+  # run_turn synchronously waits for the provider process and records its exit
+  # status before this function is called. Once that process has returned, no
+  # later terminal record can appear; waiting again only hides the real stderr.
+  has_result "$f" && return 0
   note ""
-  note "ai-qwen: no terminal success result after ${WAIT_TIMEOUT}s — the run did not complete."
+  note "ai-qwen: Qwen ended without emitting a terminal success result."
   note "  output   : $f ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
   note "  diagnose : ai-qwen doctor"
-  note "  Raise the ceiling with AI_QWEN_WAIT_TIMEOUT=<seconds> for a genuinely long run."
-  AWAIT_RESULT_REASON="timeout"
+  AWAIT_RESULT_REASON="process-ended"
   return 1
 }
 
@@ -656,10 +631,15 @@ cleanup_qualification_probe() {
 }
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
-  local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload; qwen="$(resolve_qwen)"
+  local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
+  if [ "$mode" = review ]; then
+    max_turns="$REVIEW_MAX_TURNS"; max_tool_calls="$REVIEW_MAX_TOOL_CALLS"; max_wall_time="$REVIEW_MAX_WALL_TIME"
+  else
+    max_turns="$IMPLEMENT_MAX_TURNS"; max_tool_calls="$IMPLEMENT_MAX_TOOL_CALLS"; max_wall_time="$IMPLEMENT_MAX_WALL_TIME"
+  fi
   local args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
-    --max-session-turns "$MAX_TURNS" --max-wall-time "$MAX_WALL_TIME"
-    --max-tool-calls "$MAX_TOOL_CALLS" --max-subagent-depth 1)
+    --max-session-turns "$max_turns" --max-wall-time "$max_wall_time"
+    --max-tool-calls "$max_tool_calls" --max-subagent-depth 1)
   [ -z "$sid" ] || args+=(--resume "$sid")
   # The provider key lives in the Qwen process environment so it survives the
   # runtime's startup relaunch, so EVERY mode depends on the installer-patched
@@ -956,10 +936,9 @@ Environment:
   AI_QWEN_CALLER       'claude' (default) or 'codex' — keeps sessions separate
   AI_QWEN_BIN          explicit path to the qwen binary
   AI_QWEN_MODEL        model pin ($QWEN_MODEL)
-  AI_QWEN_MAX_TURNS    maximum session turns ($MAX_TURNS)
-  AI_QWEN_MAX_TOOL_CALLS maximum tool calls ($MAX_TOOL_CALLS)
-  AI_QWEN_MAX_WALL_TIME wall-clock limit ($MAX_WALL_TIME)
-  AI_QWEN_WAIT_TIMEOUT seconds to wait for completion ($WAIT_TIMEOUT)
+  AI_QWEN_MAX_TURNS    override session turns (review $REVIEW_MAX_TURNS; write $IMPLEMENT_MAX_TURNS)
+  AI_QWEN_MAX_TOOL_CALLS override tool calls (review $REVIEW_MAX_TOOL_CALLS; write $IMPLEMENT_MAX_TOOL_CALLS)
+  AI_QWEN_MAX_WALL_TIME override wall-clock limit (review $REVIEW_MAX_WALL_TIME; write $IMPLEMENT_MAX_WALL_TIME)
   AI_QWEN_STATE_DIR    session state ($STATE_DIR)
 EOF
 }
@@ -1037,7 +1016,8 @@ cmd_doctor() {
     echo "child secrets : FAILED — rerun the repository-owned provider CLI installer"; rc=1
   fi
   echo "implement     : full Qwen tools + sandbox + disposable Git worktree"
-  echo "budgets       : turns=$MAX_TURNS tools=$MAX_TOOL_CALLS wall=$MAX_WALL_TIME"
+  echo "review budgets: turns=$REVIEW_MAX_TURNS tools=$REVIEW_MAX_TOOL_CALLS wall=$REVIEW_MAX_WALL_TIME"
+  echo "write budgets : turns=$IMPLEMENT_MAX_TURNS tools=$IMPLEMENT_MAX_TOOL_CALLS wall=$IMPLEMENT_MAX_WALL_TIME"
   echo
   if qwen_local "$qwen" sessions list --json --limit 1 >/dev/null 2>&1; then
     echo "session store : OK"
@@ -1122,7 +1102,9 @@ LIFECYCLE_PRIOR_TREE=""
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
   local out="$1" err="$2" reason="$3"
   [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
-  if { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
+  if [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
+    printf 'turn_limit_cancelled'
+  elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
     printf 'usage-limit'
   elif [ "$LIFECYCLE_COMMAND_RC" != unavailable ] && [ "$LIFECYCLE_COMMAND_RC" -ne 0 ] 2>/dev/null; then
@@ -1167,6 +1149,7 @@ mark_preserved() { # mark_preserved OWNER
 safe_report_detail() { # safe_report_detail TERMINAL_STATE
   case "$1" in
     usage-limit) printf 'Qwen reported a usage or billing limit.' ;;
+    turn_limit_cancelled) printf 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.' ;;
     timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
     cancelled)   printf 'The wrapper received an interrupt or termination request.' ;;
     *)           printf 'Qwen did not emit the required terminal completion record.' ;;
@@ -1399,6 +1382,8 @@ start_session() { # start_session NAME MODE
   [ "$mode" != review ] || record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" provider_turn_pending_local_validation
   if ! await_result "$out" "$mode '$name'"; then
     LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
+    [ "$mode" != review ] || record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" "$LIFECYCLE_STATE"
+    note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     exit 1
@@ -1509,9 +1494,13 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   record_existing_review_recovery "$meta" "$out" turn_in_progress
   write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
+  LIFECYCLE_COMMAND_RC="$rc"
   pending="${meta%.json}.pending.jsonl"
   record_existing_review_recovery "$meta" "$out" provider_turn_pending_local_validation
   if ! await_result "$out" "'$name'"; then
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
+    record_existing_review_recovery "$meta" "$out" "$LIFECYCLE_STATE"
+    note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     rm -f "$pf" "$out" "$out.err"; exit 1
@@ -1584,7 +1573,9 @@ continue_implementation() { # NAME RID META [RESET]
   fi
   rc="$RUN_TURN_RC"; LIFECYCLE_COMMAND_RC="$rc"
   if ! await_result "$out" "implementation continuation '$name'"; then
-    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"; exit 1
+    LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
+    note "  terminal reason: $LIFECYCLE_STATE"
+    exit 1
   fi
   verify_returned_model "$out"
   if [ "$reset" = 1 ]; then LIFECYCLE_SID="$(session_id_from "$out")"
