@@ -1,0 +1,113 @@
+name: windows-queue-watchdog
+
+# Albert cannot see the GitHub or self-hosted runner queues himself, so he has
+# no way to know when it would be worth paying for Blacksmith (#210). This
+# workflow watches a verify.yml run from the moment it starts: if the free
+# windows-offline-section matrix has not picked up all four jobs within a few
+# minutes - which is unusual, since hosted concurrency is normally unmetered
+# on this public repo - it leaves one comment on the pull request naming the
+# delay and saying to ask Claude to route that PR to windows-offline-blacksmith
+# instead. It never dispatches Blacksmith itself: routing there is always a
+# deliberate, paid choice a person makes, never an automatic fallback.
+on:
+  workflow_run:
+    workflows: [verify]
+    types: [in_progress]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  watch-section-pickup:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    # Bounded well under the 35-minute section ceiling: this only needs to
+    # catch a slow *start*, not watch the run to completion.
+    timeout-minutes: 8
+    steps:
+      - name: Watch section pickup and flag a slow start
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const prs = run.pull_requests || [];
+            if (prs.length === 0) {
+              core.info('No same-repo pull request on this run; nothing to flag.');
+              return;
+            }
+            const prNumber = prs[0].number;
+
+            // Instant pickup is the norm (checkout overhead alone measured
+            // ~15s in the 2026-09-10 baseline evidence). Flag a start delay
+            // only once it clearly stopped looking like normal variance.
+            const flagAfterMs = 3 * 60 * 1000;
+            const deadlineMs = 7 * 60 * 1000;
+            const pollMs = 20 * 1000;
+            const start = Date.now();
+
+            let flagged = false;
+            while (Date.now() - start < deadlineMs) {
+              const { data } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id,
+                filter: 'latest',
+                per_page: 100,
+              });
+              const sections = data.jobs.filter(j => j.name.startsWith('windows-offline-section'));
+              if (sections.length === 0) {
+                // Sections job set hasn't appeared yet, or this run skipped
+                // Windows entirely (prose-only change). Either way, nothing
+                // to flag yet - keep polling until the deadline.
+              } else {
+                const stillQueued = sections.filter(j => j.status === 'queued');
+                const elapsed = Date.now() - start;
+                if (stillQueued.length === 0) {
+                  core.info(`All ${sections.length} Windows sections picked up after ${Math.round(elapsed / 1000)}s.`);
+                  return;
+                }
+                if (elapsed >= flagAfterMs && !flagged) {
+                  const minutes = Math.round(elapsed / 60000);
+                  const body = [
+                    `**Windows checks are running slow to start.**`,
+                    ``,
+                    `${stillQueued.length} of ${sections.length} Windows sections are still queued after ` +
+                      `about ${minutes} minute(s), which is unusual for this repo - they normally start ` +
+                      `almost instantly.`,
+                    ``,
+                    `If you want this to run now instead of waiting, tell Claude to route this pull ` +
+                      `request to Blacksmith (paid, near-instant start) instead of waiting on the free lane.`,
+                  ].join('\n');
+                  const marker = '<!-- windows-queue-watchdog -->';
+                  const { data: comments } = await github.rest.issues.listComments({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    per_page: 100,
+                  });
+                  const existing = comments.find(c => c.body && c.body.includes(marker));
+                  const commentBody = `${marker}\n${body}`;
+                  if (existing) {
+                    await github.rest.issues.updateComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      comment_id: existing.id,
+                      body: commentBody,
+                    });
+                  } else {
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: prNumber,
+                      body: commentBody,
+                    });
+                  }
+                  flagged = true;
+                }
+              }
+              await new Promise(resolve => setTimeout(resolve, pollMs));
+            }
+            if (!flagged) {
+              core.info('Sections never appeared or resolved without crossing the flag threshold.');
+            }
