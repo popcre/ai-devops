@@ -66,9 +66,9 @@ one). Each was a real failing run, not a starvation rebuild.
 of the `gh-readonly-queue/main/pr-<N>-<sha>` ref, resolves that pull request's
 head commit, and refuses to pass unless:
 
-- GitHub associates the synthetic merge-group commit with the pull request named
-  by the queue ref. Squash merge groups have one parent and a new tree, so the
-  pull-request head is deliberately not an ancestor;
+- the live GraphQL merge-queue entry is frozen to the same pull-request head
+  whose verification is being checked. Squash merge groups have one parent and
+  a new tree, so the pull-request head is deliberately not an ancestor;
 - a `verify.yml` run on event `pull_request` exists for that exact commit;
 - every such run has finished and concluded `success` — an in-progress run is not
   evidence, and an older failing run on the same commit still rejects;
@@ -105,10 +105,14 @@ merge groups. PR #364 head `162df0ac` versus group `c0c42012` returned ancestry
 exit **1**; PR #363 head `bd8e9d3a` versus group `3db8620e` also returned **1**.
 Each group had exactly one parent (the then-current `main`), while
 `git merge-tree --write-tree <parent> <pr-head>` produced the exact tree stored
-by the group commit. GitHub's commit-to-pulls endpoint associated each synthetic
-commit with the expected PR and exact head. The old check therefore rejected
-valid squash groups; the corrected gate validates GitHub's association and then
-demands completed exact-head PR evidence.
+by the group commit. The old check therefore rejected valid squash groups.
+
+Run `34437374341` then exercised the first proposed correction against a live group.
+It proved the REST commit-to-pulls endpoint is empty while the synthetic commit
+is still queued, returning exit 1 rather than a false pass. The final gate uses
+the live GraphQL `mergeQueueEntry.headCommit` instead, which exposes the exact
+PR head frozen by GitHub for this queue entry, and then demands completed
+exact-head pull-request evidence.
 
 ## What was deliberately not changed
 
