@@ -212,11 +212,24 @@ PACKET_DIR="$($PACKET "${PACKET_ARGS[@]}")" \
 "$PACKET" verify "$PACKET_DIR" >/dev/null \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
 
+# The prompt reaches Codex on stdin, which no shell converts. On Git Bash the
+# packet and snapshot paths are POSIX spellings (/c/...) that a native Windows
+# Codex resolves against the current drive root, so an absolute path in the
+# prompt sends the reviewer outside its own workspace and it reports a denied
+# read instead of a judgment. Observed live on 2026-09-09 (issue #210): a
+# final-check returned BLOCKED with "workspace read access was denied before
+# MANIFEST.md could be opened". Codex already starts in the snapshot via
+# `--cd`, so name the packet relative to that working directory: a relative
+# path needs no conversion and is correct on every platform.
+PACKET_REL="${PACKET_DIR#"$REVIEW_DIR"/}"
+[ "$PACKET_REL" != "$PACKET_DIR" ]   || die 'the review packet is not inside the review snapshot; refusing to send an unreachable path.'
+
 PROMPT="You are performing a READ-ONLY $MODE. Do not edit, create, commit, push, merge, or delete files.
 
-Read $PACKET_DIR/MANIFEST.md first. It binds the exact whole-source digest and
-change evidence. You may read any file under $REVIEW_DIR to verify the change,
-including every untracked file listed by the manifest.
+Your working directory is the review snapshot. Read $PACKET_REL/MANIFEST.md
+first. It binds the exact whole-source digest and change evidence. You may read
+any file under the working directory to verify the change, including every
+untracked file listed by the manifest.
 
 $DECISION
 
@@ -226,6 +239,21 @@ allowed word exactly as follows:
 ## Verdict
 APPROVE|REJECT|BLOCKED"
 
+# `--ignore-user-config` keeps user MCP servers and their secret-bearing
+# launcher arguments out of a sealed review, but it also drops the one Windows
+# setting that lets Codex spawn a process at all: `[windows] sandbox`. Without
+# it, codex-cli 0.153.2 refuses every shell command with
+# `CreateProcess ... rejected: blocked by policy`, in read-only AND
+# workspace-write alike, so the reviewer reports a denied read instead of a
+# judgment. Observed live on 2026-09-09 (issue #210). This selects the sandbox
+# IMPLEMENTATION, not its permissions: `--sandbox read-only` still denies every
+# write, proved live by a refused file creation.
+WINDOWS_SANDBOX_ARGS=()
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    WINDOWS_SANDBOX_ARGS=(-c "windows.sandbox=\"${AI_CODEX_WINDOWS_SANDBOX:-elevated}\"") ;;
+esac
+
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
@@ -233,7 +261,7 @@ set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
 # secret-bearing launcher arguments through terminal-title control sequences.
-printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
+printf '%s\n' "$PROMPT" | timeout "$REVIEW_TIMEOUT" "${CODEX_ARGS[@]}" ${WINDOWS_SANDBOX_ARGS[@]+"${WINDOWS_SANDBOX_ARGS[@]}"} --ignore-user-config --cd "$REVIEW_DIR" - > "$TMP_OUT" 2> "$TMP_ERR" & PROVIDER_PID=$!
 wait "$PROVIDER_PID"; PROVIDER_RC=$?; PROVIDER_PID=""
 set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
