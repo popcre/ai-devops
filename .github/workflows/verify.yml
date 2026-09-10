@@ -137,7 +137,7 @@ jobs:
             echo 'Not a merge-queue run: the queued-commit evidence check applies to merge groups only.'
             exit 0
           fi
-          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
+          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety --require injected-failure-proof
 
   # Ordinary pull requests divide the Windows-sensitive lane into four declared,
   # balanced sections that run at the same time on four independent GitHub-hosted

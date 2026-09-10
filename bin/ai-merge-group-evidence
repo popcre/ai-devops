@@ -12,7 +12,8 @@
 # on the exact queued head commit passed. Nothing checked it. A pull request
 # whose Windows verification never ran, ran on an earlier commit, or ran and
 # failed could still reach the queue and merge on the strength of a green Linux
-# gate alone.
+# gate alone. GitHub's squash merge queue creates a new single-parent commit;
+# the pull-request head is deliberately not its ancestor.
 #
 # This command closes that gap without putting the long jobs back on the queue.
 # It is fail-closed: silence is never evidence, a run on a different commit is
@@ -85,11 +86,16 @@ case "$HEAD_SHA" in
   ''|*[!0-9a-fA-F]*) die "could not read the head commit of pull request $PR_NUMBER" ;;
 esac
 
-# The queued group must actually contain that commit. Without this, a pull
-# request could be re-pushed after entering the queue and the evidence below
-# would describe a commit that is not the one about to merge.
-if ! git merge-base --is-ancestor "$HEAD_SHA" "$MERGE_GROUP_SHA" 2>/dev/null; then
-  reject "the queued group $MERGE_GROUP_SHA does not contain head commit $HEAD_SHA of pull request $PR_NUMBER; its evidence would be stale"
+# A squash merge-group commit has one parent and a new tree. Ask GitHub which
+# pull requests the synthetic commit represents and require the number encoded
+# in the queue ref to be among them. GitHub removes/rebuilds a queued entry when
+# its head changes; HEAD_SHA above is then also the exact commit whose
+# pull-request verification must have passed.
+[ -n "$REPO" ] || REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
+[ -n "$REPO" ] || die 'could not determine the GitHub repository'
+ASSOCIATED_PRS="$(gh api "repos/$REPO/commits/$MERGE_GROUP_SHA/pulls" --jq '.[].number' 2>/dev/null)"
+if ! printf '%s\n' "$ASSOCIATED_PRS" | grep -Fxq "$PR_NUMBER"; then
+  reject "GitHub does not associate merge group $MERGE_GROUP_SHA with pull request $PR_NUMBER; its evidence would be stale"
 fi
 
 RUNS="$(gh run list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --workflow "$WORKFLOW" --event pull_request --commit "$HEAD_SHA" --limit 20 --json databaseId,conclusion,status --jq '.[] | [.databaseId, .status, .conclusion] | @tsv' 2>/dev/null)"

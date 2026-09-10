@@ -66,9 +66,9 @@ one). Each was a real failing run, not a starvation rebuild.
 of the `gh-readonly-queue/main/pr-<N>-<sha>` ref, resolves that pull request's
 head commit, and refuses to pass unless:
 
-- the queued group actually contains that head commit (`git merge-base
-  --is-ancestor`), so a re-push after entering the queue cannot merge on evidence
-  describing a different commit;
+- GitHub associates the synthetic merge-group commit with the pull request named
+  by the queue ref. Squash merge groups have one parent and a new tree, so the
+  pull-request head is deliberately not an ancestor;
 - a `verify.yml` run on event `pull_request` exists for that exact commit;
 - every such run has finished and concluded `success` — an in-progress run is not
   evidence, and an older failing run on the same commit still rejects;
@@ -97,6 +97,18 @@ and script must be present, both Windows lanes must be named as required, and
 the job must not be gated to `merge_group` only. Against `origin/main`'s
 `verify.yml` all three fail (`grep -c 'merge-group-evidence:'` returns 0), which
 is what makes them worth keeping.
+
+## Real merge-group shape and rejected ancestry rule
+
+The exit code was captured directly, without a pipe, against two completed real
+merge groups. PR #364 head `162df0ac` versus group `c0c42012` returned ancestry
+exit **1**; PR #363 head `bd8e9d3a` versus group `3db8620e` also returned **1**.
+Each group had exactly one parent (the then-current `main`), while
+`git merge-tree --write-tree <parent> <pr-head>` produced the exact tree stored
+by the group commit. GitHub's commit-to-pulls endpoint associated each synthetic
+commit with the expected PR and exact head. The old check therefore rejected
+valid squash groups; the corrected gate validates GitHub's association and then
+demands completed exact-head PR evidence.
 
 ## What was deliberately not changed
 
