@@ -64,6 +64,17 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The Blacksmith Windows runner image does not provide jq.'
           }
+      - name: Shorten TEMP so nested mktemp trees stay under the Windows path limit
+        # Blacksmith's default runneradmin TEMP (C:\Users\runneradmin\AppData\Local\Temp)
+        # is far deeper than GitHub-hosted's (D:\a\_temp), and these suites nest their
+        # own mktemp trees below it - long enough to cross the 260-char Windows path
+        # cap and fail silently (see tests/verification for the prior parallel-run
+        # incident with the same root cause). A short root avoids it.
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\t | Out-Null
+          "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Windows-sensitive section ${{ matrix.section }} of 4 (Blacksmith)
         shell: pwsh
         run: |
