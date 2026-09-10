@@ -354,6 +354,26 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
   mv -f "$tmp" "$f"
 }
 
+# A successful HTTP submission can still leave the paid provider turn's outcome
+# unknown if this process dies before a terminal record arrives. Keep that fact
+# before submitting, then refuse a same-name continuation until a proven terminal
+# result clears it. This is deliberately narrower than Grok's cross-checkout
+# lock: GLM sessions are bound to one exact OpenCode session.
+mark_remote_turn_pending() { # META
+  local meta="$1" now
+  now="$(date -u +%FT%TZ)"
+  write_meta "$meta" "$(jq --arg now "$now" '.remote_turn={state:"pending",started_at:$now}' "$meta")"
+}
+
+remote_turn_pending() { # META
+  jq -e '.remote_turn.state == "pending"' "$1" >/dev/null 2>&1
+}
+
+clear_remote_turn_pending() { # META
+  local meta="$1"
+  write_meta "$meta" "$(jq 'del(.remote_turn)' "$meta")"
+}
+
 implementation_terminal() {
   case "$1" in completed|failed|aborted) return 0 ;; *) return 1 ;; esac
 }
@@ -1039,6 +1059,7 @@ cmd_new() {
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
   fi
+  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1050,6 +1071,7 @@ cmd_new() {
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
   verify_model "$msg"
+  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
@@ -1062,6 +1084,12 @@ cmd_ask() {
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
   [ -f "$mp" ] || die "no session '$name' for caller '$CALLER' in this repo. Start one: ai-glm new $name"
+  # Claim the session before inspecting its paid-turn state. A process that
+  # waited for a crashed owner must re-read the durable record under the lock.
+  lock="$(lock_path "$rid" "$name")"
+  lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s.
+       If you are sure nothing else is running, remove: $lock"
+  remote_turn_pending "$mp" && die "session '$name' has a prior GLM turn with unconfirmed remote completion. Do not retry it; inspect or delete the exact session before starting a new named review."
   sid="$(jq -r .opencode_session_id "$mp")"
   [ "$(jq -r .type "$mp")" = "review" ] || die "session '$name' is not a review session."
   api GET "/session/$sid" | jq -e .id >/dev/null 2>&1 || \
@@ -1069,9 +1097,6 @@ cmd_ask() {
        Start a new one (a replacement under the same name would falsely imply continuity):
          ai-glm delete $name && ai-glm new $name ..."
   pf="$(read_prompt)"
-  lock="$(lock_path "$rid" "$name")"
-  lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s.
-       If you are sure nothing else is running, remove: $lock"
   before="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   # Refresh the snapshot so a later turn reviews the CURRENT working tree rather
   # than a stale copy. The snapshot path is deterministic, so the live OpenCode
@@ -1098,6 +1123,7 @@ $REVIEW_HEAD only."
   if ! capacity_gate; then rm -f "$pf"; lock_release "$lock"; return 1; fi
   write_meta "$mp" "$(jq --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" '.last_diagnostic_run_id=$diagnostic|.quota_result=$quota' "$mp")"
   record_diagnostic preflight capacity-checked --local-health healthy
+  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1109,6 +1135,7 @@ $REVIEW_HEAD only."
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
   verify_model "$msg"
+  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then
     write_meta "$mp" "$(jq '.status="failed"' "$mp")"

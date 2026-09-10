@@ -22,6 +22,7 @@ check "exhausted capacity fails before a Kimi review job is created" "sed -n '/s
 check "worker launch failure records a terminal diagnostic" "grep -q 'terminal worker-start-failed.*failure-class worker-start-failed' '$SCRIPT'"
 check "every Kimi startup failure path records terminal evidence" "test \"\$(grep -c 'terminal worker-start-failed' '$SCRIPT')\" -eq 3"
 check "Kimi diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
+check "Kimi delegates only pure adapter primitives to the shared helper" "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -648,7 +649,11 @@ AW="$TMP/await.jsonl"; : > "$AW"
 ( sleep 2; printf '{"role":"assistant","content":"still working"}\n' > "$AW"
   sleep 2; cat "$TMP/fixture.jsonl" > "$AW" ) &
 BG=$!
-sed '/^CMD=/,$d' "$SCRIPT" > "$TMP/lib.sh"
+# The extracted library normally resolves its helper relative to itself.  Keep
+# that dependency pointed at the real checkout so this terminal-record fixture
+# executes the same functions as the installed wrapper.
+sed '/^CMD=/,$d' "$SCRIPT" | \
+  sed "s|source \"\$SELF_DIR/../tools/lib/provider-wrapper-common.sh\"|source \"$REPO_ROOT/tools/lib/provider-wrapper-common.sh\"|" > "$TMP/lib.sh"
 START=$(date +%s)
 ( set +e; . "$TMP/lib.sh"; await_result "$AW" test ) >/dev/null 2>&1
 RC=$?; ELAPSED=$(( $(date +%s) - START )); wait $BG 2>/dev/null
