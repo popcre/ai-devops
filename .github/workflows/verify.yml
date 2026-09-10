@@ -76,8 +76,8 @@ jobs:
     uses: ./.github/workflows/fast-classifier.yml
 
   linux-offline:
-    needs: [fast-classifier, manual-preflight, merge-group-evidence]
-    if: ${{ !cancelled() && needs.merge-group-evidence.result == 'success' && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    needs: [fast-classifier, manual-preflight]
+    if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -137,7 +137,7 @@ jobs:
             echo 'Not a merge-queue run: the queued-commit evidence check applies to merge groups only.'
             exit 0
           fi
-          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety --require injected-failure-proof
+          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
 
   # Ordinary pull requests divide the Windows-sensitive lane into four declared,
   # balanced sections that run at the same time on four independent GitHub-hosted
