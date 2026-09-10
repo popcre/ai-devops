@@ -104,6 +104,41 @@ jobs:
       - name: Complete offline Bash suite
         run: bash tests/test-all.sh
 
+  # The queue gate is deliberately light: #204 took the long Windows jobs off
+  # merge_group because a required check that never reports on a merge group
+  # hangs every entry for the full 120-minute check_response_timeout. That trade
+  # left the Windows proof resting on the pull-request run of the queued head
+  # commit, with nothing checking that it existed, matched the commit, finished,
+  # or passed. This job checks exactly that, in seconds, so the queue keeps its
+  # measured p90 of about 12 minutes while stale, missing or mismatched evidence
+  # can no longer merge. It is fail-closed: an error exits non-zero rather than
+  # letting the change through.
+  merge-group-evidence:
+    # Runs on every event on purpose. A required check that reports on one event
+    # and stays silent on the other is the #204 failure in either direction: a
+    # merge group waits out the 120-minute response timeout, or a pull request
+    # can never satisfy a context that never reports. Outside the queue this job
+    # says so and passes in seconds, so one stable context covers both.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Queued commit carries its own full verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != 'merge_group' ]; then
+            echo 'Not a merge-queue run: the queued-commit evidence check applies to merge groups only.'
+            exit 0
+          fi
+          bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
+
   # Ordinary pull requests divide the Windows-sensitive lane into four declared,
   # balanced sections that run at the same time on four independent GitHub-hosted
   # machines (#210). Hosted concurrency is unmetered on a public repository, so
