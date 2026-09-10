@@ -48,6 +48,7 @@
     "test-completion-eval.sh",
     "test-install-ai-provider-clis.sh",
     "test-installer-parity.sh",
+    "test-lib-test-harness.sh",
     "test-lib-test-timing.sh",
     "test-line-endings.sh",
     "test-markdown-links.sh",

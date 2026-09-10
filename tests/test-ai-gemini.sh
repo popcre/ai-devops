@@ -4,9 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-gemini"; FIXTURES="$ROOT/tests/fixtures/ai-gemini"
 PASS=0; FAIL=0
-ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 # Timing budgets are measured, not guessed: a constant that is generous on an
 # idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md

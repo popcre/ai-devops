@@ -4,8 +4,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CATALOG="$ROOT/config/tool-versions.json"
 PASS=0; FAIL=0
-ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 if jq -e '.schema_version == 1 and (.reviewed_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))' "$CATALOG" >/dev/null; then
   ok "version catalog has a dated schema"

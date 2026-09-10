@@ -223,9 +223,13 @@ jobs:
     # the old 75-minute ceiling at 75m11s (run 33675127243). Self-hosted
     # EDGE-RUNN-ENVY over four runs the same day: 58m40s to 62m18s. This
     # ceiling is sized from those measurements to bound a genuine hang; it is
-    # NOT a target. #166 must set the required-check ceiling from a completed
-    # run rather than from this bound.
-    timeout-minutes: 100
+    # NOT a target. Runs 34445127896 and 34445717137 completed the substantive
+    # suite at 99m56s and 99m59s respectively, but GitHub cancelled job
+    # finalization at the 100-minute boundary. Five minutes allows checkout
+    # cleanup and result publication without masking a genuine hang. #166 must
+    # still set the required-check ceiling from a completed run rather than from
+    # this bound.
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

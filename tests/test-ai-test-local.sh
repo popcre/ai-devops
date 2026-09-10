@@ -16,9 +16,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="$REPO_ROOT/tests/run-parallel.sh"
 LAUNCHER="$REPO_ROOT/bin/ai-test-local"
 PASS=0; FAIL=0
-ok()  { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

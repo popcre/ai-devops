@@ -12,9 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOL="$ROOT/tools/completion-eval/completion-eval.py"
 PY="$(command -v py >/dev/null 2>&1 && echo "py -3" || echo python3)"
 PASS=0; FAIL=0
-ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 # --- the run command: read-only, and effort pinned ------------------------------
 codex_cmd="$($PY "$TOOL" --client codex --print-command)"

@@ -3,9 +3,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0; FAIL=0
-ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 FIX="$ROOT/tests/fixtures/shared-db-routing/1097-successor-1113.md"
 ORCH="$ROOT/skills/shared/shared-db-orchestrator/SKILL.md"
 MANUAL="$ROOT/skills/shared/shared-db-orchestrator/references/operating-manual.md"

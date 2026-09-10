@@ -8,8 +8,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AI_GLM="$REPO_ROOT/bin/ai-glm"
 PASS=0; FAIL=0
-ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 # Timing budgets are measured, not guessed: a constant that is generous on an

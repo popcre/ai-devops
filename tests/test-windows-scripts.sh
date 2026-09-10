@@ -4,8 +4,7 @@
 set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0; FAIL=0
-ok()  { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
 cd "$REPO_ROOT"
 

@@ -14,13 +14,10 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-grok-review"
 PASS=0; FAIL=0; SKIP=0
-ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
-bad()  { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 # A platform-gated case that did not execute is not a passing check.
 # Counting it as one inflated the non-Windows totals and hid which
 # Windows cases never ran.
-skip() { printf '  skip %s\n' "$1"; SKIP=$((SKIP+1)); }
-check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 isolation_homes_match(){
   local home grok_home profile xdg_config xdg_cache xdg_data appdata localappdata
   local normalized_home normalized_grok normalized_profile normalized_config normalized_cache normalized_data
