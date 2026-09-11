@@ -91,6 +91,15 @@ outcomes, not merely prepare branches or make checks quiet.
   `EDGE-RUNN-ENVY` online/busy with unrelated work. There were 91 registered
   worktrees; preserve them unless a separately authorized cleanup proves each
   target is finished and unique work is retained.
+- The closeout secrets sweep found no credential-shaped additions and no `.env`
+  changes. The documentation pass found no stale operating instruction outside
+  this handoff and the two programme plans updated by PR #438.
+- Two other sessions' handoffs are stale because their named issues are closed:
+  `2026-09-01T1709Z-edge-dev-codex-issue-161-fast-ci.md` owned by
+  `codex/issue-161-fast-ci`, and
+  `2026-09-10T1402Z-edge-dev-codex-issue-167-finalization-proof.md` owned by
+  `codex/issue-167-shared-harness`. They were deliberately not deleted during
+  closeout; the successor must apply the three-part retention proof first.
 
 ## 4. Everything tried that did not work
 
@@ -141,6 +150,9 @@ outcomes, not merely prepare branches or make checks quiet.
    GitHub, runners, installed hashes and worktrees. Do not inherit a branch from
    another child. Gate: the new session can name current main, every open child,
    its exact PR head/base, runner state and installed source before editing.
+   Verify the two stale handoffs named in section 3 satisfy the successor rule;
+   retire them only when their landed work, transferred obligations and unique
+   decisions are all proven.
 2. Finish #396 from its own worktree. Rebase or merge current main into PR #416,
    inspect its exact delta and current issue acceptance, run focused tests,
    parallel independent exact-head review, CI, merge, install and live
@@ -226,15 +238,59 @@ outcomes, not merely prepare branches or make checks quiet.
   production mutation, capability reduction, or closure-order change, stop and
   raise the complete owner-decision list together.
 
+## Parallel reviewer accounting
+
+### Agent: Hubble / `review_glm_failures`
+
+- **Asked to do:** independently review #395's exact integrated head while the
+  other provider reviews ran in parallel.
+- **Actually did:** completed a read-only Muse review of
+  `aa3285e2c7dab53c6d03e8686e7aa9c40154b037` and returned `APPROVE`. The private
+  retained report hashes to
+  `d446784ac70a198916eb2cfd97a825b647338d30e6d1828151e12f404d17babe`.
+- **Found:** the approved #395 behavior remained intact after the upstream merge;
+  no actionable merge defect.
+- **PR / branch:** reviewed PR #421; created no branch or commit.
+- **Worktree:** no separately owned worktree; read-only work finished.
+- **Deliberately did NOT do, and why:** made no edits or database contact because
+  this was an independent final review.
+
+### Agent: Halley / `review_grok_doctor`
+
+- **Asked to do:** run an independent Grok exact-head review in parallel.
+- **Actually did:** preserved the session after the governed 20-turn limit ended
+  without a verdict; no report was created and no approval was claimed.
+- **Found:** no usable terminal verdict or findings.
+- **PR / branch:** inspected #395 evidence; created no branch or commit.
+- **Worktree:** no separately owned worktree; provider attempt finished.
+- **Deliberately did NOT do, and why:** did not retry an unchanged provider
+  attempt or fabricate a verdict; Muse supplied the required independent gate.
+
+### Agent: Boyle / `review_kimi_archive`
+
+- **Asked to do:** inspect the Kimi stale-archive race failure independently.
+- **Actually did:** performed read-only analysis and created no changes.
+- **Found:** the fixture orders provider completion, abort recording and owner
+  release; current code permits an abort-requested job to complete. The code was
+  unchanged from prior 244/244 passing evidence, so no real race defect was
+  established.
+- **PR / branch:** inspected the #395 repair context; created no branch or commit.
+- **Worktree:** no separately owned worktree; analysis finished.
+- **Deliberately did NOT do, and why:** did not weaken or rewrite the test; if the
+  symptom recurs, the next run must retain final metadata and saved output first.
+
 ## Handoff self-audit
 
 1. Yes. Sections 1–3 give a newcomer the application, purpose, exact current
    state, commits, runs, issues and open PR topology; section 6 gives ordered
    steps with a verification gate for every step.
 2. Yes. Sections 4–5 retain the failed approaches, timing race, five regression
-   groups, reviewer dead ends, Windows probe issue and durable-evidence findings.
-3. Yes. Sections 0–9 cover goals, state, failures, findings, constraints,
-   environment, risks, exact actions, merge/install/live proof and fixed order.
+   groups, reviewer dead ends, Windows probe issue and durable-evidence findings;
+   the parallel reviewer blocks preserve each agent's exact contribution.
+3. Yes. Sections 0–9 and the parallel reviewer accounting cover goals, state,
+   failures, findings, constraints, environment, risks, exact actions,
+   merge/install/live proof, fixed order and every delegated result.
 4. Yes. A line-by-line sweep of sections 1–9 found no current owner decision.
-   Section 0 says so explicitly, preserves all settled rulings, and tells the
-   next session how to raise any genuinely new decision in one message.
+   The parallel reviewer blocks also contain none. Section 0 says so explicitly,
+   preserves all settled rulings, and tells the next session how to raise any
+   genuinely new decision in one message.
