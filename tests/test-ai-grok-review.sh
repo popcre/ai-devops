@@ -61,6 +61,11 @@ check "both Grok dispatches gate capacity before exact-work reservation" "test \
 check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
 check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
 check "Grok diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
+if bash "$REPO_ROOT/tests/grok-auth-link-cases.sh"; then
+  ok "credential initialization preserves concurrent readers and failure evidence"
+else
+  bad "credential initialization preserves concurrent readers and failure evidence"
+fi
 
 TMP="$(mktemp -d)"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -72,6 +77,18 @@ TMP="$(cd "$TMP" && pwd -P)"
 mkdir -p "$TMP/system-tmp"
 export TMPDIR="$TMP/system-tmp"
 cleanup() {
+  # These files contain only offline stub fixtures. Preserve the actual owner
+  # failure in CI output before deleting scratch; a later serialization failure
+  # cannot explain why the original owner exited before reaching its lock.
+  if [ "$FAIL" -gt 0 ]; then
+    local diagnostic
+    for diagnostic in ask-a.rc ask-a.err ask-a.out ask-b.rc ask-b.err ask-b.out dup-ask.rc dup-ask.out; do
+      [ -s "$TMP/$diagnostic" ] || continue
+      printf '  fixture diagnostic: %s\n' "$diagnostic" >&2
+      tail -c 4096 "$TMP/$diagnostic" >&2
+      printf '\n' >&2
+    done
+  fi
   # Native Windows children can exit before Git Bash releases their final cwd
   # handle. Keep a persistent leak visible, but allow that bounded handoff to
   # settle so a fully passing safety run does not fail only in EXIT cleanup.
@@ -858,8 +875,8 @@ rm -f "$TMP/release-grok" "$TMP/hold-started"; echo hold > "$TMP/mode"
 # The owners must outlive the challenger below and the whole intentional stall.
 # Packet preparation plus the 150s Windows stall reached 243s in CI, so 240s
 # could expire a correct owner immediately before the exact retry checked it.
-( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err" ) & ASK_A_PID=$!
-( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err" ) & ASK_B_PID=$!
+( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-a --prompt next >"$TMP/ask-a.out" 2>"$TMP/ask-a.err"; rc=$?; printf '%s\n' "$rc" >"$TMP/ask-a.rc"; exit "$rc" ) & ASK_A_PID=$!
+( AI_GROK_WAIT_TIMEOUT="$(budget 80 480)" run ask ask-b --prompt other-next >"$TMP/ask-b.out" 2>"$TMP/ask-b.err"; rc=$?; printf '%s\n' "$rc" >"$TMP/ask-b.rc"; exit "$rc" ) & ASK_B_PID=$!
 # Packet construction can spend minutes inside one antivirus-scanned Git
 # operation without changing any observable file. The owning worker is the
 # reliable progress signal: wait while it is alive, but still fail if it exits

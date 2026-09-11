@@ -16,6 +16,8 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
+2026-09-11 installed component evidence: #396's Grok authentication-link concurrency repair merged through [PR #408](https://github.com/popcre/ai-devops/pull/408) as `e3b4700d1005088065740200a70d68d7574a4243`. Exact-head independent review and required CI passed; the unchanged local suite passed 226/226. Installed SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` passed two concurrent actual-auth initializers and 100 readability/same-inode checks, without paid provider work. Private incident evidence was appended. Broader #396, #337, and #159 remain open; #398 retains the original 198-entry round and runs last within #337, then #166 runs last overall.
+
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
