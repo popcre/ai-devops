@@ -36,3 +36,22 @@ staging path. The 13 reason/fault checks pass after those improvements.
 Independent exact-head review, required CI, installation and affected private
 incident reconciliation remain pending. No turn ceiling, permission, accounting
 rule, provider selection or database structure changed.
+
+Existing consumer issue #2707 identified a further exact root cause: Grok's
+final JSON omits the cancellation category, while its native `turn_completed`
+metadata retains it. The repair reads only bounded terminal metadata records,
+matches both session and request IDs, and preserves a compact private witness
+bound to the result and terminal-record hashes. Only one matching explicit
+`max_turns_reached` category changes generic cancellation to turn-limit
+exhaustion. Missing, ambiguous, mismatched and unknown metadata stays generic;
+no turn-count inference is made. The private incomplete publisher now uses its
+supported `report-publication` phase, so the witness survives cleanup.
+
+Native fixtures reproduced 11 passed/two failed before repair, then all 14
+passed. End-to-end continuation/metadata/diagnostic/private-publication checks
+pass 26/0/0. A read-only check against the retained real result and native
+terminal record also identified the exact turn limit: result SHA-256
+`d1220d662fd848808f435102cdd3045b78f235d3ff53ba2df348446017bc8091`,
+terminal-record SHA-256
+`5f2c67a072637cf0f0a519976a0cfa653d85a9700882471aa5f79ce314bbfb88`.
+No provider call or raw transcript-body publication was needed for this proof.

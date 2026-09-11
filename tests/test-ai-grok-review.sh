@@ -633,7 +633,7 @@ wait $BGPID 2>/dev/null
 # 7/8 -----------------------------------------------------------------------
 terminal_reason_cases(){
   local reason expected output status
-  source <(sed -n '/^terminal_reason() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
   note(){ printf '%s\n' "$*" >&2; }
   for reason in cancelled max_turns max_turns_reached max-turns-exhausted PRIVATE_UNKNOWN_STOP; do
     case "$reason" in cancelled) expected=provider_cancelled;; max*) expected=turn_limit_cancelled;; *) expected=unknown_terminal_reason;; esac
@@ -665,8 +665,39 @@ terminal_reason_cases(){
     test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && compgen -G "$TMP/typed-stop.json.incomplete.*.md" >/dev/null
   ); then ok 'failed incomplete publication preserves source response and stderr'; else bad 'failed incomplete publication preserves source response and stderr'; fi
 }
+
+native_terminal_reason_cases(){
+  local STATE_DIR="$TMP/native-terminal-state" fixture="$TMP/native-result.json" stream category output
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
+  mkdir -p "$(dirname "$stream")"
+  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+    jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
+    rm -f "$fixture.terminal.json"
+    jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
+    case "$category" in
+      wrong-request) jq -c '.params.update.prompt_id="prior-request"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      wrong-session) jq -c '.params.sessionId="another-session"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      duplicate) jq -c '.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; cat "$stream.new" "$stream.new" > "$stream" ;;
+      absent) : > "$stream" ;;
+    esac
+    capture_terminal_evidence "$fixture"
+    output="$(handle_stop_reason "$fixture" native 20 2>&1)"
+    if [ "$category" = max_turns_reached ]; then
+      check 'native exact session/request category identifies exhausted turn budget' "printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+      check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
+      printf '\n' >> "$fixture"
+      check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    else
+      check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
+    fi
+    check "native $category never prints private category text" "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_CATEGORY"
+  done
+}
 echo "== stop_reason handling =="
 terminal_reason_cases
+native_terminal_reason_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -682,17 +713,21 @@ CANCELLED_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--t4.json' -print -
 check 'cancelled session preserves the exact diagnostic class' "jq -e '.last_stop_reason==\"cancelled\" and .last_terminal_reason==\"provider_cancelled\"' '$CANCELLED_META'"
 
 terminal_provider_cases(){
-  local output status meta
+  local output status meta native_dir
   cp "$TMP/fixture.json" "$TMP/typed-fixture-original.json"
   echo ok > "$TMP/mode"
   if run new typed-stop-followup --prompt review >/dev/null 2>&1; then ok 'typed-stop fixture begins with an ordinary completed review'; else bad 'typed-stop fixture begins with an ordinary completed review'; fi
-  jq '.stopReason="max_turns_reached"' "$TMP/typed-fixture-original.json" > "$TMP/fixture.json"
+  jq '.stopReason="cancelled"|.requestId="typed-native-followup"' "$TMP/typed-fixture-original.json" > "$TMP/fixture.json"
+  native_dir="$AI_GROK_STATE_DIR/isolated-home/sessions/typed-fixture/$(jq -r .sessionId "$TMP/fixture.json")"
+  mkdir -p "$native_dir"
+  jq -c '{params:{sessionId:.sessionId,update:{sessionUpdate:"turn_completed",prompt_id:.requestId,stop_reason:.stopReason},_meta:{cancellationCategory:"max_turns_reached"}}}' "$TMP/fixture.json" > "$native_dir/updates.jsonl"
   output="$(run ask typed-stop-followup --prompt followup 2>&1)"; status=$?
   printf '%s\n' "$output" > "$TMP/typed-stop-diagnostic.txt"
   cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
   meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
   if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi
   if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep -q turn_limit_cancelled; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
+  if find "$AI_REVIEW_EVENT_DIR" -name '*.report.json' -type f -exec jq -r '.report_text // empty' {} + | grep -Fq '"category": "max_turns_reached"'; then ok 'private incomplete publication retains the bound native category witness'; else bad 'private incomplete publication retains the bound native category witness'; fi
 }
 terminal_provider_cases
 

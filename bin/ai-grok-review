@@ -1142,9 +1142,66 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
     *) printf 'unknown_terminal_reason' ;;
   esac
 }
+capture_terminal_evidence() { # bind native terminal metadata to this paid JSON result
+  [ "$(jq -r '.stopReason // ""' "$1")" = cancelled ] || return 0
+  local runtime; runtime="$(command -v python3 || command -v python)" || return 1
+  "$runtime" - "$1" "$STATE_DIR/isolated-home/sessions" <<'PY'
+import hashlib,json,os,pathlib,re,sys
+result_path=pathlib.Path(sys.argv[1]); raw=result_path.read_bytes(); result=json.loads(raw)
+sid,request=result.get('sessionId'),result.get('requestId')
+witness={'schema_version':1,'result_sha256':hashlib.sha256(raw).hexdigest(),'terminal_reason':'provider_cancelled','native_terminal_matches':0}
+root=pathlib.Path(sys.argv[2]); matches=[]
+valid=lambda value:isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',value)
+if valid(sid) and valid(request) and root.is_dir() and not root.is_symlink():
+    for parent in root.iterdir():
+        session=parent/sid; stream=session/'updates.jsonl'
+        if parent.is_symlink() or session.is_symlink() or stream.is_symlink() or not stream.is_file(): continue
+        if not stream.resolve().is_relative_to(root.resolve()): continue
+        try:
+            with stream.open('rb') as handle:
+                while True:
+                    line=handle.readline(65537)
+                    if not line: break
+                    if len(line)>65536:
+                        while line and not line.endswith(b'\n'): line=handle.readline(65537)
+                        continue
+                    if not re.search(rb'"sessionUpdate"\s*:\s*"turn_completed"',line): continue
+                    try: event=json.loads(line)
+                    except (ValueError,UnicodeError): continue
+                    if not isinstance(event,dict): continue
+                    params=event.get('params',{})
+                    if not isinstance(params,dict): continue
+                    update=params.get('update',{})
+                    if not isinstance(update,dict): continue
+                    if params.get('sessionId')!=sid or update.get('prompt_id')!=request or update.get('sessionUpdate')!='turn_completed' or update.get('stop_reason')!='cancelled': continue
+                    meta=params.get('_meta',{})
+                    category=meta.get('cancellationCategory') if isinstance(meta,dict) else None
+                    matches.append({'session_id':sid,'request_id':request,'category':category if isinstance(category,str) and len(category)<=160 else None,'source_terminal_sha256':hashlib.sha256(line).hexdigest()})
+        except OSError: continue
+witness['native_terminal_matches']=len(matches)
+if len(matches)==1:
+    witness.update(matches[0])
+    if matches[0]['category']=='max_turns_reached': witness['terminal_reason']='turn_limit_cancelled'
+fd=os.open(str(result_path)+'.terminal.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+with os.fdopen(fd,'w',encoding='utf-8') as handle: json.dump(witness,handle); handle.write('\n')
+PY
+}
+
+terminal_reason_for_result() {
+  local out="$1" stop; stop="$(jq -r '.stopReason // "unknown"' "$out")"
+  if [ "$stop" = cancelled ] && [ -f "$out.terminal.json" ] && [ ! -L "$out.terminal.json" ] &&
+     [ "$(jq -r '.result_sha256 // ""' "$out.terminal.json")" = "$(sha256sum "$out" | awk '{print $1}')" ] &&
+     jq -e '.schema_version==1 and .native_terminal_matches==1 and .category=="max_turns_reached" and .terminal_reason=="turn_limit_cancelled"' "$out.terminal.json" >/dev/null 2>&1; then
+    printf '%s' turn_limit_cancelled
+  else
+    terminal_reason "$stop"
+  fi
+}
+
 handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   local f="$1" name="$2" turns="$3" sr sid used
   sr="$(jq -r '.stopReason // "missing"' "$f")"
+  [ "$(terminal_reason_for_result "$f")" != turn_limit_cancelled ] || sr=max_turns_reached
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
   case "$sr" in
@@ -1204,13 +1261,18 @@ retain_failed_terminal() { # prepare private incomplete evidence before cleanup
   report="$(mktemp "$out.incomplete.XXXXXX.md")" || return 1
   {
     printf '# Incomplete Grok turn\n\nThis turn did not produce an accepted review.\n\n'
-    printf 'Provider terminal reason: %s\n\n## Provider result\n\n```json\n' "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")"
+    printf 'Provider terminal reason: %s\n\n## Provider result\n\n```json\n' "$(terminal_reason_for_result "$out")"
     cat "$out" || return 1
     printf '\n```\n\n## Provider stderr\n\n```text\n'
     [ ! -f "$out.err" ] || cat "$out.err" || return 1
     printf '\n```\n'
+    if [ -f "$out.terminal.json" ]; then
+      printf '\n## Bound terminal metadata\n\n```json\n'
+      cat "$out.terminal.json" || return 1
+      printf '\n```\n'
+    fi
   } > "$report" || return 1
-  if ! reviewer_event_publish_report grok "$report" '{"phase":"terminal-failure"}'; then
+  if ! reviewer_event_publish_report grok "$report" '{"phase":"report-publication"}'; then
     note "incomplete provider evidence retained: $report"
     return 1
   fi
@@ -1506,6 +1568,7 @@ cmd_new() {
   sid="$(jq -r '.sessionId // ""' "$out")"
   [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
+  capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
@@ -1514,7 +1577,7 @@ cmd_new() {
     --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
     --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
-    --arg terminal_reason "$(terminal_reason "$(jq -r '.stopReason // "?"' "$out")")" \
+    --arg terminal_reason "$(terminal_reason_for_result "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
       review_dir:$review_dir, base:$base, head:$head, packet_sha256:$pkthash,
@@ -1525,11 +1588,11 @@ cmd_new() {
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason_for_result "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
     retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
-  rm -f "$pf" "$out" "$out.err"
+  rm -f "$pf" "$out" "$out.err" "$out.terminal.json"
   return $st
 }
 
@@ -1629,12 +1692,13 @@ $REVIEW_HEAD only."
     exit 1
   fi
 
+  capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
   write_meta "$meta" "$(jq \
     --arg updated "$(date -u +%FT%TZ)" \
     --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
     --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
-    --arg terminal_reason "$(terminal_reason "$(jq -r '.stopReason // "?"' "$out")")" \
+    --arg terminal_reason "$(terminal_reason_for_result "$out")" \
     --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
     '.head=$head | .base=$base | .packet_sha256=$pkthash |
      .updated=$updated | .turns=(.turns+1)
@@ -1649,11 +1713,11 @@ $REVIEW_HEAD only."
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason_for_result "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
     retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
-  rm -f "$pf" "$out" "$out.err"
+  rm -f "$pf" "$out" "$out.err" "$out.terminal.json"
   return $st
 }
 
