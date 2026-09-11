@@ -328,6 +328,15 @@ create_or_refresh() { # create_or_refresh ROOT TAG STAGE
       remove_partial "$build" "$stage"; build=""
       die "could not build a complete review snapshot; no partial evidence was published."
     fi
+    # OpenCode names a project by origin URL, else the cached .git/opencode,
+    # else the root commit. Snapshots have no origin, so every snapshot of one
+    # repository would share a project and each server boot would rescan all
+    # of them (issue #430). Pin an ID derived from the published path: unique
+    # per snapshot, and unchanged when refresh-copy rebuilds the same path.
+    printf 'ai-review-sandbox:%s' "$stage" | git hash-object --stdin > "$build/.git/opencode" || {
+      remove_partial "$build" "$stage"; build=""
+      die "could not record the snapshot's reviewer project identity."
+    }
     after="$(source_digest "$root")"
     if [ "$before" = "$after" ]; then
       if [ -e "$stage" ]; then remove_sandbox "$stage"; fi
