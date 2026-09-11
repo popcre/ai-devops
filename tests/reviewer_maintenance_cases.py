@@ -837,7 +837,10 @@ wait "$job"
     def test_linked_implementation_recovers_report_and_missing_patch_without_rebinding(self):
         self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True)
 
-    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False):
+    def test_linked_implementation_recovers_report_after_patch_was_already_published(self):
+        self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True, patch_first=True)
+
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False, patch_first=False):
         state = self.root / "state"
         workspace = state / "worktrees/qwen.fixture-codex-work/wt"
         workspace.parent.mkdir(parents=True)
@@ -859,11 +862,14 @@ wait "$job"
             original = self.invocation(rid="f" * 32, provider="qwen", finish=False)
             events.bind_owner(self.root, "qwen", original["run_id"], owner)
             events.require_report(self.root, "qwen", original["run_id"])
-            events.publish_report(self.root, "qwen", original["run_id"], report)
-            canonical.unlink()
-            with self.assertRaises(events.Blocked):
+            if patch_first:
                 events.publish_patch(self.root, "qwen", original["run_id"], canonical)
-            canonical.write_bytes(patch_data)
+            else:
+                events.publish_report(self.root, "qwen", original["run_id"], report)
+                canonical.unlink()
+                with self.assertRaises(events.Blocked):
+                    events.publish_patch(self.root, "qwen", original["run_id"], canonical)
+                canonical.write_bytes(patch_data)
             with self.assertRaisesRegex(events.Blocked, "still active"):
                 events.reconcile_owner(self.root, "qwen", owner, metadata, report)
             self.write({**original, "event": "finished", "exit_code": 1, "evidence_state": "publication-incomplete"})

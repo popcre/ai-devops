@@ -195,13 +195,7 @@ def publish_patch(directory, provider, run_id, path, facts=None):
     return publish_report(directory, provider, run_id, path, facts or {"phase": "report-publication"}, key)
 
 
-def recovered_references(directory, provider, run_id):
-    required_keys = set()
-    for path in (evidence_root(directory, run_id) / "artifacts").glob("*.json"):
-        row = read_json(path)
-        require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
-                        "artifact_kind": "git-binary-patch", "artifact_key": path.stem}, "required patch identity changed")
-        required_keys.add(path.stem)
+def recovered_references(directory, provider, run_id, required_keys):
     candidates = {}
     for candidate in (directory / "evidence").glob("*/*.report.json"):
         row = read_json(physical(candidate))
@@ -225,14 +219,6 @@ def verify_reports(directory, provider, run_id):
     require(required == {"schema_version": 1, "run_id": run_id, "provider": provider,
                          "head": start["head"], "caller": start["caller"]}, "evidence requirement changed")
     paths = sorted(root.glob("*.report.json"))
-    if not paths:
-        # A local finalizer may preserve a paid result after its original
-        # wrapper has ended. Validate that immutable receipt without rewriting
-        # the earlier event or pretending another provider request occurred.
-        recovered = recovered_references(directory, provider, run_id)
-        if recovered:
-            return sorted(set(recovered))
-    require(paths, "required report is not durably published; cleanup and replay refused")
     references = []
     artifacts = set()
     reports = 0
@@ -265,16 +251,21 @@ def verify_reports(directory, provider, run_id):
                     (row.get("recovery_state") == "completed-stale-source" and row.get("original_head_sha") == original["head"]),
                     "recovered evidence source identity is unproven")
         references.append(run_id + "/" + receipt_id)
-    require(reports, "required report is not durably published; a patch alone cannot authorize cleanup")
+    missing_keys = set()
     for path in (root / "artifacts").glob("*.json"):
         row = read_json(path)
         key = path.stem
         require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
                         "artifact_kind": "git-binary-patch", "artifact_key": key}, "required patch identity changed")
         if key not in artifacts:
-            recovered = recovered_references(directory, provider, run_id)
-            require(recovered, "required patch is not durably published; cleanup refused")
-            return sorted(set(references + recovered))
+            missing_keys.add(key)
+    if not reports or missing_keys:
+        # Earlier valid patch receipts remain useful when only the report
+        # failed. A local finalizer must supply every still-missing artifact.
+        recovered = recovered_references(directory, provider, run_id, missing_keys)
+        require(recovered, "required report is not durably published; cleanup and replay refused" if not reports else
+                "required patch is not durably published; cleanup refused")
+        return sorted(set(references + recovered))
     return references
 
 
