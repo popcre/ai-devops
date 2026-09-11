@@ -76,6 +76,32 @@ check "shas_are_40_characters"                "[ \${#HEAD_SHA} -eq 40 ]"
 check "base_selection_rule_is_stated"         "grep -q 'Base selection rule:' '$M'"
 check "verdict_is_bound_to_head"              "grep -q 'applies to head' '$M'"
 
+# shared-db #2709: fetched origin/main is authoritative when local main is
+# stale. Otherwise an update-from-main merge makes unrelated mainline files
+# appear to be undeclared branch work.
+REMOTE_BASE_REPO="$TMP/remote-base"
+mkdir -p "$REMOTE_BASE_REPO"
+git -C "$REMOTE_BASE_REPO" init -q -b main
+git -C "$REMOTE_BASE_REPO" config user.email t@example.com
+git -C "$REMOTE_BASE_REPO" config user.name Test
+echo base > "$REMOTE_BASE_REPO/base.txt"
+git -C "$REMOTE_BASE_REPO" add -A && git -C "$REMOTE_BASE_REPO" commit -qm base
+STALE_MAIN="$(git -C "$REMOTE_BASE_REPO" rev-parse HEAD)"
+git -C "$REMOTE_BASE_REPO" checkout -q -b review-branch
+echo reviewed > "$REMOTE_BASE_REPO/reviewed.txt"
+git -C "$REMOTE_BASE_REPO" add reviewed.txt && git -C "$REMOTE_BASE_REPO" commit -qm reviewed
+git -C "$REMOTE_BASE_REPO" checkout -q main
+echo current-main > "$REMOTE_BASE_REPO/current-main.txt"
+git -C "$REMOTE_BASE_REPO" add current-main.txt && git -C "$REMOTE_BASE_REPO" commit -qm current-main
+CURRENT_MAIN="$(git -C "$REMOTE_BASE_REPO" rev-parse HEAD)"
+git -C "$REMOTE_BASE_REPO" update-ref refs/remotes/origin/main "$CURRENT_MAIN"
+git -C "$REMOTE_BASE_REPO" reset -q --hard "$STALE_MAIN"
+git -C "$REMOTE_BASE_REPO" checkout -q review-branch
+git -C "$REMOTE_BASE_REPO" merge -q --no-ff -m update-from-main refs/remotes/origin/main
+REMOTE_PKT="$("$SCRIPT" build "$REMOTE_BASE_REPO" remote-base)"
+check "packet_prefers_current_origin_main_over_stale_local_main" "grep -q '$CURRENT_MAIN' '$REMOTE_PKT/MANIFEST.md'"
+check "remote_base_packet_keeps_only_reviewed_scope" "grep -q 'reviewed.txt' '$REMOTE_PKT/MANIFEST.md' && ! grep -q 'current-main.txt' '$REMOTE_PKT/MANIFEST.md'"
+
 # --- what changed -------------------------------------------------------------
 check "changed_files_listed"                  "grep -q 'a.txt' '$M' && grep -q 'newfile.txt' '$M'"
 check "uncommitted_edits_listed"              "grep -q 'Uncommitted edits' '$M'"

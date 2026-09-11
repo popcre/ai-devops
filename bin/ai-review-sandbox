@@ -237,15 +237,16 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   # "Merge main into ..." commit): two Codex runs REJECTed the change over a
   # handoff document that came from main and was not part of the pull request.
   #
-  # ai-review-packet's own base-order comment already ASSUMES these local branch
-  # names survive the clone. This makes that true instead of assumed. It only
-  # ADDS refs: HEAD stays detached at $base and the reviewed tree is untouched,
+  # Carry the remote-tracking branch in preference to a same-named local branch.
+  # The latter may be stale even when the source worktree has fetched current
+  # main; copying it caused review packets to diff against the PR's old base.
+  # This only ADDS refs: HEAD stays detached at $base and the reviewed tree is untouched,
   # so nothing the reviewer reads changes -- only which commit the diff is taken
   # against, which is the one thing that was wrong.
   local base_ref base_sha
   for base_ref in main master; do
-    base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$base_ref^{commit}" 2>/dev/null || true)"
-    [ -n "$base_sha" ] || base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$base_ref^{commit}" 2>/dev/null || true)"
+    base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$base_ref^{commit}" 2>/dev/null || true)"
+    [ -n "$base_sha" ] || base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$base_ref^{commit}" 2>/dev/null || true)"
     [ -n "$base_sha" ] || continue
     # The object came from the source we just cloned, so it is present here. A
     # missing one degrades to the previous behaviour rather than failing the
