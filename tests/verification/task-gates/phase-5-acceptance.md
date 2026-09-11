@@ -1,6 +1,6 @@
 # Issue #335 Phase 5 acceptance evidence
 
-Date: 2026-09-11  
+Date: 2026-09-11
 Status: in progress; central safety repair verified, final installed acceptance
 and programme closeout remain open.
 
