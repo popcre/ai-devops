@@ -64,10 +64,10 @@ LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
 cleanup(){
-  local accepted_path="" accepted_id="" active_status="" active_tmp=""
+  local accepted_path="" accepted_id="" active_status="" active_tmp="" evidence_durable=1
   rm -f -- "$RUN_TMP"/muse-key.*
   release_credential_lock
-  reviewer_event_cleanup_allowed muse || { mark_uncertain report_publication_incomplete; return 1; }
+  reviewer_event_cleanup_allowed muse || evidence_durable=0
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
     active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
     case "$active_status" in
@@ -84,6 +84,7 @@ cleanup(){
   if [ -n "$PUBLISH_ROOT" ] && [ -n "$PUBLISH_ID" ] && [ -d "$PUBLISH_ROOT/.ai" ]; then
     while IFS= read -r -d '' moved; do case "$(cd "$(dirname "$moved")" && pwd -P 2>/dev/null || true)" in "$(cd "$PUBLISH_ROOT" && pwd -P)"/*) [ "$moved" = "$accepted_path" ] && [ "$PUBLISH_ID" = "$accepted_id" ] && continue; [ -f "$moved" ] && [ ! -L "$moved" ] && [ "$(stat -c '%d:%i' "$moved" 2>/dev/null || true)" = "$PUBLISH_ID" ] && rm -f -- "$moved" 2>/dev/null || true;; esac; done < <(find "$PUBLISH_ROOT/.ai" -type f -print0 2>/dev/null)
   fi
+  [ "$evidence_durable" = 1 ] || return 1
   rm -rf "$RUN_TMP"
 }
 mark_uncertain(){
@@ -235,8 +236,8 @@ finish_report_staging(){
   fi
   chmod 600 "$path" 2>/dev/null || die 'could not protect the published Muse report.'
   protect_windows_path "$path" file || die 'could not enforce the published Muse report Windows ACL.'
-  reviewer_event_publish_report muse "$path" || die 'durable report publication failed; local evidence retained.'
   printf '%s\n%s\n' "$path" "$published_id" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
+  reviewer_event_publish_report muse "$path" || die 'durable report publication failed; local evidence retained.'
   eval "exec ${PUBLISH_FD}>&-" || die 'could not close Muse report staging file.'; PUBLISH_FD=""
   rm -f "$PUBLISH_TMP"
   PUBLISH_TMP=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
@@ -384,6 +385,9 @@ cmd_show(){ jq . "$(find_meta "$1")"; }
 cmd_transcript(){ local m; m="$(find_meta "$1")"; runtime_env; "$BIN" export "$(jq -r .session_id "$m")"; }
 cmd_reconcile(){ local m rid tmp status sid; m="$(find_meta "$1")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; status="$(jq -r '.status//"active"' "$m")"; sid="$(jq -r '.session_id//""' "$m")"; case "$status" in provider_outcome_uncertain) [ -n "$sid" ] || die "session '$1' may have reached Muse but returned no provider identity. Keep it blocked; do not retry duplicate paid work.";; completed_pending_local_checks|turn_in_progress) ;; preparation_failed) [ -n "$sid" ] || die "session '$1' failed before Muse created a provider session. Delete it, then retry with ai-muse new.";; *) die "session '$1' cannot be reconciled from status: $status";; esac; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="active"|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"; unlock_session; printf 'reconciled Muse session: %s\n' "$1"; }
 cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="$(jq -r .repository_root "$m")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; tag="$(jq -r .sandbox_tag "$m")"; sid="$(jq -r .session_id "$m")"; status="$(jq -r '.status//"active"' "$m")"; runtime_env
+  if [ -d "$(jq -r '.review_dir//""' "$m")" ]; then
+    reviewer_event_verify_sandbox "$(jq -r .review_dir "$m")" || die "review evidence cleanup refused; provider session and metadata preserved."
+  fi
   if [ "$sid" = null ] || [ -z "$sid" ]; then
     [ "$status" = preparation_failed ] || die "session '$1' has no provider identity and cannot be deleted from status: $status"
     "$PACKET" remove "$(jq -r '.review_dir//""' "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag" >/dev/null 2>&1 || true; rm -f "$m"; unlock_session; printf 'deleted pre-provider Muse session: %s\n' "$1"; return 0
