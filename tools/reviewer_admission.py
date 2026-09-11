@@ -26,7 +26,7 @@ def home_profile(home):
     # Only path metadata is used; credential files are never opened or hashed.
     canonical = os.path.realpath(home)
     return {'credential_profile_scope': hashlib.sha256(canonical.encode('utf-8')).hexdigest(),
-            'source_kind': 'canonical-home-path'}
+            'source_kind': 'canonical-home-path', 'credential_home': canonical}
 
 
 def valid_scope(profile, model):

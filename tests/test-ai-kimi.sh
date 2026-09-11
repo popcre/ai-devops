@@ -51,7 +51,7 @@ printf '%s\n' "$PWD" >> "$TMPDIR_FOR_TEST/pwd.txt"
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "0.32.0"; exit 0 ;;
-  provider)  [ "$mode" = noauth ] && exit 1; echo "managed:kimi-code type=kimi"; exit 0 ;;
+  provider)  [ "$mode" = noauth ] && exit 1; if [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] && [ ! "${KIMI_CODE_HOME:-}" -ef "$TMPDIR_FOR_TEST/delegated-profile" ]; then exit 1; fi; echo "managed:kimi-code type=kimi"; exit 0 ;;
   export)
     while [ $# -gt 0 ]; do
       if [ "$1" = -o ]; then printf 'zip-fixture' > "$2"; exit 0; fi
@@ -69,6 +69,7 @@ case "$mode" in
   ok)      cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   nohint)  printf '{"role":"assistant","content":"partial answer"}\n' ;;   # no terminal record
   refusal) printf '{"role":"assistant","content":"Usage limit reached for this billing cycle"}\n' ;;
+  prefixedrefusal) printf '{"role":"assistant","content":"provider refused"}\n'; printf 'kimi: Usage limit reached for this billing cycle\n' >&2; exit 7 ;;
   quotedrefusal) printf '{"role":"tool","content":"Usage limit reached for this billing cycle"}\n{"role":"assistant","content":"The file contains an error example, not a provider refusal."}\n' ;;
   badverdict)
     printf '{"role":"assistant","content":"analysis without a governed verdict"}\n'
@@ -169,6 +170,65 @@ run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ); }
   quoted_profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$KIMI_CODE_HOME" | jq -r .credential_profile_scope)"
   quoted_admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$quoted_profile" --model kimi-code/k3 --json)"
   check "quoted tool refusal cannot establish provider backoff" "printf '%s' \"\$quoted_admission\" | jq -e '.state==\"eligible\"'"
+  export KIMI_CODE_HOME="$TMP/kimi-prefix-home"
+  echo prefixedrefusal > "$TMP/mode"
+  run new admission-prefix --prompt review > "$TMP/refusal-prefix.log" 2>&1
+  prefix_after="$(admission_turns)"
+  run new admission-prefix-repeat --prompt review > "$TMP/refusal-prefix-repeat.log" 2>&1; prefix_rc=$?
+  check "provider-prefixed stderr refusal blocks another paid turn" "test '$prefix_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$prefix_after' && grep -q 'not submitted' '$TMP/refusal-prefix-repeat.log'"
+
+  # Exercise documented root delegation with a nonstandard login home and
+  # explicit target KIMI_CODE_HOME. No real account or credentials are used.
+  real_id="$(command -v id)"
+  printf '#!/usr/bin/env bash\nif [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ]; then case "$1" in -u) echo 0; exit;; -un) echo root; exit;; esac; fi\nexec %q "$@"\n' "$real_id" > "$STUB/id"
+  cat > "$STUB/su" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] || exit 97
+[ "${AI_KIMI_TEST_CONTEXT_FAIL:-0}" != 1 ] || exit 124
+[ "$1" = - ] && [ "$2" = fixture-owner ] && [ "$3" = -c ] || exit 98
+export HOME="$TMPDIR_FOR_TEST/nonstandard-login" KIMI_CODE_HOME=../delegated-profile
+cd "$HOME" || exit 99
+exec bash --noprofile --norc -c "$4"
+EOF
+  chmod +x "$STUB/id" "$STUB/su"
+  admission_path="$PATH"; export PATH="$STUB:$PATH"
+  mkdir -p "$TMP/nonstandard-login/.kimi-code/bin" "$TMP/delegated-profile"
+  cp "$STUB/kimi" "$TMP/nonstandard-login/.kimi-code/bin/kimi"
+  export AI_KIMI_TEST_DELEGATED=1 AI_KIMI_OWNER=fixture-owner
+  export KIMI_CODE_HOME="$TMP/root-profile"
+  delegated_context="$(bash "$REPO_ROOT/bin/ai-review-preflight" effective-profile kimi)"
+  delegated_profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$TMP/delegated-profile" | jq -r .credential_profile_scope)"
+  check "effective delegated profile comes from actual login environment" "printf '%s' \"\$delegated_context\" | jq -e --arg p '$delegated_profile' '.run_as_user==\"fixture-owner\" and .credential_profile_scope==\$p'"
+  delegated_before="$(admission_turns)"
+  run implement admission-delegated-implementation --prompt work > "$TMP/delegated-implementation.log" 2>&1; delegated_impl_rc=$?
+  check "implementation remains non-delegating with zero provider turns" "test '$delegated_impl_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_before' && grep -q 'will not be delegated' '$TMP/delegated-implementation.log'"
+  AI_KIMI_TEST_CONTEXT_FAIL=1 run new admission-delegated-unresolved --prompt review > "$TMP/delegated-unresolved.log" 2>&1; delegated_fail_rc=$?
+  check "unresolved effective context refuses without provider contact" "test '$delegated_fail_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_before' && grep -q 'admission' '$TMP/delegated-unresolved.log'"
+  echo refusal > "$TMP/mode"
+  delegated_before="$(admission_turns)"
+  run new admission-delegated --prompt review > "$TMP/refusal-delegated.log" 2>&1
+  delegated_after="$(admission_turns)"
+  check "delegated review keeps its first provider submission capability" "test '$delegated_after' -eq $((delegated_before+1))"
+  run new admission-delegated-repeat --prompt review > "$TMP/refusal-delegated-repeat.log" 2>&1; delegated_rc=$?
+  check "delegated refusal blocks the next dispatch without provider replay" "test '$delegated_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_after' && grep -q 'not submitted' '$TMP/refusal-delegated-repeat.log'"
+  delegated_admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$delegated_profile" --model kimi-code/k3 --json)"
+  check "delegated observation is scoped to target credentials rather than root" "printf '%s' \"\$delegated_admission\" | jq -e '.state==\"backoff\"'"
+  unset AI_KIMI_TEST_DELEGATED AI_KIMI_OWNER
+  export PATH="$admission_path"
+  rm -f "$STUB/id" "$STUB/su"
+
+  # Invoke the actual observer under errexit; failed optional hashing must not
+  # prevent caller finalization or consume the only retained provider stream.
+  sed -n '/^observe_scoped_refusal()/,/^}/p' "$SCRIPT" > "$TMP/kimi-observer.sh"
+  ( set -e; . "$TMP/kimi-observer.sh"; RUN_TURN_TIMED_OUT=0; RUN_TURN_CANCELLED=0; RUN_TURN_STARTUP_FAILED=0
+    has_resume_hint(){ return 1; }; warn(){ printf '%s\n' "$*" >&2; }
+    AI_REVIEW_EVENT_RUN_ID=cccccccccccccccccccccccccccccccc
+    printf '{"role":"assistant","content":"Usage limit reached"}\n' > "$TMP/hash-refusal.jsonl"
+    sha256_file(){ return 7; }
+    observe_scoped_refusal "$TMP/hash-refusal.jsonl" "$TMP/no-stderr" "$profile"
+    printf finalized > "$TMP/hash-failure-finalized"
+  ) > "$TMP/hash-failure.log" 2>&1
+  check "optional refusal hashing failure preserves caller finalization and raw output" "test -s '$TMP/hash-failure-finalized' && test -s '$TMP/hash-refusal.jsonl' && grep -q 'could not be hashed' '$TMP/hash-failure.log'"
   export KIMI_CODE_HOME="$admission_home"
   cp "$AI_REVIEW_QUARANTINE_DIR/kimi.json" "$TMP/valid-policy.json"
   printf '{invalid-policy' > "$AI_REVIEW_QUARANTINE_DIR/kimi.json"

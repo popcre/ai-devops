@@ -136,10 +136,8 @@ admission_gate() {
 
 capacity_gate() {
   local out state profile
-  if [ -z "$(run_as_user)" ]; then
-    profile="$(safe_home_hash)" || { warn 'local admission profile could not be resolved; provider was not contacted.'; return 4; }
-    admission_gate "$profile" || return $?
-  fi
+  profile="$(safe_home_hash)" || { warn 'local admission profile could not be resolved; provider was not contacted.'; return 4; }
+  admission_gate "$profile" || return $?
   out="$("$REVIEW_PREFLIGHT_BIN" capacity kimi --json 2>/dev/null || true)"
   if ! printf '%s\n' "$out" | jq -e '.schema_version==1 and .provider=="kimi" and (.state|IN("available","exhausted","unknown"))' >/dev/null 2>&1; then
     out="$(jq -nc --arg at "$(date -u +%FT%TZ)" '{schema_version:1,provider:"kimi",state:"unknown",checked_at:$at,provider_version:"unknown",credential_profile_scope:null,model_scope:null,source_kind:"wrapper",reason:"malformed-response",reset_at:null}')"
@@ -175,7 +173,13 @@ job_log()      { printf '%s/worker.log' "$(job_dir "$1" "$2")"; }
 job_is_terminal() { jq -e '.phase | IN("completed","failed","timed-out","cancelled","recovery-required")' "$1" >/dev/null 2>&1; }
 
 safe_home_hash() {
-  "$REVIEW_PREFLIGHT_BIN" profile kimi --home "$KIMI_HOME" | jq -er '.credential_profile_scope | select(test("^[0-9a-f]{64}$"))'
+  effective_credential_context | jq -er '.credential_profile_scope | select(test("^[0-9a-f]{64}$"))'
+}
+
+effective_credential_context() {
+  "$REVIEW_PREFLIGHT_BIN" effective-profile kimi | jq -ce '
+    select((.credential_profile_scope|test("^[0-9a-f]{64}$")) and
+      (.credential_home|type=="string" and length>0) and (.run_as_user|type=="string"))'
 }
 
 observe_scoped_refusal() { # OUTPUT STDERR ORIGINAL-PROFILE
@@ -188,7 +192,7 @@ observe_scoped_refusal() { # OUTPUT STDERR ORIGINAL-PROFILE
   if jq -se 'any(.[]; .role=="assistant" and (.content|type)=="string" and
       (.content|test("^(Usage limit reached|Quota (reached|exceeded)|Billing (cycle|limit).*(reached|exceeded)|Please purchase extra usage)";"i")))' "$out" >/dev/null 2>&1; then
     evidence="$out"
-  elif [ -s "$err" ] && grep -Eqi '^(Usage limit reached|Quota (reached|exceeded)|Billing (cycle|limit).*(reached|exceeded)|Please purchase extra usage)' "$err"; then
+  elif [ -s "$err" ] && grep -Eqi '^(kimi: |kimi: error: )?(Usage limit reached|Quota (reached|exceeded)|Billing (cycle|limit).*(reached|exceeded)|Please purchase extra usage)' "$err"; then
     evidence="$err"
   else return 0; fi
   [ -f "$evidence" ] && [ ! -L "$evidence" ] || return 0
@@ -196,7 +200,7 @@ observe_scoped_refusal() { # OUTPUT STDERR ORIGINAL-PROFILE
   dir="${AI_REVIEW_EVENT_DIR:-${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}/reviewer-events}/evidence/$run"
   mkdir -p "$dir" && chmod 700 "$dir" || { warn 'could not retain scoped refusal evidence; no backoff was recorded.'; return 0; }
   tmp="$(mktemp "$dir/.refusal.XXXXXX")" || return 0
-  hash="$(sha256_file "$evidence")"
+  hash="$(sha256_file "$evidence")" || { rm -f "$tmp"; warn 'refusal evidence could not be hashed; result retained without backoff.'; return 0; }
   if ! cp "$evidence" "$tmp" || [ "$(sha256_file "$tmp")" != "$hash" ] || [ "$(sha256_file "$evidence")" != "$hash" ]; then
     rm -f "$tmp"; warn 'refusal evidence changed; no backoff was recorded.'; return 0
   fi
@@ -219,7 +223,7 @@ profile_is_readonly() {
 # Callers can turn execution-context-denied into a hand-back to the main task.
 PREFLIGHT_CLASS=""
 preflight_execution_context() { # MODE REPO
-  local mode="$1" repo="$2" canary parent provider
+  local mode="$1" repo="$2" canary parent provider context as effective_home
   PREFLIGHT_CLASS=""
   mkdir -p "$STATE_DIR" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
   canary="$STATE_DIR/.write-canary.$$"
@@ -227,12 +231,20 @@ preflight_execution_context() { # MODE REPO
   [ -x "$(resolve_kimi)" ] || { PREFLIGHT_CLASS="local_dependency_unavailable"; return 1; }
   [ -r "$repo/.git" ] || git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
   if [ "$mode" = review ] && ! profile_is_readonly; then PREFLIGHT_CLASS="profile-invalid"; return 1; fi
-  parent="$(dirname "$KIMI_HOME")"
-  [ -d "$KIMI_HOME" ] || [ -w "$parent" ] || { PREFLIGHT_CLASS="kimi-home-unwritable"; return 1; }
-  mkdir -p "$KIMI_HOME/sessions" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
-  canary="$KIMI_HOME/sessions/.ai-kimi-canary.$$"
+  context="$(effective_credential_context)" || { PREFLIGHT_CLASS="local-admission-unavailable"; return 1; }
+  as="$(jq -r .run_as_user <<<"$context")"; effective_home="$(jq -r .credential_home <<<"$context")"
+  if [ -n "$as" ]; then
+    [ "$mode" = review ] || { PREFLIGHT_CLASS="implementation-delegation-refused"; return 1; }
+    timeout "${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}s" su - "$as" -c "h=$(printf '%q' "$effective_home"); test -r $(printf '%q' "$repo") && mkdir -p \"\$h/sessions\" && f=\$(mktemp \"\$h/sessions/.ai-kimi-canary.XXXXXX\") && test -r \"\$f\" && rm -f -- \"\$f\"" >/dev/null 2>&1 \
+      || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+    return 0
+  fi
+  parent="$(dirname "$effective_home")"
+  [ -d "$effective_home" ] || [ -w "$parent" ] || { PREFLIGHT_CLASS="kimi-home-unwritable"; return 1; }
+  mkdir -p "$effective_home/sessions" 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
+  canary="$effective_home/sessions/.ai-kimi-canary.$$"
   ( umask 077; : > "$canary" && test -r "$canary" && rm -f "$canary" ) 2>/dev/null || { PREFLIGHT_CLASS="execution-context-denied"; return 1; }
-  provider="$(KIMI_CODE_HOME="$KIMI_HOME" "$(resolve_kimi)" provider list 2>/dev/null || true)"
+  provider="$(KIMI_CODE_HOME="$effective_home" "$(resolve_kimi)" provider list 2>/dev/null || true)"
   if [ -z "$provider" ] || printf '%s' "$provider" | grep -qi 'no providers configured'; then
     PREFLIGHT_CLASS="credentials-unavailable"; return 1
   fi
@@ -307,11 +319,7 @@ has_credentials() { # has_credentials [USER] — true if that account can reach 
 
 # Prints the user to run Kimi as, or empty for "run directly as me".
 run_as_user() {
-  has_credentials && { printf ''; return 0; }
-  if [ "$(id -u)" = 0 ] && [ "$(id -un)" != "$KIMI_OWNER" ] && has_credentials "$KIMI_OWNER"; then
-    printf '%s' "$KIMI_OWNER"; return 0
-  fi
-  printf ''
+  effective_credential_context | jq -er '.run_as_user'
 }
 
 kimi_procs() {
@@ -731,12 +739,12 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   # brief in argv. Never put secrets in a Kimi brief on a shared host.
   args+=(-p "$(cat "$pf")")
 
-  local as; as="$(run_as_user)"
-  if [ -z "$as" ]; then
-    if ! profile="$(safe_home_hash)"; then
+  local as context effective_home
+    if ! context="$(effective_credential_context)"; then
       : > "$out"; printf '%s\n' 'local admission profile could not be resolved; provider was not contacted' > "$out.err"
       RUN_TURN_RC=4; RUN_TURN_ADMISSION_FAILED=1; return 0
     fi
+    as="$(jq -r .run_as_user <<<"$context")"; effective_home="$(jq -r .credential_home <<<"$context")"; profile="$(jq -r .credential_profile_scope <<<"$context")"
     local admission_rc=0
     admission_gate "$profile" || admission_rc=$?
     if [ "$admission_rc" != 0 ]; then
@@ -748,7 +756,6 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
       fi
       RUN_TURN_RC="$admission_rc"; return 0
     fi
-  fi
   if [ -n "$as" ] && [ "$mode" = implement ]; then
     die "this account has no Kimi credentials, and an implement run will not be delegated
   to '$as' — its writes would land owned by the wrong user. Either run 'kimi login'
@@ -762,10 +769,10 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     # su spawns, but do not claim that this hides the prompt from process lists.
     local q="" a
     for a in "${args[@]}"; do q="$q $(printf '%q' "$a")"; done
-    su - "$as" -c "cd $(printf '%q' "$repo") && \"\$HOME/.kimi-code/bin/kimi\"$q" \
+    su - "$as" -c "cd $(printf '%q' "$repo") && KIMI_CODE_HOME=$(printf '%q' "$effective_home") \"\$HOME/.kimi-code/bin/kimi\"$q" \
       < /dev/null > "$out" 2>"$out.err" &
   else
-    ( cd "$repo" && KIMI_CODE_HOME="$KIMI_HOME" exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
+    ( cd "$repo" && KIMI_CODE_HOME="$effective_home" exec "$kimi" "${args[@]}" ) > "$out" 2>"$out.err" &
   fi
   RUN_TURN_PID=$!
   local elapsed=0 last_size=0 size=0

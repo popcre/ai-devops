@@ -49,10 +49,36 @@ admission_store() {
   "$runtime" "$REGISTRY_REAL_DIR/../tools/reviewer_admission.py" "$@" --directory "$STATE_DIR"
 }
 
+kimi_effective_profile() {
+  local home="${KIMI_CODE_HOME:-$HOME/.kimi-code}" owner="${AI_KIMI_OWNER:-ai}" as="" candidate binary="" found="" context
+  # Only root can use the existing password-free delegation capability. All
+  # probes are non-generating, bounded and keep provider configuration private.
+  if [ "$(id -u)" = 0 ] && [ "$(id -un)" != "$owner" ]; then
+    for candidate in "${AI_KIMI_BIN:-}" "$(command -v kimi 2>/dev/null || true)" "$home/bin/kimi" "$home/bin/kimi.exe" "$HOME/.kimi-code/bin/kimi" /home/ai/.kimi-code/bin/kimi /usr/local/bin/kimi; do
+      [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+      binary="$candidate"; break
+    done
+    if [ -n "$binary" ]; then
+      found="$(KIMI_CODE_HOME="$home" timeout "${CHECK_TIMEOUT}s" "$binary" provider list 2>/dev/null)" || { case "$?" in 124|137) return 1;; esac; }
+    fi
+    if [ -z "$found" ] || printf '%s' "$found" | grep -qi 'no providers configured'; then
+      # Read the login environment, never infer an account's home pathname.
+      # Prefix framing rejects incidental shell startup output.
+      context="$(timeout "${CHECK_TIMEOUT}s" su - "$owner" -c 'h=${KIMI_CODE_HOME:-$HOME/.kimi-code}; case "$h" in /*) ;; *) h="$PWD/$h";; esac; p=$(KIMI_CODE_HOME="$h" "$HOME/.kimi-code/bin/kimi" provider list 2>/dev/null) || exit 1; [ -n "$p" ] && ! printf "%s" "$p" | grep -qi "no providers configured" || exit 1; printf "AI_KIMI_HOME=%s\n" "$h"' 2>/dev/null)" || { case "$?" in 124|137) return 1;; esac; }
+      if [ -n "$context" ]; then
+        case "$context" in AI_KIMI_HOME=*) home="${context#AI_KIMI_HOME=}"; as="$owner";; *) return 1;; esac
+        case "$home" in ''|*$'\n'*|*$'\r'*) return 1;; esac
+      fi
+    fi
+  fi
+  admission_store profile kimi --home "$home" | jq -ce --arg as "$as" \
+    '. + {run_as_user:$as} | select(.credential_profile_scope|test("^[0-9a-f]{64}$"))'
+}
+
 default_admission() {
   local profile="${AI_REVIEW_ADMISSION_PROFILE:-}" model="${AI_REVIEW_ADMISSION_MODEL:-}"
   if [ "$1" = kimi ]; then
-    [ -n "$profile" ] || profile="$(admission_store profile kimi --home "${KIMI_CODE_HOME:-$HOME/.kimi-code}" | jq -er .credential_profile_scope)" || return 1
+    [ -n "$profile" ] || profile="$(kimi_effective_profile | jq -er .credential_profile_scope)" || return 1
     [ -n "$model" ] || model="${AI_KIMI_MODEL:-kimi-code/k3}"
   fi
   admission_store admission "$1" --profile "$profile" --model "$model"
@@ -402,12 +428,16 @@ Usage:
   ai-review-preflight capacity <provider> --json
   ai-review-preflight admission <provider> --profile HASH --model MODEL --json
   ai-review-preflight profile <provider> --home PATH
+  ai-review-preflight effective-profile kimi
   ai-review-preflight observe-refusal <provider> --profile HASH --model MODEL --run-id ID --observed EPOCH --seconds N --reason usage-limit --evidence FILE
 EOF
 }
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  effective-profile)
+    [ "${1:-}" = kimi ] && [ "$#" = 1 ] || die 'effective-profile requires kimi.'
+    kimi_effective_profile ;;
   profile)
     provider="${1:-}"; shift || true
     valid_provider "$provider" || die "unknown provider '$provider'."
