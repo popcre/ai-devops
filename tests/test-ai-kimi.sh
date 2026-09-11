@@ -169,6 +169,29 @@ run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ); }
   quoted_profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$KIMI_CODE_HOME" | jq -r .credential_profile_scope)"
   quoted_admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$quoted_profile" --model kimi-code/k3 --json)"
   check "quoted tool refusal cannot establish provider backoff" "printf '%s' \"\$quoted_admission\" | jq -e '.state==\"eligible\"'"
+  export KIMI_CODE_HOME="$admission_home"
+  cp "$AI_REVIEW_QUARANTINE_DIR/kimi.json" "$TMP/valid-policy.json"
+  printf '{invalid-policy' > "$AI_REVIEW_QUARANTINE_DIR/kimi.json"
+  local_failure_turns="$(admission_turns)"
+  for action in new implement; do
+    run "$action" "corrupt-policy-$action" --prompt work > "$TMP/corrupt-policy-$action.log" 2>&1; local_rc=$?
+    check "corrupt policy refuses $action before provider contact" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'admission' '$TMP/corrupt-policy-$action.log'"
+  done
+  cp "$TMP/valid-policy.json" "$AI_REVIEW_QUARANTINE_DIR/kimi.json"
+  printf '#!/usr/bin/env bash\nexit 7\n' > "$TMP/admission-helper-fails"; chmod +x "$TMP/admission-helper-fails"
+  for action in new implement; do
+    AI_REVIEW_PREFLIGHT_BIN="$TMP/admission-helper-fails" run "$action" "missing-helper-$action" --prompt work > "$TMP/missing-helper-$action.log" 2>&1; local_rc=$?
+    check "failed profile helper refuses $action before provider contact" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'admission' '$TMP/missing-helper-$action.log'"
+  done
+  cat > "$TMP/admission-helper-malformed" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = admission ]; then printf '{"state":"unknown"}\n'; else exec bash "$AI_KIMI_TEST_REAL_PREFLIGHT" "$@"; fi
+EOF
+  chmod +x "$TMP/admission-helper-malformed"
+  for action in new implement; do
+    AI_KIMI_TEST_REAL_PREFLIGHT="$REPO_ROOT/bin/ai-review-preflight" AI_REVIEW_PREFLIGHT_BIN="$TMP/admission-helper-malformed" run "$action" "malformed-helper-$action" --prompt work > "$TMP/malformed-helper-$action.log" 2>&1; local_rc=$?
+    check "malformed admission is a local failure for $action with zero provider turns" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'local admission response is invalid' '$TMP/malformed-helper-$action.log'"
+  done
   if [ "$FAIL" -ne 0 ]; then
     trap - EXIT
     printf 'preserved admission fixture: %s\n' "$TMP"
