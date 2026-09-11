@@ -19,5 +19,24 @@ Verification on 2026-09-11:
 - Existing workflow policy suite: PASS.
 - Git whitespace validation: PASS.
 
+PR #411 subsequently exposed a second mismatch in the same evidence gate:
+run `34567280854` at head `f685d676982c59d942273ce738ce857eb114c966`
+completed the hosted equivalent safety lane successfully, but the original lane
+hit its configured 30-minute ceiling. Both workflow jobs execute the identical
+Codex and Grok suites. The gate rejected the whole cancelled run before looking
+at that successful replacement evidence.
+
+The additional repair accepts only completed equivalent fallback proof with
+successful Linux, Windows aggregate and classifier jobs. Every other reported
+job must be complete and clean; original assertion failure, failed runs, missing
+jobs, unrelated cancellation/failure and moving queue identity still refuse.
+The original lane may remain queued/running or be skipped/cancelled, avoiding a
+redundant wait while preserving all required coverage. No run was cancelled or
+rerun, and no timeout or branch-protection rule was changed.
+
+- Extended regression suite: 41 passed, 0 failed, 0 skipped.
+- The actual exact-head job evidence from run `34567280854` satisfies the narrow
+  replacement proof; private job metadata is retained with the review evidence.
+
 This is the bounded classification repair, not final #166 programme acceptance.
 Exact-head independent review, CI and landing evidence are recorded on the PR.
