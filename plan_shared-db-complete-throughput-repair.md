@@ -77,6 +77,7 @@ Concrete examples were the DCP repair polled repeatedly while undispatched, ten 
 - Finish-first stage scheduling with no numeric limit on non-conflicting authors.
 - One outcome record from intake through live application verification.
 - Durable event-triggered transitions and machine-readable session snapshots.
+- Completion-or-blocked agent check-ins: tell agents to report only when assigned work finishes or becomes genuinely blocked, eliminating routine progress narration from the shared-db orchestrator context.
 - Early automatic evidence/route qualification.
 - A fail-closed no-database-preview fast lane for work proven unable to alter database structure, behavior, permissions, or data.
 - Compatible batching of already-approved migrations.
@@ -157,6 +158,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 5. **Use a fixed timeout to kill running reviewers.** Rejected: a quiet healthy review is not dead. The SLO applies to failure to start or lack of durable liveness, with provider-specific evidence.
 6. **Add another dashboard/database.** Rejected: use existing GitHub events and throughput ledgers.
 7. **Poll every few minutes.** Rejected: unchanged state is expected and creates cost without progress. React to issue/ref/workflow events and use bounded waits only while a state transition is expected.
+8. **Require periodic agent progress check-ins.** Rejected: intermediate narration consumes orchestrator context and tokens without changing a decision. Durable evidence carries progress; agents report only completion or a genuine blocker requiring coordination.
 8. **Batch every pending migration.** Rejected: incompatible risk, dependencies, superseded migrations, missing roles, or missing evidence must split or refuse.
 9. **Trust caller-asserted or otherwise unqualified automatic production approval.** Rejected: exact migration lists and business-risk decisions remain governed gates. The accepted #2716 path promotes only when the immutable exact list and every machine-verifiable review, preview, dry-run, risk, identity, serialization, and evidence gate qualify; any missing or ambiguous proof refuses to an engineer.
 10. **Close an outcome at merge.** Rejected: the application is still blocked until correct environment and behavior are verified.
@@ -172,6 +174,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 2. Keep preview, merge, and production writes globally serialized.
 3. Add service classes `urgent-application`, `standard-application`, and `maintenance`. Only a reproducible live outage, blocked application release, security exposure, or owner-declared business deadline qualifies as urgent.
 4. Within the same safety eligibility, order shared-stage work by service class, then finishable critical path, then `createdAt`, then issue number. Never use urgency to jump an object conflict or missing dependency.
+5. Cut the check-ins themselves: every dispatched agent reports to the shared-db orchestrator only when its assignment finishes or becomes genuinely blocked. Routine progress, unchanged waits, and “still working” messages are suppressed; durable commits, events, checks, and evidence remain the source of truth.
 5. One outcome issue remains open through `live_verified`; claims and PRs are supporting records.
 6. Reuse existing coordination events and blocker ledger as the state store.
 7. Reviewer/runner SLOs govern start/reroute, not cancellation of healthy active work.
@@ -261,11 +264,11 @@ Add `--outcome-status <issue>` and `--complete-outcome <issue> --evidence <ref>`
 
 Build a read-only `--orchestrator-snapshot` from current marker, claims, PR heads/checks, reviewer leases, stage locks, outcome events, and eligible queues. Hash and attach it to the marker/issue; a successor verifies freshness and resumes without a prose reconstruction. Keep prose handoffs only for unresolved judgment, failure history, and private/non-derivable context.
 
-Publish durable events on eligibility, dependency completion, author-capacity release, review availability, merge-queue completion/ejection, preview completion, production decision, and live verification. Update canonical skills so unchanged state produces no repeated status task. Use bounded event-aware waits only when an operation has actually started.
+Publish durable events on eligibility, dependency completion, author-capacity release, review availability, merge-queue completion/ejection, preview completion, production decision, and live verification. Update canonical skills and the sub-agent brief so agents report only at completion or when genuinely blocked; do not send periodic progress, unchanged-wait, or “still working” check-ins into the shared-db orchestrator session. Use bounded event-aware waits only when an operation has actually started. Durable events and evidence replace intermediate narration rather than removing observability.
 
 The current manual owner-authorized marker succession remains until Codex/Claude can prove an authenticated automatic continuation. If no supported continuation API exists, the snapshot plus one fixed launch action is the fallback; never pretend notification or continuation occurred.
 
-**Verification gate:** a fixture successor reconstructs the exact active map from the snapshot; an unchanged queued item produces zero repeated comments/polls; each meaningful transition wakes once.
+**Verification gate:** a fixture successor reconstructs the exact active map from the snapshot; an unchanged queued item produces zero repeated comments/polls; each meaningful transition wakes once; a simulated agent emits no orchestrator message for intermediate or unchanged progress and emits exactly one message on completion or genuine blockage.
 
 #### Step 5 — one early delivery preflight and automatic evidence registration
 
@@ -342,6 +345,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Queue ordering: urgent vs standard vs maintenance; transitive blocker; created-at tie; issue-number tie; object conflict; full capacity; no destructive preemption.
 - Outcome lifecycle: every legal transition; every illegal skip; merge-not-live; evidence re-derivation; generated-type requirement.
 - Events/snapshot: deterministic hash; stale input; one wake per transition; no unchanged poll; successor reconstruction.
+- Agent reporting: intermediate progress, unchanged waits, and periodic check-ins produce no orchestrator message; completion and genuine blocker transitions each produce exactly one concise report with durable evidence.
 - Delivery preflight: sidecar/producer/claim/base/dependency/route/reviewer/runner cases and digest invalidation.
 - Migration train: all eight cases named in Step 6.
 - Admission: every structural type accepted; application rows/code, docs, CI, reviewer tooling, workflows, and repository maintenance rejected by both sender and orchestrator; sender misclassification cannot acquire a claim/stage.
@@ -405,6 +409,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - [ ] No numeric author-capacity limit remains; at least 100 concurrent non-conflicting claims are admitted, while the next conflicting claim is refused for its exact object conflict.
 - [ ] One outcome card remains open through live application verification.
 - [ ] Polling and manual state reconstruction are replaced by durable events/snapshots.
+- [ ] Dispatched agents report only completion or genuine blockage; routine progress check-ins consume zero shared-db orchestrator messages.
 - [ ] Early preflight catches all named late bookkeeping failures.
 - [ ] Compatible approved migrations can move as one governed train and, after #2716 policy activation, promote automatically only when every existing machine gate passes.
 - [ ] Reviewer and runner non-start waits reroute within the tested SLO.
