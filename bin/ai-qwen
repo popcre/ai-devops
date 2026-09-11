@@ -1465,7 +1465,6 @@ start_session() { # start_session NAME MODE
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
   if [ "$mode" = review ]; then
-    reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable review evidence; no provider call was made.'
     LIFECYCLE_META="$meta"
     capture_review_runtime
     reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable Qwen evidence; no provider call was made.'
