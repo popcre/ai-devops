@@ -312,6 +312,21 @@ PROVIDER OWNER METADATA REPORT`. This verifies the exact session/report identity
 and that every Git-visible workspace change equals the existing canonical patch,
 then preserves both report and patch centrally. Unexported files or differing work
 remain blocked for recovery; a later cleanup never assumes they were published.
+Current implementation owners additionally retain the exact prepared report and
+patch paths and hashes. Reconciliation republishes every missing original
+artifact; a different report from the same session cannot replace a paid result.
+`ai-reviewer-issue evidence verify-prepared PROVIDER ORIGINAL_RUN_ID KIND PATH`
+checks that proof even after the disposable owner file has been removed.
+
+Explicit Qwen and Kimi implementation-state deletion first archives the complete
+owned local state in the existing private evidence store. The equivalent local
+commands are `ai-reviewer-issue evidence archive-implementation-state PROVIDER
+METADATA` and `ai-reviewer-issue evidence verify-implementation-archive PROVIDER
+METADATA`. They preserve the exact metadata, owner manifest, canonical patch,
+older owned generations, and explicitly recorded recovery patches. Unknown files,
+changed bytes, and missing known paid-result evidence refuse deletion. A legacy
+archive records the original paid result as unknown; preserving surviving bytes
+does not reconstruct lost evidence or grant source approval.
 Use `ai-reviewer-issue evidence verify-sandbox SANDBOX` to check the resulting
 cleanup proof. Keep all command arguments and artifacts private; this operation is
 not a disposition sweep and does not change a frozen maintenance round.

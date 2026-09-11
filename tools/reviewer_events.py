@@ -195,13 +195,7 @@ def publish_patch(directory, provider, run_id, path, facts=None):
     return publish_report(directory, provider, run_id, path, facts or {"phase": "report-publication"}, key)
 
 
-def recovered_references(directory, provider, run_id):
-    required_keys = set()
-    for path in (evidence_root(directory, run_id) / "artifacts").glob("*.json"):
-        row = read_json(path)
-        require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
-                        "artifact_kind": "git-binary-patch", "artifact_key": path.stem}, "required patch identity changed")
-        required_keys.add(path.stem)
+def recovered_references(directory, provider, run_id, required_keys):
     candidates = {}
     for candidate in (directory / "evidence").glob("*/*.report.json"):
         row = read_json(physical(candidate))
@@ -216,6 +210,25 @@ def recovered_references(directory, provider, run_id):
     return sorted(set(recovered))
 
 
+def missing_prepared(directory, provider, run_id, references):
+    root = evidence_root(directory, run_id)
+    receipts = [read_json(directory / "evidence" / (reference + ".report.json")) for reference in references]
+    missing = []
+    for path in (root / "prepared").glob("*.json"):
+        row = read_json(path)
+        owner = read_json(root / "owner.json")
+        require(row.get("schema_version") == 1 and row.get("provider") == provider and row.get("run_id") == run_id and
+                row.get("owner") == owner.get("owner") and row.get("kind") in {"report", "git-binary-patch"} and
+                re.fullmatch(r"[0-9a-f]{64}", row.get("sha256", "")) and
+                digest(row.get("path", "").encode("utf-8")) == path.stem, "prepared owner artifact identity changed")
+        if not any(receipt["report_sha256"] == row["sha256"] and
+                   ((row["kind"] == "report" and not receipt.get("artifact_kind")) or
+                    (row["kind"] == "git-binary-patch" and receipt.get("artifact_key") == path.stem))
+                   for receipt in receipts):
+            missing.append(path.stem)
+    return missing
+
+
 def verify_reports(directory, provider, run_id):
     start = invocation(directory, provider, run_id)
     root = evidence_root(directory, run_id)
@@ -225,14 +238,6 @@ def verify_reports(directory, provider, run_id):
     require(required == {"schema_version": 1, "run_id": run_id, "provider": provider,
                          "head": start["head"], "caller": start["caller"]}, "evidence requirement changed")
     paths = sorted(root.glob("*.report.json"))
-    if not paths:
-        # A local finalizer may preserve a paid result after its original
-        # wrapper has ended. Validate that immutable receipt without rewriting
-        # the earlier event or pretending another provider request occurred.
-        recovered = recovered_references(directory, provider, run_id)
-        if recovered:
-            return sorted(set(recovered))
-    require(paths, "required report is not durably published; cleanup and replay refused")
     references = []
     artifacts = set()
     reports = 0
@@ -265,16 +270,23 @@ def verify_reports(directory, provider, run_id):
                     (row.get("recovery_state") == "completed-stale-source" and row.get("original_head_sha") == original["head"]),
                     "recovered evidence source identity is unproven")
         references.append(run_id + "/" + receipt_id)
-    require(reports, "required report is not durably published; a patch alone cannot authorize cleanup")
+    missing_keys = set()
     for path in (root / "artifacts").glob("*.json"):
         row = read_json(path)
         key = path.stem
         require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
                         "artifact_kind": "git-binary-patch", "artifact_key": key}, "required patch identity changed")
         if key not in artifacts:
-            recovered = recovered_references(directory, provider, run_id)
-            require(recovered, "required patch is not durably published; cleanup refused")
-            return sorted(set(references + recovered))
+            missing_keys.add(key)
+    if not reports or missing_keys or missing_prepared(directory, provider, run_id, references):
+        # Earlier valid patch receipts remain useful when only the report
+        # failed. A local finalizer must supply every still-missing artifact.
+        recovered = recovered_references(directory, provider, run_id, missing_keys)
+        require(recovered, "required report is not durably published; cleanup and replay refused" if not reports else
+                "required patch is not durably published; cleanup refused")
+        references = sorted(set(references + recovered))
+        require(not missing_prepared(directory, provider, run_id, references), "prepared paid evidence is not durably published; cleanup refused")
+        return references
     return references
 
 
@@ -404,6 +416,145 @@ def verify_owner(directory, provider, owner, binding_only=False):
         return [] if binding_only else verify_reports(directory, provider, run_id)
 
 
+def prepare_owner_artifact(directory, provider, run_id, owner, kind, artifact):
+    require(kind in {"report", "git-binary-patch"}, "invalid prepared owner artifact kind")
+    verify_owner(directory, provider, owner, binding_only=True)
+    owner_path, owner_boundary, owner_data, row, _, _ = owner_identity(owner)
+    require(row["evidence_run_id"] == run_id, "prepared artifact belongs to another owner invocation")
+    artifact = physical(artifact)
+    boundary, data = snapshot(artifact, "log")
+    require(boundary["exists"] and (data or kind == "git-binary-patch"), "prepared owner artifact is missing")
+    data.decode("utf-8")
+    require(kind != "git-binary-patch" or not data or data.startswith(b"diff --git "), "prepared owner artifact is not a Git patch")
+    value = {"schema_version": 1, "provider": provider, "run_id": run_id, "owner": str(owner_path),
+             "kind": kind, "path": str(artifact), "sha256": digest(data)}
+    key = digest(str(artifact).encode("utf-8"))
+    with event_lock(directory):
+        invocation(directory, provider, run_id, active=True)
+        require((evidence_root(directory, run_id) / "required.json").is_file(), "prepared owner publication was not reserved")
+        require(snapshot(owner_path, "log") == (owner_boundary, owner_data), "implementation owner changed during artifact preparation")
+        require(snapshot(artifact, "log") == (boundary, data), "prepared owner artifact changed")
+        target = evidence_root(directory, run_id) / "prepared" / (key + ".json")
+        if target.exists():
+            require(read_json(target) == value, "prepared owner artifact conflicts with original bytes")
+        else:
+            publish(target, value)
+
+
+def prepared_owner_artifact(directory, provider, run_id, owner, artifact, kind):
+    artifact = physical(artifact)
+    key = digest(str(artifact).encode("utf-8"))
+    value = read_json(evidence_root(directory, run_id) / "prepared" / (key + ".json"))
+    _, data = snapshot(artifact, "log")
+    require(value == {"schema_version": 1, "provider": provider, "run_id": run_id,
+                      "owner": str(physical(owner)), "kind": kind, "path": str(artifact), "sha256": digest(data)},
+            "exact prepared owner artifact is unproven or changed")
+    return artifact, data
+
+
+def verify_prepared(directory, provider, run_id, kind, artifact):
+    require(kind in {"report", "git-binary-patch"}, "invalid prepared artifact kind")
+    references = verify_reports(directory, provider, run_id)
+    binding = read_json(evidence_root(directory, run_id) / "owner.json")
+    start = invocation(directory, provider, run_id)
+    require(binding.get("provider") == provider and binding.get("run_id") == run_id and
+            physical(binding.get("repository", "")) == physical(start["repo"]), "prepared artifact original binding changed")
+    prepared_owner_artifact(directory, provider, run_id, binding["owner"], artifact, kind)
+    return references
+
+
+def implementation_archive_source(directory, provider, metadata):
+    require(provider in {"qwen", "kimi"}, "implementation state archive has no authoritative provider adapter")
+    metadata = physical(metadata)
+    _, metadata_data = snapshot(metadata, "log")
+    meta = json.loads(metadata_data)
+    require(isinstance(meta, dict) and meta.get("version") == 2 and meta.get("mode") == "implement",
+            "only canonical implementation state may be archived")
+    name, caller, base = meta.get("name"), meta.get("caller"), meta.get("base_sha")
+    require(name and caller and metadata.name == "metadata.json" and
+            metadata.parent.name == caller + "--" + name + ".d" and
+            re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""), "legacy canonical metadata identity is unproven")
+    repo = physical(meta.get("repo") or "")
+    result = subprocess.run(["git", "-C", str(repo), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    require(result.returncode == 0 and physical(result.stdout.strip()) == repo,
+            "legacy canonical repository is unavailable or changed")
+    result = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", base + "^{commit}"], capture_output=True)
+    require(result.returncode == 0, "legacy canonical base commit is unavailable")
+    manifest = physical(metadata.parent / "owner.json")
+    _, manifest_data = snapshot(manifest, "log")
+    owner = json.loads(manifest_data)
+    require(isinstance(owner, dict) and owner.get("version") == 1 and physical(owner.get("owner_dir", "")) == metadata.parent and
+            physical(owner.get("metadata", "")) == metadata and owner.get("patch_pattern") == "cumulative-<generation>-<sha256>.patch",
+            "legacy canonical owner manifest is unproven")
+    patch = physical(meta.get("canonical_patch") or "")
+    require(patch.parent == metadata.parent and
+            (patch.name == "cumulative.patch" or re.fullmatch(r"cumulative-[0-9]+-[0-9a-f]{64}\.patch", patch.name)),
+            "legacy canonical patch path is unproven")
+    patch_boundary, patch_data = snapshot(patch, "log")
+    require(patch_boundary["exists"] and digest(patch_data) == meta.get("patch_sha256") and
+            (not patch_data or patch_data.startswith(b"diff --git ")), "legacy canonical patch is missing or changed")
+    if meta.get("evidence_run_id"):
+        verify_prepared(directory, provider, meta["evidence_run_id"], "git-binary-patch", patch)
+    files = {metadata: metadata_data, manifest: manifest_data, patch: patch_data}
+    for candidate in metadata.parent.glob("cumulative-*.patch"):
+        candidate = physical(candidate)
+        match = re.fullmatch(r"cumulative-[0-9]+-([0-9a-f]{64})\.patch", candidate.name)
+        _, data = snapshot(candidate, "log")
+        require(match and digest(data) == match[1] and (not data or data.startswith(b"diff --git ")),
+                "historical canonical patch name or bytes are unproven")
+        files[candidate] = data
+    preserved = meta.get("preserved_generation_artifacts", [])
+    require(isinstance(preserved, list), "preserved generation metadata is invalid")
+    for item in preserved:
+        require(isinstance(item, dict), "preserved generation entry is invalid")
+        candidate = physical(item.get("path", ""))
+        require(candidate.parent == metadata.parent / "recovery", "preserved generation is outside owned recovery directory")
+        boundary, data = snapshot(candidate, "log")
+        require(boundary["exists"] and digest(data) == item.get("sha256") and (not data or data.startswith(b"diff --git ")),
+                "preserved generation bytes are unproven")
+        files[candidate] = data
+    actual = set()
+    for item in metadata.parent.rglob("*"):
+        item = physical(item)
+        if item.is_dir():
+            require(item == metadata.parent / "recovery", "unowned directory in legacy implementation state")
+        else:
+            actual.add(item)
+    require(actual == set(files), "legacy implementation state contains unowned or missing artifacts")
+    value = {"schema_version": 1, "provider": provider, "operation": "legacy-state-archive",
+             "repository": str(repo), "caller": caller, "base": base,
+             "historical_source_authorization": "unknown", "original_paid_result": "unknown",
+             "files": [{"path": str(path), "sha256": digest(data), "text": data.decode("utf-8")}
+                       for path, data in sorted(files.items(), key=lambda item: str(item[0]))]}
+    return digest(encoded(value))[:32], value
+
+
+def archive_implementation_state(directory, provider, metadata):
+    run_id, value = implementation_archive_source(directory, provider, metadata)
+    event = {"schema_version": 1, "event": "started", "provider": provider, "operation": "local-reconciliation",
+             "parent_run_id": None, "run_id": run_id, "timestamp": now(), "repo": value["repository"],
+             "head": "", "caller": value["caller"]}
+    append(directory, lambda rows: None if any(row.get("run_id") == run_id for row in rows) else event)
+    target = evidence_root(directory, run_id) / "implementation-state-archive.json"
+    if target.exists():
+        require(read_json(target) == value, "immutable implementation archive conflicts")
+    else:
+        publish(target, value)
+    require(implementation_archive_source(directory, provider, metadata) == (run_id, value), "legacy state changed during archival")
+    finish_reconciliation(directory, provider, run_id, [])
+    return {"archive_id": run_id, "historical_source_authorization": "unknown", "original_paid_result": "unknown"}
+
+
+def verify_implementation_archive(directory, provider, metadata):
+    run_id, value = implementation_archive_source(directory, provider, metadata)
+    require(read_json(evidence_root(directory, run_id) / "implementation-state-archive.json") == value,
+            "exact legacy implementation state is not archived")
+    start = invocation(directory, provider, run_id)
+    require(start.get("operation") == "local-reconciliation" and start.get("head") == "" and
+            start.get("parent_run_id") is None, "legacy archive must not claim a paid invocation")
+    return {"archive_id": run_id, "historical_source_authorization": "unknown", "original_paid_result": "unknown"}
+
+
 def reconcile_owner(directory, provider, owner, metadata, report):
     """Publish proven legacy report/patch before allowing exact owned cleanup."""
     path, _, owner_data, row, repo, workspace = owner_identity(owner)
@@ -435,7 +586,7 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     require(original is None or caller == original["caller"], "implementation caller differs from original invocation")
     require(name and caller and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""),
             "legacy implementation identity is incomplete")
-    require((meta.get("last_terminal_state") in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
+    require((meta.get("provider_terminal_state", meta.get("last_terminal_state")) in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
             meta.get("status") in {"completed", "failed", "aborted"}, "legacy implementation has no terminal outcome proof")
     report = physical(report)
     _, report_data = snapshot(report, "log")
@@ -450,9 +601,9 @@ def reconcile_owner(directory, provider, owner, metadata, report):
         require(workspace == physical(expected) and path == physical(workspace.parent / "owner.json"),
                 "legacy implementation workspace identity mismatch")
         sid = meta.get(provider + "_session_id")
-        require(sid and (f"- Session: `{sid}`" in text or f"- {provider.title()} session ID: `{sid}`" in text) and report.name.startswith(provider + "-" + name + "-"),
+        require(original or (sid and (f"- Session: `{sid}`" in text or f"- {provider.title()} session ID: `{sid}`" in text) and report.name.startswith(provider + "-" + name + "-")),
                 "legacy implementation report session mismatch")
-        require(f"- Repo: `{meta['repo']}`" in text or f"- Repository: `{meta['repo']}`" in text,
+        require(original or f"- Repo: `{meta['repo']}`" in text or f"- Repository: `{meta['repo']}`" in text,
                 "legacy implementation report repository mismatch")
         patch_path = physical(meta.get("canonical_patch") or "")
         require(patch_path.parent == metadata.parent, "legacy canonical patch is outside its owned metadata")
@@ -481,9 +632,31 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     diff = subprocess.run(["git", "-C", str(workspace), "diff", "--binary", base], capture_output=True)
     require(diff.returncode == 0 and diff.stdout == patch_data,
             "legacy workspace differs from its canonical patch; preserve unexported work")
+    patches = [(patch_path, patch_data)] if patch_path is not None else []
+    reports = [(report, report_data)]
+    if original:
+        prepared_owner_artifact(directory, provider, original["run_id"], owner, report, "report")
+        patches = []
+        reports = []
+        original_root = evidence_root(directory, original["run_id"])
+        for required in (original_root / "artifacts").glob("*.json"):
+            prepared = read_json(original_root / "prepared" / required.name)
+            require(digest(str(physical(prepared.get("path", ""))).encode("utf-8")) == required.stem,
+                    "prepared patch does not match original required path")
+        for prepared_path in (original_root / "prepared").glob("*.json"):
+            prepared = read_json(prepared_path)
+            if prepared.get("kind") == "git-binary-patch":
+                patches.append(prepared_owner_artifact(directory, provider, original["run_id"], owner,
+                                                       prepared.get("path", ""), "git-binary-patch"))
+            elif prepared.get("kind") == "report":
+                reports.append(prepared_owner_artifact(directory, provider, original["run_id"], owner,
+                                                       prepared.get("path", ""), "report"))
     identity = {"provider": provider, "owner_sha256": digest(owner_data), "metadata_sha256": digest(meta_data),
                 "report_sha256": digest(report_data), "patch_sha256": digest(patch_data),
                 "historical_source_authorization": "unknown"}
+    if original:
+        identity["prepared_patches"] = sorted((str(item), digest(data)) for item, data in patches)
+        identity["prepared_reports"] = sorted((str(item), digest(data)) for item, data in reports)
     run_id = digest(encoded(identity))[:32]
     event = {"schema_version": 1, "event": "started", "provider": provider,
              "operation": "local-finalization" if original else "local-reconciliation",
@@ -494,11 +667,12 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     facts = {"phase": "report-publication"}
     if original:
         facts["original_invocation_id"] = original["run_id"]
-    receipt = publish_report(directory, provider, run_id, report, facts)
-    require(receipt["report_sha256"] == identity["report_sha256"], "legacy report changed during reconciliation")
-    if patch_path is not None:
-        receipt = publish_patch(directory, provider, run_id, patch_path, facts)
-        require(receipt["report_sha256"] == identity["patch_sha256"], "legacy patch changed during reconciliation")
+    for prepared_path, prepared_data in reports:
+        receipt = publish_report(directory, provider, run_id, prepared_path, facts)
+        require(receipt["report_sha256"] == digest(prepared_data), "legacy report changed during reconciliation")
+    for prepared_path, prepared_data in patches:
+        receipt = publish_patch(directory, provider, run_id, prepared_path, facts)
+        require(receipt["report_sha256"] == digest(prepared_data), "legacy patch changed during reconciliation")
     require(snapshot(path, "log")[1] == owner_data and snapshot(metadata, "log")[1] == meta_data,
             "legacy implementation ownership changed during reconciliation")
     final_status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"], capture_output=True)
@@ -642,7 +816,14 @@ def main():
     require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen"},
             "unknown reviewer provider")
     directory = location()
-    if operation == "reconcile-owner":
+    if operation in {"archive-implementation-state", "verify-implementation-archive"}:
+        require(len(sys.argv) == 4, "implementation archive requires provider and exact canonical metadata")
+        action = archive_implementation_state if operation == "archive-implementation-state" else verify_implementation_archive
+        print(json.dumps(action(directory, provider, sys.argv[3])))
+    elif operation == "verify-prepared":
+        require(len(sys.argv) == 6, "verify-prepared requires provider, original invocation, kind and exact path")
+        print(json.dumps({"references": verify_prepared(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5])}))
+    elif operation == "reconcile-owner":
         require(len(sys.argv) == 6, "reconcile-owner requires provider, owner, metadata and exact report")
         print(json.dumps(reconcile_owner(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5])))
     elif operation == "reconcile-sandbox":
@@ -664,10 +845,13 @@ def main():
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
-    elif operation in {"require-report", "publish-report", "publish-patch", "verify-reports", "bind-sandbox", "bind-owner"}:
+    elif operation in {"require-report", "publish-report", "publish-patch", "verify-reports", "bind-sandbox", "bind-owner", "prepare-owner-artifact"}:
         require(len(sys.argv) >= 4, "missing evidence invocation")
         run_id = sys.argv[3]
-        if operation == "require-report":
+        if operation == "prepare-owner-artifact":
+            require(len(sys.argv) == 7, "prepared artifact requires invocation, owner, kind and path")
+            prepare_owner_artifact(directory, provider, run_id, sys.argv[4], sys.argv[5], sys.argv[6])
+        elif operation == "require-report":
             require(len(sys.argv) in {4, 5, 6}, "invalid evidence requirement")
             require_report(directory, provider, run_id)
             if len(sys.argv) >= 5:
