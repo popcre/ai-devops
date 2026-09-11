@@ -341,13 +341,94 @@ def verify_owner(directory, provider, owner):
         path, _, _, row, repo, workspace = owner_identity(owner)
         run_id = row.get("evidence_run_id")
         require(isinstance(run_id, str) and re.fullmatch(r"[0-9a-f]{32}", run_id),
-                "legacy implementation ownership has no invocation proof; preserve its metadata, reports and workspace for exact local reconciliation")
+                "legacy implementation ownership has no invocation proof; use ai-reviewer-issue evidence reconcile-owner PROVIDER OWNER METADATA REPORT with exact private evidence")
         start = invocation(directory, provider, run_id)
         identity = read_json(evidence_root(directory, run_id) / "owner.json")
         require(identity == {"schema_version": 1, "provider": provider, "run_id": run_id,
                              "owner": str(path), "repository": str(repo), "workspace": str(workspace)} and
                 repo == physical(start["repo"]), "implementation evidence ownership changed")
         return verify_reports(directory, provider, run_id)
+
+
+def reconcile_owner(directory, provider, owner, metadata, report):
+    """Publish proven legacy report/patch before allowing exact owned cleanup."""
+    path, _, owner_data, row, repo, workspace = owner_identity(owner)
+    if row.get("evidence_run_id"):
+        references = verify_owner(directory, provider, owner)
+        run_id = row["evidence_run_id"]
+        if invocation(directory, provider, run_id).get("operation") == "local-reconciliation":
+            finish_reconciliation(directory, provider, run_id, references)
+        return {"already_reconciled": True, "report_count": len(references)}
+    metadata = physical(metadata)
+    _, meta_data = snapshot(metadata, "log")
+    meta = json.loads(meta_data)
+    require(physical(meta.get("repo") or meta.get("repository_root") or "") == repo,
+            "legacy implementation metadata repository mismatch")
+    name, caller, base = meta.get("name"), meta.get("caller"), meta.get("base_sha")
+    require(name and caller and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""),
+            "legacy implementation identity is incomplete")
+    require((meta.get("last_terminal_state") in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
+            meta.get("status") in {"completed", "failed", "aborted"}, "legacy implementation has no terminal outcome proof")
+    report = physical(report)
+    _, report_data = snapshot(report, "log")
+    require(report_data, "legacy implementation report is unavailable")
+    text = report_data.decode("utf-8")
+    if provider in {"qwen", "kimi"}:
+        require(meta.get("version") == 2 and meta.get("mode") == "implement" and
+                metadata.name == "metadata.json" and metadata.parent.name == caller + "--" + name + ".d",
+                "legacy implementation canonical metadata path is unproven")
+        state = metadata.parent.parent.parent.parent
+        expected = state / "worktrees" / (provider + "." + metadata.parent.parent.name + "-" + caller + "-" + name) / "wt"
+        require(workspace == physical(expected) and path == physical(workspace.parent / "owner.json"),
+                "legacy implementation workspace identity mismatch")
+        sid = meta.get(provider + "_session_id")
+        require(sid and f"- Session: `{sid}`" in text and report.name.startswith(provider + "-" + name + "-"),
+                "legacy implementation report session mismatch")
+        require(f"- Repo: `{meta['repo']}`" in text, "legacy implementation report repository mismatch")
+        patch_path = physical(meta.get("canonical_patch") or "")
+        require(patch_path.parent == metadata.parent, "legacy canonical patch is outside its owned metadata")
+        _, patch_data = snapshot(patch_path, "log")
+        require(digest(patch_data) == meta.get("patch_sha256"), "legacy canonical patch hash mismatch")
+    elif provider == "glm":
+        require(path == metadata and meta.get("type") == "implementation" and
+                metadata.name == caller + "--" + name + ".json", "legacy GLM owner metadata mismatch")
+        state = metadata.parent.parent.parent
+        require(workspace == physical(state / "wt" / metadata.parent.name / (caller + "--" + name)),
+                "legacy GLM clone identity mismatch")
+        require(physical(meta.get("report_path") or "") == report and meta.get("opencode_session_id"),
+                "legacy GLM report path is unproven")
+        sid = meta["opencode_session_id"]
+        require(f"| session id | `{sid}` |" in text or f"- OpenCode session ID: `{sid}`" in text,
+                "legacy GLM report session mismatch")
+        patch_name = meta.get("patch_path") or meta.get("incomplete_patch_path")
+        patch_path = physical(patch_name) if patch_name else None
+        patch_data = snapshot(patch_path, "log")[1] if patch_path else b""
+    else:
+        raise Blocked("no authoritative implementation ownership adapter")
+    require(workspace.is_dir(), "legacy recovery workspace is unavailable")
+    status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"], capture_output=True)
+    require(status.returncode == 0 and not any(line.startswith(b"??") for line in status.stdout.splitlines()),
+            "legacy workspace has unexported files; preserve and export exact work before reconciliation")
+    diff = subprocess.run(["git", "-C", str(workspace), "diff", "--binary", base], capture_output=True)
+    require(diff.returncode == 0 and diff.stdout == patch_data,
+            "legacy workspace differs from its canonical patch; preserve unexported work")
+    identity = {"provider": provider, "owner_sha256": digest(owner_data), "metadata_sha256": digest(meta_data),
+                "report_sha256": digest(report_data), "patch_sha256": digest(patch_data),
+                "historical_source_authorization": "unknown"}
+    run_id = digest(encoded(identity))[:32]
+    event = {"schema_version": 1, "event": "started", "provider": provider, "operation": "local-reconciliation",
+             "parent_run_id": None, "run_id": run_id, "timestamp": now(), "repo": str(repo), "head": "", "caller": caller}
+    append(directory, lambda rows: None if any(item.get("run_id") == run_id for item in rows) else event)
+    require_report(directory, provider, run_id)
+    receipt = publish_report(directory, provider, run_id, report, {"phase": "report-publication"})
+    require(receipt["report_sha256"] == identity["report_sha256"], "legacy report changed during reconciliation")
+    if patch_data:
+        receipt = publish_report(directory, provider, run_id, patch_path, {"phase": "report-publication"})
+        require(receipt["report_sha256"] == identity["patch_sha256"], "legacy patch changed during reconciliation")
+    bind_owner(directory, provider, run_id, owner)
+    references = verify_owner(directory, provider, owner)
+    finish_reconciliation(directory, provider, run_id, references)
+    return {"run_id": run_id, "report_count": len(references), "historical_source_authorization": "unknown"}
 
 
 def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
@@ -479,7 +560,10 @@ def main():
     require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen"},
             "unknown reviewer provider")
     directory = location()
-    if operation == "reconcile-sandbox":
+    if operation == "reconcile-owner":
+        require(len(sys.argv) == 6, "reconcile-owner requires provider, owner, metadata and exact report")
+        print(json.dumps(reconcile_owner(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5])))
+    elif operation == "reconcile-sandbox":
         require(len(sys.argv) >= 6, "reconcile-sandbox requires provider, sandbox, metadata, and exact report paths")
         print(json.dumps(reconcile_sandbox(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5:])))
     elif operation == "begin":

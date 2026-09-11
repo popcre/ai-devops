@@ -812,6 +812,36 @@ wait "$job"
         with self.assertRaises(events.Blocked):
             events.verify_owner(self.root, "grok", owner)
 
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self):
+        state = self.root / "state"
+        workspace = state / "worktrees/qwen.fixture-codex-work/wt"
+        workspace.parent.mkdir(parents=True)
+        subprocess.run(["git", "clone", "-q", str(self.toolkit), str(workspace)], check=True, capture_output=True)
+        (workspace / "proof.txt").write_text("Synthetic preserved implementation change.\n")
+        patch_data = subprocess.check_output(["git", "-C", str(workspace), "diff", "--binary", self.sha])
+        metadata = state / "sessions/fixture/codex--work.d/metadata.json"
+        metadata.parent.mkdir(parents=True)
+        canonical = metadata.parent / "cumulative.patch"
+        canonical.write_bytes(patch_data)
+        metadata.write_text(json.dumps({"version": 2, "mode": "implement", "repo": str(self.toolkit),
+            "caller": "codex", "name": "work", "base_sha": self.sha, "last_terminal_state": "completed",
+            "qwen_session_id": "synthetic-session", "canonical_patch": str(canonical), "patch_sha256": events.digest(patch_data)}))
+        owner = workspace.parent / "owner.json"
+        owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
+        report = self.root / "qwen-work-synthetic.md"
+        report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
+        extra = workspace / "unexported.txt"
+        extra.write_text("must not be discarded")
+        with self.assertRaises(events.Blocked):
+            events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+        extra.unlink()
+        result = events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+        self.assertEqual(result["report_count"], 2)
+        self.assertEqual(result["historical_source_authorization"], "unknown")
+        report.unlink(); canonical.unlink()
+        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 2)
+        self.assertTrue(events.reconcile_owner(self.root, "qwen", owner, metadata, report)["already_reconciled"])
+
     def test_shared_publisher_carries_muse_recovery_identity(self):
         original, recovery = "e" * 32, "f" * 32
         self.invocation(rid=original, provider="muse")
