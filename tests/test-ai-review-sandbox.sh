@@ -224,6 +224,7 @@ check "refresh_head_matches_the_worktree" \
 # refreshed this way.
 ALIASED_SANDBOX_DIR="$TMP/alias/../sandboxes"; mkdir -p "$TMP/alias"
 RECORDED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" ensure-copy "$MAIN" stable-move)"
+RECORDED_ID="$(cat "$RECORDED/.git/opencode" 2>/dev/null)"
 MOVED_SOURCE="$TMP/moved-source"; git clone -q "$MAIN" "$MOVED_SOURCE"
 git -C "$MOVED_SOURCE" config user.email t@example.com
 git -C "$MOVED_SOURCE" config user.name Test
@@ -231,6 +232,7 @@ echo moved-source > "$MOVED_SOURCE/moved.txt"; git -C "$MOVED_SOURCE" add moved.
 REFRESHED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" refresh-copy "$MOVED_SOURCE" stable-move "$RECORDED")"
 check "recorded_copy_refresh_keeps_exact_directory" "[ '$REFRESHED' = '$RECORDED' ]"
 check "recorded_copy_refresh_uses_current_source" "grep -qx moved-source '$RECORDED/moved.txt' && [ \"\$(git -C '$RECORDED' rev-parse HEAD)\" = \"\$(git -C '$MOVED_SOURCE' rev-parse HEAD)\" ]"
+check "recorded_copy_refresh_keeps_project_identity" "printf '%s\n' '$RECORDED_ID' | grep -Eqx '[0-9a-f]{40}' && [ \"\$(cat '$RECORDED/.git/opencode')\" = '$RECORDED_ID' ]"
 check "recorded_copy_refresh_rejects_wrong_tag" "! AI_REVIEW_SANDBOX_DIR='$ALIASED_SANDBOX_DIR' '$SCRIPT' refresh-copy '$MOVED_SOURCE' wrong-tag '$RECORDED'"
 UNMANAGED_REFRESH="$TMP/sandboxes/unmanaged-refresh"; mkdir -p "$UNMANAGED_REFRESH"; touch "$UNMANAGED_REFRESH/preserve"
 check "recorded_copy_refresh_rejects_unmanaged_target" "! '$SCRIPT' refresh-copy '$MOVED_SOURCE' stable-move '$UNMANAGED_REFRESH'"
@@ -242,6 +244,12 @@ check "recorded_copy_removal_deletes_exact_snapshot" "AI_REVIEW_SANDBOX_DIR='$AL
 # Tags isolate concurrent sessions.
 STAGE_B="$("$SCRIPT" ensure "$WT" second-session)"
 check "tags_are_isolated"                     "[ '$STAGE_B' != '$STAGE2' ] && [ -d '$STAGE_B' ]"
+# Issue #430: snapshots of one repository must not share an OpenCode project,
+# or every server boot rescans all of them.
+check "snapshots_get_distinct_opencode_projects" \
+  "grep -Eqx '[0-9a-f]{40}' '$STAGE_B/.git/opencode' && grep -Eqx '[0-9a-f]{40}' '$STAGE2/.git/opencode' && [ \"\$(cat '$STAGE_B/.git/opencode')\" != \"\$(cat '$STAGE2/.git/opencode')\" ]"
+check "snapshot_project_is_not_the_root_commit" \
+  "grep -Eqx '[0-9a-f]{40}' '$STAGE_B/.git/opencode' && [ \"\$(cat '$STAGE_B/.git/opencode')\" != \"\$(git -C '$WT' rev-list --max-parents=0 HEAD)\" ]"
 
 # Deletion safety (rule: every destructive action must be recoverable/scoped).
 "$SCRIPT" remove "$WT" second-session
