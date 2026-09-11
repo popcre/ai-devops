@@ -65,6 +65,9 @@ release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null |
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
 cleanup(){
   local accepted_path="" accepted_id="" active_status="" active_tmp=""
+  rm -f -- "$RUN_TMP"/muse-key.*
+  release_credential_lock
+  reviewer_event_cleanup_allowed muse || { mark_uncertain report_publication_incomplete; return 1; }
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
     active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
     case "$active_status" in
@@ -175,7 +178,10 @@ ensure_report_destination(){
   rel="${path#"$root"/}"
   git -C "$root" check-ignore -q "$rel" || die "refusing Muse report: exact destination is not Git-ignored: $rel. Add .ai/reviews/ to .gitignore, then retry."
   ! git -C "$root" ls-files --error-unmatch "$rel" >/dev/null 2>&1 || die "refusing Muse report: exact destination is tracked: $rel. Preserve it, remove it from Git tracking with: git rm --cached -- '$rel'; then retry."
-  [ ! -e "$path" ] || die "refusing Muse report: exact destination already exists: $rel"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    [ -n "${MUSE_RECOVERY_EVENT_RUN_ID:-}" ] && [ "$path" = "${MUSE_RECOVERY_REPORT_PATH:-}" ] &&
+      [ -f "$path" ] && [ ! -L "$path" ] || die "refusing Muse report: exact destination already exists: $rel"
+  fi
   mkdir -p "$dir" || die "could not create Muse report directory: $dir"
   secure_review_directory "$dir" || die "could not enforce private Muse report storage: $dir"
   [ ! -L "$dir" ] || die 'refusing Muse reports: .ai/reviews became a linked path.'
@@ -202,7 +208,7 @@ reserve_report_staging(){
   [ "$path_state" = "$PUBLISH_FD_ID" ] || die 'reserved Muse staging pathname does not match its held descriptor.'
 }
 finish_report_staging(){
-  local root="$1" path="$2" dir="$root/.ai/reviews"
+  local root="$1" path="$2" dir="$root/.ai/reviews" published_id
   [ -n "$PUBLISH_FD" ] && [ -n "$PUBLISH_TMP" ] && [ -n "$PUBLISH_ID" ] || die 'Muse report staging was not reserved before provider contact.'
   ensure_report_destination "$root" "$path"
   [ "$(cd "$dir" && pwd -P)" = "$PUBLISH_DIR_PHYSICAL" ] || die 'refusing Muse report: destination directory changed after staging.'
@@ -214,14 +220,23 @@ finish_report_staging(){
   ensure_report_destination "$root" "$path"
   [ "$(cd "$dir" && pwd -P)" = "$PUBLISH_DIR_PHYSICAL" ] || die 'refusing Muse report: destination directory changed during final publication.'
   [ "$(stat -c '%f:%h:%d:%i' "$PUBLISH_TMP" 2>/dev/null)" = "$PUBLISH_FD_ID" ] && [ "$(stat -Lc '%f:%h:%d:%i' "/proc/$BASHPID/fd/$PUBLISH_FD" 2>/dev/null)" = "$PUBLISH_FD_ID" ] || die 'refusing Muse report: staging identity or link count changed during final publication.'
-  ln "$PUBLISH_TMP" "$path" 2>/dev/null || die "could not publish Muse report without overwriting: $path"
-  if [ "$(stat -c '%d:%i' "$path" 2>/dev/null)" != "$PUBLISH_ID" ]; then
-    rm -f -- "$path"
-    die 'refusing Muse report: published file does not match the held staging file.'
+  if [ -e "$path" ]; then
+    published_id="$(stat -c '%d:%i' "$path")"
+    [ -n "${MUSE_RECOVERY_EVENT_RUN_ID:-}" ] && [ "$path" = "${MUSE_RECOVERY_REPORT_PATH:-}" ] &&
+      [ -f "$path" ] && [ ! -L "$path" ] && cmp -s "$PUBLISH_TMP" "$path" &&
+      [ "$published_id" = "$(stat -c '%d:%i' "$path")" ] || die 'recovered Muse report differs from the retained result.'
+  else
+    ln "$PUBLISH_TMP" "$path" 2>/dev/null || die "could not publish Muse report without overwriting: $path"
+    published_id="$PUBLISH_ID"
+    if [ "$(stat -c '%d:%i' "$path" 2>/dev/null)" != "$PUBLISH_ID" ]; then
+      rm -f -- "$path"
+      die 'refusing Muse report: published file does not match the held staging file.'
+    fi
   fi
   chmod 600 "$path" 2>/dev/null || die 'could not protect the published Muse report.'
   protect_windows_path "$path" file || die 'could not enforce the published Muse report Windows ACL.'
-  printf '%s\n%s\n' "$path" "$PUBLISH_ID" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
+  reviewer_event_publish_report muse "$path" || die 'durable report publication failed; local evidence retained.'
+  printf '%s\n%s\n' "$path" "$published_id" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
   eval "exec ${PUBLISH_FD}>&-" || die 'could not close Muse report staging file.'; PUBLISH_FD=""
   rm -f "$PUBLISH_TMP"
   PUBLISH_TMP=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
@@ -345,7 +360,11 @@ report(){
   ensure_report_destination "$root" "$path"; [ -n "$PUBLISH_FD" ] || die "Muse report staging was not reserved: $path"
   { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
   finish_report_staging "$root" "$path"
-  "$PACKET" verify "$PACKET_DIR" >/dev/null || die "source identity changed; paid report retained: $path"
+  if [ "${MUSE_RECOVERY_STATE:-}" = completed-stale-source ]; then
+    "$PACKET" verify-retained "$PACKET_DIR" >/dev/null || die "retained source evidence changed; paid report retained: $path"
+  else
+    "$PACKET" verify "$PACKET_DIR" >/dev/null || die "source identity changed; paid report retained: $path"
+  fi
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
 }
 cmd_new(){

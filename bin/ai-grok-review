@@ -1261,7 +1261,7 @@ preflight_review_file() { # preflight_review_file REPO NAME
 }
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
-  local repo="$1" name="$2" f="$3" dir ts out base
+  local repo="$1" name="$2" f="$3" dir ts out base tmp
   ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
@@ -1270,6 +1270,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
   [ -z "$PENDING_REVIEW_DIR" ] || [ "$dir" = "$PENDING_REVIEW_DIR" ] || { warn 'refusing Grok review: report destination changed after preflight.'; return 1; }
   mkdir -p "$dir"
   out="$dir/$base"
+  tmp="$(mktemp "$dir/.grok-report.XXXXXX")" || return 1
   {
     echo "# Grok review — $name"
     echo
@@ -1283,7 +1284,10 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "---"
     echo
     jq -r '.text // ""' "$f"
-  } > "$out"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  ln "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  reviewer_event_publish_report grok "$out" || return 1
   printf '%s' "$out"
 }
 
@@ -1439,6 +1443,7 @@ cmd_new() {
   ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
   record_diagnostic "$repo" "$workid" "$name" launch provider-started
+  reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     if [ "$rc" = 124 ]; then
@@ -1455,11 +1460,11 @@ cmd_new() {
       note "  A first turn that completes but delivers no output has been seen before"
       note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   sid="$(jq -r '.sessionId // ""' "$out")"
-  [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
+  [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
@@ -1481,6 +1486,7 @@ cmd_new() {
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1560,6 +1566,7 @@ $REVIEW_HEAD only."
   ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
   record_diagnostic "$repo" "$workid" "$name" launch provider-started
+  reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     if [ "$rc" = 124 ]; then
@@ -1578,7 +1585,7 @@ $REVIEW_HEAD only."
       note "  Do not keep retrying this session: start a fresh one with"
       note "    ai-grok-review new ${name}-2 --prompt-file <brief>"
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   write_meta "$meta" "$(jq \
@@ -1600,6 +1607,7 @@ $REVIEW_HEAD only."
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
