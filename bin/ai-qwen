@@ -462,6 +462,7 @@ qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADE
   returned="$(model_from "$stream")"
   if [ -z "$runtime_sha" ] || [ -z "$preloader_sha" ]; then printf 'wrapper-runtime-evidence-drift'
   elif [ "$provider_rc" = 124 ] || [ "$provider_rc" = 137 ]; then printf 'timeout'
+  elif provider_content_filter "$stream" "$stderr"; then printf 'content-filter'
   elif grep -Eqi 'unauth|authentication|invalid[ _-]?(api[ _-]?)?key|login required|401' "$stderr"; then printf 'authentication-failure'
   elif grep -Eqi 'allowance|quota|usage limit|credit|insufficient|429' "$stderr"; then printf 'allowance-exhaustion'
   elif grep -Eqi 'model[^[:alnum:]]+(unavailable|unsupported|unknown|invalid|not found|rejected)|404' "$stderr"; then printf 'requested-model-unavailable'
@@ -472,6 +473,13 @@ qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADE
   elif [ ! -s "$stream" ]; then printf 'empty-provider-stream'
   elif ! tail -20 "$stream" | jq -e 'select(.type=="result")' >/dev/null 2>&1; then printf 'missing-terminal-result'
   else printf 'provider-process-transport-failure'; fi
+}
+
+provider_content_filter() { # STREAM STDERR; typed provider errors, not review prose
+  local message
+  message="$(provider_api_error "$1" || true)"
+  printf '%s' "$message" | grep -Eq '(^|[^[:alnum:]_])DataInspectionFailed([^[:alnum:]_]|$)' && return 0
+  [ -s "$2" ] && grep -Eq '(\[API Error:|InternalError\.Algo\.).*DataInspectionFailed([^[:alnum:]_]|$)' "$2"
 }
 
 write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA [CLASS]
@@ -517,6 +525,10 @@ AWAIT_RESULT_REASON=""
 await_result() { # await_result FILE
   local f="$1"
   AWAIT_RESULT_REASON=""
+  if provider_content_filter "$f" "$f.err"; then
+    AWAIT_RESULT_REASON=content-filter
+    return 1
+  fi
   # run_turn synchronously waits for the provider process and records its exit
   # status before this function is called. Once that process has returned, no
   # later terminal record can appear; waiting again only hides the real stderr.
@@ -770,7 +782,8 @@ record_existing_review_recovery() { # META OUT REASON
   preserve_review_stream "$out" "$pending" || return 1
   digest="$(sha256_file "$pending")" || return 1
   chmod 600 "$pending" 2>/dev/null || true
-  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .recovery_sha256=$digest | .recovery_runtime_sha256=$runtime | .recovery_preloader_sha256=$preloader | .recovery_event_run_id=$event | .governed_head=$governed | .updated=$u' "$meta")"
+  if [ -f "$out.err" ]; then preserve_review_stream "$out.err" "$pending.stderr"; else preserve_review_stream /dev/null "$pending.stderr"; fi || return 1
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" --arg stderr_digest "$(sha256_file "$pending.stderr")" --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .recovery_stderr=($p+".stderr") | .recovery_stderr_sha256=$stderr_digest | .recovery_sha256=$digest | .recovery_runtime_sha256=$runtime | .recovery_preloader_sha256=$preloader | .recovery_event_run_id=$event | .governed_head=$governed | .updated=$u' "$meta")"
 }
 
 REVIEW_RUNTIME_SHA=""; REVIEW_PRELOADER_SHA=""
@@ -834,7 +847,11 @@ extract_answer() { # extract_answer FILE
   text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed 's/\r$//' | sed '/^$/d')"
   local api_error; api_error="$(provider_api_error "$1" || true)"
   if [ -n "$api_error" ]; then
-    ANSWER_DEFECT="the provider refused the call and returned no review: $api_error"
+    if printf '%s' "$api_error" | grep -Eq '(^|[^[:alnum:]_])DataInspectionFailed([^[:alnum:]_]|$)'; then
+      ANSWER_DEFECT="content-filter: the provider refused the call and returned no review"
+    else
+      ANSWER_DEFECT="provider-unavailable: the provider refused the call and returned no review"
+    fi
   elif [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
     ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
   elif [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then
@@ -1151,7 +1168,7 @@ cmd_doctor() {
     # The paid provider process has returned. Disable the EXIT-only interruption
     # finalizer before parsing and writing the ordinary success/failure result.
     QUALIFICATION_ACTIVE=0
-    if [ -z "$failure_override" ] && has_result "$tmp" && [ "$(model_from "$tmp")" = "$QWEN_MODEL" ] && [ "$provider_rc" = 0 ]        && ! provider_api_error "$tmp" >/dev/null; then echo "OK"
+    if [ -z "$failure_override" ] && has_result "$tmp" && [ "$(model_from "$tmp")" = "$QWEN_MODEL" ] && [ "$provider_rc" = 0 ]        && ! provider_api_error "$tmp" >/dev/null && ! provider_content_filter "$tmp" "$tmp.err"; then echo "OK"
     else
       QUALIFICATION_DIAGNOSTIC_PATH=""
       if write_qualification_diagnostic "$tmp" "$tmp.err" "$provider_rc" "$runtime_sha" "$preloader_sha" "$failure_override"; then
@@ -1202,13 +1219,14 @@ record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
   preserve_review_stream "$out" "$pending" || return 1
   digest="$(sha256_file "$pending")" || return 1
   chmod 600 "$pending" 2>/dev/null || true
+  if [ -f "$out.err" ]; then preserve_review_stream "$out.err" "$pending.stderr"; else preserve_review_stream /dev/null "$pending.stderr"; fi || return 1
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg review_dir "$review_dir" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" \
     --arg packet "$PACKET_HASH" --arg tree "$WORKING_TREE_HASH" --arg pending "$pending" --arg reason "$reason" --arg now "$now" \
-    --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" \
+    --arg stderr_digest "$(sha256_file "$pending.stderr")" --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" \
     '{qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"review",status:"recovery-required",model:$model,
       review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,
-      recovery_stream:$pending,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
+      recovery_stream:$pending,recovery_stderr:($pending+".stderr"),recovery_stderr_sha256:$stderr_digest,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
 LIFECYCLE_PRIOR_TREE=""
@@ -1216,7 +1234,9 @@ LIFECYCLE_PRIOR_TREE=""
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
   local out="$1" err="$2" reason="$3"
   [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
-  if [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
+  if provider_content_filter "$out" "$err"; then
+    printf 'content-filter'
+  elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
     printf 'turn_limit_cancelled'
   elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
@@ -1262,6 +1282,7 @@ mark_preserved() { # mark_preserved OWNER
 
 safe_report_detail() { # safe_report_detail TERMINAL_STATE
   case "$1" in
+    content-filter) printf 'Qwen rejected the request with provider content inspection; no review was accepted.' ;;
     usage-limit) printf 'Qwen reported a usage or billing limit.' ;;
     turn_limit_cancelled) printf 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.' ;;
     timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
@@ -1539,7 +1560,7 @@ start_session() { # start_session NAME MODE
     [ "$mode" != review ] || record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" "$LIFECYCLE_STATE"
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    note "  $(safe_report_detail "$LIFECYCLE_STATE")"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1663,7 +1684,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     record_existing_review_recovery "$meta" "$out" "$LIFECYCLE_STATE"
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    note "  $(safe_report_detail "$LIFECYCLE_STATE")"
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
   verify_returned_model "$out"
@@ -1762,9 +1783,9 @@ complete_review_metadata() { # META EXACT_SESSION; publish before removing recov
   [ "$digest" = "$(jq -r .recovery_sha256 "$meta")" ] || return 1
   [ -n "$QWEN_LAST_REPORT" ] && [ -f "$QWEN_LAST_REPORT" ] || return 1
   report_hash="$(sha256_file "$QWEN_LAST_REPORT")" || return 1
-  updated="$(jq --arg sid "$sid" --arg report "$QWEN_LAST_REPORT" --arg report_hash "$report_hash" --arg digest "$digest" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | .last_finalized_stream_sha256=$digest | .last_report=$report | .last_report_sha256=$report_hash | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=(.turns+1)' "$meta")" || return 1
+  updated="$(jq --arg sid "$sid" --arg report "$QWEN_LAST_REPORT" --arg report_hash "$report_hash" --arg digest "$digest" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | .last_finalized_stream_sha256=$digest | .last_report=$report | .last_report_sha256=$report_hash | del(.failure_reason,.recovery_stream,.recovery_stderr) | .updated=$u | .turns=(.turns+1)' "$meta")" || return 1
   write_meta "$meta" "$updated" || return 1
-  rm -f "$pending"
+  rm -f "$pending" "$pending.stderr"
 }
 
 cmd_finalize() { # local-only completion of one sealed provider turn
@@ -1795,6 +1816,8 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   [ "$status" = recovery-required ] && [ "$(jq -r .failure_reason "$meta")" = provider_turn_pending_local_validation ] || die 'remote completion is uncertain; local finalization cannot resubmit or guess a result.'
   pending="${meta%.json}.pending.jsonl"
   same_path "$(jq -r .recovery_stream "$meta")" "$pending" && [ -f "$pending" ] && [ ! -L "$pending" ] && [ "$(sha256_file "$pending")" = "$(jq -r .recovery_sha256 "$meta")" ] || die 'the exact retained provider stream is missing or changed.'
+  same_path "$(jq -r .recovery_stderr "$meta")" "$pending.stderr" && [ -f "$pending.stderr" ] && [ ! -L "$pending.stderr" ] && [ "$(sha256_file "$pending.stderr")" = "$(jq -r .recovery_stderr_sha256 "$meta")" ] || die 'the exact retained provider stderr is missing or changed.'
+  if provider_content_filter "$pending" "$pending.stderr"; then die 'content-filter: retained provider rejection cannot be finalized as a review.'; fi
   sid="$(jq -r .qwen_session_id "$meta")"
   jq -se --arg sid "$sid" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
   verify_returned_model "$pending"
@@ -1812,7 +1835,8 @@ finish_turn() {
     note "source identity changed; paid stream retained: $out"
     return 4
   fi
-  if [ "${OPT_JSON:-0}" = 1 ]; then extract_answer "$out" >/dev/null; cat "$out"; else extract_answer "$out"; fi
+  if provider_api_error "$out" >/dev/null; then extract_answer "$out" >/dev/null
+  elif [ "${OPT_JSON:-0}" = 1 ]; then extract_answer "$out" >/dev/null; cat "$out"; else extract_answer "$out"; fi
   [ -z "$ANSWER_DEFECT" ] || artifact_status=incomplete
   QWEN_REPORT_KEY="$(sha256_file "$out")" || return 1
   path="$(write_review_file "$repo" "$name" "$out" "$artifact_status")" || return 1
