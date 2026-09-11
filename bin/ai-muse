@@ -143,11 +143,15 @@ read_prompt(){
   [ -s "$f" ] || { rm -f "$f"; die 'prompt is empty.'; }; printf '%s' "$f"
 }
 prepare(){
-  local root="$1" name="$2" prompt="$3" t; t="$(tag "$name")"
+  local root="$1" name="$2" prompt="$3" t identity; t="$(tag "$name")"
+  identity="$(tmp_file)"
+  "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || die "source identity refused before snapshot creation"
   REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
   git -C "$REVIEW_DIR" clean -fdq -- .ai/reviews 2>/dev/null || true
-  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --decision "$(cat "$prompt")" --class medium)"
-  "$PACKET" verify "$PACKET_DIR" >/dev/null
+  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --identity "$identity" --decision "$(cat "$prompt")" --class medium)"
+  "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
+  rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
 }
 load_key(){
@@ -318,6 +322,7 @@ report(){
   ensure_report_destination "$root" "$path"; [ -n "$PUBLISH_FD" ] || die "Muse report staging was not reserved: $path"
   { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
   finish_report_staging "$root" "$path"
+  "$PACKET" verify "$PACKET_DIR" >/dev/null || die "source identity changed; paid report retained: $path"
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
 }
 cmd_new(){
@@ -398,6 +403,23 @@ cmd_doctor(){
 }
 usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
+OPT_BASE=""; OPT_ASSERT_HEAD=""
+if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
+  source_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base|--assert-head)
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+        if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+        shift 2;;
+      --prompt|--prompt-file)
+        [ "$#" -ge 2 ] || die "$1 requires a value."
+        source_args+=("$1" "$2"); shift 2;;
+      *) source_args+=("$1"); shift;;
+    esac
+  done
+  set -- "${source_args[@]}"
+fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
