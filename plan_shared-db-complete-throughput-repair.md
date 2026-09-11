@@ -203,13 +203,13 @@ Do not edit #2705 or #2709 from this programme while their current chat sessions
 
 For #2709, verify the landed `ai-review-packet` and governed wrappers accept and record the contract-declared base SHA, verify ancestry, and compute the patch from the real merge-base. Never reuse the pull request's original base after an update-from-main merge.
 
-Execute #2715 in its own repo-maintenance session. Add a fail-closed prose classifier path that posts the required successful status without dispatching the database guarded-merge workflow; one non-prose/rulebook/config/workflow/script/test/migration file must retain the full path. This removes docs and handoff blockage from the orchestrator.
+Execute #2715 in its own repo-maintenance session. Add a fail-closed prose classifier path that posts the required successful status without dispatching the database guarded-merge workflow. Apply the same principle in ai-devops: a plan plus declarative discoverability pointers in plan indexes, task routers, AGENTS files, and skill links uses a lightweight lane limited to changed-link validation, Markdown validation, routing consistency, and syntax/parse checks. Those pointer edits do not become code merely because they live beside operating instructions. Any executable instruction change, workflow, script, test, configuration, migration, or behavior-changing rulebook edit retains its targeted or full code path. This removes docs, plans, and handoff blockage without weakening checks for behavior changes.
 
 Execute #2716 in its own cross-repository policy/workflow session after its one policy-activation gate. Align global instructions, shared-db rules, risk gate, dry-run, workflow, serial production lock, evidence assertions, and engineer escalation atomically. Never ask Albert to name migration versions after the approved policy is live.
 
 Do not restart these implementations if their current PRs have landed. Verify, consume their evidence, and close only the remaining gap.
 
-**Verification gate:** an unusable provider is never durably assigned; a branch updated from main produces only branch-owned files; a prose-only PR receives its required success without migration dispatch; a fully qualified migration promotes serially after dry-run while every missing/ambiguous proof refuses to an engineer. All four issues close with merged/live evidence from their own owners.
+**Verification gate:** an unusable provider is never durably assigned; a branch updated from main produces only branch-owned files; a prose-only PR receives its required success without migration dispatch; an ai-devops plan with only declarative routing/index/skill pointers runs only the lightweight checks, while an executable or behavior-changing edit still selects the appropriate code suite; a fully qualified migration promotes serially after dry-run while every missing/ambiguous proof refuses to an engineer. All four issues close with merged/live evidence from their own owners.
 
 ### Phase B — make application outcomes control scheduling
 
@@ -355,7 +355,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Preview, merge, and production remain one at a time.
 - Reviewer failure is not a code finding; runner cancellation is not a test result.
 - A merge queue supplements rather than replaces exact-head approval and production freeze.
-- Plans, AGENTS files, skills, workflows, scripts, tests, and configuration are not “documentation only” merely because the visible change is prose.
+- Classification follows behavior, not directory or filename: plans and declarative discoverability pointers use the lightweight lane; executable instructions, behavior-changing rules, workflows, scripts, tests, configuration, and migrations retain targeted or full code checks.
 - Raw transcripts, secrets, licensed data, and private evidence stay outside public repositories.
 - Update this STATUS table whenever implementation changes reality.
 - At every phase boundary, use a fresh session and re-read all remaining downstream phases.
