@@ -4,10 +4,11 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-10T1921Z-edge-dev-codex-issue-335-release-repair.md`](HANDOFF.d/2026-09-10T1921Z-edge-dev-codex-issue-335-release-repair.md)
+**Active handoff:** [`HANDOFF.d/2026-09-11T0001Z-edge-dev-codex-issue-335-phase5-boundary.md`](HANDOFF.d/2026-09-11T0001Z-edge-dev-codex-issue-335-phase5-boundary.md)
 
-The current continuation is the sole Phase 4 owner. PR #330 is an unrelated
-Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
+Phase 4 is closed; the active handoff preserves the Phase 5 boundary only. PR
+#330 is an unrelated Qwen workstream; do not cancel, rerun, or diagnose it as
+part of Issue #335.
 
 **Decision date:** 2026-09-08
 
@@ -19,7 +20,7 @@ Qwen workstream; do not cancel, rerun, or diagnose it as part of Issue #335.
 | 1 | Define the shared routing and gate-policy contracts | DONE 2026-09-08 | `config/task-gates.json`, `config/task-gates.schema.json`, `tools/ci/validate-task-gates.py`, lean-router content model in `docs/context-spec.md` |
 | 2 | Implement and qualify the central `ai-devops` engine | DONE 2026-09-08 | `bin/ai-task-gates` plus enforcement in `bin/ai-review`, `bin/ai-pr-wait`, `bin/ai-review-lifecycle`; evidence under `tests/verification/task-gates/` |
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
-| 4 | Roll out thin policies and lean routers to all remaining repositories | PARTIAL 2026-09-10 — 12/17 landed | Five green PRs at recorded heads remain held because merging starts production automation: POP CRM #8, POP PIM #6, PopDAM #122, Backrest Wiz #7, and Ansible #14. Reopen #335, obtain exact production authority, resolve Backrest's reviewer proof, then merge and verify these five before central coverage closeout |
+| 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
 | 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
@@ -392,17 +393,17 @@ the pilots expose a common gap; never patch consumers inconsistently.
 
 ### Phase 4 — full repository rollout
 
-**Execution update, 2026-09-10:** All 17 repository policies are landed, but
-Phase 4 is still incomplete because two of the final automatic production
-releases failed and the central coverage gate remains unrun. POP CRM #8 merged
-as `acc367ff` and its production job proved the merged commit serving; PopDAM
-#122 merged as `562dc999` and its `popdam / production` deployment reported
-success. POP PIM #6 merged as `8ff0c71c`, built its image, then failed because
-its Coolify restart used GET and received HTTP 405. Backrest Wiz #7 merged as
-`daf86a69`, built its image, then failed because the production host was denied
-access to GHCR and therefore retained a prior image. Both release repairs need
-new exact current-chat production authority. Do not update the 17-row coverage
-gate or start Phase 5 until both live releases are verified.
+**Completion update, 2026-09-10:** Phase 4 is complete. POP CRM #8 landed as
+`acc367ff` and its production job proved the merged commit serving. PopDAM #122
+landed as `562dc999` and deployment `6379307635` reported production success.
+POP PIM #6 landed as `8ff0c71c`; its GET restart failed with HTTP 405, so the
+small repair in #7 landed as `53e43c0a` and release `34521735944` verified
+production successfully. Backrest Wiz #7 landed as `daf86a69`; its first deploy
+failed because the production host could not pull from GHCR. Albert authorized
+the protected credential replacement; rerun `34519554165` then succeeded. The
+central coverage check reports 17 rows and 17 canonical remotes, with the two
+private repositories intentionally metadata-only. Do not begin Phase 5 without
+a separate instruction.
 
 **Prior release update, 2026-09-10:** 13 of 17 repository policies were landed.
 `u2giants/ansible#14` merged as `5e66e72c` after Albert's exact current-chat
