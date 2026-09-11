@@ -38,7 +38,7 @@ gh pr view <number> --repo <owner/repo> --json number,state,headRefOid,baseRefOi
 
 - Sole orchestrator marker: shared-db issue `#2714`, declaring a live Codex route. This programme did not open or replace the marker.
 - Author capacity audit: `4/8` active-author leases, four protected claims, zero relinquished, zero expired at capture.
-- Reviewer-active refs existed for six durable reviewer identities. Their presence is protection/history, not proof that six reviewers are currently working.
+- Nine current-format reviewer lease refs existed. Six older-format reviewer refs also remained; ref presence is protection/history, not proof that the named reviewers are currently working. The #2705 owner must reconcile stale leases for its prior head and closed competing PR rather than this programme deleting them.
 - No preview, merge, or production stage-lock ref matched the audited lock prefixes at capture.
 - The orchestrator reported three production-applied structural candidates with direct catalog/security proof (`#2579`, `#2496`, and `#2507`), one production run in progress (`#2501`), one failed runtime outcome requiring forward repair (`#2506`), and two application-side acceptance waits (`#2576`, `#2482`). These are candidate evidence only; Step 10 still requires five consecutive outcomes under the activated model and direct live application proof.
 
@@ -48,6 +48,7 @@ Reproduce:
 node scripts/check-orchestrator-marker.mjs --resolve
 node scripts/manage-migration-author-lanes.mjs --audit
 node scripts/manage-migration-author-lanes.mjs --queue-audit
+gh api repos/u2giants/shared-db/git/refs/db-review-active-v2
 git ls-remote origin "refs/db-review-active/*" "refs/db-preview-lock/*" "refs/db-merge-lock/*" "refs/db-production-lock/*"
 ```
 
@@ -56,7 +57,7 @@ git ls-remote origin "refs/db-review-active/*" "refs/db-preview-lock/*" "refs/db
 - `u2giants/shared-db` remained repository id `1275568548`, public, under `u2giants`; `main` branch protection was strict `false`, enforced for administrators, and required the twelve existing contexts including `Migration guarded merge authorization`.
 - `popcre/ai-devops` remained repository id `1289642575`, public. Active ruleset `main: pull request + merge queue` required `linux-offline` and configured the native queue; ordinary branch-protection REST returned 404 because rulesets are authoritative there.
 - Visible self-hosted runners were `EDGE-ALIEN` (paused label, idle), `edge-dev-win` (idle), and `EDGE-RUNN-ENVY` (qualified, busy). Runner state is drift-prone; re-read before dispatch.
-- Open-PR inventory at capture included 13 shared-db PRs and 10 ai-devops PRs. Relevant heads were enumerated before work; later gates must query again rather than trust this count.
+- Open-PR inventory changed during capture (shared-db 13 to 14; ai-devops 10 to 12), proving that later gates must query again rather than trust a recorded count.
 
 Reproduce:
 
