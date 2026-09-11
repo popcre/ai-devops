@@ -429,6 +429,121 @@ check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='
 check "running inside read remains legitimate" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_INSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = inside'"
 check "unmeasured running input is not guessed" "AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary '\''{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"path\":\"elsewhere\"}}}]}'\'' \"\$ROOT_FIX\")\" = missing'"
 
+echo "== review retention =="
+PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"; PR_ROOT="$TMP/prune-root"; PR_CALLS="$TMP/prune-calls"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB" "$PR_ROOT"; : > "$PR_CALLS"
+PR_OLD="$(date -u -d '3 days ago' +%FT%TZ)"; PR_NOW="$(date -u +%FT%TZ)"
+pr_sandbox() { # NAME AGE -> managed sandbox path
+  local d="$PR_SB/glm-$1-0123456789ab"; mkdir -p "$d"; printf '%s\nevidence_format=1\n' "$PR_SB" > "$d/.ai-review-sandbox"
+  printf 'Snapshot tag: glm-%s\n' "$1" > "$d/AI-REVIEW-SANDBOX.md"
+  [ "$2" = old ] && touch -d '3 days ago' "$d/AI-REVIEW-SANDBOX.md" "$d"
+  printf '%s' "$d"
+}
+pr_meta() { # NAME TYPE ACTIVITY [EXTRA_JQ]
+  local f="$PR_STATE/sessions/rid1/claude--$1.json" sb; sb="$(pr_sandbox "$1" old)"
+  jq -n --arg n "$1" --arg t "$2" --arg ts "$3" --arg b "$sb" --arg r "$PR_ROOT" \
+    '{name:$n,type:$t,caller:"claude",opencode_session_id:("sid-"+$n),boundary_root:$b,repository_root:$r,created_at:$ts,last_activity_at:$ts,status:"active"}' |
+    jq "${4:-.}" > "$f"
+  touch -d '3 days ago' "$f"
+}
+pr_meta idle review "$PR_OLD"
+pr_meta fresh review "$PR_NOW"
+pr_meta polling review "$PR_OLD" ".remote_turn={state:\"pending\",started_at:\"$PR_OLD\"} | .last_poll_at=\"$PR_NOW\""
+pr_meta locked review "$PR_OLD"
+pr_meta job implementation "$PR_OLD"
+pr_meta deadlock review "$PR_OLD"
+mkdir -p "$PR_STATE/locks/rid1--claude--locked.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--claude--locked.lock.d/pid"
+mkdir -p "$PR_STATE/locks/rid1--claude--deadlock.lock.d"; printf 99999999 > "$PR_STATE/locks/rid1--claude--deadlock.lock.d/pid"
+# Sandboxes are shared by repository and name across callers.
+pr_meta shared review "$PR_OLD"
+jq --arg ts "$PR_NOW" '.caller="codex" | .opencode_session_id="sid-codex-shared" | .last_activity_at=$ts' \
+  "$PR_STATE/sessions/rid1/claude--shared.json" > "$PR_STATE/sessions/rid1/codex--shared.json"
+pr_meta sharedlock review "$PR_OLD"
+mkdir -p "$PR_STATE/locks/rid1--codex--sharedlock.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--codex--sharedlock.lock.d/pid"
+pr_sandbox starting old >/dev/null
+mkdir -p "$PR_STATE/locks/rid1--codex--starting.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--codex--starting.lock.d/pid"
+# Interleavings: another caller locks the name while this caller's server delete runs,
+# and a snapshot build holds the sandbox's own build lock.
+pr_meta racing review "$PR_OLD"
+pr_meta building review "$PR_OLD"; mkdir "$PR_SB/glm-building-0123456789ab.lock"
+pr_meta badtag review "$PR_OLD"; printf 'Snapshot tag: glm-other\n' > "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md"
+touch -d '3 days ago' "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md" "$PR_SB/glm-badtag-0123456789ab"
+pr_sandbox orphan old >/dev/null; pr_sandbox building-new new >/dev/null
+# A snapshot from before evidence ownership was recorded cannot prove what it holds.
+pr_meta legacy review "$PR_OLD"; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacy-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacy-0123456789ab"
+pr_sandbox legacyorphan old >/dev/null; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacyorphan-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacyorphan-0123456789ab"
+run_prune() { # SERVER_UP [RETENTION]
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_UP="$1" PR_CALLS="$PR_CALLS" \
+    AI_GLM_REVIEW_RETENTION_HOURS="${2:-24}" bash -c '
+      source "$AI_GLM_SOURCE"
+      server_up(){ [ "$PR_UP" = 1 ]; }
+      permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
+        # A same-name publish attempted during the server delete must find the build lock held.
+        if [ "$2" = /session/sid-racing ] && mkdir "$AI_REVIEW_SANDBOX_DIR/glm-racing-0123456789ab.lock" 2>/dev/null; then
+          rmdir "$AI_REVIEW_SANDBOX_DIR/glm-racing-0123456789ab.lock"; echo unguarded >> "$PR_CALLS.race"; fi; }
+      cmd_prune' >/dev/null 2>&1
+}
+run_prune 0; pr_down_rc=$?
+check "prune refuses to act while the server is down" "test '$pr_down_rc' -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--idle.json' && test ! -s '$PR_CALLS'"
+check "prune refuses a retention no longer than the turn timeout" "! run_prune 1 0 && test -f '$PR_STATE/sessions/rid1/claude--idle.json'"
+run_prune 1; pr_rc=$?
+check "prune reports the live-locked review it kept" "test '$pr_rc' -ne 0"
+check "idle review record is pruned"                "test ! -e '$PR_STATE/sessions/rid1/claude--idle.json'"
+check "idle review sandbox is pruned"               "test ! -e '$PR_SB/glm-idle-0123456789ab'"
+check "idle review server session is deleted exactly" "grep -qx 'DELETE /session/sid-idle' '$PR_CALLS'"
+check "only idle, unlocked review server sessions are deleted" "test \"\$(sort '$PR_CALLS' | tr '\n' ' ')\" = 'DELETE /session/sid-badtag DELETE /session/sid-idle DELETE /session/sid-racing DELETE /session/sid-shared '"
+check "the build lock is held from the sharing check through removal" "test ! -e '$PR_CALLS.race' && test ! -e '$PR_STATE/sessions/rid1/claude--racing.json' && test ! -e '$PR_SB/glm-racing-0123456789ab'"
+check "a sandbox holding its build lock keeps its session and record together" "test -f '$PR_STATE/sessions/rid1/claude--building.json' && test -d '$PR_SB/glm-building-0123456789ab' && ! grep -q sid-building '$PR_CALLS'"
+check "a sandbox that will not delete never strands a record without its session" "test ! -e '$PR_STATE/sessions/rid1/claude--badtag.json' && test -d '$PR_SB/glm-badtag-0123456789ab'"
+check "prune leaves no build lock of its own behind" "test -d '$PR_SB/glm-building-0123456789ab.lock' && test \"\$(ls -d '$PR_SB'/*.lock | wc -l | tr -d ' ')\" -eq 1"
+check "another caller's same-name record keeps the shared sandbox" "test ! -e '$PR_STATE/sessions/rid1/claude--shared.json' && test -f '$PR_STATE/sessions/rid1/codex--shared.json' && test -d '$PR_SB/glm-shared-0123456789ab'"
+check "another caller's same-name lock keeps the whole review" "test -f '$PR_STATE/sessions/rid1/claude--sharedlock.json' && test -d '$PR_SB/glm-sharedlock-0123456789ab' && test -d '$PR_STATE/locks/rid1--codex--sharedlock.lock.d'"
+check "an unrecorded sandbox whose session holds a lock is kept" "test -d '$PR_SB/glm-starting-0123456789ab'"
+check "unreconciled evidence keeps session, record and sandbox together" "test -f '$PR_STATE/sessions/rid1/claude--legacy.json' && test -d '$PR_SB/glm-legacy-0123456789ab' && ! grep -q sid-legacy '$PR_CALLS'"
+check "an unrecorded sandbox with unreconciled evidence is kept" "test -d '$PR_SB/glm-legacyorphan-0123456789ab'"
+check "recently active review is kept"              "test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
+check "a review still polling a pending turn is kept" "test -f '$PR_STATE/sessions/rid1/claude--polling.json'"
+check "a review locked by a live process is kept"   "test -f '$PR_STATE/sessions/rid1/claude--locked.json' && test -d '$PR_SB/glm-locked-0123456789ab'"
+check "the live owner's lock is left in place"      "test \"\$(cat '$PR_STATE/locks/rid1--claude--locked.lock.d/pid')\" = '$$'"
+check "prune never reclaims a dead owner's lock (no remove-then-create race)" "test -f '$PR_STATE/sessions/rid1/claude--deadlock.json' && test \"\$(cat '$PR_STATE/locks/rid1--claude--deadlock.lock.d/pid')\" = 99999999"
+check "implementation records are not review-pruned" "test -f '$PR_STATE/sessions/rid1/claude--job.json'"
+check "idle unrecorded review sandbox is pruned"    "test ! -e '$PR_SB/glm-orphan-0123456789ab'"
+check "a new unrecorded sandbox (review starting) is kept" "test -d '$PR_SB/glm-building-new-0123456789ab'"
+# An interrupt during a server delete finishes that review under its build lock, then stops.
+PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALLS"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
+pr_meta intr review "$PR_OLD"; pr_meta intr2 review "$PR_OLD"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" bash -c '
+  source "$AI_GLM_SOURCE"
+  server_up(){ return 0; }
+  permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
+    [ "$2" = /session/sid-intr ] || return 0
+    [ -d "$AI_REVIEW_SANDBOX_DIR/glm-intr-0123456789ab.lock" ] || echo unguarded >> "$PR_CALLS.race"
+    kill -INT $$; }
+  cmd_prune' >/dev/null 2>&1; pr_int_rc=$?
+check "an interrupted prune never strands a record without its session" "grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test ! -e '$PR_STATE/sessions/rid1/claude--intr.json' && test ! -e '$PR_SB/glm-intr-0123456789ab' && test ! -e '$PR_CALLS.race'"
+check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intr2 '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intr2.json' && test -d '$PR_SB/glm-intr2-0123456789ab'"
+check "an interrupted prune still releases its build lock" "! ls -d '$PR_SB'/*.lock >/dev/null 2>&1"
+# An unreadable record may own a sandbox, so the orphan sweep leaves every sandbox alone.
+PR_STATE="$TMP/prune-state-bad"; PR_SB="$TMP/prune-sandboxes-bad"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
+printf '{not json' > "$PR_STATE/sessions/rid1/claude--broken.json"; pr_sandbox broken old >/dev/null
+run_prune 1; pr_bad_rc=$?
+check "an unreadable record stops the unrecorded-sandbox sweep" "test '$pr_bad_rc' -ne 0 && test -d '$PR_SB/glm-broken-0123456789ab'"
+PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"
+NEW_FN="$(sed -n '/^cmd_new()/,/^}/p' "$AI_GLM")"
+check "new retires a bounded batch before creating a session" "printf '%s' \"\$NEW_FN\" | grep -q 'cmd_prune \"\$PRUNE_BATCH\"' && test \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'cmd_prune' | cut -d: -f1)\" -lt \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'create_session' | cut -d: -f1)\""
+check "doctor runs review retention" "sed -n '/^cmd_doctor()/,/^}/p' '$AI_GLM' | grep -q 'cmd_prune'"
+pr_batch() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_PRUNE_BATCH="$1" bash -c 'source "$AI_GLM_SOURCE"; prune_batch_valid' >/dev/null 2>&1; }
+check "a zero prune batch is refused (it would mean unlimited)" "! pr_batch 0"
+check "a non-numeric prune batch is refused, not silently skipped" "! pr_batch abc && ! pr_batch -3 && ! pr_batch 2x"
+check "an empty prune batch falls back to the default" "pr_batch ''"
+check "a positive prune batch is accepted" "pr_batch 25"
+check "new validates the prune batch before pruning" "printf '%s' \"\$NEW_FN\" | grep -q 'prune_batch_valid ||'"
+check "prune refuses a non-numeric removal limit" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$PR_STATE' bash -c 'source \"\$AI_GLM_SOURCE\"; server_up(){ return 0; }; cmd_prune x1' >/dev/null 2>&1; test \$? -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
+
 fi
 echo "== implementation job records =="
 JOB_STATE="$TMP/jobs"; mkdir -p "$JOB_STATE"; : > "$TMP/job-calls"; : > "$TMP/job-permission-calls"
