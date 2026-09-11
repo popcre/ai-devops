@@ -25,6 +25,10 @@ pipeline. The recovery procedure lives in
 - Production and shared cloud infrastructure are read-only by default. Do not
   run `terraform apply`, `terraform destroy`, or mutating production `gcloud`
   commands without Albert naming the exact action and resource in this chat.
+  The sole exception is the separately activated `shared-db` automatic migration
+  workflow after exact structural admission, guarded merge, and merged-main
+  preview proof; it authorizes no manual production command or other infrastructure
+  mutation and fails closed to an engineer on any absent or ambiguous evidence.
 - Shared-database STRUCTURE changes are authored in `u2giants/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.

@@ -231,7 +231,8 @@ and guarded merge, the successful merged-main preview workflow automatically
 qualifies and dispatches the production workflow's governed business-risk gate.
 It reads the exact merged PR/checks, immutable review artifact, pinned preview
 apply proof, the one open linked structural work issue independently admitted
-from current scope plus actual migration files, current-main SQL, and activation record. Never supply risk booleans
+from current scope plus actual migration files, current-main SQL, and activation
+record. Never supply risk booleans
 or prose as evidence, and never manually reconstruct version or artifact inputs
 for the automatic path. Derived risks are DISCLOSED in the evidence; they do not
 block. Missing, stale, multi-source, or ambiguous evidence stops for an engineer
