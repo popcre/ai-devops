@@ -296,7 +296,8 @@ work issue linked by GitHub to the source PR and independently admitted from its
 current scope plus the PR's actual migration files. It then dispatches the
 existing serial production workflow; no session or owner transcribes migration
 versions or artifact identifiers. The workflow runs
-`scripts/production_business_risk_gate.py` before and after its approval wait.
+`scripts/production_business_risk_gate.py` before and after the production
+environment admission boundary.
 It independently reads the merged PR and required checks, verifies both pinned
 artifacts, proves the preview ledger change, and conservatively inspects the
 current-main SQL. Caller-written booleans and explanatory prose are never
@@ -306,12 +307,13 @@ ambiguous proof stops before dispatch and names engineer action required; it
 never falls back to asking Albert for migration numbers, project identifiers,
 SQL approval, or a technical-risk rubber stamp.
 
-The gate still derives and records all five business-risk conclusions: permanent
+The gate derives and records all five business-risk conclusions: permanent
 data loss or rewrite, expected downtime, material access change, credible tested
-recovery, and unresolved material objection. Per the 2026-08-18 owner ruling,
-those conclusions are disclosed evidence rather than a technical judgement
-Albert must rubber-stamp. They do not replace or weaken any machine-verifiable
-admission, review, preview, target, dry-run, lock, or post-apply gate.
+recovery, and unresolved material objection. Automatic v2 evidence proceeds only
+when every one is clear; any risk class stops to an engineer before a database
+write. Per the 2026-08-18 owner ruling, the legacy/manual recovery path may still
+record those conclusions as disclosed evidence instead of demanding a technical
+rubber stamp from Albert. That compatibility does not weaken the automatic path.
 
 This policy cannot authorize its own rollout. The earlier business-risk policy
 started inactive and was activated only by the separately governed shared-db PR
@@ -322,7 +324,8 @@ skill hashes in `config/production-risk-policy-activation.json`. The workflow
 must re-read that exact record; a boolean, adjective, explanation, or caller
 assertion cannot activate the path. Issue #2716 adds automatic dispatch only
 after that independently activated gate, the exact-head verdict, guarded merge,
-successful post-merge preview evidence, and current main are all re-proved. The
+successful post-merge preview evidence, current main, and all five business-risk
+conclusions are re-proved. The
 production job then independently repeats its evidence checks, acquires the
 global production lock, performs the fresh dry-run immediately before the write,
 and records post-apply ledger and catalog proof.

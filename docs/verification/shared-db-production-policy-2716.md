@@ -41,5 +41,7 @@ The automatic path must independently prove the current main SHA, durable exact-
 verdict, latest guarded merge authorization, exactly one open linked structural issue
 admitted from its current scope and the PR's actual migration files, exact preview run
 and digest, bounded ordered allowlist, exact production target, fresh dry-run, global
-production lock, and post-apply ledger/catalog result. Any absent, stale, ambiguous,
-multi-source, non-structural, or failed evidence stops for an engineer before dispatch.
+production lock, all five derived business-risk conclusions clear, and post-apply
+ledger/catalog result. Any absent, stale, ambiguous, multi-source, non-structural,
+or failed evidence stops for an engineer before dispatch or, on repeated downstream
+verification, before a database write.

@@ -234,8 +234,9 @@ apply proof, the one open linked structural work issue independently admitted
 from current scope plus actual migration files, current-main SQL, and activation
 record. Never supply risk booleans
 or prose as evidence, and never manually reconstruct version or artifact inputs
-for the automatic path. Derived risks are DISCLOSED in the evidence; they do not
-block. Missing, stale, multi-source, or ambiguous evidence stops for an engineer
+for the automatic path. All five derived business-risk conclusions must be clear;
+any one blocks automatic v2 promotion for an engineer. Missing, stale,
+multi-source, or ambiguous evidence stops for an engineer
 without dispatch. See the operating manual. The dispatched lane freezes merges
 for the bounded promotion and verifies the exact production result.
 
