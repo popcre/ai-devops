@@ -117,8 +117,25 @@ warn() { printf 'ai-kimi: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
+admission_gate() {
+  local profile="${1:-}" out state
+  [ -n "$profile" ] || return 0
+  out="$("$REVIEW_PREFLIGHT_BIN" admission kimi --profile "$profile" --model "$KIMI_MODEL" --json 2>/dev/null || true)"
+  if ! printf '%s\n' "$out" | jq -e --arg profile "$profile" --arg model "$KIMI_MODEL" '
+      .schema_version==1 and .provider=="kimi" and .credential_profile_scope==$profile and .model_scope==$model and
+      (.state|IN("eligible","unknown","backoff")) and (.state!="backoff" or (.policy_expires_epoch|type)=="number")' >/dev/null 2>&1; then
+    warn 'Kimi scoped admission is unknown; continuing under existing review guards.'; return 0
+  fi
+  state="$(jq -r .state <<<"$out")"
+  if [ "$state" = backoff ]; then
+    warn "Kimi review was not submitted: this credential profile/model has a recent proven refusal. Local retry policy expires at epoch $(jq -r .policy_expires_epoch <<<"$out"); provider quota/reset remain unknown."
+    return 3
+  fi
+}
+
 capacity_gate() {
   local out state
+  if [ -z "$(run_as_user)" ]; then admission_gate "$(safe_home_hash)" || return 3; fi
   out="$("$REVIEW_PREFLIGHT_BIN" capacity kimi --json 2>/dev/null || true)"
   if ! printf '%s\n' "$out" | jq -e '.schema_version==1 and .provider=="kimi" and (.state|IN("available","exhausted","unknown"))' >/dev/null 2>&1; then
     out="$(jq -nc --arg at "$(date -u +%FT%TZ)" '{schema_version:1,provider:"kimi",state:"unknown",checked_at:$at,provider_version:"unknown",credential_profile_scope:null,model_scope:null,source_kind:"wrapper",reason:"malformed-response",reset_at:null}')"
@@ -153,7 +170,40 @@ job_output()   { printf '%s/stream.jsonl' "$(job_dir "$1" "$2")"; }
 job_log()      { printf '%s/worker.log' "$(job_dir "$1" "$2")"; }
 job_is_terminal() { jq -e '.phase | IN("completed","failed","timed-out","cancelled","recovery-required")' "$1" >/dev/null 2>&1; }
 
-safe_home_hash() { printf '%s' "$KIMI_HOME" | sha256sum | awk '{print $1}'; }
+safe_home_hash() {
+  "$REVIEW_PREFLIGHT_BIN" profile kimi --home "$KIMI_HOME" | jq -er '.credential_profile_scope | select(test("^[0-9a-f]{64}$"))'
+}
+
+observe_scoped_refusal() { # OUTPUT STDERR ORIGINAL-PROFILE
+  local out="$1" err="$2" profile="$3" evidence="" run="${AI_REVIEW_EVENT_RUN_ID:-}" observed dir tmp hash retained
+  [ -n "$profile" ] && [[ "$run" =~ ^[0-9a-f]{32}$ ]] || return 0
+  [ "$RUN_TURN_TIMED_OUT" = 0 ] && [ "$RUN_TURN_CANCELLED" = 0 ] && [ "$RUN_TURN_STARTUP_FAILED" = 0 ] || return 0
+  has_resume_hint "$out" && return 0
+  # Only provider-facing assistant/error output can establish refusal. Tool
+  # results and user messages may quote limits as ordinary reviewed content.
+  if jq -se 'any(.[]; .role=="assistant" and (.content|type)=="string" and
+      (.content|test("^(Usage limit reached|Quota (reached|exceeded)|Billing (cycle|limit).*(reached|exceeded)|Please purchase extra usage)";"i")))' "$out" >/dev/null 2>&1; then
+    evidence="$out"
+  elif [ -s "$err" ] && grep -Eqi '^(Usage limit reached|Quota (reached|exceeded)|Billing (cycle|limit).*(reached|exceeded)|Please purchase extra usage)' "$err"; then
+    evidence="$err"
+  else return 0; fi
+  [ -f "$evidence" ] && [ ! -L "$evidence" ] || return 0
+  observed="$(date +%s)"
+  dir="${AI_REVIEW_EVENT_DIR:-${AI_REVIEWER_STATE_BASE:-$HOME/.local/state/ai-devops}/reviewer-events}/evidence/$run"
+  mkdir -p "$dir" && chmod 700 "$dir" || { warn 'could not retain scoped refusal evidence; no backoff was recorded.'; return 0; }
+  tmp="$(mktemp "$dir/.refusal.XXXXXX")" || return 0
+  hash="$(sha256_file "$evidence")"
+  if ! cp "$evidence" "$tmp" || [ "$(sha256_file "$tmp")" != "$hash" ] || [ "$(sha256_file "$evidence")" != "$hash" ]; then
+    rm -f "$tmp"; warn 'refusal evidence changed; no backoff was recorded.'; return 0
+  fi
+  chmod 600 "$tmp" || { rm -f "$tmp"; return 0; }
+  retained="$dir/provider-refusal-$hash.log"
+  ln "$tmp" "$retained" 2>/dev/null || cmp -s "$tmp" "$retained" || { rm -f "$tmp"; return 0; }
+  rm -f "$tmp"
+  "$REVIEW_PREFLIGHT_BIN" observe-refusal kimi --profile "$profile" --model "$KIMI_MODEL" --run-id "$run" \
+    --observed "$observed" --seconds "${AI_REVIEW_QUARANTINE_SECONDS:-1800}" --reason usage-limit --evidence "$retained" >/dev/null \
+    || warn 'scoped refusal observation was not accepted; no broader backoff was inferred.'
+}
 
 profile_is_readonly() {
   [ -f "$RO_AGENT" ] &&
@@ -647,11 +697,12 @@ RUN_TURN_PID=""
 RUN_TURN_TIMED_OUT=0
 RUN_TURN_CANCELLED=0
 RUN_TURN_STARTUP_FAILED=0
+RUN_TURN_ADMISSION_BLOCKED=0
 ACTIVE_JOB_META=""
 ACTIVE_CANCEL_FILE=""
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
-  local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
-  RUN_TURN_PID=""; RUN_TURN_TIMED_OUT=0; RUN_TURN_CANCELLED=0; RUN_TURN_STARTUP_FAILED=0
+  local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}" profile=""
+  RUN_TURN_PID=""; RUN_TURN_TIMED_OUT=0; RUN_TURN_CANCELLED=0; RUN_TURN_STARTUP_FAILED=0; RUN_TURN_ADMISSION_BLOCKED=0
   if [ ! -s "$pf" ]; then
     : > "$out"; printf '%s\n' 'private prompt is missing or empty; provider was not contacted' > "$out.err"
     RUN_TURN_RC=1; RUN_TURN_STARTUP_FAILED=1
@@ -676,6 +727,13 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   args+=(-p "$(cat "$pf")")
 
   local as; as="$(run_as_user)"
+  if [ -z "$as" ]; then
+    profile="$(safe_home_hash)"
+    if ! admission_gate "$profile"; then
+      : > "$out"; printf '%s\n' 'scoped refusal backoff; provider was not contacted' > "$out.err"
+      RUN_TURN_RC=3; RUN_TURN_ADMISSION_BLOCKED=1; return 0
+    fi
+  fi
   if [ -n "$as" ] && [ "$mode" = implement ]; then
     die "this account has no Kimi credentials, and an implement run will not be delegated
   to '$as' — its writes would land owned by the wrong user. Either run 'kimi login'
@@ -735,6 +793,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   [ "$RUN_TURN_TIMED_OUT" = 1 ] && RUN_TURN_RC=124
   RUN_TURN_PID=""
   set -e
+  observe_scoped_refusal "$out" "$out.err" "$profile"
   return 0
 }
 
@@ -1195,7 +1254,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
   reason="provider-process-failed"
   # A measured deadline is authoritative. Tool results can quote arbitrary
   # repository text, including error examples; they are not runtime diagnostics.
-  if [ "$RUN_TURN_TIMED_OUT" = 1 ]; then
+  if [ "$RUN_TURN_ADMISSION_BLOCKED" = 1 ]; then
+    reason="scoped-backoff"
+  elif [ "$RUN_TURN_TIMED_OUT" = 1 ]; then
     reason="timed-out"
   elif [ "$RUN_TURN_STARTUP_FAILED" = 1 ]; then
     reason="startup-timeout"
