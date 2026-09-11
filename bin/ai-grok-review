@@ -80,6 +80,7 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+umask 077
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
