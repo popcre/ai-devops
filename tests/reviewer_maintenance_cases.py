@@ -857,6 +857,17 @@ wait "$job"
         self.assertEqual(len(references), 2)
         self.assertIn(receipt["reference"], references)
 
+    def test_same_patch_bytes_at_two_owned_paths_remain_distinct_valid_receipts(self):
+        rid, _, report = self.evidence_fixture()
+        events.publish_report(self.root, "grok", rid, report)
+        references = []
+        for name in ("complete.patch", "incomplete.patch"):
+            path = self.root / name
+            path.write_text("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n")
+            references.append(events.publish_patch(self.root, "grok", rid, path)["reference"])
+        self.assertNotEqual(*references)
+        self.assertTrue(set(references).issubset(events.verify_reports(self.root, "grok", rid)))
+
     def test_empty_patch_does_not_replace_required_review_report(self):
         rid, _, report = self.evidence_fixture()
         patch_path = self.root / "no-changes.patch"

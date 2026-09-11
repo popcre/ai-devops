@@ -170,13 +170,14 @@ def publish_report(directory, provider, run_id, report, facts=None, artifact_key
                  "recovery_state": recovery_state, "original_head_sha": original_head}
         if artifact_key:
             value.update(artifact_kind="git-binary-patch", artifact_key=artifact_key)
-        path = root / (sha + ".report.json")
+        receipt_id = sha + ("." + artifact_key if artifact_key else "")
+        path = root / (receipt_id + ".report.json")
         if path.exists():
             require(read_json(path) == value, "published evidence conflicts with this invocation")
         else:
             publish(path, value)
         # Return an opaque recovery reference, not a source-worktree path.
-        return {"reference": run_id + "/" + sha, "report_sha256": sha}
+        return {"reference": run_id + "/" + receipt_id, "report_sha256": sha}
 
 
 def publish_patch(directory, provider, run_id, path):
@@ -237,7 +238,8 @@ def verify_reports(directory, provider, run_id):
         else:
             reports += 1
         sha = digest(row["report_text"].encode("utf-8"))
-        require(row.get("report_sha256") == sha and path.name == sha + ".report.json",
+        receipt_id = sha + ("." + row["artifact_key"] if kind else "")
+        require(row.get("report_sha256") == sha and path.name == receipt_id + ".report.json",
                 "published report content changed")
         provenance(row.get("provenance"))
         if row.get("original_invocation_id") is not None:
@@ -249,7 +251,7 @@ def verify_reports(directory, provider, run_id):
             require((row.get("recovery_state") is None and original["head"] == start["head"] and row.get("original_head_sha") is None) or
                     (row.get("recovery_state") == "completed-stale-source" and row.get("original_head_sha") == original["head"]),
                     "recovered evidence source identity is unproven")
-        references.append(run_id + "/" + sha)
+        references.append(run_id + "/" + receipt_id)
     require(reports, "required report is not durably published; a patch alone cannot authorize cleanup")
     for path in (root / "artifacts").glob("*.json"):
         row = read_json(path)
