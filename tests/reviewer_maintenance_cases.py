@@ -478,6 +478,25 @@ esac
                 patch.object(Path, "home", side_effect=RuntimeError("No Windows profile")):
             self.assertEqual(events.location(), m.physical(self.root))
 
+    def test_maintenance_configuration_retains_inactive_known_providers(self):
+        registry_path = ROOT / "config/reviewer-registry.json"
+        registry = json.loads(registry_path.read_text())
+        expected = sorted(registry["providers"])
+        original = m.configuration(ROOT)
+        self.assertEqual(original["providers"], expected)
+        changed = copy.deepcopy(registry)
+        for provider in changed["providers"].values():
+            provider["registry_state"] = "absent"
+        with patch.object(m, "read_json", side_effect=lambda path:
+                          changed if Path(path).name == "reviewer-registry.json" else json.loads(Path(path).read_text())):
+            inactive = m.configuration(ROOT)
+        self.assertEqual(inactive["providers"], expected)
+        self.assertEqual(m.digest(m.encoded(inactive)), m.digest(m.encoded(original)))
+        inactive["sources"] = self.config["sources"]
+        self.engine = m.Maintenance(self.toolkit, self.root / "issues", inactive)
+        self.invocation(provider="kimi")
+        self.assertEqual(self.engine.start()["candidates"][0]["provider"], "kimi")
+
     def test_sourcing_grok_functions_does_not_launch_an_invocation(self):
         # The existing Grok regression suite loads definitions from a temporary
         # library without copying the installed toolkit or executing its CLI.
