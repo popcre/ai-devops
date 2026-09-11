@@ -218,5 +218,20 @@ check "guidance exists for empty-report" "$SCRIPT explain empty-report | grep -q
 check "guidance exists for not-registered" "$SCRIPT explain not-registered | grep -qi 'registry'"
 
 
+echo '== scoped refusal admission'
+PYTHON="$(command -v python3 || command -v python)"
+check "scoped store expiry, migration, concurrency and killed-owner behavior" "'$PYTHON' '$ROOT/tests/test_reviewer_admission.py'"
+printf 'synthetic terminal refusal\n' > "$TMP/refusal.json"
+OBSERVED="$(date +%s)"
+$SCRIPT clear kimi >/dev/null
+check "terminal refusal creates policy backoff without quota claim" "$SCRIPT observe-refusal kimi --profile profile-a --model model-a --run-id run-a --observed '$OBSERVED' --seconds 120 --reason usage-limit --evidence '$TMP/refusal.json' | jq -e '.state==\"backoff\" and .quota_state==\"unknown\" and .reset_at==null'"
+check "matching scope is not allocatable despite healthy install" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-a $SCRIPT status kimi | jq -e '.usable==false and .status==\"installed-healthy\" and .admission.state==\"backoff\"'"
+$SCRIPT clear kimi >/dev/null
+$SCRIPT observe-refusal kimi --profile profile-a --model model-a --run-id run-a --observed "$OBSERVED" --seconds 120 --reason usage-limit --evidence "$TMP/refusal.json" >/dev/null
+check "different profile remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-b AI_REVIEW_ADMISSION_MODEL=model-a $SCRIPT usable kimi | jq -e '.usable==true'"
+check "different model remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-b $SCRIPT usable kimi | jq -e '.usable==true'"
+check "capacity remains unknown during policy backoff" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reset_at==null'"
+check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine kimi authentication-failed --seconds 30 && $SCRIPT admission kimi --profile profile-a --model model-a --json | jq -e '.state==\"backoff\"'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

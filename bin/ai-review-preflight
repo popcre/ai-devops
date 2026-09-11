@@ -43,6 +43,21 @@ provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 qualification_file() { printf '%s/%s-live-qualified.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
 
+admission_store() {
+  local runtime
+  runtime="$(command -v python3 || command -v python)" || die 'Python is required for the admission store.'
+  "$runtime" "$REGISTRY_REAL_DIR/../tools/reviewer_admission.py" "$@" --directory "$STATE_DIR"
+}
+
+default_admission() {
+  local profile="${AI_REVIEW_ADMISSION_PROFILE:-}" model="${AI_REVIEW_ADMISSION_MODEL:-}"
+  if [ "$1" = kimi ]; then
+    [ -n "$profile" ] || profile="$(printf '%s' "${KIMI_CODE_HOME:-$HOME/.kimi-code}" | sha256sum | awk '{print $1}')"
+    [ -n "$model" ] || model="${AI_KIMI_MODEL:-kimi-code/k3}"
+  fi
+  admission_store admission "$1" --profile "$profile" --model "$model"
+}
+
 capacity_unknown() { # PROVIDER REASON [OBSERVED-VERSION] [SOURCE] [QUALIFIED-VERSION]
   jq -nc --arg provider "$1" --arg reason "$2" --arg version "${3:-unknown}" \
     --arg source "${4:-unsupported}" --arg qualified "${5:-}" --arg checked "$(date -u +%FT%TZ)" \
@@ -175,7 +190,7 @@ registry_reason() { # PROVIDER
 # when the local install is healthy, unquarantined, and live-qualified.
 health_status() { # PROVIDER
   if static_status "$1"; then return 1; fi
-  if active_quarantine "$1"; then jq -c '. + {status:"quarantined"}' "$(provider_file "$1")"; return 1; fi
+  if active_quarantine "$1"; then printf '%s\n' "$ACTIVE_QUARANTINE" | jq -c '. + {status:"quarantined"}'; return 1; fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"
 }
@@ -185,12 +200,13 @@ health_status() { # PROVIDER
 # the provider may actually be given a review right now. "installed-healthy" is
 # deliberately not called "available": health alone never means allocatable.
 reconciled_status() { # PROVIDER
-  local health healthy=0 state reason usable
+  local health healthy=0 state reason usable admission
   health="$(health_status "$1")" || healthy=1
+  admission="$(default_admission "$1")" || return 1
   state="$(registry_state "$1")"; reason="$(registry_reason "$1")"
-  if [ "$healthy" = 0 ] && [ "$state" = registered ]; then usable=true; else usable=false; fi
+  if [ "$healthy" = 0 ] && [ "$state" = registered ] && [ "$(printf '%s' "$admission" | jq -r .state)" != backoff ]; then usable=true; else usable=false; fi
   printf '%s
-' "$health" | jq -c --arg state "$state" --arg reason "$reason" --argjson usable "$usable"     '. + {registry_state:$state, registry_reason:$reason, usable:$usable}'
+' "$health" | jq -c --arg state "$state" --arg reason "$reason" --argjson usable "$usable" --argjson admission "$admission" '. + {registry_state:$state, registry_reason:$reason, usable:$usable, admission:$admission}'
   [ "$usable" = true ]
 }
 
@@ -223,21 +239,13 @@ quarantine() { # PROVIDER CLASS [SECONDS]
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
-  now="$(now_epoch)"; expires=$((now + seconds)); f="$(provider_file "$provider")"
-  write_atomic "$f" "$(jq -nc --arg provider "$provider" --arg class "$class" \
-    --argjson created "$now" --argjson expires "$expires" \
-    '{version:1,provider:$provider,failure_class:$class,created_epoch:$created,expires_epoch:$expires}')"
+  admission_store quarantine "$provider" --reason "$class" --seconds "$seconds" >/dev/null
   note "ai-review-preflight: quarantined $provider for ${seconds}s ($class)."
 }
 
 active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
-  local f now expires
-  f="$(provider_file "$1")"; [ -f "$f" ] || return 1
-  jq -e --arg p "$1" '.version==1 and .provider==$p and (.expires_epoch|type=="number")' "$f" >/dev/null 2>&1 \
-    || die "invalid quarantine record: $f"
-  now="$(now_epoch)"; expires="$(jq -r .expires_epoch "$f")"
-  if [ "$expires" -le "$now" ]; then rm -f "$f"; return 1; fi
-  return 0
+  ACTIVE_QUARANTINE="$(admission_store global "$1")" || die 'invalid quarantine record.'
+  [ "$ACTIVE_QUARANTINE" != null ]
 }
 
 classify_failure() { # OUTPUT
@@ -328,7 +336,12 @@ check_provider() { # PROVIDER REPO LIVE BASE
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   need jq; need git; need timeout
   if active_quarantine "$provider"; then
-    jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' "$(provider_file "$provider")" >&2
+    printf '%s\n' "$ACTIVE_QUARANTINE" | jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' >&2
+    return 3
+  fi
+  out="$(default_admission "$provider")" || return 1
+  if [ "$(printf '%s' "$out" | jq -r .state)" = backoff ]; then
+    printf 'ai-review-preflight: %s has an active scoped usage-limit backoff.\n' "$provider" >&2
     return 3
   fi
   if [ "$(registry_state "$provider")" != registered ]; then
@@ -387,11 +400,20 @@ Usage:
   ai-review-preflight usable [provider]
   ai-review-preflight explain <failure-class>
   ai-review-preflight capacity <provider> --json
+  ai-review-preflight admission <provider> --profile HASH --model MODEL --json
+  ai-review-preflight observe-refusal <provider> --profile HASH --model MODEL --run-id ID --observed EPOCH --seconds N --reason usage-limit --evidence FILE
 EOF
 }
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  admission|observe-refusal)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    admission_args=()
+    for arg in "$@"; do [ "$arg" = --json ] || admission_args+=("$arg"); done
+    action=admission; [ "$cmd" != observe-refusal ] || action=observe
+    admission_store "$action" "$provider" "${admission_args[@]}" ;;
   capacity)
     provider="${1:-}"; shift || true
     [ "${1:-}" = --json ] || die 'capacity requires --json.'
@@ -409,7 +431,7 @@ case "$cmd" in
     quarantine "$provider" "$class" "$seconds" ;;
   clear)
     provider="${1:-}"; valid_provider "$provider" || die "unknown provider '$provider'."
-    rm -f "$(provider_file "$provider")"; note "ai-review-preflight: cleared $provider quarantine." ;;
+    admission_store clear "$provider" >/dev/null; note "ai-review-preflight: cleared $provider quarantine and scoped backoffs." ;;
   qualify)
     [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify gemini|qwen'
     case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
