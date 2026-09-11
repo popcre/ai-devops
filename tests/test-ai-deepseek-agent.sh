@@ -17,6 +17,7 @@ export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
 git -C "$TMP/repo" init -q; git -C "$TMP/repo" config user.email test@example.com; git -C "$TMP/repo" config user.name Test
+printf '.ai/\n' >> "$TMP/repo/.git/info/exclude"
 printf 'test\n' > "$TMP/repo/tracked"; git -C "$TMP/repo" add tracked; git -C "$TMP/repo" commit -qm init
 printf 'placeholder-token\n' > "$TMP/home/.config/ai-devops/op-service-account"
 printf 'DEEPSEEK_API_KEY=op://example\nUNRELATED_SECRET=op://must-not-resolve\n' > "$TMP/home/.config/ai-devops/mcp.env"
@@ -29,7 +30,8 @@ cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DEEPSEEK_CURL_ARGS"
 env | sort > "$DEEPSEEK_CURL_ENV"
-out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;; esac; done
+out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "${DEEPSEEK_STUB_REQUEST:-}" ] || cp "${2#@}" "$DEEPSEEK_STUB_REQUEST"; shift 2;; *) shift;; esac; done
+[ -z "${DEEPSEEK_STUB_MUTATE_SOURCE:-}" ] || printf 'provider-time source movement\n' >> "$DEEPSEEK_STUB_MUTATE_SOURCE"
 [ -z "${DEEPSEEK_STUB_DELAY:-}" ] || {
   printf '%s\n' "$$" > "$DEEPSEEK_STUB_PID_FILE"
   trap 'printf terminated > "$DEEPSEEK_STUB_TERM_MARKER"; exit 143' TERM
@@ -56,6 +58,7 @@ check "managed descriptor handoff delivers the key without exporting it to curl"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
+if [ "${AI_DEEPSEEK_SOURCE_TESTS_ONLY:-0}" != 1 ]; then
 DOCTOR_STATE_BEFORE="$(git -C "$TMP/repo" status --porcelain=v1 --untracked-files=all)"
 check "offline doctor succeeds without provider contact" "run doctor | grep -q 'bounded provider timeout'"
 check "offline doctor leaves the repository byte state unchanged" "test '$DOCTOR_STATE_BEFORE' = \"\$(git -C '$TMP/repo' status --porcelain=v1 --untracked-files=all)\" && test ! -e '$TMP/repo/.ai/deepseek-sessions'"
@@ -242,5 +245,39 @@ check "a recovery-required session refuses continuation before any provider cont
 check "the recovery marker is not mistaken for a conversation by list" "! run list | grep -q recovery-required"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "list excludes retained provider responses" "! run list | grep -q response"
+else
+  SESSION="$(run send source-fixture | sed -n 's/^SESSION_ID: //p')"
+fi
+SOURCE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "wrong source head refuses before provider contact" "! run send wrong-source --review --assert-head 0000000000000000000000000000000000000000 >/dev/null 2>&1 && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "missing source target refuses before provider contact" "! run send wrong-base --review --base source-target-missing >/dev/null 2>&1 && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "advisory send refuses source-only flags" "! run send advisory --base HEAD >/dev/null 2>&1 && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "advisory reply refuses source-only flags" "! run reply '$SESSION' advisory --assert-head HEAD >/dev/null 2>&1 && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+printf '\000\377abc\n\n' > "$TMP/binary-evidence"
+printf '%0300000d' 0 > "$TMP/large-evidence"
+LARGE_OUT="$(run send large-evidence --file "$TMP/large-evidence")"; LARGE_ID="$(printf '%s\n' "$LARGE_OUT" | sed -n 's/^SESSION_ID: //p')"
+check "large attachments bypass process argument limits without truncation" "jq -e '.[0].content|contains(\"Bytes: 300000\") and (length>300000)' '$TMP/repo/.ai/deepseek-sessions/$LARGE_ID.json'"
+BINARY_OUT="$(run send binary-evidence --file "$TMP/binary-evidence")"; BINARY_ID="$(printf '%s\n' "$BINARY_OUT" | sed -n 's/^SESSION_ID: //p')"
+check "binary attachments retain all bytes through explicit base64" "jq -er '.[0].content' '$TMP/repo/.ai/deepseek-sessions/$BINARY_ID.json' | grep -q 'AP9hYmMKCg=='"
+check "binary attachment encoding states byte length and digest" "jq -er '.[0].content' '$TMP/repo/.ai/deepseek-sessions/$BINARY_ID.json' | grep -q 'Encoding: base64' && jq -er '.[0].content' '$TMP/repo/.ai/deepseek-sessions/$BINARY_ID.json' | grep -q 'Bytes: 7'"
+SOURCE_BASE="$(git -C "$TMP/repo" rev-parse HEAD)"
+git -C "$TMP/repo" update-ref refs/heads/non-main-source "$SOURCE_BASE"
+printf 'only this committed source change\n' > "$TMP/repo/source-only.txt"
+git -C "$TMP/repo" add source-only.txt; git -C "$TMP/repo" commit -qm source-fixture
+SOURCE_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
+SOURCE_OUT="$(AI_REVIEW_PATCH_MAX_BYTES=64 DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send source-identity --review --base refs/heads/non-main-source --assert-head "$SOURCE_HEAD")"
+SOURCE_ID="$(printf '%s\n' "$SOURCE_OUT" | sed -n 's/^SESSION_ID: //p')"; SOURCE_META="$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.meta.json"
+check "formal review metadata binds explicit non-main source and full packet digest" "jq -e --arg base '$SOURCE_BASE' --arg head '$SOURCE_HEAD' '.source_identity.base==\$base and .source_identity.head==\$head and (.packet_sha256|test(\"^[0-9a-f]{64}$\"))' '$SOURCE_META'"
+check "formal review attaches the committed diff and complete manifest" "jq -er '.[1].content' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | grep -q 'only this committed source change' && jq -er '.[1].content' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | grep -q 'MANIFEST.md'"
+check "formal review preserves sealed packet after disposable snapshot cleanup" "test -f \"\$(jq -r .source_packet_directory '$SOURCE_META')/MANIFEST.sha256\""
+check "split packets attach the complete patch" "jq -e '.source_attached_files|any(endswith(\"patch.full.diff\"))' '$SOURCE_META'"
+SOURCE_MOVE_LOG="$TMP/source-move.log"
+set +e
+DEEPSEEK_STUB_MUTATE_SOURCE="$TMP/repo/tracked" DEEPSEEK_STUB_REPLY=$'paid response\n## Verdict\nAPPROVE' run reply "$SOURCE_ID" changed-during-review --review > "$SOURCE_MOVE_LOG" 2>&1
+SOURCE_MOVE_RC=$?
+set -e
+check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
+check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
+check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >/dev/null && jq -e '.status==\"complete\"' '$SOURCE_META'"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

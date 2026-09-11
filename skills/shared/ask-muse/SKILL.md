@@ -43,8 +43,12 @@ session when the named one can be continued. Read the report path printed after 
 turn; use `AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse transcript <stable-name>` for the full conversation.
 
 If `ask` says reconciliation is required, inspect that transcript first, then run
-`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse reconcile <stable-name>` only when you deliberately accept the recorded
-provider state. Never bypass or silently replace an uncertain session.
+`AI_MUSE_CALLER="$AI_MUSE_CALLER" ai-muse reconcile <stable-name>` to verify and publish the exact retained completion without a provider call.
+The command requires a successful retained process, matching session and source
+packet, and unchanged response bytes. Missing terminal proof stays blocked; a
+session ID or manual acknowledgment cannot substitute for it. Source movement
+produces a non-authorizing retained report, after which a fresh same-session `ask`
+can review the current source. Never bypass or silently replace an uncertain session.
 
 For a code review, tell Muse to read the manifest in its evidence packet first.
 The packet directory is named after the session (`.ai-review-muse-<caller>-<name>`),

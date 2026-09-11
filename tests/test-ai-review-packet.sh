@@ -201,6 +201,78 @@ PKT="$("$SCRIPT" build "$R" explicitbase --base "$BASE_SHA")"
 check "explicit_base_is_honoured"             "grep -q 'explicitly requested' '$PKT/MANIFEST.md'"
 check "bad_base_is_refused_loudly"            "'$SCRIPT' remove '$R'; ! '$SCRIPT' build '$R' badbase --base deadbeefdeadbeef"
 
+# A fetched target branch is authoritative over a stale local branch. This is
+# the A/B/C regression: local main remains at A, origin/main advances to B, and
+# the feature head C is based on B. Selecting A would include B's unrelated
+# file in the review.
+STALE="$TMP/stale-base"
+ORIGIN="$TMP/stale-origin.git"
+git init -q --bare --initial-branch=main "$ORIGIN"
+git clone -q "$R" "$STALE"
+git -C "$STALE" config user.email t@example.com
+git -C "$STALE" config user.name Test
+git -C "$STALE" remote set-url origin "$ORIGIN"
+git -C "$STALE" checkout -q -B main "$BASE_SHA"
+git -C "$STALE" push -q -u origin main
+UPSTREAM="$TMP/stale-upstream"
+git clone -q "$ORIGIN" "$UPSTREAM"
+git -C "$UPSTREAM" config user.email t@example.com
+git -C "$UPSTREAM" config user.name Test
+echo target-only > "$UPSTREAM/target-only.txt"
+git -C "$UPSTREAM" add -A && git -C "$UPSTREAM" commit -qm target-advanced && git -C "$UPSTREAM" push -q origin main
+git -C "$STALE" fetch -q origin
+STALE_REMOTE_SHA="$(git -C "$STALE" rev-parse origin/main)"
+STALE_LOCAL_SHA="$(git -C "$STALE" rev-parse main)"
+git -C "$STALE" checkout -q -B feature origin/main
+echo feature-only > "$STALE/feature-only.txt"
+git -C "$STALE" add -A && git -C "$STALE" commit -qm feature
+STALE_PKT="$($SCRIPT build "$STALE" stale-origin)"
+check "stale_local_main_differs_from_fetched_origin" "[ '$STALE_LOCAL_SHA' != '$STALE_REMOTE_SHA' ]"
+check "fetched_origin_base_beats_stale_local_main" "grep -q '$STALE_REMOTE_SHA' '$STALE_PKT/MANIFEST.md'"
+check "stale_base_packet_excludes_target_branch_work" "! grep -q 'target-only.txt' '$STALE_PKT/patch.diff' && grep -q 'feature-only.txt' '$STALE_PKT/patch.diff'"
+
+# The caller resolves once, before the snapshot, and the sealed packet must
+# preserve that identity. Wrong or moved input is refused before any provider.
+git -C "$STALE" branch release "$STALE_REMOTE_SHA"
+IDENTITY="$TMP/source-identity.json"
+mkdir -p "$STALE/.ai-review-notes"
+printf 'legitimate untracked source\n' > "$STALE/.ai-review-notes/feature.txt"
+"$SCRIPT" resolve "$STALE" --base release --assert-head "$(git -C "$STALE" rev-parse HEAD)" > "$IDENTITY"
+IDENTITY_SNAPSHOT="$("$REPO_ROOT/bin/ai-review-sandbox" ensure-copy "$STALE" identity-contract)"
+IDENTITY_PACKET="$("$SCRIPT" build "$IDENTITY_SNAPSHOT" identity-contract --identity "$IDENTITY")"
+check "non_main_target_survives_snapshot" "git -C '$IDENTITY_SNAPSHOT' rev-parse release >/dev/null && '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+check "packet_seals_original_repository_identity" "cmp -s '$IDENTITY' '$IDENTITY_PACKET/identity.json'"
+check "packet_preserves_user_prefixed_source_directory" "grep -q '.ai-review-notes/feature.txt' '$IDENTITY_PACKET/MANIFEST.md' && test -f '$IDENTITY_SNAPSHOT/.ai-review-notes/feature.txt' && '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+mkdir -p "$STALE/.ai/reviews"
+printf '.ai/\n' >> "$STALE/.git/info/exclude"
+RECEIPT="$STALE/.ai/reviews/source-receipt.json"
+check "verified_packet_publishes_exact_receipt" "AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY' && jq -e --arg h \"\$(cat '$IDENTITY_PACKET/MANIFEST.sha256')\" '.packet_sha256==\$h and .schema_version==1' '$RECEIPT'"
+check "same_receipt_publication_is_idempotent" "AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+printf '{}' > "$STALE/.ai/reviews/conflicting-receipt.json"
+check "receipt_refuses_overwrite_of_other_evidence" "! AI_REVIEW_SOURCE_RECEIPT_FILE='$STALE/.ai/reviews/conflicting-receipt.json' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+check "receipt_cannot_escape_private_report_directory" "! AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/outside-receipt.json' '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY' && test ! -e '$TMP/outside-receipt.json'"
+check "resolve_rejects_wrong_expected_head" "! '$SCRIPT' resolve '$STALE' --assert-head '$STALE_REMOTE_SHA'"
+check "resolve_rejects_missing_target" "! '$SCRIPT' resolve '$STALE' --base refs/heads/missing"
+jq --arg bad "$STALE_LOCAL_SHA" '.base=$bad' "$IDENTITY" > "$TMP/wrong-base.json"
+check "build_rejects_forged_base_identity" "! '$SCRIPT' build '$IDENTITY_SNAPSHOT' wrong-base --identity '$TMP/wrong-base.json'"
+jq --arg bad "$BASE_SHA" '.head=$bad' "$IDENTITY" > "$TMP/wrong-head.json"
+check "build_rejects_forged_head_identity" "! '$SCRIPT' build '$IDENTITY_SNAPSHOT' wrong-head --identity '$TMP/wrong-head.json'"
+echo changed-untracked > "$STALE/identity-new.txt"
+check "identity_rejects_untracked_source_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+check "retained_verification_preserves_stale_evidence_without_receipt" "AI_REVIEW_SOURCE_RECEIPT_FILE='$STALE/.ai/reviews/retained-must-not-authorize.json' '$SCRIPT' verify-retained '$IDENTITY_PACKET' > '$TMP/retained.log' && grep -q NON-AUTHORIZING '$TMP/retained.log' && test ! -e '$STALE/.ai/reviews/retained-must-not-authorize.json'"
+echo snapshot-tamper > "$IDENTITY_SNAPSHOT/retained-tamper.txt"
+check "retained_verification_refuses_changed_snapshot" "! '$SCRIPT' verify-retained '$IDENTITY_PACKET'"
+rm "$IDENTITY_SNAPSHOT/retained-tamper.txt"
+printf 'tamper' >> "$IDENTITY_PACKET/MANIFEST.md"
+check "retained_verification_refuses_changed_packet" "! '$SCRIPT' verify-retained '$IDENTITY_PACKET'"
+head -c -6 "$IDENTITY_PACKET/MANIFEST.md" > "$TMP/restored-manifest"; mv "$TMP/restored-manifest" "$IDENTITY_PACKET/MANIFEST.md"
+rm "$STALE/identity-new.txt"
+git -C "$STALE" update-ref refs/heads/release HEAD
+check "identity_rejects_target_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+git -C "$STALE" update-ref refs/heads/release "$STALE_REMOTE_SHA"
+check "unchanged_identity_verifies_after_restoring_target" "'$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+"$REPO_ROOT/bin/ai-review-sandbox" remove-copy "$STALE" identity-contract
+
 # --- linked worktrees ---------------------------------------------------------
 # A raw worktree kills a reviewer before it reads code. Refuse at the door and
 # name the fix, rather than emitting a packet nobody can use.

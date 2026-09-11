@@ -6,6 +6,7 @@
 # server URL, the credentials, the API shapes, and every safety invariant.
 #
 #   ai-glm new <name> [--prompt T | --prompt-file F | stdin]   start a review session
+#   ai-glm recover <name>         recover exact pending work without resubmitting
 #   ai-glm ask <name> [...]                                    continue it
 #   ai-glm implement <name> [...]                              one-shot write job in a throwaway clone
 #   ai-glm list | show <name> | transcript <name> | diff <name>
@@ -218,7 +219,7 @@ review_boundary() { # review_boundary ROOT NAME -> directory to hand the reviewe
 }
 release_boundary() { # release_boundary ROOT NAME
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
+  "$SANDBOX_BIN" remove-copy "$1" "glm-$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -241,7 +242,10 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
 prepare_review() { # prepare_review ROOT NAME [RECORDED_BOUNDARY]
-  local root="$1" name="$2" recorded="${3:-}" pkt want refreshed
+  local root="$1" name="$2" recorded="${3:-}" pkt want refreshed identity
+  identity="$(mktemp)" || die "could not reserve source identity"
+  "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
   if [ -z "$recorded" ]; then
     REVIEW_DIR="$(review_boundary "$root" "$name")"
   elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
@@ -266,10 +270,12 @@ reviewed. Re-read the SHA from git rather than transcribing it."
   fi
   [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
   pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "glm-$name" --class small \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
@@ -359,19 +365,48 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
 # before submitting, then refuse a same-name continuation until a proven terminal
 # result clears it. This is deliberately narrower than Grok's cross-checkout
 # lock: GLM sessions are bound to one exact OpenCode session.
-mark_remote_turn_pending() { # META
-  local meta="$1" now
+mark_remote_turn_pending() { # META [PREVIOUS_ASSISTANT_ID]
+  local meta="$1" now previous="${2:-}"
   now="$(date -u +%FT%TZ)"
-  write_meta "$meta" "$(jq --arg now "$now" '.remote_turn={state:"pending",started_at:$now}' "$meta")"
+  write_meta "$meta" "$(jq --arg now "$now" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" '.remote_turn={state:"pending",started_at:$now,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary}' "$meta")"
 }
 
 remote_turn_pending() { # META
-  jq -e '.remote_turn.state == "pending"' "$1" >/dev/null 2>&1
+  jq -e '.remote_turn.state == "pending" or .remote_turn.state == "completed-unpublished"' "$1" >/dev/null 2>&1
 }
 
 clear_remote_turn_pending() { # META
   local meta="$1"
   write_meta "$meta" "$(jq 'del(.remote_turn)' "$meta")"
+}
+
+persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local work
+  local meta="$1" msg="$2" target="${1%.json}.terminal.json" temporary digest branch version
+  printf '%s' "$msg" | jq -e '.finish=="stop" and (.id|type=="string") and (.id|length)>0' >/dev/null || return 1
+  temporary="$(mktemp "${target}.XXXXXX")" || return 1
+  printf '%s\n' "$msg" > "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$target" || { rm -f "$temporary"; return 1; }
+  digest="$(sha256sum "$target" | cut -d' ' -f1)" || return 1
+  GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$meta")"
+  write_meta "$meta" "$(jq --arg path "$target" --arg digest "$digest" '.remote_turn.state="completed-unpublished" | .remote_turn.terminal_path=$path | .remote_turn.terminal_sha256=$digest' "$meta")" || return 1
+  # Preserve display context once: local branch/server changes must not change
+  # the bytes of an already published report during an exact retry.
+  branch="$(git -C "$(jq -r .repository_root "$meta")" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null)" || version=unavailable
+  [ -n "$version" ] || version=unavailable
+  write_meta "$meta" "$(jq --arg branch "$branch" --arg version "$version" '.remote_turn.report_branch=(.remote_turn.report_branch // $branch) | .remote_turn.report_server_version=(.remote_turn.report_server_version // $version)' "$meta")" || return 1
+  restore_report_context "$meta"
+}
+
+restore_report_context() {
+  GLM_REPORT_BRANCH="$(jq -r '.remote_turn.report_branch // "unavailable"' "$1")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r '.remote_turn.report_server_version // "unavailable"' "$1")"
+}
+
+record_review_publication() { # META REPORT; clear fence only after this succeeds
+  local meta="$1" report="$2" digest
+  [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  digest="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
+  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")"
 }
 
 implementation_terminal() {
@@ -866,6 +901,12 @@ last_assistant() { # -> JSON of the newest assistant message
   api GET "/api/session/$1/message?limit=1" | jq -c '.data[0] // {}'
 }
 
+previous_message_id() { # prove the pre-submission watermark; errors are not empty history
+  local response
+  response="$(api GET "/api/session/$1/message?limit=1")" || return 1
+  printf '%s' "$response" | jq -r 'if (.data|type)!="array" then error("invalid message history") elif (.data|length)==0 then "" elif (.data[0].id|type)=="string" and (.data[0].id|length)>0 then .data[0].id else error("message identity missing") end'
+}
+
 running_tools() {
   printf '%s' "$1" | jq -r '[.content[]? | select(.type=="tool" and .state.status=="running") | .name] | join(", ")'
 }
@@ -903,7 +944,8 @@ touch_liveness() { # touch_liveness ASSISTANT_JSON
 }
 
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
-  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck previous=""
+  [ -z "$TURN_META" ] || previous="$(jq -r '.remote_turn.previous_message_id // empty' "$TURN_META")"
   APPROVED_PERMISSION_IDS=""
   sleep 6
   while [ "$waited" -lt "$TIMEOUT" ]; do
@@ -921,9 +963,9 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     # The message digest is the signal that actually moves while the model produces
     # output, so `provider_progress_at` means "the provider emitted something new".
     # `last_poll_at` is the weaker companion: the wrapper is alive and polling.
-    touch_liveness "$msg"
+    [ -n "$previous" ] && [ "$(printf '%s' "$msg" | jq -r '.id // empty')" = "$previous" ] || touch_liveness "$msg"
     finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
-    if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ]; then
+    if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ] && { [ -z "$previous" ] || [ "$(printf '%s' "$msg" | jq -r '.id // empty')" != "$previous" ]; }; then
       printf '%s' "$msg"; return 0
     fi
     if [ -n "$impl_meta" ] && implementation_abort_requested "$impl_meta" && [ "$idle" -ge 2 ]; then
@@ -953,12 +995,18 @@ msg_tokens() { printf '%s' "$1" | jq -c '.tokens // null'; }
 # Reports
 # --------------------------------------------------------------------------------
 write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
-  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver tmp
+  ts="${GLM_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)}"
+  [ -z "${GLM_REPORT_KEY:-}" ] || [[ "$GLM_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
   f="$root/.ai/reviews/glm-$name-$ts.md"
   mkdir -p "$(dirname "$f")"
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  tmp="$(mktemp "$(dirname "$f")/.glm-report.XXXXXX")" || return 1
+  if [ -n "${GLM_REPORT_KEY:-}" ]; then
+    branch="${GLM_REPORT_BRANCH:-unavailable}"; ver="${GLM_REPORT_SERVER_VERSION:-unavailable}"
+  else
+    branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  fi
   {
     printf '# GLM %s — %s\n\n' "$kind" "$name"
     printf '| field | value |\n|---|---|\n'
@@ -969,10 +1017,32 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     printf '| repository | %s |\n' "$root"
     printf '| branch | %s |\n' "$branch"
     printf '| caller | %s |\n' "$CALLER"
-    printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ -n "${GLM_REPORT_KEY:-}" ]; then
+      printf '| requested | %s |\n' "${GLM_REPORT_REQUESTED_AT:-unavailable}"
+    else
+      printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
     printf '| tokens | `%s` |\n\n' "$tokens"
     printf -- '---\n\n%s\n' "$text"
-  } > "$f"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  else
+    ln "$tmp" "$f" 2>/dev/null || {
+      [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+    }
+  fi
+  rm -f "$tmp"
+  local facts='{"phase":"report-publication"}'
+  if [ -n "${GLM_RECOVERY_EVENT_RUN_ID:-}" ]; then
+    [[ "$GLM_RECOVERY_EVENT_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 1
+    facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"$GLM_RECOVERY_EVENT_RUN_ID\"}"
+    if [ -n "${GLM_RECOVERY_STATE:-}" ]; then
+      [ "$GLM_RECOVERY_STATE" = completed-stale-source ] && [[ "${GLM_ORIGINAL_HEAD_SHA:-}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
+      facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"$GLM_ORIGINAL_HEAD_SHA\"}"
+    fi
+  fi
+  reviewer_event_publish_report glm "$f" "$facts" || return 1
   printf '%s' "$f"
 }
 
@@ -1032,7 +1102,7 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run previous_message
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
@@ -1059,7 +1129,9 @@ cmd_new() {
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
   fi
-  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
+  reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable GLM evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1070,16 +1142,82 @@ cmd_new() {
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
+  persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
-  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
+cmd_recover() { # exact session only; never sends or resends a prompt
+  local name="$1" root rid mp sid lock packet boundary expected state msg terminal digest report text tokens binding stale=0 observed
+  valid_name "$name" || die 'invalid GLM session name.'
+  [ -z "$PROMPT_TEXT$PROMPT_FILE$OPT_BASE$OPT_TESTS$OPT_DECISION$OPT_ASSERT_HEAD" ] || die 'recover cannot submit a prompt or change the original review evidence.'
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  [ -f "$mp" ] && [ ! -L "$mp" ] || die 'exact local GLM session metadata is missing.'
+  lock="$(lock_path "$rid" "$name")"; lock_acquire "$lock" "$LOCK_TIMEOUT" || die 'the exact GLM session is busy.'
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg model "$MODEL" --arg provider "$PROVIDER" '.type=="review" and .name==$name and .caller==$caller and .model==$model and .provider==$provider' "$mp" >/dev/null || die 'GLM recovery identity differs from the requested review.'
+  [ "$(canonical_path "$(jq -r .repository_root "$mp")" "$root")" = "$(canonical_path "$root" "$root")" ] || die 'GLM recovery belongs to a different repository.'
+  sid="$(jq -r .opencode_session_id "$mp")"
+  printf '%s' "$sid" | grep -Eq '^[A-Za-z0-9_-]+$' && [ "$sid" != null ] || die 'GLM session identity is malformed.'
+  state="$(jq -r '.remote_turn.state // empty' "$mp")"
+  binding=remote_turn; [ -n "$state" ] || binding=last_completed_turn
+  jq -e --arg key "$binding" '.[$key] | (.head|type=="string" and test("^[0-9a-f]{40}$")) and (.packet_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$mp" >/dev/null || die 'GLM recovery source identity is malformed.'
+  boundary="$(jq -r --arg key "$binding" '.[$key].boundary_root // empty' "$mp")"; expected="$(jq -r --arg key "$binding" '.[$key].head // empty' "$mp")"
+  [ -n "$boundary" ] || die 'the original review boundary is unbound.'
+  observed="$(git -C "$root" rev-parse HEAD)"
+  packet="$("$PACKET_BIN" path "$boundary" "glm-$name")"
+  [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r --arg key "$binding" '.[$key].packet_sha256 // empty' "$mp")" ] || die 'the original source packet digest changed.'
+  if [ "$(jq -r --arg key "$binding" '.[$key].recovery_state // empty' "$mp")" = completed-stale-source ] || [ "$observed" != "$expected" ] || ! (unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$PACKET_BIN" verify "$packet") >/dev/null 2>&1; then
+    "$PACKET_BIN" verify-retained "$packet" >/dev/null || die 'the retained source packet no longer verifies.'
+    stale=1
+  fi
+  if [ -z "$state" ]; then
+    report="$(jq -r '.last_completed_turn.report // empty' "$mp")"
+    [ -f "$report" ] && [ ! -L "$report" ] && [ "$(sha256sum "$report" | cut -d' ' -f1)" = "$(jq -r .last_completed_turn.report_sha256 "$mp")" ] || die 'no exact completed-turn receipt exists.'
+    if [ "$stale" = 1 ]; then printf 'RETAINED non-authorizing session=%s report=%s original-head=%s\n' "$name" "$report" "$expected"; else printf 'PASS already-finalized session=%s report=%s\n' "$name" "$report"; fi; return
+  fi
+  jq -e '.remote_turn|(.previous_message_id|type=="string") and (.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$"))' "$mp" >/dev/null || die 'legacy pending turn lacks a proven watermark or original invocation identity; retain it for exact evidence inspection, never resubmit it.'
+  GLM_RECOVERY_EVENT_RUN_ID="$(jq -r .remote_turn.original_invocation_id "$mp")"
+  if [ "$state" = pending ]; then
+    require_review_server
+    TURN_META="$mp"; msg="$(await_turn "$sid" "$name" review "$boundary")"; TURN_META=""
+    persist_review_terminal "$mp" "$msg" || die 'could not preserve the completed GLM turn; original remote session remains fenced.'
+  elif [ "$state" != completed-unpublished ]; then die 'unknown GLM recovery state; no provider call was made.'; fi
+  terminal="${mp%.json}.terminal.json"
+  [ "$(canonical_path "$(jq -r .remote_turn.terminal_path "$mp")" "$STATE_DIR")" = "$(canonical_path "$terminal" "$STATE_DIR")" ] && [ -f "$terminal" ] && [ ! -L "$terminal" ] || die 'retained GLM terminal evidence is missing.'
+  digest="$(sha256sum "$terminal" | cut -d' ' -f1)"
+  [ "$digest" = "$(jq -r .remote_turn.terminal_sha256 "$mp")" ] || die 'retained GLM completion bytes changed.'
+  msg="$(cat "$terminal")"; verify_model "$msg"
+  jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" '.finish=="stop" and (.id|type=="string") and (.id|length)>0 and .id!=$previous and .model.id==$model and .model.providerID==$provider' "$terminal" >/dev/null || die 'retained message does not prove the pending turn completed under the exact model.'
+  reviewer_event_evidence require-report glm "$boundary" "$GLM_RECOVERY_EVENT_RUN_ID" || die 'could not reserve durable recovered GLM evidence.'
+  GLM_RECOVERY_STATE=''; GLM_ORIGINAL_HEAD_SHA=''
+  if [ "$stale" = 1 ]; then GLM_RECOVERY_STATE=completed-stale-source; GLM_ORIGINAL_HEAD_SHA="$expected"; fi
+  GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$mp")"; text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  restore_report_context "$mp"
+  if [ "$stale" = 1 ]; then
+    GLM_REPORT_KEY="$(printf '%s\ncompleted-stale-source\n' "$digest" | sha256sum | cut -d' ' -f1)"
+    write_meta "$mp" "$(jq --arg head "$observed" '.remote_turn.recovery_state="completed-stale-source" | .remote_turn.authorizing=false | .remote_turn.observed_head=(.remote_turn.observed_head // $head)' "$mp")" || die 'could not record stale-source completion.'
+    text="RETAINED COMPLETION — NON-AUTHORIZING: source changed after this turn. Original head: $expected.
+
+$text"
+  fi
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'GLM report publication failed; recover can finalize the retained completion without another provider call.'
+  if [ "$stale" = 1 ]; then
+    "$PACKET_BIN" verify-retained "$packet" >/dev/null || die 'retained packet changed during local recovery.'
+  else
+    "$PACKET_BIN" verify "$packet" >/dev/null || die 'source changed during local recovery; retained work is not authorization.'
+  fi
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM final metadata publication failed; retained completion remains recoverable.'
+  if [ "$stale" = 1 ]; then printf 'RETAINED non-authorizing session=%s report=%s original-head=%s\n' "$name" "$report" "$expected"; return; fi
+  emit "$name" review "$sid" "$text" "$tokens" "$report"
+}
+
 cmd_ask() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run previous_message
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
@@ -1123,7 +1261,9 @@ $REVIEW_HEAD only."
   if ! capacity_gate; then rm -f "$pf"; lock_release "$lock"; return 1; fi
   write_meta "$mp" "$(jq --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" '.last_diagnostic_run_id=$diagnostic|.quota_result=$quota' "$mp")"
   record_diagnostic preflight capacity-checked --local-health healthy
-  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
+  reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable GLM evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1134,8 +1274,8 @@ $REVIEW_HEAD only."
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
+  persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
-  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then
     write_meta "$mp" "$(jq '.status="failed"' "$mp")"
@@ -1144,7 +1284,9 @@ $REVIEW_HEAD only."
   fi
   write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
@@ -1615,13 +1757,13 @@ cmd_delete() {
       delete_exact_server_session "$sid" || die "could not delete exact server session $sid (HTTP $HTTP_STATUS); record preserved."
     fi
   else
+    root="$(jq -r '.repository_root // empty' "$mp")"
+    if [ -n "$root" ] && [ -e "$root" ]; then
+      release_boundary "$root" "$1" || die "review evidence cleanup refused; provider session and metadata preserved."
+    fi
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
   fi
   # Review snapshots are disposable and must not outlive their session.
-  if [ "$type" != implementation ]; then
-    root="$(jq -r '.repository_root // empty' "$mp")"
-    [ -z "$root" ] || [ ! -e "$root" ] || release_boundary "$root" "$1"
-  fi
   rm -f "$mp"
   note "deleted session: $1"
 }
@@ -2028,6 +2170,7 @@ done
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-glm ask <name> ..."; cmd_ask "$ARG" ;;
+  recover)    [ -n "$ARG" ] || die 'usage: ai-glm recover <name>'; cmd_recover "$ARG" ;;
   implement)  [ -n "$ARG" ] || die "usage: ai-glm implement <name> ..."; cmd_implement "$ARG" ;;
   list)       cmd_list ;;
   show)       cmd_show "$ARG" ;;
