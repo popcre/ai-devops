@@ -170,16 +170,17 @@ def publish_report(directory, provider, run_id, report, facts=None, artifact_key
                  "recovery_state": recovery_state, "original_head_sha": original_head}
         if artifact_key:
             value.update(artifact_kind="git-binary-patch", artifact_key=artifact_key)
-        path = root / (sha + ".report.json")
+        receipt_id = sha + ("." + artifact_key if artifact_key else "")
+        path = root / (receipt_id + ".report.json")
         if path.exists():
             require(read_json(path) == value, "published evidence conflicts with this invocation")
         else:
             publish(path, value)
         # Return an opaque recovery reference, not a source-worktree path.
-        return {"reference": run_id + "/" + sha, "report_sha256": sha}
+        return {"reference": run_id + "/" + receipt_id, "report_sha256": sha}
 
 
-def publish_patch(directory, provider, run_id, path):
+def publish_patch(directory, provider, run_id, path, facts=None):
     # Reserve before reading: even a missing patch must block later cleanup.
     key = digest(str(physical(path)).encode("utf-8"))
     with event_lock(directory):
@@ -191,7 +192,28 @@ def publish_patch(directory, provider, run_id, path):
             require(read_json(target) == requirement, "artifact requirement changed")
         else:
             publish(target, requirement)
-    return publish_report(directory, provider, run_id, path, {"phase": "report-publication"}, key)
+    return publish_report(directory, provider, run_id, path, facts or {"phase": "report-publication"}, key)
+
+
+def recovered_references(directory, provider, run_id):
+    required_keys = set()
+    for path in (evidence_root(directory, run_id) / "artifacts").glob("*.json"):
+        row = read_json(path)
+        require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
+                        "artifact_kind": "git-binary-patch", "artifact_key": path.stem}, "required patch identity changed")
+        required_keys.add(path.stem)
+    candidates = {}
+    for candidate in (directory / "evidence").glob("*/*.report.json"):
+        row = read_json(physical(candidate))
+        if row.get("original_invocation_id") == run_id and row.get("run_id") != run_id:
+            candidates.setdefault(row.get("run_id", ""), []).append(row)
+    recovered = []
+    for owner, rows in candidates.items():
+        references = verify_reports(directory, provider, owner)
+        linked_keys = {row.get("artifact_key") for row in rows if row.get("artifact_kind") == "git-binary-patch"}
+        if required_keys <= linked_keys and any(not row.get("artifact_kind") for row in rows):
+            recovered.extend(references)
+    return sorted(set(recovered))
 
 
 def verify_reports(directory, provider, run_id):
@@ -207,15 +229,7 @@ def verify_reports(directory, provider, run_id):
         # A local finalizer may preserve a paid result after its original
         # wrapper has ended. Validate that immutable receipt without rewriting
         # the earlier event or pretending another provider request occurred.
-        recovered = []
-        for candidate in (directory / "evidence").glob("*/*.report.json"):
-            row = read_json(physical(candidate))
-            if row.get("original_invocation_id") == run_id and row.get("run_id") != run_id:
-                owner = row.get("run_id", "")
-                references = verify_reports(directory, provider, owner)
-                reference = owner + "/" + row.get("report_sha256", "")
-                require(reference in references, "recovery receipt identity is invalid")
-                recovered.append(reference)
+        recovered = recovered_references(directory, provider, run_id)
         if recovered:
             return sorted(set(recovered))
     require(paths, "required report is not durably published; cleanup and replay refused")
@@ -237,7 +251,8 @@ def verify_reports(directory, provider, run_id):
         else:
             reports += 1
         sha = digest(row["report_text"].encode("utf-8"))
-        require(row.get("report_sha256") == sha and path.name == sha + ".report.json",
+        receipt_id = sha + ("." + row["artifact_key"] if kind else "")
+        require(row.get("report_sha256") == sha and path.name == receipt_id + ".report.json",
                 "published report content changed")
         provenance(row.get("provenance"))
         if row.get("original_invocation_id") is not None:
@@ -249,14 +264,17 @@ def verify_reports(directory, provider, run_id):
             require((row.get("recovery_state") is None and original["head"] == start["head"] and row.get("original_head_sha") is None) or
                     (row.get("recovery_state") == "completed-stale-source" and row.get("original_head_sha") == original["head"]),
                     "recovered evidence source identity is unproven")
-        references.append(run_id + "/" + sha)
+        references.append(run_id + "/" + receipt_id)
     require(reports, "required report is not durably published; a patch alone cannot authorize cleanup")
     for path in (root / "artifacts").glob("*.json"):
         row = read_json(path)
         key = path.stem
         require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
-                        "artifact_kind": "git-binary-patch", "artifact_key": key} and key in artifacts,
-                "required patch is not durably published; cleanup refused")
+                        "artifact_kind": "git-binary-patch", "artifact_key": key}, "required patch identity changed")
+        if key not in artifacts:
+            recovered = recovered_references(directory, provider, run_id)
+            require(recovered, "required patch is not durably published; cleanup refused")
+            return sorted(set(references + recovered))
     return references
 
 
@@ -372,7 +390,7 @@ def bind_owner(directory, provider, run_id, owner):
                 os.unlink(tmp)
 
 
-def verify_owner(directory, provider, owner):
+def verify_owner(directory, provider, owner, binding_only=False):
     with event_lock(directory):
         path, _, _, row, repo, workspace = owner_identity(owner)
         run_id = row.get("evidence_run_id")
@@ -383,24 +401,38 @@ def verify_owner(directory, provider, owner):
         require(identity == {"schema_version": 1, "provider": provider, "run_id": run_id,
                              "owner": str(path), "repository": str(repo), "workspace": str(workspace)} and
                 repo == physical(start["repo"]), "implementation evidence ownership changed")
-        return verify_reports(directory, provider, run_id)
+        return [] if binding_only else verify_reports(directory, provider, run_id)
 
 
 def reconcile_owner(directory, provider, owner, metadata, report):
     """Publish proven legacy report/patch before allowing exact owned cleanup."""
     path, _, owner_data, row, repo, workspace = owner_identity(owner)
+    original = None
     if row.get("evidence_run_id"):
-        references = verify_owner(directory, provider, owner)
+        verify_owner(directory, provider, owner, binding_only=True)
         run_id = row["evidence_run_id"]
-        if invocation(directory, provider, run_id).get("operation") == "local-reconciliation":
-            finish_reconciliation(directory, provider, run_id, references)
-        return {"already_reconciled": True, "report_count": len(references)}
+        try:
+            references = verify_owner(directory, provider, owner)
+        except Blocked:
+            original = invocation(directory, provider, run_id)
+            _, ledger = snapshot(directory / "events.jsonl", "jsonl")
+            require(any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
+                        for line in ledger.splitlines()), "implementation invocation is still active; recovery refused")
+        else:
+            if invocation(directory, provider, run_id).get("operation") == "local-reconciliation":
+                finish_reconciliation(directory, provider, run_id, references)
+            for recovered_id in {reference.split("/", 1)[0] for reference in references} - {run_id}:
+                recovered = invocation(directory, provider, recovered_id)
+                if recovered.get("operation") == "local-finalization" and recovered.get("parent_run_id") == run_id:
+                    finish_reconciliation(directory, provider, recovered_id, verify_reports(directory, provider, recovered_id))
+            return {"already_reconciled": True, "report_count": len(references)}
     metadata = physical(metadata)
     _, meta_data = snapshot(metadata, "log")
     meta = json.loads(meta_data)
     require(physical(meta.get("repo") or meta.get("repository_root") or "") == repo,
             "legacy implementation metadata repository mismatch")
     name, caller, base = meta.get("name"), meta.get("caller"), meta.get("base_sha")
+    require(original is None or caller == original["caller"], "implementation caller differs from original invocation")
     require(name and caller and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""),
             "legacy implementation identity is incomplete")
     require((meta.get("last_terminal_state") in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
@@ -453,14 +485,19 @@ def reconcile_owner(directory, provider, owner, metadata, report):
                 "report_sha256": digest(report_data), "patch_sha256": digest(patch_data),
                 "historical_source_authorization": "unknown"}
     run_id = digest(encoded(identity))[:32]
-    event = {"schema_version": 1, "event": "started", "provider": provider, "operation": "local-reconciliation",
-             "parent_run_id": None, "run_id": run_id, "timestamp": now(), "repo": str(repo), "head": "", "caller": caller}
+    event = {"schema_version": 1, "event": "started", "provider": provider,
+             "operation": "local-finalization" if original else "local-reconciliation",
+             "parent_run_id": original["run_id"] if original else None, "run_id": run_id,
+             "timestamp": now(), "repo": str(repo), "head": original["head"] if original else "", "caller": caller}
     append(directory, lambda rows: None if any(item.get("run_id") == run_id for item in rows) else event)
     require_report(directory, provider, run_id)
-    receipt = publish_report(directory, provider, run_id, report, {"phase": "report-publication"})
+    facts = {"phase": "report-publication"}
+    if original:
+        facts["original_invocation_id"] = original["run_id"]
+    receipt = publish_report(directory, provider, run_id, report, facts)
     require(receipt["report_sha256"] == identity["report_sha256"], "legacy report changed during reconciliation")
-    if patch_data:
-        receipt = publish_patch(directory, provider, run_id, patch_path)
+    if patch_path is not None:
+        receipt = publish_patch(directory, provider, run_id, patch_path, facts)
         require(receipt["report_sha256"] == identity["patch_sha256"], "legacy patch changed during reconciliation")
     require(snapshot(path, "log")[1] == owner_data and snapshot(metadata, "log")[1] == meta_data,
             "legacy implementation ownership changed during reconciliation")
@@ -469,9 +506,10 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     require(final_status.returncode == 0 and final_status.stdout == status.stdout and
             final_diff.returncode == 0 and final_diff.stdout == patch_data,
             "legacy implementation workspace changed during reconciliation")
-    bind_owner(directory, provider, run_id, owner)
+    if original is None:
+        bind_owner(directory, provider, run_id, owner)
     references = verify_owner(directory, provider, owner)
-    finish_reconciliation(directory, provider, run_id, references)
+    finish_reconciliation(directory, provider, run_id, verify_reports(directory, provider, run_id))
     return {"run_id": run_id, "report_count": len(references), "historical_source_authorization": "unknown"}
 
 
@@ -583,7 +621,7 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 
 def finish_reconciliation(directory, provider, run_id, references):
     start = invocation(directory, provider, run_id)
-    require(start.get("operation") == "local-reconciliation", "not a local reconciliation invocation")
+    require(start.get("operation") in {"local-reconciliation", "local-finalization"}, "not a local reconciliation invocation")
     def terminal(rows):
         finished = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "finished"]
         if finished:
@@ -655,14 +693,23 @@ def main():
         require(operation == "finish" and len(sys.argv) in {5, 6}, "invalid event operation")
         run_id, result = sys.argv[3:5]
         facts = provenance(json.loads(sys.argv[5]) if len(sys.argv) == 6 else None)
+        publication_incomplete = []
         def finish(rows):
             matches = [r for r in rows if r.get("run_id") == run_id]
             require(len(matches) == 1 and matches[0].get("event") == "started" and
                     matches[0].get("provider") == provider, "event has no unique matching start")
-            references = verify_reports(directory, provider, run_id)
-            return {**matches[0], "event": "finished", "timestamp": now(), "exit_code": int(result),
-                    "provenance": facts, "evidence_references": references}
+            try:
+                references = verify_reports(directory, provider, run_id)
+            except (Blocked, OSError, ValueError):
+                references = []
+                publication_incomplete.append(True)
+            return {**matches[0], "event": "finished", "timestamp": now(),
+                    "exit_code": int(result) if int(result) or not publication_incomplete else 1,
+                    "wrapper_exit_code": int(result),
+                    "provenance": facts, "evidence_references": references,
+                    "evidence_state": "publication-incomplete" if publication_incomplete else "verified"}
         append(directory, finish)
+        require(not publication_incomplete, "required evidence publication incomplete; terminal outcome recorded and local recovery retained")
 
 
 if __name__ == "__main__":

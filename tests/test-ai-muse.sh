@@ -89,6 +89,11 @@ case "${1:-}" in
   --version) echo 1.18.12;;
   run)
     [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
+    if [ -n "${MUSE_STUB_USAGE_FIXTURE:-}" ]; then
+      jq -c '.events[] | .sessionID="ses_new"' "$MUSE_STUB_USAGE_FIXTURE"
+      printf '{"type":"text","sessionID":"ses_new","part":{"text":"usage-proven-response"}}\n'
+      exit 0
+    fi
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
@@ -126,14 +131,21 @@ chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
 muse_recovery_cases(){
   local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
+  local real_jq
+  real_jq="$(command -v jq)"
+  # Reproduce the former second-write failure without weakening the required
+  # retained-turn metadata write. Recovery must never recompute that choice.
+  { printf '#!/usr/bin/env bash\n'; printf '%s\n' 'case "$*" in *'"'"'.retained_turn.usage_json=$usage'"'"'*) exit 73;; esac'; printf 'exec %q "$@"\n' "$real_jq"; } > "$TMP/bin/jq"
+  chmod +x "$TMP/bin/jq"
   : > "$calls"
   if [ "${AI_MUSE_REPORT_RECOVERY_ONLY:-0}" = 1 ]; then
     (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new recovery-stale --prompt test") >/dev/null
     m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
   else
-  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
+  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
   m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
   check 'Muse retains exact successful process and event evidence' "jq -e '.retained_turn.process_exit==0 and (.retained_turn.original_invocation_id|length)==32 and (.retained_turn.stream_sha256|length)==64' '$m'"
+  check 'optional accounting failure is retained atomically with the paid turn' "jq -e '.retained_turn.usage_json|fromjson|.availability_reason==\"usage-formatting-failed\"' '$m'"
   raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/recovery-original"
   printf 'tamper' >> "$raw"
   check 'changed retained Muse bytes cannot unlock continuation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\""
@@ -142,6 +154,7 @@ muse_recovery_cases(){
   rep="$(jq -r .last_report "$m")"
   if [ "$rep" = null ]; then cat "$TMP/reconcile.log"; return; fi
   check 'stale Muse report is explicitly non-authorizing' "grep -q NON-AUTHORIZING '$rep'"
+  check 'recovery preserves the original unavailable accounting instead of recomputing it' "grep -q usage-formatting-failed '$rep'"
   check 'repeated Muse reconciliation does not repeat paid work' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && test \"\$(wc -l < '$calls')\" -eq 1"
   fi
   check 'normal continuation survives stale completion reconciliation' "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask recovery-stale --prompt continue\""
@@ -155,6 +168,7 @@ muse_recovery_cases(){
   check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\" > '$TMP/failed-followup.log' 2>&1"
   check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
   if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
+  rm -f "$TMP/bin/jq"
 }
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
@@ -245,6 +259,8 @@ check 'target movement during paid response rejects acceptance' "cd '$REPO' && !
 check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
 git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
+check 'optional usage failure preserves successful paid response' "cd '$REPO' && eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_TOUCH='$TMP/usage-paid-count' '$SCRIPT' new usage-failure --prompt test\" > '$TMP/usage-failure.log' 2>&1 && grep -q usage-formatting-failed '$REPO'/.ai/reviews/muse-usage-failure-*.md && grep -q first '$TMP/usage-failure.log' && test \"\$(wc -c < '$TMP/usage-paid-count')\" -eq 7"
 check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
 check 'hostile installed profile is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile --prompt test\""
@@ -325,7 +341,7 @@ check 'source changes during a turn reject stale output' "printf '%s' \"\$STALE_
 STALE_META="$(find "$TMP/state" -name 'codex--stale.json' -type f)"
 check 'rejected stale turn preserves its Muse session' "jq -e '.status==\"completed_pending_local_checks\" and .session_id==\"ses_new\"' '$STALE_META'"
 check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'reconciliation cannot clear missing durable evidence' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'"
+check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""

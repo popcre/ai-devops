@@ -123,9 +123,52 @@ export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
 
+glm_deadline_cases() {
+  local result
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 0 > "$DEADLINE_DIR/clock"; : > "$DEADLINE_DIR/calls"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }
+    sleep(){ printf "%s" "$(( $(glm_now) + $1 ))" > "$DEADLINE_DIR/clock"; }
+    server_pw(){ printf synthetic-password; }
+    curl(){ local max=0; while [ "$#" -gt 0 ]; do if [ "$1" = -m ]; then max="$2"; shift; fi; shift; done; printf "%s\n" "$max" >> "$DEADLINE_DIR/calls"; sleep "$max"; printf 000; return 28; }
+    implementation_update(){ printf deadline > "$DEADLINE_DIR/reason"; }
+    TIMEOUT=10; POLL_SECS=1; PERMISSION_HTTP_TIMEOUT=20; PERMISSION_HTTP_ATTEMPTS=3; TURN_META=""
+    set +e; await_turn sid name implement "$DEADLINE_DIR" fake-meta >/dev/null; rc=$?
+    printf "%s:%s:%s:%s" "$rc" "$(glm_now)" "$(wc -l < "$DEADLINE_DIR/calls" | tr -d " ")" "$(cat "$DEADLINE_DIR/calls")"
+  ')"
+  check "HTTP permission time counts toward the wall deadline without retries past it" "test '$result' = '124:10:1:4' && grep -qx deadline '$TMP/reason'"
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 7 > "$DEADLINE_DIR/clock"; : > "$DEADLINE_DIR/calls"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }; sleep(){ printf unexpected >> "$DEADLINE_DIR/calls"; }
+    handle_permissions(){ printf unexpected >> "$DEADLINE_DIR/calls"; }
+    implementation_update(){ :; }
+    printf "%s" "{\"remote_turn\":{\"deadline_epoch\":5,\"previous_message_id\":\"old\"}}" > "$DEADLINE_DIR/pending"
+    TIMEOUT=100; TURN_META="$DEADLINE_DIR/pending"
+    set +e; await_turn sid name implement "$DEADLINE_DIR" fake-meta >/dev/null; rc=$?
+    printf "%s:%s:%s" "$rc" "$(glm_now)" "$(wc -c < "$DEADLINE_DIR/calls" | tr -d " ")"
+  ')"
+  check "recovery does not restart an expired original turn deadline" "test '$result' = '124:7:0'"
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 100 > "$DEADLINE_DIR/clock"; printf "{}" > "$DEADLINE_DIR/pending"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }; TIMEOUT=10
+    mark_remote_turn_pending "$DEADLINE_DIR/pending" old || exit 1
+    jq -r ".remote_turn.deadline_epoch" "$DEADLINE_DIR/pending"
+  ')"
+  check "original deadline is durable before provider submission" "test '$result' = 110"
+}
+if [ "${AI_GLM_DEADLINE_TESTS_ONLY:-0}" = 1 ]; then
+  glm_deadline_cases
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+
 echo "== static checks =="
 check "ai-glm is executable"                "test -x '$AI_GLM'"
 check "ai-glm parses"                       "bash -n '$AI_GLM'"
+AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; JSON_OUT=1; emit usage-fixture review synthetic "unchanged answer" "{\"input\":0}" report.md' > "$TMP/usage-scope.json"
+check "GLM labels last-step usage without inventing whole-turn completeness" "jq -e '.response.text==\"unchanged answer\" and .usage.input==0 and .usage_scope==\"last-assistant-step\" and .usage_completeness==\"adapter-provider-missingness-unknown\"' '$TMP/usage-scope.json'"
 check "GLM password is streamed to curl instead of exposed in argv" "grep -q 'curl_auth_config | curl --config -' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM'"
 check "both GLM review dispatches gate capacity before send_prompt" "test \"\$(grep -c 'if ! capacity_gate' '$AI_GLM')\" -eq 2 && grep -q \"exhausted).*return 3\" '$AI_GLM'"
 check "GLM diagnostics distinguish local health and permission transport" "grep -q 'local-health-timeout' '$AI_GLM' && grep -q 'permission-endpoint-timeout' '$AI_GLM'"
@@ -384,7 +427,7 @@ check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI
 # the raw worktree, whose git control files sit outside any single-directory
 # boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
 if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
-if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+if sed -n '/^cmd_ask()/,/^}/p' "$AI_GLM" | grep -Fq 'await_turn "$sid" "$name" review "$boundary"'; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
 # Since issue #53, new sessions create a private copy and continuations refresh
 # the exact directory recorded when OpenCode created the session.
 if grep -Fq 'prepare_review "$root" "$name" "$boundary"' "$AI_GLM"; then ok "ask reuses recorded review directory"; else bad "ask reuses recorded review directory"; fi
@@ -476,6 +519,20 @@ check "failure detail is valid JSON with a branch id" "printf '%s' '$DETAIL' | j
 check "failure detail redacts secrets"                "! printf '%s' '$DETAIL' | grep -qE 'tok-visible|auth-visible|sec-visible|cred-visible|pw-visible|body-visible|val-visible'"
 
 echo "== transport failure is not a permission failure (step 7) =="
+glm_deadline_cases
+permission_auth_probe() {
+  AI_GLM_SOURCE="$AI_GLM" AUTH_ARGS="$TMP/permission-auth-args" AUTH_INPUT="$TMP/permission-auth-input" bash -c '
+    source "$AI_GLM_SOURCE"
+    server_pw(){ printf synthetic-local-password; }
+    curl(){ printf "%s\n" "$@" > "$AUTH_ARGS"; cat > "$AUTH_INPUT"; printf 200; }
+    permission_http GET /api/session/s/permission
+    [ "$HTTP_STATUS" = 200 ]
+  '
+}
+check "permission polling authenticates through stdin without password argv" "permission_auth_probe && grep -q -- '--config' '$TMP/permission-auth-args' && ! grep -q synthetic-local-password '$TMP/permission-auth-args' && grep -q synthetic-local-password '$TMP/permission-auth-input'"
+if [ "${AI_GLM_AUTH_TEST_ONLY:-0}" = 1 ]; then
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 transport_probe() { # CURL_RC ATTEMPTS -> prints one line per curl attempt, then STATUS
   AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" CURL_RC="$1" \
     AI_GLM_PERMISSION_HTTP_ATTEMPTS="$2" AI_GLM_PERMISSION_HTTP_RETRY_SECS=0 \

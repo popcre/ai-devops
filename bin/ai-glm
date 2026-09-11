@@ -169,17 +169,33 @@ curl_auth_config() {
   auth="$user:$pw"; auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
   printf 'user = "%s"\n' "$auth"
 }
+glm_now() { date +%s; }
+glm_new_deadline() {
+  case "$TIMEOUT" in ''|*[!0-9]*) warn 'GLM timeout must be whole seconds.'; return 1 ;; esac
+  printf '%s' "$(( $(glm_now) + 10#$TIMEOUT ))"
+}
+glm_http_budget() { # bound each request and sleep by the current turn's remaining wall time
+  local limit="$1" remaining
+  if [ -n "${GLM_HTTP_DEADLINE:-}" ]; then
+    remaining=$((GLM_HTTP_DEADLINE - $(glm_now)))
+    [ "$remaining" -gt 0 ] || return 124
+    [ "$limit" -gt 0 ] && [ "$remaining" -ge "$limit" ] || limit="$remaining"
+  fi
+  printf '%s' "$limit"
+}
 api() { # api METHOD PATH [JSON_BODY_FILE]
-  local method="$1" path="$2" body="${3:-}"
+  local method="$1" path="$2" body="${3:-}" budget
+  budget="$(glm_http_budget 120)" || return $?
   if [ -n "$body" ]; then
-    curl_auth_config | curl --config - -sS -m 120 \
+    curl_auth_config | curl --config - -sS -m "$budget" \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
   else
-    curl_auth_config | curl --config - -sS -m 120 -X "$method" "$BASE$path"
+    curl_auth_config | curl --config - -sS -m "$budget" -X "$method" "$BASE$path"
   fi
 }
 api_code() { # api_code METHOD PATH [MAX_SECONDS] -> HTTP status only
   local max_seconds="${3:-30}"
+  max_seconds="$(glm_http_budget "$max_seconds")" || return $?
   curl_auth_config | curl --config - -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
     -X "$1" "$BASE$2" 2>/dev/null || echo 000
 }
@@ -368,7 +384,8 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
 mark_remote_turn_pending() { # META [PREVIOUS_ASSISTANT_ID]
   local meta="$1" now previous="${2:-}"
   now="$(date -u +%FT%TZ)"
-  write_meta "$meta" "$(jq --arg now "$now" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" '.remote_turn={state:"pending",started_at:$now,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary}' "$meta")"
+  GLM_REQUESTED_DEADLINE="$(glm_new_deadline)" || return 1
+  write_meta "$meta" "$(jq --arg now "$now" --argjson deadline "$GLM_REQUESTED_DEADLINE" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" '.remote_turn={state:"pending",started_at:$now,deadline_epoch:$deadline,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary}' "$meta")"
 }
 
 remote_turn_pending() { # META
@@ -580,17 +597,18 @@ PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
 PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
 PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" pw tmp rc attempt=1
-  pw="$(server_pw)"
+  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget
+  GLM_HTTP_DEADLINE_HIT=0
   while :; do
+    budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
     rc=0; tmp="$(mktemp)"
     if [ -n "$json" ]; then
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
     else
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         2>/dev/null)" || rc=$?
     fi
     HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
@@ -598,9 +616,13 @@ permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTT
     # A server that DID answer keeps its real status and still fails closed elsewhere.
     # Only the never-answered case reaches here and is retried.
     HTTP_STATUS="000"
+    if [ -n "${GLM_HTTP_DEADLINE:-}" ] && [ "$(glm_now)" -ge "$GLM_HTTP_DEADLINE" ]; then
+      GLM_HTTP_DEADLINE_HIT=1; return 0
+    fi
     [ "$attempt" -lt "$PERMISSION_HTTP_ATTEMPTS" ] || return 0
     attempt=$((attempt + 1))
-    sleep "$PERMISSION_HTTP_RETRY_SECS"
+    budget="$(glm_http_budget "$PERMISSION_HTTP_RETRY_SECS")" || { GLM_HTTP_DEADLINE_HIT=1; return 0; }
+    sleep "$budget"
   done
 }
 
@@ -807,6 +829,7 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
   local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance
   guidance="$(permission_next_step "$name" "$impl_meta")"
   permission_http GET "/api/session/$sid/permission"
+  [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
   # OpenCode 1.18.12 emits the same metadata-free HTTP 500 UnknownError while a normal
   # read is running and while an outside-directory read is stuck. The status is not a
   # permission signal by itself. Use the measured running read input deterministically;
@@ -876,6 +899,7 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
            "$HTTP_STATUS" "$mode" inside "")"
     fi
     permission_http POST "/api/session/$sid/permission/$id/reply" '{"reply":"always"}'
+    [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
     case "$HTTP_STATUS" in
       2*) ;;
       000) fail_permission "$impl_meta" "$root" transport-failed \
@@ -913,6 +937,8 @@ running_tools() {
 
 send_prompt() { # send_prompt SID PROMPT_FILE
   local sid="$1" pf="$2" body
+  if [ -z "${GLM_REQUESTED_DEADLINE:-}" ]; then GLM_REQUESTED_DEADLINE="$(glm_new_deadline)" || return 1; fi
+  local GLM_HTTP_DEADLINE="$GLM_REQUESTED_DEADLINE"
   body="$(mktemp)"
   jq -Rs '{prompt:{text:.}}' < "$pf" > "$body"
   if ! api POST "/api/session/$sid/prompt" "$body" > /dev/null; then
@@ -944,18 +970,33 @@ touch_liveness() { # touch_liveness ASSISTANT_JSON
 }
 
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
-  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck previous=""
-  [ -z "$TURN_META" ] || previous="$(jq -r '.remote_turn.previous_message_id // empty' "$TURN_META")"
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" idle=0 msg='{}' finish stuck previous="" saved_deadline budget poll_rc
+  local GLM_HTTP_DEADLINE
+  GLM_HTTP_DEADLINE="${GLM_REQUESTED_DEADLINE:-$(glm_new_deadline)}" || return 1
+  if [ -n "$TURN_META" ]; then
+    previous="$(jq -r '.remote_turn.previous_message_id // empty' "$TURN_META")"
+    saved_deadline="$(jq -r '.remote_turn.deadline_epoch // empty' "$TURN_META")"
+    if [ -n "$saved_deadline" ]; then
+      [[ "$saved_deadline" =~ ^[0-9]+$ ]] || return 1
+      [ "$saved_deadline" -ge "$GLM_HTTP_DEADLINE" ] || GLM_HTTP_DEADLINE="$saved_deadline"
+    fi
+  fi
   APPROVED_PERMISSION_IDS=""
-  sleep 6
-  while [ "$waited" -lt "$TIMEOUT" ]; do
-    handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta"
+  if budget="$(glm_http_budget 6)"; then sleep "$budget"; fi
+  while [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ]; do
+    poll_rc=0; handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta" || poll_rc=$?
+    if [ "$poll_rc" -ne 0 ]; then
+      [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 1 ] && break
+      return "$poll_rc"
+    fi
+    [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ] || break
     if api GET /session/status | grep -q "$sid"; then
       idle=0
     else
       idle=$((idle + 1))
     fi
-    msg="$(last_assistant "$sid")"
+    [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ] || break
+    msg="$(last_assistant "$sid")" || { poll_rc=$?; [ "$(glm_now)" -ge "$GLM_HTTP_DEADLINE" ] && break; return "$poll_rc"; }
     # LIVENESS -- stamped from the ASSISTANT MESSAGE, not from /session/status.
     # A first attempt hooked this to the `idle=0` branch above and DID NOT WORK: on a
     # real review /session/status returned `{}` for the whole turn, so that branch never
@@ -971,10 +1012,9 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     if [ -n "$impl_meta" ] && implementation_abort_requested "$impl_meta" && [ "$idle" -ge 2 ]; then
       return 130
     fi
-    sleep "$POLL_SECS"
-    waited=$((waited + POLL_SECS))
+    budget="$(glm_http_budget "$POLL_SECS")" || break
+    sleep "$budget"
   done
-  msg="$(last_assistant "$sid")"
   stuck="$(running_tools "$msg")"
   finish="$(printf '%s' "$msg" | jq -r '.finish // "none"')"
   if [ -n "$impl_meta" ]; then
@@ -1022,7 +1062,7 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     else
       printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     fi
-    printf '| tokens | `%s` |\n\n' "$tokens"
+    printf '| last step adapter tokens | `%s` |\n\n' "$tokens"
     printf -- '---\n\n%s\n' "$text"
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   if [ -e "$f" ] || [ -L "$f" ]; then
@@ -1053,10 +1093,12 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
           --arg model "$PROVIDER/$MODEL" --arg caller "$CALLER" \
       '{schema_version:1, ok:true,
         session:{name:$name, type:$kind, id:$sid, caller:$caller, model:$model},
-        response:{text:$text}, usage:$tokens, artifacts:{report:$report}}'
+        response:{text:$text}, usage:$tokens,
+        usage_scope:"last-assistant-step", usage_completeness:"adapter-provider-missingness-unknown",
+        artifacts:{report:$report}}'
   else
     printf '%s\n' "$4"
-    printf '\n--- session: %s (%s)  model: %s/%s  tokens: %s\n--- report: %s\n' \
+    printf '\n--- session: %s (%s)  model: %s/%s  last step adapter tokens: %s\n--- report: %s\n' \
       "$1" "$2" "$PROVIDER" "$MODEL" "${5:-null}" "$6" >&2
   fi
 }

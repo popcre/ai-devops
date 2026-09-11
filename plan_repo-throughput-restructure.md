@@ -30,10 +30,26 @@ A fresh session selects the remaining registered child that owns its code bounda
 | 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
 | 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | done | [`tests/verification/repo-throughput/issue-164-merge-queue-convergence.md`](tests/verification/repo-throughput/issue-164-merge-queue-convergence.md) |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | done | [`tests/verification/repo-throughput/issue-167-shared-harness.md`](tests/verification/repo-throughput/issue-167-shared-harness.md) |
-| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | source merged; integrated live acceptance open | Merge `26e893db03754b6668238c266142f8e61abb01bc`; remaining allocation/disposition behavior belongs to #396 rather than extending this extraction issue. |
+| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | installed acceptance complete | Merge `26e893db03754b6668238c266142f8e61abb01bc`; [installed hash, fixture adapter and both migrated providers verified](tests/verification/reviewer-reliability/issue-169-installed-primitives.md). Allocation/disposition remains #396; recovery remains #397. |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
 | 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
 | 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
+
+**#333 implementation evidence, 2026-09-11:** the existing wrappers now have a
+tested accounting implementation with pinned OpenCode semantics and private
+synthetic same-session continuity measurements. [Evidence and remaining gates](tests/verification/reviewer-reliability/issue-333-truthful-usage.md)
+distinguish adapter estimates from billed cost and unknown counters from zero.
+No context or compaction optimization was applied. Exact review, CI, installation
+and live accounting verification remain open; this does not complete #337/#159.
+
+Reviewer programme update (2026-09-11): the bounded DeepSeek Unicode/terminal
+repair #405 landed as `068c6cb9f07c0792f5e579fd004df25f012820a1`, passed
+85/0/0 focused tests, exact-head independent GLM review, PR CI `34563556041`
+and queue `34567376452`, and was installed with a successful paid synthetic
+Unicode review and stored replay. The reviewer plan records the exact hashes.
+Its affected incident is partially resolved because the separate large-input
+symptom still awaits #393 live proof. This does not close #394, #337 or #159;
+the original maintenance round is preserved and final #398/#166 remain last.
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
