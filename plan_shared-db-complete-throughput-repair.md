@@ -154,7 +154,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 6. **Add another dashboard/database.** Rejected: use existing GitHub events and throughput ledgers.
 7. **Poll every few minutes.** Rejected: unchanged state is expected and creates cost without progress. React to issue/ref/workflow events and use bounded waits only while a state transition is expected.
 8. **Batch every pending migration.** Rejected: incompatible risk, dependencies, superseded migrations, missing roles, or missing evidence must split or refuse.
-9. **Auto-approve production.** Rejected: exact migration lists and business-risk decisions remain explicit owner gates.
+9. **Trust caller-asserted or otherwise unqualified automatic production approval.** Rejected: exact migration lists and business-risk decisions remain governed gates. The accepted #2716 path promotes only when the immutable exact list and every machine-verifiable review, preview, dry-run, risk, identity, serialization, and evidence gate qualify; any missing or ambiguous proof refuses to an engineer.
 10. **Close an outcome at merge.** Rejected: the application is still blocked until correct environment and behavior are verified.
 11. **Duplicate #2705/#2709 fixes in this programme.** Rejected: consume their proven results as prerequisites.
 
