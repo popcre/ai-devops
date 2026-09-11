@@ -384,7 +384,7 @@ check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI
 # the raw worktree, whose git control files sit outside any single-directory
 # boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
 if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
-if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+if sed -n '/^cmd_ask()/,/^}/p' "$AI_GLM" | grep -Fq 'await_turn "$sid" "$name" review "$boundary"'; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
 # Since issue #53, new sessions create a private copy and continuations refresh
 # the exact directory recorded when OpenCode created the session.
 if grep -Fq 'prepare_review "$root" "$name" "$boundary"' "$AI_GLM"; then ok "ask reuses recorded review directory"; else bad "ask reuses recorded review directory"; fi
@@ -476,6 +476,19 @@ check "failure detail is valid JSON with a branch id" "printf '%s' '$DETAIL' | j
 check "failure detail redacts secrets"                "! printf '%s' '$DETAIL' | grep -qE 'tok-visible|auth-visible|sec-visible|cred-visible|pw-visible|body-visible|val-visible'"
 
 echo "== transport failure is not a permission failure (step 7) =="
+permission_auth_probe() {
+  AI_GLM_SOURCE="$AI_GLM" AUTH_ARGS="$TMP/permission-auth-args" AUTH_INPUT="$TMP/permission-auth-input" bash -c '
+    source "$AI_GLM_SOURCE"
+    server_pw(){ printf synthetic-local-password; }
+    curl(){ printf "%s\n" "$@" > "$AUTH_ARGS"; cat > "$AUTH_INPUT"; printf 200; }
+    permission_http GET /api/session/s/permission
+    [ "$HTTP_STATUS" = 200 ]
+  '
+}
+check "permission polling authenticates through stdin without password argv" "permission_auth_probe && grep -q -- '--config' '$TMP/permission-auth-args' && ! grep -q synthetic-local-password '$TMP/permission-auth-args' && grep -q synthetic-local-password '$TMP/permission-auth-input'"
+if [ "${AI_GLM_AUTH_TEST_ONLY:-0}" = 1 ]; then
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 transport_probe() { # CURL_RC ATTEMPTS -> prints one line per curl attempt, then STATUS
   AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" CURL_RC="$1" \
     AI_GLM_PERMISSION_HTTP_ATTEMPTS="$2" AI_GLM_PERMISSION_HTTP_RETRY_SECS=0 \

@@ -580,17 +580,16 @@ PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
 PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
 PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" pw tmp rc attempt=1
-  pw="$(server_pw)"
+  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1
   while :; do
     rc=0; tmp="$(mktemp)"
     if [ -n "$json" ]; then
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
     else
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         2>/dev/null)" || rc=$?
     fi
     HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
