@@ -65,15 +65,20 @@ The formatter has 13 provider-shaped cases, including absent/zero/invalid,
 incremental steps, cumulative message exclusion, duplicate/conflicting events,
 missing terminal state, mixed sessions, and unqualified versions.
 Focused wrapper probes: Muse 44 passed/0 failed; Grok 14/0; DeepSeek 46/0;
-GLM last-step scope/unchanged-answer/zero-preservation check passed.
+GLM scope/unchanged-answer/zero/null-availability probe passed 4/0.
 These include actual accounting failure preserving the paid response and no replay.
 The Grok probe also proves an overflowed JSON number remains unknown. jq accepts
 `1e999` as numeric despite it not being finite; both raw counters and accumulated
 totals now reject non-finite values without changing the paid response.
 
-Grok exact-head review of `780c3b45dd9c2701ec7bfef119890363d2f2a94a`
-approved with no blocking accounting defects (17 turns, $0.21912966).
-Its doctor-display suggestion is applied; final follow-up review remains pending.
+Grok approved `02f30d875c9a229a905357d4983aa9422134fc1f`; its retained
+report hashes to `465cbf78c368e4d21d6c77dea3f3c4af5b32b92338459e165a1737bb4d9b3dfa`.
+GLM approved integrated `b41f7070455abf73ab2ddb17ee218f0b60c53401`;
+report SHA256 `a0d4cc8b4d0928804668bfb9f0c1b192e75a81e3d1b0e2337a154c4fd681eac7`.
+Its valid null-label finding is repaired: absent usage is explicitly unavailable,
+while a returned zero retains the adapter scope. The suggested jq 1.7 minimum
+was unsupported: the [official jq 1.6 manual](https://jqlang.org/manual/v1.6/#infinite-nan-isinfinite-isnan-isfinite-isnormal)
+already documents `isfinite`. No unnecessary runtime restriction was added.
 
-Required CI, final exact-head independent review, merged installation, and live checks
+Required CI, final review of the null-label refinement, merged installation, and live checks
 of the changed accounting are pending. This evidence does not close #333.
