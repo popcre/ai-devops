@@ -185,6 +185,7 @@ case "$mode" in
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
   hold)      printf '%s\n' "$$" >> "$TMPDIR_FOR_TEST/hold-started"
+             printf '%s\n' 'synthetic-private-provider-body' >&2
              printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
              trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
              # The hold is released by the test, or terminated by the wrapper's
@@ -324,6 +325,7 @@ TIMEOUT_WALL="$(( TIMEOUT_CEILING * 15 ))"
 [ "$TIMEOUT_WALL" -lt 45 ] && TIMEOUT_WALL=45
 
 # 16 ------------------------------------------------------------------------
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" != 1 ]; then
 echo "== exact_work_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 # Keep this first review alive until this test explicitly releases it. A fixed
@@ -360,10 +362,12 @@ SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
 git -C "$SSH_CLONE" remote set-url origin git@GitHub.com:EXAMPLE/Reviewer-Fixture.git
 SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; SSH_RC=$?
 [ "$SSH_RC" -ne 0 ] && ok "equivalent_origins_share_exact_session_duplicate_detection" || bad "equivalent_origins_share_exact_session_duplicate_detection"
+fi
 OTHER="$TMP/unrelated"; mkdir -p "$OTHER"; git -C "$OTHER" init -q
 git -C "$OTHER" config user.email t@example.com; git -C "$OTHER" config user.name T
 printf '.ai/\n' > "$OTHER/.gitignore"; echo x > "$OTHER/x"; git -C "$OTHER" add -A; git -C "$OTHER" commit -qm i
 git -C "$OTHER" remote add origin https://github.com/example/unrelated.git
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" != 1 ]; then
 echo ok > "$TMP/mode"
 ( cd "$OTHER" && bash "$SCRIPT" new unrelated --prompt x >/dev/null 2>&1 ) && ok "unrelated_upstreams_do_not_block_each_other" || bad "unrelated_upstreams_do_not_block_each_other"
 echo wait > "$TMP/mode"
@@ -386,6 +390,7 @@ wait "$SECOND_PID"
 wait "$CLAUDE_PID"
 check "slow_turn_emits_truthful_bounded_heartbeats" "test \"\$(grep -c 'does not prove provider activity' '$TMP/first.err')\" -ge 2"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
+fi
 
 # The configured wait ceiling must also bound a Grok process that never exits.
 # A timed-out paid turn remains blocked because local process death does not
@@ -398,6 +403,32 @@ TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -
 check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured ${TIMEOUT_CEILING}s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
 check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt '$TIMEOUT_WALL'"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
+TIMEOUT_WORK="$(cat "$TIMEOUT_LOCK/work_id")"
+TIMEOUT_FENCE_HASH="$(sha256sum "$TIMEOUT_LOCK/remote-uncertain")"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure.json" 2> "$TMP/local-failure.err"; LOCAL_FAILURE_RC=$?
+check "local_timeout_has_exact_nonzero_invocation_proof_without_remote_completion" "test '$LOCAL_FAILURE_RC' -eq 0 && jq -e '.failure_code==\"wrapper_terminal_failure\" and .local_reason==\"local_timeout\" and .wrapper_exit_code==1 and .remote_completion==\"unconfirmed\" and .remote_cancellation==\"unconfirmed\" and .authorization==\"none\"' '$TMP/local-failure.json'"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure-repeat.json" 2>/dev/null
+check "local_failure_inspection_is_repeatable_and_keeps_paid_fence" "cmp -s '$TMP/local-failure.json' '$TMP/local-failure-repeat.json' && test '$TIMEOUT_FENCE_HASH' = \"\$(sha256sum '$TIMEOUT_LOCK/remote-uncertain')\""
+mv "$TIMEOUT_LOCK/event-run-id" "$TMP/original-timeout-event"
+check "historical_timeout_without_exact_invocation_join_refuses_conversion" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK') && test -f '$TIMEOUT_LOCK/remote-uncertain'"
+mv "$TMP/original-timeout-event" "$TIMEOUT_LOCK/event-run-id"
+cp "$TIMEOUT_LOCK/local-failure.json" "$TMP/original-local-failure.json"
+jq '.event_run_id="00000000000000000000000000000000"' "$TIMEOUT_LOCK/local-failure.json" > "$TMP/changed-local-failure.json"
+cat "$TMP/changed-local-failure.json" > "$TIMEOUT_LOCK/local-failure.json"
+check "local_failure_refuses_a_different_invocation_binding" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-local-failure.json" > "$TIMEOUT_LOCK/local-failure.json"
+TIMEOUT_STDERR="$(printf '%s\n' "$TIMED_OUT" | sed -n 's/^  Private diagnostic retained at: //p' | tail -1)"
+check "timeout_keeps_private_provider_stderr_without_echoing_it" "! printf '%s' '$TIMED_OUT' | grep -q synthetic-private-provider-body && test -f '$TIMEOUT_STDERR' && grep -q synthetic-private-provider-body '$TIMEOUT_STDERR'"
+cp "$TIMEOUT_LOCK/local-stderr" "$TMP/original-timeout-stderr"
+printf changed >> "$TIMEOUT_LOCK/local-stderr"
+check "local_failure_refuses_changed_retained_provider_bytes" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-timeout-stderr" > "$TIMEOUT_LOCK/local-stderr"
+mkdir "$TMP/successful-event"
+jq -c --arg run "$(cat "$TIMEOUT_LOCK/event-run-id")" 'if .run_id==$run and .event=="finished" then .exit_code=0|.wrapper_exit_code=0 else . end' "$AI_REVIEW_EVENT_DIR/events.jsonl" > "$TMP/successful-event/events.jsonl"
+check "local_failure_cannot_reclassify_a_successful_wrapper_invocation" "! (cd '$OTHER' && AI_REVIEW_EVENT_DIR='$TMP/successful-event' bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 check "Windows timeouts delegate both process trees to the native supervisor" "test \"\$(grep -c -- '--stop-file \"\$ACTIVE_GROK_NATIVE_STOP_FILE\"' '$SCRIPT')\" -eq 2 && grep -q 'TerminateJobObject(job, 124)' '$REPO_ROOT/bin/ai-process-supervisor'"
 check "Windows fallback translates the MSYS PID and never emits a console signal" "grep -q '/proc/\$child/winpid' '$SCRIPT' && grep -q 'taskkill.exe /PID \"\$windows_pid\"' '$SCRIPT'"
 rm -rf "$TIMEOUT_LOCK"

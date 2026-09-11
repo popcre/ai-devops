@@ -486,6 +486,9 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
       [ -z "$prompt_digest" ] || printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
       [ -z "$source_id" ] || printf '%s\n' "$source_id" > "$dir/source_identity"
       [ -z "$turn" ] || printf '%s\n' "$turn" > "$dir/turn"
+      if [[ "${AI_REVIEW_EVENT_RUN_ID:-}" =~ ^[0-9a-f]{32}$ ]]; then
+        printf '%s\n' "$AI_REVIEW_EVENT_RUN_ID" > "$dir/event-run-id" || return 1
+      fi
     }
     return 0
   fi
@@ -607,6 +610,79 @@ lock_release() { # only the creating wrapper may release it
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
 }
+record_local_failure() { # DIR SUPERVISOR_RC OUTPUT; never establishes remote completion
+  local dir="$1" rc="$2" out="$3" run tmp artifact input reason=local_result_unconfirmed
+  run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] || return 1
+  [ "$rc" != 124 ] || reason=local_timeout
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/remote-uncertain" ] || return 1
+  for artifact in stdout stderr; do
+    input="$out"; [ "$artifact" != stderr ] || input="$out.err"
+    [ -f "$input" ] && [ ! -L "$input" ] || return 1
+    tmp="$(mktemp "$dir/.local-$artifact.XXXXXX")" || return 1
+    cp -- "$input" "$tmp" && chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+    if ! ln "$tmp" "$dir/local-$artifact" 2>/dev/null; then
+      [ -f "$dir/local-$artifact" ] && [ ! -L "$dir/local-$artifact" ] && cmp -s "$tmp" "$dir/local-$artifact" || { rm -f "$tmp"; return 1; }
+    fi
+    rm -f "$tmp"
+  done
+  tmp="$(mktemp "$dir/.local-failure.XXXXXX")" || return 1
+  if ! jq -n --arg run "$run" --arg work "$(cat "$dir/work_id")" \
+    --arg caller "$(cat "$dir/caller")" --arg session "$(cat "$dir/session")" \
+    --arg repo "$(cat "$dir/source")" --arg source "$(cat "$dir/source_identity")" \
+    --arg reason "$reason" --argjson rc "$rc" \
+    --arg stdout_hash "$(sha256sum "$dir/local-stdout" | awk '{print $1}')" \
+    --arg stderr_hash "$(sha256sum "$dir/local-stderr" | awk '{print $1}')" \
+    '{schema_version:1,provider:"grok",event_run_id:$run,work_id:$work,caller:$caller,
+      session:$session,repository:$repo,source_identity:$source,local_reason:$reason,
+      supervisor_exit_code:$rc,stdout_sha256:$stdout_hash,stderr_sha256:$stderr_hash,
+      remote_completion:"unconfirmed",remote_cancellation:"unconfirmed"}' > "$tmp"; then
+    rm -f "$tmp"; return 1
+  fi
+  chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+  if ! ln "$tmp" "$dir/local-failure.json" 2>/dev/null; then
+    [ -f "$dir/local-failure.json" ] && [ ! -L "$dir/local-failure.json" ] && cmp -s "$tmp" "$dir/local-failure.json" || { rm -f "$tmp"; return 1; }
+  fi
+  rm -f "$tmp"
+  note "ai-grok-review: wrapper_terminal_failure: $reason; remote completion and cancellation remain unconfirmed; paid fence retained."
+  [ ! -s "$dir/local-stderr" ] || note "  Private diagnostic retained at: $dir/local-stderr"
+}
+
+cmd_failure() { # exact WORK_ID; read-only evidence inspection, never paid recovery
+  local work="$1" dir run events base receipt rows repo source caller session
+  [[ "$work" =~ ^[0-9a-f]{32}$ ]] || die 'failure requires the exact 32-character work ID from list.'
+  dir="$(work_lock_path "$work")"; receipt="$dir/local-failure.json"
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/remote-uncertain" ] && [ ! -L "$dir/remote-uncertain" ] || die 'exact retained paid fence is missing or unsafe.'
+  for base in event-run-id work_id source source_identity caller session local-failure.json local-stdout local-stderr; do
+    [ -f "$dir/$base" ] && [ ! -L "$dir/$base" ] || die 'authoritative local failure binding is missing; historical timeout text cannot supply it.'
+  done
+  run="$(cat "$dir/event-run-id")"; source="$(cat "$dir/source_identity")"; repo="$(cat "$dir/source")"
+  caller="$(cat "$dir/caller")"; session="$(cat "$dir/session")"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] && [ "$(cat "$dir/work_id")" = "$work" ] && [ "$caller" = "$CALLER" ] || die 'local failure identity does not match this caller/work.'
+  [ "$(cd "$repo" && pwd -P)" = "$(cd "$(repo_root)" && pwd -P)" ] || die 'local failure belongs to another repository.'
+  base="${AI_REVIEWER_STATE_BASE:-${HOME}/.local/state/ai-devops}"
+  events="${AI_REVIEW_EVENT_DIR:-$base/reviewer-events}/events.jsonl"
+  rows="$(jq -sc --arg run "$run" '[.[] | select(.run_id==$run)]' "$events")" || die 'original invocation evidence cannot be read.'
+  jq -e --arg run "$run" --arg work "$work" --arg caller "$caller" --arg session "$session" \
+    --arg repo "$repo" --arg source "$source" --arg head "${source%%:*}" --argjson rows "$rows" \
+    --arg stdout_hash "$(sha256sum "$dir/local-stdout" | awk '{print $1}')" \
+    --arg stderr_hash "$(sha256sum "$dir/local-stderr" | awk '{print $1}')" '
+    def norm: gsub("\\\\";"/") | (if test("^/[A-Za-z]/") then .[1:2]+":"+.[2:] else . end) |
+      if test("^[A-Za-z]:/") then (.[0:1]|ascii_downcase)+.[1:] else . end;
+    .schema_version==1 and .provider=="grok" and .event_run_id==$run and .work_id==$work and
+    .caller==$caller and .session==$session and .repository==$repo and .source_identity==$source and
+    .stdout_sha256==$stdout_hash and .stderr_sha256==$stderr_hash and
+    .remote_completion=="unconfirmed" and .remote_cancellation=="unconfirmed" and
+    ((.local_reason=="local_timeout" and .supervisor_exit_code==124) or
+      (.local_reason=="local_result_unconfirmed" and (.supervisor_exit_code|type)=="number")) and
+    ($rows|length)==2 and $rows[0].event=="started" and $rows[1].event=="finished" and
+    ($rows|all(.provider=="grok" and .caller==$caller and .head==$head and (.repo|norm)==($repo|norm))) and
+    (($rows[1].wrapper_exit_code // $rows[1].exit_code)|type)=="number" and
+    ($rows[1].wrapper_exit_code // $rows[1].exit_code)!=0
+    ' "$receipt" >/dev/null || die 'original exact invocation has no proven nonzero local terminal outcome.'
+  jq --argjson rows "$rows" '. + {failure_code:"wrapper_terminal_failure",wrapper_exit_code:($rows[1].wrapper_exit_code // $rows[1].exit_code),provider_fence:"retained",authorization:"none"}' "$receipt"
+}
+
 mark_remote_uncertain() { # retain paid-work lock after local interruption
   local dir="$1"
   [ -d "$dir" ] || return 0
@@ -1405,6 +1481,7 @@ ai-grok-review $VERSION — read-only Grok reviews in persistent, named sessions
   ai-grok-review ask <name>  [--prompt TEXT | --prompt-file FILE | stdin] [--max-turns N]
   ai-grok-review list
   ai-grok-review show <name>
+  ai-grok-review failure <work-id>  # prove local failure; remote fence stays held
   ai-grok-review transcript <name>
   ai-grok-review delete <name>
   ai-grok-review doctor [--live]
@@ -1554,8 +1631,11 @@ cmd_new() {
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+    record_local_failure "$rid_lock" "$rc" "$out" || {
+      warn 'local failure receipt could not be retained; paid fence remains held.'
+      [ ! -s "$out.err" ] || note "  Private diagnostic retained at: $out.err"
+    }
     note "  grok exit status was $rc - which proves nothing; see the note above."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
       note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
     else
@@ -1679,8 +1759,11 @@ $REVIEW_HEAD only."
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+    record_local_failure "$rid_lock" "$rc" "$out" || {
+      warn 'local failure receipt could not be retained; paid fence remains held.'
+      [ ! -s "$out.err" ] || note "  Private diagnostic retained at: $out.err"
+    }
     note "  grok exit status was $rc - which proves nothing."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
       note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
     elif [ ! -s "$out" ]; then
@@ -1866,6 +1949,7 @@ case "$CMD" in
   ask)        [ -n "$ARG" ] || die "usage: ai-grok-review ask <name> …"; cmd_ask "$ARG" ;;
   list)       cmd_list ;;
   show)       [ -n "$ARG" ] || die "usage: ai-grok-review show <name>"; cmd_show "$ARG" ;;
+  failure)    [ -n "$ARG" ] || die "usage: ai-grok-review failure <work-id>"; cmd_failure "$ARG" ;;
   transcript) [ -n "$ARG" ] || die "usage: ai-grok-review transcript <name>"; cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-grok-review delete <name>"; cmd_delete "$ARG" ;;
   doctor)     cmd_doctor "$OPT_LIVE" ;;
