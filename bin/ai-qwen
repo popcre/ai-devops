@@ -847,7 +847,7 @@ extract_answer() { # extract_answer FILE
   text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed 's/\r$//' | sed '/^$/d')"
   local api_error; api_error="$(provider_api_error "$1" || true)"
   if [ -n "$api_error" ]; then
-    if printf '%s' "$api_error" | grep -q 'DataInspectionFailed'; then
+    if printf '%s' "$api_error" | grep -Eq '(^|[^[:alnum:]_])DataInspectionFailed([^[:alnum:]_]|$)'; then
       ANSWER_DEFECT="content-filter: the provider refused the call and returned no review"
     else
       ANSWER_DEFECT="provider-unavailable: the provider refused the call and returned no review"

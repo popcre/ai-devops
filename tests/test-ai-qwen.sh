@@ -258,6 +258,17 @@ STUBMOVE
   check 'local recovery cannot adopt a different returned session' "! run finalize metadata-recovery > '$TMP/recovery-wrong-session-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
   echo review > "$TMP/mode"
 }
+terminal_token_cases(){
+  local token expected ANSWER_DEFECT
+  source <(sed -n '/^provider_api_error() {/,/^}/p; /^extract_answer() {/,/^}/p' "$SCRIPT")
+  for token in DataInspectionFailed DataInspectionFailedSuffix; do
+    expected=provider-unavailable; [ "$token" != DataInspectionFailed ] || expected=content-filter
+    jq -nc --arg text "[API Error: $token: PRIVATE_BODY]" '{type:"result",is_error:false,result:$text}' > "$TMP/token-result.jsonl"
+    extract_answer "$TMP/token-result.jsonl" >/dev/null
+    check "typed filter token boundary: $token" "printf '%s' \"\$ANSWER_DEFECT\" | grep -q '^$expected:'"
+  done
+}
+terminal_token_cases
 if [ "${AI_QWEN_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/recovery-install.log" 2>&1 || { cat "$TMP/recovery-install.log"; exit 1; }
   recovery_cases
