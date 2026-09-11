@@ -66,10 +66,17 @@ forbidden action on a protected class has no authorization path and would make
 the installer permanently unusable.
 
 `bin/ai-task-gates` records the declared class at the start of work and
-rechecks the complete change set before any expensive or risky action. A
+rechecks the complete change set before any expensive or risky action. The
+stronger of the declared and observed classes is the effective class whose
+protection level applies, while required proofs from both classes are additive.
+Forbidden actions come from the
+effective class, so an explicitly declared production task can enter the
+production gate without dropping the deployment proofs attached to its changed
+files. A
 protected class — reviewer safety, shared database, deployment, infrastructure,
 production, private evidence — can never be acknowledged or owner-requested
-away, and anything the tool cannot classify is refused rather than allowed.
+away. A protected external action with neither changes nor a declared class is
+also refused rather than guessed safe.
 
 ### The review-mode variables are a guardrail, not a boundary
 

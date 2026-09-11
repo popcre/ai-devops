@@ -50,6 +50,10 @@ ai-task-gates start --class code --reason "fixing the reviewer lock"
 `database`, `infrastructure`, `production`) recomputes the complete change set —
 committed, staged, unstaged, untracked, deleted, both sides of a rename, and
 submodules — and refuses when the work has outgrown what was declared. The
+stronger of declared intent and observed changes supplies the effective class,
+and both classes' required proofs are additive;
+an empty diff cannot enter deployment, database, infrastructure, or production
+without an explicit task declaration. The
 reviewer lifecycle, `ai-pr-wait`, and `ai-review` call it themselves before any
 lock, state file, or paid call exists, so a refusal costs nothing.
 
