@@ -325,7 +325,7 @@ check 'source changes during a turn reject stale output' "printf '%s' \"\$STALE_
 STALE_META="$(find "$TMP/state" -name 'codex--stale.json' -type f)"
 check 'rejected stale turn preserves its Muse session' "jq -e '.status==\"completed_pending_local_checks\" and .session_id==\"ses_new\"' '$STALE_META'"
 check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'reconciliation cannot clear missing durable evidence' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'"
+check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
