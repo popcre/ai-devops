@@ -131,14 +131,21 @@ chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
 muse_recovery_cases(){
   local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
+  local real_jq
+  real_jq="$(command -v jq)"
+  # Reproduce the former second-write failure without weakening the required
+  # retained-turn metadata write. Recovery must never recompute that choice.
+  { printf '#!/usr/bin/env bash\n'; printf '%s\n' 'case "$*" in *'"'"'.retained_turn.usage_json=$usage'"'"'*) exit 73;; esac'; printf 'exec %q "$@"\n' "$real_jq"; } > "$TMP/bin/jq"
+  chmod +x "$TMP/bin/jq"
   : > "$calls"
   if [ "${AI_MUSE_REPORT_RECOVERY_ONLY:-0}" = 1 ]; then
     (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new recovery-stale --prompt test") >/dev/null
     m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
   else
-  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
+  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
   m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
   check 'Muse retains exact successful process and event evidence' "jq -e '.retained_turn.process_exit==0 and (.retained_turn.original_invocation_id|length)==32 and (.retained_turn.stream_sha256|length)==64' '$m'"
+  check 'optional accounting failure is retained atomically with the paid turn' "jq -e '.retained_turn.usage_json|fromjson|.availability_reason==\"usage-formatting-failed\"' '$m'"
   raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/recovery-original"
   printf 'tamper' >> "$raw"
   check 'changed retained Muse bytes cannot unlock continuation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\""
@@ -147,6 +154,7 @@ muse_recovery_cases(){
   rep="$(jq -r .last_report "$m")"
   if [ "$rep" = null ]; then cat "$TMP/reconcile.log"; return; fi
   check 'stale Muse report is explicitly non-authorizing' "grep -q NON-AUTHORIZING '$rep'"
+  check 'recovery preserves the original unavailable accounting instead of recomputing it' "grep -q usage-formatting-failed '$rep'"
   check 'repeated Muse reconciliation does not repeat paid work' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && test \"\$(wc -l < '$calls')\" -eq 1"
   fi
   check 'normal continuation survives stale completion reconciliation' "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask recovery-stale --prompt continue\""
@@ -160,6 +168,7 @@ muse_recovery_cases(){
   check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\" > '$TMP/failed-followup.log' 2>&1"
   check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
   if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
+  rm -f "$TMP/bin/jq"
 }
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases

@@ -263,8 +263,17 @@ exec "$@"
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
 }
-retain_turn(){ # retain exact bytes before optional parsing/reporting
-  local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item
+turn_usage(){
+  local out="$1" sid="$2" event="$3" usage_python usage
+  usage_python="$(command -v python3 || command -v python || true)"
+  if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$event" 2> "$out.usage-error")"; then
+    usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
+    printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
+  fi
+  printf '%s' "$usage"
+}
+retain_turn(){ # retain exact bytes and optional observations in one metadata write
+  local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item usage observed_sid
   [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
   stem="${meta%.json}.$event"
   for item in jsonl prompt stderr; do
@@ -273,8 +282,10 @@ retain_turn(){ # retain exact bytes before optional parsing/reporting
     [ ! -e "$to" ] && [ ! -L "$to" ] || return 1
     (set -C; cat "$from" > "$to") && chmod 600 "$to" && protect_windows_path "$to" file || return 1
   done
+  observed_sid="$(jq -sr '[.[]|.sessionID//.part.sessionID//empty]|last//empty' "$stem.jsonl" 2>/dev/null || true)"
+  usage="$(turn_usage "$stem.jsonl" "$observed_sid" "$event")"
   tmp="$(tmp_file)"
-  jq --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
+  jq --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
@@ -346,19 +357,7 @@ parse_turn(){ # shared terminal parser; never launches the provider
   fi
   usage_event="${AI_REVIEW_EVENT_RUN_ID:-}"
   [ -z "$meta" ] || usage_event="$(jq -r '.retained_turn.original_invocation_id // empty' "$meta")"
-  local usage_python
-  usage_python="$(command -v python3 || command -v python || true)"
-  if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! USAGE_JSON="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$TURN_SID" --run "$usage_event" 2> "$out.usage-error")"; then
-    USAGE_JSON='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
-    printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
-  fi
-  if [ -n "$meta" ]; then
-    usage_tmp="$(tmp_file)"
-    if ! { jq --arg usage "$USAGE_JSON" '.retained_turn.usage_json=$usage' "$meta" > "$usage_tmp" && mv -f "$usage_tmp" "$meta"; }; then
-      USAGE_JSON='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-retention-failed"}'
-      printf 'Muse usage could not be retained; the completed response must not be replayed.\n' >&2
-    fi
-  fi
+  USAGE_JSON="$(turn_usage "$out" "$TURN_SID" "$usage_event")"
 }
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
