@@ -1701,7 +1701,7 @@ wait_for_server_health() { # LABEL [ABSOLUTE_DEADLINE]
       printf 'ai-glm: %s was launched but did not become healthy within %ss.\n' "$label" "$SERVER_START_TIMEOUT" >&2
       if [ "$IS_WINDOWS" = 1 ]; then
         schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
-        printf 'Inspect: %s/.local/state/ai-devops/opencode-glm/server.log\nRetry: ai-glm server start\n' "$HOME" >&2
+        printf 'Inspect: %s\nRetry: ai-glm server start\n' "$OC_HOME/server.log" >&2
       else
         systemctl --user status opencode-glm.service --no-pager 2>/dev/null | tail -20 >&2 || true
         printf 'Inspect: journalctl --user -u opencode-glm -n 50\nRetry: ai-glm server start\n' >&2

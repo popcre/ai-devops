@@ -223,6 +223,13 @@ WIN_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADL
   schtasks(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 2 ]; }
   cmd_server start' 2>&1)"; WIN_RC=$?
 [ "$WIN_RC" -eq 0 ] && printf '%s' "$WIN_OUT" | grep -q 'started and healthy' && ok "Windows start waits for health" || bad "Windows start waits for health"
+# The failure must point at the log the scheduled task actually writes, not a path
+# nothing ever creates (observed 2026-09-11).
+WINFAIL_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=1
+  schtasks(){ :; }; sleep(){ :; }; server_up(){ return 1; }
+  wait_for_server_health restarted' 2>&1)"; WINFAIL_RC=$?
+[ "$WINFAIL_RC" -ne 0 ] && printf '%s' "$WINFAIL_OUT" | grep -qF "Inspect: $TMP/cfg/opencode/server.log" && ok "Windows start failure names the real server log" || bad "Windows start failure names the real server log"
 
 echo "== platform-correct doctor checks =="
 # `stat -c %a` reports a synthesised mode on NTFS regardless of the ACL, so the 0600
