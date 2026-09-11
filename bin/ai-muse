@@ -320,10 +320,10 @@ run_turn(){
   [ -z "${AI_MUSE_TEST_POST_PROCESS_MARKER:-}" ] || printf reached > "$AI_MUSE_TEST_POST_PROCESS_MARKER"
   [ -z "${AI_MUSE_TEST_POST_PROCESS_DELAY:-}" ] || sleep "$AI_MUSE_TEST_POST_PROCESS_DELAY"
   set -e
-  parse_turn "$out" "$rc"
+  parse_turn "$out" "$rc" "$meta"
 }
 parse_turn(){ # shared terminal parser; never launches the provider
-  local out="$1" rc="$2" salvaged_ids event_sid_count
+  local out="$1" rc="$2" meta="${3:-}" salvaged_ids event_sid_count usage_event usage_tmp
   RUN_RC="$rc"; TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   salvaged_ids="$(while IFS= read -r line; do printf '%s\n' "$line" | jq -r '.sessionID//empty' 2>/dev/null || true; done < "$out" | sed '/^$/d' | sort -u)"
   [ "$(printf '%s\n' "$salvaged_ids" | sed '/^$/d' | wc -l)" -ne 1 ] || TURN_SID="$salvaged_ids"
@@ -339,6 +339,26 @@ parse_turn(){ # shared terminal parser; never launches the provider
   if [ "$FINISH" != stop ]; then TURN_ERROR="Muse did not prove completion (reason: ${FINISH:-missing})."; return 1; fi
   if [ -z "$TEXT" ]; then TURN_ERROR='Muse completed without a usable response.'; return 1; fi
   if [ "${REQUIRE_VERDICT:-0}" = 1 ] && ! printf '%s\n' "$TEXT" | sed '/^[[:space:]]*$/d' | tail -n 1 | grep -Eq '^VERDICT:[[:space:]]+(FINDINGS|NO FINDINGS)$'; then TURN_ERROR='Muse stopped without an allowed final VERDICT line.'; return 1; fi
+  # Optional accounting must never invalidate a paid completion or request replay.
+  if [ -n "$meta" ] && jq -e '.retained_turn.usage_json | fromjson | type=="object"' "$meta" >/dev/null 2>&1; then
+    USAGE_JSON="$(jq -r .retained_turn.usage_json "$meta")"
+    return 0
+  fi
+  usage_event="${AI_REVIEW_EVENT_RUN_ID:-}"
+  [ -z "$meta" ] || usage_event="$(jq -r '.retained_turn.original_invocation_id // empty' "$meta")"
+  local usage_python
+  usage_python="$(command -v python3 || command -v python || true)"
+  if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! USAGE_JSON="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$TURN_SID" --run "$usage_event" 2> "$out.usage-error")"; then
+    USAGE_JSON='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
+    printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
+  fi
+  if [ -n "$meta" ]; then
+    usage_tmp="$(tmp_file)"
+    if ! { jq --arg usage "$USAGE_JSON" '.retained_turn.usage_json=$usage' "$meta" > "$usage_tmp" && mv -f "$usage_tmp" "$meta"; }; then
+      USAGE_JSON='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-retention-failed"}'
+      printf 'Muse usage could not be retained; the completed response must not be replayed.\n' >&2
+    fi
+  fi
 }
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
@@ -362,7 +382,11 @@ preserve_failure(){
 report(){
   local root="$1" name="$2" prompt="$3" path="$4"
   ensure_report_destination "$root" "$path"; [ -n "$PUBLISH_FD" ] || die "Muse report staging was not reserved: $path"
-  { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
+  {
+    printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'
+    printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| last step adapter tokens | `%s` |\n| turn usage | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS" "$USAGE_JSON"
+    printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"
+  } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
   finish_report_staging "$root" "$path"
   if [ "${MUSE_RECOVERY_STATE:-}" = completed-stale-source ]; then
     "$PACKET" verify-retained "$PACKET_DIR" >/dev/null || die "retained source evidence changed; paid report retained: $path"
@@ -427,7 +451,7 @@ cmd_reconcile(){
     [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key]' "$m")" ] || die 'retained Muse evidence bytes changed.'
   done
   out="$stem.jsonl"; prompt="$stem.prompt"; REQUIRE_VERDICT="$(jq -r .retained_turn.require_verdict "$m")"
-  parse_turn "$out" 0 || die "$TURN_ERROR The retained response cannot prove this turn completed."
+  parse_turn "$out" 0 "$m" || die "$TURN_ERROR The retained response cannot prove this turn completed."
   sid="$(jq -r '.retained_turn.expected_session_id // ""' "$m")"
   [ -z "$sid" ] || [ "$TURN_SID" = "$sid" ] || die 'retained Muse turn belongs to a different resumed session.'
   sid="$(jq -r '.session_id // ""' "$m")"; [ -z "$sid" ] || [ "$TURN_SID" = "$sid" ] || die 'retained Muse response differs from the canonical session.'

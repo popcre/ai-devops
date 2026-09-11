@@ -23,6 +23,8 @@ check historical-config-model jq -e '.model == "meta-model-api/muse-spark-1.2-co
 check config-key-reference jq -e '.provider["meta-model-api"].options.apiKey == "{env:MODEL_API_KEY}"' "$ACTIVE_CONFIG" >/dev/null
 check config-no-literal-key jq -e '(.provider["meta-model-api"].options | tostring | contains("MODEL_API_KEY")) and (.provider["meta-model-api"].options | tostring | contains("LLM|")) | not' "$ACTIVE_CONFIG" >/dev/null
 check config-exact-model jq -e '.model == "meta-model-api/muse-spark-1.3-contributor" and .share == "disabled" and .autoupdate == false' "$ACTIVE_CONFIG" >/dev/null
+PYTHON="$(command -v python3 || command -v python)"
+check qualified-usage-counters "$PYTHON" "$ROOT/tests/fixtures/muse-opencode/usage_cases.py" -q
 
 if [ "$failures" -ne 0 ]; then exit 1; fi
 printf 'Muse OpenCode contract fixtures passed.\n'
