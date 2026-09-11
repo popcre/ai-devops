@@ -128,16 +128,18 @@ def require_report(directory, provider, run_id):
             publish(path, value)
 
 
-def publish_report(directory, provider, run_id, report, facts=None):
+def publish_report(directory, provider, run_id, report, facts=None, artifact_key=None):
     # Only a wrapper's prepared UTF-8 report is accepted, never a stream/session
     # directory. The private report is immutable; no response enters the ledger.
     report = physical(report)
     boundary, data = snapshot(report, "log")
-    require(boundary["exists"] and data, "report is missing or empty; source evidence retained")
+    require(boundary["exists"] and (data or artifact_key), "report is missing or empty; source evidence retained")
     current = report.stat()
     require(current.st_size == boundary["offset"] and current.st_mtime_ns == boundary["mtime_ns"],
             "report changed during publication; source evidence retained")
     text = data.decode("utf-8")
+    if artifact_key:
+        require(not data or data.startswith(b"diff --git "), "artifact is not a prepared Git patch")
     facts = dict(facts or {})
     original_id = facts.pop("original_invocation_id", None)
     recovery_state = facts.pop("recovery_state", None)
@@ -166,6 +168,8 @@ def publish_report(directory, provider, run_id, report, facts=None):
                  "head": start["head"], "caller": start["caller"], "report_sha256": sha,
                  "report_text": text, "provenance": facts, "original_invocation_id": original_id,
                  "recovery_state": recovery_state, "original_head_sha": original_head}
+        if artifact_key:
+            value.update(artifact_kind="git-binary-patch", artifact_key=artifact_key)
         path = root / (sha + ".report.json")
         if path.exists():
             require(read_json(path) == value, "published evidence conflicts with this invocation")
@@ -173,6 +177,21 @@ def publish_report(directory, provider, run_id, report, facts=None):
             publish(path, value)
         # Return an opaque recovery reference, not a source-worktree path.
         return {"reference": run_id + "/" + sha, "report_sha256": sha}
+
+
+def publish_patch(directory, provider, run_id, path):
+    # Reserve before reading: even a missing patch must block later cleanup.
+    key = digest(str(physical(path)).encode("utf-8"))
+    with event_lock(directory):
+        invocation(directory, provider, run_id, active=True)
+        requirement = {"schema_version": 1, "provider": provider, "run_id": run_id,
+                       "artifact_kind": "git-binary-patch", "artifact_key": key}
+        target = evidence_root(directory, run_id) / "artifacts" / (key + ".json")
+        if target.exists():
+            require(read_json(target) == requirement, "artifact requirement changed")
+        else:
+            publish(target, requirement)
+    return publish_report(directory, provider, run_id, path, {"phase": "report-publication"}, key)
 
 
 def verify_reports(directory, provider, run_id):
@@ -201,12 +220,22 @@ def verify_reports(directory, provider, run_id):
             return sorted(set(recovered))
     require(paths, "required report is not durably published; cleanup and replay refused")
     references = []
+    artifacts = set()
+    reports = 0
     for path in paths:
         row = read_json(path)
         require(row.get("schema_version") == 1 and row.get("run_id") == run_id and
                 row.get("provider") == provider and row.get("head") == start["head"] and
                 row.get("caller") == start["caller"], "published report identity changed")
-        require(isinstance(row.get("report_text"), str) and row["report_text"], "published report is empty")
+        kind = row.get("artifact_kind")
+        require(kind in {None, "git-binary-patch"}, "published artifact type changed")
+        require(isinstance(row.get("report_text"), str) and (row["report_text"] or kind), "published report is empty")
+        if kind:
+            require(re.fullmatch(r"[0-9a-f]{64}", row.get("artifact_key", "")) and
+                    (not row["report_text"] or row["report_text"].startswith("diff --git ")), "published patch identity changed")
+            artifacts.add(row["artifact_key"])
+        else:
+            reports += 1
         sha = digest(row["report_text"].encode("utf-8"))
         require(row.get("report_sha256") == sha and path.name == sha + ".report.json",
                 "published report content changed")
@@ -221,6 +250,13 @@ def verify_reports(directory, provider, run_id):
                     (row.get("recovery_state") == "completed-stale-source" and row.get("original_head_sha") == original["head"]),
                     "recovered evidence source identity is unproven")
         references.append(run_id + "/" + sha)
+    require(reports, "required report is not durably published; a patch alone cannot authorize cleanup")
+    for path in (root / "artifacts").glob("*.json"):
+        row = read_json(path)
+        key = path.stem
+        require(row == {"schema_version": 1, "provider": provider, "run_id": run_id,
+                        "artifact_kind": "git-binary-patch", "artifact_key": key} and key in artifacts,
+                "required patch is not durably published; cleanup refused")
     return references
 
 
@@ -424,7 +460,7 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     receipt = publish_report(directory, provider, run_id, report, {"phase": "report-publication"})
     require(receipt["report_sha256"] == identity["report_sha256"], "legacy report changed during reconciliation")
     if patch_data:
-        receipt = publish_report(directory, provider, run_id, patch_path, {"phase": "report-publication"})
+        receipt = publish_patch(directory, provider, run_id, patch_path)
         require(receipt["report_sha256"] == identity["patch_sha256"], "legacy patch changed during reconciliation")
     require(snapshot(path, "log")[1] == owner_data and snapshot(metadata, "log")[1] == meta_data,
             "legacy implementation ownership changed during reconciliation")
@@ -590,7 +626,7 @@ def main():
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
-    elif operation in {"require-report", "publish-report", "verify-reports", "bind-sandbox", "bind-owner"}:
+    elif operation in {"require-report", "publish-report", "publish-patch", "verify-reports", "bind-sandbox", "bind-owner"}:
         require(len(sys.argv) >= 4, "missing evidence invocation")
         run_id = sys.argv[3]
         if operation == "require-report":
@@ -604,6 +640,9 @@ def main():
         elif operation == "bind-sandbox":
             require(len(sys.argv) == 5, "invalid sandbox evidence binding")
             bind_sandbox(directory, provider, run_id, sys.argv[4])
+        elif operation == "publish-patch":
+            require(len(sys.argv) == 5, "invalid patch publication")
+            print(json.dumps(publish_patch(directory, provider, run_id, sys.argv[4])))
         elif operation == "publish-report":
             require(len(sys.argv) in {5, 6}, "invalid report publication")
             facts = json.loads(sys.argv[5]) if len(sys.argv) == 6 else None
