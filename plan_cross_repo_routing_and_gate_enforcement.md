@@ -21,7 +21,7 @@ part of Issue #335.
 | 2 | Implement and qualify the central `ai-devops` engine | DONE 2026-09-08 | `bin/ai-task-gates` plus enforcement in `bin/ai-review`, `bin/ai-pr-wait`, `bin/ai-review-lifecycle`; evidence under `tests/verification/task-gates/` |
 | 3 | Pilot in `ai-devops`, `shared-db`, one DesignFlow service, and Oracle | DONE 2026-09-09 | `ai-devops` #352 (`4d83f9a5`), `shared-db` #2637 (`fe5fa74d`), Oracle #9 (`28e8eb75`), and DesignFlow `sandbox-albert` (`ea8f6029`, build `27721624-9702-4435-afea-fb41c6f6849b`) are landed and verified |
 | 4 | Roll out thin policies and lean routers to all remaining repositories | DONE 2026-09-10 — 17/17 landed | All releases have direct proof and `tests/test-repository-coverage.sh` passes with 17 canonical rows; do not begin Phase 5 without a separate instruction |
-| 5 | Install, exercise, measure, and close the cross-repository rollout | OPEN | Start at Step 5.1 only after every inventory row has a landed policy |
+| 5 | Install, exercise, measure, and close the cross-repository rollout | IN PROGRESS 2026-09-11 | Central repair #389 and Windows landed-source installation are complete; Ubuntu permission and private-memory health gates remain |
 
 Natural context cuts are after Phases 0, 2, 3, and 4. At each cut, use a fresh
 session, read this STATUS table and the newest matching OPEN handoff, and resume
