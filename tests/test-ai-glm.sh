@@ -43,7 +43,7 @@ require_review_server(){ :; }
 reviewer_event_evidence(){ :; }
 sleep(){ :; }
 handle_permissions(){ :; }
-api(){ [ "$1" = GET ] || { printf POST >> "$FIXTURE/submissions"; return 99; }; if [[ "$2" == */message?limit=1 ]]; then cat "$FIXTURE/history"; else printf '{}'; fi; }
+api(){ [ "$1" = GET ] || { printf POST >> "$FIXTURE/submissions"; return 99; }; if [[ "$2" == */message?limit=1 ]]; then cat "$FIXTURE/history"; elif [ "$2" = /global/health ]; then printf '{"version":"%s"}' "${API_SERVER_VERSION:-original-server}"; else printf '{}'; fi; }
 send_prompt(){ printf POST >> "$FIXTURE/submissions"; return 99; }
 last_assistant(){
   local count; count="$(cat "$FIXTURE/polls")"; count=$((count+1)); printf '%s' "$count" > "$FIXTURE/polls"
@@ -51,6 +51,8 @@ last_assistant(){
   else printf '{"id":"new","finish":"stop","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"content":[{"type":"text","text":"new answer"}]}'
   fi
 }
+eval "$(declare -f write_report | sed '1s/write_report/original_write_report/')"
+reviewer_event_publish_report(){ :; }
 write_report(){ [ ! -e "$FIXTURE/fail-report" ] || return 73; printf '%s' "$4" > "$FIXTURE/report.md"; printf '%s/report.md' "$FIXTURE"; }
 meta="$STATE_DIR/sessions/fixture/codex--exact.json"
 head="$(git -C "$REPO_OVERRIDE" rev-parse HEAD)"
@@ -87,6 +89,17 @@ cp "$FIXTURE/original-meta" "$meta"
 jq 'del(.remote_turn.original_invocation_id)' "$meta" > "$FIXTURE/legacy"; mv "$FIXTURE/legacy" "$meta"
 if (cmd_recover exact) > "$FIXTURE/legacy.log" 2>&1; then exit 28; fi
 jq -e '.remote_turn.state=="completed-unpublished"' "$meta" >/dev/null || exit 29
+restore_report_context "$FIXTURE/original-meta"
+GLM_REPORT_KEY="$(jq -r .remote_turn.terminal_sha256 "$FIXTURE/original-meta")"
+GLM_REPORT_REQUESTED_AT="$(jq -r .remote_turn.started_at "$FIXTURE/original-meta")"
+original_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 30
+original_report_sha="$(sha256sum "$original_report" | cut -d' ' -f1)"
+original_report_inode="$(stat -c '%d:%i' "$original_report")"
+API_SERVER_VERSION=changed-after-completion
+git -C "$REPO_OVERRIDE" branch -m renamed-after-completion
+repeated_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 31
+[ "$original_report" = "$repeated_report" ] && [ "$original_report_sha" = "$(sha256sum "$repeated_report" | cut -d' ' -f1)" ] && [ "$original_report_inode" = "$(stat -c '%d:%i' "$repeated_report")" ] || exit 32
+grep -q 'original-server' "$repeated_report" && ! grep -q 'renamed-after-completion\|changed-after-completion' "$repeated_report" || exit 33
 printf 'RECOVERY_OK polls=3 submissions=0\n'
 RECOVERY_CASES
   AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1

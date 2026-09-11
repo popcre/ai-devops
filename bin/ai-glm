@@ -381,13 +381,25 @@ clear_remote_turn_pending() { # META
 }
 
 persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local work
-  local meta="$1" msg="$2" target="${1%.json}.terminal.json" temporary digest
+  local meta="$1" msg="$2" target="${1%.json}.terminal.json" temporary digest branch version
   printf '%s' "$msg" | jq -e '.finish=="stop" and (.id|type=="string") and (.id|length)>0' >/dev/null || return 1
   temporary="$(mktemp "${target}.XXXXXX")" || return 1
   printf '%s\n' "$msg" > "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$target" || { rm -f "$temporary"; return 1; }
   digest="$(sha256sum "$target" | cut -d' ' -f1)" || return 1
   GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$meta")"
-  write_meta "$meta" "$(jq --arg path "$target" --arg digest "$digest" '.remote_turn.state="completed-unpublished" | .remote_turn.terminal_path=$path | .remote_turn.terminal_sha256=$digest' "$meta")"
+  write_meta "$meta" "$(jq --arg path "$target" --arg digest "$digest" '.remote_turn.state="completed-unpublished" | .remote_turn.terminal_path=$path | .remote_turn.terminal_sha256=$digest' "$meta")" || return 1
+  # Preserve display context once: local branch/server changes must not change
+  # the bytes of an already published report during an exact retry.
+  branch="$(git -C "$(jq -r .repository_root "$meta")" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null)" || version=unavailable
+  [ -n "$version" ] || version=unavailable
+  write_meta "$meta" "$(jq --arg branch "$branch" --arg version "$version" '.remote_turn.report_branch=(.remote_turn.report_branch // $branch) | .remote_turn.report_server_version=(.remote_turn.report_server_version // $version)' "$meta")" || return 1
+  restore_report_context "$meta"
+}
+
+restore_report_context() {
+  GLM_REPORT_BRANCH="$(jq -r '.remote_turn.report_branch // "unavailable"' "$1")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r '.remote_turn.report_server_version // "unavailable"' "$1")"
 }
 
 record_review_publication() { # META REPORT; clear fence only after this succeeds
@@ -989,8 +1001,12 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
   f="$root/.ai/reviews/glm-$name-$ts.md"
   mkdir -p "$(dirname "$f")"
   tmp="$(mktemp "$(dirname "$f")/.glm-report.XXXXXX")" || return 1
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  if [ -n "${GLM_REPORT_KEY:-}" ]; then
+    branch="${GLM_REPORT_BRANCH:-unavailable}"; ver="${GLM_REPORT_SERVER_VERSION:-unavailable}"
+  else
+    branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  fi
   {
     printf '# GLM %s — %s\n\n' "$kind" "$name"
     printf '| field | value |\n|---|---|\n'
@@ -1181,6 +1197,7 @@ cmd_recover() { # exact session only; never sends or resends a prompt
   GLM_RECOVERY_STATE=''; GLM_ORIGINAL_HEAD_SHA=''
   if [ "$stale" = 1 ]; then GLM_RECOVERY_STATE=completed-stale-source; GLM_ORIGINAL_HEAD_SHA="$expected"; fi
   GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$mp")"; text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  restore_report_context "$mp"
   if [ "$stale" = 1 ]; then
     GLM_REPORT_KEY="$(printf '%s\ncompleted-stale-source\n' "$digest" | sha256sum | cut -d' ' -f1)"
     write_meta "$mp" "$(jq --arg head "$observed" '.remote_turn.recovery_state="completed-stale-source" | .remote_turn.authorizing=false | .remote_turn.observed_head=(.remote_turn.observed_head // $head)' "$mp")" || die 'could not record stale-source completion.'
