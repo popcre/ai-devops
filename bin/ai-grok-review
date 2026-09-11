@@ -905,6 +905,26 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
+prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live reader
+  local source="$1" auth_home="$2" pending rc=0
+  mkdir -p "$auth_home"; chmod 700 "$auth_home" 2>/dev/null || true
+  # A Windows hard link is not -L. It is already the required credential inode,
+  # and replacing it on every turn races readers in other named sessions.
+  [ "$source" -ef "$auth_home/auth.json" ] && return 0
+  pending="$(mktemp -d "$auth_home/.auth-link.XXXXXX")" || return 1
+  # nativestrict refuses Git Bash's default symlink-as-copy emulation. A hard
+  # link is the safe fallback when Windows denies native symlink creation.
+  MSYS="${MSYS:+$MSYS }winsymlinks:nativestrict" ln -s "$source" "$pending/auth.json" 2>/dev/null ||
+    ln "$source" "$pending/auth.json" 2>/dev/null || rc=1
+  if [ "$rc" -eq 0 ] && [ "$source" -ef "$pending/auth.json" ]; then
+    # Another initializer may have finished while our candidate was prepared.
+    # Rename publishes a complete link; never remove the shared name first.
+    [ "$source" -ef "$auth_home/auth.json" ] || mv -fT -- "$pending/auth.json" "$auth_home/auth.json" 2>/dev/null || true
+  fi
+  rm -f -- "$pending/auth.json"; rmdir "$pending"
+  [ "$source" -ef "$auth_home/auth.json" ]
+}
+
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
   local grok supervisor python_bin bash_bin; local -a grok_command; grok="$(resolve_grok)"
@@ -948,19 +968,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local isolated_home="$STATE_DIR/isolated-home" auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
   if [ -f "$auth_source" ]; then
-    if [ ! -L "$isolated_home/auth.json" ] || [ ! "$auth_source" -ef "$isolated_home/auth.json" ]; then
-      rm -f -- "$isolated_home/auth.json"
-      ln -s "$auth_source" "$isolated_home/auth.json" 2>/dev/null || true
-      # Default Git Bash can implement `ln -s` as a byte copy. Reject that
-      # shape and use a same-volume hard link so there is still one credential
-      # inode, not a stale second secret. Linux keeps the real symlink.
-      if [ ! -L "$isolated_home/auth.json" ]; then
-        rm -f -- "$isolated_home/auth.json"
-        ln "$auth_source" "$isolated_home/auth.json" 2>/dev/null || true
-      fi
-    fi
-    [ "$auth_source" -ef "$isolated_home/auth.json" ] \
-      || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
+    prepare_auth_link "$auth_source" "$isolated_home" || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
   else
     rm -f -- "$isolated_home/auth.json"
   fi
