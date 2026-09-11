@@ -20,6 +20,7 @@ record merely to reduce the file count.
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
 | [`plan_pop-business-rules-skill.md`](../plan_pop-business-rules-skill.md) | [#35](https://github.com/popcre/ai-devops/issues/35) | Live trigger evidence remains before closure |
 | [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | #212 is complete; #169 source is merged but Kimi removal from the shared-db allocator is awaiting its active owner; #166 remains last and needs explicit owner authority for the live ruleset cutover |
+| [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md) | [#401](https://github.com/popcre/ai-devops/issues/401) | Step 0; consume independently owned #2705/#2709/#2715/#2716 work, then enforce two-sided structural admission and request-to-live delivery |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
 | [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md) | [#333](https://github.com/popcre/ai-devops/issues/333) | Step 2.1; only provider-returned cache reporting remains |
 | [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Step 0, then provider children #254-#257 |
@@ -64,7 +65,7 @@ text.
 | `plan_muse-opencode-harness.md` | `plan_muse_reviewer_availability_repair.md`; issue #40 is closed |
 | `plan_must_address.md` | Evidence appendix for `plan_ai-devops-work-claims.md`; not an implementation plan |
 | `plan_repo-housekeeping-visibility.md` | Issue #168, this index, and the `cleanup-worktree` procedure |
-| `plan_shared-db-finish-first-delivery.md` | Non-operative proposal superseded by current shared-db orchestration rules; a new owner ruling is required before reviving its 1+1 model |
+| `plan_shared-db-finish-first-delivery.md` | Superseded by active [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md), which preserves the later eight-author model |
 
 ## Maintenance rule
 
