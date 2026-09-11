@@ -294,7 +294,7 @@ review_boundary() { # review_boundary ROOT TAG [RECORDED-DIRECTORY] -> directory
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 release_recorded_boundary() { # release_recorded_boundary TAG RECORDED-DIRECTORY
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; cannot safely remove the recorded private snapshot."
@@ -1830,6 +1830,7 @@ start_session() { # start_session NAME MODE
     LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
     write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
       '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
+    reviewer_event_evidence bind-owner kimi "$owner" || die 'could not bind exact implementation evidence ownership.'
     workdir="$wt"
     note "implement run isolated in a throwaway worktree: $wt"
   fi
@@ -1888,6 +1889,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
     return 1
   }
   [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
+  reviewer_event_verify_owner kimi "$owner" || { warn 'implementation evidence cleanup refused; exact owner and worktree preserved.'; return 1; }
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
   if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
@@ -1993,6 +1995,7 @@ continue_implementation() { # NAME RID META [RESET]
   git -C "$wt" config core.longpaths true
   owner="${wt%/wt}/owner.json"; LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"
   write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:"active"}')"
+  reviewer_event_evidence bind-owner kimi "$owner" || die 'could not bind exact implementation evidence ownership.'
   git -C "$wt" apply --check "$patch" >/dev/null 2>&1 && git -C "$wt" apply "$patch" >/dev/null 2>&1 || die "canonical patch cannot be applied to immutable base $base."
   git -C "$wt" add -A >/dev/null 2>&1
   expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
@@ -2085,7 +2088,7 @@ cmd_delete() {
     if [ -n "$recorded_workspace" ]; then
       release_recorded_boundary "kimi-$CALLER-$1" "$recorded_workspace"
     else
-      release_boundary "$(repo_root)" "kimi-$CALLER-$1"
+      release_boundary "$(repo_root)" "kimi-$CALLER-$1" || die "review evidence cleanup refused; session metadata preserved."
     fi
     rm -f "$meta"
   fi

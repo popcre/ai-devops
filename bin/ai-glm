@@ -219,7 +219,7 @@ review_boundary() { # review_boundary ROOT NAME -> directory to hand the reviewe
 }
 release_boundary() { # release_boundary ROOT NAME
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
+  "$SANDBOX_BIN" remove-copy "$1" "glm-$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -989,8 +989,12 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
   f="$root/.ai/reviews/glm-$name-$ts.md"
   mkdir -p "$(dirname "$f")"
   tmp="$(mktemp "$(dirname "$f")/.glm-report.XXXXXX")" || return 1
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  if [ -n "${GLM_REPORT_KEY:-}" ]; then
+    branch="${GLM_REPORT_BRANCH:-unavailable}"; ver="${GLM_REPORT_SERVER_VERSION:-unavailable}"
+  else
+    branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  fi
   {
     printf '# GLM %s — %s\n\n' "$kind" "$name"
     printf '| field | value |\n|---|---|\n'
@@ -1129,7 +1133,7 @@ cmd_new() {
   persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
   record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
@@ -1267,7 +1271,7 @@ $REVIEW_HEAD only."
   fi
   write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
   "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
   record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
@@ -1740,13 +1744,13 @@ cmd_delete() {
       delete_exact_server_session "$sid" || die "could not delete exact server session $sid (HTTP $HTTP_STATUS); record preserved."
     fi
   else
+    root="$(jq -r '.repository_root // empty' "$mp")"
+    if [ -n "$root" ] && [ -e "$root" ]; then
+      release_boundary "$root" "$1" || die "review evidence cleanup refused; provider session and metadata preserved."
+    fi
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
   fi
   # Review snapshots are disposable and must not outlive their session.
-  if [ "$type" != implementation ]; then
-    root="$(jq -r '.repository_root // empty' "$mp")"
-    [ -z "$root" ] || [ ! -e "$root" ] || release_boundary "$root" "$1"
-  fi
   rm -f "$mp"
   note "deleted session: $1"
 }

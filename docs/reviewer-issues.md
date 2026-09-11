@@ -304,6 +304,14 @@ The command verifies the exact stored workspace and provider-session/report link
 publishes the prepared evidence, then records cleanup ownership. It does not infer
 ownership from a shared repository or head, synthesize a historical run ID, or
 claim historical source authorization. Unknown or missing evidence remains unknown.
+Implementation workspaces use the same private event store and bind their existing
+owner record to the original invocation. Before that invocation reserves paid work,
+ordinary setup cleanup remains available; afterwards cleanup requires its receipt.
+For legacy implementation owners, use `ai-reviewer-issue evidence reconcile-owner
+PROVIDER OWNER METADATA REPORT`. This verifies the exact session/report identity
+and that every Git-visible workspace change equals the existing canonical patch,
+then preserves both report and patch centrally. Unexported files or differing work
+remain blocked for recovery; a later cleanup never assumes they were published.
 Use `ai-reviewer-issue evidence verify-sandbox SANDBOX` to check the resulting
 cleanup proof. Keep all command arguments and artifacts private; this operation is
 not a disposition sweep and does not change a frozen maintenance round.
