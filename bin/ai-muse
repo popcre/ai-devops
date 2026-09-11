@@ -270,7 +270,7 @@ retain_turn(){ # retain exact bytes before optional parsing/reporting
     local from to="$stem.$item"
     case "$item" in jsonl) from="$out";; prompt) from="$prompt";; stderr) from="$out.stderr";; esac
     [ ! -e "$to" ] && [ ! -L "$to" ] || return 1
-    cp "$from" "$to" && chmod 600 "$to" && protect_windows_path "$to" file || return 1
+    (set -C; cat "$from" > "$to") && chmod 600 "$to" && protect_windows_path "$to" file || return 1
   done
   tmp="$(tmp_file)"
   jq --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
@@ -452,7 +452,9 @@ $TEXT"
   reviewer_event_evidence require-report muse "$REVIEW_DIR" "$event" || die 'could not reserve exact recovered Muse evidence.'
   ensure_report_destination "$root" "$rep"; reserve_report_staging "$root"; report "$root" "$name" "$prompt" "$rep" >/dev/null
   tmp="$(tmp_file)"; jq --arg sid "$TURN_SID" --arg report "$rep" --arg sha "$(sha256sum "$rep" | cut -d' ' -f1)" --arg now "$(date -u +%FT%TZ)" '.status="active"|.session_id=$sid|.last_report=$report|.retained_turn.finalized=true|.retained_turn.report_sha256=$sha|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp" && mv -f "$tmp" "$m"
-  unlock_session; printf 'reconciled Muse session: %s; retained completion, no provider request\n' "$name"
+  unlock_session
+  if [ "$stale" = 1 ]; then printf 'reconciled Muse session: %s; NON-AUTHORIZING retained completion, no provider request\n' "$name"
+  else printf 'reconciled Muse session: %s; retained completion, no provider request\n' "$name"; fi
 }
 cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="$(jq -r .repository_root "$m")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; tag="$(jq -r .sandbox_tag "$m")"; sid="$(jq -r .session_id "$m")"; status="$(jq -r '.status//"active"' "$m")"; runtime_env
   if [ "$sid" = null ] || [ -z "$sid" ]; then
