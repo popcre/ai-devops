@@ -8,7 +8,7 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 
 | Step | State | Date | Evidence / completion gate |
 |---|---|---|---|
-| 0. Reconcile the live baseline and establish one programme ledger | ⬜ open | 2026-09-11 | Commit a redacted baseline that resolves every dependency named in §9.0. |
+| 0. Reconcile the live baseline and establish one programme ledger | ✅ complete | 2026-09-11 | Redacted live ledger: `tests/verification/shared-db-throughput/2026-09-11-live-baseline.md`; source tips `b6922ea8` / `f3eff56d`. |
 | 1. Consume the four independently owned prerequisite repairs | ⬜ open | 2026-09-11 | #2705/#2709/#2715/#2716 have their own sessions; this programme verifies and integrates their landed behavior without duplicating it. |
 | 2. Enforce two-sided structural admission, urgent application-unblock priority, and finish-first scheduling | ⬜ open | 2026-09-11 | Sender and orchestrator both reject non-structural work; urgent outcomes dispatch first without weakening object conflicts. |
 | 3. Make one outcome card authoritative through live verification | ⬜ open | 2026-09-11 | A request cannot close at merge and exposes entered/dispatched/built/live timestamps. |
