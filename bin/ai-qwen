@@ -736,11 +736,26 @@ stop_run_turn() {
 }
 
 record_existing_review_recovery() { # META OUT REASON
-  local meta="$1" out="$2" reason="$3" pending
+  local meta="$1" out="$2" reason="$3" pending digest
   pending="${meta%.json}.pending.jsonl"
-  cp "$out" "$pending" 2>/dev/null || : > "$pending"
+  preserve_review_stream "$out" "$pending" || return 1
+  digest="$(sha256_file "$pending")" || return 1
   chmod 600 "$pending" 2>/dev/null || true
-  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .updated=$u' "$meta")"
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .recovery_sha256=$digest | .recovery_runtime_sha256=$runtime | .recovery_preloader_sha256=$preloader | .recovery_event_run_id=$event | .governed_head=$governed | .updated=$u' "$meta")"
+}
+
+REVIEW_RUNTIME_SHA=""; REVIEW_PRELOADER_SHA=""
+capture_review_runtime() {
+  REVIEW_RUNTIME_SHA="$(qwen_runtime_sha256)" && REVIEW_PRELOADER_SHA="$(qwen_preloader_sha256)" \
+    && printf '%s' "$REVIEW_RUNTIME_SHA" | grep -Eq '^[0-9a-f]{64}$' \
+    && printf '%s' "$REVIEW_PRELOADER_SHA" | grep -Eq '^[0-9a-f]{64}$' \
+    || die 'Qwen recovery runtime identity could not be captured; no provider call was made.'
+}
+preserve_review_stream() {
+  local source="$1" destination="$2" temporary
+  temporary="$(mktemp "${destination}.XXXXXX")" || return 1
+  cp "$source" "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$destination" \
+    || { rm -f "$temporary"; return 1; }
 }
 cancel_plain_turn() {
   stop_run_turn
@@ -962,6 +977,7 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen ask <name>       [--base REF] [--assert-head SHA] [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen finalize <name>  finalize a proven retained review locally; no provider call
   ai-qwen list | show <name> | transcript <name> | delete <name>
   ai-qwen doctor [--identity | --live]
 
@@ -1125,17 +1141,19 @@ LIFECYCLE_META=""
 LIFECYCLE_REVIEW_DIR=""
 
 record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
-  local meta="$1" repo="$2" name="$3" review_dir="$4" out="$5" reason="$6" pending sid now
+  local meta="$1" repo="$2" name="$3" review_dir="$4" out="$5" reason="$6" pending sid now digest
   mkdir -p "$(dirname "$meta")"
   pending="${meta%.json}.pending.jsonl"; sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable; now="$(date -u +%FT%TZ)"
-  cp "$out" "$pending" 2>/dev/null || : > "$pending"
+  preserve_review_stream "$out" "$pending" || return 1
+  digest="$(sha256_file "$pending")" || return 1
   chmod 600 "$pending" 2>/dev/null || true
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg review_dir "$review_dir" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" \
     --arg packet "$PACKET_HASH" --arg tree "$WORKING_TREE_HASH" --arg pending "$pending" --arg reason "$reason" --arg now "$now" \
+    --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" \
     '{qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"review",status:"recovery-required",model:$model,
       review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,
-      recovery_stream:$pending,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
+      recovery_stream:$pending,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
 LIFECYCLE_PRIOR_TREE=""
@@ -1417,6 +1435,7 @@ start_session() { # start_session NAME MODE
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
   if [ "$mode" = review ]; then
     LIFECYCLE_META="$meta"
+    capture_review_runtime
     record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" turn_in_progress
     write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   fi
@@ -1453,8 +1472,7 @@ start_session() { # start_session NAME MODE
   # skip lifecycle_finalize and lose the run's own record of what happened.
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$mode" = review ] && [ "${FINISH_RC:-0}" = 0 ]; then
-    rm -f "$(jq -r '.recovery_stream // empty' "$meta")"
-    write_meta "$meta" "$(jq --arg sid "$sid" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=1' "$meta")"
+    complete_review_metadata "$meta" "$sid" || die 'Qwen report was preserved but completion metadata could not be published; use finalize for this exact turn.'
   fi
   lifecycle_finalize 0
   [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
@@ -1539,6 +1557,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   build_prompt_file "$pf"
   before="$(tree_state "$workdir")"
   PLAIN_REVIEW_META="$meta"; PLAIN_REVIEW_OUT="$out"
+  capture_review_runtime
   record_existing_review_recovery "$meta" "$out" turn_in_progress
   write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
@@ -1564,8 +1583,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   FINISH_RC=0
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$FINISH_RC" = 0 ]; then
-    rm -f "$pending"
-    write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=(.turns+1)' "$meta")"
+    complete_review_metadata "$meta" "$sid" || die 'Qwen report was preserved but completion metadata could not be published; use finalize for this exact turn.'
     PLAIN_REVIEW_META=""; PLAIN_REVIEW_OUT=""
     rm -f "$pf" "$out" "$out.err"
   else
@@ -1636,6 +1654,59 @@ continue_implementation() { # NAME RID META [RESET]
   [ "$FINISH_RC" = 0 ] || exit "$FINISH_RC"
 }
 
+QWEN_LAST_REPORT=""; QWEN_REPORT_KEY=""
+FINALIZE_SESSION_LOCK=""; FINALIZE_REPO_LOCK=""
+release_finalize_locks() { lock_release "$FINALIZE_SESSION_LOCK"; lock_release "$FINALIZE_REPO_LOCK"; }
+complete_review_metadata() { # META EXACT_SESSION; publish before removing recovery bytes
+  local meta="$1" sid="$2" pending digest report_hash updated
+  pending="$(jq -r '.recovery_stream // empty' "$meta")"
+  [ -n "$pending" ] && [ -f "$pending" ] && [ ! -L "$pending" ] || return 1
+  digest="$(sha256_file "$pending")" || return 1
+  [ "$digest" = "$(jq -r .recovery_sha256 "$meta")" ] || return 1
+  [ -n "$QWEN_LAST_REPORT" ] && [ -f "$QWEN_LAST_REPORT" ] || return 1
+  report_hash="$(sha256_file "$QWEN_LAST_REPORT")" || return 1
+  updated="$(jq --arg sid "$sid" --arg report "$QWEN_LAST_REPORT" --arg report_hash "$report_hash" --arg digest "$digest" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | .last_finalized_stream_sha256=$digest | .last_report=$report | .last_report_sha256=$report_hash | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=(.turns+1)' "$meta")" || return 1
+  write_meta "$meta" "$updated" || return 1
+  rm -f "$pending"
+}
+
+cmd_finalize() { # local-only completion of one sealed provider turn
+  local name="$1" repo rid meta sid pending status packet runtime preloader returned report
+  valid_name "$name" || die 'invalid review session name.'
+  [ -z "$OPT_PROMPT$OPT_PROMPT_FILE$OPT_BASE$OPT_ASSERT_HEAD" ] || die 'finalize cannot submit a prompt or change the original source identity.'
+  repo="$(repo_root)"; rid="$(repo_id "$repo")"; meta="$(meta_path "$rid" "$name")"
+  [ -f "$meta" ] && [ ! -L "$meta" ] || die 'no exact local recovery record exists for this caller and repository.'
+  lock_acquire "$(lock_path "$rid" "$name")" "finalize:$name" || die 'this exact Qwen session is busy.'
+  lock_acquire "$(repolock_path "$rid")" "finalize:$name" || { lock_release "$(lock_path "$rid" "$name")"; die 'another Qwen turn is active in this repository.'; }
+  FINALIZE_SESSION_LOCK="$(lock_path "$rid" "$name")"; FINALIZE_REPO_LOCK="$(repolock_path "$rid")"
+  trap release_finalize_locks EXIT
+  jq -e --arg caller "$CALLER" --arg name "$name" --arg model "$QWEN_MODEL" '.mode=="review" and .caller==$caller and .name==$name and .model==$model' "$meta" >/dev/null || die 'recovery identity differs from the exact requested review.'
+  same_path "$(jq -r .repo "$meta")" "$repo" || die 'recovery belongs to a different repository.'
+  [ "$(git -C "$repo" rev-parse HEAD)" = "$(jq -r .head "$meta")" ] && [ "$(tree_state "$repo")" = "$(jq -r .working_tree_sha256 "$meta")" ] || die 'source changed; retained response cannot be finalized against different code.'
+  packet="$($PACKET_BIN path "$(jq -r .review_dir "$meta")" "qwen-$CALLER-$name")"
+  [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r .packet_sha256 "$meta")" ] && "$PACKET_BIN" verify "$packet" >/dev/null || die 'the original sealed packet no longer verifies.'
+  [ -z "$OPT_GOVERNED_VERDICT" ] || [ "$OPT_GOVERNED_VERDICT" = "$(jq -r '.governed_head // empty' "$meta")" ] || die 'finalize cannot change the original terminal verdict contract.'
+  OPT_GOVERNED_VERDICT="$(jq -r '.governed_head // empty' "$meta")"
+  status="$(jq -r .status "$meta")"
+  if [ "$status" = active ]; then
+    report="$(jq -r '.last_report // empty' "$meta")"
+    [ -f "$report" ] && [ ! -L "$report" ] && [ "$(sha256_file "$report")" = "$(jq -r .last_report_sha256 "$meta")" ] || die 'this session has no verified local finalization receipt.'
+    printf 'PASS already-finalized session=%s report=%s\n' "$name" "$report"; return
+  fi
+  [ "$status" = recovery-required ] && [ "$(jq -r .failure_reason "$meta")" = provider_turn_pending_local_validation ] || die 'remote completion is uncertain; local finalization cannot resubmit or guess a result.'
+  pending="${meta%.json}.pending.jsonl"
+  same_path "$(jq -r .recovery_stream "$meta")" "$pending" && [ -f "$pending" ] && [ ! -L "$pending" ] && [ "$(sha256_file "$pending")" = "$(jq -r .recovery_sha256 "$meta")" ] || die 'the exact retained provider stream is missing or changed.'
+  runtime="$(qwen_runtime_sha256)"; preloader="$(qwen_preloader_sha256)"
+  [ -n "$runtime" ] && [ "$runtime" = "$(jq -r .recovery_runtime_sha256 "$meta")" ] && [ -n "$preloader" ] && [ "$preloader" = "$(jq -r .recovery_preloader_sha256 "$meta")" ] || die 'Qwen runtime or preloader identity changed since the retained turn.'
+  sid="$(jq -r .qwen_session_id "$meta")"
+  jq -se --arg sid "$sid" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
+  verify_returned_model "$pending"
+  QWEN_RECOVERY_EVENT_RUN_ID="$(jq -r '.recovery_event_run_id // empty' "$meta")"
+  [ -n "$QWEN_RECOVERY_EVENT_RUN_ID" ] || die 'retained completion lacks its original invocation identity.'
+  finish_turn "$repo" "$name" "$pending" || die 'the retained turn could not be finalized; provider bytes were preserved and no provider call was made.'
+  complete_review_metadata "$meta" "$sid" || die 'local completion publication failed; provider bytes remain available for finalize.'
+}
+
 finish_turn() {
   local repo="$1" name="$2" out="$3" path rc=0 artifact_status=accepted
   ANSWER_DEFECT=""
@@ -1645,7 +1716,10 @@ finish_turn() {
   fi
   if [ "${OPT_JSON:-0}" = 1 ]; then extract_answer "$out" >/dev/null; cat "$out"; else extract_answer "$out"; fi
   [ -z "$ANSWER_DEFECT" ] || artifact_status=incomplete
-  path="$(write_review_file "$repo" "$name" "$out" "$artifact_status")"
+  QWEN_REPORT_KEY="$(sha256_file "$out")" || return 1
+  path="$(write_review_file "$repo" "$name" "$out" "$artifact_status")" || return 1
+  [ -n "$path" ] && [ -f "$path" ] || { warn 'Qwen report publication did not produce a durable file; retained stream requires local finalization.'; return 1; }
+  QWEN_LAST_REPORT="$path"
   [ -n "$path" ] && note "saved: $path"
   jq -r 'select(.type=="result") | "usage: input=\(.usage.input_tokens // "?") output=\(.usage.output_tokens // "?") turns=\(.num_turns // "?")"' "$out" 2>/dev/null | tail -1 >&2
   note "model: requested=$QWEN_MODEL returned=$(model_from "$out")"
@@ -1765,13 +1839,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 need jq
-[ -z "$OPT_GOVERNED_VERDICT" ] || { [ "$CMD" = new ] || [ "$CMD" = ask ]; } || die '--governed-verdict applies only to read-only new or ask turns.'
+[ -z "$OPT_GOVERNED_VERDICT" ] || { [ "$CMD" = new ] || [ "$CMD" = ask ] || [ "$CMD" = finalize ]; } || die '--governed-verdict applies only to read-only new, ask, or finalize turns.'
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-qwen new <name> …";       start_session "$ARG" review ;;
   implement)  [ -n "$ARG" ] || die "usage: ai-qwen implement <name> …"; cmd_implement "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-qwen ask <name> …";       cmd_ask "$ARG" ;;
   list)       cmd_list ;;
+  finalize)   [ -n "$ARG" ] || die 'usage: ai-qwen finalize <name>'; cmd_finalize "$ARG" ;;
   show)       [ -n "$ARG" ] || die "usage: ai-qwen show <name>";        cmd_show "$ARG" ;;
   transcript) [ -n "$ARG" ] || die "usage: ai-qwen transcript <name>";  cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-qwen delete <name>";      cmd_delete "$ARG" ;;

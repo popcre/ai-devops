@@ -137,6 +137,40 @@ printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
 
+recovery_cases(){
+  local meta pending calls saved_meta saved_stream report before
+  echo review > "$TMP/mode"
+  mv "$REPO/.ai/reviews" "$REPO/.ai/reviews-before-recovery"
+  printf 'publication blocked by fixture\n' > "$REPO/.ai/reviews"
+  if run new local-recovery --prompt review > "$TMP/recovery-first.log" 2>&1; then bad 'failed report publication is not success'; else ok 'failed report publication is not success'; fi
+  rm "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews-before-recovery" "$REPO/.ai/reviews"
+  meta="$(find "$TMP/state/sessions" -name 'codex--local-recovery.json' -print -quit)"; pending="${meta%.json}.pending.jsonl"
+  check 'failed local publication preserves a proven pending stream and source binding' "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\" and (.recovery_sha256|length)==64 and (.recovery_event_run_id|length)>0' '$meta' && test -s '$pending'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  cp "$meta" "$TMP/recovery-original-meta"; cp "$pending" "$TMP/recovery-original-stream"
+  printf '\nchanged' >> "$pending"
+  check 'changed retained bytes refuse local finalization' "! run finalize local-recovery > '$TMP/recovery-changed.log' 2>&1"
+  cp "$TMP/recovery-original-stream" "$pending"
+  jq '.recovery_runtime_sha256="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'changed runtime identity refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-runtime.log' 2>&1"
+  cp "$TMP/recovery-original-meta" "$meta"
+  cp "$REPO/a.txt" "$TMP/recovery-original-source"
+  printf 'changed source\n' >> "$REPO/a.txt"
+  check 'changed source refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-source.log' 2>&1"
+  cp "$TMP/recovery-original-source" "$REPO/a.txt"
+  check 'local finalization accepts the exact saved turn' "run finalize local-recovery > '$TMP/recovery-finalize.log' 2>&1"
+  check 'finalization publishes metadata before removing pending bytes' "jq -e '.status==\"active\" and .turns==1 and (.last_report_sha256|length)==64' '$meta' && test ! -e '$pending'"
+  before="$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' "$meta")"
+  check 'repeated local finalization reuses the same completion' "run finalize local-recovery > '$TMP/recovery-repeat.log' 2>&1 && test '$before' = \"\$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' '$meta')\""
+  check 'recovery and all refusals spend zero additional provider turns' "test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+}
+if [ "${AI_QWEN_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/recovery-install.log" 2>&1 || { cat "$TMP/recovery-install.log"; exit 1; }
+  recovery_cases
+  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
+
 # A CLI recorder can supervise the actual review worker. Crash the owner of
 # this fixture's repository lock, then let its supervisor reap it. Never use
 # PID zero as a missing-worker fallback: kill(0) targets the entire test group.
@@ -551,5 +585,6 @@ else
   bad '1Password service token is absent from wrapper post-call processes'
 fi
 
+recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))
