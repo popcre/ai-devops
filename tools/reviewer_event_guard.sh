@@ -61,6 +61,7 @@ reviewer_event_guard(){
   name="AI_${provider^^}_REVIEW_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   [ "$provider" != kimi ] || [ "${1:-}" != start ] || operation=async-submission
   [ "$provider" != qwen ] || [ "${1:-}" != finalize ] || operation=local-finalization
+  [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
