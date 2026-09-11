@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,13 +21,24 @@ const canonical = (value) => Array.isArray(value)
     ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
     : JSON.stringify(value)
 
-export function classifyDatabasePreview(manifest, { root = process.cwd(), readFile = readFileSync } = {}) {
+export function classifyDatabasePreview(manifest, {
+  root = process.cwd(),
+  readFile = readFileSync,
+  isAncestor = (base, head) => { execFileSync('git', ['merge-base', '--is-ancestor', base, head], { cwd: root }); return true },
+  listChangedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
+} = {}) {
   if (!manifest || manifest.schema_version !== 1 || !Array.isArray(manifest.files) || !manifest.files.length) {
     throw new PreviewClassificationError('a schema-version-1 manifest with at least one file is required')
   }
   if (!Array.isArray(manifest.applicable_checks) || !manifest.applicable_checks.length) {
     throw new PreviewClassificationError('applicable non-database checks are required')
   }
+  for (const field of ['base_sha', 'head_sha']) {
+    if (!/^[0-9a-f]{40}$/i.test(manifest[field] ?? '')) throw new PreviewClassificationError(`${field} must be an exact commit SHA`)
+  }
+  try {
+    if (isAncestor(manifest.base_sha, manifest.head_sha) !== true) throw new Error('not an ancestor')
+  } catch { throw new PreviewClassificationError('base_sha is not a proved ancestor of head_sha') }
   const seen = new Set()
   const files = manifest.files.map((entry) => {
     if (!entry || typeof entry.path !== 'string' || path.isAbsolute(entry.path) || entry.path.includes('..')) {
@@ -44,14 +56,22 @@ export function classifyDatabasePreview(manifest, { root = process.cwd(), readFi
     if (entry.sha256 !== digest) throw new PreviewClassificationError(`content digest changed for ${normalizedPath}`)
     return { path: normalizedPath, sha256: digest, impact, reason: entry.reason.trim() }
   }).sort((a, b) => a.path.localeCompare(b.path))
+  let changedFiles
+  try { changedFiles = listChangedFiles(manifest.base_sha, manifest.head_sha).map((file) => file.replaceAll('\\', '/')).sort() }
+  catch { throw new PreviewClassificationError('the complete changed-file set is unreadable or truncated') }
+  if (!changedFiles.length || new Set(changedFiles).size !== changedFiles.length) throw new PreviewClassificationError('the complete changed-file set is empty or invalid')
+  const declaredFiles = files.map((file) => file.path)
+  if (canonical(changedFiles) !== canonical(declaredFiles)) throw new PreviewClassificationError('manifest files do not exactly match the complete changed-file set')
   const applicableChecks = [...new Set(manifest.applicable_checks.map(String))].sort()
   if (applicableChecks.some((check) => !check.trim())) throw new PreviewClassificationError('applicable checks must be non-empty')
   const required = files.filter((file) => PREVIEW_REQUIRED_IMPACTS.includes(file.impact))
-  const inspectedDigest = sha256(canonical({ classifier_version: CLASSIFIER_VERSION, files, applicable_checks: applicableChecks }))
+  const inspectedDigest = sha256(canonical({ classifier_version: CLASSIFIER_VERSION, base_sha: manifest.base_sha.toLowerCase(), head_sha: manifest.head_sha.toLowerCase(), files, applicable_checks: applicableChecks }))
   return {
     schema_version: 1,
     decision: required.length ? 'DATABASE_PREVIEW_REQUIRED' : 'NO_DATABASE_PREVIEW',
     reason_code: required.length ? `impact_${required[0].impact.replaceAll('-', '_')}` : 'proven_non_database_change',
+    base_sha: manifest.base_sha.toLowerCase(),
+    head_sha: manifest.head_sha.toLowerCase(),
     inspected_digest: inspectedDigest,
     files,
     applicable_checks: applicableChecks,
