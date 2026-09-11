@@ -23,11 +23,11 @@ const canonical = (value) => Array.isArray(value)
 
 export function classifyDatabasePreview(manifest, {
   root = process.cwd(),
-  readFile = readFileSync,
   readFileAt = (ref, file) => execFileSync('git', ['show', `${ref}:${file}`], { cwd: root, maxBuffer: 16 * 1024 * 1024 }),
+  modeAt = (ref, file) => execFileSync('git', ['ls-tree', ref, '--', file], { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 }).trim().split(/\s+/, 1)[0],
   isAncestor = (base, head) => { execFileSync('git', ['merge-base', '--is-ancestor', base, head], { cwd: root }); return true },
-  listChangedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMRD', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
-  listDeletedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=D', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
+  listChangedFiles = (base, head) => execFileSync('git', ['diff', '--no-renames', '--name-only', '--diff-filter=ACMRD', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
+  listDeletedFiles = (base, head) => execFileSync('git', ['diff', '--no-renames', '--name-only', '--diff-filter=D', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
 } = {}) {
   if (!manifest || manifest.schema_version !== 1 || !Array.isArray(manifest.files) || !manifest.files.length) {
     throw new PreviewClassificationError('a schema-version-1 manifest with at least one file is required')
@@ -52,16 +52,25 @@ export function classifyDatabasePreview(manifest, {
     const normalizedPath = entry.path.replaceAll('\\', '/')
     if (seen.has(normalizedPath)) throw new PreviewClassificationError(`duplicate inspected path: ${normalizedPath}`)
     seen.add(normalizedPath)
-    const allowed = [...NO_PREVIEW_IMPACTS, ...PREVIEW_REQUIRED_IMPACTS]
     const deleted = deletedFiles.has(normalizedPath)
-    const impact = deleted ? 'ambiguous' : (allowed.includes(entry.impact) ? entry.impact : 'ambiguous')
     if (typeof entry.reason !== 'string' || !entry.reason.trim()) throw new PreviewClassificationError(`missing impact reason for ${normalizedPath}`)
-    let bytes
-    try { bytes = deleted ? readFileAt(manifest.base_sha, normalizedPath) : readFile(path.resolve(root, normalizedPath)) }
+    const sourceRef = deleted ? manifest.base_sha : manifest.head_sha
+    let bytes, mode
+    try { bytes = readFileAt(sourceRef, normalizedPath); mode = modeAt(sourceRef, normalizedPath) }
     catch { throw new PreviewClassificationError(`inspected file is unreadable: ${normalizedPath}`) }
     const digest = sha256(bytes)
     if (entry.sha256 !== digest) throw new PreviewClassificationError(`content digest changed for ${normalizedPath}`)
-    return { path: normalizedPath, sha256: digest, impact, reason: entry.reason.trim(), change_type: deleted ? 'deleted' : 'present' }
+    const text = Buffer.from(bytes).toString('utf8')
+    const databaseSignal = /(?:\b(?:create|alter|drop|grant|revoke|insert|update|delete)\b[\s\S]{0,40}\b(?:table|view|function|policy|role|schema|into|from)\b|\bsupabase\b|\bpsql\b|\bapply_migration\b|\bdb\s+push\b)/i.test(text)
+    const databasePath = /(?:^|\/)(?:supabase|migrations?|policies)(?:\/|$)|\.sql$/i.test(normalizedPath)
+    const safeDocumentation = /(?:^|\/)(?:docs\/.*|HANDOFF\.d\/.*|plan_[^/]*|README)\.(?:md|txt)$/i.test(normalizedPath) || /\.txt$/i.test(normalizedPath)
+    let impact = 'ambiguous'
+    if (deleted || !['100644', '100755'].includes(mode)) impact = 'ambiguous'
+    else if (databaseSignal || databasePath) impact = 'database-behavior'
+    else if (entry.impact === 'documentation' && safeDocumentation) impact = 'documentation'
+    else if (entry.impact === 'reviewer-tooling' && /^(?:bin\/ai-(?:review|reviewer)|tools\/reviewer_)/.test(normalizedPath)) impact = 'reviewer-tooling'
+    else if (PREVIEW_REQUIRED_IMPACTS.includes(entry.impact)) impact = entry.impact
+    return { path: normalizedPath, sha256: digest, mode, impact, reason: entry.reason.trim(), change_type: deleted ? 'deleted' : 'present' }
   }).sort((a, b) => a.path.localeCompare(b.path))
   let changedFiles
   try { changedFiles = listChangedFiles(manifest.base_sha, manifest.head_sha).map((file) => file.replaceAll('\\', '/')).sort() }
