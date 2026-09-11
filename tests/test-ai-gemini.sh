@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-gemini"; FIXTURES="$ROOT/tests/fixtures/ai-gemini"
+export REAL_REVIEW_PACKET="$ROOT/bin/ai-review-packet"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
@@ -28,7 +29,8 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- build) p="$2/.ai-review-$3"; mkdir -p "$p"; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
+ resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
+ build) p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify) test -s "$2/MANIFEST.sha256" ;;
  path) printf %s "$2/.ai-review-$3" ;;
  remove) rm -rf "$2/.ai-review-$3" ;;
@@ -151,6 +153,8 @@ check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" 
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
 GOOD_BEFORE="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
 GOOD_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'wrong source head submits zero provider calls' "! (cd '$R4' && '$SCRIPT' new wrong-head --assert-head 0000000000000000000000000000000000000000 --prompt review) && test '$GOOD_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+check 'missing source base submits zero provider calls' "! (cd '$R4' && '$SCRIPT' new wrong-base --base missing-source-target --prompt review) && test '$GOOD_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 check 'duplicate new is refused' "! new_run '$R4' good normal"
 GOOD_AFTER="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
 check 'duplicate new preserves metadata report packet and private copy byte-for-byte' "test '$GOOD_BEFORE' = '$GOOD_AFTER'"
