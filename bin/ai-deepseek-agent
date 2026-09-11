@@ -381,12 +381,12 @@ verify_review_source() {
       local stale meta
       meta="$(session_path "$ID" .meta.json)" || return 1
       stale="$(mktemp "$SESS_DIR/.source-stale.XXXXXX")" || return 1
-      GOVERNED_HEAD="$GOVERNED_HEAD" OBSERVED_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" OBSERVED_SOURCE_DIGEST="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$REPO_ROOT" 2>/dev/null || true)" \
+      REPO="$REPO_ROOT" CALLER_NAME="$CALLER" MODEL_NAME="$MODEL" GOVERNED_HEAD="$GOVERNED_HEAD" OBSERVED_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" OBSERVED_SOURCE_DIGEST="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$REPO_ROOT" 2>/dev/null || true)" \
       "$PYTHON" - "$REVIEW_SOURCE_IDENTITY" "$stale" "$ID" "$REVIEW_SOURCE_HASH" "$REVIEW_SOURCE_SAVED" <<'PY'
 import json, os, sys
 identity_path, output, session_id, packet_hash, packet_directory = sys.argv[1:]
 identity = json.load(open(identity_path, encoding='utf-8'))
-json.dump({'schema_version':2,'provider':'deepseek','session_id':session_id,'head':identity['head'],'source_identity':identity,'observed_head':os.environ['OBSERVED_HEAD'],'observed_source_digest':os.environ['OBSERVED_SOURCE_DIGEST'],'packet_sha256':packet_hash,'source_packet_directory':packet_directory,'verdict_mode':'governed' if os.environ['GOVERNED_HEAD'] else 'ordinary','governed_head':os.environ['GOVERNED_HEAD'] or None,'status':'source_changed','verdict':None,'reason':'Source evidence changed after the provider returned; the conversation is retained and a new turn must resolve fresh source.'},open(output,'w',encoding='utf-8'),indent=2)
+json.dump({'schema_version':2,'provider':'deepseek','session_id':session_id,'repository_root':os.environ['REPO'],'caller':os.environ['CALLER_NAME'],'model':os.environ['MODEL_NAME'],'head':identity['head'],'source_identity':identity,'observed_head':os.environ['OBSERVED_HEAD'],'observed_source_digest':os.environ['OBSERVED_SOURCE_DIGEST'],'packet_sha256':packet_hash,'source_packet_directory':packet_directory,'verdict_mode':'governed' if os.environ['GOVERNED_HEAD'] else 'ordinary','governed_head':os.environ['GOVERNED_HEAD'] or None,'status':'source_changed','verdict':None,'reason':'Source evidence changed after the provider returned; the conversation is retained and a new turn must resolve fresh source.'},open(output,'w',encoding='utf-8'),indent=2)
 PY
       if ! write_atomic "$meta" "$stale"; then echo 'Error: stale source metadata could not be published; retained transcript authorizes nothing.' >&2; fi
       rm -f "$stale"
@@ -492,6 +492,28 @@ if meta.get("verdict_mode", "ordinary") == "governed" and meta.get("governed_hea
 PY
 }
 
+session_review_identity_matches() {
+  local meta
+  meta="$(session_path "$ID" .meta.json)" || return 1
+  "$PYTHON" - "$meta" "$ID" "$CALLER" "$MODEL" "$REPO_ROOT" "$REVIEW" <<'PY'
+import json, os, sys
+path, sid, caller, model, repository, review = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as handle: meta = json.load(handle)
+except FileNotFoundError:
+    if review == "0": raise SystemExit(0)
+    print("Error: review-identity-unknown: original formal review identity is missing; conversation retained.", file=sys.stderr)
+    raise SystemExit(1)
+except (OSError, ValueError):
+    print("Error: review-identity-unknown: original review identity is unreadable; conversation retained.", file=sys.stderr)
+    raise SystemExit(1)
+expected = {"provider":"deepseek", "session_id":sid, "caller":caller, "model":model}
+if any(meta.get(key) != value for key, value in expected.items()) or os.path.normcase(os.path.realpath(meta.get("repository_root", ""))) != os.path.normcase(os.path.realpath(repository)):
+    print("Error: review-identity-mismatch: restore the formal review's original caller, model and repository; conversation retained.", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 # A reply resends the whole conversation, so files attached on ANY earlier turn
 # are still in front of DeepSeek. Recording only the latest turn understated
 # the evidence behind a continued review verdict. The ledger accumulates every
@@ -560,7 +582,7 @@ write_review_metadata() { # id verdict [status]
   # inspection at that commit.
   # Paths travel as argv and as NUL-delimited bytes, never as newline-joined
   # text, so a name containing spaces or newlines is recorded exactly as given.
-  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
+  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" MODEL_NAME="$MODEL" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
   SOURCE_IDENTITY_FILE="$REVIEW_SOURCE_IDENTITY" SOURCE_PACKET_HASH="$REVIEW_SOURCE_HASH" SOURCE_PACKET_DIRECTORY="$REVIEW_SOURCE_SAVED" \
   "$PYTHON" - "$tmp" "$ledger" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"} <<'PY'
 import json, os, sys
@@ -574,7 +596,7 @@ for part in raw.split(b"\0"):
     if name not in attached: attached.append(name)
 identity = json.load(open(os.environ["SOURCE_IDENTITY_FILE"], encoding="utf-8"))
 source_files = [os.fsdecode(part) for part in open(os.environ["SOURCE_IDENTITY_FILE"] + '.files', 'rb').read().split(b'\0') if part]
-json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
+json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"model":os.environ["MODEL_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
 PY
   if [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" = publish ]; then mkdir -p "$meta" || return 1; fi
   if ! write_atomic "$meta" "$tmp"; then rm -f "$tmp"; return 1; fi
@@ -788,6 +810,7 @@ $REVIEW_INSTRUCTION"
 $REVIEW_INSTRUCTION"
 
     acquire_lock "$F" || exit 1
+    session_review_identity_matches || exit 1
     [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
