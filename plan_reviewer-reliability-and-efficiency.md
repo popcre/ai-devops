@@ -6,26 +6,23 @@ Albert should get accurate, usable reviews without paying repeatedly for the wro
 
 **If a step conflicts with this goal, the goal wins — stop and flag it.** “100% optimal” means the explicit qualification criteria below are satisfied; it is not a promise of zero provider outages or a mathematically maximal cache-hit rate.
 
-Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops/issues/337). Authored September 8, 2026. [Execution handoff](HANDOFF.d/2026-09-08T1957Z-edge-dev-codex-reviewer-reliability-plan.md).
+Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops/issues/337), registered under repository-throughput parent [#159](https://github.com/popcre/ai-devops/issues/159). Authored September 8, 2026; coding-boundary refactor September 11, 2026. [Execution handoff](HANDOFF.d/2026-09-08T1957Z-edge-dev-codex-reviewer-reliability-plan.md).
 
 ## STATUS — implementation, not planning progress
 
-| Step | State | Updated | Required evidence before complete |
+| Coding owner | State | Updated | Required evidence before complete |
 |---|---|---|---|
-| 0. Refresh ownership, versions, and incident boundary | Open | 2026-09-08 | Private frozen inventory and current dependency dispositions |
-| 1. Classify historical/current failures | Open | 2026-09-08 | Every candidate linked/classified; pre-journal coverage report |
-| 2. Correct source-base propagation | Open | 2026-09-08 | Exact base/head fixture matrix and governed live comparison |
-| 3. Prevent repeated known quota failures | Open | 2026-09-08 | Scoped, expiring failure-state and allocation/dispatch proof |
-| 4. Finish Qwen startup/recovery qualification | Open | 2026-09-08 | PR #330 disposition plus exact finalization/recovery proof |
-| 5. Diagnose and repair GLM transport/progress | Open | 2026-09-08 | Failure-window diagnosis, focused fix, exact-session recovery |
-| 6. Restore Codex read-only review capability | Open | 2026-09-08 | Positive repository-read and negative write/access canaries |
-| 7. Make usage reporting truthful and complete | Open | 2026-09-08 | Provider-shaped fixtures and paid-result persistence proof |
-| 8. Qualify all session and implementation paths | Open | 2026-09-08 | Nine-provider matrix plus GLM implementation matrix |
-| 9. Measure and tune context/prompt efficiency | Open | 2026-09-08 | Paired measurements and correctness-preserving decision record |
-| 10. Merge, install, and qualify each delivery slice | Open | 2026-09-08 | Exact-head review, required CI, merged and installed identities |
-| 11. Close incident coverage and reconcile documentation | Open | 2026-09-08 | Immutable closure records, real completed checkpoint, final matrix |
+| [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 active | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison |
+| [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open | 2026-09-11 | Provider-shaped failure matrix and governed reason parity |
+| [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Open | 2026-09-11 | Crash/cleanup/race proof; 33 evidence-gap dispositions |
+| [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open | 2026-09-11 | Allocation/lock/cooldown matrix and governed live proof |
+| [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Open | 2026-09-11 | Provider progress/finalization/restart matrix and live canaries |
+| [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; absorbs #290 | 2026-09-11 | Repository reads succeed while writes/network/outside reads fail |
+| [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Open | 2026-09-11 | Provider-shaped usage fixtures and paid-result persistence proof |
+| [#169](https://github.com/popcre/ai-devops/issues/169) shared wrapper infrastructure | Source merged; live acceptance open | 2026-09-11 | Shared primitives retain every provider-specific safety contract |
+| [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Open; runs last inside #337 | 2026-09-11 | All 198 dispositions, installed nine-provider matrix, bounded recurrence scan |
 
-**Fresh-session start:** Step 0. Read downstream phases before beginning each phase; update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. Current blockers in another step do not prevent independent work.
+**Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 
 ## 1. Goal and acceptance model
 
@@ -51,35 +48,37 @@ Nine review adapters are `bin/ai-claude-review`, `ai-codex-review`, `ai-grok-rev
 
 Albert requested review of recent reviewer failures and a comprehensive audit of context caching, prompt caching, and session persistence across all reviewers/wrappers/OpenCode paths, then explicitly requested this implementation plan.
 
-The private audit examined 37 incident records and froze a first real maintenance round with 198 candidates: 25 existing unresolved incidents, 46 failed invocations, four invocations lacking terminal proof, and 123 scoreboard outcomes requiring classification. These are categories of evidence, not 198 distinct defects. A previous completed real checkpoint did not exist. New events after the frozen upper boundary belong to the next interval.
+The private audit examined 37 incident records and froze a first real maintenance round with 198 candidates: 25 existing unresolved incidents, 46 failed invocations, four invocations lacking terminal proof, and 123 scoreboard outcomes requiring classification. These are categories of evidence, not 198 distinct defects. The restored round is `0c62f3dffce145c4b2768855b912b958`; its frozen boundary must never be reset. New events after that boundary belong to the next interval.
 
 The private evidence is discoverable through `bin/ai-reviewer-issue path`, `list`, and `maintenance show`. Do not publish the private report, source paths within private repositories, raw provider bodies, or conversation transcripts. The audit is an inventory, not a closed repair round.
 
 Reproduction for the strongest source defect: create an isolated fixture with local `main` at A, `origin/main` advanced to B, and feature HEAD C containing only one new feature after B. Build a review snapshot and default packet. At the planning baseline, snapshot creation prefers A and packet selection prefers local main, so the reviewer can receive A..C instead of the intended B..C. Add a merge-commit variant and an explicit non-main target; the solution must handle both, not merely reorder one loop.
 
-Other observed symptoms: repeated Kimi usage-limit refusals; Qwen long passive identity checks and unproven post-provider validation; GLM local permission-endpoint loss and a separate timeout; Codex repository reads denied before execution; retained but misleading/incomplete usage reporting. A symptom is not a proven root cause.
+The 67 formerly ambiguous scoreboard records now divide into 33 confirmed Codex Windows read-sandbox denials, one legitimate evidence-based BLOCKED review, 31 referenced reports no longer retained, and two interruptions without retained cause. The remaining new uncovered symptoms are a DeepSeek Windows output-encoding failure, Qwen content-filter failure classified as generic stderr, Muse start failure without durable evidence, and Grok turn-limit cancellation without a terminal result. A symptom is not a proven root cause; #394 and #395 own the diagnostic and retention contracts that make the causes provable.
 
 ## 4. Scope and consolidation
 
-This issue owns integration, measurement, and final incident closure. Existing work remains authoritative for its narrow scope:
+This issue is a programme parent. Each remaining change has exactly one coding-boundary child:
 
-| Work | Existing owner | Treatment |
+| Coding boundary | Canonical owner | Absorbed evidence/issues |
 |---|---|---|
-| Durable log checkpoints | #308; `plan_reviewer-log-repair-checkpoints.md` | Completed infrastructure; execute real backlog coverage, do not rebuild |
-| Diagnostic envelopes and capacity contract | #312; `plan_reviewer-diagnostics-quota-preflight.md` | Completed and installed; extend only demonstrated gaps |
-| DeepSeek/Muse cache reporting | #333; `plan_reviewer-cache-efficiency.md` | Finish that implementation; this plan adds integrated acceptance and aggregation qualification |
-| Qwen fast identity check | #322, PR #330 | Concurrent dependency; do not duplicate or take over its branch |
-| Codex read access | #271/#290; source-base/verdict history #179/#217 | Verify scope and consolidate closure evidence, not duplicate repairs |
-| Investigation mode | #253–#256 | Separate capability expansion; do not wait for or silently include it |
-| Harness/provider consolidation | #167/#169; backlog #168 | Reuse existing helpers; no new generic harness without a demonstrated need |
+| Packet/snapshot source identity and completeness | #393 | #179, #188, #189, PR #344 |
+| Terminal result parsing and failure diagnostics | #394 | #182, #183, #217, #218; four newly uncovered failures |
+| Durable report publication and interruption provenance | #395 | 31 missing-report and two unknown-interruption records; completed #212 |
+| Availability, cooldown, allocation, and concurrency | #396 | #233, #304; #169 Kimi disposition; #312 diagnostics |
+| Provider-turn progress, finalization, and recovery | #397 | #177, #233, #351; completed #322/PR #330 |
+| Codex Windows read-only enforcement | #271 | duplicate #290 and 33 confirmed maintenance records |
+| Usage, cache, and measured context efficiency | #333 | `plan_reviewer-cache-efficiency.md` and old plan Steps 7/9 |
+| Shared provider-wrapper primitives | #169 | Extraction only after provider-specific contracts exist |
+| Installed integration and 198-entry closure | #398 | #308 maintenance infrastructure and all component evidence |
 
-This umbrella is necessary because no narrow plan owns the complete accuracy→reliability→measurement→installed-closure chain. #337's implementer owns its STATUS and child evidence. Keep provider detail in the existing topic plans. Retire this handoff when #337 is truly complete; retain the completed plan as a decision record. Add only the minimum child issues needed for uncovered repair slices; do not clone the whole backlog.
+Old symptom issues are evidence, not parallel implementation owners. Transfer their still-valid reproductions and acceptance requirements to the canonical child, then close them as superseded without claiming the defect is fixed. Investigation mode #253–#257, credential maintenance #326, and reviewer-assisted problem solving #198 remain separate capabilities/dependencies. Retire this handoff only when #337 and #398 are truly complete.
 
 **Not in this plan:** model/provider switching; permanent reviewer retirement or automatic re-enablement; raising global timeouts; removing review guards; changing production/cloud infrastructure; database/schema/data work; purchasing quota; credential rotation; shared-server redesign; new memory plugins; automatic application of implementation patches; deleting provider/session histories; global instruction overhaul; CI redesign. A planning request does not authorize implementation deployment. Execute this plan when implementation is requested; ordinary scoped implementation work then follows existing authorization rules.
 
 ## 5. Current code and delivery baseline
 
-Planning source is ai-devops commit `d5522d9a8bcdef49db917d37002166aaaff5be73`. Line references below refer to that commit; re-find by symbol after drift. The audit worktree is isolated and tracked source was untouched before this documentation change.
+Current refactor source is ai-devops commit `b5a08cb55b0b4f71debcad272c591b3d3a026cc3`. Older line references below came from planning commit `d5522d9a8bcdef49db917d37002166aaaff5be73`; re-find by symbol after drift. Active PR #344 owns the current #393 source-base slice but remains blocked by failing reviewer-safety checks.
 
 - `bin/ai-review-packet:179`: default order `main`, `master`, `origin/main`, `origin/master`. `bin/ai-review-sandbox:246`: copies local base branch before consulting remote. This establishes the wrong-base mechanism.
 - `bin/ai-deepseek-agent:268–329`: sends persisted `messages`, extracts response content, appends conversation; usage is discarded at `:303`. Transcript JSON is the next request body, not a place for metrics.
@@ -130,21 +129,21 @@ Planning source is ai-devops commit `d5522d9a8bcdef49db917d37002166aaaff5be73`. 
 
 ### Phase A — evidence and correctness
 
-#### Step 0. Refresh current ownership and freeze the right work
+#### Programme gate. Refresh current ownership and freeze the right work (#337)
 
 Read AGENTS, `docs/task-router.md`, this STATUS and relevant child STATUS. Fetch ai-devops main; create a dedicated current-upstream worktree. Inspect open PRs, especially #330, and current installation identity. Resolve shared-db upstream through GitHub before creating its own worktree for integration changes. Check live runner jobs before any local suite. Reuse the current real maintenance round via `bin/ai-reviewer-issue maintenance show` and `maintenance start --resume ROUND-ID`; obtain ROUND-ID from show, never guess or reset it. If another owner is actively classifying it, agree on disjoint candidate ownership or keep this slice read-only.
 
 Gate: retained private source/version/owner inventory, no competing checkout edits, exact frozen lower/upper boundaries, and explicit disposition for each dependency. Depends on nothing. This step authorizes no provider retry.
 
-#### Step 1. Account for every candidate before repair closure
+#### Maintenance accounting. Account for every candidate before repair closure (#398)
 
 Use `tools/reviewer_maintenance.py` through `bin/ai-reviewer-issue`, following `docs/reviewer-issues.md`. Link exact existing incidents with `maintenance classify`; use `maintenance record` for a newly established defect. Classify expected refusals, quota, application failures, duplicate events and user cancellation only with exact evidence. An orphaned start needs current worker proof, not age. Audit all nine providers' supporting metadata, lifecycle failures, owned logs and known DeepSeek sidecars for pre-journal coverage; never open raw session transcripts as a shortcut.
 
 For each incident preserve: observed symptom, evidence availability, current code disposition, root-cause confidence, owner, planned step, and exact closure gate. Unrecoverable overwritten history is an explicit blocker. New post-boundary failures go into the next round and current incident ledger; do not expand the frozen upper boundary.
 
-Gate: every candidate has an accountable classification or specifically documented blocker; no unexplained event is dropped. Full completion waits for Step 11. Depends on 0; may proceed alongside disjoint code diagnosis.
+Gate: every candidate has an accountable classification or specifically documented blocker; no unexplained event is dropped. Full completion waits for #398's integrated acceptance. Classification may proceed alongside disjoint component diagnosis.
 
-#### Step 2. Bind the intended review base through the entire pipeline
+#### Source identity. Bind the intended review base through the entire pipeline (#393)
 
 Change `bin/ai-review-sandbox` base-ref preservation and `bin/ai-review-packet` base resolution together. Trace every packet caller in the nine wrappers and consumer `run-governed-review.mjs`. For governed PR reviews, resolve target branch/base/head using current trusted PR data, validate repository/ancestry/object existence, and carry immutable resolved SHAs through snapshot and manifest. A SHA must be locally resolvable; never silently fetch arbitrary prompt-supplied remotes. A mid-run base/head movement invalidates authorization and requires a newly bound run, not rewritten old evidence.
 
@@ -152,11 +151,11 @@ For standalone reviews preserve explicit `--base` behavior. Define default seman
 
 Gate: `tests/test-ai-review-packet.sh` and `tests/test-ai-review-sandbox.sh` prove A/B/C stale-main reproduction fixed, merge-commit comparison correct, non-main target honored, explicit SHA preserved, missing/mismatched target rejected and source movement rejected. Add consumer tests to `scripts/run-governed-review.test.mjs` and `scripts/manage-migration-author-lanes.test.mjs` after verifying those test owners at current main. Live synthetic PR comparison must match GitHub's intended changed-file set and sealed base/head; a generic APPROVE alone is insufficient. Depends on 0.
 
-**Cut point:** land the accuracy slice through Step 10, update evidence and child issues, then use `fresh-session` if needed. Re-read Steps 3–11 before continuing.
+**Cut point:** land #393 through the delivery gate, update evidence and child issues, then use `fresh-session` if needed. Re-read the remaining child contracts before continuing.
 
 ### Phase B — failure prevention and recovery
 
-#### Step 3. Avoid assigning repeatedly to an account known exhausted
+#### Availability. Avoid assigning repeatedly to an account known exhausted (#396)
 
 Trace `bin/ai-review-preflight` capacity/quarantine paths, `config/reviewer-capacity.json`, Kimi terminal `usage-limit` classification, diagnostic observation hooks, and shared-db allocation/preflight/failure recording. Existing adapters remain unknown when unsupported. Add only the missing connection from a proven terminal exhaustion observation to a scoped temporary admission backoff. Prefer the existing preflight/quarantine store; if its provider-only key cannot safely represent credential-profile/model scope, extend its versioned schema with migration tests rather than create a second store.
 
@@ -164,7 +163,7 @@ Store only opaque non-secret account/profile identity, provider/model scope wher
 
 Gate: fake clock/transport tests show repeat dispatch submits zero provider calls during an applicable backoff, different scope stays usable, unknown remains usable, stale/unscopable evidence cannot block indefinitely, expiry permits a guarded attempt, and allocation plus dispatch recheck share the same reason. Local dependency failures must never become quota exclusions. Test both Kimi durable worker and ordinary wrapper paths. Live validation uses an existing real refusal if still applicable; do not intentionally exhaust an account. Depends on 0 and scope evidence from 1; #312 is a completed prerequisite.
 
-#### Step 4. Reuse Qwen's fast identity repair; diagnose the remaining recovery gap
+#### Session recovery. Reuse Qwen's fast identity repair; diagnose the remaining recovery gap (#397)
 
 First verify PR #330's current head/review/merge/installation and the default qualification result. Do not reimplement its one-pass identity contract in `bin/ai-review-preflight`/`bin/ai-qwen`. If open, leave ownership with that task and continue independent steps. Its reported passing test counts do not prove installed completion.
 
@@ -172,27 +171,39 @@ For remaining failures instrument the exact `ai-qwen` turn/finalization paths: p
 
 Gate: default identity/qualification budgets pass on the installed build; changed, duplicate, missing and malformed fingerprints refuse; successful provider output plus failed local write is recoverable without generating again; unproven output stays incomplete; timeout cancellation state is truthful. Existing `tests/test-ai-qwen.sh` and `tests/test-ai-review-preflight.sh` remain green. Depends on 0; startup acceptance depends on PR #330, not provider recovery diagnosis.
 
-#### Step 5. Diagnose GLM transport and progress with exact failure-window evidence
+#### Session recovery. Diagnose GLM transport and progress with exact failure-window evidence (#397)
 
 Use `bin/ai-glm` `send_prompt`/`await_turn`, existing #312 diagnostic hooks and implementation v3 records. Capture bounded loopback health/permission latency, process/listener identity, last actual provider progress and cancellation acknowledgement during failure. A listener existing does not prove a responsive server; an unanswered endpoint does not prove a denied permission. First reproduce with mocked local endpoint stalls and delayed provider progress; then choose the smallest fix supported by observations.
 
 If server recovery is necessary, qualify it in a dedicated test instance; never restart the shared production reviewer server while another task uses it. Keep exact sessions and paid completion across a local transport outage. Preserve the narrow TodoWrite action contract and read-only tools. If no causal reproduction exists, leave the incident partial and identify the exact missing telemetry rather than tuning speculative timeouts.
 
-Gate: `tests/test-ai-glm.sh` distinguishes stalled transport, real permission denial, quiet healthy provider work and completed-but-unpublished output; no duplicate submission; recovery resumes the same session. If setup/recovery scripts change, `tests/test-windows-scripts.sh` plus the documented owned-child crash/restart canary are required. Depends on 0, existing diagnostics; live crash proof requires an isolated instance or a proven idle maintenance window.
+Gate: `tests/test-ai-glm.sh` distinguishes stalled transport, real permission denial, quiet healthy provider work and completed-but-unpublished output; no duplicate submission; recovery resumes the same session. If setup/recovery scripts change, `tests/test-windows-scripts.sh` plus the documented owned-child crash/restart canary are required. Depends on the programme gate and existing diagnostics; live crash proof requires an isolated instance or a proven idle maintenance window.
 
-#### Step 6. Restore Codex's original read-only capability
+#### Terminal contract. Standardize outcomes and failure diagnostics (#394)
+
+Make exit status, stdout, report state, and governed consumption agree on one terminal result. Add provider-shaped fixtures for the newly uncovered DeepSeek Windows encoding failure, Qwen content-filter/DataInspectionFailed path, Muse start failure, and Grok turn-limit cancellation, plus the absorbed #182/#183/#217/#218 cases. Preserve sanitized terminal diagnostics before cleanup and distinguish a legitimate evidence-based BLOCKED review from infrastructure failure.
+
+Gate: every supported wrapper returns one parseable verdict or stable failure reason; malformed, missing, trailing, filtered, encoding-failed, start-failed, tool-denied, cancelled, and turn-limited outputs cannot become generic success or approval. The governed consumer records the same reason.
+
+#### Evidence durability. Publish reports and interruption provenance before cleanup (#395)
+
+Write sanitized reports and terminal metadata atomically to the central private evidence store before deleting disposable worktrees. Record interruption source, actor class, phase, last proven provider state, and paid-work uncertainty. Cleanup must refuse when required evidence publication has not completed. This absorbs the 31 missing-report and two unknown-interruption maintenance records while reusing completed #212 metadata work.
+
+Gate: crash, cleanup, and race fixtures preserve exact invocation linkage; user cancellation, scheduler interruption, timeout, process death, and unknown remain distinct; publication failure neither erases paid work nor causes replay. Historical unknowns remain unknown.
+
+#### Codex containment. Restore Codex's original read-only capability (#271)
 
 Reproduce in a synthetic repository using the exact validated `CODEX_CMD` from `bin/ai-codex-review` and the current Windows CLI/build. Compare CLI process execution, private-path ACL setup, sandbox root spelling and source snapshot access. Keep authentication private. Determine whether denial occurs before shell launch, at path authorization, or inside a supported sandbox configuration. Inspect current official OpenAI documentation/installed CLI source or help before selecting a platform repair.
 
 Preserve sandbox enforcement, allowed command shape and GPT-5.6 low/medium reasoning. Do not change to unrestricted mode, delegate file reads to a privileged helper as a bypass, or declare read success from a doctor header. If the supported runtime cannot satisfy both read and deny-write tests, this is an external blocker; retain capability requirements and do not restore its retired consumer rotation without separate authorization.
 
-Gate: `tests/test-ai-codex-review.sh` plus a live synthetic exact-head review reads a known marker and the intended diff; attempted source write and out-of-boundary sentinel read fail; final verdict/report hashes match the reviewed head. Source-base Step 2 must be in the integrated live path. Depends on 0, with 2 needed for final acceptance.
+Gate: `tests/test-ai-codex-review.sh` plus a live synthetic exact-head review reads a known marker and the intended diff; attempted source write and out-of-boundary sentinel read fail; final verdict/report hashes match the reviewed head. #393 source identity must be in the integrated live path.
 
-**Cut point:** each repair lands independently via Step 10. Do not hold proven accuracy/observability fixes behind an unrelated provider outage. Re-read the measurement/closure phases after drift.
+**Cut point:** each repair lands independently through the delivery gate. Do not hold proven accuracy/observability fixes behind an unrelated provider outage. Re-read the measurement/closure phases after drift.
 
 ### Phase C — truthful telemetry and persistent state
 
-#### Step 7. Normalize usage without changing requests or verdicts
+#### Usage. Normalize usage without changing requests or verdicts (#333)
 
 Implement #333 in `bin/ai-deepseek-agent` and `bin/ai-muse`; extend Grok's missing-field formatting and GLM's report scope only as justified. Keep usage out of stdout if stdout is the governed terminal-verdict channel. For DeepSeek append per-turn usage to `<session>.usage.jsonl`, not `<session>.usage.json` (the latter can be mistaken for a session). Publish the successfully paid response/conversation atomically before any optional metrics failure can cause a replay. A sidecar failure must be visible but must not erase the paid result or create a false whole-turn total.
 
@@ -202,7 +213,7 @@ For Muse/OpenCode deduplicate by qualified stable part/message identity, never t
 
 Gate: tests in `test-ai-deepseek-agent.sh`, `test-ai-muse.sh`, `test-ai-grok-review.sh`, `test-ai-glm.sh` and `test-muse-opencode-contract.sh` cover missing/null/zero/malformed/nested counters, two tool steps, duplicate events, cumulative counters, compaction, missing final usage, sidecar write failure and resumed turn. Requests and existing terminal verdicts remain byte-equivalent in deterministic fixtures. Depends on 0 and the pinned-schema research gate in §6.
 
-#### Step 8. Qualify persistence for every advertised path
+#### Session recovery. Qualify persistence for every advertised path (#397, with #395 evidence publication)
 
 Create a qualification record under the existing `tests/verification/reviewer-reliability/` home, with synthetic fixtures beside the relevant existing provider tests. Do not create a competing generic harness. For Grok, GLM, Muse, Kimi, Qwen, Gemini and DeepSeek verify fresh task → explicit follow-up → wrapper process exit/restart → exact continuation. Use two repository/caller identities and concurrent independent names to prove separation; an attempt to continue an ambiguous/changed identity must refuse. Check retained decision-critical facts and original evidence, not only the session ID.
 
@@ -214,7 +225,7 @@ Gate: every provider/path cell is Pass, Unsupported-by-contract, or Blocked-with
 
 ### Phase D — measured tuning and delivery
 
-#### Step 9. Tune only measured inefficiency
+#### Efficiency. Tune only measured inefficiency (#333)
 
 Use existing provider test/probe paths and `tests/probes/muse-opencode-contract.sh`. Select a synthetic multi-file review with planted defects and a fixed expected result, a follow-up asking about a previously established fact, and a bounded compaction/restart case. Run three paired samples of unchanged baseline and candidate with equivalent task/source/model/tool settings. Alternate order; record cache warming, timing and retention interval. Preserve existing per-run limits. Stop immediately on incorrect evidence, lost facts, duplicate paid work, quota refusal or unproven cancellation. No unchanged retry after a deterministic failure.
 
@@ -224,7 +235,7 @@ Candidate changes may include fixing packet path retries, reducing redundant per
 
 Acceptance: all planted defects and retained-fact checks pass; safety checks unchanged; candidate improves median known cost or median elapsed time by at least 10% across the three pairs with no greater than 10% regression in the other measured dimension. This is a practical local acceptance threshold, not a statistical generalization. If counters are unavailable, claim time improvement only. If noise or tradeoffs defeat the gate, retain baseline and record no justified tuning; do not widen scope or run an indefinite benchmark. No provider is required to hit an arbitrary cache percentage. Depends on 7–8 for trusted interpretation.
 
-#### Step 10. Deliver each tested slice safely
+#### Delivery gate. Deliver each coding child safely
 
 For each repository: current-upstream isolated worktree, owned files only, correct Albert Git identity, focused regression suite then the current required verification route. Wrapper/evidence/safety-path changes require one read-only independent exact-head final review. Use the approved wrapper/skill for that review; no self-approval. Keep concurrent installations and Windows suite lanes exclusive after current job inspection. Retain skipped counts and blockers.
 
@@ -234,7 +245,7 @@ Installation is deployment: read `docs/deployment.md`, prove the installed launc
 
 Gate: exact source/review/CI/merge/install identities and synthetic live artifacts exist for each changed path. Depends on its slice's tests; runs repeatedly as delivery work, not as a final monolithic release.
 
-#### Step 11. Close the real repair round and reconcile owners
+#### Integrated acceptance. Close the real repair round and reconcile owners (#398)
 
 Resolve every affected incident through `ai-reviewer-issue resolve` with exact merged repair commit, repository when cross-repo, and evidence. Use partially-resolved only where some symptoms remain, with `maintenance carry-forward` and remaining-work proof. No resolution by similarity alone. Run maintenance completion with the documented proof JSON: repair_commit, tests, independent_review, installation, live and first-round legacy_audit. Open unexplained candidates or broken continuity keep the round open. Source loss cannot be waved away; a historical coverage blocker means full #337 closure is blocked.
 
@@ -285,7 +296,7 @@ Done requires every STATUS row evidenced; correct governed comparison and valid 
 
 Rollback is slice-specific: retain pre-install configuration backups and installed source identity; stop new submissions only during an authorized serialized changeover, preserve in-flight records and paid artifacts, and revert the exact owned code/configuration slice through GitHub. Do not downgrade/delete a new state schema blindly. Versioned state readers must either read prior records or fail with an explicit recovery path; qualification tests cover forward-written state before rollback approval. If rollback would remove an original capability or destroy state, stop before it and present the concrete owner decision.
 
-Open technical questions have defined resolution gates, not missing product requirements: OpenCode usage semantics (§6/7); GLM failure cause (Step 5); Codex supported sandbox repair (Step 6); Qwen residual finalization cause after #330 (Step 4); scope/freshness of exhaustion observations (Step 3); best compaction settings (Step 9). Outcomes may be no justified change, targeted repair, or external blocker with retained evidence. None permits claiming a blocked supported capability is complete.
+Open technical questions have defined resolution gates, not missing product requirements: OpenCode usage semantics (#333); GLM and Qwen execution causes (#397); Codex supported sandbox repair (#271); scope/freshness of exhaustion observations (#396); and justified compaction settings (#333). Outcomes may be no justified change, targeted repair, or external blocker with retained evidence. None permits claiming a blocked supported capability is complete.
 
 The public plan is sufficient to start and execute diagnosis without the planning chat. Private historical closure still requires the original host evidence; if unavailable, create synthetic regression proof for code work but retain that historical closure blocker. Do not ask Albert to choose technical mechanics already bounded here. No outstanding owner decision blocks the planning deliverable.
 

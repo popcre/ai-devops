@@ -28,7 +28,7 @@ The plan covers the confirmed source defects, precise diagnosis branches for unr
 
 Planning baseline: ai-devops `d5522d9a8bcdef49db917d37002166aaaff5be73`. Branch/worktree: `codex/reviewer-audit-20260908` at `C:/repos/ai-devops-worktrees/reviewer-audit-20260908`. This delivery contains only the plan, this handoff and prose discovery links. Implementation has not started; no installed configuration or runtime source was changed. The planning PR's final merged identity is discoverable through issue #337 and Git history; verify it live before relying on this file, rather than expecting a commit to contain its own future SHA.
 
-The private audit and inventories remain under that worktree's ignored `.ai/reviewer-audit-20260908/`. Do not copy them into public Git. The canonical incident ledger is discoverable with `bin/ai-reviewer-issue path`. Its first real maintenance round is still open: use `maintenance show` to recover the current round ID and `maintenance start --resume` to retain its frozen boundaries. At audit time it contained 198 candidates; this is not a count of proven defects. No candidate closure or completed checkpoint was claimed.
+The canonical incident ledger is discoverable with `bin/ai-reviewer-issue path`. Its first real maintenance round is open and restored as `0c62f3dffce145c4b2768855b912b958`; always resume that exact round and retain its frozen boundaries. It contains 198 evidence candidates, not 198 distinct defects. The private 67-record root-cause map stays in the canonical checkout's ignored maintenance directory and must not be copied into public Git.
 
 Completed prerequisites: #308 checkpoint implementation and #312 diagnostics/quota implementation. #312 merged as `a570069a95d06c271895a33565785c2784e32a8b`; its current plan says installed/live-qualified. The capacity adapters remain unknown for unsupported interfaces, so repeated observed exhaustion still needs end-to-end admission investigation.
 
@@ -48,11 +48,11 @@ GLM timeout/endpoint loss, Qwen finalization failure and Codex read denials have
 
 ## 6. Exact next steps
 
-1. Read the linked plan STATUS and §§4–6, fetch current upstream into an independent worktree, inspect #330/#333 and active runner ownership. Gate: exact current baseline and no duplicated implementation.
-2. Execute plan Steps 0–1 through the existing maintenance tooling. Gate: every frozen candidate has a traceable disposition or an explicit evidence blocker; never reset the round.
-3. Begin the reproducible wrong-base slice in Step 2; independent disjoint diagnosis/metrics work can proceed if separately owned. Gate: stale-main, merge-commit, explicit/non-main target and source-movement tests pass, then exact-head review and installation proof.
-4. Follow Steps 3–9 with their dependencies and bounded diagnosis/measurement gates; re-read downstream phases at each fresh-session cut point. Gate: supported-path matrix has no unproven pass.
-5. Deliver each slice through Step 10, then close the real incident coverage through Step 11. Gate: merged/installed identities, live results and immutable completion proof all exist. Only then close #337 and retire this handoff under the successor rules.
+1. Read the linked plan STATUS, fetch current upstream into an independent worktree, and inspect active PR/runner ownership. Gate: exact current baseline and no duplicated implementation.
+2. Select one #337 coding child: #393 source identity, #394 terminal diagnostics, #395 durable evidence, #396 availability/concurrency, #397 session recovery, #271 Codex sandbox, #333 usage/efficiency, or #169 shared primitives. Do not mix boundaries merely because one incident shows several symptoms.
+3. Deliver that child with focused fixtures, required safety suites, exact-head review, merge, installation, live qualification, and incident reconciliation.
+4. Run #398 last inside #337: account for all 198 frozen candidates and a bounded next interval, then prove the installed nine-reviewer matrix.
+5. Close #337 only after every registered child is complete. #166 remains the final #159 required-check and throughput cutover.
 
 ## 7. Constraints and gotchas
 
