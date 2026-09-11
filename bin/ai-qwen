@@ -1771,40 +1771,30 @@ cmd_list() {
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() {
+(
   local rid meta dir manifest sess_lock f base
   rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
   [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
   sess_lock="$(lock_path "$rid" "$1")"
-  [ ! -d "$sess_lock" ] || die "session '$1' has an active turn and cannot be deleted."
+  lock_acquire "$sess_lock" "delete:$1" || die "session '$1' has an active turn and cannot be deleted."
+  trap '[ "$(cat "$sess_lock/pid" 2>/dev/null)" != "$$" ] || lock_release "$sess_lock"' EXIT
   if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
     dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
     same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] || die "refusing to delete untrusted implementation state."
     jq -e --arg dir "$dir" --arg meta "$meta" '.version==1 and .owner_dir==$dir and .metadata==$meta' "$manifest" >/dev/null 2>&1 \
       || die "refusing to delete an implementation directory with an invalid owner manifest."
-    for f in "$dir"/* "$dir"/.[!.]*; do
-      [ -e "$f" ] || continue; base="$(basename "$f")"
-      case "$base" in
-        owner.json|metadata.json|cumulative.patch|.tmp.*|.cumulative.*) ;;
-        cumulative-*.patch) printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' \
-          || die "implementation state directory contains an unowned file and was left in place: $f" ;;
-        *) die "implementation state directory contains an unowned file and was left in place: $f" ;;
-      esac
-    done
-    local evidence_run canonical
-    evidence_run="$(jq -r '.evidence_run_id // empty' "$meta")"; canonical="$(jq -r .canonical_patch "$meta")"
-    [ -n "$evidence_run" ] || die 'legacy implementation evidence is unknown; preserve and reconcile exact private artifacts before deleting this state.'
-    reviewer_event_verify_private verify-prepared qwen "$evidence_run" git-binary-patch "$canonical" || die 'canonical implementation evidence is not durable; state preserved for local reconciliation.'
-    for f in "$dir"/cumulative-*.patch "$dir"/cumulative.patch; do
-      [ -f "$f" ] || continue
-      same_path "$f" "$canonical" || die 'historical implementation patch has unproven cleanup ownership; preserve and reconcile it before deleting state.'
-    done
-    rm -f "$dir"/metadata.json "$dir"/owner.json "$canonical" "$dir"/.tmp.* "$dir"/.cumulative.*
+    local -a archived_files=("$meta" "$manifest" "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/recovery/*)
+    reviewer_event_verify_private archive-implementation-state qwen "$meta" || die 'implementation state could not be archived; every local artifact was preserved.'
+    reviewer_event_verify_private verify-implementation-archive qwen "$meta" || die 'implementation state changed after archival; local artifacts were preserved.'
+    for f in "${archived_files[@]}"; do [ ! -e "$f" ] || rm -f -- "$f" || die 'archived state could not be removed; archive remains available.'; done
+    [ ! -d "$dir/recovery" ] || rmdir "$dir/recovery" || die 'unexpected recovery files were preserved.'
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
   else
     release_boundary "$(repo_root)" "qwen-$1" || die "review evidence cleanup refused; session metadata preserved."
     rm -f "$meta"
   fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
+)
 }
 cmd_transcript() {
   local sid qwen repo dir out tmp source base; repo="$(repo_root)"

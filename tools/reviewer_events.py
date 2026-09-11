@@ -463,6 +463,98 @@ def verify_prepared(directory, provider, run_id, kind, artifact):
     return references
 
 
+def implementation_archive_source(directory, provider, metadata):
+    require(provider in {"qwen", "kimi"}, "implementation state archive has no authoritative provider adapter")
+    metadata = physical(metadata)
+    _, metadata_data = snapshot(metadata, "log")
+    meta = json.loads(metadata_data)
+    require(isinstance(meta, dict) and meta.get("version") == 2 and meta.get("mode") == "implement",
+            "only canonical implementation state may be archived")
+    name, caller, base = meta.get("name"), meta.get("caller"), meta.get("base_sha")
+    require(name and caller and metadata.name == "metadata.json" and
+            metadata.parent.name == caller + "--" + name + ".d" and
+            re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""), "legacy canonical metadata identity is unproven")
+    repo = physical(meta.get("repo") or "")
+    result = subprocess.run(["git", "-C", str(repo), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    require(result.returncode == 0 and physical(result.stdout.strip()) == repo,
+            "legacy canonical repository is unavailable or changed")
+    result = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", base + "^{commit}"], capture_output=True)
+    require(result.returncode == 0, "legacy canonical base commit is unavailable")
+    manifest = physical(metadata.parent / "owner.json")
+    _, manifest_data = snapshot(manifest, "log")
+    owner = json.loads(manifest_data)
+    require(isinstance(owner, dict) and owner.get("version") == 1 and physical(owner.get("owner_dir", "")) == metadata.parent and
+            physical(owner.get("metadata", "")) == metadata and owner.get("patch_pattern") == "cumulative-<generation>-<sha256>.patch",
+            "legacy canonical owner manifest is unproven")
+    patch = physical(meta.get("canonical_patch") or "")
+    require(patch.parent == metadata.parent and
+            (patch.name == "cumulative.patch" or re.fullmatch(r"cumulative-[0-9]+-[0-9a-f]{64}\.patch", patch.name)),
+            "legacy canonical patch path is unproven")
+    patch_boundary, patch_data = snapshot(patch, "log")
+    require(patch_boundary["exists"] and digest(patch_data) == meta.get("patch_sha256") and
+            (not patch_data or patch_data.startswith(b"diff --git ")), "legacy canonical patch is missing or changed")
+    if meta.get("evidence_run_id"):
+        verify_prepared(directory, provider, meta["evidence_run_id"], "git-binary-patch", patch)
+    files = {metadata: metadata_data, manifest: manifest_data, patch: patch_data}
+    for candidate in metadata.parent.glob("cumulative-*.patch"):
+        candidate = physical(candidate)
+        match = re.fullmatch(r"cumulative-[0-9]+-([0-9a-f]{64})\.patch", candidate.name)
+        _, data = snapshot(candidate, "log")
+        require(match and digest(data) == match[1] and (not data or data.startswith(b"diff --git ")),
+                "historical canonical patch name or bytes are unproven")
+        files[candidate] = data
+    preserved = meta.get("preserved_generation_artifacts", [])
+    require(isinstance(preserved, list), "preserved generation metadata is invalid")
+    for item in preserved:
+        require(isinstance(item, dict), "preserved generation entry is invalid")
+        candidate = physical(item.get("path", ""))
+        require(candidate.parent == metadata.parent / "recovery", "preserved generation is outside owned recovery directory")
+        boundary, data = snapshot(candidate, "log")
+        require(boundary["exists"] and digest(data) == item.get("sha256") and (not data or data.startswith(b"diff --git ")),
+                "preserved generation bytes are unproven")
+        files[candidate] = data
+    actual = set()
+    for item in metadata.parent.rglob("*"):
+        item = physical(item)
+        if item.is_dir():
+            require(item == metadata.parent / "recovery", "unowned directory in legacy implementation state")
+        else:
+            actual.add(item)
+    require(actual == set(files), "legacy implementation state contains unowned or missing artifacts")
+    value = {"schema_version": 1, "provider": provider, "operation": "legacy-state-archive",
+             "repository": str(repo), "caller": caller, "base": base,
+             "historical_source_authorization": "unknown", "original_paid_result": "unknown",
+             "files": [{"path": str(path), "sha256": digest(data), "text": data.decode("utf-8")}
+                       for path, data in sorted(files.items(), key=lambda item: str(item[0]))]}
+    return digest(encoded(value))[:32], value
+
+
+def archive_implementation_state(directory, provider, metadata):
+    run_id, value = implementation_archive_source(directory, provider, metadata)
+    event = {"schema_version": 1, "event": "started", "provider": provider, "operation": "local-reconciliation",
+             "parent_run_id": None, "run_id": run_id, "timestamp": now(), "repo": value["repository"],
+             "head": "", "caller": value["caller"]}
+    append(directory, lambda rows: None if any(row.get("run_id") == run_id for row in rows) else event)
+    target = evidence_root(directory, run_id) / "implementation-state-archive.json"
+    if target.exists():
+        require(read_json(target) == value, "immutable implementation archive conflicts")
+    else:
+        publish(target, value)
+    require(implementation_archive_source(directory, provider, metadata) == (run_id, value), "legacy state changed during archival")
+    finish_reconciliation(directory, provider, run_id, [])
+    return {"archive_id": run_id, "historical_source_authorization": "unknown", "original_paid_result": "unknown"}
+
+
+def verify_implementation_archive(directory, provider, metadata):
+    run_id, value = implementation_archive_source(directory, provider, metadata)
+    require(read_json(evidence_root(directory, run_id) / "implementation-state-archive.json") == value,
+            "exact legacy implementation state is not archived")
+    start = invocation(directory, provider, run_id)
+    require(start.get("operation") == "local-reconciliation" and start.get("head") == "" and
+            start.get("parent_run_id") is None, "legacy archive must not claim a paid invocation")
+    return {"archive_id": run_id, "historical_source_authorization": "unknown", "original_paid_result": "unknown"}
+
+
 def reconcile_owner(directory, provider, owner, metadata, report):
     """Publish proven legacy report/patch before allowing exact owned cleanup."""
     path, _, owner_data, row, repo, workspace = owner_identity(owner)
@@ -724,7 +816,11 @@ def main():
     require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen"},
             "unknown reviewer provider")
     directory = location()
-    if operation == "verify-prepared":
+    if operation in {"archive-implementation-state", "verify-implementation-archive"}:
+        require(len(sys.argv) == 4, "implementation archive requires provider and exact canonical metadata")
+        action = archive_implementation_state if operation == "archive-implementation-state" else verify_implementation_archive
+        print(json.dumps(action(directory, provider, sys.argv[3])))
+    elif operation == "verify-prepared":
         require(len(sys.argv) == 6, "verify-prepared requires provider, original invocation, kind and exact path")
         print(json.dumps({"references": verify_prepared(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5])}))
     elif operation == "reconcile-owner":
