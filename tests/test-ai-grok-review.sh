@@ -757,7 +757,7 @@ else
   skip "Windows native fallback runtime test skipped on non-Windows"
   skip "Windows fallback-failure fail-closed test skipped on non-Windows"
 fi
-check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
+check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c '^    preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
 # on_paid_signal ordering: the interrupt path must record paid-work uncertainty
 # BEFORE it attempts the fallible process-tree stop. Both stop helpers are
 # replaced with functions that abort, so a marker can only exist if it was

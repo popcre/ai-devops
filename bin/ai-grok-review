@@ -287,7 +287,7 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -1076,6 +1076,9 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   prepare_active_stop_file
+  if [ -n "${ACTIVE_PAID_LOCK:-}" ]; then
+    reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+  fi
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
@@ -1443,7 +1446,6 @@ cmd_new() {
   ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
   record_diagnostic "$repo" "$workid" "$name" launch provider-started
-  reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     if [ "$rc" = 124 ]; then
@@ -1566,7 +1568,6 @@ $REVIEW_HEAD only."
   ACTIVE_DIAG_REPO="$repo"; ACTIVE_DIAG_RUN="$workid"; ACTIVE_DIAG_SESSION="$name"
   trap 'on_paid_signal' INT TERM
   record_diagnostic "$repo" "$workid" "$name" launch provider-started
-  reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
   run_turn "$REVIEW_DIR" "$out" "$pf" "$turns" "$sid"; rc="$RUN_TURN_RC"
   if [ "$rc" = 124 ] || ! await_result "$out" "review '$name'"; then
     if [ "$rc" = 124 ]; then
@@ -1701,6 +1702,7 @@ cmd_delete() {
     fi
   done
   meta="$(find_meta "$rid" "$name")"
+  release_boundary "$(repo_root)" "grok-$name" || die 'review evidence cleanup refused; session metadata preserved.'
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
@@ -1711,7 +1713,6 @@ cmd_delete() {
     [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
     rm -rf -- "$record"
   done
-  release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }
 

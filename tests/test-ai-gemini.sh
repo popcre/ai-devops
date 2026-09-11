@@ -20,7 +20,7 @@ cat > "$TMP/bin/sandbox" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- ensure-copy) src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf %s "$dst" ;;
+ ensure-copy) src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf '%s\nevidence_format=1\n' "$src" > "$dst/.ai-review-sandbox"; printf %s "$dst" ;;
  remove-copy) rm -rf "$MOCK_COPIES/$3" ;;
  *) exit 2 ;;
 esac
