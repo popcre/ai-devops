@@ -490,6 +490,11 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
     return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -f "$dir/publication-incomplete" ]; then
+    warn "Grok returned a terminal result, but durable publication is incomplete; paid work remains blocked. Inspect $(basename "$dir") before reconciling it manually."
+    [ ! -s "$dir/terminal-result-path" ] || warn "retained terminal result: $(cat "$dir/terminal-result-path")"
+    return 1
+  fi
   if [ -f "$dir/remote-uncertain" ]; then
     warn "an interrupted Grok turn has unconfirmed provider state; paid work remains blocked. Inspect $(basename "$dir") before reconciling it manually."
     return 1
@@ -604,6 +609,7 @@ lock_release() { # only the creating wrapper may release it
   local dir="$1" owner
   [ -d "$dir" ] || return 0
   [ ! -f "$dir/remote-uncertain" ] || return 0
+  [ ! -f "$dir/publication-incomplete" ] || return 0
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
 }
@@ -627,6 +633,21 @@ preserve_uncertain_paid_turn() { # preserve lock before any fallible tree cleanu
   [ -z "$sess_lock" ] || lock_release "$sess_lock"
   stop_active_grok_tree \
     || warn 'could not confirm local reviewer-tree termination; paid work remains blocked for manual reconciliation.'
+}
+
+preserve_publication_incomplete() { # preserve known terminal JSON until durable publication can be reconciled
+  local rid_lock="$1" sess_lock="${2:-}" result_path="$3"
+  # The provider turn is known terminal, so do not invent remote uncertainty.
+  # Disable normal deletion first; the exact-work lock remains fail-closed even
+  # if the local marker itself cannot be written.
+  trap - EXIT
+  if date -u +%FT%TZ > "$rid_lock/publication-incomplete" &&
+     printf '%s\n' "$result_path" > "$rid_lock/terminal-result-path"; then
+    :
+  else
+    warn 'could not record the publication-incomplete marker; retaining the paid-work lock for manual reconciliation.'
+  fi
+  [ -z "$sess_lock" ] || lock_release "$sess_lock"
 }
 
 session_lock_owner_alive() { # DIR OWNER
@@ -1408,9 +1429,9 @@ cmd_doctor() {
         lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
       else
         echo "FAILED — terminal result retained because durable evidence publication failed"
-        date -u +%FT%TZ > "$live_lock/publication-incomplete"
         note "  exact terminal result retained for reconciliation: $tmp"
-        ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM; keep_result=1; rc=1
+        preserve_publication_incomplete "$live_lock" '' "$tmp"
+        ACTIVE_PAID_LOCK=''; trap - INT TERM; keep_result=1; rc=1
       fi
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
@@ -1509,7 +1530,11 @@ cmd_new() {
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
-  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
+  reviewer_event_cleanup_allowed grok || {
+    note "  exact terminal result retained for reconciliation: $out"
+    preserve_publication_incomplete "$rid_lock" "$sess_lock" "$out"
+    return 1
+  }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1631,7 +1656,11 @@ $REVIEW_HEAD only."
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
-  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
+  reviewer_event_cleanup_allowed grok || {
+    note "  exact terminal result retained for reconciliation: $out"
+    preserve_publication_incomplete "$rid_lock" "$sess_lock" "$out"
+    return 1
+  }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
