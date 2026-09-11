@@ -510,6 +510,37 @@ esac
         self.assertIn("await_result", result.stdout)
         self.assertFalse(self.ledger.exists())
 
+    def test_delete_preserves_metadata_and_provider_when_snapshot_cleanup_refuses(self):
+        for provider, wrapper in (("qwen", "ai-qwen"), ("kimi", "ai-kimi"), ("glm", "ai-glm"), ("grok", "ai-grok-review")):
+            with self.subTest(provider=provider):
+                source = (ROOT / "bin" / wrapper).read_text()
+                delete = source.split("\ncmd_delete() {", 1)[1].split("\n}\n", 1)[0]
+                release = source.split("\nrelease_boundary() {", 1)[1].split("\n}\n", 1)[0]
+                meta = self.root / (provider + "-metadata.json")
+                meta.write_text(json.dumps({"mode": "review", "type": "review", "repository_root": str(self.root)}))
+                sandbox = self.root / "refusing-sandbox"
+                sandbox.write_text("#!/usr/bin/env bash\nexit 1\n")
+                sandbox.chmod(0o700)
+                script = self.root / (provider + "-delete.sh")
+                script.write_text('''set -euo pipefail
+STATE_DIR="$1"; META="$2"; SANDBOX_BIN="$3"; CALLER=fixture
+repo_root(){ printf '%s' "$STATE_DIR"; }
+repo_id(){ printf repo; }
+find_meta(){ printf '%s' "$META"; }
+lock_path(){ printf '%s/absent-lock' "$STATE_DIR"; }
+require_upstream_identity(){ printf upstream; }
+session_record_path(){ printf '%s/absent-session' "$STATE_DIR"; }
+server_up(){ return 0; }
+api(){ touch "$STATE_DIR/provider-delete"; }
+note(){ :; }
+die(){ printf '%s\\n' "$*" >&2; exit 1; }
+''' + "release_boundary() {" + release + "\n}\ncmd_delete() {" + delete + "\n}\ncmd_delete fixture\n")
+                result = subprocess.run([self.bash, str(script), str(self.root), str(meta), str(sandbox)],
+                                        capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(meta.exists(), result.stderr)
+                self.assertFalse((self.root / "provider-delete").exists(), result.stderr)
+
     def test_guard_preserves_stdin_stdout_stderr_exit(self):
         result = self.guard(operation="stream", input="unchanged input\n")
         self.assertEqual(result.returncode, 7, result.stderr)
@@ -692,6 +723,18 @@ wait "$job"
             events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
         self.assertEqual((sandbox / ".ai-review-sandbox").read_bytes(), before)
 
+    def test_legacy_reconciliation_recovers_crash_after_marker_publication_idempotently(self):
+        sandbox, meta, report = self.legacy_sandbox_fixture()
+        result = events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows if row["event"] != "finished"))
+        again = events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        self.assertTrue(again["already_reconciled"])
+        events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(len([row for row in rows if row["event"] == "finished"]), 1)
+        self.assertEqual(rows[-1]["run_id"], result["run_id"])
+
     def test_stale_source_finalization_preserves_original_head_without_authorizing_current_head(self):
         original = "b" * 32
         self.invocation(rid=original)
@@ -725,6 +768,123 @@ wait "$job"
         reference = events.publish_report(self.root, "grok", recovery, report, {"original_invocation_id": original})
         self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
         self.assertEqual(self.ledger.read_bytes(), before)
+
+    def test_failed_local_retry_does_not_poison_later_recovery_cleanup(self):
+        original, sandbox, report = self.evidence_fixture()
+        marker = sandbox / ".ai-review-sandbox"
+        marker.write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", original, sandbox)
+            original_marker = marker.read_bytes()
+            for recovery in ("d" * 32, "e" * 32):
+                self.invocation(rid=recovery, finish=False)
+                rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+                rows[-1]["operation"] = "local-finalization"
+                self.ledger.write_text("".join(json.dumps(item) + "\n" for item in rows))
+                events.require_report(self.root, "grok", recovery)
+                events.bind_sandbox(self.root, "grok", recovery, sandbox, original)
+                self.assertEqual(marker.read_bytes(), original_marker)
+            with self.assertRaises(events.Blocked):
+                events.verify_sandbox(self.root, sandbox)
+            reference = events.publish_report(self.root, "grok", recovery, report,
+                                              {"original_invocation_id": original})
+            self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
+
+    def test_implementation_owner_allows_no_paid_cleanup_then_requires_durable_report(self):
+        rid = "b" * 32
+        self.invocation(rid=rid, finish=False)
+        workspace = self.root / "implementation"
+        workspace.mkdir()
+        owner = self.root / "implementation-owner.json"
+        owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
+        events.bind_owner(self.root, "grok", rid, owner)
+        self.assertEqual(events.verify_owner(self.root, "grok", owner), [])
+        events.require_report(self.root, "grok", rid)
+        with self.assertRaises(events.Blocked):
+            events.verify_owner(self.root, "grok", owner)
+        report = self.root / "implementation.md"
+        report.write_text("Synthetic incomplete implementation evidence.")
+        receipt = events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(events.verify_owner(self.root, "grok", owner), [receipt["reference"]])
+        row = json.loads(owner.read_text())
+        row["worktree"] = str(self.root / "other-workspace")
+        owner.write_text(json.dumps(row))
+        with self.assertRaises(events.Blocked):
+            events.verify_owner(self.root, "grok", owner)
+
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self):
+        state = self.root / "state"
+        workspace = state / "worktrees/qwen.fixture-codex-work/wt"
+        workspace.parent.mkdir(parents=True)
+        subprocess.run(["git", "clone", "-q", str(self.toolkit), str(workspace)], check=True, capture_output=True)
+        (workspace / "proof.txt").write_text("Synthetic preserved implementation change.\n")
+        patch_data = subprocess.check_output(["git", "-C", str(workspace), "diff", "--binary", self.sha])
+        metadata = state / "sessions/fixture/codex--work.d/metadata.json"
+        metadata.parent.mkdir(parents=True)
+        canonical = metadata.parent / "cumulative.patch"
+        canonical.write_bytes(patch_data)
+        metadata.write_text(json.dumps({"version": 2, "mode": "implement", "repo": str(self.toolkit),
+            "caller": "codex", "name": "work", "base_sha": self.sha, "last_terminal_state": "completed",
+            "qwen_session_id": "synthetic-session", "canonical_patch": str(canonical), "patch_sha256": events.digest(patch_data)}))
+        owner = workspace.parent / "owner.json"
+        owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
+        report = self.root / "qwen-work-synthetic.md"
+        report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
+        extra = workspace / "unexported.txt"
+        extra.write_text("must not be discarded")
+        with self.assertRaises(events.Blocked):
+            events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+        extra.unlink()
+        result = events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+        self.assertEqual(result["report_count"], 2)
+        self.assertEqual(result["historical_source_authorization"], "unknown")
+        report.unlink(); canonical.unlink()
+        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 2)
+        self.assertTrue(events.reconcile_owner(self.root, "qwen", owner, metadata, report)["already_reconciled"])
+
+    def test_patch_publication_failure_blocks_cleanup_after_report_succeeds(self):
+        rid, _, report = self.evidence_fixture()
+        events.publish_report(self.root, "grok", rid, report)
+        patch_path = self.root / "missing.patch"
+        with self.assertRaises(events.Blocked):
+            events.publish_patch(self.root, "grok", rid, patch_path)
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "grok", rid)
+        patch_path.write_text("diff --git a/x b/x\nGIT binary patch\nliteral 1\nIc${Nk000310RR91\n")
+        receipt = events.publish_patch(self.root, "grok", rid, patch_path)
+        patch_path.unlink()
+        references = events.verify_reports(self.root, "grok", rid)
+        self.assertEqual(len(references), 2)
+        self.assertIn(receipt["reference"], references)
+
+    def test_empty_patch_does_not_replace_required_review_report(self):
+        rid, _, report = self.evidence_fixture()
+        patch_path = self.root / "no-changes.patch"
+        patch_path.write_bytes(b"")
+        events.publish_patch(self.root, "grok", rid, patch_path)
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "grok", rid)
+        events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(len(events.verify_reports(self.root, "grok", rid)), 2)
+
+    def test_shared_publisher_carries_muse_recovery_identity(self):
+        original, recovery = "e" * 32, "f" * 32
+        self.invocation(rid=original, provider="muse")
+        self.invocation(rid=recovery, provider="muse", finish=False)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[-1]["operation"] = "local-finalization"
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        report = self.root / "muse-report.md"
+        report.write_text("Synthetic retained Muse report.\n")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root), "AI_REVIEW_EVENT_RUN_ID": recovery,
+               "MUSE_RECOVERY_EVENT_RUN_ID": original}
+        result = subprocess.run([self.bash, "-c", 'source "$1"; reviewer_event_publish_report muse "$2"', "fixture",
+                                 str(self.toolkit / "tools/reviewer_event_guard.sh"), str(report)],
+                                cwd=self.toolkit, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(events.verify_reports(self.root, "muse", recovery)), 1)
+        receipt = next((self.root / "evidence" / recovery).glob("*.report.json"))
+        self.assertEqual(json.loads(receipt.read_text())["original_invocation_id"], original)
 
     def test_evidence_rejects_wrong_invocation_and_changed_content(self):
         rid, _, report = self.evidence_fixture()

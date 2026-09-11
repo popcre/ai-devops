@@ -216,10 +216,11 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; REVIEW_HEAD=""; API_RESPONSE_FILE=""
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
+  reviewer_event_cleanup_allowed deepseek || return 1
   if [ -n "$REVIEW_SOURCE_TAG" ]; then
     "$SOURCE_TOOLS/ai-review-sandbox" remove-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG" >/dev/null 2>&1 || true
     REVIEW_SOURCE_TAG=""
@@ -237,10 +238,26 @@ on_lock_signal() { # SIGNAL_EXIT_CODE
     wait "$ACTIVE_API_PID" 2>/dev/null || true
     ACTIVE_API_PID=""
   fi
+  publish_failure_evidence interrupted || exit "$code"
   [ -z "$ACTIVE_API_TMP" ] || rm -f $ACTIVE_API_TMP
   ACTIVE_API_TMP=""
   [ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock
   exit "$code"
+}
+
+publish_failure_evidence() {
+  local reason="$1" report
+  [ -n "${LOCK_DIR:-}" ] || return 0
+  report="$(mktemp "$SESS_DIR/.failure-report.XXXXXX")" || return 1
+  {
+    printf '# DeepSeek incomplete turn\n\nLocal result: %s. Remote paid-work outcome is unknown.\n' "$reason"
+    if [ -n "$ACTIVE_API_RESPONSE" ] && [ -f "$ACTIVE_API_RESPONSE" ]; then
+      printf '\n## Retained provider response\n\n'
+      cat "$ACTIVE_API_RESPONSE"
+    fi
+  } > "$report" || return 1
+  reviewer_event_publish_report deepseek "$report" || return 1
+  rm -f "$report"
 }
 acquire_lock() { # transcript path
   local target="$1" waited=0
@@ -274,6 +291,13 @@ call_api() {
   # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
   # signal cannot release the conversation lock while the request still runs.
   local msgs_file="$1" reply_file="$2" req_file resp_file status_file http_code rc
+  if [ -n "${LOCK_DIR:-}" ]; then
+    if [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then
+      reviewer_event_evidence require-report deepseek "$REVIEW_SOURCE_WORKSPACE" || return 1
+    else
+      reviewer_event_evidence require-report deepseek || return 1
+    fi
+  fi
   req_file="$(mktemp)"; status_file="$(mktemp)"
   # Retain the exact paid response before local parsing or verdict validation.
   # This is private provider evidence, not a conversation or a usage sidecar.
@@ -284,6 +308,7 @@ call_api() {
     resp_file="$(mktemp)" || return 1
   fi
   API_RESPONSE_FILE="$resp_file"
+  ACTIVE_API_RESPONSE="$resp_file"
   ACTIVE_API_TMP="$req_file $status_file"
   MODEL="$MODEL" "$PYTHON" - "$msgs_file" >"$req_file" <<'PY'
 import json, os, sys
@@ -301,12 +326,14 @@ PY
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   if [ "$rc" -ne 0 ]; then
     echo "Error: provider-transport-failure: DeepSeek request failed or exceeded ${CALL_TIMEOUT}s; private response: $resp_file" >&2
+    publish_failure_evidence request-failed || return 1
     rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
     return 1
   fi
   if [ "$http_code" != "200" ]; then
     echo "Error: provider-http-failure: DeepSeek returned HTTP $http_code; private response: $resp_file" >&2
+    publish_failure_evidence "http-$http_code" || return 1
     rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
     return 1
@@ -327,6 +354,10 @@ except (ValueError, KeyError, IndexError, TypeError, OSError):
     raise SystemExit(1)
 PY
   rc=$?
+  [ "$rc" -eq 0 ] || publish_failure_evidence invalid-provider-response || return 1
+  if [ -n "${LOCK_DIR:-}" ] && [ "$rc" -eq 0 ]; then
+    reviewer_event_publish_report deepseek "$reply_file" || return 1
+  fi
   rm -f "$req_file" "$status_file"
   if [ "$rc" -eq 0 ] && [ -z "${ID:-}" ]; then rm -f "$resp_file"; fi
   [ "$rc" -eq 0 ] || echo "Private response: $resp_file" >&2
@@ -350,6 +381,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   REVIEW_HEAD="$(jq -r .head "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_TAG="deepseek-$(printf '%s' "$REVIEW_SOURCE_IDENTITY" | sha256sum | cut -c1-24)"
   snapshot="$("$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
+  REVIEW_SOURCE_WORKSPACE="$snapshot"
   REVIEW_SOURCE_PACKET="$("$SOURCE_TOOLS/ai-review-packet" build "$snapshot" "$REVIEW_SOURCE_TAG" --identity "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_HASH="$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")"
   saved="$REVIEW_SOURCE_IDENTITY.packet"
@@ -668,7 +700,7 @@ $REVIEW_INSTRUCTION"
     [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
-    call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; exit 1; }
     REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
@@ -729,7 +761,7 @@ $REVIEW_INSTRUCTION"
     [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
-    call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; canonical conversation is unchanged." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; exit 1; }
     REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi

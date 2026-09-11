@@ -22,8 +22,12 @@ AI_MUSE_CALLER=codex ai-muse delete architecture-debate
 if OpenCode returns another one. Sessions are separated by repository, caller, and
 name. Codex uses `AI_MUSE_CALLER=codex`; Claude uses `AI_MUSE_CALLER=claude`.
 Replace `codex` with `claude` when Claude owns the conversation. If a provider turn or local check leaves the outcome uncertain, `ask` stops. Inspect
-the transcript, then run `reconcile` only when you deliberately accept that recorded
-state and want to continue the same conversation.
+the transcript, then run `reconcile` to finalize an exact retained completion locally.
+It verifies the original process result, session, packet, and response bytes without
+contacting the provider. A session ID alone cannot clear an uncertain turn. Missing
+or ambiguous terminal evidence stays blocked. If the source moved, reconciliation
+retains a clearly non-authorizing report and permits a fresh same-session `ask`.
+An unchanged existing report is reused; different bytes are never overwritten.
 
 The older `ai-muse review [repository] [request]` command remains available. It now
 creates a timestamped named conversation, so the result is not trapped in a one-off

@@ -139,6 +139,7 @@ git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
+  reviewer_event_cleanup_allowed codex || return 1
   [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
@@ -160,6 +161,7 @@ preserve_failure_diagnostic(){ # FAILURE_CLASS
     tail -c 32768 "$TMP_ERR" | sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file && mv "$tmp" "$path" && protect_windows_path "$path" file || { rm -f "$tmp"; return 1; }
+  reviewer_event_publish_report codex "$path" || return 1
   FAILURE_REPORT="$path"; printf '%s' "$path"
 }
 
@@ -266,6 +268,7 @@ esac
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
+reviewer_event_evidence require-report codex "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
 set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
@@ -304,6 +307,7 @@ chmod 600 "$TMP_REPORT" 2>/dev/null || die 'could not protect temporary report o
 mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
 chmod 600 "$OUT" 2>/dev/null || die 'could not protect the completed report.'
 protect_windows_path "$OUT" file || die 'could not enforce the completed report Windows ACL.'
+reviewer_event_publish_report codex "$OUT" || die 'report publication failed; local evidence retained.'
 if ! "$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null; then
   mv "$OUT" "$OUT.stale"
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true

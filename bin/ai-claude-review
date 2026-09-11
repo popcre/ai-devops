@@ -80,6 +80,7 @@ mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="claude-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_JSON=""; TMP_TEXT=""; TMP_REPORT=""
 cleanup(){
+  reviewer_event_cleanup_allowed claude || return 1
   [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
   [ -z "$TMP_JSON" ] || rm -f "$TMP_JSON"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"; [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
   [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
@@ -120,6 +121,7 @@ Return findings with file and line evidence. End with a literal heading and one 
 ## Verdict
 APPROVE|REJECT|BLOCKED"
 TMP_JSON="$(mktemp "$REPORT_DIR/.claude-output.XXXXXX")"
+reviewer_event_evidence require-report claude "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
 set +e; (cd "$REVIEW_DIR" && printf '%s\n' "$PROMPT" | "${CLAUDE_ARGS[@]}") > "$TMP_JSON" 2>&1; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 [ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed >/dev/null 2>&1 || true; die "Claude exited nonzero ($PROVIDER_RC)."; }
@@ -139,6 +141,7 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.claude-report.XXXXXX")"
   printf '| run | `%s` |\n| provider session | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | `Read,Grep,Glob` |\n\n## Result\n\n' "$RUN_ID" "$(jq -r .session_id "$TMP_JSON")" "$CALLER" "$ELAPSED"
   cat "$TMP_TEXT"
 } > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
+reviewer_event_publish_report claude "$OUT" || die 'report publication failed; local evidence retained.'
 if ! "$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null; then
   mv "$OUT" "$OUT.stale"
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
