@@ -274,6 +274,13 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
                 "sandbox evidence head differs from invocation")
         require((evidence_root(directory, run_id) / "required.json").is_file(),
                 "sandbox evidence requirement was not reserved")
+        if original_id is not None:
+            require(provider + ":" + original_id in owners,
+                    "original paid invocation does not own this sandbox")
+            # Local retries do not submit paid work. Keep the original owner's
+            # obligation until a validated recovery receipt satisfies it; a
+            # failed local render must not create permanent cleanup debt.
+            return
         owner = provider + ":" + run_id
         if owner not in owners:
             write_sandbox_owner(marker, boundary, data, "evidence_owner=" + owner)

@@ -738,6 +738,27 @@ wait "$job"
         self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
         self.assertEqual(self.ledger.read_bytes(), before)
 
+    def test_failed_local_retry_does_not_poison_later_recovery_cleanup(self):
+        original, sandbox, report = self.evidence_fixture()
+        marker = sandbox / ".ai-review-sandbox"
+        marker.write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", original, sandbox)
+            original_marker = marker.read_bytes()
+            for recovery in ("d" * 32, "e" * 32):
+                self.invocation(rid=recovery, finish=False)
+                rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+                rows[-1]["operation"] = "local-finalization"
+                self.ledger.write_text("".join(json.dumps(item) + "\n" for item in rows))
+                events.require_report(self.root, "grok", recovery)
+                events.bind_sandbox(self.root, "grok", recovery, sandbox, original)
+                self.assertEqual(marker.read_bytes(), original_marker)
+            with self.assertRaises(events.Blocked):
+                events.verify_sandbox(self.root, sandbox)
+            reference = events.publish_report(self.root, "grok", recovery, report,
+                                              {"original_invocation_id": original})
+            self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
+
     def test_shared_publisher_carries_muse_recovery_identity(self):
         original, recovery = "e" * 32, "f" * 32
         self.invocation(rid=original, provider="muse")
