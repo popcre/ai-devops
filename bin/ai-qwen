@@ -943,15 +943,19 @@ reviews_dir() {
     && printf '%s/.ai/reviews' "$repo" || printf ''
 }
 write_review_file() {
-  local repo="$1" name="$2" f="$3" status="${4:-accepted}" dir ts out base
-  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  local repo="$1" name="$2" f="$3" status="${4:-accepted}" dir ts out base tmp
+  ts="${QWEN_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+  if [ -n "${QWEN_REPORT_KEY:-}" ]; then
+    [[ "$QWEN_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
+  fi
   if [ "$status" = accepted ]; then base="qwen-${name}-${ts}.md"; else base="qwen-${name}-incomplete-${ts}.md"; fi
   dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
-    return 0
+    return 1
   fi
-  mkdir -p "$dir"; out="$dir/$base"
+  mkdir -p "$dir" || return 1; out="$dir/$base"
+  tmp="$(mktemp "$dir/.qwen-report.XXXXXX")" || return 1
   {
     if [ "$status" = accepted ]; then echo "# Qwen review — $name"; else echo "# Qwen incomplete review — $name"; fi
     echo
@@ -964,7 +968,21 @@ write_review_file() {
     echo "- Usage: \`$(jq -c 'select(.type=="result")|.usage // {}' "$f" | tail -1)\`"
     echo; echo "---"; echo
     jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$f" 2>/dev/null
-  } > "$out"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$out" ] || [ -L "$out" ]; then
+    [ -f "$out" ] && [ ! -L "$out" ] && cmp -s "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  else
+    ln "$tmp" "$out" 2>/dev/null || {
+      [ -f "$out" ] && [ ! -L "$out" ] && cmp -s "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+    }
+  fi
+  rm -f "$tmp"
+  local facts='{"phase":"report-publication"}'
+  if [ -n "${QWEN_RECOVERY_EVENT_RUN_ID:-}" ]; then
+    [[ "$QWEN_RECOVERY_EVENT_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 1
+    facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"$QWEN_RECOVERY_EVENT_RUN_ID\"}"
+  fi
+  reviewer_event_publish_report qwen "$out" "$facts" || return 1
   printf '%s' "$out"
 }
 
