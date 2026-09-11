@@ -721,6 +721,24 @@ check "usage line reports cached"      "printf '%s' \"\$ERR\" | grep -q 'cached:
 check "usage line reports cost"        "printf '%s' \"\$ERR\" | grep -q 'cost:'"
 check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.6'"
 
+cp "$TMP/fixture.json" "$TMP/usage-full.json"
+jq 'del(.usage, .total_cost_usd)' "$TMP/usage-full.json" > "$TMP/fixture.json"
+run new usage-unknown --prompt x >/dev/null 2>&1
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "missing usage is reported as unknown" "printf '%s' \"\$ERR\" | grep -q 'cached: unknown' && printf '%s' \"\$ERR\" | grep -Fq 'cost: \$unknown'"
+check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:0,cache_read_input_tokens:0} | .total_cost_usd=0' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep -q 'cached: 0' && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_usd={bad:true}' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
+check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "live doctor keeps malformed cost unknown" "run doctor --live | grep -Fq 'cost \$unknown'"
+jq '.usage={total_tokens:1e999,cache_read_input_tokens:1e999} | .total_cost_usd=1e999' "$TMP/usage-full.json" > "$TMP/fixture.json"
+OVERFLOW_OUT="$(run new usage-overflow --prompt x 2>&1)"; OVERFLOW_RC=$?
+check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+cp "$TMP/usage-full.json" "$TMP/fixture.json"
+
 # 11 ------------------------------------------------------------------------
 echo "== verdict_delimiter_extraction =="
 OUT="$(run new t7 --prompt x 2>/dev/null)"
