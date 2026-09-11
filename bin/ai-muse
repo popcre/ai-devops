@@ -151,6 +151,9 @@ prepare(){
   "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
     || die "source identity refused before snapshot creation"
   REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
+  # jq on Windows stores native paths; render the same identity before and
+  # after local recovery so an identical report remains byte-identical.
+  if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi
   git -C "$REVIEW_DIR" clean -fdq -- .ai/reviews 2>/dev/null || true
   PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --identity "$identity" --decision "$(cat "$prompt")" --class medium)"
   "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
@@ -308,7 +311,7 @@ run_turn(){
     sleep 1; waited=$((waited+1))
     [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
   done
-  wait "$TURN_PID"; rc=$?; TURN_PID=""
+  wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""
   if [ -n "$meta" ] && ! retain_turn "$meta" "$out" "$prompt" "$rc" "$sid"; then
     printf 'Muse completion evidence could not be published; private runtime evidence retained at %s\n' "$RUN_TMP" >&2
     RETAIN_FAILED=1; TURN_ERROR='Muse completion preservation failed; do not replay the provider turn.'; return 1
@@ -414,7 +417,12 @@ cmd_reconcile(){
   event="$(jq -r .retained_turn.original_invocation_id "$m")"; stem="${m%.json}.$event"
   for item in stream prompt; do
     path="$(jq -r --arg key "$item" '.retained_turn[$key]' "$m")"; expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
-    [ "$(realpath -m "$path")" = "$(realpath -m "$expected")" ] && [ -f "$path" ] && [ ! -L "$path" ] || die 'retained Muse evidence path is missing or changed.'
+    if command -v cygpath >/dev/null 2>&1; then
+      [ "$(cygpath -am "$path")" = "$(cygpath -am "$expected")" ] || die 'retained Muse evidence path differs from the exact turn.'
+    else
+      [ "$(realpath -m "$path")" = "$(realpath -m "$expected")" ] || die 'retained Muse evidence path differs from the exact turn.'
+    fi
+    [ -f "$path" ] && [ ! -L "$path" ] || die 'retained Muse evidence file is missing or unsafe.'
     [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key]' "$m")" ] || die 'retained Muse evidence bytes changed.'
   done
   out="$stem.jsonl"; prompt="$stem.prompt"; REQUIRE_VERDICT="$(jq -r .retained_turn.require_verdict "$m")"
