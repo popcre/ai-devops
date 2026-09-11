@@ -288,28 +288,32 @@ latency, turns, tokens/cache/cost only when reported, and final outcome. Kimi's
 headless token/cache/cost/returned-model figures are unavailable and must remain
 marked unavailable.
 
-After approval, green checks, preview proof, and guarded merge, dispatch the
-production workflow with the exact source PR, review run and digest, preview
-apply run and digest, current-main SHA, and ordered allowlist. The workflow runs
+After approval, green checks, guarded merge, and a successful merged-main preview
+rehearsal, the preview workflow automatically derives the exact source PR,
+durable exact-head verdict, guarded-merge status, review evidence, preview run
+and digest, current-main SHA, ordered allowlist, and exactly one open structural
+work issue linked by GitHub to the source PR and independently admitted from its
+current scope plus the PR's actual migration files. It then dispatches the
+existing serial production workflow; no session or owner transcribes migration
+versions or artifact identifiers. The workflow runs
 `scripts/production_business_risk_gate.py` before and after its approval wait.
 It independently reads the merged PR and required checks, verifies both pinned
 artifacts, proves the preview ledger change, and conservatively inspects the
 current-main SQL. Caller-written booleans and explanatory prose are never
-evidence. Automatic production promotion is allowed only when the governed
-records prove all five: no permanent data loss/rewrite, no expected downtime,
-no material access change, tested credible recovery, and no unresolved material
-objection. Ambiguous SQL stops. Ask Albert one plain business-risk question and
-never ask him to approve migration numbers, project identifiers, SQL, or other
-technical details.
+evidence. Automatic production promotion is allowed only when every
+machine-verifiable record passes. Any missing, stale, multi-source, failed, or
+ambiguous proof stops before dispatch and names engineer action required; it
+never falls back to asking Albert for migration numbers, project identifiers,
+SQL approval, or a technical-risk rubber stamp.
 
-Transition rule: this policy cannot authorize its own rollout.
-`config/production-risk-policy-activation.json` starts inactive, so the older
-exact approval and production-environment review remain binding. Activation is
-a later governed change and must name the merged shared-db #1021 and ai-devops
-#24 commits, record matching canonical and installed skill hashes, and pin the
-forward-test proof hash. The gate re-reads both PRs and all hashes before it can
-use the automatic path. A boolean such as `active: true`, an explanation, or a
-caller assertion without the complete exact schema fails closed.
+The earlier business-risk policy activation remains pinned by
+`config/production-risk-policy-activation.json`; a boolean, explanation, or
+caller assertion cannot replace its complete exact schema. Issue #2716 adds the
+automatic dispatch only after that activated gate, the exact-head verdict,
+guarded merge, successful post-merge preview evidence, and current main are all
+re-proved. The production job then independently repeats its evidence checks,
+acquires the global production lock, performs the fresh dry-run immediately
+before the write, and records post-apply ledger and catalog proof.
 
 ## Release and recovery
 

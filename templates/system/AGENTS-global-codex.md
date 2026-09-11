@@ -119,6 +119,17 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   chat. Never gain broader credentials to bypass this rule. Before production
   trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
+  The sole narrow exception is `shared-db`'s activated automatic migration
+  promotion workflow: after a guarded merge and successful merged-main preview
+  rehearsal, it may dispatch its existing serial production lane without Albert
+  naming migration versions. That lane must independently re-prove the durable
+  exact-head verdict, guarded merge, current main, the one open structural work
+  issue linked to the source PR and independently admitted from its current
+  scope plus actual migration files, immutable preview evidence,
+  production target, bounded allowlist, fresh dry-run, exclusive lock, and
+  post-apply result. Missing or ambiguous evidence stops for an engineer. This
+  exception authorizes no manual production command, workflow dispatch, other
+  repository, infrastructure action, or bypass.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
