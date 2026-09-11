@@ -136,6 +136,32 @@ echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ); }
 
+if [ "${AI_KIMI_DURABILITY_TEST_ONLY:-0}" = 1 ]; then
+  echo failednochange > "$TMP/mode"
+  run implement no-change-evidence --prompt work > "$TMP/no-change.log" 2>&1; no_change_rc=$?
+  check "failed no-change turn remains unsuccessful with durable evidence" "test '$no_change_rc' -ne 0 && find '$AI_REVIEW_EVENT_DIR/evidence' -name '*.report.json' | grep -q ."
+  check "proved no-change failure removes its exact disposable worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1 && ! find '$AI_KIMI_STATE_DIR/worktrees' -name owner.json | grep -q ."
+  check "no-change failure creates no empty patch" "! find '$REPO/.ai/reviews' -name '*.patch' | grep -q ."
+  echo usagepartial > "$TMP/mode"
+  run implement binary-evidence --prompt work > "$TMP/binary.log" 2>&1; binary_rc=$?
+  check "incomplete binary work is published before disposal" "test '$binary_rc' -ne 0 && test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1 && find '$AI_REVIEW_EVENT_DIR/evidence' -name '*.report.json' -exec jq -e 'select(.artifact_kind==\"git-binary-patch\" and (.report_text|contains(\"GIT binary patch\")))' {} + | grep -q git-binary-patch"
+  echo ok > "$TMP/mode"
+  AI_KIMI_TEST_DIRECT_WORKER=1 AI_KIMI_TEST_FAIL_ARTIFACT=1 run new publication-failure --prompt review > "$TMP/publication.log" 2>&1
+  failure_meta="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--publication-failure/job.json' -print -quit)"
+  check "publication failure preserves honest recovery-required state" "jq -e '.phase==\"recovery-required\" and .terminal_reason==\"artifact-write-failed\"' '$failure_meta'"
+  failure_stream="$(jq -r .artifact_paths.stream "$failure_meta")"
+  check "publication failure retains paid stream while removing launch transients" "test -s '$failure_stream' && ! find \"\$(dirname '$failure_meta')\" -name 'launch-*.ps1' | grep -q ."
+  echo usagepartial > "$TMP/mode"
+  AI_KIMI_TEST_FAIL_EXPORT=destination run implement retained-owner --prompt work > "$TMP/retained-owner.log" 2>&1
+  retained_meta="$(find "$AI_KIMI_STATE_DIR/sessions" -path '*claude--retained-owner.d/metadata.json' -print -quit)"
+  check "publication failure preserves authoritative canonical implementation metadata" "test -f '$retained_meta' && jq -e '.continuity_state==\"recovery-required\" and .provider_terminal_state==\"usage-limit\" and .recovery_reason==\"report-publication-incomplete\"' '$retained_meta'"
+  retained_patch="$(jq -r .canonical_patch "$retained_meta")"
+  check "publication failure keeps the exact cumulative binary work for local recovery" "test -s '$retained_patch' && grep -q 'GIT binary patch' '$retained_patch' && find '$AI_KIMI_STATE_DIR/worktrees' -name owner.json | grep -q ."
+  if [ "$FAIL" -ne 0 ]; then trap - EXIT; printf 'preserved durability fixture: %s\n' "$TMP"; fi
+  printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
+  [ "$FAIL" = 0 ]; exit $?
+fi
+
 CAP_NOW="$(date -u +%FT%TZ)"
 KIMI_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"kimi",state:"exhausted",checked_at:$now,provider_version:"0.36.1",credential_profile_scope:"fixture-profile",model_scope:"kimi-code/k3",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
 turn_count(){ if [ -f "$TMP/provider-turn-count.txt" ]; then wc -l < "$TMP/provider-turn-count.txt"; else printf 0; fi; }

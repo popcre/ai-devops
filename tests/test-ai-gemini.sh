@@ -20,7 +20,7 @@ cat > "$TMP/bin/sandbox" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- ensure-copy) src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf %s "$dst" ;;
+ ensure-copy) src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf '%s\nevidence_format=1\n' "$src" > "$dst/.ai-review-sandbox"; printf %s "$dst" ;;
  remove-copy) rm -rf "$MOCK_COPIES/$3" ;;
  *) exit 2 ;;
 esac
@@ -31,7 +31,13 @@ set -e
 case "$1" in
  resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
  build) p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
- verify) test -s "$2/MANIFEST.sha256" ;;
+ verify)
+   test -s "$2/MANIFEST.sha256"
+   if [ -f "$2/identity.json" ]; then
+     root="$(jq -r .repository "$2/identity.json")"
+     current="$("$REAL_REVIEW_PACKET" resolve "$root" --assert-head "$(jq -r .head "$2/identity.json")")"
+     jq -e --argjson current "$current" '.repository==$current.repository and .head==$current.head and .source_digest==$current.source_digest' "$2/identity.json" >/dev/null
+   fi ;;
  path) printf %s "$2/.ai-review-$3" ;;
  remove) rm -rf "$2/.ai-review-$3" ;;
  *) exit 2 ;;
@@ -228,6 +234,8 @@ R10="$TMP/repo10"; make_repo "$R10"; new_run "$R10" source-ignored normal >/dev/
 check 'follow-up refuses ignored protected-source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 R11="$TMP/repo11"; make_repo "$R11"; new_run "$R11" source-runtime normal >/dev/null; mkdir -p "$R11/.ai/reviews" "$R11/.ai/test-runs" "$R11/.ai/qwen-test.123"; printf report > "$R11/.ai/reviews/other-review.md"; printf log > "$R11/.ai/test-runs/test.log"; printf runtime > "$R11/.ai/qwen-test.123/state"
 check 'wrapper-owned .ai runtime evidence does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
+mkdir -p "$R11/.ai-review-user-source"; printf source > "$R11/.ai-review-user-source/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'similarly prefixed user source refuses before provider contact' "! (cd '$R11' && '$SCRIPT' ask source-runtime --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'initialized gitlink content drift is fingerprinted before provider contact' "! (cd '$SUBPARENT' && '$SCRIPT' ask source-gitlink --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 

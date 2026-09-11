@@ -95,6 +95,10 @@ remove_sandbox() {
   local d="$1"
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  local python event_tool
+  python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
+  event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
+  "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
   rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
 }
 
@@ -227,7 +231,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
       || return 1
   fi
   run_test_hook after-clone "$root" "$attempt"
-  printf '%s\nsource_digest=%s\n' "$root" "$before" > "$build/$MARKER" || return 1
+  printf '%s\nsource_digest=%s\nevidence_format=1\n' "$root" "$before" > "$build/$MARKER" || return 1
   git -C "$build" remote remove origin >/dev/null 2>&1 || true
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
     git -C "$build" checkout --progress --detach "$base" \

@@ -287,7 +287,7 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -490,6 +490,11 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
     return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -f "$dir/publication-incomplete" ]; then
+    warn "Grok returned a terminal result, but durable publication is incomplete; paid work remains blocked. Inspect $(basename "$dir") before reconciling it manually."
+    [ ! -s "$dir/terminal-result-path" ] || warn "retained terminal result: $(cat "$dir/terminal-result-path")"
+    return 1
+  fi
   if [ -f "$dir/remote-uncertain" ]; then
     warn "an interrupted Grok turn has unconfirmed provider state; paid work remains blocked. Inspect $(basename "$dir") before reconciling it manually."
     return 1
@@ -604,6 +609,7 @@ lock_release() { # only the creating wrapper may release it
   local dir="$1" owner
   [ -d "$dir" ] || return 0
   [ ! -f "$dir/remote-uncertain" ] || return 0
+  [ ! -f "$dir/publication-incomplete" ] || return 0
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
 }
@@ -627,6 +633,21 @@ preserve_uncertain_paid_turn() { # preserve lock before any fallible tree cleanu
   [ -z "$sess_lock" ] || lock_release "$sess_lock"
   stop_active_grok_tree \
     || warn 'could not confirm local reviewer-tree termination; paid work remains blocked for manual reconciliation.'
+}
+
+preserve_publication_incomplete() { # preserve known terminal JSON until durable publication can be reconciled
+  local rid_lock="$1" sess_lock="${2:-}" result_path="$3"
+  # The provider turn is known terminal, so do not invent remote uncertainty.
+  # Disable normal deletion first; the exact-work lock remains fail-closed even
+  # if the local marker itself cannot be written.
+  trap - EXIT
+  if date -u +%FT%TZ > "$rid_lock/publication-incomplete" &&
+     printf '%s\n' "$result_path" > "$rid_lock/terminal-result-path"; then
+    :
+  else
+    warn 'could not record the publication-incomplete marker; retaining the paid-work lock for manual reconciliation.'
+  fi
+  [ -z "$sess_lock" ] || lock_release "$sess_lock"
 }
 
 session_lock_owner_alive() { # DIR OWNER
@@ -1076,6 +1097,13 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   prepare_active_stop_file
+  if [ -n "${ACTIVE_PAID_LOCK:-}" ]; then
+    if [ -n "$REVIEW_DIR" ]; then
+      reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+    else
+      reviewer_event_evidence require-report grok || die 'could not reserve durable review evidence.'
+    fi
+  fi
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
@@ -1270,7 +1298,7 @@ preflight_review_file() { # preflight_review_file REPO NAME
 }
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
-  local repo="$1" name="$2" f="$3" dir ts out base
+  local repo="$1" name="$2" f="$3" dir ts out base tmp
   ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
@@ -1279,6 +1307,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
   [ -z "$PENDING_REVIEW_DIR" ] || [ "$dir" = "$PENDING_REVIEW_DIR" ] || { warn 'refusing Grok review: report destination changed after preflight.'; return 1; }
   mkdir -p "$dir"
   out="$dir/$base"
+  tmp="$(mktemp "$dir/.grok-report.XXXXXX")" || return 1
   {
     echo "# Grok review — $name"
     echo
@@ -1292,7 +1321,10 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "---"
     echo
     jq -r '.text // ""' "$f"
-  } > "$out"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  ln "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  reviewer_event_publish_report grok "$out" || return 1
   printf '%s' "$out"
 }
 
@@ -1340,7 +1372,7 @@ EOF
 }
 
 cmd_doctor() {
-  local live=0 grok rc=0 repo upstream workid live_lock
+  local live=0 grok rc=0 repo upstream workid live_lock keep_result=0
   [ "${1:-}" = "--live" ] && live=1
   need jq
   grok="$(resolve_grok)"
@@ -1392,13 +1424,21 @@ cmd_doctor() {
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
     run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
     if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
-      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
-      lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
+      if reviewer_event_publish_report grok "$tmp" && reviewer_event_cleanup_allowed grok; then
+        echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
+        lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
+      else
+        echo "FAILED — terminal result retained because durable evidence publication failed"
+        note "  exact terminal result retained for reconciliation: $tmp"
+        preserve_publication_incomplete "$live_lock" '' "$tmp"
+        ACTIVE_PAID_LOCK=''; trap - INT TERM; keep_result=1; rc=1
+      fi
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
     fi
     clear_active_grok
-    rm -f "$tmp" "$tmp.prompt" "$tmp.err" 2>/dev/null || true
+    [ "$keep_result" = 1 ] || rm -f "$tmp" "$tmp.err" 2>/dev/null || true
+    rm -f "$tmp.prompt" 2>/dev/null || true
   fi
   return $rc
 }
@@ -1464,11 +1504,11 @@ cmd_new() {
       note "  A first turn that completes but delivers no output has been seen before"
       note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   sid="$(jq -r '.sessionId // ""' "$out")"
-  [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
+  [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
@@ -1490,6 +1530,11 @@ cmd_new() {
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || {
+    note "  exact terminal result retained for reconciliation: $out"
+    preserve_publication_incomplete "$rid_lock" "$sess_lock" "$out"
+    return 1
+  }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1587,7 +1632,7 @@ $REVIEW_HEAD only."
       note "  Do not keep retrying this session: start a fresh one with"
       note "    ai-grok-review new ${name}-2 --prompt-file <brief>"
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   write_meta "$meta" "$(jq \
@@ -1611,6 +1656,11 @@ $REVIEW_HEAD only."
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || {
+    note "  exact terminal result retained for reconciliation: $out"
+    preserve_publication_incomplete "$rid_lock" "$sess_lock" "$out"
+    return 1
+  }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1704,6 +1754,7 @@ cmd_delete() {
     fi
   done
   meta="$(find_meta "$rid" "$name")"
+  release_boundary "$(repo_root)" "grok-$name" || die 'review evidence cleanup refused; session metadata preserved.'
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
@@ -1714,7 +1765,6 @@ cmd_delete() {
     [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
     rm -rf -- "$record"
   done
-  release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }
 

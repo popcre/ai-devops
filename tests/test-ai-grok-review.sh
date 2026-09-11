@@ -775,7 +775,7 @@ else
   skip "Windows native fallback runtime test skipped on non-Windows"
   skip "Windows fallback-failure fail-closed test skipped on non-Windows"
 fi
-check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
+check "new and ask preserve terminal JSON without inventing remote uncertainty" "test \"\$(grep -c '^    preserve_publication_incomplete \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
 # on_paid_signal ordering: the interrupt path must record paid-work uncertainty
 # BEFORE it attempts the fallible process-tree stop. Both stop helpers are
 # replaced with functions that abort, so a marker can only exist if it was
@@ -821,6 +821,15 @@ DURABLE_WORK="$TMP/work--durable.lock.d"; mkdir -p "$DURABLE_WORK"; printf '9999
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$DURABLE_WORK" new:durable github.com/example/reviewer-fixture durable "$REPO" durable-work prompt-digest source-id 1 ) >"$TMP/durable.out" 2>&1; DURABLE_RC=$?
 check "stale_local_owner_does_not_erase_durable_provider_record" "test '$DURABLE_RC' -ne 0 && test -f '$DURABLE_WORK/provider-contacted' && test -f '$DURABLE_WORK/remote-uncertain'"
 rm -rf "$DURABLE_WORK"
+PUBLISHED_RESULT="$TMP/known-terminal.json"; cp "$TMP/fixture.json" "$PUBLISHED_RESULT"
+PUBLICATION_WORK="$TMP/work--publication-incomplete.lock.d"; mkdir -p "$PUBLICATION_WORK"; printf '99999999\n' > "$PUBLICATION_WORK/pid"; printf 'doctor-live\n' > "$PUBLICATION_WORK/label"; date -u +%FT%TZ > "$PUBLICATION_WORK/provider-contacted"; date -u +%FT%TZ > "$PUBLICATION_WORK/publication-incomplete"; printf '%s\n' "$PUBLISHED_RESULT" > "$PUBLICATION_WORK/terminal-result-path"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$PUBLICATION_WORK" doctor-live github.com/example/reviewer-fixture doctor-live "$REPO" publication-work prompt-digest source-id 1 ) >"$TMP/publication-incomplete.out" 2>&1; PUBLICATION_RC=$?
+check "known terminal publication failure stays distinct from remote uncertainty" "test '$PUBLICATION_RC' -ne 0 && test -f '$PUBLICATION_WORK/publication-incomplete' && test ! -f '$PUBLICATION_WORK/remote-uncertain' && grep -q 'terminal result' '$TMP/publication-incomplete.out' && grep -Fq '$PUBLISHED_RESULT' '$TMP/publication-incomplete.out'"
+rm -rf "$PUBLICATION_WORK"
+HELPER_WORK="$TMP/work--publication-helper.lock.d"; mkdir -p "$HELPER_WORK"; printf '%s\n' "$$" > "$HELPER_WORK/pid"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; preserve_publication_incomplete "$HELPER_WORK" '' "$PUBLISHED_RESULT" )
+check "terminal publication helper retains exact result and never marks remote uncertainty" "test -f '$HELPER_WORK/publication-incomplete' && grep -Fxq '$PUBLISHED_RESULT' '$HELPER_WORK/terminal-result-path' && test ! -f '$HELPER_WORK/remote-uncertain'"
+rm -rf "$HELPER_WORK"
 check "unconfirmed stops drop only the temporary supervisor stop state"   "test \"\$(grep -c 'clear_active_stop_file' '$SCRIPT')\" -ge 6"
 check "the timeout path cleans orphaned stop state without releasing the paid lock"   "sed -n '/exceeded the configured/,/RUN_TURN_RC=124/p' '$SCRIPT' | grep -q 'clear_active_stop_file'"
 
@@ -938,10 +947,11 @@ poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask too
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+UNCERTAIN_PAID_CALLS="$(grep -c -- '--prompt-file' "$TMP/argv.txt")"
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -Eq 'exact Grok continuation|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -Eq 'continuation-turn collision|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
 run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
 check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"

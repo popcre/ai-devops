@@ -34,6 +34,7 @@ export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
 
+if [ "${AI_GLM_IMPL_TESTS_ONLY:-0}" != 1 ]; then
 echo "== static checks =="
 check "ai-glm is executable"                "test -x '$AI_GLM'"
 check "ai-glm parses"                       "bash -n '$AI_GLM'"
@@ -122,6 +123,7 @@ else
   ok "doctor symlink check skipped (host created a copy)"
 fi
 
+fi
 echo "== repository + session identity =="
 mkdir -p "$TMP/repoA" "$TMP/repoB"
 for d in repoA repoB; do
@@ -131,6 +133,7 @@ for d in repoA repoB; do
   git -C "$TMP/$d" -c user.email=t@example.com -c user.name=t commit -qm init
 done
 # Same basename in different places must NOT collide.
+if [ "${AI_GLM_IMPL_TESTS_ONLY:-0}" != 1 ]; then
 idA="$(cd "$TMP/repoA" && printf '%s\n%s' "$(git rev-parse --show-toplevel)" "" | sha256sum | cut -c1-12)"
 idB="$(cd "$TMP/repoB" && printf '%s\n%s' "$(git rev-parse --show-toplevel)" "" | sha256sum | cut -c1-12)"
 check "distinct repos get distinct ids"     "test '$idA' != '$idB'"
@@ -426,6 +429,7 @@ check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='
 check "running inside read remains legitimate" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_INSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = inside'"
 check "unmeasured running input is not guessed" "AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary '\''{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"path\":\"elsewhere\"}}}]}'\'' \"\$ROOT_FIX\")\" = missing'"
 
+fi
 echo "== implementation job records =="
 JOB_STATE="$TMP/jobs"; mkdir -p "$JOB_STATE"; : > "$TMP/job-calls"; : > "$TMP/job-permission-calls"
 JOB_ID="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" bash -c 'source "$AI_GLM_SOURCE"; repo_id "$JOB_REPO"')"
@@ -437,15 +441,21 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
     JOB_CALLS="$TMP/job-calls" JOB_PERMISSION_CALLS="$TMP/job-permission-calls" \
     bash -c '
       source "$AI_GLM_SOURCE"
+      source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
+      cd "$JOB_REPO"
+      export AI_GLM_CALLER=codex
+      AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+      export AI_REVIEW_EVENT_RUN_ID
+      if [ "$JOB_FAIL" = publication ]; then reviewer_event_publish_report(){ return 1; }; fi
       require_server(){ :; }; server_up(){ return 0; }; api(){ printf "{}"; }
       permission_http(){
+        printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"
         if [ "$JOB_TURN" = permission ]; then
-          printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"
           HTTP_STATUS=200
           HTTP_BODY='\''{"data":[{"id":"blocked-1","action":"question","resources":["*"]}]}'\''
         elif [ "$JOB_TURN" = transport ]; then
           case "$1 $2" in
-            "GET "*/permission) printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"; HTTP_STATUS=000; HTTP_BODY="" ;;
+            "GET "*/permission) HTTP_STATUS=000; HTTP_BODY="" ;;
             *) HTTP_STATUS=200; HTTP_BODY="{}" ;;
           esac
         else
@@ -491,11 +501,47 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
 wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt "$(scale_ticks 100)" ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
 
+implementation_partial_publication_case() {
+  run_fake_impl partial-publication-success '' "$TMP/no-ready" "$TMP/no-release" failure '' binary >"$TMP/partial-publication-success.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication-success)" partial_event partial_patch
+  partial_event="$(jq -r .evidence_run_id "$partial_meta")"; partial_patch="$(jq -r .incomplete_patch_path "$partial_meta")"
+  check "incomplete binary publication finishes both prepared obligations before cleanup" "test '$partial_rc' -ne 0 && jq -e '.outcome==\"failed-partial\" and .artifact_state==\"durable\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$partial_meta' >/dev/null"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$partial_event/"*.report.json > "$TMP/recovered-partial.patch"
+  check "incomplete binary patch survives centrally after exact clone cleanup" "test -s '$partial_patch' && cmp -s '$partial_patch' '$TMP/recovered-partial.patch' && grep -q 'GIT binary patch' '$partial_patch'"
+  if [ "$FAIL" -gt 0 ]; then
+    grep -E 'prepared|publication|cleanup refused' "$TMP/partial-publication-success.out" >&2 || true
+  fi
+}
+implementation_publication_cases() {
+  implementation_partial_publication_case
+  run_fake_impl publication-binary '' "$TMP/no-ready" "$TMP/no-release" success '' binary >"$TMP/publication-binary.out" 2>&1; local binary_rc=$?
+  local binary_meta="$(job_meta publication-binary)" binary_event binary_patch
+  binary_event="$(jq -r .evidence_run_id "$binary_meta")"; binary_patch="$(jq -r .patch_path "$binary_meta")"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$binary_event/"*.report.json > "$TMP/recovered-binary.patch"
+  check "complete binary patch survives centrally after clone cleanup" "test '$binary_rc' -eq 0 && test ! -e \"\$(jq -r .clone_path '$binary_meta')\" && cmp -s '$binary_patch' '$TMP/recovered-binary.patch' && grep -q 'GIT binary patch' '$TMP/recovered-binary.patch'"
+  run_fake_impl publication-refusal '' "$TMP/no-ready" "$TMP/no-release" success publication >"$TMP/publication-refusal.out" 2>&1; local publication_rc=$?
+  local publication_meta="$(job_meta publication-refusal)"
+  check "publication refusal retains exact prompt clone and pending ownership" "test '$publication_rc' -ne 0 && jq -e '.cleanup.clone==\"preserved\" and .cleanup.server_session==\"pending\" and .provider_submission_started==true' '$publication_meta' >/dev/null && test -f \"\$(jq -r .prompt_path '$publication_meta')\" -a -d \"\$(jq -r .clone_path '$publication_meta')\""
+  check "publication refusal retains original paid response at its recorded path" "test -f \"\$(jq -r .report_path '$publication_meta')\" && grep -qx done \"\$(jq -r .report_path '$publication_meta')\""
+  check "publication refusal never deletes paid server session" "! grep -q 'DELETE /session/sid-publication-refusal' '$TMP/job-permission-calls'"
+  run_fake_impl partial-publication '' "$TMP/no-ready" "$TMP/no-release" failure publication binary >"$TMP/partial-publication.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication)"
+  check "incomplete publication refusal records both exact retained artifact paths" "test '$partial_rc' -ne 0 && test -f \"\$(jq -r .incomplete_report_path '$partial_meta')\" -a -f \"\$(jq -r .incomplete_patch_path '$partial_meta')\" -a -d \"\$(jq -r .clone_path '$partial_meta')\""
+}
+if [ "${AI_GLM_PARTIAL_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_partial_publication_case
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+if [ "${AI_GLM_OWNER_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_publication_cases
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+
 READY="$TMP/record-ready"; RELEASE="$TMP/record-release"
 run_fake_impl exclusive record "$READY" "$RELEASE" >"$TMP/exclusive.out" 2>&1 & exclusive_pid=$!
 wait_file "$READY"
 EX_META="$(job_meta exclusive)"
-check "implement_record_exists_before_clone_creation" "test -f '$EX_META' -a \"\$(jq -r .status '$EX_META')\" = starting -a \"\$(jq -r .clone_path '$EX_META')\" = null"
+check "implement_record_exists_before_clone_creation" "test -f '$EX_META' -a \"\$(jq -r .status '$EX_META')\" = starting && jq -e '.clone_path!=null and (.evidence_run_id|length)==32' '$EX_META' >/dev/null && test ! -e \"\$(jq -r .clone_path '$EX_META')\""
 check "implement_list_and_show_are_type_and_state_aware" "AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' list | grep -qE 'exclusive.*implementation.*starting' && (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' show exclusive | jq -e '.type==\"implementation\" and .status==\"starting\"' >/dev/null)"
 before_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
 run_fake_impl exclusive >"$TMP/duplicate.out" 2>&1; duplicate_rc=$?
@@ -507,7 +553,7 @@ check "delete_refuses_active_implementation_job" "! (cd '$TMP/repoA' && AI_GLM_C
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" \
   bash -c 'source "$AI_GLM_SOURCE"; require_server(){ :; }; permission_http(){ HTTP_STATUS=200; HTTP_BODY="{}"; }; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex; cmd_abort exclusive' >/dev/null 2>&1
 check "starting-job abort is recorded before a server session exists" "test \"\$(jq -r .status '$EX_META')\" = abort-requested"
-check "starting-job abort has no clone to delete" "test \"\$(jq -r .clone_path '$EX_META')\" = null"
+check "starting-job abort has no clone to delete" "test ! -e \"\$(jq -r .clone_path '$EX_META')\""
 touch "$RELEASE"; wait "$exclusive_pid" || true
 check "pre-resource abort records terminal state" "test \"\$(jq -r .status '$EX_META')\" = aborted -a \"\$(jq -r .cleanup.clone '$EX_META')\" = none"
 
@@ -588,7 +634,7 @@ check "Windows clone enables long paths before checkout" "grep -q 'git -c core.l
 check "Windows exact cleanup uses Git long-path removal" "grep -q 'core.longpaths=true -C.*rm -rf' '$AI_GLM'"
 run_fake_impl patch-failed '' "$TMP/no-ready" "$TMP/no-release" success patch >"$TMP/patch-failed.out" 2>&1; patch_rc=$?
 PATCH_META="$(job_meta patch-failed)"; PATCH_CLONE="$JOB_STATE/wt/$JOB_ID/codex--patch-failed"
-check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .report_path '$PATCH_META')\" != null -a ! -e '$PATCH_CLONE'"
+check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .artifact_state '$PATCH_META')\" = durable -a ! -e '$PATCH_CLONE' && REPORT=\"\$(jq -r .report_path '$PATCH_META')\" && test -s \"\$REPORT\" && grep -q done \"\$REPORT\" && grep -q 'Patch export failed' \"\$REPORT\""
 
 for export_fail in incomplete-destination incomplete-move incomplete-metadata; do
   run_fake_impl "export-$export_fail" '' "$TMP/no-ready" "$TMP/no-release" failure "$export_fail" untracked >"$TMP/export-$export_fail.out" 2>&1; export_rc=$?
@@ -609,14 +655,28 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
 NORMAL_HASH_AFTER="$(sha256sum "$NORMAL_META" | awk '{print $1}')"
 check "repeated finalization is idempotent" "test '$NORMAL_HASH_BEFORE' = '$NORMAL_HASH_AFTER'"
 
+bind_fixture_owner() {
+  AI_GLM_SOURCE="$AI_GLM" OWNER_FIXTURE="$1" JOB_REPO="$TMP/repoA" bash -c '
+    source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
+    cd "$JOB_REPO"; export AI_GLM_CALLER=codex
+    AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+    export AI_REVIEW_EVENT_RUN_ID
+    jq "del(.evidence_run_id)" "$OWNER_FIXTURE" > "$OWNER_FIXTURE.tmp" && mv "$OWNER_FIXTURE.tmp" "$OWNER_FIXTURE" || exit 1
+    reviewer_event_evidence bind-owner glm "$OWNER_FIXTURE" || exit 1
+    report="$(jq -r ".report_path // empty" "$OWNER_FIXTURE")"
+    [ -z "$report" ] || reviewer_event_publish_report glm "$report"
+  '
+}
+
 RECON_META="$(job_meta reconcile-dead)"; RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--reconcile-dead"; RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--reconcile-dead.lock.d"
 mkdir -p "$RECON_CLONE" "$RECON_LOCK"
 jq --arg n reconcile-dead --arg clone "$RECON_CLONE" --argjson pid 99999999 \
   '.name=$n | .status="running" | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .failure=null | .cleanup={clone:"pending",server_session:"pending"}' \
   "$FAILED_META" > "$RECON_META"
 printf 99999999 > "$RECON_LOCK/pid"
+bind_fixture_owner "$RECON_META"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" RECON_META="$RECON_META" \
-  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$RECON_META"' >/dev/null 2>&1
+  bash -c 'source "$AI_GLM_SOURCE"; source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"; CALLER=codex; reconcile_implementation_record "$RECON_META"' >/dev/null 2>&1
 check "dead_owner_reconciliation_requires_all_safety_checks" "test \"\$(jq -r .status '$RECON_META')\" = failed -a \"\$(jq -r .failure '$RECON_META')\" = owner-process-died -a ! -e '$RECON_CLONE' -a ! -e '$RECON_LOCK'"
 
 PERM_RECON_META="$(job_meta permission-reconcile)"; PERM_RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--permission-reconcile"; PERM_RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--permission-reconcile.lock.d"
@@ -625,8 +685,9 @@ jq --arg n permission-reconcile --arg clone "$PERM_RECON_CLONE" --argjson pid 99
   '.name=$n | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .exit_code=null | .cleanup={clone:"pending",server_session:"pending"}' \
   "$PERMISSION_META" > "$PERM_RECON_META"
 printf 99999998 > "$PERM_RECON_LOCK/pid"
+bind_fixture_owner "$PERM_RECON_META"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" PERM_RECON_META="$PERM_RECON_META" \
-  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$PERM_RECON_META"' >/dev/null 2>&1
+  bash -c 'source "$AI_GLM_SOURCE"; source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"; CALLER=codex; reconcile_implementation_record "$PERM_RECON_META"' >/dev/null 2>&1
 check "dead permission-failure owner completes cleanup without losing cause" "test \"\$(jq -r .status '$PERM_RECON_META')\" = failed -a \"\$(jq -r .failure '$PERM_RECON_META')\" = permission-unsupported-action -a \"\$(jq -r .cleanup.clone '$PERM_RECON_META')\" = removed -a ! -e '$PERM_RECON_CLONE' -a ! -e '$PERM_RECON_LOCK'"
 
 FORGED_META="$(job_meta forged-outside)"; FORGED_CLONE="$TMP/outside-owned-by-user"; FORGED_LOCK="$JOB_STATE/locks/$JOB_ID--codex--forged-outside.lock.d"
@@ -654,6 +715,7 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
 touch "$RACE_RELEASE"; wait "$race_pid" || true
 check "abort_completion_race_records_observed_truth" "jq -e '.status==\"completed\" and .outcome==\"completed\" and .incomplete_patch_path==null' '$RACE_META' >/dev/null"
 check "ambiguous_server_state_is_reported_not_deleted" "grep -q 'server state.*ambiguous' '$AI_GLM'"
+implementation_publication_cases
 (cd "$TMP/repoA" && AI_GLM_CALLER=codex AI_GLM_STATE_DIR="$JOB_STATE" "$AI_GLM" delete normal >/dev/null 2>&1)
 check "terminal_record_can_be_cleared_for_safe_name_reuse" "test ! -e '$NORMAL_META'"
 
