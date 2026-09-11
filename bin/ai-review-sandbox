@@ -212,9 +212,12 @@ validate_snapshot_links() { # validate_snapshot_links STAGE
 }
 
 build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
-  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry
+  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry captured_refs
   base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
     || die "worktree $root has no commits yet; there is nothing to snapshot."
+  # Capture refs before copying objects. Another worktree can commit while the
+  # clone runs; reading its newer ref afterward names an object we never copied.
+  captured_refs="$(git -C "$root" for-each-ref --format='update %(refname) %(objectname)' refs/heads refs/remotes)" || return 1
 
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
     git -c core.longpaths=true clone --progress --no-hardlinks "$root" "$build" \
@@ -223,6 +226,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
     git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
       || return 1
   fi
+  run_test_hook after-clone "$root" "$attempt"
   printf '%s\nsource_digest=%s\n' "$root" "$before" > "$build/$MARKER" || return 1
   git -C "$build" remote remove origin >/dev/null 2>&1 || true
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
@@ -253,8 +257,9 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   # HEAD stays detached at $base and the reviewed tree is untouched.
   # Batch the ref transaction: spawning Git once per branch is especially
   # expensive on Windows. update-ref rejects unavailable objects atomically.
-  git -C "$root" for-each-ref --format='update %(refname) %(objectname)' refs/heads refs/remotes \
-    | git -C "$build" update-ref --stdin || return 1
+  if [ -n "$captured_refs" ]; then
+    printf '%s\n' "$captured_refs" | git -C "$build" update-ref --stdin || return 1
+  fi
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.
