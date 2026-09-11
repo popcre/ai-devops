@@ -966,6 +966,10 @@ write_review_file() {
   if [ -n "${QWEN_RECOVERY_EVENT_RUN_ID:-}" ]; then
     [[ "$QWEN_RECOVERY_EVENT_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 1
     facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"$QWEN_RECOVERY_EVENT_RUN_ID\"}"
+    if [ -n "${QWEN_RECOVERY_STATE:-}" ]; then
+      [ "$QWEN_RECOVERY_STATE" = completed-stale-source ] && [[ "${QWEN_ORIGINAL_HEAD_SHA:-}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
+      facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"$QWEN_ORIGINAL_HEAD_SHA\"}"
+    fi
   fi
   reviewer_event_publish_report qwen "$out" "$facts" || return 1
   printf '%s' "$out"

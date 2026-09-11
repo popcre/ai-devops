@@ -618,6 +618,114 @@ wait "$job"
         with self.assertRaisesRegex(events.Blocked, "identity changed"):
             events.publish_report(self.root, "grok", rid, report, {"original_invocation_id": original})
 
+    def test_owned_sandbox_refuses_removal_until_report_is_durable(self):
+        rid, checkout, report = self.evidence_fixture()
+        marker = checkout / ".ai-review-sandbox"
+        marker.write_text(str(self.toolkit) + "\nsource_digest=synthetic\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", rid, checkout)
+        with self.assertRaisesRegex(events.Blocked, "cleanup and replay refused"):
+            events.verify_sandbox(self.root, checkout)
+        events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(len(events.verify_sandbox(self.root, checkout)), 1)
+
+    def test_standalone_and_legacy_sandbox_ownership_are_distinct(self):
+        checkout = self.root / "sandbox"
+        checkout.mkdir()
+        marker = checkout / ".ai-review-sandbox"
+        marker.write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        self.assertEqual(events.verify_sandbox(self.root, checkout), [])
+        marker.write_text(str(self.toolkit) + "\nsource_digest=legacy\n")
+        with self.assertRaisesRegex(events.Blocked, "reconcile"):
+            events.verify_sandbox(self.root, checkout)
+
+    def test_sandbox_binding_rejects_another_source_even_at_same_head(self):
+        rid, checkout, _ = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(str(self.root) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            with self.assertRaisesRegex(events.Blocked, "source"):
+                events.bind_sandbox(self.root, "grok", rid, checkout)
+
+    def test_sandbox_retains_every_followup_invocation_owner(self):
+        rid, checkout, report = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", rid, checkout)
+        events.publish_report(self.root, "grok", rid, report)
+        next_id = "c" * 32
+        self.invocation(rid=next_id, finish=False)
+        events.require_report(self.root, "grok", next_id)
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", next_id, checkout)
+        with self.assertRaises(events.Blocked):
+            events.verify_sandbox(self.root, checkout)
+        events.publish_report(self.root, "grok", next_id, report)
+        self.assertEqual(len(events.verify_sandbox(self.root, checkout)), 2)
+
+    def legacy_sandbox_fixture(self):
+        sandbox = self.root / "legacy-sandbox"
+        sandbox.mkdir()
+        (sandbox / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nsource_digest=legacy\n")
+        (sandbox / "AI-REVIEW-SANDBOX.md").write_text("Snapshot tag: grok-codex-test\n")
+        meta = self.root / "legacy-meta.json"
+        meta.write_text(json.dumps({"repo": str(self.toolkit), "review_dir": str(sandbox), "name": "test",
+                                    "caller": "codex", "grok_session_id": "synthetic-session", "head": self.sha}))
+        report = self.root / "grok-test-original.md"
+        report.write_text(f"# Grok review\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n\nSynthetic result.\n")
+        return sandbox, meta, report
+
+    def test_legacy_exact_session_reconciliation_unlocks_only_saved_evidence(self):
+        sandbox, meta, report = self.legacy_sandbox_fixture()
+        result = events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        self.assertEqual(result["historical_source_authorization"], "unknown")
+        report.unlink()
+        self.assertEqual(len(events.verify_sandbox(self.root, sandbox)), 1)
+        row = events.invocation(self.root, "grok", result["run_id"])
+        self.assertEqual(row["operation"], "local-reconciliation")
+        self.assertEqual(row["head"], "")
+
+    def test_legacy_reconciliation_refuses_wrong_session_without_relabeling_marker(self):
+        sandbox, meta, report = self.legacy_sandbox_fixture()
+        before = (sandbox / ".ai-review-sandbox").read_bytes()
+        report.write_text(report.read_text().replace("synthetic-session", "another-session"))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        self.assertEqual((sandbox / ".ai-review-sandbox").read_bytes(), before)
+
+    def test_stale_source_finalization_preserves_original_head_without_authorizing_current_head(self):
+        original = "b" * 32
+        self.invocation(rid=original)
+        rid, _, report = self.evidence_fixture()
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[-1].update(operation="local-finalization", head="f" * 40)
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        (self.root / "evidence" / rid / "required.json").unlink()
+        events.require_report(self.root, "grok", rid)
+        with self.assertRaises(events.Blocked):
+            events.publish_report(self.root, "grok", rid, report, {"original_invocation_id": original})
+        reference = events.publish_report(self.root, "grok", rid, report,
+                    {"original_invocation_id": original, "recovery_state": "completed-stale-source", "original_head_sha": self.sha})
+        self.assertEqual(events.verify_reports(self.root, "grok", rid), [reference["reference"]])
+        row = json.loads((self.root / "evidence" / rid / (reference["report_sha256"] + ".report.json")).read_text())
+        self.assertEqual(row["original_head_sha"], self.sha)
+        self.assertEqual(row["recovery_state"], "completed-stale-source")
+
+    def test_recovered_receipt_satisfies_original_missing_publication_without_rewriting_history(self):
+        original, sandbox, report = self.evidence_fixture()
+        (sandbox / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", original, sandbox)
+        recovery = "d" * 32
+        row = self.invocation(rid=recovery, finish=False)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[-1]["operation"] = "local-finalization"
+        self.ledger.write_text("".join(json.dumps(item) + "\n" for item in rows))
+        events.require_report(self.root, "grok", recovery)
+        before = self.ledger.read_bytes()
+        reference = events.publish_report(self.root, "grok", recovery, report, {"original_invocation_id": original})
+        self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
+        self.assertEqual(self.ledger.read_bytes(), before)
+
     def test_evidence_rejects_wrong_invocation_and_changed_content(self):
         rid, _, report = self.evidence_fixture()
         with self.assertRaises(events.Blocked):
