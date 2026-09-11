@@ -314,18 +314,33 @@ Source digest: $before
 EOF
 }
 
+# The EXIT trap fires after create_or_refresh's frame is gone (die exits the
+# whole script), where its locals are unbound and `set -u` aborts the trap
+# before the lock is released. Cleanup state therefore lives in globals that
+# outlast the function, and remove_partial runs in a subshell so its own die
+# cannot skip the lock release.
+SNAPSHOT_LOCK="" SNAPSHOT_STAGE="" SNAPSHOT_BUILD=""
+cleanup_snapshot() {
+  if [ -n "$SNAPSHOT_BUILD" ]; then ( remove_partial "$SNAPSHOT_BUILD" "$SNAPSHOT_STAGE" ) || true; fi
+  if [ -n "$SNAPSHOT_LOCK" ]; then rmdir "$SNAPSHOT_LOCK" 2>/dev/null || true; fi
+  SNAPSHOT_LOCK="" SNAPSHOT_BUILD=""
+}
+
 create_or_refresh() { # create_or_refresh ROOT TAG STAGE
-  local root="$1" tag="$2" stage="$3" lock="$3.lock" build="" before after attempt
+  local root="$1" tag="$2" stage="$3" lock="$3.lock" before after attempt
   mkdir -p "$SANDBOX_DIR"
   mkdir "$lock" 2>/dev/null || die "snapshot is already being built for tag '$tag': $lock"
-  trap '[ -z "${build:-}" ] || remove_partial "$build" "$stage"; rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
+  SNAPSHOT_LOCK="$lock" SNAPSHOT_STAGE="$stage" SNAPSHOT_BUILD=""
+  trap cleanup_snapshot EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   for attempt in 1 2; do
     before="$(source_digest "$root")"
-    build="$stage.building.$$.$attempt"
-    [ ! -e "$build" ] || die "partial snapshot path already exists: $build"
-    if ! build_snapshot "$root" "$tag" "$build" "$before" "$attempt"; then
-      remove_partial "$build" "$stage"; build=""
+    SNAPSHOT_BUILD="$stage.building.$$.$attempt"
+    [ ! -e "$SNAPSHOT_BUILD" ] || die "partial snapshot path already exists: $SNAPSHOT_BUILD"
+    if ! build_snapshot "$root" "$tag" "$SNAPSHOT_BUILD" "$before" "$attempt"; then
+      remove_partial "$SNAPSHOT_BUILD" "$stage"; SNAPSHOT_BUILD=""
       die "could not build a complete review snapshot; no partial evidence was published."
     fi
     # OpenCode names a project by origin URL, else the cached .git/opencode,
@@ -333,20 +348,20 @@ create_or_refresh() { # create_or_refresh ROOT TAG STAGE
     # repository would share a project and each server boot would rescan all
     # of them (issue #430). Pin an ID derived from the published path: unique
     # per snapshot, and unchanged when refresh-copy rebuilds the same path.
-    printf 'ai-review-sandbox:%s' "$stage" | git hash-object --stdin > "$build/.git/opencode" || {
-      remove_partial "$build" "$stage"; build=""
+    printf 'ai-review-sandbox:%s' "$stage" | git hash-object --stdin > "$SNAPSHOT_BUILD/.git/opencode" || {
+      remove_partial "$SNAPSHOT_BUILD" "$stage"; SNAPSHOT_BUILD=""
       die "could not record the snapshot's reviewer project identity."
     }
     after="$(source_digest "$root")"
     if [ "$before" = "$after" ]; then
       if [ -e "$stage" ]; then remove_sandbox "$stage"; fi
-      mv "$build" "$stage" || die "could not publish the complete review snapshot."
-      build=""
-      rmdir "$lock" 2>/dev/null || true
+      mv "$SNAPSHOT_BUILD" "$stage" || die "could not publish the complete review snapshot."
+      SNAPSHOT_BUILD=""
+      cleanup_snapshot
       trap - EXIT INT TERM
       return 0
     fi
-    remove_partial "$build" "$stage"; build=""
+    remove_partial "$SNAPSHOT_BUILD" "$stage"; SNAPSHOT_BUILD=""
     [ "$attempt" -lt 2 ] || die "source changed during both snapshot attempts; review stopped without publishing mixed evidence."
   done
 }

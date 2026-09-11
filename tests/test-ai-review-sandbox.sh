@@ -177,6 +177,39 @@ LOCK_STAGE="$($SCRIPT path "$WT" duplicate-lock)"; mkdir -p "$LOCK_STAGE.lock"
 check "duplicate_snapshot_lock_is_rejected" "! '$SCRIPT' ensure '$WT' duplicate-lock >/dev/null 2>&1"
 rmdir "$LOCK_STAGE.lock"
 
+# A failed build must release its lock and partial copy. The EXIT trap runs
+# after create_or_refresh's frame is gone, so a trap reading function locals
+# died on `set -u` ("lock: unbound variable") and left a stale lock that blocked
+# every later build for the tag.
+FAIL_PROGRESS_DIR="$TMP/failing-inventory"
+FAIL_ERR="$TMP/failing-inventory.err"
+FAIL_STAGE="$($SCRIPT path "$WT" failing-inventory)"
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_PROGRESS_FILE="$FAIL_PROGRESS_DIR/missing/progress" \
+  "$SCRIPT" ensure-copy "$WT" failing-inventory >/dev/null 2>"$FAIL_ERR"
+check "failed_inventory_is_reported" "grep -q 'could not read the complete review-visible source inventory' '$FAIL_ERR'"
+check "failed_inventory_trap_has_no_unbound_variable" "! grep -q 'unbound variable' '$FAIL_ERR'"
+check "failed_inventory_releases_snapshot_lock" "[ ! -e '$FAIL_STAGE.lock' ]"
+check "failed_inventory_publishes_nothing" "[ ! -e '$FAIL_STAGE' ]"
+check "failed_inventory_tag_can_be_rebuilt" "'$SCRIPT' ensure-copy '$WT' failing-inventory >/dev/null 2>&1 && [ -d '$FAIL_STAGE/.git' ]"
+"$SCRIPT" remove-copy "$WT" failing-inventory
+
+# The same failure after the partial copy exists must remove that copy too.
+HOOK_BREAK_INVENTORY="$TMP/break-inventory.sh"
+cat > "$HOOK_BREAK_INVENTORY" <<'HOOK'
+#!/usr/bin/env bash
+[ "$1:$3" = after-copy:1 ] || exit 0
+rm -rf "$AI_REVIEW_SANDBOX_PROGRESS_FILE_DIR"
+HOOK
+chmod +x "$HOOK_BREAK_INVENTORY"
+mkdir -p "$FAIL_PROGRESS_DIR"
+LATE_STAGE="$($SCRIPT path "$WT" failing-late)"
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$HOOK_BREAK_INVENTORY" \
+  AI_REVIEW_SANDBOX_PROGRESS_FILE_DIR="$FAIL_PROGRESS_DIR" AI_REVIEW_SANDBOX_PROGRESS_FILE="$FAIL_PROGRESS_DIR/progress" \
+  "$SCRIPT" ensure-copy "$WT" failing-late >/dev/null 2>"$FAIL_ERR"
+check "late_failed_inventory_is_reported" "grep -q 'could not read the complete review-visible source inventory' '$FAIL_ERR' && ! grep -q 'unbound variable' '$FAIL_ERR'"
+check "late_failed_inventory_releases_snapshot_lock" "[ ! -e '$LATE_STAGE.lock' ]"
+check "late_failed_inventory_removes_partial_copy" "! ls -d '$LATE_STAGE'.building.* >/dev/null 2>&1 && [ ! -e '$LATE_STAGE' ]"
+
 # Keep a non-trivial path in the inventory to guard accidental newline/space or
 # path-truncation rewrites. (The production clone also enables core.longpaths.)
 LONG_REL="long directory/segment-012345678901234567890123456789/segment-abcdefghij/file with spaces.txt"
