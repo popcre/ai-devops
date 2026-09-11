@@ -26,6 +26,7 @@ check "Kimi delegates only pure adapter primitives to the shared helper" "grep -
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine"
 export AI_KIMI_STATE_DIR="$TMP/state"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_REVIEW_SANDBOX_DIR="$TMP/review-sandboxes"
@@ -50,7 +51,7 @@ printf '%s\n' "$PWD" >> "$TMPDIR_FOR_TEST/pwd.txt"
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "${1:-}" in
   --version) echo "0.32.0"; exit 0 ;;
-  provider)  [ "$mode" = noauth ] && exit 1; echo "managed:kimi-code type=kimi"; exit 0 ;;
+  provider)  [ "$mode" = noauth ] && exit 1; if [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] && [ ! "${KIMI_CODE_HOME:-}" -ef "$TMPDIR_FOR_TEST/delegated-profile" ]; then exit 1; fi; echo "managed:kimi-code type=kimi"; exit 0 ;;
   export)
     while [ $# -gt 0 ]; do
       if [ "$1" = -o ]; then printf 'zip-fixture' > "$2"; exit 0; fi
@@ -67,6 +68,9 @@ printf 'turn\n' >> "$TMPDIR_FOR_TEST/provider-turn-count.txt"
 case "$mode" in
   ok)      cat "$TMPDIR_FOR_TEST/fixture.jsonl" ;;
   nohint)  printf '{"role":"assistant","content":"partial answer"}\n' ;;   # no terminal record
+  refusal) printf '{"role":"assistant","content":"Usage limit reached for this billing cycle"}\n' ;;
+  prefixedrefusal) printf '{"role":"assistant","content":"provider refused"}\n'; printf 'kimi: Usage limit reached for this billing cycle\n' >&2; exit 7 ;;
+  quotedrefusal) printf '{"role":"tool","content":"Usage limit reached for this billing cycle"}\n{"role":"assistant","content":"The file contains an error example, not a provider refusal."}\n' ;;
   badverdict)
     printf '{"role":"assistant","content":"analysis without a governed verdict"}\n'
     printf '{"role":"meta","type":"session.resume_hint","session_id":"session_35e1a0a2-139f-4095-afdd-fce90a32ed2d","command":"kimi -r session_35e1a0a2"}\n' ;;
@@ -161,6 +165,132 @@ if [ "${AI_KIMI_DURABILITY_TEST_ONLY:-0}" = 1 ]; then
   printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
   [ "$FAIL" = 0 ]; exit $?
 fi
+{
+  admission_home="$KIMI_CODE_HOME"
+  admission_turns() { if [ -f "$TMP/provider-turn-count.txt" ]; then wc -l < "$TMP/provider-turn-count.txt"; else printf 0; fi; }
+  echo refusal > "$TMP/mode"
+  before="$(admission_turns)"
+  run new admission-worker --prompt review > "$TMP/refusal-worker.log" 2>&1; first_rc=$?
+  after="$(admission_turns)"
+  check "durable worker records one actual refused provider turn" "test '$first_rc' -ne 0 && test '$after' -eq $((before+1))"
+  profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$KIMI_CODE_HOME" | jq -r .credential_profile_scope)"
+  admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$profile" --model kimi-code/k3 --json)"
+  check "proven refusal sets scoped policy with unknown quota and reset" "printf '%s' \"\$admission\" | jq -e '.state==\"backoff\" and .quota_state==\"unknown\" and .reset_at==null'"
+  run new admission-worker-blocked --prompt review > "$TMP/refusal-worker-blocked.log" 2>&1; blocked_rc=$?
+  check "next durable submission performs zero provider turns" "test '$blocked_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$after' && grep -q 'not submitted' '$TMP/refusal-worker-blocked.log'"
+  run implement admission-ordinary-blocked --prompt work > "$TMP/refusal-ordinary-blocked.log" 2>&1; blocked_rc=$?
+  check "ordinary dispatch agrees and performs zero provider turns" "test '$blocked_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$after' && grep -q 'not submitted' '$TMP/refusal-ordinary-blocked.log'"
+  export KIMI_CODE_HOME="$TMP/kimi-other-home"
+  run implement admission-ordinary --prompt work > "$TMP/refusal-ordinary.log" 2>&1; ordinary_rc=$?
+  ordinary_after="$(admission_turns)"
+  check "another profile remains eligible for its first ordinary turn" "test '$ordinary_rc' -ne 0 && test '$ordinary_after' -eq $((after+1))"
+  run implement admission-ordinary-repeat --prompt work > "$TMP/refusal-ordinary-repeat.log" 2>&1; repeat_rc=$?
+  check "ordinary refusal blocks its own next turn without another submission" "test '$repeat_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$ordinary_after'"
+  check "raw terminal refusal is privately retained under original invocation" "find '$AI_REVIEW_EVENT_DIR/evidence' -name 'provider-refusal-*.log' | grep -q ."
+  different_model="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$profile" --model another-model --json)"
+  check "one model refusal does not block another model" "printf '%s' \"\$different_model\" | jq -e '.state==\"eligible\" and .quota_state==\"unknown\"'"
+  export KIMI_CODE_HOME="$TMP/kimi-quoted-home"
+  echo quotedrefusal > "$TMP/mode"
+  run new admission-quoted --prompt review > "$TMP/refusal-quoted.log" 2>&1
+  quoted_profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$KIMI_CODE_HOME" | jq -r .credential_profile_scope)"
+  quoted_admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$quoted_profile" --model kimi-code/k3 --json)"
+  check "quoted tool refusal cannot establish provider backoff" "printf '%s' \"\$quoted_admission\" | jq -e '.state==\"eligible\"'"
+  export KIMI_CODE_HOME="$TMP/kimi-prefix-home"
+  echo prefixedrefusal > "$TMP/mode"
+  run new admission-prefix --prompt review > "$TMP/refusal-prefix.log" 2>&1
+  prefix_after="$(admission_turns)"
+  run new admission-prefix-repeat --prompt review > "$TMP/refusal-prefix-repeat.log" 2>&1; prefix_rc=$?
+  check "provider-prefixed stderr refusal blocks another paid turn" "test '$prefix_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$prefix_after' && grep -q 'not submitted' '$TMP/refusal-prefix-repeat.log'"
+
+  # Exercise documented root delegation with a nonstandard login home and
+  # explicit target KIMI_CODE_HOME. No real account or credentials are used.
+  real_id="$(command -v id)"
+  printf '#!/usr/bin/env bash\nif [ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ]; then case "$1" in -u) echo 0; exit;; -un) echo root; exit;; esac; fi\nexec %q "$@"\n' "$real_id" > "$STUB/id"
+  cat > "$STUB/su" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_KIMI_TEST_DELEGATED:-0}" = 1 ] || exit 97
+[ "${AI_KIMI_TEST_CONTEXT_FAIL:-0}" != 1 ] || exit 124
+[ "$1" = - ] && [ "$2" = fixture-owner ] && [ "$3" = -c ] || exit 98
+export HOME="$TMPDIR_FOR_TEST/nonstandard-login" KIMI_CODE_HOME=../delegated-profile
+cd "$HOME" || exit 99
+exec bash --noprofile --norc -c "$4"
+EOF
+  chmod +x "$STUB/id" "$STUB/su"
+  admission_path="$PATH"; export PATH="$STUB:$PATH"
+  mkdir -p "$TMP/nonstandard-login/.kimi-code/bin" "$TMP/delegated-profile"
+  cp "$STUB/kimi" "$TMP/nonstandard-login/.kimi-code/bin/kimi"
+  export AI_KIMI_TEST_DELEGATED=1 AI_KIMI_OWNER=fixture-owner
+  export KIMI_CODE_HOME="$TMP/root-profile"
+  delegated_context="$(bash "$REPO_ROOT/bin/ai-review-preflight" effective-profile kimi)"
+  delegated_profile="$(bash "$REPO_ROOT/bin/ai-review-preflight" profile kimi --home "$TMP/delegated-profile" | jq -r .credential_profile_scope)"
+  check "effective delegated profile comes from actual login environment" "printf '%s' \"\$delegated_context\" | jq -e --arg p '$delegated_profile' '.run_as_user==\"fixture-owner\" and .credential_profile_scope==\$p'"
+  delegated_before="$(admission_turns)"
+  run implement admission-delegated-implementation --prompt work > "$TMP/delegated-implementation.log" 2>&1; delegated_impl_rc=$?
+  check "implementation remains non-delegating with zero provider turns" "test '$delegated_impl_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_before' && grep -q 'will not be delegated' '$TMP/delegated-implementation.log'"
+  AI_KIMI_TEST_CONTEXT_FAIL=1 run new admission-delegated-unresolved --prompt review > "$TMP/delegated-unresolved.log" 2>&1; delegated_fail_rc=$?
+  check "unresolved effective context refuses without provider contact" "test '$delegated_fail_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_before' && grep -q 'admission' '$TMP/delegated-unresolved.log'"
+  echo refusal > "$TMP/mode"
+  delegated_before="$(admission_turns)"
+  run new admission-delegated --prompt review > "$TMP/refusal-delegated.log" 2>&1
+  delegated_after="$(admission_turns)"
+  check "delegated review keeps its first provider submission capability" "test '$delegated_after' -eq $((delegated_before+1))"
+  run new admission-delegated-repeat --prompt review > "$TMP/refusal-delegated-repeat.log" 2>&1; delegated_rc=$?
+  check "delegated refusal blocks the next dispatch without provider replay" "test '$delegated_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$delegated_after' && grep -q 'not submitted' '$TMP/refusal-delegated-repeat.log'"
+  delegated_admission="$(bash "$REPO_ROOT/bin/ai-review-preflight" admission kimi --profile "$delegated_profile" --model kimi-code/k3 --json)"
+  check "delegated observation is scoped to target credentials rather than root" "printf '%s' \"\$delegated_admission\" | jq -e '.state==\"backoff\"'"
+  unset AI_KIMI_TEST_DELEGATED AI_KIMI_OWNER
+  export PATH="$admission_path"
+  rm -f "$STUB/id" "$STUB/su"
+
+  # Invoke the actual observer under errexit; failed optional hashing must not
+  # prevent caller finalization or consume the only retained provider stream.
+  sed -n '/^observe_scoped_refusal()/,/^}/p' "$SCRIPT" > "$TMP/kimi-observer.sh"
+  ( set -e; . "$TMP/kimi-observer.sh"; RUN_TURN_TIMED_OUT=0; RUN_TURN_CANCELLED=0; RUN_TURN_STARTUP_FAILED=0
+    has_resume_hint(){ return 1; }; warn(){ printf '%s\n' "$*" >&2; }
+    AI_REVIEW_EVENT_RUN_ID=cccccccccccccccccccccccccccccccc
+    printf '{"role":"assistant","content":"Usage limit reached"}\n' > "$TMP/hash-refusal.jsonl"
+    sha256_file(){ return 7; }
+    observe_scoped_refusal "$TMP/hash-refusal.jsonl" "$TMP/no-stderr" "$profile"
+    printf finalized > "$TMP/hash-failure-finalized"
+  ) > "$TMP/hash-failure.log" 2>&1
+  check "optional refusal hashing failure preserves caller finalization and raw output" "test -s '$TMP/hash-failure-finalized' && test -s '$TMP/hash-refusal.jsonl' && grep -q 'could not be hashed' '$TMP/hash-failure.log'"
+  export KIMI_CODE_HOME="$admission_home"
+  cp "$AI_REVIEW_QUARANTINE_DIR/kimi.json" "$TMP/valid-policy.json"
+  printf '{invalid-policy' > "$AI_REVIEW_QUARANTINE_DIR/kimi.json"
+  local_failure_turns="$(admission_turns)"
+  for action in new implement; do
+    run "$action" "corrupt-policy-$action" --prompt work > "$TMP/corrupt-policy-$action.log" 2>&1; local_rc=$?
+    check "corrupt policy refuses $action before provider contact" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'admission' '$TMP/corrupt-policy-$action.log'"
+  done
+  cp "$TMP/valid-policy.json" "$AI_REVIEW_QUARANTINE_DIR/kimi.json"
+  printf '#!/usr/bin/env bash\nexit 7\n' > "$TMP/admission-helper-fails"; chmod +x "$TMP/admission-helper-fails"
+  for action in new implement; do
+    AI_REVIEW_PREFLIGHT_BIN="$TMP/admission-helper-fails" run "$action" "missing-helper-$action" --prompt work > "$TMP/missing-helper-$action.log" 2>&1; local_rc=$?
+    check "failed profile helper refuses $action before provider contact" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'admission' '$TMP/missing-helper-$action.log'"
+  done
+  cat > "$TMP/admission-helper-malformed" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = admission ]; then printf '{"state":"unknown"}\n'; else exec bash "$AI_KIMI_TEST_REAL_PREFLIGHT" "$@"; fi
+EOF
+  chmod +x "$TMP/admission-helper-malformed"
+  for action in new implement; do
+    AI_KIMI_TEST_REAL_PREFLIGHT="$REPO_ROOT/bin/ai-review-preflight" AI_REVIEW_PREFLIGHT_BIN="$TMP/admission-helper-malformed" run "$action" "malformed-helper-$action" --prompt work > "$TMP/malformed-helper-$action.log" 2>&1; local_rc=$?
+    check "malformed admission is a local failure for $action with zero provider turns" "test '$local_rc' -ne 0 && test \"\$(admission_turns)\" -eq '$local_failure_turns' && grep -q 'local admission response is invalid' '$TMP/malformed-helper-$action.log'"
+  done
+  if [ "$FAIL" -ne 0 ]; then
+    trap - EXIT
+    printf 'preserved admission fixture: %s\n' "$TMP"
+    grep -E 'observation|admission|backoff|error:|Traceback|ValueError' "$TMP"/refusal-*.log || true
+    printf 'admission result: %s\n' "$admission"
+  fi
+  if [ "${AI_KIMI_ADMISSION_TEST_ONLY:-0}" = 1 ]; then
+    printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
+    [ "$FAIL" = 0 ]; exit $?
+  fi
+  export KIMI_CODE_HOME="$admission_home"
+  export AI_REVIEW_QUARANTINE_DIR="$TMP/remaining-quarantine"
+  echo ok > "$TMP/mode"
+}
 
 CAP_NOW="$(date -u +%FT%TZ)"
 KIMI_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"kimi",state:"exhausted",checked_at:$now,provider_version:"0.36.1",credential_profile_scope:"fixture-profile",model_scope:"kimi-code/k3",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
@@ -304,7 +434,7 @@ cp "$CANONICAL" "$UNSAFE_DIR/review-recovery.md"
 run recover recover-unsafe >/dev/null 2>&1 || true
 check "recovery cannot approve a worker-classified safety failure" "run status recover-unsafe | jq -e '.phase==\"recovery-required\" and .artifact_kind==\"incomplete\" and .terminal_reason!=\"session.resume_hint\"'"
 echo usagepartial > "$TMP/mode"
-run start quota-review --prompt review >/dev/null
+AI_REVIEW_QUARANTINE_DIR="$TMP/quota-review-policy" run start quota-review --prompt review >/dev/null
 run wait quota-review >/dev/null 2>&1 || true
 check "durable review classifies quota separately from authentication" "run status quota-review | jq -e '.phase == \"failed\" and .terminal_reason == \"usage-limit\"'"
 check "quota failure preserves an incomplete no-verdict artifact" "p=\$(run status quota-review | jq -r .artifact_paths.canonical); test -f \"\$p\" && grep -q 'INCOMPLETE.*NO VERDICT' \"\$p\" && grep -q 'Usage limit reached' \"\$p\""
@@ -579,7 +709,7 @@ echo ok > "$TMP/mode"
 
 echo "== incomplete implementation recovery =="
 echo usagepartial > "$TMP/mode"
-OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement usagepartial --prompt 'private prompt marker DO-NOT-LEAK-731' 2>&1)"; RC=$?
+OUT="$(AI_REVIEW_QUARANTINE_DIR="$TMP/usagepartial-policy" AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" run implement usagepartial --prompt 'private prompt marker DO-NOT-LEAK-731' 2>&1)"; RC=$?
 [ $RC -ne 0 ] && ok "usage limit with changes returns nonzero" || bad "usage limit with changes returns nonzero"
 IPATCH="$(ls "$REPO"/.ai/reviews/kimi-usagepartial-*.incomplete.patch 2>/dev/null | head -1)"
 IREPORT="$(ls "$REPO"/.ai/reviews/kimi-usagepartial-*.incomplete.md 2>/dev/null | head -1)"
@@ -640,7 +770,7 @@ check "interrupt with changes cleans worktree" "test \"\$(git -C '$REPO' worktre
 echo "== incomplete artifact failure safety =="
 for failure in destination move; do
   echo usagepartial > "$TMP/mode"
-  OUT="$(AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" AI_KIMI_TEST_FAIL_EXPORT="$failure" run implement "exportfail-$failure" --prompt x 2>&1)"; RC=$?
+  OUT="$(AI_REVIEW_QUARANTINE_DIR="$TMP/exportfail-$failure-policy" AI_KIMI_WAIT_TIMEOUT="$TIMEOUT_CEILING" AI_KIMI_TEST_FAIL_EXPORT="$failure" run implement "exportfail-$failure" --prompt x 2>&1)"; RC=$?
   [ $RC -ne 0 ] && ok "$failure export failure returns nonzero" || bad "$failure export failure returns nonzero"
   OWNER="$(find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null)"
   WT="$(jq -r .worktree "$OWNER" 2>/dev/null)"
