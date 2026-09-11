@@ -269,6 +269,14 @@ check "merge_packet_shows_the_real_change"     "grep -q 'the-actual-change.txt' 
 check "merge_packet_omits_unrelated_main_work" "! grep -q 'not-part-of-the-change.txt' '$MERGE_PKT/MANIFEST.md'"
 check "merge_patch_omits_unrelated_main_work" "! grep -q 'not-part-of-the-change.txt' '$MERGE_PKT/patch.diff'"
 
+# The sandbox removes origin, so it must carry the current remote base into its
+# local main ref rather than copying a stale local main.
+git -C "$MERGE_SRC" update-ref refs/heads/main "$(git -C "$MERGE_SRC" rev-parse main^)"
+STALE_LOCAL_MAIN="$(git -C "$MERGE_SRC" rev-parse main)"
+git -C "$MERGE_SRC" update-ref refs/remotes/origin/main "$MERGE_MAIN_SHA"
+REMOTE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" remote-wins)"
+check "snapshot_prefers_origin_main_over_stale_local_main" "[ \"$(git -C "$REMOTE_SNAP" rev-parse main)\" = '$MERGE_MAIN_SHA' ] && [ '$STALE_LOCAL_MAIN' != '$MERGE_MAIN_SHA' ]"
+
 # --- wiring contract ----------------------------------------------------------
 # The snapshot only helps if the reviewer wrappers actually route their review
 # directory through it. These guards fail loudly if a future edit hands a raw
