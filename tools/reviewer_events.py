@@ -382,9 +382,10 @@ def reconcile_owner(directory, provider, owner, metadata, report):
         require(workspace == physical(expected) and path == physical(workspace.parent / "owner.json"),
                 "legacy implementation workspace identity mismatch")
         sid = meta.get(provider + "_session_id")
-        require(sid and f"- Session: `{sid}`" in text and report.name.startswith(provider + "-" + name + "-"),
+        require(sid and (f"- Session: `{sid}`" in text or f"- {provider.title()} session ID: `{sid}`" in text) and report.name.startswith(provider + "-" + name + "-"),
                 "legacy implementation report session mismatch")
-        require(f"- Repo: `{meta['repo']}`" in text, "legacy implementation report repository mismatch")
+        require(f"- Repo: `{meta['repo']}`" in text or f"- Repository: `{meta['repo']}`" in text,
+                "legacy implementation report repository mismatch")
         patch_path = physical(meta.get("canonical_patch") or "")
         require(patch_path.parent == metadata.parent, "legacy canonical patch is outside its owned metadata")
         _, patch_data = snapshot(patch_path, "log")
@@ -425,6 +426,13 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     if patch_data:
         receipt = publish_report(directory, provider, run_id, patch_path, {"phase": "report-publication"})
         require(receipt["report_sha256"] == identity["patch_sha256"], "legacy patch changed during reconciliation")
+    require(snapshot(path, "log")[1] == owner_data and snapshot(metadata, "log")[1] == meta_data,
+            "legacy implementation ownership changed during reconciliation")
+    final_status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"], capture_output=True)
+    final_diff = subprocess.run(["git", "-C", str(workspace), "diff", "--binary", base], capture_output=True)
+    require(final_status.returncode == 0 and final_status.stdout == status.stdout and
+            final_diff.returncode == 0 and final_diff.stdout == patch_data,
+            "legacy implementation workspace changed during reconciliation")
     bind_owner(directory, provider, run_id, owner)
     references = verify_owner(directory, provider, owner)
     finish_reconciliation(directory, provider, run_id, references)
