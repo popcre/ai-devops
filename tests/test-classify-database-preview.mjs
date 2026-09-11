@@ -11,7 +11,7 @@ const fixture = (impact, content = 'safe fixture\n') => {
   const root = mkdtempSync(path.join(tmpdir(), 'preview-classifier-'))
   writeFileSync(path.join(root, 'change.txt'), content)
   const manifest = { schema_version: 1, base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), applicable_checks: ['unit-tests'], files: [{ path: 'change.txt', sha256: sha256(content), impact, reason: `proved ${impact}` }] }
-  return { root, manifest, adapters: { root, isAncestor: () => true, listChangedFiles: () => manifest.files.map((file) => file.path) } }
+  return { root, manifest, adapters: { root, isAncestor: () => true, listChangedFiles: () => manifest.files.map((file) => file.path), listDeletedFiles: () => [] } }
 }
 
 for (const impact of ['documentation', 'reviewer-tooling', 'ci-workflow', 'read-only-test', 'application-only']) {
@@ -60,6 +60,7 @@ test('classification is deterministic across file and check ordering', () => {
   ]
   const base = { schema_version: 1, base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), files, applicable_checks: ['lint', 'test'] }
   const adapters = { root, isAncestor: () => true, listChangedFiles: () => ['b.txt', 'a.txt'] }
+  adapters.listDeletedFiles = () => []
   const first = classifyDatabasePreview(base, adapters)
   const second = classifyDatabasePreview({ ...base, files: [...files].reverse(), applicable_checks: ['test', 'lint'] }, adapters)
   assert.equal(first.inspected_digest, second.inspected_digest)
@@ -71,4 +72,21 @@ test('omitted, extra, non-ancestral, and unreadable changed-file evidence refuse
   assert.throws(() => classifyDatabasePreview(manifest, { ...adapters, listChangedFiles: () => [] }), /empty or invalid/)
   assert.throws(() => classifyDatabasePreview(manifest, { ...adapters, isAncestor: () => false }), /not a proved ancestor/)
   assert.throws(() => classifyDatabasePreview(manifest, { ...adapters, listChangedFiles: () => { throw new Error('truncated') } }), /unreadable or truncated/)
+})
+
+test('deleted files are complete-diff inputs and always require preview', () => {
+  const { root, manifest, adapters } = fixture('documentation', 'drop table core.customer;\n')
+  manifest.files[0].path = 'deleted.sql'
+  manifest.files[0].sha256 = sha256('drop table core.customer;\n')
+  const deletionAdapters = {
+    ...adapters,
+    listChangedFiles: () => ['deleted.sql'],
+    listDeletedFiles: () => ['deleted.sql'],
+    readFileAt: () => Buffer.from('drop table core.customer;\n'),
+  }
+  const result = classifyDatabasePreview(manifest, deletionAdapters)
+  assert.equal(result.decision, 'DATABASE_PREVIEW_REQUIRED')
+  assert.equal(result.files[0].change_type, 'deleted')
+  assert.equal(result.files[0].impact, 'ambiguous')
+  assert.throws(() => classifyDatabasePreview({ ...manifest, files: [] }, deletionAdapters), PreviewClassificationError)
 })

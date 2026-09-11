@@ -24,8 +24,10 @@ const canonical = (value) => Array.isArray(value)
 export function classifyDatabasePreview(manifest, {
   root = process.cwd(),
   readFile = readFileSync,
+  readFileAt = (ref, file) => execFileSync('git', ['show', `${ref}:${file}`], { cwd: root, maxBuffer: 16 * 1024 * 1024 }),
   isAncestor = (base, head) => { execFileSync('git', ['merge-base', '--is-ancestor', base, head], { cwd: root }); return true },
-  listChangedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
+  listChangedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMRD', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
+  listDeletedFiles = (base, head) => execFileSync('git', ['diff', '--name-only', '--diff-filter=D', `${base}...${head}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean),
 } = {}) {
   if (!manifest || manifest.schema_version !== 1 || !Array.isArray(manifest.files) || !manifest.files.length) {
     throw new PreviewClassificationError('a schema-version-1 manifest with at least one file is required')
@@ -39,6 +41,9 @@ export function classifyDatabasePreview(manifest, {
   try {
     if (isAncestor(manifest.base_sha, manifest.head_sha) !== true) throw new Error('not an ancestor')
   } catch { throw new PreviewClassificationError('base_sha is not a proved ancestor of head_sha') }
+  let deletedFiles
+  try { deletedFiles = new Set(listDeletedFiles(manifest.base_sha, manifest.head_sha).map((file) => file.replaceAll('\\', '/'))) }
+  catch { throw new PreviewClassificationError('the deleted-file set is unreadable or truncated') }
   const seen = new Set()
   const files = manifest.files.map((entry) => {
     if (!entry || typeof entry.path !== 'string' || path.isAbsolute(entry.path) || entry.path.includes('..')) {
@@ -48,13 +53,15 @@ export function classifyDatabasePreview(manifest, {
     if (seen.has(normalizedPath)) throw new PreviewClassificationError(`duplicate inspected path: ${normalizedPath}`)
     seen.add(normalizedPath)
     const allowed = [...NO_PREVIEW_IMPACTS, ...PREVIEW_REQUIRED_IMPACTS]
-    const impact = allowed.includes(entry.impact) ? entry.impact : 'ambiguous'
+    const deleted = deletedFiles.has(normalizedPath)
+    const impact = deleted ? 'ambiguous' : (allowed.includes(entry.impact) ? entry.impact : 'ambiguous')
     if (typeof entry.reason !== 'string' || !entry.reason.trim()) throw new PreviewClassificationError(`missing impact reason for ${normalizedPath}`)
     let bytes
-    try { bytes = readFile(path.resolve(root, normalizedPath)) } catch { throw new PreviewClassificationError(`inspected file is unreadable: ${normalizedPath}`) }
+    try { bytes = deleted ? readFileAt(manifest.base_sha, normalizedPath) : readFile(path.resolve(root, normalizedPath)) }
+    catch { throw new PreviewClassificationError(`inspected file is unreadable: ${normalizedPath}`) }
     const digest = sha256(bytes)
     if (entry.sha256 !== digest) throw new PreviewClassificationError(`content digest changed for ${normalizedPath}`)
-    return { path: normalizedPath, sha256: digest, impact, reason: entry.reason.trim() }
+    return { path: normalizedPath, sha256: digest, impact, reason: entry.reason.trim(), change_type: deleted ? 'deleted' : 'present' }
   }).sort((a, b) => a.path.localeCompare(b.path))
   let changedFiles
   try { changedFiles = listChangedFiles(manifest.base_sha, manifest.head_sha).map((file) => file.replaceAll('\\', '/')).sort() }
