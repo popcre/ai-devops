@@ -67,6 +67,20 @@ records the recovery slice under #337; it does not close #397 or the parent.
   configuration pipe. The synthetic regression proves authentication remains
   present on standard input and absent from command arguments. No real password
   was inspected; this is code-path evidence, not proof of external disclosure.
+- Independent GLM review of `060cd3d27256be6b66e49a1aeccb37871d35d73a`
+  returned APPROVE with wrapper exit 0. Its valid Muse accounting retry finding
+  is repaired by saving the chosen accounting JSON in the existing atomic
+  retained-turn write. There is no second metadata write that can leave the
+  paid report and retained accounting inconsistent. The focused owning recovery
+  suite passed 55 checks, including a fault that rejects the former second
+  write and recovery of the original unavailable accounting without recomputation.
+- DeepSeek formal reviews now bind caller, requested model, repository and
+  session across wrapper restarts. Changed caller/model refuses before provider
+  contact; ordinary conversations retain their existing model selection.
+  Source-change metadata preserves these identities so ordinary fresh-source
+  review continuation remains possible. The existing focused suite passed
+  32 checks with zero failures/skips; unknown legacy model provenance is not
+  inferred from current configuration.
 
 ## Outstanding qualification
 
