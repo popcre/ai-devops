@@ -294,7 +294,7 @@ review_boundary() { # review_boundary ROOT TAG [RECORDED-DIRECTORY] -> directory
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 release_recorded_boundary() { # release_recorded_boundary TAG RECORDED-DIRECTORY
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; cannot safely remove the recorded private snapshot."
@@ -322,7 +322,12 @@ REVIEW_SNAPSHOT_SECONDS=0; REVIEW_PACKET_SECONDS=0; REVIEW_TEST_SECONDS=0
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
 prepare_review() { # prepare_review ROOT TAG [RECORDED-DIRECTORY]
-  local root="$1" tag="$2" recorded="${3:-}" pkt want snapshot_started packet_started
+  local root="$1" tag="$2" recorded="${3:-}" pkt want snapshot_started packet_started identity=""
+  if [ "$OPT_REVIEW_KIND" = diff ]; then
+    identity="$(mktemp)" || die "could not reserve source identity"
+    "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+      || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
+  fi
   snapshot_started="$(date +%s)"
   REVIEW_DIR="$(review_boundary "$root" "$tag" "$recorded")"
   REVIEW_SNAPSHOT_SECONDS="$(( $(date +%s) - snapshot_started ))"
@@ -366,12 +371,15 @@ EOF
   if [ "${changed_count:-0}" -gt 10 ] || [ "${patch_bytes:-0}" -gt 40960 ]; then review_class="medium"; fi
   packet_started="$(date +%s)"
   pkt="$(AI_REVIEW_PATCH_MAX_BYTES=40960 AI_REVIEW_TEST_TAIL=25 "$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class "$review_class" \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
+  REVIEW_IDENTITY_BOUND=1
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
   # Re-point the preamble now that the packet's real directory name is known.
   PACKET_PREAMBLE="${DIFF_PACKET_PREAMBLE//.ai-review/$PACKET_REL}"
@@ -959,6 +967,7 @@ finalize_review_artifact() { # META STREAM KIND REASON
   local meta="$1" stream="$2" kind="$3" reason="$4"
   [ "${AI_KIMI_TEST_FAIL_ARTIFACT:-0}" != 1 ] || return 1
   render_review_artifact "$meta" "$stream" "$kind" "$reason" || return 1
+  reviewer_event_publish_report kimi "$FINAL_CANONICAL" || return 1
   mirror_review_artifact "$meta" "$FINAL_CANONICAL" || warn "repository mirror failed; canonical review kept at $FINAL_CANONICAL"
   return 0
 }
@@ -968,10 +977,12 @@ finalize_review_artifact() { # META STREAM KIND REASON
 write_review_file() { # REPO NAME STREAM
   local repo="$1" name="$2" stream="$3" stamp base dir out tmp
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="kimi-${name}-${stamp}.md"; dir="$(reviews_dir "$repo" "$base")"
-  [ -n "$dir" ] || { warn "not writing transcript: exact destination is not safely git-ignored"; return 0; }
+  [ -n "$dir" ] || { warn "not writing transcript: exact destination is not safely git-ignored"; return 1; }
   mkdir -p "$dir" || return 1; out="$dir/$base"; tmp="$(mktemp "$dir/.kimi-turn.XXXXXX")" || return 1
   { echo "# Kimi turn — $name"; echo; assistant_text "$stream"; } > "$tmp" || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }; printf '%s' "$out"
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  reviewer_event_publish_report kimi "$out" || return 1
+  printf '%s' "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -1050,6 +1061,7 @@ launch_review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 cleanup_review_transients() { # JOB-DIR PROMPT-FILE
+  reviewer_event_cleanup_allowed kimi || return 1
   rm -f -- "$2" "$1/launch-worker.ps1" "$1/launch-bootstrap.ps1" 2>/dev/null || true
 }
 
@@ -1062,7 +1074,7 @@ release_review_worker_resources() { # JOB-DIR PROMPT-FILE REPO-LOCK JOB-META
   if [ "${AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY:-0}" -gt 0 ] 2>/dev/null; then
     sleep "$AI_KIMI_TEST_TERMINAL_CLEANUP_DELAY"
   fi
-  cleanup_review_transients "$1" "$2"
+  cleanup_review_transients "$1" "$2" || return 1
   # Test-only fault injection proves that a failed deletion can never be
   # published as terminal readiness. A directory at the launcher path models
   # an undeletable transient without depending on host ACL behavior.
@@ -1144,6 +1156,8 @@ review_worker() { # JOB-DIR PROMPT-FILE
   write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
   record_diagnostic "$repo" "$diag_run" "$name" launch provider-started
   provider_started="$(date +%s)"
+  reviewer_event_evidence require-report kimi || exit 2
+  reviewer_event_evidence bind-sandbox kimi "$workdir" || exit 2
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   provider_seconds="$(( $(date +%s) - provider_started ))"
   write_job_state "$meta" --argjson seconds "$provider_seconds" --arg u "$(date -u +%FT%TZ)" '.timing.provider_seconds=$seconds|.timing.model_steps="unavailable"|.updated=$u' || exit 2
@@ -1166,6 +1180,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
     [ -n "$new_sid" ] || reason=malformed-output
     if [ "$mode" = review ] && [ "$before" != "$(tree_state "$workdir")" ]; then
       reason=readonly-tree-changed
+    fi
+    if [ -z "${reason:-}" ] && [ "$mode" = review ] && [ "$(jq -r '.review_kind // "diff"' "$meta")" = diff ]; then
+      "$PACKET_BIN" verify "$("$PACKET_BIN" path "$workdir" "kimi-$CALLER-$name")" >/dev/null || reason=source-identity-changed
     fi
     defect="$(review_answer_defect "$out")"; [ -n "${reason:-}" ] || [ -z "$defect" ] || reason="$defect"
     if [ -n "${reason:-}" ]; then
@@ -1686,6 +1703,7 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
   if [ "$kind" = incomplete ]; then
     [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
+    reviewer_event_publish_report kimi "$report" || return 1
     note "ai-kimi: $state with partial changes; command remains unsuccessful."
     note "INCOMPLETE patch written: $patch"
     note "INCOMPLETE report written: $report"
@@ -1712,6 +1730,12 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
       emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
         "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" \
         "${LIFECYCLE_PRIOR_TREE:-$LIFECYCLE_BASE}" || artifact_rc=$?
+    fi
+    if ! reviewer_event_cleanup_allowed kimi; then
+      LIFECYCLE_PRESERVE=1
+      [ -z "$LIFECYCLE_OWNER" ] || mark_preserved "$LIFECYCLE_OWNER" || true
+      [ -z "$LIFECYCLE_META" ] || mark_impl_recovery_required "$LIFECYCLE_META" report-publication-incomplete || true
+      return 1
     fi
     if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
       continuity=exact
@@ -1741,6 +1765,7 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
     fi
     [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
   fi
+  reviewer_event_cleanup_allowed kimi || return 1
   rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
   [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
   [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
@@ -1805,6 +1830,7 @@ start_session() { # start_session NAME MODE
     LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
     write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
       '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
+    reviewer_event_evidence bind-owner kimi "$owner" || die 'could not bind exact implementation evidence ownership.'
     workdir="$wt"
     note "implement run isolated in a throwaway worktree: $wt"
   fi
@@ -1815,6 +1841,8 @@ start_session() { # start_session NAME MODE
   before="$(tree_state "$repo")"
 
   note "Kimi $mode '$name' starting (model $KIMI_MODEL)…"
+  reviewer_event_evidence require-report kimi || die 'could not reserve durable review evidence.'
+  [ "$mode" != review ] || reviewer_event_evidence bind-sandbox kimi "$workdir" || die 'could not bind review evidence ownership.'
   run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
   LIFECYCLE_COMMAND_RC="$rc"
   if ! await_result "$out" "$mode '$name'" "$rc"; then
@@ -1861,6 +1889,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
     return 1
   }
   [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
+  reviewer_event_verify_owner kimi "$owner" || { warn 'implementation evidence cleanup refused; exact owner and worktree preserved.'; return 1; }
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
   if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
@@ -1913,11 +1942,13 @@ $REVIEW_HEAD only."
   build_prompt_file "$pf"
   before="$(tree_state "$REVIEW_DIR")"
   note "Kimi '$name' continuing session $sid…"
+  reviewer_event_evidence require-report kimi || die 'could not reserve durable review evidence.'
+  [ "$mode" != review ] || reviewer_event_evidence bind-sandbox kimi "$REVIEW_DIR" || die 'could not bind review evidence ownership.'
   run_turn "$REVIEW_DIR" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   if ! await_result "$out" "'$name'" "$rc"; then
     note "  kimi exit status was $rc — which proves nothing on its own."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
   after="$(tree_state "$REVIEW_DIR")"
   if [ "$mode" = review ] && [ "$before" != "$after" ]; then
@@ -1964,6 +1995,7 @@ continue_implementation() { # NAME RID META [RESET]
   git -C "$wt" config core.longpaths true
   owner="${wt%/wt}/owner.json"; LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"
   write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:"active"}')"
+  reviewer_event_evidence bind-owner kimi "$owner" || die 'could not bind exact implementation evidence ownership.'
   git -C "$wt" apply --check "$patch" >/dev/null 2>&1 && git -C "$wt" apply "$patch" >/dev/null 2>&1 || die "canonical patch cannot be applied to immutable base $base."
   git -C "$wt" add -A >/dev/null 2>&1
   expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
@@ -1974,9 +2006,11 @@ continue_implementation() { # NAME RID META [RESET]
   { printf '%s\n\n' "NOTICE: This implementation continuation (write run) uses a newly reconstructed workspace. Git-visible source is exact. Ignored dependencies, build output, downloads, caches, and secrets did not persist. Recreate what is needed and rerun tests."; cat "$pf"; } > "$pf.notice"; mv "$pf.notice" "$pf"
   if [ "$reset" = 1 ]; then
     note "Kimi CONTEXT RESET (write run) '$name': preserving canonical code but starting a new conversation generation."
+    reviewer_event_evidence require-report kimi || die 'could not reserve durable review evidence.'
     LIFECYCLE_SID=""; run_turn "$wt" "$out" "$pf" implement
   else
     note "Kimi implementation continuation (write run) '$name' resuming exact session $sid in a disposable workspace."
+    reviewer_event_evidence require-report kimi || die 'could not reserve durable review evidence.'
     run_turn "$wt" "$out" "$pf" implement "$sid"
   fi
   rc="$RUN_TURN_RC"; LIFECYCLE_COMMAND_RC="$rc"
@@ -1996,8 +2030,12 @@ continue_implementation() { # NAME RID META [RESET]
 finish_turn() {
   local repo="$1" name="$2" out="$3" path
   ANSWER_DEFECT=""
+  if [ "${REVIEW_IDENTITY_BOUND:-0}" = 1 ] && ! "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null; then
+    note "source identity changed; paid stream retained: $out"
+    return 4
+  fi
   if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
-  path="$(write_review_file "$repo" "$name" "$out")"
+  path="$(write_review_file "$repo" "$name" "$out")" || return 4
   [ -n "$path" ] && note "saved: $path"
   note "note: Kimi reports no token, cost, or model data — none can be quoted for this run."
   # Issue #1220: a turn with no answer, or no verdict, must NOT read as a clean
@@ -2050,7 +2088,7 @@ cmd_delete() {
     if [ -n "$recorded_workspace" ]; then
       release_recorded_boundary "kimi-$CALLER-$1" "$recorded_workspace"
     else
-      release_boundary "$(repo_root)" "kimi-$CALLER-$1"
+      release_boundary "$(repo_root)" "kimi-$CALLER-$1" || die "review evidence cleanup refused; session metadata preserved."
     fi
     rm -f "$meta"
   fi

@@ -12,7 +12,7 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 | Coding owner | State | Updated | Required evidence before complete |
 |---|---|---|---|
-| [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 active | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison |
+| [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 inspected; PR #402 groundwork merged as `b6922ea8`; complete nine-wrapper identity contract in progress | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison; installation remains pending |
 | [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open | 2026-09-11 | Provider-shaped failure matrix and governed reason parity |
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Open | 2026-09-11 | Crash/cleanup/race proof; 33 evidence-gap dispositions |
 | [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open; Grok auth concurrency slice installed | 2026-09-11 | Auth slice merged `e3b4700d`; allocation/cooldown matrix and governed live proof remain |
@@ -23,6 +23,8 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 | [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Open; runs last inside #337 | 2026-09-11 | All 198 dispositions, installed nine-provider matrix, bounded recurrence scan |
 
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
+
+The maintenance round remains `0c62f3dffce145c4b2768855b912b958` with all 198 original candidates. Its installed `show` and exact-round `start --resume` commands work again after an unrelated analysis sidecar was moved out of the checkpoint directory into private analysis storage. The frozen started record still hashes to `aad9e0f327a135d8b684f03768b702aa675981f738924b468215ef61aeefa8f0`. No candidate was reset or disposition invented; final reconciliation remains #398's last step.
 
 **#396 installed slice, 2026-09-11:** [PR #408](https://github.com/popcre/ai-devops/pull/408) merged as `e3b4700d1005088065740200a70d68d7574a4243` after exact-head independent Grok APPROVE on `84274fd629fec8324ecef58373c8b8f011faabb3` and passing required CI/merge queue. Final local Grok suite: 226 passed, zero failed/skipped; focused authentication regressions: seven passed, zero failed/skipped. Installed wrapper SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` matches the tested source. Two concurrent initializers against the actual installed authentication link passed 100 readability/same-inode checks without replacing the existing credential inode; no credential values were read and no provider request was made. The matching private concurrency incident received append-only repair evidence. This does not close the broader availability/cooldown programme or classify the frozen 198-entry round.
 

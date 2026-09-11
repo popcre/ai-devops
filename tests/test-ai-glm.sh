@@ -24,6 +24,95 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+glm_recovery_cases(){
+  local fixture="$TMP/recovery"
+  mkdir -p "$fixture/repo" "$fixture/state/sessions/fixture" "$fixture/packet"
+  git -C "$fixture/repo" init -q
+  git -C "$fixture/repo" config user.name Test; git -C "$fixture/repo" config user.email test@example.com
+  printf 'source\n' > "$fixture/repo/source"; git -C "$fixture/repo" add source; git -C "$fixture/repo" commit -qm fixture
+  printf '%064d' 0 > "$fixture/packet/MANIFEST.sha256"
+  cat > "$fixture/cases.sh" <<'RECOVERY_CASES'
+set -e
+source "$AI_GLM_SOURCE"
+CALLER=codex; STATE_DIR="$FIXTURE/state"; PROMPT_TEXT=''; PROMPT_FILE=''; REPO_OVERRIDE="$FIXTURE/repo"; OPT_BASE=''; OPT_TESTS=''; OPT_DECISION=''; OPT_ASSERT_HEAD=''; JSON_OUT=0
+TIMEOUT=8; POLL_SECS=1; LOCK_TIMEOUT=1
+repo_id(){ printf fixture; }
+packet_fixture(){ case "$1" in path) printf '%s/packet' "$FIXTURE";; verify) test ! -f "$FIXTURE/stale";; verify-retained) test -f "$FIXTURE/packet/MANIFEST.sha256";; *) return 1;; esac; }
+PACKET_BIN=packet_fixture
+require_review_server(){ :; }
+reviewer_event_evidence(){ :; }
+sleep(){ :; }
+handle_permissions(){ :; }
+api(){ [ "$1" = GET ] || { printf POST >> "$FIXTURE/submissions"; return 99; }; if [[ "$2" == */message?limit=1 ]]; then cat "$FIXTURE/history"; elif [ "$2" = /global/health ]; then printf '{"version":"%s"}' "${API_SERVER_VERSION:-original-server}"; else printf '{}'; fi; }
+send_prompt(){ printf POST >> "$FIXTURE/submissions"; return 99; }
+last_assistant(){
+  local count; count="$(cat "$FIXTURE/polls")"; count=$((count+1)); printf '%s' "$count" > "$FIXTURE/polls"
+  if [ "$count" -le 2 ]; then printf '{"id":"old","finish":"stop","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"content":[{"type":"text","text":"old answer"}]}'
+  else printf '{"id":"new","finish":"stop","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"content":[{"type":"text","text":"new answer"}]}'
+  fi
+}
+eval "$(declare -f write_report | sed '1s/write_report/original_write_report/')"
+reviewer_event_publish_report(){ :; }
+write_report(){ [ ! -e "$FIXTURE/fail-report" ] || return 73; printf '%s' "$4" > "$FIXTURE/report.md"; printf '%s/report.md' "$FIXTURE"; }
+meta="$STATE_DIR/sessions/fixture/codex--exact.json"
+head="$(git -C "$REPO_OVERRIDE" rev-parse HEAD)"
+jq -n --arg head "$head" --arg root "$REPO_OVERRIDE" --arg boundary "$FIXTURE/packet" '{type:"review",name:"exact",caller:"codex",model:"glm-5.3",provider:"zai-coding-plan",repository_root:$root,opencode_session_id:"session-exact",remote_turn:{state:"pending",previous_message_id:"old",original_invocation_id:("a"*32),started_at:"2026-09-11T00:00:00Z",head:$head,boundary_root:$boundary,packet_sha256:("0"*64)}}' > "$meta"
+printf 0 > "$FIXTURE/polls"; : > "$FIXTURE/submissions"; : > "$FIXTURE/fail-report"
+printf '{"error":"transport"}' > "$FIXTURE/history"
+if previous_message_id session > "$FIXTURE/watermark-error.log" 2>&1; then exit 20; fi
+printf '{"data":[]}' > "$FIXTURE/history"
+[ "$(previous_message_id session)" = '' ] || exit 21
+printf '{"data":[{"id":"old"}]}' > "$FIXTURE/history"
+[ "$(previous_message_id session)" = old ] || exit 22
+if (cmd_recover exact) > "$FIXTURE/first.log" 2>&1; then exit 10; fi
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] || exit 11
+jq -e '.remote_turn.state=="completed-unpublished" and (.remote_turn.terminal_sha256|length)==64' "$meta" >/dev/null || exit 12
+[ -s "${meta%.json}.terminal.json" ] || exit 13
+cp "$meta" "$FIXTURE/original-meta"
+printf 'changed' >> "${meta%.json}.terminal.json"
+if (cmd_recover exact) > "$FIXTURE/changed.log" 2>&1; then exit 14; fi
+head -c -7 "${meta%.json}.terminal.json" > "$FIXTURE/restored"; mv "$FIXTURE/restored" "${meta%.json}.terminal.json"
+rm "$FIXTURE/fail-report"
+(cmd_recover exact) > "$FIXTURE/final.log" 2>&1 || exit 15
+jq -e '.remote_turn==null and .last_completed_turn.previous_message_id=="old" and (.last_completed_turn.report_sha256|length)==64' "$meta" >/dev/null || exit 16
+[ "$(cat "$FIXTURE/report.md")" = 'new answer' ] || exit 17
+(cmd_recover exact) > "$FIXTURE/repeat.log" 2>&1 || exit 18
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] && [ ! -s "$FIXTURE/submissions" ] || exit 19
+cp "$FIXTURE/original-meta" "$meta"
+: > "$FIXTURE/stale"
+(cmd_recover exact) > "$FIXTURE/stale.log" 2>&1 || exit 23
+jq -e '.remote_turn==null and .last_completed_turn.recovery_state=="completed-stale-source" and .last_completed_turn.authorizing==false' "$meta" >/dev/null || exit 24
+grep -q 'NON-AUTHORIZING' "$FIXTURE/report.md" || exit 25
+grep -q 'RETAINED non-authorizing' "$FIXTURE/stale.log" || exit 26
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] && [ ! -s "$FIXTURE/submissions" ] || exit 27
+cp "$FIXTURE/original-meta" "$meta"
+jq 'del(.remote_turn.original_invocation_id)' "$meta" > "$FIXTURE/legacy"; mv "$FIXTURE/legacy" "$meta"
+if (cmd_recover exact) > "$FIXTURE/legacy.log" 2>&1; then exit 28; fi
+jq -e '.remote_turn.state=="completed-unpublished"' "$meta" >/dev/null || exit 29
+restore_report_context "$FIXTURE/original-meta"
+GLM_REPORT_KEY="$(jq -r .remote_turn.terminal_sha256 "$FIXTURE/original-meta")"
+GLM_REPORT_REQUESTED_AT="$(jq -r .remote_turn.started_at "$FIXTURE/original-meta")"
+original_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 30
+original_report_sha="$(sha256sum "$original_report" | cut -d' ' -f1)"
+original_report_inode="$(stat -c '%d:%i' "$original_report")"
+API_SERVER_VERSION=changed-after-completion
+git -C "$REPO_OVERRIDE" branch -m renamed-after-completion
+repeated_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 31
+[ "$original_report" = "$repeated_report" ] && [ "$original_report_sha" = "$(sha256sum "$repeated_report" | cut -d' ' -f1)" ] && [ "$original_report_inode" = "$(stat -c '%d:%i' "$repeated_report")" ] || exit 32
+grep -q 'original-server' "$repeated_report" && ! grep -q 'renamed-after-completion\|changed-after-completion' "$repeated_report" || exit 33
+printf 'RECOVERY_OK polls=3 submissions=0\n'
+RECOVERY_CASES
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1
+  local result=$?
+  check 'GLM waits for a new assistant, preserves failed publication, and recovers without replay' "test '$result' -eq 0 && grep -q 'RECOVERY_OK polls=3 submissions=0' '$fixture/result.log'"
+  if [ "$result" -ne 0 ]; then printf 'recovery fixture exit=%s\n' "$result"; cat "$fixture/result.log" "$fixture/first.log" "$fixture/final.log" 2>/dev/null; fi
+}
+if [ "${AI_GLM_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  trap 'rm -rf "$TMP"' EXIT
+  glm_recovery_cases
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -48,7 +137,7 @@ printf '{"name":"pending","remote_turn":{"state":"pending","started_at":"2026-09
 AI_GLM_SOURCE="$AI_GLM" PENDING_META="$PENDING_META" bash -c 'source "$AI_GLM_SOURCE"; remote_turn_pending "$PENDING_META"; clear_remote_turn_pending "$PENDING_META"; ! remote_turn_pending "$PENDING_META"; mark_remote_turn_pending "$PENDING_META"; remote_turn_pending "$PENDING_META"; jq -e ".remote_turn.started_at | type == \"string\"" "$PENDING_META" >/dev/null'
 check "a durable pending paid turn blocks retry until a proven terminal result clears it" "jq -e '.remote_turn.state==\"pending\"' '$PENDING_META' >/dev/null"
 check "both GLM review paths record pending remote work before submission" "test \"\$(grep -c 'mark_remote_turn_pending \"\$mp\"' '$AI_GLM')\" -eq 2"
-check "both GLM review paths clear pending work only after terminal model verification" "test \"\$(grep -c 'clear_remote_turn_pending \"\$mp\"' '$AI_GLM')\" -eq 2"
+check "GLM review and recovery paths clear pending work only after report publication" "test \"\$(grep -c 'record_review_publication \"\$mp\" \"\$report\" && clear_remote_turn_pending' '$AI_GLM')\" -eq 3"
 ASK_FN="$(sed -n '/^cmd_ask()/,/^IMPL_META=/p' "$AI_GLM")"
 ASK_LOCK_LINE="$(printf '%s\n' "$ASK_FN" | grep -n 'lock_acquire' | head -1 | cut -d: -f1)"
 ASK_PENDING_LINE="$(printf '%s\n' "$ASK_FN" | grep -n 'remote_turn_pending' | head -1 | cut -d: -f1)"
@@ -832,8 +921,9 @@ rm -rf "$LIVE_TMP"
 
 check "touch_liveness is driven by the assistant message, not /session/status" \
   "awk '/^await_turn\(\)/,/^}/' '$AI_GLM' | grep -q 'touch_liveness \"\$msg\"'"
-check "both review call sites arm TURN_META before await_turn" \
-  "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 2 ]"
+check "review and recovery call sites arm TURN_META before await_turn" \
+  "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 3 ]"
 
+glm_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

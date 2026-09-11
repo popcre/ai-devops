@@ -458,6 +458,9 @@ resolve_issue(){
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  evidence)
+    python="$(command -v python3 || command -v python)" || die "evidence recovery requires Python 3."
+    exec "$python" "$TOOLKIT_ROOT/tools/reviewer_events.py" "$@" ;;
   maintenance)
     python="$(command -v python3 || command -v python)" || die "maintenance requires Python 3."
     export AI_REVIEWER_BASH="$BASH"

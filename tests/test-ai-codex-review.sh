@@ -27,6 +27,7 @@ case "${AI_CODEX_STUB_MODE:-success}" in
   fail) printf 'provider TOKEN=must-not-leak failed\n' >&2; exit 7;; empty) exit 0;; missing) printf 'findings only\n';;
   mutate) printf 'provider-write\n' >> "$dir/a.txt"; printf '## Verdict\nAPPROVE\n';;
   mutate-source) printf 'source-write\n' >> "$AI_CODEX_STUB_SOURCE/a.txt"; printf '## Verdict\nAPPROVE\n';;
+  mutate-target) git -C "$AI_CODEX_STUB_SOURCE" update-ref refs/heads/release-fixture "$AI_CODEX_NEW_TARGET"; printf '## Verdict\nAPPROVE\n';;
   trailing) printf '## Verdict\nAPPROVE\ntrailing text\n';;
   multiple) printf '## Verdict\nAPPROVE\n## Verdict\nAPPROVE\n';;
   hang) sleep 3; printf '## Verdict\nAPPROVE\n';;
@@ -65,12 +66,22 @@ EOF
   check "doctor_normalizes_mixed_tmp_and_native_executable_paths" "cd '$R' && AI_CODEX_PATH_FIXTURE='$STUB' PATH='$TMP/path-tools:$PATH' '$SCRIPT' doctor | grep -q 'sandbox=read-only reasoning=explicit'"
 fi
 check "models_configuration_is_parsed_as_data" "test ! -e '$TMP/models-executed'"
+IDENTITY_CALLS_BEFORE="$(find "$TMP/args" -name 'args-*' | wc -l)"
+check "wrong_source_head_refused_before_provider" "cd '$R' && ! '$SCRIPT' diff-review --assert-head 0000000000000000000000000000000000000000 >/dev/null 2>&1"
+check "missing_source_base_refused_before_provider" "cd '$R' && ! '$SCRIPT' diff-review --base missing-source-target >/dev/null 2>&1"
+IDENTITY_CALLS_AFTER="$(find "$TMP/args" -name 'args-*' | wc -l)"
+check "source_identity_refusals_submit_zero_provider_calls" "[ '$IDENTITY_CALLS_BEFORE' = '$IDENTITY_CALLS_AFTER' ]"
 check "doctor_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' doctor --unknown"
 export AI_CODEX_TEST_MARKER="$TMP/tests-ran"
 check "review_runs_the_supplied_test_evidence_command" "cd '$R' && '$SCRIPT' diff-review --tests 'printf passed > \"\$AI_CODEX_TEST_MARKER\"' >/dev/null && grep -qx passed '$TMP/tests-ran'"
 check "review_rejects_a_missing_tests_command" "cd '$R' && ! '$SCRIPT' diff-review --tests >/dev/null 2>&1"
 check "review_rejects_duplicate_test_commands" "cd '$R' && ! '$SCRIPT' diff-review --tests true --tests true >/dev/null 2>&1"
 check "review_rejects_unknown_options" "cd '$R' && ! '$SCRIPT' diff-review --unknown >/dev/null 2>&1"
+git -C "$R" branch release-fixture
+export AI_CODEX_NEW_TARGET="$(git -C "$R" commit-tree HEAD^{tree} -p HEAD -m target-moved)"
+check "target_movement_during_provider_refuses_authorization" "cd '$R' && ! AI_CODEX_STUB_MODE=mutate-target '$SCRIPT' diff-review --base release-fixture >/dev/null 2>&1"
+check "target_movement_retains_paid_report" "find '$R/.ai/reviews' -name '*.md.stale' | grep -q ."
+git -C "$R" branch -D release-fixture >/dev/null
 BEFORE="$($REPO_ROOT/bin/ai-review-sandbox digest "$R")"
 OUT="$(cd "$R" && "$SCRIPT" diff-review)"
 check "successful_review_publishes_one_report" "[ -s '$OUT' ]"

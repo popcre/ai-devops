@@ -64,7 +64,10 @@ LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
 cleanup(){
-  local accepted_path="" accepted_id="" active_status="" active_tmp=""
+  local accepted_path="" accepted_id="" active_status="" active_tmp="" evidence_durable=1
+  rm -f -- "$RUN_TMP"/muse-key.*
+  release_credential_lock
+  reviewer_event_cleanup_allowed muse || evidence_durable=0
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
     active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
     case "$active_status" in
@@ -81,7 +84,8 @@ cleanup(){
   if [ -n "$PUBLISH_ROOT" ] && [ -n "$PUBLISH_ID" ] && [ -d "$PUBLISH_ROOT/.ai" ]; then
     while IFS= read -r -d '' moved; do case "$(cd "$(dirname "$moved")" && pwd -P 2>/dev/null || true)" in "$(cd "$PUBLISH_ROOT" && pwd -P)"/*) [ "$moved" = "$accepted_path" ] && [ "$PUBLISH_ID" = "$accepted_id" ] && continue; [ -f "$moved" ] && [ ! -L "$moved" ] && [ "$(stat -c '%d:%i' "$moved" 2>/dev/null || true)" = "$PUBLISH_ID" ] && rm -f -- "$moved" 2>/dev/null || true;; esac; done < <(find "$PUBLISH_ROOT/.ai" -type f -print0 2>/dev/null)
   fi
-  rm -rf "$RUN_TMP"
+  [ "$evidence_durable" = 1 ] || return 1
+  [ "${RETAIN_FAILED:-0}" = 1 ] || rm -rf "$RUN_TMP"
 }
 mark_uncertain(){
   local reason="$1" tmp status next_status
@@ -143,11 +147,18 @@ read_prompt(){
   [ -s "$f" ] || { rm -f "$f"; die 'prompt is empty.'; }; printf '%s' "$f"
 }
 prepare(){
-  local root="$1" name="$2" prompt="$3" t; t="$(tag "$name")"
+  local root="$1" name="$2" prompt="$3" t identity; t="$(tag "$name")"
+  identity="$(tmp_file)"
+  "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || die "source identity refused before snapshot creation"
   REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
+  # jq on Windows stores native paths; render the same identity before and
+  # after local recovery so an identical report remains byte-identical.
+  if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi
   git -C "$REVIEW_DIR" clean -fdq -- .ai/reviews 2>/dev/null || true
-  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --decision "$(cat "$prompt")" --class medium)"
-  "$PACKET" verify "$PACKET_DIR" >/dev/null
+  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --identity "$identity" --decision "$(cat "$prompt")" --class medium)"
+  "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
+  rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
 }
 load_key(){
@@ -171,7 +182,10 @@ ensure_report_destination(){
   rel="${path#"$root"/}"
   git -C "$root" check-ignore -q "$rel" || die "refusing Muse report: exact destination is not Git-ignored: $rel. Add .ai/reviews/ to .gitignore, then retry."
   ! git -C "$root" ls-files --error-unmatch "$rel" >/dev/null 2>&1 || die "refusing Muse report: exact destination is tracked: $rel. Preserve it, remove it from Git tracking with: git rm --cached -- '$rel'; then retry."
-  [ ! -e "$path" ] || die "refusing Muse report: exact destination already exists: $rel"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    [ -n "${MUSE_RECOVERY_EVENT_RUN_ID:-}" ] && [ "$path" = "${MUSE_RECOVERY_REPORT_PATH:-}" ] &&
+      [ -f "$path" ] && [ ! -L "$path" ] || die "refusing Muse report: exact destination already exists: $rel"
+  fi
   mkdir -p "$dir" || die "could not create Muse report directory: $dir"
   secure_review_directory "$dir" || die "could not enforce private Muse report storage: $dir"
   [ ! -L "$dir" ] || die 'refusing Muse reports: .ai/reviews became a linked path.'
@@ -198,7 +212,7 @@ reserve_report_staging(){
   [ "$path_state" = "$PUBLISH_FD_ID" ] || die 'reserved Muse staging pathname does not match its held descriptor.'
 }
 finish_report_staging(){
-  local root="$1" path="$2" dir="$root/.ai/reviews"
+  local root="$1" path="$2" dir="$root/.ai/reviews" published_id
   [ -n "$PUBLISH_FD" ] && [ -n "$PUBLISH_TMP" ] && [ -n "$PUBLISH_ID" ] || die 'Muse report staging was not reserved before provider contact.'
   ensure_report_destination "$root" "$path"
   [ "$(cd "$dir" && pwd -P)" = "$PUBLISH_DIR_PHYSICAL" ] || die 'refusing Muse report: destination directory changed after staging.'
@@ -210,14 +224,23 @@ finish_report_staging(){
   ensure_report_destination "$root" "$path"
   [ "$(cd "$dir" && pwd -P)" = "$PUBLISH_DIR_PHYSICAL" ] || die 'refusing Muse report: destination directory changed during final publication.'
   [ "$(stat -c '%f:%h:%d:%i' "$PUBLISH_TMP" 2>/dev/null)" = "$PUBLISH_FD_ID" ] && [ "$(stat -Lc '%f:%h:%d:%i' "/proc/$BASHPID/fd/$PUBLISH_FD" 2>/dev/null)" = "$PUBLISH_FD_ID" ] || die 'refusing Muse report: staging identity or link count changed during final publication.'
-  ln "$PUBLISH_TMP" "$path" 2>/dev/null || die "could not publish Muse report without overwriting: $path"
-  if [ "$(stat -c '%d:%i' "$path" 2>/dev/null)" != "$PUBLISH_ID" ]; then
-    rm -f -- "$path"
-    die 'refusing Muse report: published file does not match the held staging file.'
+  if [ -e "$path" ]; then
+    published_id="$(stat -c '%d:%i' "$path")"
+    [ -n "${MUSE_RECOVERY_EVENT_RUN_ID:-}" ] && [ "$path" = "${MUSE_RECOVERY_REPORT_PATH:-}" ] &&
+      [ -f "$path" ] && [ ! -L "$path" ] && cmp -s "$PUBLISH_TMP" "$path" &&
+      [ "$published_id" = "$(stat -c '%d:%i' "$path")" ] || die 'recovered Muse report differs from the retained result.'
+  else
+    ln "$PUBLISH_TMP" "$path" 2>/dev/null || die "could not publish Muse report without overwriting: $path"
+    published_id="$PUBLISH_ID"
+    if [ "$(stat -c '%d:%i' "$path" 2>/dev/null)" != "$PUBLISH_ID" ]; then
+      rm -f -- "$path"
+      die 'refusing Muse report: published file does not match the held staging file.'
+    fi
   fi
   chmod 600 "$path" 2>/dev/null || die 'could not protect the published Muse report.'
   protect_windows_path "$path" file || die 'could not enforce the published Muse report Windows ACL.'
-  printf '%s\n%s\n' "$path" "$PUBLISH_ID" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
+  printf '%s\n%s\n' "$path" "$published_id" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
+  reviewer_event_publish_report muse "$path" || die 'durable report publication failed; local evidence retained.'
   eval "exec ${PUBLISH_FD}>&-" || die 'could not close Muse report staging file.'; PUBLISH_FD=""
   rm -f "$PUBLISH_TMP"
   PUBLISH_TMP=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
@@ -239,6 +262,19 @@ exec "$@"
 '
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
+}
+retain_turn(){ # retain exact bytes before optional parsing/reporting
+  local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item
+  [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
+  stem="${meta%.json}.$event"
+  for item in jsonl prompt stderr; do
+    local from to="$stem.$item"
+    case "$item" in jsonl) from="$out";; prompt) from="$prompt";; stderr) from="$out.stderr";; esac
+    [ ! -e "$to" ] && [ ! -L "$to" ] || return 1
+    (set -C; cat "$from" > "$to") && chmod 600 "$to" && protect_windows_path "$to" file || return 1
+  done
+  tmp="$(tmp_file)"
+  jq --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
@@ -265,6 +301,7 @@ run_turn(){
     while IFS='=' read -r safe_name _; do case "$safe_name" in AI_MUSE_TEST_*|MUSE_STUB_*) clean_env+=("$safe_name=${!safe_name}");; esac; done < <(env)
   fi
   if [ -n "$meta" ]; then
+    reviewer_event_evidence require-report muse "$dir" || die 'could not reserve Muse evidence; no provider request was sent.'
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
@@ -275,10 +312,19 @@ run_turn(){
     sleep 1; waited=$((waited+1))
     [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
   done
-  wait "$TURN_PID"; rc=$?; TURN_PID=""
+  wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""
+  if [ -n "$meta" ] && ! retain_turn "$meta" "$out" "$prompt" "$rc" "$sid"; then
+    printf 'Muse completion evidence could not be published; private runtime evidence retained at %s\n' "$RUN_TMP" >&2
+    RETAIN_FAILED=1; TURN_ERROR='Muse completion preservation failed; do not replay the provider turn.'; return 1
+  fi
   [ -z "${AI_MUSE_TEST_POST_PROCESS_MARKER:-}" ] || printf reached > "$AI_MUSE_TEST_POST_PROCESS_MARKER"
   [ -z "${AI_MUSE_TEST_POST_PROCESS_DELAY:-}" ] || sleep "$AI_MUSE_TEST_POST_PROCESS_DELAY"
-  set -e; RUN_RC="$rc"
+  set -e
+  parse_turn "$out" "$rc"
+}
+parse_turn(){ # shared terminal parser; never launches the provider
+  local out="$1" rc="$2" salvaged_ids event_sid_count
+  RUN_RC="$rc"; TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   salvaged_ids="$(while IFS= read -r line; do printf '%s\n' "$line" | jq -r '.sessionID//empty' 2>/dev/null || true; done < "$out" | sed '/^$/d' | sort -u)"
   [ "$(printf '%s\n' "$salvaged_ids" | sed '/^$/d' | wc -l)" -ne 1 ] || TURN_SID="$salvaged_ids"
   if ! jq -s -e 'length>0 and all(.[];type=="object")' "$out" >/dev/null 2>&1; then TURN_ERROR='Muse returned malformed event output.'; return 1; fi
@@ -318,6 +364,11 @@ report(){
   ensure_report_destination "$root" "$path"; [ -n "$PUBLISH_FD" ] || die "Muse report staging was not reserved: $path"
   { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
   finish_report_staging "$root" "$path"
+  if [ "${MUSE_RECOVERY_STATE:-}" = completed-stale-source ]; then
+    "$PACKET" verify-retained "$PACKET_DIR" >/dev/null || die "retained source evidence changed; paid report retained: $path"
+  else
+    "$PACKET" verify "$PACKET_DIR" >/dev/null || die "source identity changed; paid report retained: $path"
+  fi
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
 }
 cmd_new(){
@@ -357,8 +408,59 @@ find_meta(){ local root rid m; name_ok "$1" || die "invalid session name '$1'.";
 cmd_list(){ local f; printf '%-24s %-8s %-26s %s\n' NAME CALLER UPDATED REPOSITORY; while IFS= read -r -d '' f; do jq -r '[.name,.caller,.updated_at,.repository_root]|@tsv' "$f"; done < <(find "$STATE/sessions" -type f -name '*.json' -print0 2>/dev/null) | awk -F '\t' '{printf "%-24s %-8s %-26s %s\n",$1,$2,$3,$4}'; }
 cmd_show(){ jq . "$(find_meta "$1")"; }
 cmd_transcript(){ local m; m="$(find_meta "$1")"; runtime_env; "$BIN" export "$(jq -r .session_id "$m")"; }
-cmd_reconcile(){ local m rid tmp status sid; m="$(find_meta "$1")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; status="$(jq -r '.status//"active"' "$m")"; sid="$(jq -r '.session_id//""' "$m")"; case "$status" in provider_outcome_uncertain) [ -n "$sid" ] || die "session '$1' may have reached Muse but returned no provider identity. Keep it blocked; do not retry duplicate paid work.";; completed_pending_local_checks|turn_in_progress) ;; preparation_failed) [ -n "$sid" ] || die "session '$1' failed before Muse created a provider session. Delete it, then retry with ai-muse new.";; *) die "session '$1' cannot be reconciled from status: $status";; esac; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="active"|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"; unlock_session; printf 'reconciled Muse session: %s\n' "$1"; }
+cmd_reconcile(){
+  local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected
+  m="$(find_meta "$name")"; root="$(repo_root)"; rid="$(repo_id "$root")"; lock_session "$rid" "$name"
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and .retained_turn.process_exit==0' "$m" >/dev/null || die 'no exact successful retained Muse process exists; keep uncertain work fenced, never replay it.'
+  [ "$(cd "$(jq -r .repository_root "$m")" && pwd -P)" = "$(cd "$root" && pwd -P)" ] || die 'retained Muse work belongs to a different repository.'
+  status="$(jq -r .status "$m")"
+  case "$status" in active|provider_outcome_uncertain|completed_pending_local_checks|turn_in_progress) ;; *) die "session cannot be reconciled from status: $status";; esac
+  event="$(jq -r .retained_turn.original_invocation_id "$m")"; stem="${m%.json}.$event"
+  for item in stream prompt; do
+    path="$(jq -r --arg key "$item" '.retained_turn[$key]' "$m")"; expected="$stem.prompt"; [ "$item" != stream ] || expected="$stem.jsonl"
+    if command -v cygpath >/dev/null 2>&1; then
+      [ "$(cygpath -am "$path")" = "$(cygpath -am "$expected")" ] || die 'retained Muse evidence path differs from the exact turn.'
+    else
+      [ "$(realpath -m "$path")" = "$(realpath -m "$expected")" ] || die 'retained Muse evidence path differs from the exact turn.'
+    fi
+    [ -f "$path" ] && [ ! -L "$path" ] || die 'retained Muse evidence file is missing or unsafe.'
+    [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$(jq -r --arg key "${item}_sha256" '.retained_turn[$key]' "$m")" ] || die 'retained Muse evidence bytes changed.'
+  done
+  out="$stem.jsonl"; prompt="$stem.prompt"; REQUIRE_VERDICT="$(jq -r .retained_turn.require_verdict "$m")"
+  parse_turn "$out" 0 || die "$TURN_ERROR The retained response cannot prove this turn completed."
+  sid="$(jq -r '.retained_turn.expected_session_id // ""' "$m")"
+  [ -z "$sid" ] || [ "$TURN_SID" = "$sid" ] || die 'retained Muse turn belongs to a different resumed session.'
+  sid="$(jq -r '.session_id // ""' "$m")"; [ -z "$sid" ] || [ "$TURN_SID" = "$sid" ] || die 'retained Muse response differs from the canonical session.'
+  REVIEW_DIR="$(jq -r .review_dir "$m")"; HEAD_SHA="$(jq -r .head "$m")"; PACKET_HASH="$(jq -r .packet_sha256 "$m")"; PACKET_DIR="$("$PACKET" path "$REVIEW_DIR" "$(tag "$name")")"
+  [ "$(cat "$PACKET_DIR/MANIFEST.sha256" 2>/dev/null)" = "$PACKET_HASH" ] || die 'retained Muse packet identity changed.'
+  if [ "$(jq -r '.retained_turn.recovery_state // ""' "$m")" = completed-stale-source ] || ! (unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$PACKET" verify "$PACKET_DIR") >/dev/null 2>&1; then
+    "$PACKET" verify-retained "$PACKET_DIR" >/dev/null || die 'retained Muse snapshot no longer verifies.'; stale=1
+  fi
+  if [ "$status" = active ] && jq -e '.retained_turn.finalized==true' "$m" >/dev/null; then
+    rep="$(jq -r .last_report "$m")"; [ -f "$rep" ] && [ ! -L "$rep" ] && [ "$(sha256sum "$rep" | cut -d' ' -f1)" = "$(jq -r .retained_turn.report_sha256 "$m")" ] || die 'retained Muse report changed.'
+    printf 'already reconciled Muse session: %s (retained evidence only)\n' "$name"; return
+  fi
+  MUSE_RECOVERY_EVENT_RUN_ID="$event"; MUSE_RECOVERY_STATE=''; MUSE_ORIGINAL_HEAD_SHA=''
+  rep="$(jq -r .retained_turn.report_path "$m")"; [ -n "$rep" ] && [ "$rep" != null ] || die 'original Muse report destination was not retained.'
+  if [ "$stale" = 1 ]; then
+    MUSE_RECOVERY_STATE=completed-stale-source; MUSE_ORIGINAL_HEAD_SHA="$HEAD_SHA"; rep="$rep.stale.md"
+    TEXT="RETAINED COMPLETION — NON-AUTHORIZING: source changed after this turn. Original head: $HEAD_SHA.
+
+$TEXT"
+  fi
+  tmp="$(tmp_file)"; jq --arg state "$MUSE_RECOVERY_STATE" --arg report "$rep" '.retained_turn.recovery_state=$state|.retained_turn.recovery_report_path=$report' "$m" > "$tmp" && mv -f "$tmp" "$m"
+  MUSE_RECOVERY_REPORT_PATH="$rep"
+  reviewer_event_evidence require-report muse "$REVIEW_DIR" "$event" || die 'could not reserve exact recovered Muse evidence.'
+  ensure_report_destination "$root" "$rep"; reserve_report_staging "$root"; report "$root" "$name" "$prompt" "$rep" >/dev/null
+  tmp="$(tmp_file)"; jq --arg sid "$TURN_SID" --arg report "$rep" --arg sha "$(sha256sum "$rep" | cut -d' ' -f1)" --arg now "$(date -u +%FT%TZ)" '.status="active"|.session_id=$sid|.last_report=$report|.retained_turn.finalized=true|.retained_turn.report_sha256=$sha|.reconciled_at=$now|.updated_at=$now' "$m" > "$tmp" && mv -f "$tmp" "$m"
+  unlock_session
+  if [ "$stale" = 1 ]; then printf 'reconciled Muse session: %s; NON-AUTHORIZING retained completion, no provider request\n' "$name"
+  else printf 'reconciled Muse session: %s; retained completion, no provider request\n' "$name"; fi
+}
 cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="$(jq -r .repository_root "$m")"; rid="$(jq -r .repository_id "$m")"; lock_session "$rid" "$1"; tag="$(jq -r .sandbox_tag "$m")"; sid="$(jq -r .session_id "$m")"; status="$(jq -r '.status//"active"' "$m")"; runtime_env
+  if [ -d "$(jq -r '.review_dir//""' "$m")" ]; then
+    reviewer_event_verify_sandbox "$(jq -r .review_dir "$m")" || die "review evidence cleanup refused; provider session and metadata preserved."
+  fi
   if [ "$sid" = null ] || [ -z "$sid" ]; then
     [ "$status" = preparation_failed ] || die "session '$1' has no provider identity and cannot be deleted from status: $status"
     "$PACKET" remove "$(jq -r '.review_dir//""' "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag" >/dev/null 2>&1 || true; rm -f "$m"; unlock_session; printf 'deleted pre-provider Muse session: %s\n' "$1"; return 0
@@ -396,8 +498,25 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
+OPT_BASE=""; OPT_ASSERT_HEAD=""
+if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
+  source_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base|--assert-head)
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+        if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+        shift 2;;
+      --prompt|--prompt-file)
+        [ "$#" -ge 2 ] || die "$1 requires a value."
+        source_args+=("$1" "$2"); shift 2;;
+      *) source_args+=("$1"); shift;;
+    esac
+  done
+  set -- "${source_args[@]}"
+fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;

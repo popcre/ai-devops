@@ -287,7 +287,7 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -308,7 +308,10 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # would be computed in a subshell and lost, which is the whole failure this
 # replaces (agents hand-expanding short SHAs into wrong full ones).
 prepare_review() { # prepare_review ROOT TAG [RECORDED_BOUNDARY]
-  local root="$1" tag="$2" recorded="${3:-}" pkt refreshed
+  local root="$1" tag="$2" recorded="${3:-}" pkt refreshed identity
+  identity="$(mktemp)" || die "could not reserve source identity"
+  "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
   if [ -z "$recorded" ]; then
     REVIEW_DIR="$(review_boundary "$root" "$tag")"
   elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
@@ -335,10 +338,12 @@ reviewed. Re-read the SHA from git rather than transcribing it."
 
   [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
   pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class small \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
@@ -1071,6 +1076,9 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   prepare_active_stop_file
+  if [ -n "${ACTIVE_PAID_LOCK:-}" ]; then
+    reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+  fi
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
@@ -1256,7 +1264,7 @@ preflight_review_file() { # preflight_review_file REPO NAME
 }
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
-  local repo="$1" name="$2" f="$3" dir ts out base
+  local repo="$1" name="$2" f="$3" dir ts out base tmp
   ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
@@ -1265,6 +1273,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
   [ -z "$PENDING_REVIEW_DIR" ] || [ "$dir" = "$PENDING_REVIEW_DIR" ] || { warn 'refusing Grok review: report destination changed after preflight.'; return 1; }
   mkdir -p "$dir"
   out="$dir/$base"
+  tmp="$(mktemp "$dir/.grok-report.XXXXXX")" || return 1
   {
     echo "# Grok review — $name"
     echo
@@ -1278,7 +1287,10 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "---"
     echo
     jq -r '.text // ""' "$f"
-  } > "$out"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  ln "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  reviewer_event_publish_report grok "$out" || return 1
   printf '%s' "$out"
 }
 
@@ -1450,11 +1462,11 @@ cmd_new() {
       note "  A first turn that completes but delivers no output has been seen before"
       note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   sid="$(jq -r '.sessionId // ""' "$out")"
-  [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
+  [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
@@ -1476,6 +1488,7 @@ cmd_new() {
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1573,7 +1586,7 @@ $REVIEW_HEAD only."
       note "  Do not keep retrying this session: start a fresh one with"
       note "    ai-grok-review new ${name}-2 --prompt-file <brief>"
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   write_meta "$meta" "$(jq \
@@ -1595,6 +1608,7 @@ $REVIEW_HEAD only."
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1607,6 +1621,11 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     return 1
   fi
   if ! path="$(write_review_file "$repo" "$name" "$out")"; then
+    clear_active_grok
+    return 1
+  fi
+  if ! "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null; then
+    note "source identity changed; paid report retained: $path"
     clear_active_grok
     return 1
   fi
@@ -1683,6 +1702,7 @@ cmd_delete() {
     fi
   done
   meta="$(find_meta "$rid" "$name")"
+  release_boundary "$(repo_root)" "grok-$name" || die 'review evidence cleanup refused; session metadata preserved.'
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
@@ -1693,7 +1713,6 @@ cmd_delete() {
     [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
     rm -rf -- "$record"
   done
-  release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }
 
