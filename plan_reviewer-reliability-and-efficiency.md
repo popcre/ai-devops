@@ -33,6 +33,15 @@ private output SHA-256 is
 The affected private incident received an append-only partial resolution:
 its separate large-attachment failure still awaits #393 installed live proof.
 
+The bounded queue-evidence repair [PR #411](https://github.com/popcre/ai-devops/pull/411)
+is installed at `be5f1e2c25e12abc4b0c57cf1f1f11ffc83811b1`: 42 focused
+checks passed, exact-head GLM approved `d8f8c0a1d338c507ce884888471b3de17eb37ea7`,
+and queue `34574548945` succeeded. Installed helper SHA-256
+`7e37e1bc87c3ac1a7858fbe2dd0bdf2afdf002a6799fad8efb6e31b747341d042`
+was independently verified; its matcher accepted the qualified captured
+run `34567280854` while retaining every required code safety check. This is
+bounded #161/#164 acceptance; #337/#159 and final #398/#166 remain open.
+
 The maintenance round remains `0c62f3dffce145c4b2768855b912b958` with all 198 original candidates. Its installed `show` and exact-round `start --resume` commands work again after an unrelated analysis sidecar was moved out of the checkpoint directory into private analysis storage. The frozen started record still hashes to `aad9e0f327a135d8b684f03768b702aa675981f738924b468215ef61aeefa8f0`. No candidate was reset or disposition invented; final reconciliation remains #398's last step.
 
 **#396 installed slice, 2026-09-11:** [PR #408](https://github.com/popcre/ai-devops/pull/408) merged as `e3b4700d1005088065740200a70d68d7574a4243` after exact-head independent Grok APPROVE on `84274fd629fec8324ecef58373c8b8f011faabb3` and passing required CI/merge queue. Final local Grok suite: 226 passed, zero failed/skipped; focused authentication regressions: seven passed, zero failed/skipped. Installed wrapper SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` matches the tested source. Two concurrent initializers against the actual installed authentication link passed 100 readability/same-inode checks without replacing the existing credential inode; no credential values were read and no provider request was made. The matching private concurrency incident received append-only repair evidence. This does not close the broader availability/cooldown programme or classify the frozen 198-entry round.
