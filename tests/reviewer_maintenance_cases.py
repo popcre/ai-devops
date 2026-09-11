@@ -692,6 +692,18 @@ wait "$job"
             events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
         self.assertEqual((sandbox / ".ai-review-sandbox").read_bytes(), before)
 
+    def test_legacy_reconciliation_recovers_crash_after_marker_publication_idempotently(self):
+        sandbox, meta, report = self.legacy_sandbox_fixture()
+        result = events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows if row["event"] != "finished"))
+        again = events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        self.assertTrue(again["already_reconciled"])
+        events.reconcile_sandbox(self.root, "grok", sandbox, meta, [report])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(len([row for row in rows if row["event"] == "finished"]), 1)
+        self.assertEqual(rows[-1]["run_id"], result["run_id"])
+
     def test_stale_source_finalization_preserves_original_head_without_authorizing_current_head(self):
         original = "b" * 32
         self.invocation(rid=original)

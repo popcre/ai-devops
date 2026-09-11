@@ -68,6 +68,8 @@ def append(directory, event):
         rows = [json.loads(line) for line in data.splitlines()]
         require(all(isinstance(row, dict) for row in rows), "invalid event ledger")
         value = event(rows) if callable(event) else event
+        if value is None:
+            return
         with path.open("ab") as output:
             output.write(encoded(value) + b"\n")
             output.flush()
@@ -228,7 +230,7 @@ def sandbox_marker(sandbox):
     require(boundary["exists"] and data, "sandbox ownership marker is unavailable")
     lines = data.decode("utf-8").splitlines()
     require(lines.count("evidence_format=1") == 1,
-            "legacy sandbox ownership is unknown; reconcile-sandbox with exact session metadata and reports")
+            "legacy sandbox ownership is unknown; use ai-reviewer-issue evidence reconcile-sandbox PROVIDER SANDBOX METADATA REPORT with exact private evidence")
     owners = []
     for line in lines:
         if line.startswith("evidence_owner="):
@@ -296,8 +298,15 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     boundary, marker_data = snapshot(marker, "log")
     require(boundary["exists"] and marker_data, "legacy sandbox marker is missing")
     lines = marker_data.decode("utf-8").splitlines()
-    require(not any(line.startswith("evidence_owner=") for line in lines),
-            "sandbox already has invocation ownership; verify existing evidence")
+    if any(line.startswith("evidence_owner=") for line in lines):
+        references = verify_sandbox(directory, sandbox)
+        for line in lines:
+            if line.startswith("evidence_owner=" + provider + ":"):
+                owner = line.split(":", 1)[1]
+                if invocation(directory, provider, owner).get("operation") == "local-reconciliation":
+                    finish_reconciliation(directory, provider, owner, verify_reports(directory, provider, owner))
+        return {"already_reconciled": True, "report_count": len(references),
+                "historical_source_authorization": "unknown"}
     source = physical(lines[0])
     _, meta_data = snapshot(physical(metadata), "log")
     meta = json.loads(meta_data)
@@ -364,9 +373,13 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     ledger = directory / "events.jsonl"
     _, prior = snapshot(ledger, "jsonl")
     if not any(json.loads(line).get("run_id") == run_id for line in prior.splitlines()):
-        append(directory, {"schema_version": 1, "event": "started", "provider": provider,
-                           "operation": "local-reconciliation", "parent_run_id": None, "run_id": run_id,
-                           "timestamp": now(), "repo": str(source), "head": "", "caller": meta.get("caller", "unknown")})
+        event = {"schema_version": 1, "event": "started", "provider": provider,
+                 "operation": "local-reconciliation", "parent_run_id": None, "run_id": run_id,
+                 "timestamp": now(), "repo": str(source), "head": "", "caller": meta.get("caller", "unknown")}
+        def reserve(rows):
+            require(not any(row.get("run_id") == run_id for row in rows), "legacy reconciliation already reserved; retry existing work")
+            return event
+        append(directory, reserve)
     require_report(directory, provider, run_id)
     identity_path = evidence_root(directory, run_id) / "legacy-identity.json"
     if identity_path.exists():
@@ -377,10 +390,25 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
         result = publish_report(directory, provider, run_id, report, {"phase": "report-publication"})
         require(result["report_sha256"] == expected_hash, "legacy report changed during reconciliation")
     with event_lock(directory):
-        verify_reports(directory, provider, run_id)
+        references = verify_reports(directory, provider, run_id)
         prefix = "" if "evidence_format=1" in lines else "evidence_format=1\n"
         write_sandbox_owner(marker, boundary, marker_data, prefix + "evidence_owner=" + provider + ":" + run_id)
+    finish_reconciliation(directory, provider, run_id, references)
     return {"run_id": run_id, "report_count": len(report_values), "historical_source_authorization": "unknown"}
+
+
+def finish_reconciliation(directory, provider, run_id, references):
+    start = invocation(directory, provider, run_id)
+    require(start.get("operation") == "local-reconciliation", "not a local reconciliation invocation")
+    def terminal(rows):
+        finished = [row for row in rows if row.get("run_id") == run_id and row.get("event") == "finished"]
+        if finished:
+            require(len(finished) == 1 and finished[0].get("exit_code") == 0 and
+                    finished[0].get("evidence_references") == references, "local reconciliation terminal identity changed")
+            return None
+        return {**start, "event": "finished", "timestamp": now(), "exit_code": 0,
+                "provenance": provenance({"phase": "report-publication"}), "evidence_references": references}
+    append(directory, terminal)
 
 
 def main():

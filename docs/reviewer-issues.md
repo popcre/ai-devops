@@ -277,6 +277,37 @@ rewritten.
 
 ## Closing a repaired incident
 
+### Durable report publication and cleanup
+
+Reviewer wrappers reserve report evidence before paid review work. Prepared reports
+are published as immutable private receipts in the existing reviewer-events store;
+the event ledger contains only opaque references. A publication failure
+retains local output and refuses cleanup. Successful failure-diagnostic publication
+does not turn an interrupted or failed review into an approval.
+
+Managed snapshot markers record every paid invocation that used them. Removal and
+refresh verify each invocation's durable receipt, including a separately recorded
+local finalization linked to the original invocation. A stale-source finalization
+preserves the original head and explicitly remains non-authorizing for current
+source. It never submits another provider request or rewrites the original event.
+New standalone snapshots have an explicit empty ownership list and retain ordinary
+creation, refresh, and removal behavior.
+
+Older snapshots without ownership proof are retained until exact private metadata
+and prepared reports establish their identity. Recover them locally with:
+
+```text
+ai-reviewer-issue evidence reconcile-sandbox PROVIDER SANDBOX METADATA REPORT [REPORT ...]
+```
+
+The command verifies the exact stored workspace and provider-session/report link,
+publishes the prepared evidence, then records cleanup ownership. It does not infer
+ownership from a shared repository or head, synthesize a historical run ID, or
+claim historical source authorization. Unknown or missing evidence remains unknown.
+Use `ai-reviewer-issue evidence verify-sandbox SANDBOX` to check the resulting
+cleanup proof. Keep all command arguments and artifacts private; this operation is
+not a disposition sweep and does not change a frozen maintenance round.
+
 A reviewer repair is not complete merely because its tests pass or a wrapper is
 installed. Every local incident whose recorded symptoms the repair addresses
 must receive an explicit resolution record before completion is reported:

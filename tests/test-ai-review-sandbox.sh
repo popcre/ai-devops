@@ -21,6 +21,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 
 # --- a main repo plus a linked worktree --------------------------------------
 MAIN="$TMP/main"
@@ -191,6 +192,21 @@ check "path_creates_nothing_new" \
   "rm -rf '$STAGE' && '$SCRIPT' path '$WT' othertag >/dev/null && [ ! -d '$STAGE' ]"
 
 # Refresh: a later turn must see later edits, and new commits must not go stale.
+PYTHON="$(command -v python3 || command -v python)"
+EVENTS="$REPO_ROOT/tools/reviewer_events.py"
+OWNED="$("$SCRIPT" ensure-copy "$WT" durable-proof)"
+EVENT_ID="$(cd "$WT" && "$PYTHON" "$EVENTS" begin grok)"
+"$PYTHON" "$EVENTS" require-report grok "$EVENT_ID" "$OWNED"
+check "unpublished_paid_evidence_refuses_later_snapshot_removal" \
+  "! '$SCRIPT' remove-copy '$WT' durable-proof >/dev/null 2>&1 && [ -d '$OWNED' ]"
+check "unpublished_paid_evidence_refuses_snapshot_refresh" \
+  "! '$SCRIPT' ensure-copy '$WT' durable-proof >/dev/null 2>&1 && [ -d '$OWNED' ]"
+printf '# Synthetic completed review\n' > "$TMP/durable-report.md"
+"$PYTHON" "$EVENTS" publish-report grok "$EVENT_ID" "$TMP/durable-report.md" >/dev/null
+rm -f "$TMP/durable-report.md"
+check "durable_receipt_allows_exact_cleanup_after_original_report_is_gone" \
+  "'$SCRIPT' remove-copy '$WT' durable-proof && [ ! -d '$OWNED' ] && '$PYTHON' '$EVENTS' verify-reports grok '$EVENT_ID' >/dev/null"
+
 STAGE="$("$SCRIPT" ensure "$WT" reviewtag)"
 echo second-round > "$WT/d.txt"
 git -C "$WT" add -A

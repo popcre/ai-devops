@@ -65,6 +65,9 @@ release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null |
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
 cleanup(){
   local accepted_path="" accepted_id="" active_status="" active_tmp=""
+  rm -f -- "$RUN_TMP"/muse-key.*
+  release_credential_lock
+  reviewer_event_cleanup_allowed muse || { mark_uncertain report_publication_incomplete; return 1; }
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
     active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
     case "$active_status" in
@@ -221,6 +224,7 @@ finish_report_staging(){
   fi
   chmod 600 "$path" 2>/dev/null || die 'could not protect the published Muse report.'
   protect_windows_path "$path" file || die 'could not enforce the published Muse report Windows ACL.'
+  reviewer_event_publish_report muse "$path" || die 'durable report publication failed; local evidence retained.'
   printf '%s\n%s\n' "$path" "$PUBLISH_ID" > "$RUN_TMP/published-report" || die 'could not record accepted Muse report identity.'
   eval "exec ${PUBLISH_FD}>&-" || die 'could not close Muse report staging file.'; PUBLISH_FD=""
   rm -f "$PUBLISH_TMP"
@@ -269,6 +273,7 @@ run_turn(){
     while IFS='=' read -r safe_name _; do case "$safe_name" in AI_MUSE_TEST_*|MUSE_STUB_*) clean_env+=("$safe_name=${!safe_name}");; esac; done < <(env)
   fi
   if [ -n "$meta" ]; then
+    reviewer_event_evidence require-report muse "$dir" || die 'could not reserve durable review evidence.'
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
