@@ -80,6 +80,7 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+umask 077
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -486,6 +487,9 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
       [ -z "$prompt_digest" ] || printf '%s\n' "$prompt_digest" > "$dir/prompt_digest"
       [ -z "$source_id" ] || printf '%s\n' "$source_id" > "$dir/source_identity"
       [ -z "$turn" ] || printf '%s\n' "$turn" > "$dir/turn"
+      if [[ "${AI_REVIEW_EVENT_RUN_ID:-}" =~ ^[0-9a-f]{32}$ ]]; then
+        printf '%s\n' "$AI_REVIEW_EVENT_RUN_ID" > "$dir/event-run-id" || return 1
+      fi
     }
     return 0
   fi
@@ -607,6 +611,134 @@ lock_release() { # only the creating wrapper may release it
   owner="$(cat "$dir/pid" 2>/dev/null || true)"
   [ "$owner" = "$$" ] && rm -rf "$dir" 2>/dev/null || true
 }
+record_local_failure() { # DIR SUPERVISOR_RC OUTPUT; never establishes remote completion
+  local dir="$1" rc="$2" out="$3" run tmp artifact input reason=local_result_unconfirmed
+  run="$(cat "$dir/event-run-id" 2>/dev/null || true)"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] || return 1
+  [ "$rc" != 124 ] || reason=local_timeout
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/remote-uncertain" ] || return 1
+  for artifact in stdout stderr; do
+    input="$out"; [ "$artifact" != stderr ] || input="$out.err"
+    [ -f "$input" ] && [ ! -L "$input" ] || return 1
+    tmp="$(mktemp "$dir/.local-$artifact.XXXXXX")" || return 1
+    cp -- "$input" "$tmp" && chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+    if ! ln "$tmp" "$dir/local-$artifact" 2>/dev/null; then
+      [ -f "$dir/local-$artifact" ] && [ ! -L "$dir/local-$artifact" ] && cmp -s "$tmp" "$dir/local-$artifact" || { rm -f "$tmp"; return 1; }
+    fi
+    rm -f "$tmp"
+  done
+  tmp="$(mktemp "$dir/.local-failure.XXXXXX")" || return 1
+  if ! jq -n --arg run "$run" --arg work "$(cat "$dir/work_id")" \
+    --arg caller "$(cat "$dir/caller")" --arg session "$(cat "$dir/session")" \
+    --arg repo "$(cat "$dir/source")" --arg source "$(cat "$dir/source_identity")" \
+    --arg reason "$reason" --argjson rc "$rc" \
+    --arg stdout_hash "$(sha256sum "$dir/local-stdout" | awk '{print $1}')" \
+    --arg stderr_hash "$(sha256sum "$dir/local-stderr" | awk '{print $1}')" \
+    '{schema_version:1,provider:"grok",event_run_id:$run,work_id:$work,caller:$caller,
+      session:$session,repository:$repo,source_identity:$source,local_reason:$reason,
+      supervisor_exit_code:$rc,stdout_sha256:$stdout_hash,stderr_sha256:$stderr_hash,
+      remote_completion:"unconfirmed",remote_cancellation:"unconfirmed"}' > "$tmp"; then
+    rm -f "$tmp"; return 1
+  fi
+  chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+  if ! ln "$tmp" "$dir/local-failure.json" 2>/dev/null; then
+    [ -f "$dir/local-failure.json" ] && [ ! -L "$dir/local-failure.json" ] && cmp -s "$tmp" "$dir/local-failure.json" || { rm -f "$tmp"; return 1; }
+  fi
+  rm -f "$tmp"
+  note "ai-grok-review: wrapper_terminal_failure: $reason; remote completion and cancellation remain unconfirmed; paid fence retained."
+  [ ! -s "$dir/local-stderr" ] || note "  Private diagnostic retained at: $dir/local-stderr"
+}
+
+legacy_local_wait_failure() { # DIR WORK_ID; structured evidence, not inferred exit
+  local dir="$1" work="$2" repo source caller session field diagnostic='' candidate marker snapshot='' digest patch_hash
+  local lifecycle="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+  local sandboxes="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
+  for field in work_id source source_identity caller session; do
+    [ -f "$dir/$field" ] && [ ! -L "$dir/$field" ] || die 'legacy work identity is missing or unsafe.'
+  done
+  repo="$(cat "$dir/source")"; source="$(cat "$dir/source_identity")"
+  caller="$(cat "$dir/caller")"; session="$(cat "$dir/session")"
+  [ "$(cat "$dir/work_id")" = "$work" ] && [ "$caller" = "$CALLER" ] && valid_name "$session" || die 'legacy local wait belongs to another caller/work.'
+  [[ "$source" =~ ^[0-9a-f]{40}:[0-9a-f]{64}:[0-9a-f]{64}$ ]] || die 'legacy source contract is malformed.'
+  [ "$(cd "$repo" && pwd -P)" = "$(cd "$(repo_root)" && pwd -P)" ] || die 'legacy local wait belongs to another repository.'
+  for candidate in "$lifecycle"/diagnostics/*/grok/"$caller/$work.json"; do
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    [ -z "$diagnostic" ] || die 'multiple original local wait diagnostics are ambiguous.'
+    diagnostic="$candidate"
+  done
+  [ -n "$diagnostic" ] || die 'no authoritative original local wait diagnostic exists.'
+  jq -e --arg work "$work" --arg caller "$caller" --arg session "$session" --arg repo "$repo" --arg head "${source%%:*}" '
+    def norm: gsub("\\\\";"/") | (if test("^/[A-Za-z]/") then .[1:2]+":"+.[2:] else . end) |
+      if test("^[A-Za-z]:/") then (.[0:1]|ascii_downcase)+.[1:] else . end;
+    .schema_version==1 and .provider=="grok" and .run_id==$work and .caller==$caller and
+    .session_id==$session and (.repository_root|norm)==($repo|norm) and .head==$head and
+    (.source_digest|test("^[0-9a-f]{64}$")) and .launch_summary.last_observation_type=="provider-started" and
+    .terminal_summary.phase=="terminal" and .terminal_summary.last_observation_type=="provider-deadline" and
+    .terminal_summary.wrapper_exit_code==124 and .terminal_summary.deadline_kind=="wrapper-timeout" and
+    .terminal_summary.failure_class=="timed-out" and .terminal_summary.provider_terminal_reason==null and
+    .terminal_summary.cancellation.confirmation=="unconfirmed"
+    ' "$diagnostic" >/dev/null || die 'original diagnostic does not prove this exact local wait deadline.'
+  digest="$(jq -r .source_digest "$diagnostic")"; patch_hash="${source#*:}"; patch_hash="${patch_hash%%:*}"
+  for candidate in "$sandboxes/grok-$session-"*; do
+    marker="$candidate/.ai-review-sandbox"
+    [ -d "$candidate" ] && [ ! -L "$candidate" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || continue
+    [ "$(head -n 1 "$marker")" = "$(cd "$repo" && pwd -P)" ] || continue
+    grep -qx "source_digest=$digest" "$marker" || continue
+    [ "$(git -C "$candidate" rev-parse HEAD 2>/dev/null)" = "${source%%:*}" ] || continue
+    field="$candidate/.ai-review-grok-$session/patch.diff"
+    [ -f "$field" ] && [ ! -L "$field" ] && [ "$(sha256sum "$field" | awk '{print $1}')" = "$patch_hash" ] || continue
+    [ -z "$snapshot" ] || die 'multiple original source snapshots are ambiguous.'
+    snapshot="$candidate"
+  done
+  [ -n "$snapshot" ] || die 'original local wait source fingerprint has no matching retained snapshot.'
+  jq --arg source "$source" --arg proof "$(sha256sum "$diagnostic" | awk '{print $1}')" '
+    {schema_version:1,provider:"grok",failure_code:"wrapper_terminal_failure",proof_kind:"recorded-local-wait",
+     work_id:.run_id,caller:.caller,session:.session_id,repository:.repository_root,head:.head,
+     source_identity:$source,source_digest:.source_digest,diagnostic_sha256:$proof,
+     local_wait:"deadline-ended",local_wait_code:124,event_run_id:null,event_link:"absent",
+     outer_wrapper_exit:"unconfirmed",local_process_exit:"unconfirmed",remote_completion:"unconfirmed",
+     remote_cancellation:"unconfirmed",provider_fence:"retained",authorization:"none",governed_artifact:"not-checked"}
+    ' "$diagnostic"
+}
+
+cmd_failure() { # exact WORK_ID; read-only evidence inspection, never paid recovery
+  local work="$1" dir run events base receipt rows repo source caller session
+  [[ "$work" =~ ^[0-9a-f]{32}$ ]] || die 'failure requires the exact 32-character work ID from list.'
+  dir="$(work_lock_path "$work")"; receipt="$dir/local-failure.json"
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/remote-uncertain" ] && [ ! -L "$dir/remote-uncertain" ] || die 'exact retained paid fence is missing or unsafe.'
+  if [ ! -e "$dir/event-run-id" ] && [ ! -L "$dir/event-run-id" ] && [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+    legacy_local_wait_failure "$dir" "$work"; return $?
+  fi
+  for base in event-run-id work_id source source_identity caller session local-failure.json local-stdout local-stderr; do
+    [ -f "$dir/$base" ] && [ ! -L "$dir/$base" ] || die 'authoritative local failure binding is missing; historical timeout text cannot supply it.'
+  done
+  run="$(cat "$dir/event-run-id")"; source="$(cat "$dir/source_identity")"; repo="$(cat "$dir/source")"
+  caller="$(cat "$dir/caller")"; session="$(cat "$dir/session")"
+  [[ "$run" =~ ^[0-9a-f]{32}$ ]] && [ "$(cat "$dir/work_id")" = "$work" ] && [ "$caller" = "$CALLER" ] || die 'local failure identity does not match this caller/work.'
+  [ "$(cd "$repo" && pwd -P)" = "$(cd "$(repo_root)" && pwd -P)" ] || die 'local failure belongs to another repository.'
+  base="${AI_REVIEWER_STATE_BASE:-${HOME}/.local/state/ai-devops}"
+  events="${AI_REVIEW_EVENT_DIR:-$base/reviewer-events}/events.jsonl"
+  rows="$(jq -sc --arg run "$run" '[.[] | select(.run_id==$run)]' "$events")" || die 'original invocation evidence cannot be read.'
+  jq -e --arg run "$run" --arg work "$work" --arg caller "$caller" --arg session "$session" \
+    --arg repo "$repo" --arg source "$source" --arg head "${source%%:*}" --argjson rows "$rows" \
+    --arg stdout_hash "$(sha256sum "$dir/local-stdout" | awk '{print $1}')" \
+    --arg stderr_hash "$(sha256sum "$dir/local-stderr" | awk '{print $1}')" '
+    def norm: gsub("\\\\";"/") | (if test("^/[A-Za-z]/") then .[1:2]+":"+.[2:] else . end) |
+      if test("^[A-Za-z]:/") then (.[0:1]|ascii_downcase)+.[1:] else . end;
+    .schema_version==1 and .provider=="grok" and .event_run_id==$run and .work_id==$work and
+    .caller==$caller and .session==$session and .repository==$repo and .source_identity==$source and
+    .stdout_sha256==$stdout_hash and .stderr_sha256==$stderr_hash and
+    .remote_completion=="unconfirmed" and .remote_cancellation=="unconfirmed" and
+    ((.local_reason=="local_timeout" and .supervisor_exit_code==124) or
+      (.local_reason=="local_result_unconfirmed" and (.supervisor_exit_code|type)=="number")) and
+    ($rows|length)==2 and $rows[0].event=="started" and $rows[1].event=="finished" and
+    ($rows|all(.provider=="grok" and .caller==$caller and .head==$head and (.repo|norm)==($repo|norm))) and
+    (($rows[1].wrapper_exit_code // $rows[1].exit_code)|type)=="number" and
+    ($rows[1].wrapper_exit_code // $rows[1].exit_code)!=0
+    ' "$receipt" >/dev/null || die 'original exact invocation has no proven nonzero local terminal outcome.'
+  jq --argjson rows "$rows" '. + {failure_code:"wrapper_terminal_failure",wrapper_exit_code:($rows[1].wrapper_exit_code // $rows[1].exit_code),provider_fence:"retained",authorization:"none"}' "$receipt"
+}
+
 mark_remote_uncertain() { # retain paid-work lock after local interruption
   local dir="$1"
   [ -d "$dir" ] || return 0
@@ -1134,9 +1266,75 @@ frozen_prefix() {
 # ---------------------------------------------------------------------------
 # Result interpretation
 # ---------------------------------------------------------------------------
+terminal_reason() { # provider stop token -> stable diagnostic, without inference
+  case "$1" in
+    end_turn|EndTurn|stop|completed) printf '%s' "$1" ;;
+    cancelled) printf 'provider_cancelled' ;;
+    max_turns|max_turns_reached|max-turns*) printf 'turn_limit_cancelled' ;;
+    *) printf 'unknown_terminal_reason' ;;
+  esac
+}
+capture_terminal_evidence() { # bind native terminal metadata to this paid JSON result
+  [ "$(jq -r '.stopReason // ""' "$1")" = cancelled ] || return 0
+  local runtime; runtime="$(command -v python3 || command -v python)" || return 1
+  "$runtime" - "$1" "$STATE_DIR/isolated-home/sessions" <<'PY'
+import hashlib,json,os,pathlib,re,sys
+result_path=pathlib.Path(sys.argv[1]); raw=result_path.read_bytes(); result=json.loads(raw)
+sid,request=result.get('sessionId'),result.get('requestId')
+witness={'schema_version':1,'result_sha256':hashlib.sha256(raw).hexdigest(),'terminal_reason':'provider_cancelled','native_terminal_matches':0}
+root=pathlib.Path(sys.argv[2]); matches=[]
+valid=lambda value:isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}',value)
+if valid(sid) and valid(request) and root.is_dir() and not root.is_symlink():
+    for parent in root.iterdir():
+        session=parent/sid; stream=session/'updates.jsonl'
+        if parent.is_symlink() or session.is_symlink() or stream.is_symlink() or not stream.is_file(): continue
+        if not stream.resolve().is_relative_to(root.resolve()): continue
+        try:
+            with stream.open('rb') as handle:
+                while True:
+                    line=handle.readline(65537)
+                    if not line: break
+                    if len(line)>65536:
+                        while line and not line.endswith(b'\n'): line=handle.readline(65537)
+                        continue
+                    if not re.search(rb'"sessionUpdate"\s*:\s*"turn_completed"',line): continue
+                    try: event=json.loads(line)
+                    except (ValueError,UnicodeError): continue
+                    if not isinstance(event,dict): continue
+                    params=event.get('params',{})
+                    if not isinstance(params,dict): continue
+                    update=params.get('update',{})
+                    if not isinstance(update,dict): continue
+                    if params.get('sessionId')!=sid or update.get('prompt_id')!=request or update.get('sessionUpdate')!='turn_completed' or update.get('stop_reason')!='cancelled': continue
+                    meta=params.get('_meta',{})
+                    category=meta.get('cancellationCategory') if isinstance(meta,dict) else None
+                    matches.append({'session_id':sid,'request_id':request,'category':category if isinstance(category,str) and len(category)<=160 else None,'source_terminal_sha256':hashlib.sha256(line).hexdigest()})
+        except OSError: continue
+witness['native_terminal_matches']=len(matches)
+if len(matches)==1:
+    witness.update(matches[0])
+    if matches[0]['category']=='max_turns_reached': witness['terminal_reason']='turn_limit_cancelled'
+fd=os.open(str(result_path)+'.terminal.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+with os.fdopen(fd,'w',encoding='utf-8') as handle: json.dump(witness,handle); handle.write('\n')
+PY
+}
+
+terminal_reason_for_result() {
+  local out="$1" stop; stop="$(jq -r '.stopReason // "unknown"' "$out")"
+  if [ "$stop" = cancelled ] && [ -f "$out.terminal.json" ] && [ ! -L "$out.terminal.json" ] &&
+     [ "$(jq -r '.result_sha256 // ""' "$out.terminal.json")" = "$(sha256sum "$out" | awk '{print $1}')" ] &&
+     jq -e '.schema_version==1 and .native_terminal_matches==1 and .category=="max_turns_reached" and .terminal_reason=="turn_limit_cancelled"' "$out.terminal.json" >/dev/null 2>&1; then
+    printf '%s' turn_limit_cancelled
+  else
+    terminal_reason "$stop"
+  fi
+}
+
 handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
-  local f="$1" name="$2" turns="$3" sr sid used
+  local f="$1" name="$2" turns="$3" sr raw_sr sid used
   sr="$(jq -r '.stopReason // "missing"' "$f")"
+  raw_sr="$sr"
+  [ "$(terminal_reason_for_result "$f")" != turn_limit_cancelled ] || sr=max_turns_reached
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
   case "$sr" in
@@ -1145,7 +1343,8 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
     cancelled)
       note ""
       note "ai-grok-review: Grok cancelled without a final answer."
-      note "  stopReason  : $sr"
+      note "  reason: $(terminal_reason "$sr")"
+      note "  stopReason  : $raw_sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
       note "Grok may not resume a cancelled session cleanly. Do not broaden"
@@ -1155,7 +1354,8 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
     max_turns|max_turns_reached|max-turns*)
       note ""
       note "ai-grok-review: Grok stopped WITHOUT a final answer — the turn budget ran out."
-      note "  stopReason  : $sr"
+      note "  reason: $(terminal_reason "$sr")"
+      note "  stopReason  : $raw_sr"
       note "  turns used  : $used of $turns"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
@@ -1167,7 +1367,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  review and start a fresh, exact-scope session only after correcting that cause."
       return 1 ;;
     *)
-      note "ai-grok-review: unrecognised stopReason '$sr' — refusing to guess. Inspect: $f"
+      note "ai-grok-review: reason: $(terminal_reason "$sr"); refusing to guess. Inspect the private incomplete evidence for this invocation."
       return 1 ;;
   esac
 }
@@ -1187,6 +1387,30 @@ report_usage() { # report_usage FILE
        + "turns: \(.num_turns // "?") "
        + "cost: $\(.total_cost_usd // "unknown") "
        + "model: \((.modelUsage // {} | keys | first) // "unknown")"' >&2
+}
+
+retain_failed_terminal() { # prepare private incomplete evidence before cleanup
+  local out="$1" report
+  report="$(mktemp "$out.incomplete.XXXXXX.md")" || return 1
+  {
+    printf '# Incomplete Grok turn\n\nThis turn did not produce an accepted review.\n\n'
+    printf 'Provider terminal reason: %s\n\n## Provider result\n\n```json\n' "$(terminal_reason_for_result "$out")"
+    cat "$out" || return 1
+    printf '\n```\n\n## Provider stderr\n\n```text\n'
+    [ ! -f "$out.err" ] || cat "$out.err" || return 1
+    printf '\n```\n'
+    if [ -f "$out.terminal.json" ]; then
+      printf '\n## Bound terminal metadata\n\n```json\n'
+      cat "$out.terminal.json" || return 1
+      printf '\n```\n'
+    fi
+  } > "$report" || return 1
+  if ! reviewer_event_publish_report grok "$report" '{"phase":"report-publication"}'; then
+    note "incomplete provider evidence retained: $report"
+    return 1
+  fi
+  note "incomplete provider evidence retained for invocation ${AI_REVIEW_EVENT_RUN_ID:-unknown}"
+  rm -f "$report"
 }
 
 # Grok's `text` concatenates progress narration with the final answer, so every
@@ -1314,6 +1538,7 @@ ai-grok-review $VERSION — read-only Grok reviews in persistent, named sessions
   ai-grok-review ask <name>  [--prompt TEXT | --prompt-file FILE | stdin] [--max-turns N]
   ai-grok-review list
   ai-grok-review show <name>
+  ai-grok-review failure <work-id>  # prove local failure; remote fence stays held
   ai-grok-review transcript <name>
   ai-grok-review delete <name>
   ai-grok-review doctor [--live]
@@ -1463,8 +1688,11 @@ cmd_new() {
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+    record_local_failure "$rid_lock" "$rc" "$out" || {
+      warn 'local failure receipt could not be retained; paid fence remains held.'
+      [ ! -s "$out.err" ] || note "  Private diagnostic retained at: $out.err"
+    }
     note "  grok exit status was $rc - which proves nothing; see the note above."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
       note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
     else
@@ -1477,6 +1705,7 @@ cmd_new() {
   sid="$(jq -r '.sessionId // ""' "$out")"
   [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
+  capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
@@ -1485,20 +1714,22 @@ cmd_new() {
     --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
     --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    --arg terminal_reason "$(terminal_reason_for_result "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
       review_dir:$review_dir, base:$base, head:$head, packet_sha256:$pkthash,
-      turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
+      turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop,last_terminal_reason:$terminal_reason}')"
 
-  finish_turn "$repo" "$name" "$out" "$turns"
-  local st=$?
+  local st=0
+  finish_turn "$repo" "$name" "$out" "$turns" || st=$?
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason_for_result "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
-  rm -f "$pf" "$out" "$out.err"
+  rm -f "$pf" "$out" "$out.err" "$out.terminal.json"
   return $st
 }
 
@@ -1585,8 +1816,11 @@ $REVIEW_HEAD only."
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+    record_local_failure "$rid_lock" "$rc" "$out" || {
+      warn 'local failure receipt could not be retained; paid fence remains held.'
+      [ ! -s "$out.err" ] || note "  Private diagnostic retained at: $out.err"
+    }
     note "  grok exit status was $rc - which proves nothing."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
     if [ "$rc" = 124 ]; then
       note "  Do not retry while this paid turn is unconfirmed; reconcile the retained lock first."
     elif [ ! -s "$out" ]; then
@@ -1598,11 +1832,13 @@ $REVIEW_HEAD only."
     exit 1
   fi
 
+  capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
   write_meta "$meta" "$(jq \
     --arg updated "$(date -u +%FT%TZ)" \
     --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
     --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    --arg terminal_reason "$(terminal_reason_for_result "$out")" \
     --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
     '.head=$head | .base=$base | .packet_sha256=$pkthash |
      .updated=$updated | .turns=(.turns+1)
@@ -1610,23 +1846,24 @@ $REVIEW_HEAD only."
      | .total_cost_usd=(if (.total_cost_usd|type)!="number" or .total_cost_usd<0 or $cost==null then null else .total_cost_usd+$cost end)
      | .total_tokens |= (if type=="number" and isfinite and floor==. then . else null end)
      | .total_cost_usd |= (if type=="number" and isfinite then . else null end)
-     | .last_stop_reason=$stop' "$meta")"
+     | .last_stop_reason=$stop | .last_terminal_reason=$terminal_reason' "$meta")"
 
-  finish_turn "$repo" "$name" "$out" "$turns"
-  local st=$?
+  local st=0
+  finish_turn "$repo" "$name" "$out" "$turns" || st=$?
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason_for_result "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
-  rm -f "$pf" "$out" "$out.err"
+  rm -f "$pf" "$out" "$out.err" "$out.terminal.json"
   return $st
 }
 
 finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
   local repo="$1" name="$2" out="$3" turns="$4" path
-  report_usage "$out"
+  report_usage "$out" || { clear_active_grok; return 1; }
   if ! handle_stop_reason "$out" "$name" "$turns"; then
     clear_active_grok
     return 1
@@ -1641,9 +1878,9 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     return 1
   fi
   if [ "${OPT_JSON:-0}" = 1 ]; then
-    cat "$out"
+    cat "$out" || { clear_active_grok; return 1; }
   else
-    extract_answer "$out"
+    extract_answer "$out" || { clear_active_grok; return 1; }
   fi
   [ -n "$path" ] && note "review saved: $path"
   clear_active_grok
@@ -1769,6 +2006,7 @@ case "$CMD" in
   ask)        [ -n "$ARG" ] || die "usage: ai-grok-review ask <name> …"; cmd_ask "$ARG" ;;
   list)       cmd_list ;;
   show)       [ -n "$ARG" ] || die "usage: ai-grok-review show <name>"; cmd_show "$ARG" ;;
+  failure)    [ -n "$ARG" ] || die "usage: ai-grok-review failure <work-id>"; cmd_failure "$ARG" ;;
   transcript) [ -n "$ARG" ] || die "usage: ai-grok-review transcript <name>"; cmd_transcript "$ARG" ;;
   delete)     [ -n "$ARG" ] || die "usage: ai-grok-review delete <name>"; cmd_delete "$ARG" ;;
   doctor)     cmd_doctor "$OPT_LIVE" ;;

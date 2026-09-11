@@ -185,6 +185,7 @@ case "$mode" in
              ;;
   wait)      sleep 6; cat "$TMPDIR_FOR_TEST/fixture.json" ;;
   hold)      printf '%s\n' "$$" >> "$TMPDIR_FOR_TEST/hold-started"
+             printf '%s\n' 'synthetic-private-provider-body' >&2
              printf '%s\n' "$$" > "$TMPDIR_FOR_TEST/hold-child-pid"
              trap 'printf terminated > "$TMPDIR_FOR_TEST/hold-child-terminated"; exit 143' TERM
              # The hold is released by the test, or terminated by the wrapper's
@@ -324,6 +325,7 @@ TIMEOUT_WALL="$(( TIMEOUT_CEILING * 15 ))"
 [ "$TIMEOUT_WALL" -lt 45 ] && TIMEOUT_WALL=45
 
 # 16 ------------------------------------------------------------------------
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" != 1 ]; then
 echo "== exact_work_lock_visibility_and_truthful_interrupt =="
 CLONE="$TMP/clone"; git clone -q "$REPO" "$CLONE"
 # Keep this first review alive until this test explicitly releases it. A fixed
@@ -360,10 +362,12 @@ SSH_CLONE="$TMP/ssh-clone"; git clone -q "$REPO" "$SSH_CLONE"
 git -C "$SSH_CLONE" remote set-url origin git@GitHub.com:EXAMPLE/Reviewer-Fixture.git
 SSH_BLOCKED="$( cd "$SSH_CLONE" && bash "$SCRIPT" new shared-lock --prompt x 2>&1 )"; SSH_RC=$?
 [ "$SSH_RC" -ne 0 ] && ok "equivalent_origins_share_exact_session_duplicate_detection" || bad "equivalent_origins_share_exact_session_duplicate_detection"
+fi
 OTHER="$TMP/unrelated"; mkdir -p "$OTHER"; git -C "$OTHER" init -q
 git -C "$OTHER" config user.email t@example.com; git -C "$OTHER" config user.name T
 printf '.ai/\n' > "$OTHER/.gitignore"; echo x > "$OTHER/x"; git -C "$OTHER" add -A; git -C "$OTHER" commit -qm i
 git -C "$OTHER" remote add origin https://github.com/example/unrelated.git
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" != 1 ]; then
 echo ok > "$TMP/mode"
 ( cd "$OTHER" && bash "$SCRIPT" new unrelated --prompt x >/dev/null 2>&1 ) && ok "unrelated_upstreams_do_not_block_each_other" || bad "unrelated_upstreams_do_not_block_each_other"
 echo wait > "$TMP/mode"
@@ -386,6 +390,7 @@ wait "$SECOND_PID"
 wait "$CLAUDE_PID"
 check "slow_turn_emits_truthful_bounded_heartbeats" "test \"\$(grep -c 'does not prove provider activity' '$TMP/first.err')\" -ge 2"
 check "terminal_stop_reason_remains_the_only_completion_rule" "grep -q 'APPROVE' '$TMP/first.out'"
+fi
 
 # The configured wait ceiling must also bound a Grok process that never exits.
 # A timed-out paid turn remains blocked because local process death does not
@@ -398,6 +403,49 @@ TIMEOUT_LOCK="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -
 check "configured_timeout_stops_the_local_grok_process" "test '$TIMED_OUT_RC' -ne 0 && printf '%s' '$TIMED_OUT' | grep -q 'exceeded the configured ${TIMEOUT_CEILING}s limit' && test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
 check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt '$TIMEOUT_WALL'"
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
+TIMEOUT_WORK="$(cat "$TIMEOUT_LOCK/work_id")"
+TIMEOUT_FENCE_HASH="$(sha256sum "$TIMEOUT_LOCK/remote-uncertain")"
+TIMEOUT_EVENTS_HASH="$(sha256sum "$AI_REVIEW_EVENT_DIR/events.jsonl")"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure.json" 2> "$TMP/local-failure.err"; LOCAL_FAILURE_RC=$?
+check "local_timeout_has_exact_nonzero_invocation_proof_without_remote_completion" "test '$LOCAL_FAILURE_RC' -eq 0 && jq -e '.failure_code==\"wrapper_terminal_failure\" and .local_reason==\"local_timeout\" and .wrapper_exit_code==1 and .remote_completion==\"unconfirmed\" and .remote_cancellation==\"unconfirmed\" and .authorization==\"none\"' '$TMP/local-failure.json'"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure-repeat.json" 2>/dev/null
+check "local_failure_inspection_is_repeatable_and_keeps_paid_fence" "cmp -s '$TMP/local-failure.json' '$TMP/local-failure-repeat.json' && test '$TIMEOUT_FENCE_HASH' = \"\$(sha256sum '$TIMEOUT_LOCK/remote-uncertain')\""
+mv "$TIMEOUT_LOCK/event-run-id" "$TMP/original-timeout-event"
+check "historical_timeout_without_exact_invocation_join_refuses_conversion" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK') && test -f '$TIMEOUT_LOCK/remote-uncertain'"
+mv "$TMP/original-timeout-event" "$TIMEOUT_LOCK/event-run-id"
+cp "$TIMEOUT_LOCK/local-failure.json" "$TMP/original-local-failure.json"
+jq '.event_run_id="00000000000000000000000000000000"' "$TIMEOUT_LOCK/local-failure.json" > "$TMP/changed-local-failure.json"
+cat "$TMP/changed-local-failure.json" > "$TIMEOUT_LOCK/local-failure.json"
+check "local_failure_refuses_a_different_invocation_binding" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-local-failure.json" > "$TIMEOUT_LOCK/local-failure.json"
+TIMEOUT_STDERR="$(printf '%s\n' "$TIMED_OUT" | sed -n 's/^  Private diagnostic retained at: //p' | tail -1)"
+check "timeout_keeps_private_provider_stderr_without_echoing_it" "! printf '%s' '$TIMED_OUT' | grep -q synthetic-private-provider-body && test -f '$TIMEOUT_STDERR' && grep -q synthetic-private-provider-body '$TIMEOUT_STDERR'"
+cp "$TIMEOUT_LOCK/local-stderr" "$TMP/original-timeout-stderr"
+printf changed >> "$TIMEOUT_LOCK/local-stderr"
+check "local_failure_refuses_changed_retained_provider_bytes" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-timeout-stderr" > "$TIMEOUT_LOCK/local-stderr"
+mkdir "$TMP/successful-event"
+jq -c --arg run "$(cat "$TIMEOUT_LOCK/event-run-id")" 'if .run_id==$run and .event=="finished" then .exit_code=0|.wrapper_exit_code=0 else . end' "$AI_REVIEW_EVENT_DIR/events.jsonl" > "$TMP/successful-event/events.jsonl"
+check "local_failure_cannot_reclassify_a_successful_wrapper_invocation" "! (cd '$OTHER' && AI_REVIEW_EVENT_DIR='$TMP/successful-event' bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+mv "$TIMEOUT_LOCK/event-run-id" "$TMP/legacy-absent-event"
+mv "$TIMEOUT_LOCK/local-failure.json" "$TMP/legacy-absent-receipt"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/legacy-local-wait.json" 2> "$TMP/legacy-local-wait.err"; LEGACY_WAIT_RC=$?
+check "legacy_exact_diagnostic_proves_only_local_wait_and_retains_unknown_exits" "test '$LEGACY_WAIT_RC' -eq 0 && jq -e '.proof_kind==\"recorded-local-wait\" and .local_wait==\"deadline-ended\" and .event_run_id==null and .event_link==\"absent\" and .outer_wrapper_exit==\"unconfirmed\" and .local_process_exit==\"unconfirmed\" and .remote_completion==\"unconfirmed\" and .governed_artifact==\"not-checked\" and .authorization==\"none\"' '$TMP/legacy-local-wait.json'"
+LEGACY_DIAGNOSTIC="$(find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -name "$TIMEOUT_WORK.json" -print -quit)"
+cp "$LEGACY_DIAGNOSTIC" "$TMP/original-legacy-diagnostic"
+jq '.head="0000000000000000000000000000000000000000"' "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+check "legacy_local_wait_refuses_a_different_head" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+jq '.source_digest="0000000000000000000000000000000000000000000000000000000000000000"' "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+check "legacy_local_wait_refuses_a_different_source_fingerprint" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+mv "$TMP/legacy-absent-event" "$TIMEOUT_LOCK/event-run-id"
+mv "$TMP/legacy-absent-receipt" "$TIMEOUT_LOCK/local-failure.json"
+check "legacy_observation_never_releases_original_paid_fence" "test '$TIMEOUT_FENCE_HASH' = \"\$(sha256sum '$TIMEOUT_LOCK/remote-uncertain')\""
+check "local_failure_inspection_creates_no_new_provider_invocation" "test '$TIMEOUT_EVENTS_HASH' = \"\$(sha256sum '$AI_REVIEW_EVENT_DIR/events.jsonl')\""
+if [ "$LEGACY_WAIT_RC" -ne 0 ]; then cat "$TMP/legacy-local-wait.err" >&2; fi
+if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 check "Windows timeouts delegate both process trees to the native supervisor" "test \"\$(grep -c -- '--stop-file \"\$ACTIVE_GROK_NATIVE_STOP_FILE\"' '$SCRIPT')\" -eq 2 && grep -q 'TerminateJobObject(job, 124)' '$REPO_ROOT/bin/ai-process-supervisor'"
 check "Windows fallback translates the MSYS PID and never emits a console signal" "grep -q '/proc/\$child/winpid' '$SCRIPT' && grep -q 'taskkill.exe /PID \"\$windows_pid\"' '$SCRIPT'"
 rm -rf "$TIMEOUT_LOCK"
@@ -631,7 +679,73 @@ wait $BGPID 2>/dev/null
   || bad "await_result returned too early (${ELAPSED}s) — the early-return bug is NOT caught"
 
 # 7/8 -----------------------------------------------------------------------
+terminal_reason_cases(){
+  local reason expected output status
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  for reason in cancelled max_turns max_turns_reached max-turns-exhausted PRIVATE_UNKNOWN_STOP; do
+    case "$reason" in cancelled) expected=provider_cancelled;; max*) expected=turn_limit_cancelled;; *) expected=unknown_terminal_reason;; esac
+    jq -n --arg stop "$reason" '{stopReason:$stop,sessionId:"fixture-session",num_turns:99}' > "$TMP/typed-stop.json"
+    output="$(handle_stop_reason "$TMP/typed-stop.json" fixture 99 2>&1)"; status=$?
+    if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq "reason: $expected"; then ok "typed terminal refusal: $reason"; else bad "typed terminal refusal: $reason"; fi
+    if [ "$reason" = cancelled ]; then
+      check 'cancellation at the ceiling does not invent a turn-limit cause' "! printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+    elif [ "$reason" = PRIVATE_UNKNOWN_STOP ]; then
+      check 'unknown provider stop value stays private' "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_STOP"
+    fi
+  done
+  for reason in end_turn EndTurn stop completed; do
+    jq -n --arg stop "$reason" '{stopReason:$stop}' > "$TMP/typed-stop.json"
+    if handle_stop_reason "$TMP/typed-stop.json" fixture 99 >/dev/null 2>&1; then ok "completed terminal spelling: $reason"; else bad "completed terminal spelling: $reason"; fi
+  done
+  if (
+    source <(sed -n '/^finish_turn() {/,/^}/p' "$SCRIPT")
+    report_usage(){ :; }; handle_stop_reason(){ :; }; write_review_file(){ printf report; }
+    clear_active_grok(){ :; }; extract_answer(){ return 1; }
+    PACKET_BIN=true; REVIEW_DIR="$TMP"; PACKET_REL=packet; OPT_JSON=0
+    ! finish_turn repo name "$TMP/typed-stop.json" 99 >/dev/null 2>&1
+  ); then ok 'failed output cannot become success when terminal status is captured'; else bad 'failed output cannot become success when terminal status is captured'; fi
+  if (
+    source <(sed -n '/^retain_failed_terminal() {/,/^}/p' "$SCRIPT")
+    reviewer_event_publish_report(){ return 1; }
+    printf 'private fixture stderr\n' > "$TMP/typed-stop.json.err"
+    ! retain_failed_terminal "$TMP/typed-stop.json" >/dev/null 2>&1
+    test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && compgen -G "$TMP/typed-stop.json.incomplete.*.md" >/dev/null
+  ); then ok 'failed incomplete publication preserves source response and stderr'; else bad 'failed incomplete publication preserves source response and stderr'; fi
+}
+
+native_terminal_reason_cases(){
+  local STATE_DIR="$TMP/native-terminal-state" fixture="$TMP/native-result.json" stream category output
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
+  mkdir -p "$(dirname "$stream")"
+  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+    jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
+    rm -f "$fixture.terminal.json"
+    jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
+    case "$category" in
+      wrong-request) jq -c '.params.update.prompt_id="prior-request"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      wrong-session) jq -c '.params.sessionId="another-session"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      duplicate) jq -c '.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; cat "$stream.new" "$stream.new" > "$stream" ;;
+      absent) : > "$stream" ;;
+    esac
+    capture_terminal_evidence "$fixture"
+    output="$(handle_stop_reason "$fixture" native 20 2>&1)"
+    if [ "$category" = max_turns_reached ]; then
+      check 'native exact session/request category identifies exhausted turn budget' "printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+      check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
+      printf '\n' >> "$fixture"
+      check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    else
+      check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
+    fi
+    check "native $category never prints private category text" "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_CATEGORY"
+  done
+}
 echo "== stop_reason handling =="
+terminal_reason_cases
+native_terminal_reason_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -643,6 +757,28 @@ check "cancelled has cancellation recovery message" "printf '%s' \"\$OUT\" | gre
 check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
 check "cancelled does not recommend resume"     "! printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
 check "cancelled recommends a fresh session"   "printf '%s' \"\$OUT\" | grep -qi 'fresh named session'"
+CANCELLED_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--t4.json' -print -quit)"
+check 'cancelled session preserves the exact diagnostic class' "jq -e '.last_stop_reason==\"cancelled\" and .last_terminal_reason==\"provider_cancelled\"' '$CANCELLED_META'"
+
+terminal_provider_cases(){
+  local output status meta native_dir
+  cp "$TMP/fixture.json" "$TMP/typed-fixture-original.json"
+  echo ok > "$TMP/mode"
+  if run new typed-stop-followup --prompt review >/dev/null 2>&1; then ok 'typed-stop fixture begins with an ordinary completed review'; else bad 'typed-stop fixture begins with an ordinary completed review'; fi
+  jq '.stopReason="cancelled"|.requestId="typed-native-followup"' "$TMP/typed-fixture-original.json" > "$TMP/fixture.json"
+  native_dir="$AI_GROK_STATE_DIR/isolated-home/sessions/typed-fixture/$(jq -r .sessionId "$TMP/fixture.json")"
+  mkdir -p "$native_dir"
+  jq -c '{params:{sessionId:.sessionId,update:{sessionUpdate:"turn_completed",prompt_id:.requestId,stop_reason:.stopReason},_meta:{cancellationCategory:"max_turns_reached"}}}' "$TMP/fixture.json" > "$native_dir/updates.jsonl"
+  output="$(run ask typed-stop-followup --prompt followup 2>&1)"; status=$?
+  printf '%s\n' "$output" > "$TMP/typed-stop-diagnostic.txt"
+  if printf '%s' "$output" | grep -Fq 'stopReason  : cancelled'; then ok 'native cancellation category preserves the original stop token'; else bad 'native cancellation category preserves the original stop token'; fi
+  cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
+  meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
+  if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi
+  if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep -q turn_limit_cancelled; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
+  if find "$AI_REVIEW_EVENT_DIR" -name '*.report.json' -type f -exec jq -r '.report_text // empty' {} + | grep -Fq '"category": "max_turns_reached"'; then ok 'private incomplete publication retains the bound native category witness'; else bad 'private incomplete publication retains the bound native category witness'; fi
+}
+terminal_provider_cases
 
 echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1
