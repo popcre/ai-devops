@@ -1061,7 +1061,8 @@ launch_review_worker() { # JOB-DIR PROMPT-FILE
 }
 
 cleanup_review_transients() { # JOB-DIR PROMPT-FILE
-  reviewer_event_cleanup_allowed kimi || return 1
+  # These contain launch credentials/prompts, not the retained provider stream.
+  # Evidence publication failure must not prevent their exact owned cleanup.
   rm -f -- "$2" "$1/launch-worker.ps1" "$1/launch-bootstrap.ps1" 2>/dev/null || true
 }
 
@@ -1654,6 +1655,19 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     || { rm -f "$patch_tmp"; return 1; }
   if [ ! -s "$patch_tmp" ]; then
     rm -f "$patch_tmp"
+    if [ "$kind" = incomplete ]; then
+      report_tmp="$(mktemp "$dir/.kimi-report.XXXXXX")" || return 1
+      sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
+      {
+        printf '# INCOMPLETE Kimi implementation - %s\n\n' "$name"
+        printf '%s\n' 'No source changes were produced. The provider did not prove successful completion.'
+        printf -- '- Repository: `%s`\n- Kimi session ID: `%s`\n- Base SHA: `%s`\n- Terminal state: `%s`\n' "$repo" "$sid" "$base" "$state"
+      } > "$report_tmp" || return 1
+      chmod 600 "$report_tmp" || return 1
+      ln "$report_tmp" "$report" 2>/dev/null || cmp -s "$report_tmp" "$report" || return 1
+      rm -f "$report_tmp"
+      reviewer_event_publish_report kimi "$report" || return 1
+    fi
     [ "$kind" = incomplete ] && note "ai-kimi: failed before changes (terminal state: $state); no empty patch was created." \
       || warn "the implement run produced no changes."
     return 2
@@ -1700,8 +1714,10 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     return 1
   fi
   mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"; return 1; }
+  reviewer_event_publish_patch kimi "$patch" || return 1
   if [ "$kind" = incomplete ]; then
     [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
+    [ -z "$turn_patch" ] || reviewer_event_publish_patch kimi "$turn_patch" || return 1
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
     reviewer_event_publish_report kimi "$report" || return 1
     note "ai-kimi: $state with partial changes; command remains unsuccessful."

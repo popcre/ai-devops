@@ -509,6 +509,7 @@ write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELO
       terminal_subtype:(if ($subtype|length)>0 then $subtype else null end),
       terminal_error:$terminal_error,returned_model:(if ($returned|length)>0 then $returned else null end),
       stderr_classification:$class}')" || return 1
+  reviewer_event_publish_report qwen "$file" || return 1
   QUALIFICATION_DIAGNOSTIC_PATH="$file"
 }
 
@@ -633,8 +634,12 @@ cleanup_qualification_probe() {
   stop_run_turn 2>/dev/null || true
   [ -n "$QUALIFICATION_STREAM" ] || return 0
   QUALIFICATION_DIAGNOSTIC_PATH=""
-  write_qualification_diagnostic "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.err" "${RUN_TURN_RC:-130}" \
-    "$QUALIFICATION_RUNTIME_SHA" "$QUALIFICATION_PRELOADER_SHA" timeout 2>/dev/null || true
+  if ! write_qualification_diagnostic "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.err" "${RUN_TURN_RC:-130}" \
+    "$QUALIFICATION_RUNTIME_SHA" "$QUALIFICATION_PRELOADER_SHA" timeout 2>/dev/null; then
+    note "qualification evidence retained: $QUALIFICATION_STREAM"
+    QUALIFICATION_ACTIVE=0
+    return 0
+  fi
   [ -z "$QUALIFICATION_DIAGNOSTIC_PATH" ] || note "diagnostic    : $QUALIFICATION_DIAGNOSTIC_PATH"
   rm -f "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.p" "$QUALIFICATION_STREAM.err" 2>/dev/null || true
   QUALIFICATION_ACTIVE=0
@@ -1114,6 +1119,9 @@ cmd_doctor() {
         echo "diagnostic    : $diagnostic"
       else
         echo "FAILED — diagnostic-write-failure"
+        echo "qualification evidence retained: $tmp"
+        QUALIFICATION_STREAM=""
+        return 1
       fi
       rc=1
     fi
@@ -1250,6 +1258,19 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     || { rm -f "$patch_tmp"; return 1; }
   if [ ! -s "$patch_tmp" ]; then
     rm -f "$patch_tmp"
+    if [ "$kind" = incomplete ]; then
+      report_tmp="$(mktemp "$dir/.qwen-report.XXXXXX")" || return 1
+      sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
+      {
+        printf '# INCOMPLETE Qwen implementation - %s\n\n' "$name"
+        printf '%s\n' 'No source changes were produced. The provider did not prove successful completion.'
+        printf -- '- Repository: `%s`\n- Qwen session ID: `%s`\n- Base SHA: `%s`\n- Terminal state: `%s`\n' "$repo" "$sid" "$base" "$state"
+      } > "$report_tmp" || return 1
+      chmod 600 "$report_tmp" || return 1
+      ln "$report_tmp" "$report" 2>/dev/null || cmp -s "$report_tmp" "$report" || return 1
+      rm -f "$report_tmp"
+      reviewer_event_publish_report qwen "$report" || return 1
+    fi
     [ "$kind" = incomplete ] && note "ai-qwen: failed before changes (terminal state: $state); no empty patch was created." \
       || warn "the implement run produced no changes."
     return 2
@@ -1296,8 +1317,10 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     return 1
   fi
   mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "${turn_tmp:-}" "${report_tmp:-}"; return 1; }
+  reviewer_event_publish_patch qwen "$patch" || return 1
   if [ "$kind" = incomplete ]; then
     [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
+    [ -z "$turn_patch" ] || reviewer_event_publish_patch qwen "$turn_patch" || return 1
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
     reviewer_event_publish_report qwen "$report" || return 1
     note "ai-qwen: $state with partial changes; command remains unsuccessful."
