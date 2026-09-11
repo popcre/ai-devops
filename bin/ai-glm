@@ -1226,7 +1226,13 @@ cmd_recover() { # exact session only; never sends or resends a prompt
   GLM_RECOVERY_EVENT_RUN_ID="$(jq -r .remote_turn.original_invocation_id "$mp")"
   if [ "$state" = pending ]; then
     require_review_server
-    TURN_META="$mp"; msg="$(await_turn "$sid" "$name" review "$boundary")"; TURN_META=""
+    # One bounded read can recover a result that finished after the wrapper
+    # exited. It never renews the original provider/polling deadline.
+    msg="$(last_assistant "$sid")" || die 'could not observe the exact pending GLM result; session remains fenced.'
+    if ! printf '%s' "$msg" | jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" \
+      '.id != null and .id != $previous and .finish=="stop" and .model.id==$model and .model.providerID==$provider' >/dev/null; then
+      TURN_META="$mp"; msg="$(await_turn "$sid" "$name" review "$boundary")"; TURN_META=""
+    fi
     persist_review_terminal "$mp" "$msg" || die 'could not preserve the completed GLM turn; original remote session remains fenced.'
   elif [ "$state" != completed-unpublished ]; then die 'unknown GLM recovery state; no provider call was made.'; fi
   terminal="${mp%.json}.terminal.json"

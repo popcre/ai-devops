@@ -100,11 +100,21 @@ git -C "$REPO_OVERRIDE" branch -m renamed-after-completion
 repeated_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 31
 [ "$original_report" = "$repeated_report" ] && [ "$original_report_sha" = "$(sha256sum "$repeated_report" | cut -d' ' -f1)" ] && [ "$original_report_inode" = "$(stat -c '%d:%i' "$repeated_report")" ] || exit 32
 grep -q 'original-server' "$repeated_report" && ! grep -q 'renamed-after-completion\|changed-after-completion' "$repeated_report" || exit 33
-printf 'RECOVERY_OK polls=3 submissions=0\n'
+rm -f "$FIXTURE/stale"
+jq '.remote_turn.state="pending" | .remote_turn.deadline_epoch=1' "$FIXTURE/original-meta" > "$meta"
+(cmd_recover exact) > "$FIXTURE/expired-complete.log" 2>&1 || exit 34
+[ "$(cat "$FIXTURE/polls")" -eq 4 ] && [ ! -s "$FIXTURE/submissions" ] || exit 35
+jq -e '.remote_turn==null and .last_completed_turn.previous_message_id=="old"' "$meta" >/dev/null || exit 36
+jq '.remote_turn.state="pending" | .remote_turn.deadline_epoch=1' "$FIXTURE/original-meta" > "$meta"
+printf 0 > "$FIXTURE/polls"
+if (cmd_recover exact) > "$FIXTURE/expired-old.log" 2>&1; then exit 37; fi
+[ "$(cat "$FIXTURE/polls")" -eq 1 ] && [ ! -s "$FIXTURE/submissions" ] || exit 38
+jq -e '.remote_turn.state=="pending"' "$meta" >/dev/null || exit 39
+printf 'RECOVERY_OK expired observation=1 submissions=0\n'
 RECOVERY_CASES
   AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1
   local result=$?
-  check 'GLM waits for a new assistant, preserves failed publication, and recovers without replay' "test '$result' -eq 0 && grep -q 'RECOVERY_OK polls=3 submissions=0' '$fixture/result.log'"
+  check 'GLM waits for a new assistant, preserves failed publication, and observes expired completion without replay' "test '$result' -eq 0 && grep -q 'RECOVERY_OK expired observation=1 submissions=0' '$fixture/result.log'"
   if [ "$result" -ne 0 ]; then printf 'recovery fixture exit=%s\n' "$result"; cat "$fixture/result.log" "$fixture/first.log" "$fixture/final.log" 2>/dev/null; fi
 }
 if [ "${AI_GLM_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
