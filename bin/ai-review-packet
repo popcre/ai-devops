@@ -42,6 +42,7 @@
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
 #   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
 #   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
+#   ai-review-packet verify-retained <packet-dir>         # retained snapshot integrity only; never authorization
 #   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
 #   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
 #
@@ -717,5 +718,5 @@ case "${1:-}" in
   path)      shift; cmd_path "$@" ;;
   remove)    shift; cmd_remove "$@" ;;
   --version) printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-packet {build|verify|path|remove} ..." ;;
+  *) die "usage: ai-review-packet {build|resolve|verify|verify-retained|path|remove} ..." ;;
 esac
