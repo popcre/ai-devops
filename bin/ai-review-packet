@@ -40,7 +40,8 @@
 # They are referenced BY PATH as pointers instead.
 #
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
-#   ai-review-packet verify <packet-dir>                  # re-derive the hash
+#   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
+#   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
 #   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
 #   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
 #
@@ -55,6 +56,9 @@
 #
 # Options:
 #   --base REF        base of the comparison (default: resolved and REPORTED)
+#   --identity FILE   resolved source identity, captured before the snapshot
+# Verification also accepts --identity FILE. AI_REVIEW_SOURCE_RECEIPT_FILE may
+# request an immutable receipt directly inside the source's ignored .ai/reviews.
 #   --tests CMD       run CMD in the review dir; record command, exit code, tail
 #   --decision TEXT   the one-sentence decision being asked for
 #   --scope TEXT      what the reviewer IS being asked to judge   (repeatable)
@@ -160,22 +164,22 @@ remove_packet() {
 # rule wins is written into the manifest with the reason, so a human reading the
 # evidence months later can tell what was actually compared.
 #
-# Prefer the fetched remote-tracking branch when it exists. A local main is a
-# checkout convenience and may be stale; using it attributed later mainline
-# commits to the reviewed branch after an update-from-main merge (shared-db
-# #2709). Sandboxes also carry the selected remote base into a local branch, so
-# the fallback remains available after their origin remote is removed.
+# Snapshots retain the source's remote-tracking base refs even after removing
+# their network remote. Prefer those refs: a stale local `main` must never
+# widen a review when the checkout has already fetched a newer `origin/main`.
+# Local branches remain the offline fallback for ordinary repositories.
 # ---------------------------------------------------------------------------
 # Sets the globals BASE_SHA and BASE_RULE. It must NOT be called in a command
 # substitution: that runs it in a subshell and the rule would be silently lost,
 # leaving the manifest unable to say what was actually compared.
-BASE_SHA=""; BASE_RULE=""
+BASE_SHA=""; BASE_RULE=""; TARGET_REF=""; TARGET_SHA=""
 resolve_base() { # resolve_base REPO [REQUESTED_REF]
   local repo="$1" want="${2:-}" sha mb ref
   if [ -n "$want" ]; then
     sha="$(git -C "$repo" rev-parse --verify --quiet "${want}^{commit}" || true)"
     [ -n "$sha" ] || die "the requested base '$want' does not exist in $repo. Nothing was compared; fix the ref rather than letting a review proceed against an unknown base."
     BASE_SHA="$sha"; BASE_RULE="explicitly requested by the caller as '$want'"
+    TARGET_REF="$want"; TARGET_SHA="$sha"
     return 0
   fi
   for ref in origin/main origin/master main master; do
@@ -185,6 +189,7 @@ resolve_base() { # resolve_base REPO [REQUESTED_REF]
     # A base identical to HEAD compares nothing; keep looking.
     [ "$mb" = "$(git -C "$repo" rev-parse HEAD)" ] && continue
     BASE_SHA="$mb"; BASE_RULE="merge-base of HEAD with '$ref' (no --base was given)"
+    TARGET_REF="$ref"; TARGET_SHA="$(git -C "$repo" rev-parse "$ref^{commit}")"
     return 0
   done
   if git -C "$repo" rev-parse --verify --quiet 'HEAD~1^{commit}' >/dev/null; then
@@ -197,10 +202,85 @@ resolve_base() { # resolve_base REPO [REQUESTED_REF]
   BASE_RULE="the empty tree (HEAD is a root commit, so every file is new)"
 }
 
+# Resolve against the caller before cloning: the disposable clone is not an
+# authority for either the requested target or the current source checkout.
+cmd_resolve() {
+  local root want="" expected="" head merge digest
+  root="$(canon "${1:?resolve requires a repository}")"; shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --base) want="${2:?--base needs a ref}"; shift 2 ;;
+      --assert-head) expected="${2:?--assert-head needs a SHA}"; shift 2 ;;
+      *) die "unknown resolve option: $1" ;;
+    esac
+  done
+  head="$(git -C "$root" rev-parse --verify HEAD^{commit})" || die "source has no HEAD"
+  [ -z "$expected" ] || [ "$expected" = "$head" ] || die "source-head-mismatch: expected $expected; actual $head"
+  resolve_base "$root" "$want"
+  merge="$(git -C "$root" merge-base "$BASE_SHA" "$head" 2>/dev/null || true)"
+  digest="$("$SCRIPT_DIR/ai-review-sandbox" digest "$root")" || die "source-digest-unavailable"
+  jq -n --arg repository "$root" --arg base "$BASE_SHA" --arg head "$head" \
+    --arg target "$TARGET_SHA" --arg target_ref "$TARGET_REF" --arg merge_base "$merge" \
+    --arg source_digest "$digest" --arg rule "$BASE_RULE" --arg requested_base "$want" \
+    '{schema_version:1,repository:$repository,base:$base,head:$head,target:$target,target_ref:$target_ref,merge_base:$merge_base,source_digest:$source_digest,rule:$rule,requested_base:$requested_base}'
+}
+
+validate_identity() { # validate_identity JSON [REVIEW_ROOT]
+  local file="$1" review="${2:-}" source head base digest ref target
+  jq -e 'type=="object" and .schema_version==1 and
+    ([.repository,.base,.head,.target,.target_ref,.merge_base,.source_digest,.rule,.requested_base] | all(type=="string")) and
+    (.head|test("^[0-9a-f]{40}$")) and (.base|test("^[0-9a-f]{40}$")) and
+    (.source_digest|test("^[0-9a-f]{64}$"))' "$file" >/dev/null || die "invalid-source-identity"
+  source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
+  base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
+  [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$source")" = "$digest" ] || die "source-digest-mismatch"
+  ref="$(jq -r .target_ref "$file")"; target="$(jq -r .target "$file")"
+  if [ -n "$ref" ]; then
+    [ "$(git -C "$source" rev-parse --verify "$ref^{commit}" 2>/dev/null)" = "$target" ] || die "source-target-moved"
+  fi
+  BASE_SHA=""; BASE_RULE=""; TARGET_REF=""; TARGET_SHA=""
+  resolve_base "$source" "$(jq -r .requested_base "$file")"
+  [ "$BASE_SHA" = "$base" ] && [ "$TARGET_SHA" = "$target" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
+  [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "source-merge-base-mismatch"
+  if [ -n "$review" ]; then
+    local review_source="$review"
+    [ ! -f "$review/.ai-review-sandbox" ] || review_source="$(head -1 "$review/.ai-review-sandbox")"
+    [ "$(canon "$review_source")" = "$(canon "$source")" ] || die "source-repository-mismatch"
+    [ "$(git -C "$review" rev-parse HEAD)" = "$head" ] || die "snapshot-head-mismatch"
+    if [ "$(canon "$review")" != "$(canon "$source")" ]; then
+      [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$review")" = "$digest" ] || die "snapshot-digest-mismatch"
+    fi
+    git -C "$review" cat-file -e "$base" || die "snapshot-base-missing"
+  fi
+}
+
+# A governed caller may request a durable, exact identity receipt. This is
+# evidence of packet validation, never a provider verdict on its own.
+publish_receipt() { # publish_receipt PACKET HASH
+  local pkt="$1" hash="$2" receipt="${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" source parent tmp
+  [ -n "$receipt" ] || return 0
+  case "$receipt" in [A-Za-z]:*) receipt="$(cygpath -u "$receipt")" ;; esac
+  source="$(jq -r .repository "$pkt/identity.json")"
+  [ ! -L "$source/.ai" ] && [ ! -L "$source/.ai/reviews" ] && [ ! -L "$receipt" ] || die "source-receipt-linked-path"
+  parent="$(canon "$(dirname "$receipt")")"
+  [ "$parent" = "$(canon "$source")/.ai/reviews" ] || die "source-receipt-outside-reports"
+  git -C "$source" check-ignore --no-index -q -- .ai/reviews/ || die "source-receipt-reports-not-ignored"
+  tmp="$(mktemp "$parent/.source-receipt.XXXXXX")" || die "source-receipt-unavailable"
+  jq -nS --slurpfile identity "$pkt/identity.json" --arg hash "$hash" \
+    '{schema_version:1,identity:$identity[0],packet_sha256:$hash}' > "$tmp" \
+    || { rm -f "$tmp"; die "source-receipt-unavailable"; }
+  if ! ln "$tmp" "$receipt" 2>/dev/null; then
+    [ -f "$receipt" ] && [ ! -L "$receipt" ] && cmp -s "$tmp" "$receipt" \
+      || { rm -f "$tmp"; die "source-receipt-conflict"; }
+  fi
+  rm -f "$tmp"
+}
+
 # ---------------------------------------------------------------------------
 # build
 # ---------------------------------------------------------------------------
-OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_CLASS="small"
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_CLASS="small"; OPT_IDENTITY=""
 SCOPE=(); EXCLUDE=(); POINTERS=()
 
 # Inline a file list, or spill it to its own file when it is long enough to bury
@@ -223,6 +303,7 @@ cmd_build() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --base)     OPT_BASE="${2:?--base needs a ref}"; shift 2 ;;
+      --identity) OPT_IDENTITY="${2:?--identity needs a file}"; shift 2 ;;
       --tests)    OPT_TESTS="${2:?--tests needs a command}"; shift 2 ;;
       --decision) OPT_DECISION="${2:?--decision needs text}"; shift 2 ;;
       --class)    OPT_CLASS="${2:?--class needs a value}"; shift 2 ;;
@@ -243,7 +324,13 @@ cmd_build() {
 
   head="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
     || die "$root has no commits yet; there is nothing to review."
-  resolve_base "$root" "$OPT_BASE"   # sets BASE_SHA and BASE_RULE; not a subshell
+  if [ -n "$OPT_IDENTITY" ]; then
+    validate_identity "$OPT_IDENTITY" "$root"
+    BASE_SHA="$(jq -r .base "$OPT_IDENTITY")"; BASE_RULE="$(jq -r .rule "$OPT_IDENTITY")"
+    [ -z "$OPT_BASE" ] || [ "$(git -C "$root" rev-parse "$OPT_BASE")" = "$BASE_SHA" ] || die "requested-base-mismatch"
+  else
+    resolve_base "$root" "$OPT_BASE"   # sets BASE_SHA and BASE_RULE; not a subshell
+  fi
   base="$BASE_SHA"
 
   pkt="$(packet_path "$root" "$(packet_dir_name "$tag")")"
@@ -280,9 +367,9 @@ cmd_build() {
   excl="$(git -C "$root" rev-parse --git-path info/exclude)"
   case "$excl" in /*|[A-Za-z]:[/\\]*) ;; *) excl="$root/$excl" ;; esac
   mkdir -p "$(dirname "$excl")"
-  # One glob covers every session's packet, so concurrent reviews do not each
-  # append a line and none of them ever shows up as part of the change.
-  grep -qxF "$PACKET_DIR_BASE*/" "$excl" 2>/dev/null || printf '%s*/\n' "$PACKET_DIR_BASE" >> "$excl"
+  # Ignore only this generated packet, never similarly named user source.
+  local packet_exclusion="/$(basename "$pkt")/"
+  grep -qxF "$packet_exclusion" "$excl" 2>/dev/null || printf '%s\n' "$packet_exclusion" >> "$excl"
 
   # --- tests, BEFORE the evidence is captured ---------------------------------
   # Order matters. A test command can write a log, delete a fixture, or reset a
@@ -396,8 +483,8 @@ EOF
     || die "git diff --name-status $base..$head failed in $root. Nothing was sealed."
   dirty="$(git -C "$root" diff --name-status HEAD)" \
     || die "git diff --name-status HEAD failed in $root. Nothing was sealed."
-  untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null \
-               | grep -v "^$PACKET_DIR_BASE" || true)"
+  untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" \
+    || die "cannot enumerate untracked source files"
   changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
   dirty="$(list_block "$pkt"     dirty-files.txt     "(none — the working tree is clean)"           "$dirty")"
   untracked="$(list_block "$pkt" untracked-files.txt "(none)"                                        "$untracked")"
@@ -522,6 +609,17 @@ EOF
     || { rm -rf "$pkt"; die "could not re-read the complete source after packet creation."; }
   [ "$source_digest_before" = "$source_digest_after" ] \
     || { rm -rf "$pkt"; die "source changed while the evidence packet was being built; no mixed packet was published."; }
+  if [ -n "$OPT_IDENTITY" ]; then
+    validate_identity "$OPT_IDENTITY" "$root"
+    cp "$OPT_IDENTITY" "$pkt/identity.json"
+  else
+    local identity_args=()
+    [ -z "$OPT_BASE" ] || identity_args+=(--base "$OPT_BASE")
+    cmd_resolve "$real_root" "${identity_args[@]}" > "$pkt/identity.json"
+    [ "$(jq -r .base "$pkt/identity.json")" = "$base" ] || die "source-base-moved"
+    [ "$(jq -r .head "$pkt/identity.json")" = "$head" ] || die "source-head-moved"
+    validate_identity "$pkt/identity.json" "$root"
+  fi
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
   hash_packet "$pkt" > "$pkt/$HASHFILE"
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
@@ -544,12 +642,46 @@ hash_packet() { # hash_packet PACKET_DIR
 }
 
 cmd_verify() {
-  local pkt want have
+  local pkt want have identity="" root expected_patch actual_patch
   pkt="$(canon "${1:?usage: ai-review-packet verify <packet-dir>}")"
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --identity) identity="${2:?--identity needs a file}"; shift 2 ;;
+      *) die "unknown verify option: $1" ;;
+    esac
+  done
   [ -f "$pkt/$HASHFILE" ] || die "$pkt has no $HASHFILE; it is not a review packet."
   want="$(cat "$pkt/$HASHFILE")"
   have="$(hash_packet "$pkt")"
   if [ "$want" = "$have" ]; then
+    [ -f "$pkt/identity.json" ] || die "packet-identity-missing"
+    root="$(head -1 "$pkt/$MARKER")"
+    validate_identity "$pkt/identity.json" "$root"
+    if [ -n "$identity" ]; then
+      [ "$(jq -Sc . "$identity")" = "$(jq -Sc . "$pkt/identity.json")" ] || die "packet-identity-mismatch"
+    fi
+    [ -s "$pkt/$MANIFEST" ] && [ -f "$pkt/$PATCH" ] || die "packet-evidence-missing"
+    expected_patch="$(mktemp)"
+    git -C "$root" diff --binary "$(jq -r .base "$pkt/identity.json")" "$(jq -r .head "$pkt/identity.json")" > "$expected_patch" \
+      || { rm -f "$expected_patch"; die "packet-diff-unavailable"; }
+    git -C "$root" diff --binary HEAD >> "$expected_patch" \
+      || { rm -f "$expected_patch"; die "packet-diff-unavailable"; }
+    actual_patch="$pkt/$PATCH"
+    if [ -f "$pkt/$PATCH_FULL" ]; then
+      actual_patch="$pkt/$PATCH_FULL"
+      local parts
+      parts="$(mktemp)"
+      cat "$pkt"/patch.part-* > "$parts" 2>/dev/null \
+        || { rm -f "$parts" "$expected_patch"; die "packet-parts-missing"; }
+      cmp -s "$parts" "$actual_patch" \
+        || { rm -f "$parts" "$expected_patch"; die "packet-parts-incomplete"; }
+      rm -f "$parts"
+    fi
+    cmp -s "$expected_patch" "$actual_patch" \
+      || { rm -f "$expected_patch"; die "packet-diff-mismatch"; }
+    rm -f "$expected_patch"
+    publish_receipt "$pkt" "$have"
     printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
   else
     die "packet hash mismatch in $pkt
@@ -565,10 +697,11 @@ The evidence was modified after it was sealed. Do not review from it; rebuild."
 cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
 cmd_remove() { remove_packet "$(packet_path "$(canon "${1:?usage: ai-review-packet remove <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
 
-need git; need sha256sum
+need git; need sha256sum; need jq
 
 case "${1:-}" in
   build)     shift; cmd_build "$@" ;;
+  resolve)   shift; cmd_resolve "$@" ;;
   verify)    shift; cmd_verify "$@" ;;
   path)      shift; cmd_path "$@" ;;
   remove)    shift; cmd_remove "$@" ;;
