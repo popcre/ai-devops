@@ -140,9 +140,14 @@ the correct route. A predecessor's repository is context, not routing proof.
    promote to production that way.** Production almost always carries pending
    migrations from other workstreams that other teams have deliberately kept off it,
    so a plain `db push` either refuses or sweeps up work that was never approved.
-   Production promotion requires **Albert's explicit approval for that exact change**,
-   the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout recipe. It is
-   the orchestrator's call, not this skill's. Stop and ask.
+   Production promotion normally requires **Albert's explicit approval for that exact
+   change**, the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
+   recipe. The sole exception is the separately activated automatic workflow recorded
+   by issue #2716: only after exact structural admission, guarded merge, merged-main
+   preview, and every immutable evidence gate may that workflow dispatch its existing
+   serial production lane. A session never reconstructs or dispatches it manually;
+   absent or ambiguous evidence stops for an engineer. It is the orchestrator's call,
+   not this authoring skill's.
    If a change was already applied out-of-band, use `supabase migration repair
    --status applied <version>` to record it (metadata only, no SQL re-run). If the
    dry-run reports "Remote migration versions not found in local migrations

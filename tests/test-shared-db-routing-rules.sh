@@ -7,6 +7,7 @@ PASS=0; FAIL=0
 FIX="$ROOT/tests/fixtures/shared-db-routing/1097-successor-1113.md"
 ORCH="$ROOT/skills/shared/shared-db-orchestrator/SKILL.md"
 MANUAL="$ROOT/skills/shared/shared-db-orchestrator/references/operating-manual.md"
+AUTHORING="$ROOT/skills/codex/codex-shared-db-change/SKILL.md"
 CLAUDE="$ROOT/templates/system/CLAUDE-global.md"
 CODEX="$ROOT/templates/system/AGENTS-global-codex.md"
 REPO_AGENTS="$ROOT/AGENTS.md"
@@ -37,7 +38,9 @@ check "both globals carry only the governed automatic production exception" "gre
 check "automatic production never falls back to owner version naming" "grep -q 'never manually reconstruct version or artifact inputs' '$ORCH' && grep -q 'never falls back to asking Albert for migration numbers' '$MANUAL'"
 check "automatic production retains engineer refusal and dry-run lock" "grep -q 'engineer action required' '$MANUAL' && grep -q 'fresh dry-run immediately' '$MANUAL' && grep -q 'global production lock' '$MANUAL'"
 check "automatic production independently re-admits actual structural work" "grep -q 'one open linked structural work issue independently admitted' '$ORCH' && grep -q 'current scope plus the PR.s actual migration files' '$MANUAL' && grep -q 'one open structural work' '$CODEX' && grep -q 'one open structural work' '$CLAUDE'"
-check "automatic production pins refusal and prior activation evidence" "grep -q 'exception authorizes no manual production command' '$CODEX' && grep -q 'exception authorizes no manual production command' '$CLAUDE' && grep -q 'This policy cannot authorize its own rollout' '$MANUAL' && grep -q '6e4ea801798dae3ae30648a5e4682bbb3aa06e66' '$MANUAL' && grep -q '7c3e25454561748cd29e24bcfe1f3b4c0d3bdeb6' '$MANUAL'"
+check "automatic production pins refusal and prior activation evidence" "grep -q 'exception authorizes no manual production command' '$CODEX' && grep -q 'session-made workflow' '$CODEX' && grep -q 'exception authorizes no manual production command' '$CLAUDE' && grep -q 'session-made workflow' '$CLAUDE' && grep -q 'This policy cannot authorize its own rollout' '$MANUAL' && grep -q '6e4ea801798dae3ae30648a5e4682bbb3aa06e66' '$MANUAL' && grep -q '7c3e25454561748cd29e24bcfe1f3b4c0d3bdeb6' '$MANUAL'"
+check "authoring skill defers only to the activated governed workflow" "grep -q 'sole exception is the separately activated automatic workflow' '$AUTHORING' && grep -q 'never reconstructs or dispatches it manually' '$AUTHORING' && grep -q 'stops for an engineer' '$AUTHORING'"
+check "repository router pins the same narrow exception" "grep -q 'sole exception is the separately activated .*shared-db.* automatic migration' '$REPO_AGENTS' && grep -q 'authorizes no manual production command' '$REPO_AGENTS'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

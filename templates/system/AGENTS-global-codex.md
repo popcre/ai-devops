@@ -128,8 +128,8 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   scope plus actual migration files, immutable preview evidence,
   production target, bounded allowlist, fresh dry-run, exclusive lock, and
   post-apply result. Missing or ambiguous evidence stops for an engineer. This
-  exception authorizes no manual production command, workflow dispatch, other
-  repository, infrastructure action, or bypass.
+  exception authorizes no manual production command, session-made workflow
+  dispatch, other repository, infrastructure action, or bypass.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
