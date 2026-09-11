@@ -64,9 +64,12 @@ Raw exports remain private. They are not committed or sent as review input.
 The formatter has 13 provider-shaped cases, including absent/zero/invalid,
 incremental steps, cumulative message exclusion, duplicate/conflicting events,
 missing terminal state, mixed sessions, and unqualified versions.
-Focused wrapper probes: Muse 44 passed/0 failed; Grok 13/0; DeepSeek 46/0;
+Focused wrapper probes: Muse 44 passed/0 failed; Grok 14/0; DeepSeek 46/0;
 GLM last-step scope/unchanged-answer/zero-preservation check passed.
 These include actual accounting failure preserving the paid response and no replay.
+The Grok probe also proves an overflowed JSON number remains unknown. jq accepts
+`1e999` as numeric despite it not being finite; both raw counters and accumulated
+totals now reject non-finite values without changing the paid response.
 
 Grok exact-head review of `780c3b45dd9c2701ec7bfef119890363d2f2a94a`
 approved with no blocking accounting defects (17 turns, $0.21912966).

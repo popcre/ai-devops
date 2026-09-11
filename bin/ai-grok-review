@@ -1170,8 +1170,8 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
 }
 
 normalized_usage() {
-  jq 'def count: if type=="number" and .>=0 and floor==. then . else null end;
-      def money: if type=="number" and .>=0 then . else null end;
+  jq 'def count: if type=="number" and isfinite and .>=0 and floor==. then . else null end;
+      def money: if type=="number" and isfinite and .>=0 then . else null end;
       if (.usage|type)!="object" then .usage={} else . end |
       .usage.total_tokens |= count | .usage.input_tokens |= count |
       .usage.cache_read_input_tokens |= count | .total_cost_usd |= money' "$1"
@@ -1600,6 +1600,8 @@ $REVIEW_HEAD only."
      .updated=$updated | .turns=(.turns+1)
      | .total_tokens=(if (.total_tokens|type)!="number" or .total_tokens<0 or $tokens==null then null else .total_tokens+$tokens end)
      | .total_cost_usd=(if (.total_cost_usd|type)!="number" or .total_cost_usd<0 or $cost==null then null else .total_cost_usd+$cost end)
+     | .total_tokens |= (if type=="number" and isfinite and floor==. then . else null end)
+     | .total_cost_usd |= (if type=="number" and isfinite then . else null end)
      | .last_stop_reason=$stop' "$meta")"
 
   finish_turn "$repo" "$name" "$out" "$turns"

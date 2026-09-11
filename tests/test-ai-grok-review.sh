@@ -682,6 +682,9 @@ jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_u
 ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
 check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
 check "live doctor keeps malformed cost unknown" "run doctor --live | grep -Fq 'cost \$unknown'"
+jq '.usage={total_tokens:1e999,cache_read_input_tokens:1e999} | .total_cost_usd=1e999' "$TMP/usage-full.json" > "$TMP/fixture.json"
+OVERFLOW_OUT="$(run new usage-overflow --prompt x 2>&1)"; OVERFLOW_RC=$?
+check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
 cp "$TMP/usage-full.json" "$TMP/fixture.json"
 
 # 11 ------------------------------------------------------------------------
