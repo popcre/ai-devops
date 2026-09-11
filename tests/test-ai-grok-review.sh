@@ -771,6 +771,7 @@ terminal_provider_cases(){
   jq -c '{params:{sessionId:.sessionId,update:{sessionUpdate:"turn_completed",prompt_id:.requestId,stop_reason:.stopReason},_meta:{cancellationCategory:"max_turns_reached"}}}' "$TMP/fixture.json" > "$native_dir/updates.jsonl"
   output="$(run ask typed-stop-followup --prompt followup 2>&1)"; status=$?
   printf '%s\n' "$output" > "$TMP/typed-stop-diagnostic.txt"
+  if printf '%s' "$output" | grep -Fq 'stopReason  : cancelled'; then ok 'native cancellation category preserves the original stop token'; else bad 'native cancellation category preserves the original stop token'; fi
   cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
   meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
   if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi

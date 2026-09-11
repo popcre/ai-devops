@@ -1331,8 +1331,9 @@ terminal_reason_for_result() {
 }
 
 handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
-  local f="$1" name="$2" turns="$3" sr sid used
+  local f="$1" name="$2" turns="$3" sr raw_sr sid used
   sr="$(jq -r '.stopReason // "missing"' "$f")"
+  raw_sr="$sr"
   [ "$(terminal_reason_for_result "$f")" != turn_limit_cancelled ] || sr=max_turns_reached
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
@@ -1343,7 +1344,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note ""
       note "ai-grok-review: Grok cancelled without a final answer."
       note "  reason: $(terminal_reason "$sr")"
-      note "  stopReason  : $sr"
+      note "  stopReason  : $raw_sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
       note "Grok may not resume a cancelled session cleanly. Do not broaden"
@@ -1354,7 +1355,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note ""
       note "ai-grok-review: Grok stopped WITHOUT a final answer — the turn budget ran out."
       note "  reason: $(terminal_reason "$sr")"
-      note "  stopReason  : $sr"
+      note "  stopReason  : $raw_sr"
       note "  turns used  : $used of $turns"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
