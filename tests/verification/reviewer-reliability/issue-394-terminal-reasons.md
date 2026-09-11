@@ -23,7 +23,7 @@ behavior remain unchanged. The historical transient start failure's underlying
 cause is still unknown; these changes provide a recognizable diagnostic.
 
 Validation: Grok reason/fault checks 13 passed, zero failed; provider-shaped
-new/continuation checks 23 passed, zero failed or skipped. Muse startup checks
+new/continuation checks 25 passed, zero failed or skipped. Muse startup checks
 failed three cases before repair and now pass all five. Governed-consumer
 mapping passes 59 checks, zero failed or skipped, including refusal of a fake
 approval attached to every typed error and privacy of raw diagnostic bodies.
