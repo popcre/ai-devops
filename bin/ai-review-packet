@@ -160,9 +160,10 @@ remove_packet() {
 # rule wins is written into the manifest with the reason, so a human reading the
 # evidence months later can tell what was actually compared.
 #
-# Note the snapshots ai-review-sandbox builds have their `origin` remote removed,
-# so origin/* refs usually do not exist there. That is why the local branch names
-# are tried first and why falling through is normal, not an error.
+# Snapshots retain the source's remote-tracking base refs even after removing
+# their network remote. Prefer those refs: a stale local `main` must never
+# widen a review when the checkout has already fetched a newer `origin/main`.
+# Local branches remain the offline fallback for ordinary repositories.
 # ---------------------------------------------------------------------------
 # Sets the globals BASE_SHA and BASE_RULE. It must NOT be called in a command
 # substitution: that runs it in a subshell and the rule would be silently lost,
@@ -176,7 +177,7 @@ resolve_base() { # resolve_base REPO [REQUESTED_REF]
     BASE_SHA="$sha"; BASE_RULE="explicitly requested by the caller as '$want'"
     return 0
   fi
-  for ref in main master origin/main origin/master; do
+  for ref in origin/main origin/master main master; do
     git -C "$repo" rev-parse --verify --quiet "${ref}^{commit}" >/dev/null || continue
     mb="$(git -C "$repo" merge-base HEAD "$ref" 2>/dev/null || true)"
     [ -n "$mb" ] || continue

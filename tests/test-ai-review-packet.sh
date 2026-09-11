@@ -175,6 +175,36 @@ PKT="$("$SCRIPT" build "$R" explicitbase --base "$BASE_SHA")"
 check "explicit_base_is_honoured"             "grep -q 'explicitly requested' '$PKT/MANIFEST.md'"
 check "bad_base_is_refused_loudly"            "'$SCRIPT' remove '$R'; ! '$SCRIPT' build '$R' badbase --base deadbeefdeadbeef"
 
+# A fetched target branch is authoritative over a stale local branch. This is
+# the A/B/C regression: local main remains at A, origin/main advances to B, and
+# the feature head C is based on B. Selecting A would include B's unrelated
+# file in the review.
+STALE="$TMP/stale-base"
+ORIGIN="$TMP/stale-origin.git"
+git init -q --bare --initial-branch=main "$ORIGIN"
+git clone -q "$R" "$STALE"
+git -C "$STALE" config user.email t@example.com
+git -C "$STALE" config user.name Test
+git -C "$STALE" remote set-url origin "$ORIGIN"
+git -C "$STALE" checkout -q -B main "$BASE_SHA"
+git -C "$STALE" push -q -u origin main
+UPSTREAM="$TMP/stale-upstream"
+git clone -q "$ORIGIN" "$UPSTREAM"
+git -C "$UPSTREAM" config user.email t@example.com
+git -C "$UPSTREAM" config user.name Test
+echo target-only > "$UPSTREAM/target-only.txt"
+git -C "$UPSTREAM" add -A && git -C "$UPSTREAM" commit -qm target-advanced && git -C "$UPSTREAM" push -q origin main
+git -C "$STALE" fetch -q origin
+STALE_REMOTE_SHA="$(git -C "$STALE" rev-parse origin/main)"
+STALE_LOCAL_SHA="$(git -C "$STALE" rev-parse main)"
+git -C "$STALE" checkout -q -B feature origin/main
+echo feature-only > "$STALE/feature-only.txt"
+git -C "$STALE" add -A && git -C "$STALE" commit -qm feature
+STALE_PKT="$($SCRIPT build "$STALE" stale-origin)"
+check "stale_local_main_differs_from_fetched_origin" "[ '$STALE_LOCAL_SHA' != '$STALE_REMOTE_SHA' ]"
+check "fetched_origin_base_beats_stale_local_main" "grep -q '$STALE_REMOTE_SHA' '$STALE_PKT/MANIFEST.md'"
+check "stale_base_packet_excludes_target_branch_work" "! grep -q 'target-only.txt' '$STALE_PKT/patch.diff' && grep -q 'feature-only.txt' '$STALE_PKT/patch.diff'"
+
 # --- linked worktrees ---------------------------------------------------------
 # A raw worktree kills a reviewer before it reads code. Refuse at the door and
 # name the fix, rather than emitting a packet nobody can use.
