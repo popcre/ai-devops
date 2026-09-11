@@ -78,6 +78,12 @@ if (child.status !== 0) process.exit(70);
 if (process.argv[2] === '--version') { console.log('0.21.11'); process.exit(0); }
 if (process.argv[2] === 'sessions') { console.log(JSON.stringify({sessionId:'qwen-session-1', filePath:path.join(root, 'transcript.jsonl')})); process.exit(0); }
 const mode = fs.existsSync(path.join(root, 'mode')) ? fs.readFileSync(path.join(root, 'mode'), 'utf8').trim() : 'review';
+fs.appendFileSync(path.join(root, 'provider-turns'), 'turn\n');
+if (mode === 'publication-failure') {
+  const events = fs.readFileSync(path.join(root, 'reviewer-events', 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const current = events.filter(event => event.provider === 'qwen' && event.event === 'started').at(-1);
+  fs.writeFileSync(path.join(root, 'reviewer-events', 'evidence', current.run_id, 'required.json'), '{}\n');
+}
 fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
@@ -312,6 +318,20 @@ FIRST_ASK_OUT="$(run ask review-1 --prompt 'follow up' 2>&1)"; FIRST_ASK_RC=$?
 check 'first follow-up completes successfully' "test '$FIRST_ASK_RC' -eq 0"
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
+
+echo publication-failure > "$TMP/mode"
+run new publication-failed --prompt 'retain this completed result' > "$TMP/publication-failed.out" 2>&1; PUBLICATION_RC=$?
+check 'publication failure cannot become an active accepted review' "test '$PUBLICATION_RC' -ne 0 && run show publication-failed | jq -e '.status!=\"active\"'"
+PENDING_REPORT="$(run show publication-failed | jq -r .recovery_stream)"
+check 'publication failure retains completed provider stream' "test -s '$PENDING_REPORT' && grep -q APPROVE '$PENDING_REPORT'"
+TURNS_BEFORE_PUBLICATION_RETRY="$(wc -l < "$TMP/provider-turns")"
+run ask publication-failed --prompt retry > "$TMP/publication-retry.out" 2>&1; PUBLICATION_RETRY_RC=$?
+check 'unpublished review refuses paid replay' "test '$PUBLICATION_RETRY_RC' -ne 0 && test '$TURNS_BEFORE_PUBLICATION_RETRY' -eq \"\$(wc -l < '$TMP/provider-turns')\""
+echo review > "$TMP/mode"
+if [ "${AI_QWEN_DURABILITY_TESTS_ONLY:-0}" = 1 ]; then
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  [ "$FAIL" -eq 0 ]; exit $?
+fi
 
 run new packet-mismatch --prompt review >/dev/null 2>&1
 PACKET_META="$(find "$TMP/state/sessions" -name 'codex--packet-mismatch.json' -print -quit)"

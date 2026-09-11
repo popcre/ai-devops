@@ -303,7 +303,7 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 
 resolve_trusted_op() {
@@ -1338,6 +1338,7 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
   if [ "$kind" = incomplete ]; then
     [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
+    reviewer_event_publish_report qwen "$report" || return 1
     note "ai-qwen: $state with partial changes; command remains unsuccessful."
     note "INCOMPLETE patch written: $patch"
     note "INCOMPLETE report written: $report"
@@ -1364,6 +1365,12 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
       emit_implementation_artifact "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_WT" \
         "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" \
         "${LIFECYCLE_PRIOR_TREE:-$LIFECYCLE_BASE}" || artifact_rc=$?
+    fi
+    if ! reviewer_event_cleanup_allowed qwen; then
+      LIFECYCLE_PRESERVE=1
+      [ -z "$LIFECYCLE_OWNER" ] || mark_preserved "$LIFECYCLE_OWNER" || true
+      [ -z "$LIFECYCLE_META" ] || mark_impl_recovery_required "$LIFECYCLE_META" report-publication-incomplete || true
+      return 1
     fi
     if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
       continuity=exact
@@ -1393,6 +1400,7 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
     fi
     [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
   fi
+  reviewer_event_cleanup_allowed qwen || return 1
   rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
   [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
   [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
@@ -1466,6 +1474,7 @@ start_session() { # start_session NAME MODE
     LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"; LIFECYCLE_BASE="$base"
     write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" --arg state active \
       '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:$state}')"
+    reviewer_event_evidence bind-owner qwen "$owner" || die 'could not bind exact implementation evidence ownership.'
     workdir="$wt"
     note "implement run isolated in a throwaway worktree: $wt"
   fi
@@ -1482,6 +1491,8 @@ start_session() { # start_session NAME MODE
     reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable Qwen evidence; no provider call was made.'
     record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" turn_in_progress
     write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
+  else
+    reviewer_event_evidence require-report qwen || die 'could not reserve durable implementation evidence; no provider call was made.'
   fi
   run_turn "$workdir" "$out" "$pf" "$mode"; rc="$RUN_TURN_RC"
   LIFECYCLE_COMMAND_RC="$rc"
@@ -1530,6 +1541,7 @@ cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
     return 1
   }
   [ -f "$owner" ] && [ "$(jq -r '.state // ""' "$owner" 2>/dev/null)" = preserved-recovery ] && return 0
+  reviewer_event_verify_owner qwen "$owner" || { warn 'implementation evidence cleanup refused; exact owner and worktree preserved.'; return 1; }
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune >/dev/null 2>&1 || true
   if git -C "$repo" worktree list 2>/dev/null | grep -qF "$wt"; then
@@ -1668,6 +1680,7 @@ continue_implementation() { # NAME RID META [RESET]
   git -C "$wt" config core.longpaths true
   owner="${wt%/wt}/owner.json"; LIFECYCLE_WT="$wt"; LIFECYCLE_OWNER="$owner"
   write_meta "$owner" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg repo "$repo" --arg wt "$wt" --arg pid "$$" '{version:1,repo:$repo,worktree:$wt,pid:$pid,state:"active"}')"
+  reviewer_event_evidence bind-owner qwen "$owner" || die 'could not bind exact implementation evidence ownership.'
   git -C "$wt" apply --check "$patch" >/dev/null 2>&1 && git -C "$wt" apply "$patch" >/dev/null 2>&1 || die "canonical patch cannot be applied to immutable base $base."
   git -C "$wt" add -A >/dev/null 2>&1
   expected="$(jq -r .patch_sha256 "$meta")"; actual="$(mktemp)"
@@ -1676,6 +1689,7 @@ continue_implementation() { # NAME RID META [RESET]
   LIFECYCLE_PRIOR_TREE="$(git -C "$wt" write-tree)" || die "could not capture the proven pre-turn source tree."
   pf="$(mktemp)"; out="$(mktemp)"; LIFECYCLE_PF="$pf"; LIFECYCLE_OUT="$out"; build_prompt_file "$pf"
   { printf '%s\n\n' "NOTICE: This implementation continuation (write run) uses a newly reconstructed workspace. Git-visible source is exact. Ignored dependencies, build output, downloads, caches, and secrets did not persist. Recreate what is needed and rerun tests."; cat "$pf"; } > "$pf.notice"; mv "$pf.notice" "$pf"
+  reviewer_event_evidence require-report qwen || die 'could not reserve durable implementation evidence; no provider call was made.'
   if [ "$reset" = 1 ]; then
     note "Qwen CONTEXT RESET (write run) '$name': preserving canonical code but starting a new conversation generation."
     LIFECYCLE_SID=""; run_turn "$wt" "$out" "$pf" implement
@@ -1818,7 +1832,10 @@ cmd_delete() {
     done
     rm -f "$dir"/metadata.json "$dir"/owner.json "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/.tmp.* "$dir"/.cumulative.*
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
-  else rm -f "$meta"; release_boundary "$(repo_root)" "qwen-$1"; fi
+  else
+    release_boundary "$(repo_root)" "qwen-$1" || die "review evidence cleanup refused; session metadata preserved."
+    rm -f "$meta"
+  fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
 }
 cmd_transcript() {

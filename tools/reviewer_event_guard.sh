@@ -17,10 +17,34 @@ reviewer_event_evidence(){
 reviewer_event_publish_report(){
   local provider="$1" report="$2" facts='{"phase":"report-publication"}'
   [ "$#" -lt 3 ] || facts="$3"
+  local recovery_var="${provider^^}_RECOVERY_EVENT_RUN_ID" state_var="${provider^^}_RECOVERY_STATE" head_var="${provider^^}_ORIGINAL_HEAD_SHA"
+  if [ "$#" -lt 3 ] && [ -n "${!recovery_var:-}" ]; then
+    [[ "${!recovery_var}" =~ ^[0-9a-f]{32}$ ]] || return 1
+    facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"${!recovery_var}\"}"
+    if [ -n "${!state_var:-}" ]; then
+      [ "${!state_var}" = completed-stale-source ] && [[ "${!head_var:-}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
+      facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"${!head_var}\"}"
+    fi
+  fi
   reviewer_event_evidence require-report "$provider" || return 1
   reviewer_event_evidence publish-report "$provider" "$report" "$facts" >/dev/null || return 1
   reviewer_event_evidence verify-reports "$provider" >/dev/null
 }
+
+reviewer_event_publish_patch(){ reviewer_event_evidence publish-patch "$1" "$2" >/dev/null; }
+
+reviewer_event_verify_private(){
+  local python event_tool name
+  local -a evidence_env=()
+  python="$(command -v python3 || command -v python)" || return 1
+  event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+    [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
+  done
+  env -i "${evidence_env[@]}" "$python" "$event_tool" "$@" >/dev/null
+}
+reviewer_event_verify_sandbox(){ reviewer_event_verify_private verify-sandbox "$1"; }
+reviewer_event_verify_owner(){ reviewer_event_verify_private verify-owner "$1" "$2"; }
 
 reviewer_event_cleanup_allowed(){
   local provider="$1"
@@ -62,6 +86,7 @@ reviewer_event_guard(){
   [ "$provider" != kimi ] || [ "${1:-}" != start ] || operation=async-submission
   [ "$provider" != qwen ] || [ "${1:-}" != finalize ] || operation=local-finalization
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
+  [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
