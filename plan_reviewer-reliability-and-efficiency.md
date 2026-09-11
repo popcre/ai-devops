@@ -13,9 +13,9 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 | Coding owner | State | Updated | Required evidence before complete |
 |---|---|---|---|
 | [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 inspected; PR #402 groundwork merged as `b6922ea8`; complete nine-wrapper identity contract in progress | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison; installation remains pending |
-| [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open | 2026-09-11 | Provider-shaped failure matrix and governed reason parity |
+| [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open; DeepSeek Unicode/ordinary terminal slice merged, installed and live verified | 2026-09-11 | PR #405 merge `068c6cb9f07c`; 85/0/0 focused checks, exact-head GLM APPROVE, CI `34563556041` and queue `34567376452` successful; installed synthetic Unicode review/replay passed. Governed terminal parity remains in progress |
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Open | 2026-09-11 | Crash/cleanup/race proof; 33 evidence-gap dispositions |
-| [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open | 2026-09-11 | Allocation/lock/cooldown matrix and governed live proof |
+| [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open; Grok auth concurrency slice installed | 2026-09-11 | Auth slice merged `e3b4700d`; allocation/cooldown matrix and governed live proof remain |
 | [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Open | 2026-09-11 | Provider progress/finalization/restart matrix and live canaries |
 | [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; native runtime cannot enforce root-read denial; [measured evidence](docs/codex-windows-containment-2026-09-11.md) | 2026-09-11 | Marker read/write denial proven; outside-read isolation and full network denial remain unqualified; live review pending |
 | [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Implementation and synthetic live research complete; delivery gates open | 2026-09-11 | [Pinned semantics, fixtures and retained-result proof](tests/verification/reviewer-reliability/issue-333-truthful-usage.md); exact review, CI and installed accounting acceptance pending; no compaction changes |
@@ -24,7 +24,18 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 
+The bounded #405 installed proof uses wrapper SHA-256
+`be0f1cdd8708355d76285e7c3ba682fe4e137ec3fb8097a13ea30434098b47c6`.
+One paid synthetic formal-review turn preserved the exact Unicode sentinel,
+returned one terminal APPROVE, and retained the same text for stored replay;
+private output SHA-256 is
+`fa0c6506690c8cb1d8bb98ff27b08453b1693086985748134817014162a53434`.
+The affected private incident received an append-only partial resolution:
+its separate large-attachment failure still awaits #393 installed live proof.
+
 The maintenance round remains `0c62f3dffce145c4b2768855b912b958` with all 198 original candidates. Its installed `show` and exact-round `start --resume` commands work again after an unrelated analysis sidecar was moved out of the checkpoint directory into private analysis storage. The frozen started record still hashes to `aad9e0f327a135d8b684f03768b702aa675981f738924b468215ef61aeefa8f0`. No candidate was reset or disposition invented; final reconciliation remains #398's last step.
+
+**#396 installed slice, 2026-09-11:** [PR #408](https://github.com/popcre/ai-devops/pull/408) merged as `e3b4700d1005088065740200a70d68d7574a4243` after exact-head independent Grok APPROVE on `84274fd629fec8324ecef58373c8b8f011faabb3` and passing required CI/merge queue. Final local Grok suite: 226 passed, zero failed/skipped; focused authentication regressions: seven passed, zero failed/skipped. Installed wrapper SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` matches the tested source. Two concurrent initializers against the actual installed authentication link passed 100 readability/same-inode checks without replacing the existing credential inode; no credential values were read and no provider request was made. The matching private concurrency incident received append-only repair evidence. This does not close the broader availability/cooldown programme or classify the frozen 198-entry round.
 
 ## 1. Goal and acceptance model
 

@@ -16,6 +16,8 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
+2026-09-11 installed component evidence: #396's Grok authentication-link concurrency repair merged through [PR #408](https://github.com/popcre/ai-devops/pull/408) as `e3b4700d1005088065740200a70d68d7574a4243`. Exact-head independent review and required CI passed; the unchanged local suite passed 226/226. Installed SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` passed two concurrent actual-auth initializers and 100 readability/same-inode checks, without paid provider work. Private incident evidence was appended. Broader #396, #337, and #159 remain open; #398 retains the original 198-entry round and runs last within #337, then #166 runs last overall.
+
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
@@ -39,6 +41,15 @@ synthetic same-session continuity measurements. [Evidence and remaining gates](t
 distinguish adapter estimates from billed cost and unknown counters from zero.
 No context or compaction optimization was applied. Exact review, CI, installation
 and live accounting verification remain open; this does not complete #337/#159.
+
+Reviewer programme update (2026-09-11): the bounded DeepSeek Unicode/terminal
+repair #405 landed as `068c6cb9f07c0792f5e579fd004df25f012820a1`, passed
+85/0/0 focused tests, exact-head independent GLM review, PR CI `34563556041`
+and queue `34567376452`, and was installed with a successful paid synthetic
+Unicode review and stored replay. The reviewer plan records the exact hashes.
+Its affected incident is partially resolved because the separate large-input
+symptom still awaits #393 live proof. This does not close #394, #337 or #159;
+the original maintenance round is preserved and final #398/#166 remain last.
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 

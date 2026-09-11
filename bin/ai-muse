@@ -412,7 +412,7 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
