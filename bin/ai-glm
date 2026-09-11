@@ -1020,7 +1020,8 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
       '{schema_version:1, ok:true,
         session:{name:$name, type:$kind, id:$sid, caller:$caller, model:$model},
         response:{text:$text}, usage:$tokens,
-        usage_scope:"last-assistant-step", usage_completeness:"adapter-provider-missingness-unknown",
+        usage_scope:"last-assistant-step",
+        usage_completeness:(if $tokens==null then "unavailable" else "adapter-provider-missingness-unknown" end),
         artifacts:{report:$report}}'
   else
     printf '%s\n' "$4"
