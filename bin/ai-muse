@@ -293,6 +293,13 @@ run_turn(){
   if [ "$FINISH" != stop ]; then TURN_ERROR="Muse did not prove completion (reason: ${FINISH:-missing})."; return 1; fi
   if [ -z "$TEXT" ]; then TURN_ERROR='Muse completed without a usable response.'; return 1; fi
   if [ "${REQUIRE_VERDICT:-0}" = 1 ] && ! printf '%s\n' "$TEXT" | sed '/^[[:space:]]*$/d' | tail -n 1 | grep -Eq '^VERDICT:[[:space:]]+(FINDINGS|NO FINDINGS)$'; then TURN_ERROR='Muse stopped without an allowed final VERDICT line.'; return 1; fi
+  # Optional accounting must never invalidate a paid completion or request replay.
+  local usage_python
+  usage_python="$(command -v python3 || command -v python || true)"
+  if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! USAGE_JSON="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$TURN_SID" --run "${AI_REVIEW_EVENT_RUN_ID:-}" 2> "$out.usage-error")"; then
+    USAGE_JSON='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
+    printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
+  fi
 }
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
@@ -316,7 +323,11 @@ preserve_failure(){
 report(){
   local root="$1" name="$2" prompt="$3" path="$4"
   ensure_report_destination "$root" "$path"; [ -n "$PUBLISH_FD" ] || die "Muse report staging was not reserved: $path"
-  { printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'; printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| tokens | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS"; printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"; } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
+  {
+    printf '# Muse persistent review\n\n| field | value |\n|---|---|\n'
+    printf '| model | `%s` |\n| session | `%s` |\n| caller | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| review copy | `%s` |\n| evidence fingerprint | `%s` |\n| last step adapter tokens | `%s` |\n| turn usage | `%s` |\n\n' "$MODEL" "$TURN_SID" "$CALLER" "$root" "$HEAD_SHA" "$REVIEW_DIR" "$PACKET_HASH" "$TOKENS" "$USAGE_JSON"
+    printf '## Request\n\n%s\n\n## Result\n\n%s\n' "$(cat "$prompt")" "$TEXT"
+  } >&"$PUBLISH_FD" || die "could not write Muse report: $path"
   finish_report_staging "$root" "$path"
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
 }
