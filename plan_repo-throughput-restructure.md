@@ -4,6 +4,11 @@
 
 **Parent issue:** [#159](https://github.com/popcre/ai-devops/issues/159)
 
+2026-09-11: #396 scoped admission coding passed seven behavioral cases and
+92 preflight assertions. [Implementation and pending delivery gates](tests/verification/reviewer-reliability/issue-396-scoped-admission.md).
+Provider/consumer integration, review, CI, installation and live acceptance remain
+open; this does not advance #398's frozen reconciliation or #166's final gate.
+
 **Replacement authored:** 2026-08-28 by Codex on `edge-dev`
 
 **Source baseline:** `9a77ce67e492316f457b78fb3e9b8ce7d332995b` on `main`

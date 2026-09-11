@@ -181,6 +181,12 @@ Gate: `tests/test-ai-review-packet.sh` and `tests/test-ai-review-sandbox.sh` pro
 
 #### Availability. Avoid assigning repeatedly to an account known exhausted (#396)
 
+2026-09-11 coding evidence: the versioned preflight store and scoped admission
+contract are implemented in an isolated worktree. Initial verification passed
+seven behavioral cases and 92 preflight assertions. [Scope, migration, concurrency
+and remaining delivery gates](tests/verification/reviewer-reliability/issue-396-scoped-admission.md).
+Terminal/consumer integration and installed acceptance remain open.
+
 Trace `bin/ai-review-preflight` capacity/quarantine paths, `config/reviewer-capacity.json`, Kimi terminal `usage-limit` classification, diagnostic observation hooks, and shared-db allocation/preflight/failure recording. Existing adapters remain unknown when unsupported. Add only the missing connection from a proven terminal exhaustion observation to a scoped temporary admission backoff. Prefer the existing preflight/quarantine store; if its provider-only key cannot safely represent credential-profile/model scope, extend its versioned schema with migration tests rather than create a second store.
 
 Store only opaque non-secret account/profile identity, provider/model scope where evidenced, source run identity, observation time, expiry and reason. Do not hash or expose credential values to construct identity. If scope cannot be established, do not apply an account-wide exclusion. Expiry means eligible for a guarded attempt, not proven quota available. One failed attempt may establish backoff; concurrent contenders must not all race through an already-known refusal. Preserve any review artifact before release/replacement; manual ref deletion and invented verdicts remain forbidden.
