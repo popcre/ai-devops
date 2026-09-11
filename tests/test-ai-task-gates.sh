@@ -247,6 +247,8 @@ check 'the owner request is recorded in the intent state' \
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a stronger declared class supplies the effective gates' \
   "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)'"
+check 'a stronger declared class does not drop observed-class required proof' \
+  "out '$TMP/gate' explain --json | jq -e '.required_gates|index(\"exact-resource-and-action-authorization\")!=null'"
 rm -f "$TMP/gate/note.md"
 ( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 mkdir -p "$TMP/gate/bin"; printf '#!/bin/sh\n' > "$TMP/gate/bin/ai-review-lifecycle"

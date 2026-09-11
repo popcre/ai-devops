@@ -346,7 +346,7 @@ cmd_explain(){
     esac
   done
   prepare "$base" "$paths_from"
-  local declared effective gate required forbidden line
+  local declared effective required_gate effective_gate required forbidden line
   declared="$(state_field declared_class)"
   effective="$OBSERVED_CLASS"
   if [ -n "$declared" ]; then
@@ -355,9 +355,13 @@ cmd_explain(){
       effective="$declared"
     fi
   fi
-  gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
-  required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
-  forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
+  required_gate="$({
+    [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
+    [ -z "$declared" ] || [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
+  } 2>/dev/null | LC_ALL=C sort -u)"
+  effective_gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
+  required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
 
   if [ "$as_json" = true ]; then
     printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
@@ -459,10 +463,14 @@ cmd_check(){
   fi
 
   # 2. Forbidden action for the observed class.
-  local gate forbidden required
-  gate="$(merged_gate "$IDENTITY" "$effective")"
-  forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p')"
-  required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
+  local required_gate effective_gate forbidden required
+  required_gate="$({
+    [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
+    [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
+  } | LC_ALL=C sort -u)"
+  effective_gate="$(merged_gate "$IDENTITY" "$effective")"
+  forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
+  required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     if [ "$protected" = true ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nThis cannot be overridden here. It needs Albert naming the exact resource and action.' \

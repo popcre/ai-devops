@@ -112,6 +112,7 @@ start "$TMP/oracle" production
 oracle_json="$(explain "$TMP/oracle" .github/workflows/release.yml)"
 check 'Oracle production intent dominates the observed deployment path' "jq -e '.declared_class==\"production\" and .observed_class==\"deployment\" and .effective_class==\"production\"' <<<\"\$oracle_json\""
 check 'Oracle production retains exact resource-and-action authorization' "jq -e '.required_gates|index(\"exact-resource-and-action-authorization\")!=null' <<<\"\$oracle_json\""
+check 'Oracle production also retains deployment release review and owner authorization' "jq -e '([\"managed-platform-release-review\",\"exact-owner-action-authorization\",\"local-tests\"]- .required_gates|length==0)' <<<\"\$oracle_json\""
 check 'Oracle fixture may enter production only at declared production strength' "rc '$TMP/oracle' 0 check --before production"
 
 # Non-protected owner overrides are recorded, never silent.
