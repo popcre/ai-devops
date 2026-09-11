@@ -226,13 +226,14 @@ cmd_resolve() {
 }
 
 validate_identity() { # validate_identity JSON [REVIEW_ROOT]
-  local file="$1" review="${2:-}" source head base digest ref target
+  local file="$1" review="${2:-}" retained="${3:-0}" source head base digest ref target
   jq -e 'type=="object" and .schema_version==1 and
     ([.repository,.base,.head,.target,.target_ref,.merge_base,.source_digest,.rule,.requested_base] | all(type=="string")) and
     (.head|test("^[0-9a-f]{40}$")) and (.base|test("^[0-9a-f]{40}$")) and
     (.source_digest|test("^[0-9a-f]{64}$"))' "$file" >/dev/null || die "invalid-source-identity"
   source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
   base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  if [ "$retained" != 1 ]; then
   [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$source")" = "$digest" ] || die "source-digest-mismatch"
   ref="$(jq -r .target_ref "$file")"; target="$(jq -r .target "$file")"
@@ -243,6 +244,10 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   resolve_base "$source" "$(jq -r .requested_base "$file")"
   [ "$BASE_SHA" = "$base" ] && [ "$TARGET_SHA" = "$target" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "source-merge-base-mismatch"
+  else
+    [ -n "$review" ] && [ "$(canon "$review")" != "$(canon "$source")" ] || die "retained-verification-requires-isolated-snapshot"
+    [ "$(git -C "$review" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "snapshot-merge-base-mismatch"
+  fi
   if [ -n "$review" ]; then
     local review_source="$review"
     [ ! -f "$review/.ai-review-sandbox" ] || review_source="$(head -1 "$review/.ai-review-sandbox")"
@@ -642,7 +647,8 @@ hash_packet() { # hash_packet PACKET_DIR
 }
 
 cmd_verify() {
-  local pkt want have identity="" root expected_patch actual_patch
+  local pkt want have identity="" root expected_patch actual_patch retained="$1"
+  shift
   pkt="$(canon "${1:?usage: ai-review-packet verify <packet-dir>}")"
   shift
   while [ $# -gt 0 ]; do
@@ -657,7 +663,7 @@ cmd_verify() {
   if [ "$want" = "$have" ]; then
     [ -f "$pkt/identity.json" ] || die "packet-identity-missing"
     root="$(head -1 "$pkt/$MARKER")"
-    validate_identity "$pkt/identity.json" "$root"
+    validate_identity "$pkt/identity.json" "$root" "$retained"
     if [ -n "$identity" ]; then
       [ "$(jq -Sc . "$identity")" = "$(jq -Sc . "$pkt/identity.json")" ] || die "packet-identity-mismatch"
     fi
@@ -681,8 +687,12 @@ cmd_verify() {
     cmp -s "$expected_patch" "$actual_patch" \
       || { rm -f "$expected_patch"; die "packet-diff-mismatch"; }
     rm -f "$expected_patch"
-    publish_receipt "$pkt" "$have"
-    printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
+    if [ "$retained" = 1 ]; then
+      printf 'ai-review-packet: retained evidence intact; NON-AUTHORIZING (%s)\n' "$have"
+    else
+      publish_receipt "$pkt" "$have"
+      printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
+    fi
   else
     die "packet hash mismatch in $pkt
   recorded: $want
@@ -702,7 +712,8 @@ need git; need sha256sum; need jq
 case "${1:-}" in
   build)     shift; cmd_build "$@" ;;
   resolve)   shift; cmd_resolve "$@" ;;
-  verify)    shift; cmd_verify "$@" ;;
+  verify)    shift; cmd_verify 0 "$@" ;;
+  verify-retained) shift; cmd_verify 1 "$@" ;;
   path)      shift; cmd_path "$@" ;;
   remove)    shift; cmd_remove "$@" ;;
   --version) printf '%s\n' "$VERSION" ;;

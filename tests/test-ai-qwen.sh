@@ -104,7 +104,7 @@ if (mode === 'mutate-source-committed') {
 if (mode === 'fail') { console.log('{"type":"assistant","message":{"content":[]}}'); process.exit(0); }
 const returnedModel = mode === 'wrong-model' ? 'qwen-other' : 'qwen3.8-max';
 console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:returnedModel,content:[]}}));
-console.log(JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,num_turns:2,result:'## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}));
+console.log(JSON.stringify({type:'result',subtype:'success',session_id:mode==='wrong-session'?'qwen-session-other':'qwen-session-1',is_error:false,num_turns:2,result:'## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}));
 STUBEOF
 cat > "$STUB/op" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -140,6 +140,7 @@ run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
 recovery_cases(){
   local meta pending calls saved_meta saved_stream report before
   echo review > "$TMP/mode"
+  if [ "${AI_QWEN_METADATA_TESTS_ONLY:-0}" != 1 ]; then
   mv "$REPO/.ai/reviews" "$REPO/.ai/reviews-before-recovery"
   printf 'publication blocked by fixture\n' > "$REPO/.ai/reviews"
   if run new local-recovery --prompt review > "$TMP/recovery-first.log" 2>&1; then bad 'failed report publication is not success'; else ok 'failed report publication is not success'; fi
@@ -154,6 +155,14 @@ recovery_cases(){
   jq '.recovery_runtime_sha256="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
   check 'changed runtime identity refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-runtime.log' 2>&1"
   cp "$TMP/recovery-original-meta" "$meta"
+  cat "$TMP/recovery-original-stream" >> "$pending"
+  local duplicate_digest; duplicate_digest="$(sha256sum "$pending" | cut -d' ' -f1)"
+  jq --arg d "$duplicate_digest" '.recovery_sha256=$d' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'duplicate terminal records cannot be finalized even with a matching stored digest' "! run finalize local-recovery > '$TMP/recovery-duplicate.log' 2>&1"
+  cp "$TMP/recovery-original-stream" "$pending"; cp "$TMP/recovery-original-meta" "$meta"
+  jq '.failure_reason="interrupted-provider-turn"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'uncertain interrupted work cannot become a local completion' "! run finalize local-recovery > '$TMP/recovery-uncertain.log' 2>&1"
+  cp "$TMP/recovery-original-meta" "$meta"
   cp "$REPO/a.txt" "$TMP/recovery-original-source"
   printf 'changed source\n' >> "$REPO/a.txt"
   check 'changed source refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-source.log' 2>&1"
@@ -163,6 +172,27 @@ recovery_cases(){
   before="$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' "$meta")"
   check 'repeated local finalization reuses the same completion' "run finalize local-recovery > '$TMP/recovery-repeat.log' 2>&1 && test '$before' = \"\$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' '$meta')\""
   check 'recovery and all refusals spend zero additional provider turns' "test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  fi
+  cat > "$STUB/mv" <<STUBMOVE
+#!/usr/bin/env bash
+destination="\${@: -1}"
+source="\${@: -2:1}"
+if [[ "\$destination" == */codex--metadata-recovery.json ]] && jq -e '.status=="active"' "\$source" >/dev/null 2>&1; then exit 73; fi
+exec "$(command -v mv)" "\$@"
+STUBMOVE
+  chmod +x "$STUB/mv"
+  if PATH="$STUB:$PATH" run new metadata-recovery --prompt review > "$TMP/recovery-metadata.log" 2>&1; then bad 'metadata publication failure cannot discard the pending turn'; else ok 'metadata publication failure cannot discard the pending turn'; fi
+  rm "$STUB/mv"
+  meta="$(find "$TMP/state/sessions" -name 'codex--metadata-recovery.json' -print -quit)"; pending="${meta%.json}.pending.jsonl"
+  check 'metadata failure retains a complete stream after report publication' "test -s '$pending' && jq -e '.status==\"recovery-required\"' '$meta'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  check 'metadata-only recovery finalizes without regenerating' "run finalize metadata-recovery > '$TMP/recovery-metadata-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  check 'metadata recovery reuses one deterministic report' "test \"\$(find '$REPO/.ai/reviews' -name 'qwen-metadata-recovery-*.md' | wc -l)\" -eq 1"
+  echo wrong-session > "$TMP/mode"
+  check 'a follow-up returned under a different session is not accepted' "! run ask metadata-recovery --prompt followup > '$TMP/recovery-wrong-session.log' 2>&1 && jq -e '.status==\"recovery-required\"' '$meta'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  check 'local recovery cannot adopt a different returned session' "! run finalize metadata-recovery > '$TMP/recovery-wrong-session-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  echo review > "$TMP/mode"
 }
 if [ "${AI_QWEN_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/recovery-install.log" 2>&1 || { cat "$TMP/recovery-install.log"; exit 1; }

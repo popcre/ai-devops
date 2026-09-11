@@ -1454,6 +1454,7 @@ start_session() { # start_session NAME MODE
   if [ "$mode" = review ]; then
     LIFECYCLE_META="$meta"
     capture_review_runtime
+    reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable Qwen evidence; no provider call was made.'
     record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" turn_in_progress
     write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   fi
@@ -1576,6 +1577,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   before="$(tree_state "$workdir")"
   PLAIN_REVIEW_META="$meta"; PLAIN_REVIEW_OUT="$out"
   capture_review_runtime
+  reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable Qwen evidence; no provider call was made.'
   record_existing_review_recovery "$meta" "$out" turn_in_progress
   write_meta "$meta" "$(jq '.status="turn_in_progress"' "$meta")"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
@@ -1591,6 +1593,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
   verify_returned_model "$out"
+  [ "$(session_id_from "$out")" = "$sid" ] || die 'Qwen returned a different session; the exact retained turn requires inspection and cannot be accepted.'
   if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
     die "the source repository changed during the Qwen turn; the stale response was rejected. Start a new named Qwen review."
   fi
@@ -1678,7 +1681,7 @@ release_finalize_locks() { lock_release "$FINALIZE_SESSION_LOCK"; lock_release "
 complete_review_metadata() { # META EXACT_SESSION; publish before removing recovery bytes
   local meta="$1" sid="$2" pending digest report_hash updated
   pending="$(jq -r '.recovery_stream // empty' "$meta")"
-  [ -n "$pending" ] && [ -f "$pending" ] && [ ! -L "$pending" ] || return 1
+  [ -n "$pending" ] && same_path "$pending" "${meta%.json}.pending.jsonl" && [ -f "$pending" ] && [ ! -L "$pending" ] || return 1
   digest="$(sha256_file "$pending")" || return 1
   [ "$digest" = "$(jq -r .recovery_sha256 "$meta")" ] || return 1
   [ -n "$QWEN_LAST_REPORT" ] && [ -f "$QWEN_LAST_REPORT" ] || return 1
@@ -1705,6 +1708,8 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r .packet_sha256 "$meta")" ] && "$PACKET_BIN" verify "$packet" >/dev/null || die 'the original sealed packet no longer verifies.'
   [ -z "$OPT_GOVERNED_VERDICT" ] || [ "$OPT_GOVERNED_VERDICT" = "$(jq -r '.governed_head // empty' "$meta")" ] || die 'finalize cannot change the original terminal verdict contract.'
   OPT_GOVERNED_VERDICT="$(jq -r '.governed_head // empty' "$meta")"
+  runtime="$(qwen_runtime_sha256)"; preloader="$(qwen_preloader_sha256)"
+  [ -n "$runtime" ] && [ "$runtime" = "$(jq -r .recovery_runtime_sha256 "$meta")" ] && [ -n "$preloader" ] && [ "$preloader" = "$(jq -r .recovery_preloader_sha256 "$meta")" ] || die 'Qwen runtime or preloader identity changed since the retained turn.'
   status="$(jq -r .status "$meta")"
   if [ "$status" = active ]; then
     report="$(jq -r '.last_report // empty' "$meta")"
@@ -1714,13 +1719,12 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   [ "$status" = recovery-required ] && [ "$(jq -r .failure_reason "$meta")" = provider_turn_pending_local_validation ] || die 'remote completion is uncertain; local finalization cannot resubmit or guess a result.'
   pending="${meta%.json}.pending.jsonl"
   same_path "$(jq -r .recovery_stream "$meta")" "$pending" && [ -f "$pending" ] && [ ! -L "$pending" ] && [ "$(sha256_file "$pending")" = "$(jq -r .recovery_sha256 "$meta")" ] || die 'the exact retained provider stream is missing or changed.'
-  runtime="$(qwen_runtime_sha256)"; preloader="$(qwen_preloader_sha256)"
-  [ -n "$runtime" ] && [ "$runtime" = "$(jq -r .recovery_runtime_sha256 "$meta")" ] && [ -n "$preloader" ] && [ "$preloader" = "$(jq -r .recovery_preloader_sha256 "$meta")" ] || die 'Qwen runtime or preloader identity changed since the retained turn.'
   sid="$(jq -r .qwen_session_id "$meta")"
-  jq -se --arg sid "$sid" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
+  jq -se --arg sid "$sid" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
   verify_returned_model "$pending"
   QWEN_RECOVERY_EVENT_RUN_ID="$(jq -r '.recovery_event_run_id // empty' "$meta")"
   [ -n "$QWEN_RECOVERY_EVENT_RUN_ID" ] || die 'retained completion lacks its original invocation identity.'
+  reviewer_event_evidence require-report qwen "$(jq -r .review_dir "$meta")" "$QWEN_RECOVERY_EVENT_RUN_ID" || die 'could not reserve durable recovered Qwen evidence.'
   finish_turn "$repo" "$name" "$pending" || die 'the retained turn could not be finalized; provider bytes were preserved and no provider call was made.'
   complete_review_metadata "$meta" "$sid" || die 'local completion publication failed; provider bytes remain available for finalize.'
 }
