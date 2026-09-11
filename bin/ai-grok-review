@@ -1177,7 +1177,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  review and start a fresh, exact-scope session only after correcting that cause."
       return 1 ;;
     *)
-      note "ai-grok-review: reason: $(terminal_reason "$sr"); refusing to guess. Inspect the retained provider result: $f"
+      note "ai-grok-review: reason: $(terminal_reason "$sr"); refusing to guess. Inspect the private incomplete evidence for this invocation."
       return 1 ;;
   esac
 }
@@ -1200,7 +1200,8 @@ report_usage() { # report_usage FILE
 }
 
 retain_failed_terminal() { # prepare private incomplete evidence before cleanup
-  local out="$1" report="$1.incomplete.md"
+  local out="$1" report
+  report="$(mktemp "$out.incomplete.XXXXXX.md")" || return 1
   {
     printf '# Incomplete Grok turn\n\nThis turn did not produce an accepted review.\n\n'
     printf 'Provider terminal reason: %s\n\n## Provider result\n\n```json\n' "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")"

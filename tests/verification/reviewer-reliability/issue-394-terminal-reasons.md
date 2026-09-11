@@ -27,6 +27,11 @@ new/continuation checks 25 passed, zero failed or skipped. Muse startup checks
 failed three cases before repair and now pass all five. Governed-consumer
 mapping passes 59 checks, zero failed or skipped, including refusal of a fake
 approval attached to every typed error and privacy of raw diagnostic bodies.
+Combined accounting compatibility also passes all 14 checks. Independent review
+approved the implementation and identified two small diagnostic improvements:
+incomplete staging reports now use private temporary-file creation, and unknown
+terminal guidance names durable invocation evidence rather than a cleaned-up
+staging path. The 13 reason/fault checks pass after those improvements.
 
 Independent exact-head review, required CI, installation and affected private
 incident reconciliation remain pending. No turn ceiling, permission, accounting

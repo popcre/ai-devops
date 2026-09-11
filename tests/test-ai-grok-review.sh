@@ -662,7 +662,7 @@ terminal_reason_cases(){
     reviewer_event_publish_report(){ return 1; }
     printf 'private fixture stderr\n' > "$TMP/typed-stop.json.err"
     ! retain_failed_terminal "$TMP/typed-stop.json" >/dev/null 2>&1
-    test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && test -s "$TMP/typed-stop.json.incomplete.md"
+    test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && compgen -G "$TMP/typed-stop.json.incomplete.*.md" >/dev/null
   ); then ok 'failed incomplete publication preserves source response and stderr'; else bad 'failed incomplete publication preserves source response and stderr'; fi
 }
 echo "== stop_reason handling =="
