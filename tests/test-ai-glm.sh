@@ -577,8 +577,9 @@ check "delete keeps a sandbox another caller's lock shares" "! grep -q 'glm-bylo
 check "delete keeps a sandbox shared with a moved checkout's record" "! grep -q 'glm-movedrec' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid0/codex--movedrec.json'"
 check "delete keeps a sandbox shared with a moved checkout's lock" "! grep -q 'glm-movedlock' '$DL_CALLS'"
 check "a shared delete still retires this caller's session and record" "grep -qx 'DELETE /session/sid-claude-byrecord' '$DL_CALLS' && grep -qx 'DELETE /session/sid-claude-movedlock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--byrecord.json' && test ! -e '$DL_STATE/sessions/rid1/claude--movedrec.json'"
-check "an unshared delete removes its exact sandbox under the build lock" "grep -qx 'remove-recorded glm-alone .*/glm-alone-0123456789ab held' '$DL_CALLS' && grep -qx 'remove-recorded glm-ownlock .*/glm-ownlock-0123456789ab held' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
-check "delete leaves no build lock of its own behind" "test ! -e '$DL_SB/glm-alone-0123456789ab.lock' && test ! -e '$DL_SB/glm-byrecord-0123456789ab.lock'"
+check "an unshared delete removes its exact sandbox under the build lock" "grep -qx 'remove-recorded glm-alone .*/glm-alone-0123456789ab held' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
+check "delete refuses while this caller's own session is running" "! grep -q 'ownlock' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid1/claude--ownlock.json' && test -d '$DL_SB/glm-ownlock-0123456789ab' && test -d '$DL_STATE/locks/rid1--claude--ownlock.lock.d'"
+check "delete leaves no build or session lock of its own behind" "test ! -e '$DL_SB/glm-alone-0123456789ab.lock' && test ! -e '$DL_SB/glm-byrecord-0123456789ab.lock' && test ! -e '$DL_STATE/locks/rid1--claude--alone.lock.d' && test ! -e '$DL_STATE/locks/rid1--claude--building.lock.d'"
 check "delete refuses while the sandbox is being built, keeping session and record" "test -f '$DL_STATE/sessions/rid1/claude--building.json' && ! grep -q 'building' '$DL_CALLS' && test -d '$DL_SB/glm-building-0123456789ab.lock'"
 
 fi

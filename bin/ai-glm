@@ -1723,13 +1723,18 @@ cmd_delete() {
   else
     local rid boundary; rid="$(basename "$(dirname "$mp")")"
     root="$(jq -r '.repository_root // empty' "$mp")"; boundary="$(jq -r '.boundary_root // empty' "$mp")"
+    # A held session lock means this caller's own review of that name is running now.
+    # Claim it (never wait, never reclaim) so nothing is removed underneath a live run;
+    # the trap is armed only after the claim, so a refusal never frees another owner's lock.
+    DELETE_LOCK="$(lock_path "$rid" "$1")"
+    prune_claim "$DELETE_LOCK" || die "session '$1' is in use ($(cat "$DELETE_LOCK/pid" 2>/dev/null || echo 'owner unknown')); nothing deleted."
+    trap 'sandbox_build_release; lock_release "$DELETE_LOCK"' EXIT
     if [ -n "$boundary" ] && [ -e "$boundary" ] && [ -n "$SANDBOX_BIN" ] &&
        [ "$(cd "$boundary" && pwd -P)" != "$(cd "$root" 2>/dev/null && pwd -P || true)" ]; then
       # The sandbox is named by repository and session name only, so another caller's
       # same-name session shares it: retire only this caller's side. Every publish needs
       # the sandbox build lock, so holding it from the sharing check through removal
       # means no same-name session can start in between.
-      trap 'sandbox_build_release' EXIT
       sandbox_build_claim "$boundary" || die "review sandbox for '$1' is being built; session, record and sandbox preserved. Retry shortly."
       if sandbox_shared "$rid" "$1" "$mp" "$boundary"; then
         note "review sandbox for '$1' is shared with another caller's session; kept."
@@ -1750,6 +1755,7 @@ cmd_delete() {
   fi
   # Review snapshots are disposable and must not outlive their session.
   rm -f "$mp"
+  if [ -n "${DELETE_LOCK:-}" ]; then lock_release "$DELETE_LOCK"; DELETE_LOCK=""; trap - EXIT; fi
   note "deleted session: $1"
 }
 
