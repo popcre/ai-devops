@@ -1143,6 +1143,25 @@ wait "$job"
         self.assertEqual(issue["repository"]["head"], row["head"])
         self.assertEqual(issue["join"]["run_id"], row["run_id"])
 
+    def test_record_candidate_preserves_retired_repository_without_nearby_capture(self):
+        retired = self.root / "retired-worktree"
+        row = {"schema_version": 1, "provider": "grok", "event": "started", "run_id": "retired-run",
+               "repo": str(retired), "head": self.sha, "caller": "codex", "timestamp": "same-time"}
+        self.write(row)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        record = self.engine.start()
+        details = self.root / "details.txt"
+        details.write_text("Historical repository was already retired.\n")
+        with patch.dict(os.environ, {"AI_REVIEWER_BASH": self.bash,
+                                    "AI_REVIEWER_STATE_BASE": str(self.root / "state")}):
+            result = self.engine.record_incident(record["id"], record["candidates"][0]["id"],
+                                                 "Retired repository failure", details)
+        issue = json.loads((self.engine.issues / result["issue_id"] / "issue.json").read_text())
+        self.assertEqual(issue["repository"]["root"], str(retired))
+        self.assertEqual(issue["repository"]["head"], self.sha)
+        self.assertEqual(issue["evidence"]["complete_matching_review_reports_captured"], 0)
+        self.assertEqual(issue["evidence"]["recent_provider_logs_captured"], 0)
+
     @unittest.skipUnless(os.name == "nt", "Windows DOS path aliases")
     def test_record_candidate_accepts_same_repository_short_path(self):
         import ctypes

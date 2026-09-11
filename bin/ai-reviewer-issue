@@ -234,7 +234,14 @@ record_issue(){
   safe_provider "$provider" || die "provider must use only letters, numbers, dot, dash, or underscore."
   [ -n "$summary" ] || die "--summary is required."
   [ -z "$details" ] || [ -z "$details_file" ] || die "use --details or --details-file, not both."
-  root="$(repo_root "$repo")" || die "repository directory not found: $repo"
+  if ! root="$(repo_root "$repo")"; then
+    # A frozen maintenance event can legitimately name a worktree that was
+    # removed after the invocation. Preserve that exact recorded identity, but
+    # do not substitute a nearby clone or capture any repository-local files.
+    [ -n "$lifecycle_state" ] && [ -n "$observed_head" ] \
+      || die "repository directory not found: $repo"
+    root="$repo"
+  fi
   if [ -n "$error_file" ]; then [ -f "$error_file" ] || die "error file not found: $error_file"; fi
   if [ -n "$details_file" ] && [ "$details_file" != "-" ]; then [ -f "$details_file" ] || die "details file not found: $details_file"; fi
   safe_summary="$(printf '%s' "$summary" | redact_text)"
