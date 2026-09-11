@@ -10,16 +10,16 @@
 
 **Active handoff:** [`HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md`](HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md)
 
-This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. Live work is owned only by #159 and its registered children, including #209, #210, and #260.
+This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. #159 now has three clear workstreams: completed CI/queue throughput children, reviewer reliability programme #337, and final cutover #166.
 
 ## STATUS — read this first
 
-A fresh session starts with **#165**, then **#160**. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
+A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
-| 2 | [#160](https://github.com/popcre/ai-devops/issues/160) | Deterministic reviewer safety tests under real load | done | Merge `08269a1f10ec349c55a17a5afddf9c9255b7dcc7`; exact-head review `20260901T163440-2838537-1161`; [`tests/verification/reviewer-reliability/issue-160-determinism.md`](tests/verification/reviewer-reliability/issue-160-determinism.md) |
+| 2 | [#337](https://github.com/popcre/ai-devops/issues/337) | Reviewer correctness, reliability, evidence, and measured efficiency programme; includes completed #160 | open; component hierarchy rebuilt 2026-09-11 | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md); restored 198-entry round `0c62f3dffce145c4b2768855b912b958` |
 | 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | done | Closeout merge `baa3ac1`; engineering and live failover evidence remain in [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
@@ -28,9 +28,9 @@ A fresh session starts with **#165**, then **#160**. Final cutover #166 always r
 | 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
 | 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | done | [`tests/verification/repo-throughput/issue-164-merge-queue-convergence.md`](tests/verification/repo-throughput/issue-164-merge-queue-convergence.md) |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | done | [`tests/verification/repo-throughput/issue-167-shared-harness.md`](tests/verification/repo-throughput/issue-167-shared-harness.md) |
-| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure | source merged; live rotation handoff pending | Merge `26e893db03754b6668238c266142f8e61abb01bc`; exact-head GLM approval of `cd293e9f`; qualified Windows reviewer-safety run `34532381626` passed on current main. Kimi remains pending removal from the shared-db allocator by its active owner. |
+| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | source merged; integrated live acceptance open | Merge `26e893db03754b6668238c266142f8e61abb01bc`; remaining allocation/disposition behavior belongs to #396 rather than extending this extraction issue. |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
-| 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
+| 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
 | 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
@@ -88,7 +88,7 @@ Earlier records each held part of the same failure:
 - **#98:** measured run `32967607403` had `windows-offline` at 64 minutes, Linux at 9, and Windows reviewer safety at 14. Pull-request, merge-group, and `push: main` could repeat work; concurrency keys left superseded work running.
 - **#112:** PR #102 rebuilt three times as changes landed ahead and took 3h02m. Faster tests shrink the window but do not remove queue invalidation.
 
-The prior plan/handoff connected these but left partial overlap and ownerless work. #159 is now the outcome contract; #160–#169 are independently verifiable units.
+The prior plan/handoff connected these but left partial overlap and ownerless work. #159 is now the outcome contract; completed throughput units retain their evidence, while #337 owns the nested reviewer-reliability units.
 
 ### Reproduction and measurement
 
@@ -167,7 +167,7 @@ These are locked unless new evidence invalidates their reason.
 
 ### Locked, 2026-08-28
 
-- One parent (#159), ten sub-issues (#160–#169); #89/#98/#112 are historical sources.
+- One outcome parent (#159), one nested reviewer programme (#337), independently verifiable coding children, and final cutover #166; #89/#98/#112 are historical sources.
 - Preserve assertions/capabilities; fix reliability before required-check renaming.
 - Separate fast workflow; coarse categories now; keep `skills/` verified.
 - Scheduled complete matrix includes unsplit Windows Bash.
@@ -494,7 +494,7 @@ documentation exception.
 
 ### Definition of done
 
-- [ ] #160–#169 closed with acceptance evidence and STATUS artifacts.
+- [ ] Every registered #159 child is closed with acceptance evidence; #337 additionally requires every nested child and #398's maintenance proof.
 - [ ] Focused plus full offline tests pass; exact Git identity checked.
 - [ ] Task-owned commits are on `origin/main`; live workflow/ruleset changes are proven.
 - [ ] Baseline/final evidence is under `tests/verification/repo-throughput/`.
