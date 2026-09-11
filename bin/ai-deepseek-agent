@@ -216,12 +216,9 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-=======
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; REVIEW_HEAD=""; API_RESPONSE_FILE=""
->>>>>>> origin/main
 release_lock() {
   reviewer_event_cleanup_allowed deepseek || return 1
   if [ -n "$REVIEW_SOURCE_TAG" ]; then
@@ -294,7 +291,6 @@ call_api() {
   # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
   # signal cannot release the conversation lock while the request still runs.
   local msgs_file="$1" reply_file="$2" req_file resp_file status_file http_code rc
-<<<<<<< HEAD
   if [ -n "${LOCK_DIR:-}" ]; then
     if [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then
       reviewer_event_evidence require-report deepseek "$REVIEW_SOURCE_WORKSPACE" || return 1
