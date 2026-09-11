@@ -483,6 +483,21 @@ The handover is where unverified claims become someone else's false assumptions.
 9. **Pass the gate:** could a developer who walked in off the street this morning
    continue with NO questions, as effectively as you can right now? If not,
    expand and re-grade.
+10. **End with the next-session prompt — REQUIRED, and a closeout without it is
+    INCOMPLETE.** The very last thing in the closing reply to Albert is a fenced,
+    copy-paste prompt he can drop into a fresh session. It must be
+    self-contained: a session with no chat context must be able to continue from
+    it alone. It states the repository, that the reader is the successor
+    orchestrator (with the closed marker number) and must open its OWN marker
+    with its own `route_id`, the path of the `HANDOFF.d/` file and the PR that
+    carries it (and whether that PR is merged), the ordered next actions with
+    issue and PR numbers, what must not be touched, and any standing owner
+    instruction still in force. If the handover PR could not be merged, the
+    prompt's first action is merging it. If nothing is outstanding, say
+    "No follow-up prompt — this workstream is closed" instead of inventing one.
+    *(Added 2026-09-11: this skill tells sessions not to run `wrap-up`, which is
+    where the prompt requirement lived, so marker #2689's closeout ended with no
+    prompt and Albert had to ask for one.)*
 
 ## This skill is the WHOLE closeout — do not send Albert to a second skill
 
@@ -494,6 +509,9 @@ the marker closed.
 is already owned here — steps 5 and 5b merge the docs-only handover PR and close
 the marker. Running it afterwards duplicates work and invites a second, competing
 handover document.
+
+`wrap-up`'s next-session prompt is NOT dropped by this rule: step 10 above
+requires it, and the closing reply is unfinished without it.
 
 The secrets sweep (step 6) and the documentation pass (step 6b) are **performed
 inside this skill**, not delegated. A closeout that ends with "you should also run
