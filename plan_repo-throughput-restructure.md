@@ -4,10 +4,9 @@
 
 **Parent issue:** [#159](https://github.com/popcre/ai-devops/issues/159)
 
-2026-09-11: #396 scoped admission coding passed seven behavioral cases and
-92 preflight assertions. [Implementation and pending delivery gates](tests/verification/reviewer-reliability/issue-396-scoped-admission.md).
-Provider/consumer integration, review, CI, installation and live acceptance remain
-open; this does not advance #398's frozen reconciliation or #166's final gate.
+2026-09-11: #396 is complete. [Exact-head review, CI, merge, installation,
+live proof and incident reconciliation](tests/verification/reviewer-reliability/issue-396-scoped-admission.md)
+all passed. This preserves #398's frozen reconciliation and #166's final gate.
 
 **Replacement authored:** 2026-08-28 by Codex on `edge-dev`
 
@@ -19,11 +18,21 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 ## STATUS — read this first
 
-**2026-09-11 closeout checkpoint:** #159 remains open. [Detailed continuation evidence](HANDOFF.d/2026-09-11T1152Z-edge-dev-codex-throughput-reviewer-closeout.md) records the repair stack, exact reviews, failed CI cases and retained private experiments. GitHub main advanced to `c44c10278a7db965f25f22e58ed6a27384606963` through #417; installed canonical checkout remains `ecbbe4cd2391ff64f9f645dbdcf125fb4a83ec1c`. Landing run `34585150426` reports a failed merge-group-evidence job, so installation and landing qualification of #417 remain pending. #398 retains the original 198-record round and runs last within #337; #166 remains last for #159.
+**2026-09-11 closeout checkpoint:** #159 remains open. #396 merged through PR
+#416 as `a031c1de77a11bbf16fe5be8699d78dfdc6233e9`, passed exact-head review,
+PR-head CI `34646058019`, merge-group run `34650896712`, canonical installation,
+installed live proof, and incident reconciliation. #398 retains the original
+198-record round and runs last within #337; #166 remains last for #159.
 
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
-2026-09-11 installed component evidence: #396's Grok authentication-link concurrency repair merged through [PR #408](https://github.com/popcre/ai-devops/pull/408) as `e3b4700d1005088065740200a70d68d7574a4243`. Exact-head independent review and required CI passed; the unchanged local suite passed 226/226. Installed SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` passed two concurrent actual-auth initializers and 100 readability/same-inode checks, without paid provider work. Private incident evidence was appended. Broader #396, #337, and #159 remain open; #398 retains the original 198-entry round and runs last within #337, then #166 runs last overall.
+2026-09-11 installed component evidence: #396's authentication-link and scoped
+admission repairs are complete through PRs #408 and #416. The final installed
+proof covered replay, profile/model isolation, eight concurrent observations,
+and guarded expiry without a provider request. Three frozen candidates were
+classified; the round remains active with all 198 candidates, 36 incident and
+162 unclassified. #337 and #159 remain open; #398 runs last within #337, then
+#166 runs last overall. The database boundary did not move.
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|

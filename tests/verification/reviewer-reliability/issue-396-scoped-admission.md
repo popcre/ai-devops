@@ -44,6 +44,27 @@ and zero-provider context-timeout refusal. The full preflight suite passed
 92/92 after shared effective-context integration; all nine Python store cases
 passed after canonical home publication.
 
-Final exact-head review, required CI, merged installation, live acceptance, and
-affected private incident reconciliation remain pending. This file does not
-close #396 or claim authoritative remaining quota.
+Final delivery completed on 2026-09-11. Independent Muse review approved exact
+PR head `ce97c710578e1b693f763e18df7ba3227027bf54`. PR-head CI run
+`34646058019` passed Linux, all four Windows offline sections, the start
+deadline, the designed primary-job cancellation, its fallback, and the
+aggregate gate. Merge-group run `34650896712` passed on the exact landing tree;
+PR #416 merged as `a031c1de77a11bbf16fe5be8699d78dfdc6233e9`.
+
+The canonical installation and machine-tools doctor passed. Installed source
+SHA256 values were `1D914059A5998119F4DEF433EA5E0E86CD5414631FE7466F02F2A1F7B6E3B20C`
+for `ai-kimi`, `0ADCB660C5F2C200666AEDCC5E0DD72BF756BD21169D130476C66FD353FC2FB6`
+for preflight, and `E6EE15E0DD1887ACB18F6085B1EF6F77814B750D0F6A9AC1AF24B1488AF061EB`
+for the admission store. Installed live proof showed same-scope backoff,
+unchanged replay expiry and digest, different-scope eligibility, eight
+successful concurrent scoped observations, and guarded eligibility after
+expiry. Quota and reset remained unknown; no provider request or credential
+read occurred.
+
+Two affected private incidents are resolved and one is partially resolved: a
+first unknown Kimi call can still encounter a genuine five-hour provider limit.
+That residual has permanent carry-forward evidence. Three frozen candidates
+were classified without changing the database boundary. Round
+`0c62f3dffce145c4b2768855b912b958` remains active with all 198 candidates:
+36 incident and 162 unclassified. #398 remains last inside #337 and #166 last
+inside #159.
