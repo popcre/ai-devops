@@ -434,7 +434,7 @@ PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"; PR_ROOT="$TMP/prune-r
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB" "$PR_ROOT"; : > "$PR_CALLS"
 PR_OLD="$(date -u -d '3 days ago' +%FT%TZ)"; PR_NOW="$(date -u +%FT%TZ)"
 pr_sandbox() { # NAME AGE -> managed sandbox path
-  local d="$PR_SB/glm-$1-0123456789ab"; mkdir -p "$d"; : > "$d/.ai-review-sandbox"
+  local d="$PR_SB/glm-$1-0123456789ab"; mkdir -p "$d"; printf '%s\nevidence_format=1\n' "$PR_SB" > "$d/.ai-review-sandbox"
   printf 'Snapshot tag: glm-%s\n' "$1" > "$d/AI-REVIEW-SANDBOX.md"
   [ "$2" = old ] && touch -d '3 days ago' "$d/AI-REVIEW-SANDBOX.md" "$d"
   printf '%s' "$d"
@@ -469,6 +469,11 @@ pr_meta building review "$PR_OLD"; mkdir "$PR_SB/glm-building-0123456789ab.lock"
 pr_meta badtag review "$PR_OLD"; printf 'Snapshot tag: glm-other\n' > "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md"
 touch -d '3 days ago' "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md" "$PR_SB/glm-badtag-0123456789ab"
 pr_sandbox orphan old >/dev/null; pr_sandbox building-new new >/dev/null
+# A snapshot from before evidence ownership was recorded cannot prove what it holds.
+pr_meta legacy review "$PR_OLD"; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacy-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacy-0123456789ab"
+pr_sandbox legacyorphan old >/dev/null; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacyorphan-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacyorphan-0123456789ab"
 run_prune() { # SERVER_UP [RETENTION]
   AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_UP="$1" PR_CALLS="$PR_CALLS" \
     AI_GLM_REVIEW_RETENTION_HOURS="${2:-24}" bash -c '
@@ -496,6 +501,8 @@ check "prune leaves no build lock of its own behind" "test -d '$PR_SB/glm-buildi
 check "another caller's same-name record keeps the shared sandbox" "test ! -e '$PR_STATE/sessions/rid1/claude--shared.json' && test -f '$PR_STATE/sessions/rid1/codex--shared.json' && test -d '$PR_SB/glm-shared-0123456789ab'"
 check "another caller's same-name lock keeps the whole review" "test -f '$PR_STATE/sessions/rid1/claude--sharedlock.json' && test -d '$PR_SB/glm-sharedlock-0123456789ab' && test -d '$PR_STATE/locks/rid1--codex--sharedlock.lock.d'"
 check "an unrecorded sandbox whose session holds a lock is kept" "test -d '$PR_SB/glm-starting-0123456789ab'"
+check "unreconciled evidence keeps session, record and sandbox together" "test -f '$PR_STATE/sessions/rid1/claude--legacy.json' && test -d '$PR_SB/glm-legacy-0123456789ab' && ! grep -q sid-legacy '$PR_CALLS'"
+check "an unrecorded sandbox with unreconciled evidence is kept" "test -d '$PR_SB/glm-legacyorphan-0123456789ab'"
 check "recently active review is kept"              "test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
 check "a review still polling a pending turn is kept" "test -f '$PR_STATE/sessions/rid1/claude--polling.json'"
 check "a review locked by a live process is kept"   "test -f '$PR_STATE/sessions/rid1/claude--locked.json' && test -d '$PR_SB/glm-locked-0123456789ab'"
@@ -504,16 +511,20 @@ check "prune never reclaims a dead owner's lock (no remove-then-create race)" "t
 check "implementation records are not review-pruned" "test -f '$PR_STATE/sessions/rid1/claude--job.json'"
 check "idle unrecorded review sandbox is pruned"    "test ! -e '$PR_SB/glm-orphan-0123456789ab'"
 check "a new unrecorded sandbox (review starting) is kept" "test -d '$PR_SB/glm-building-new-0123456789ab'"
-# An interrupt during the server delete stops prune; it never removes without the build lock.
+# An interrupt during a server delete finishes that review under its build lock, then stops.
 PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALLS"
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
-pr_meta intr review "$PR_OLD"
+pr_meta intr review "$PR_OLD"; pr_meta intr2 review "$PR_OLD"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" bash -c '
   source "$AI_GLM_SOURCE"
   server_up(){ return 0; }
-  permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"; kill -INT $$; }
+  permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
+    [ "$2" = /session/sid-intr ] || return 0
+    [ -d "$AI_REVIEW_SANDBOX_DIR/glm-intr-0123456789ab.lock" ] || echo unguarded >> "$PR_CALLS.race"
+    kill -INT $$; }
   cmd_prune' >/dev/null 2>&1; pr_int_rc=$?
-check "an interrupted prune stops instead of removing unguarded" "test '$pr_int_rc' -ne 0 && grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test -d '$PR_SB/glm-intr-0123456789ab'"
+check "an interrupted prune never strands a record without its session" "grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test ! -e '$PR_STATE/sessions/rid1/claude--intr.json' && test ! -e '$PR_SB/glm-intr-0123456789ab' && test ! -e '$PR_CALLS.race'"
+check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intr2 '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intr2.json' && test -d '$PR_SB/glm-intr2-0123456789ab'"
 check "an interrupted prune still releases its build lock" "! ls -d '$PR_SB'/*.lock >/dev/null 2>&1"
 # An unreadable record may own a sandbox, so the orphan sweep leaves every sandbox alone.
 PR_STATE="$TMP/prune-state-bad"; PR_SB="$TMP/prune-sandboxes-bad"

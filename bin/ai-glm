@@ -1801,6 +1801,12 @@ sandbox_references() { # -> boundary basenames of every record; 1 when any recor
   out="$(jq -r '.boundary_root // empty' "${metas[@]}" 2>/dev/null)" || return 1
   printf '%s\n' "$out" | sed 's#.*[/\\]##'
 }
+sandbox_evidence_reconciled() { # SANDBOX -> 0 when ai-review-sandbox's evidence rule allows removal
+  local python tool
+  python="$(command -v python3 || command -v python)" || return 1
+  tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
+  "$python" "$tool" verify-sandbox "$1" >/dev/null 2>&1
+}
 
 prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned), 2 not due
   local mp="$1" cutoff="$2" name caller rid sid lock boundary root
@@ -1836,6 +1842,13 @@ prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned)
     else
       remove_sandbox=1
     fi
+    # A sandbox whose review evidence is not reconciled cannot be removed, and its record
+    # is the metadata that recovery needs, so the whole review stays until it is reconciled.
+    if [ "$remove_sandbox" = 1 ] && ! sandbox_evidence_reconciled "$boundary"; then
+      sandbox_build_release; lock_release "$lock"
+      warn "review '$name' has unreconciled review evidence; session, record and sandbox kept for: ai-reviewer-issue evidence reconcile-sandbox glm $boundary METADATA REPORT"
+      return 1
+    fi
   fi
   if [ -n "$sid" ] && ! delete_exact_server_session "$sid"; then
     sandbox_build_release; lock_release "$lock"; warn "server session $sid for '$name' could not be deleted (HTTP $HTTP_STATUS); record kept."; return 1
@@ -1861,12 +1874,16 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   server_up || { warn "the GLM server is not answering; nothing was pruned."; return 1; }
   cutoff=$(( $(date +%s) - RETENTION_HOURS * 3600 ))
   # A build lock left behind would make every later snapshot of that name refuse to build.
-  # An interrupt must stop here: releasing the lock and carrying on would delete unguarded.
+  # An interrupt is held until the item in hand is finished, then prune stops. Exiting
+  # mid-item could strand a record whose server session is already deleted; releasing the
+  # lock and carrying on would delete unguarded. The build lock stays held throughout.
+  PRUNE_SIGNAL=0
   trap 'sandbox_build_release' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
+  trap 'PRUNE_SIGNAL=130' INT
+  trap 'PRUNE_SIGNAL=143' TERM
   shopt -s nullglob
   for mp in "$STATE_DIR"/sessions/*/*.json; do
+    [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
     [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
     rc=0; prune_review "$mp" "$cutoff" || rc=$?
     case "$rc" in 0) removed=$((removed + 1)) ;; 1) kept=$((kept + 1)) ;; esac
@@ -1878,6 +1895,7 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
     kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."
   elif [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ]; then
     for d in "$GLM_SANDBOX_DIR"/glm-*; do
+      [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
       [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
       case "${d##*/}" in *.building.*) continue ;; esac
       tag="$(printf '%s' "${d##*/}" | sed -nE 's/^(glm-.+)-[0-9a-f]{12}$/\1/p')"
@@ -1894,11 +1912,14 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
       if compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null || printf '%s\n' "$referenced" | grep -Fqx "${d##*/}"; then
         sandbox_build_release; continue
       fi
-      if "$SANDBOX_BIN" remove-recorded "$tag" "$d" >/dev/null 2>&1; then removed=$((removed + 1))
+      if ! sandbox_evidence_reconciled "$d"; then
+        kept=$((kept + 1)); warn "unrecorded review sandbox has unreconciled review evidence; kept for recovery: $d"
+      elif "$SANDBOX_BIN" remove-recorded "$tag" "$d" >/dev/null 2>&1; then removed=$((removed + 1))
       else kept=$((kept + 1)); warn "unrecorded review sandbox could not be removed: $d"; fi
       sandbox_build_release
     done
   fi
+  [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
   note "pruned $removed idle GLM review item(s) older than ${RETENTION_HOURS}h; $kept kept for a stated reason."
   [ "$kept" -eq 0 ]
 }

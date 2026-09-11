@@ -208,9 +208,14 @@ sandbox's own build lock, which every snapshot build needs, so a same-name sessi
 cannot start in between. The lock and checks come before the server session is deleted:
 a sandbox being built leaves session and record untouched for a later prune, and once the
 session is deleted its record always goes (a sandbox that will not delete is retried by the
-orphan sweep), so prune never strands a record without its session. An interrupt stops
-prune at once and releases the build lock on the way out. The orphan sweep leaves every
+orphan sweep), so prune never strands a record without its session. An interrupt is held
+until the item in hand is finished under its build lock, then prune stops and releases
+the lock, so an interrupt never strands a record or deletes unguarded. The orphan sweep leaves every
 sandbox alone while any session record cannot be read, since that record may own one.
+A sandbox whose review evidence is not reconciled (for example one made before evidence
+ownership was recorded) is never removed: its session, record and sandbox are all kept and
+named in the warning, because the record is the metadata that
+`ai-reviewer-issue evidence reconcile-sandbox` needs.
 Nothing is pruned while the server is down. The first backlog clear on edge-dev removed 401 reviews; `/global/health` kept
 answering throughout (median 0.5s, slowest 11.5s over 18 samples).
 Do not fix a health stall by raising health timeouts; check `ai-glm list` size first.
