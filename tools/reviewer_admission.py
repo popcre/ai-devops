@@ -149,6 +149,9 @@ def observe(directory, provider, profile, model, run_id, observed, now, seconds,
     key = scope_key(profile, model)
     with locked(directory, provider):
         data = load(directory, provider)
+        if any(old_key != key and record.get('source_run_id') == run_id
+               for old_key, record in data['backoffs'].items()):
+            raise ValueError('refusal run identity cannot change scope')
         previous = data['backoffs'].get(key)
         if previous and previous.get('source_run_id') == run_id:
             if previous.get('evidence_sha256') != digest or previous.get('observed_epoch') != observed:

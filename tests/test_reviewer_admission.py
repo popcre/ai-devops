@@ -55,6 +55,13 @@ class AdmissionTests(unittest.TestCase):
                 self.observe(**kwargs)
         self.assertFalse((self.directory / 'kimi.json').exists())
 
+    def test_refusal_run_cannot_be_reassigned_to_another_scope(self):
+        self.observe()
+        for kwargs in [dict(profile='profile-b'), dict(model='model-b')]:
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                self.observe(**kwargs)
+        self.assertEqual(len(api.load(self.directory, 'kimi')['backoffs']), 1)
+
     def test_legacy_quarantine_survives_scoped_publication(self):
         legacy = dict(version=1, provider='kimi', created_epoch=900,
                       expires_epoch=2000, failure_class='authentication-failed')
