@@ -43,6 +43,13 @@ export AI_DEVOPS_MODELS_ENV="$MODELS" AI_CLAUDE_TEST_ARGS="$TMP/args" AI_CLAUDE_
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle" AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 echo '== ai-claude-review'
+IDENTITY_CALLS_BEFORE="$(find "$TMP/args" -name 'args-*' | wc -l)"
+check "wrong_source_head_refused_before_provider" "cd '$R' && ! '$SCRIPT' diff-review --assert-head 0000000000000000000000000000000000000000 >/dev/null 2>&1"
+check "missing_source_base_refused_before_provider" "cd '$R' && ! '$SCRIPT' diff-review --base missing-source-target >/dev/null 2>&1"
+IDENTITY_CALLS_AFTER="$(find "$TMP/args" -name 'args-*' | wc -l)"
+check "source_identity_refusals_submit_zero_provider_calls" "[ '$IDENTITY_CALLS_BEFORE' = '$IDENTITY_CALLS_AFTER' ]"
+git -C "$R" update-ref refs/heads/release-fixture "$(git -C "$R" rev-parse HEAD)"
+check "explicit_non_main_source_base_reaches_readonly_provider" "cd '$R' && '$SCRIPT' diff-review --base refs/heads/release-fixture --assert-head \"\$(git -C '$R' rev-parse HEAD)\" >/dev/null"
 check 'doctor proves exact model and tool boundary' "cd '$R' && '$SCRIPT' doctor | grep -q 'model=claude-opus-5 tools=Read,Grep,Glob permission=plan'"
 check 'live doctor proves canonical returned model' "cd '$R' && '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check 'live doctor accepts the current exact-key envelope without canonicalModel' "cd '$R' && AI_CLAUDE_STUB_MODE=no-canonical '$SCRIPT' doctor --live | grep -q 'live=verified'"

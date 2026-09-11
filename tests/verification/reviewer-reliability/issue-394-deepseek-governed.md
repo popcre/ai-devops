@@ -20,8 +20,9 @@ be continued explicitly in the same mode when evidence becomes available.
 
 The post-provider head check runs after the paid transcript and attachment
 record are durable. A moved head publishes `source_changed` metadata and returns
-nonzero. Raw paid responses are retained by the preceding #405 repair. #393's
-richer whole-source checks must retain that ordering during integration.
+nonzero. Raw paid responses are retained by the preceding #405 repair. The
+integrated #393 whole-source check owns this refusal, retaining the observed
+head/source, null verdict, packet identity and fixed governed mode/head.
 
 The wrapper also initializes its session identifier rather than inheriting an
 ambient `ID` variable, keeping a live doctor out of session storage.
@@ -31,15 +32,17 @@ ambient `ID` variable, keeping a live doctor out of session storage.
 - Working baseline: `b6922ea8e2de` plus prerequisite #405 patch `fb0d847a1bc1`.
 - Host: Windows, Git Bash 5.3.15, Python 3.13.15.
 - Command: `bash tests/test-ai-deepseek-agent.sh` through Git Bash.
-- Final result on September 11, 2026: **104 passed, 0 failed, 0 skipped**.
+- Initial terminal result: **104 passed, 0 failed, 0 skipped**.
+- Integrated with #393 dependency `7e833788afab` on September 11, 2026:
+  **118 passed, 0 failed, 0 skipped**.
 - Cases cover both flag forms, duplicate/missing/wrong heads, explicit formal
   mode, terminal grammar, extra/fenced/trailing decisions, persisted mode,
   ordinary continuation, genuine BLOCKED continuation, ambient ID, and moved
   head with retained transcript/stale metadata.
 - Wrapper SHA-256:
-  `65eee07d553ab0a6a0f26d8e4e092fe904793d15e4465e9f7d31f652c2ce120e`.
+  `1bdacc3387870a6613575fa096f3257ffc55200f91d3e9e59e370f69a5b92009`.
 - Suite SHA-256:
-  `58a0e9a43d95208f53b546609103b47228ba4b2c403871e0d63ef137fe0179e9`.
+  `53a09b08673645901d792c8084afe550a8235e57b3b6c9f21d017a38a7d78ea3`.
 - `git diff --check` passed.
 
 Independent exact-head review, required CI, merged identity, installation, live

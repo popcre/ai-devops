@@ -12,17 +12,19 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 | Coding owner | State | Updated | Required evidence before complete |
 |---|---|---|---|
-| [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 active | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison |
+| [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; PR #344 inspected; PR #402 groundwork merged as `b6922ea8`; complete nine-wrapper identity contract in progress | 2026-09-11 | Exact base/head/digest fixture matrix and governed live comparison; installation remains pending |
 | [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open | 2026-09-11 | Provider-shaped failure matrix and governed reason parity |
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Open | 2026-09-11 | Crash/cleanup/race proof; 33 evidence-gap dispositions |
 | [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open | 2026-09-11 | Allocation/lock/cooldown matrix and governed live proof |
 | [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Open | 2026-09-11 | Provider progress/finalization/restart matrix and live canaries |
-| [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; absorbs #290 | 2026-09-11 | Repository reads succeed while writes/network/outside reads fail |
+| [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; native runtime cannot enforce root-read denial; [measured evidence](docs/codex-windows-containment-2026-09-11.md) | 2026-09-11 | Marker read/write denial proven; outside-read isolation and full network denial remain unqualified; live review pending |
 | [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Open | 2026-09-11 | Provider-shaped usage fixtures and paid-result persistence proof |
 | [#169](https://github.com/popcre/ai-devops/issues/169) shared wrapper infrastructure | Source merged; live acceptance open | 2026-09-11 | Shared primitives retain every provider-specific safety contract |
 | [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Open; runs last inside #337 | 2026-09-11 | All 198 dispositions, installed nine-provider matrix, bounded recurrence scan |
 
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
+
+The maintenance round remains `0c62f3dffce145c4b2768855b912b958` with all 198 original candidates. Its installed `show` and exact-round `start --resume` commands work again after an unrelated analysis sidecar was moved out of the checkpoint directory into private analysis storage. The frozen started record still hashes to `aad9e0f327a135d8b684f03768b702aa675981f738924b468215ef61aeefa8f0`. No candidate was reset or disposition invented; final reconciliation remains #398's last step.
 
 ## 1. Goal and acceptance model
 

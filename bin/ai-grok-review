@@ -308,7 +308,10 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # would be computed in a subshell and lost, which is the whole failure this
 # replaces (agents hand-expanding short SHAs into wrong full ones).
 prepare_review() { # prepare_review ROOT TAG [RECORDED_BOUNDARY]
-  local root="$1" tag="$2" recorded="${3:-}" pkt refreshed
+  local root="$1" tag="$2" recorded="${3:-}" pkt refreshed identity
+  identity="$(mktemp)" || die "could not reserve source identity"
+  "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
   if [ -z "$recorded" ]; then
     REVIEW_DIR="$(review_boundary "$root" "$tag")"
   elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
@@ -335,10 +338,12 @@ reviewed. Re-read the SHA from git rather than transcribing it."
 
   [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
   pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class small \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
@@ -1599,6 +1604,11 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     return 1
   fi
   if ! path="$(write_review_file "$repo" "$name" "$out")"; then
+    clear_active_grok
+    return 1
+  fi
+  if ! "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null; then
+    note "source identity changed; paid report retained: $path"
     clear_active_grok
     return 1
   fi

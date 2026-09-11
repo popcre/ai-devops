@@ -318,13 +318,22 @@ resolve_trusted_op() {
 }
 PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
 [ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
-REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""; WORKING_TREE_HASH=""; PACKET_REL=""
+REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""; WORKING_TREE_HASH=""; PACKET_REL=""; REVIEW_PACKET_DIR=""
+resolve_review_identity() {
+  SOURCE_IDENTITY="$(mktemp)" || die "could not reserve source identity"
+  "$PACKET_BIN" resolve "$1" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$SOURCE_IDENTITY" \
+    || { rm -f "$SOURCE_IDENTITY"; die "source identity refused before snapshot creation"; }
+}
 prepare_review_identity() { # SOURCE REVIEW_DIR TAG
   local source="$1" dir="$2" tag="$3" packet
   [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH."
-  packet="$($PACKET_BIN build "$dir" "$tag")"
-  $PACKET_BIN verify "$packet" >/dev/null || die "review evidence packet failed verification."
+  packet="$($PACKET_BIN build "$dir" "$tag" --identity "$SOURCE_IDENTITY")" \
+    || { rm -f "$SOURCE_IDENTITY"; die "review evidence packet build failed."; }
+  $PACKET_BIN verify "$packet" --identity "$SOURCE_IDENTITY" >/dev/null \
+    || { rm -f "$SOURCE_IDENTITY"; die "review evidence packet failed verification."; }
+  rm -f "$SOURCE_IDENTITY"; SOURCE_IDENTITY=""
   PACKET_REL="$(basename "$packet")"
+  REVIEW_PACKET_DIR="$packet"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]*\)`.*/\1/p' "$packet/MANIFEST.md" | head -1)"
   REVIEW_HEAD="$(git -C "$source" rev-parse HEAD)"
   PACKET_HASH="$(cat "$packet/MANIFEST.sha256")"
@@ -949,8 +958,8 @@ usage() {
   cat <<EOF
 ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
 
-  ai-qwen new <name>       [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
-  ai-qwen ask <name>       [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen new <name>       [--base REF] [--assert-head SHA] [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
+  ai-qwen ask <name>       [--base REF] [--assert-head SHA] [--governed-verdict SHA] [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen implement <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen reset-context <name> [--prompt TEXT | --prompt-file FILE | stdin]
   ai-qwen list | show <name> | transcript <name> | delete <name>
@@ -1375,6 +1384,7 @@ start_session() { # start_session NAME MODE
     source_tree_before="$(tree_state "$repo")"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_SNAPSHOT_DELAY"
+    resolve_review_identity "$repo"
     workdir="$(review_boundary "$repo" "qwen-$name")"
     LIFECYCLE_REVIEW_DIR="$workdir"
     prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
@@ -1516,6 +1526,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
   source_head_before="$current_head"; source_tree_before="$current_tree"
+  resolve_review_identity "$repo"
   workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY"
@@ -1628,6 +1639,10 @@ continue_implementation() { # NAME RID META [RESET]
 finish_turn() {
   local repo="$1" name="$2" out="$3" path rc=0 artifact_status=accepted
   ANSWER_DEFECT=""
+  if [ -n "$REVIEW_PACKET_DIR" ] && ! "$PACKET_BIN" verify "$REVIEW_PACKET_DIR" >/dev/null; then
+    note "source identity changed; paid stream retained: $out"
+    return 4
+  fi
   if [ "${OPT_JSON:-0}" = 1 ]; then extract_answer "$out" >/dev/null; cat "$out"; else extract_answer "$out"; fi
   [ -z "$ANSWER_DEFECT" ] || artifact_status=incomplete
   path="$(write_review_file "$repo" "$name" "$out" "$artifact_status")"
@@ -1726,8 +1741,13 @@ cmd_reset_context() {
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
 ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_DOCTOR_MODE=""; OPT_GOVERNED_VERDICT=""
+OPT_BASE=""; OPT_ASSERT_HEAD=""; SOURCE_IDENTITY=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --base|--assert-head)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+      if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+      shift 2 ;;
     --prompt)      OPT_PROMPT="${2:-}"; shift 2 ;;
     --prompt-file) OPT_PROMPT_FILE="${2:-}"; shift 2 ;;
     --governed-verdict)

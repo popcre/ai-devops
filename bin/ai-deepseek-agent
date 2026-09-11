@@ -105,7 +105,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE AI_REVIEW_PATCH_MAX_BYTES; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -221,7 +221,13 @@ PY
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
 ACTIVE_API_PID=""; ACTIVE_API_TMP=""; REVIEW_HEAD=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""
+REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
+SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
+  if [ -n "$REVIEW_SOURCE_TAG" ]; then
+    "$SOURCE_TOOLS/ai-review-sandbox" remove-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG" >/dev/null 2>&1 || true
+    REVIEW_SOURCE_TAG=""
+  fi
   [ -n "$LOCK_DIR" ] || return 0
   [ -f "$LOCK_DIR/owner" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null)" = "$LOCK_TOKEN" ] || return 0
   rm -f "$LOCK_DIR/owner"; rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -339,19 +345,86 @@ require_review_head() {
   printf '%s' "$head"
 }
 
+prepare_review_source() { # session id; preserve complete formal-review evidence
+  local id="$1" snapshot saved file
+  git -C "$REPO_ROOT" check-ignore --no-index -q -- .ai/deepseek-sessions/ \
+    || { echo 'Error: formal review requires ignored private session storage.' >&2; return 1; }
+  REVIEW_SOURCE_IDENTITY="$(mktemp "$SESS_DIR/$id.source.XXXXXX")" || return 1
+  "$SOURCE_TOOLS/ai-review-packet" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$REVIEW_SOURCE_IDENTITY" || return 1
+  REVIEW_HEAD="$(jq -r .head "$REVIEW_SOURCE_IDENTITY")" || return 1
+  REVIEW_SOURCE_TAG="deepseek-$(printf '%s' "$REVIEW_SOURCE_IDENTITY" | sha256sum | cut -c1-24)"
+  snapshot="$("$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
+  REVIEW_SOURCE_PACKET="$("$SOURCE_TOOLS/ai-review-packet" build "$snapshot" "$REVIEW_SOURCE_TAG" --identity "$REVIEW_SOURCE_IDENTITY")" || return 1
+  REVIEW_SOURCE_HASH="$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")"
+  saved="$REVIEW_SOURCE_IDENTITY.packet"
+  cp -R "$REVIEW_SOURCE_PACKET" "$saved" || return 1
+  REVIEW_SOURCE_SAVED="$saved"
+  REVIEW_SOURCE_PACKET="$saved"
+  local patch="$saved/patch.diff"
+  [ ! -f "$saved/patch.full.diff" ] || patch="$saved/patch.full.diff"
+  local source_files=("$saved/MANIFEST.md" "$saved/identity.json" "$patch")
+  while IFS= read -r -d '' file; do
+    case "$file" in "$saved/MANIFEST.md"|"$saved/identity.json"|"$saved/patch.diff"|"$saved/patch.full.diff"|"$saved"/patch.part-*|"$saved"/.*) continue;; esac
+    source_files+=("$file")
+  done < <(find "$saved" -type f -print0 | sort -z)
+  while IFS= read -r -d '' file; do
+    source_files+=("$snapshot/$file")
+  done < <(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z)
+  printf '%s\0' "${source_files[@]}" > "$REVIEW_SOURCE_IDENTITY.files" || return 1
+  MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${source_files[@]}")" || return 1
+  "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
+}
+
+verify_review_source() {
+  "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null \
+    || {
+      local stale meta
+      meta="$(session_path "$ID" .meta.json)" || return 1
+      stale="$(mktemp "$SESS_DIR/.source-stale.XXXXXX")" || return 1
+      GOVERNED_HEAD="$GOVERNED_HEAD" OBSERVED_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" OBSERVED_SOURCE_DIGEST="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$REPO_ROOT" 2>/dev/null || true)" \
+      "$PYTHON" - "$REVIEW_SOURCE_IDENTITY" "$stale" "$ID" "$REVIEW_SOURCE_HASH" "$REVIEW_SOURCE_SAVED" <<'PY'
+import json, os, sys
+identity_path, output, session_id, packet_hash, packet_directory = sys.argv[1:]
+identity = json.load(open(identity_path, encoding='utf-8'))
+json.dump({'schema_version':2,'provider':'deepseek','session_id':session_id,'head':identity['head'],'source_identity':identity,'observed_head':os.environ['OBSERVED_HEAD'],'observed_source_digest':os.environ['OBSERVED_SOURCE_DIGEST'],'packet_sha256':packet_hash,'source_packet_directory':packet_directory,'verdict_mode':'governed' if os.environ['GOVERNED_HEAD'] else 'ordinary','governed_head':os.environ['GOVERNED_HEAD'] or None,'status':'source_changed','verdict':None,'reason':'Source evidence changed after the provider returned; the conversation is retained and a new turn must resolve fresh source.'},open(output,'w',encoding='utf-8'),indent=2)
+PY
+      if ! write_atomic "$meta" "$stale"; then echo 'Error: stale source metadata could not be published; retained transcript authorizes nothing.' >&2; fi
+      rm -f "$stale"
+      echo "Error: review source changed; paid response was retained in session $ID but is not an authorization. A new review turn can resolve the current source." >&2
+      return 1
+    }
+}
+
 build_candidate() {
   # $1 = current transcript or empty, $2 = output, remaining role/content pairs
-  "$PYTHON" - "$@" <<'PY'
+  # Message bytes stay on a pipe, avoiding OS argument limits for complete diffs.
+  local current="$1" output="$2"; shift 2
+  [ "$(( $# % 2 ))" -eq 0 ] || return 1
+  {
+    while [ "$#" -gt 0 ]; do
+      printf '%s\n' "$1"
+      printf '%s' "$2" | wc -c
+      printf '%s' "$2"
+      shift 2
+    done
+  } | "$PYTHON" -c '
 import json, sys
-path, out, *items = sys.argv[1:]
+path, out = sys.argv[1:]
 try:
     messages = json.load(open(path, encoding="utf-8"))
 except (FileNotFoundError, IsADirectoryError):
     messages = []
-if len(items) % 2: raise SystemExit("invalid role/content pairs")
-for role, content in zip(items[0::2], items[1::2]): messages.append({"role":role,"content":content})
+stream = sys.stdin.buffer
+while True:
+    role = stream.readline()
+    if not role: break
+    count = int(stream.readline().strip())
+    if count < 0: raise ValueError("invalid message length")
+    content = stream.read(count)
+    if len(content) != count: raise ValueError("incomplete message bytes")
+    messages.append({"role":role.decode("utf-8").rstrip("\n"),"content":content.decode("utf-8")})
 with open(out, "w", encoding="utf-8") as f: json.dump(messages, f, indent=2)
-PY
+' "$current" "$output"
 }
 
 review_verdict() {
@@ -399,11 +472,6 @@ configure_governed_review() {
   REVIEW_INSTRUCTION="${REVIEW_INSTRUCTION%$'\n\n'*}
 
 End the response with exactly one final line: VERDICT: APPROVE $GOVERNED_HEAD, VERDICT: REVISE $GOVERNED_HEAD, or VERDICT: REJECT $GOVERNED_HEAD. If evidence is insufficient, use VERDICT: BLOCKED $GOVERNED_HEAD; BLOCKED is retained but cannot authorize anything. Do not put a decision word at the start of any other line, even in a quote or code block. Do not use the ordinary ## Verdict section."
-}
-
-governed_head_current() {
-  [ -n "$GOVERNED_HEAD" ] || return 0
-  [ "$(require_review_head)" = "$GOVERNED_HEAD" ] || { echo "Error: governed-head-changed: source commit moved during the paid turn. Private response: $API_RESPONSE_FILE" >&2; return 1; }
 }
 
 session_verdict_mode_matches() {
@@ -493,6 +561,7 @@ write_review_metadata() { # id verdict [status]
   # Paths travel as argv and as NUL-delimited bytes, never as newline-joined
   # text, so a name containing spaces or newlines is recorded exactly as given.
   REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
+  SOURCE_IDENTITY_FILE="$REVIEW_SOURCE_IDENTITY" SOURCE_PACKET_HASH="$REVIEW_SOURCE_HASH" SOURCE_PACKET_DIRECTORY="$REVIEW_SOURCE_SAVED" \
   "$PYTHON" - "$tmp" "$ledger" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"} <<'PY'
 import json, os, sys
 out, ledger, *attached_turn = sys.argv[1:]
@@ -503,7 +572,9 @@ for part in raw.split(b"\0"):
     if not part: continue
     name = os.fsdecode(part)
     if name not in attached: attached.append(name)
-json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
+identity = json.load(open(os.environ["SOURCE_IDENTITY_FILE"], encoding="utf-8"))
+source_files = [os.fsdecode(part) for part in open(os.environ["SOURCE_IDENTITY_FILE"] + '.files', 'rb').read().split(b'\0') if part]
+json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
 PY
   if [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" = publish ]; then mkdir -p "$meta" || return 1; fi
   if ! write_atomic "$meta" "$tmp"; then rm -f "$tmp"; return 1; fi
@@ -511,16 +582,47 @@ PY
 }
 
 with_files_appended() {
-  # $1 = message, remaining args = file paths (may be none) -> combined text.
-  # --file may be repeated: a review is only as good as the evidence it is
-  # handed, and one attachment is rarely the whole story.
+  # Git Bash owns file reads so its supported Windows filenames remain readable.
+  # Length framing transports NUL bytes without ever placing them in a shell var.
   local msg="$1" file; shift
   printf '%s' "$msg"
-  for file in "$@"; do
-    [ -n "$file" ] || continue
-    [ -f "$file" ] || { echo "Error: file not found: $file" >&2; return 1; }
-    printf '\n\n--- %s ---\n%s\n--- end %s ---' "$file" "$(cat "$file")" "$file"
-  done
+  [ "$#" -gt 0 ] || return 0
+  {
+    for file in "$@"; do
+      if [ "${SOURCE_ATTACHMENT_MODE:-0}" = 1 ] && [ -L "$file" ]; then
+        printf 'symlink\n'
+        readlink -n -- "$file" | wc -c
+        readlink -n -- "$file" || exit 1
+      else
+        [ -f "$file" ] || { echo "Error: file not found: $file" >&2; exit 1; }
+        printf 'file\n'
+        wc -c < "$file" || exit 1
+        cat -- "$file" || exit 1
+      fi
+    done
+  } | "$PYTHON" -c '
+import base64, hashlib, sys
+sys.stdout.reconfigure(encoding="utf-8")
+stream = sys.stdin.buffer
+for path in sys.argv[1:]:
+    kind = stream.readline().strip()
+    if kind not in (b"file", b"symlink"): raise ValueError("missing attachment frame")
+    count = int(stream.readline().strip())
+    if count < 0: raise ValueError("invalid attachment length")
+    data = stream.read(count)
+    if len(data) != count: raise ValueError("incomplete attachment bytes")
+    try:
+        text = data.decode("utf-8")
+        if "\0" in text: raise ValueError("binary attachment")
+        encoding = "symlink-target-utf8" if kind == b"symlink" else "utf-8"
+    except (UnicodeDecodeError, ValueError):
+        text = base64.b64encode(data).decode("ascii")
+        encoding = "symlink-target-base64" if kind == b"symlink" else "base64"
+    sys.stdout.write(f"\n\n--- {path} ---\nEncoding: {encoding}\nBytes: {count}\nSHA256: {hashlib.sha256(data).hexdigest()}\n\n")
+    sys.stdout.write(text)
+    sys.stdout.write(f"\n--- end {path} ---")
+if stream.read(1): raise ValueError("unexpected attachment bytes")
+' "$@"
 }
 
 # DeepSeek reaches this wrapper over a plain text API: no repository, no
@@ -587,7 +689,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
     ;;
 
   send)
-    MSG=""; SYSTEM=""; REVIEW=0; REVIEW_FILES=()
+    MSG=""; SYSTEM=""; REVIEW=0; REVIEW_FILES=(); OPT_BASE=""; OPT_ASSERT_HEAD=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --file) REVIEW_FILES+=("${2:-}"); shift 2 ;;
@@ -596,10 +698,15 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
         --review) REVIEW=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
+        --base|--assert-head)
+          [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
+          if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+          shift 2 ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
     [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]...' >&2; exit 2; }
+    [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     if [ "$REVIEW" = 1 ] && [ -n "$SYSTEM" ]; then echo "Error: --system cannot be combined with --review; the review evidence boundary owns the system prompt. Put your instructions in the review message instead." >&2; exit 2; fi
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     configure_governed_review || exit 1
@@ -611,6 +718,7 @@ $REVIEW_INSTRUCTION"
     ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
     while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
     acquire_lock "$F" || exit 1
+    [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
     call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; conversation was not created." >&2; exit 1; }
@@ -632,10 +740,7 @@ $REVIEW_INSTRUCTION"
       echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
-    if ! governed_head_current; then
-      write_review_metadata "$ID" "$VERDICT" source_changed || echo 'Error: stale-source metadata publication failed; paid transcript remains saved.' >&2
-      exit 1
-    fi
+    [ "$REVIEW" = 0 ] || verify_review_source || exit 1
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
@@ -654,17 +759,22 @@ $REVIEW_INSTRUCTION"
 
   reply)
     ID="${1:-}"; shift || true
-    MSG=""; REVIEW=0; REVIEW_FILES=()
+    MSG=""; REVIEW=0; REVIEW_FILES=(); OPT_BASE=""; OPT_ASSERT_HEAD=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --file) REVIEW_FILES+=("${2:-}"); shift 2 ;;
         --review) REVIEW=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
+        --base|--assert-head)
+          [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
+          if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+          shift 2 ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
     [ -n "$ID" ] && [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent reply <session-id> "<message>"' >&2; exit 2; }
+    [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
     configure_governed_review || exit 1
     F="$(session_path "$ID")" || exit 2
@@ -678,6 +788,7 @@ $REVIEW_INSTRUCTION"
 $REVIEW_INSTRUCTION"
 
     acquire_lock "$F" || exit 1
+    [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
     call_api "$CANDIDATE" "$REPLY_FILE" || { rm -f "$CANDIDATE" "$REPLY_FILE"; echo "Error: provider failed; canonical conversation is unchanged." >&2; exit 1; }
@@ -698,10 +809,7 @@ $REVIEW_INSTRUCTION"
       echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
-    if ! governed_head_current; then
-      write_review_metadata "$ID" "$VERDICT" source_changed || echo 'Error: stale-source metadata publication failed; paid transcript remains saved.' >&2
-      exit 1
-    fi
+    [ "$REVIEW" = 0 ] || verify_review_source || exit 1
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
