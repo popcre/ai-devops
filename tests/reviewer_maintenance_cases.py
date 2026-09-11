@@ -834,7 +834,10 @@ wait "$job"
         with self.assertRaises(events.Blocked):
             events.verify_owner(self.root, "grok", owner)
 
-    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self):
+    def test_linked_implementation_recovers_report_and_missing_patch_without_rebinding(self):
+        self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True)
+
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False):
         state = self.root / "state"
         workspace = state / "worktrees/qwen.fixture-codex-work/wt"
         workspace.parent.mkdir(parents=True)
@@ -852,16 +855,33 @@ wait "$job"
         owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
         report = self.root / "qwen-work-synthetic.md"
         report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
+        if linked:
+            original = self.invocation(rid="f" * 32, provider="qwen", finish=False)
+            events.bind_owner(self.root, "qwen", original["run_id"], owner)
+            events.require_report(self.root, "qwen", original["run_id"])
+            events.publish_report(self.root, "qwen", original["run_id"], report)
+            canonical.unlink()
+            with self.assertRaises(events.Blocked):
+                events.publish_patch(self.root, "qwen", original["run_id"], canonical)
+            canonical.write_bytes(patch_data)
+            with self.assertRaisesRegex(events.Blocked, "still active"):
+                events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+            self.write({**original, "event": "finished", "exit_code": 1, "evidence_state": "publication-incomplete"})
+            original_owner = owner.read_bytes()
+            original_ledger = self.ledger.read_bytes()
         extra = workspace / "unexported.txt"
         extra.write_text("must not be discarded")
         with self.assertRaises(events.Blocked):
             events.reconcile_owner(self.root, "qwen", owner, metadata, report)
         extra.unlink()
         result = events.reconcile_owner(self.root, "qwen", owner, metadata, report)
-        self.assertEqual(result["report_count"], 2)
+        self.assertEqual(result["report_count"], 3 if linked else 2)
         self.assertEqual(result["historical_source_authorization"], "unknown")
+        if linked:
+            self.assertEqual(owner.read_bytes(), original_owner)
+            self.assertTrue(self.ledger.read_bytes().startswith(original_ledger))
         report.unlink(); canonical.unlink()
-        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 2)
+        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 3 if linked else 2)
         self.assertTrue(events.reconcile_owner(self.root, "qwen", owner, metadata, report)["already_reconciled"])
 
     def test_patch_publication_failure_blocks_cleanup_after_report_succeeds(self):
