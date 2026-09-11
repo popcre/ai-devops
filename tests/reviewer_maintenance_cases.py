@@ -530,6 +530,8 @@ repo_root(){ printf '%s' "$STATE_DIR"; }
 repo_id(){ printf repo; }
 find_meta(){ printf '%s' "$META"; }
 lock_path(){ printf '%s/absent-lock' "$STATE_DIR"; }
+lock_acquire(){ return 0; }
+lock_release(){ :; }
 require_upstream_identity(){ printf upstream; }
 session_record_path(){ printf '%s/absent-session' "$STATE_DIR"; }
 server_up(){ return 0; }
@@ -837,7 +839,10 @@ wait "$job"
     def test_linked_implementation_recovers_report_and_missing_patch_without_rebinding(self):
         self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True)
 
-    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False):
+    def test_linked_implementation_recovers_report_after_patch_was_already_published(self):
+        self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True, patch_first=True)
+
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False, patch_first=False):
         state = self.root / "state"
         workspace = state / "worktrees/qwen.fixture-codex-work/wt"
         workspace.parent.mkdir(parents=True)
@@ -856,19 +861,39 @@ wait "$job"
         report = self.root / "qwen-work-synthetic.md"
         report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
         if linked:
+            outcome = json.loads(metadata.read_text())
+            outcome.update(provider_terminal_state="completed", last_terminal_state="report-publication-incomplete",
+                           recovery_reason="report-publication-incomplete")
+            metadata.write_text(json.dumps(outcome))
             original = self.invocation(rid="f" * 32, provider="qwen", finish=False)
             events.bind_owner(self.root, "qwen", original["run_id"], owner)
             events.require_report(self.root, "qwen", original["run_id"])
-            events.publish_report(self.root, "qwen", original["run_id"], report)
-            canonical.unlink()
-            with self.assertRaises(events.Blocked):
-                events.publish_patch(self.root, "qwen", original["run_id"], canonical)
-            canonical.write_bytes(patch_data)
+            exported = self.root / "exact-export.patch"
+            exported.write_bytes(patch_data)
+            events.prepare_owner_artifact(self.root, "qwen", original["run_id"], owner, "report", report)
+            events.prepare_owner_artifact(self.root, "qwen", original["run_id"], owner, "git-binary-patch", exported)
+            if patch_first:
+                events.publish_patch(self.root, "qwen", original["run_id"], exported)
+            else:
+                events.publish_report(self.root, "qwen", original["run_id"], report)
+                exported.unlink()
+                with self.assertRaises(events.Blocked):
+                    events.publish_patch(self.root, "qwen", original["run_id"], exported)
+                exported.write_bytes(patch_data)
             with self.assertRaisesRegex(events.Blocked, "still active"):
                 events.reconcile_owner(self.root, "qwen", owner, metadata, report)
             self.write({**original, "event": "finished", "exit_code": 1, "evidence_state": "publication-incomplete"})
             original_owner = owner.read_bytes()
             original_ledger = self.ledger.read_bytes()
+            prior_report = self.root / "qwen-work-prior.md"
+            prior_report.write_bytes(report.read_bytes())
+            with self.assertRaises(events.Blocked):
+                events.reconcile_owner(self.root, "qwen", owner, metadata, prior_report)
+            report_bytes = report.read_bytes()
+            report.write_text("Changed paid evidence")
+            with self.assertRaises(events.Blocked):
+                events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+            report.write_bytes(report_bytes)
         extra = workspace / "unexported.txt"
         extra.write_text("must not be discarded")
         with self.assertRaises(events.Blocked):
@@ -883,6 +908,92 @@ wait "$job"
         report.unlink(); canonical.unlink()
         self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 3 if linked else 2)
         self.assertTrue(events.reconcile_owner(self.root, "qwen", owner, metadata, report)["already_reconciled"])
+
+    def test_legacy_metadata_archive_preserves_complete_owned_state_without_paid_claim(self):
+        bash = self.bash
+        self.assertTrue(bash)
+        physical_repo = subprocess.check_output([bash, "-c", "pwd -P"], cwd=self.toolkit).decode().strip()
+        rid = events.digest((physical_repo + "\n").encode())[:12]
+        directory = self.root / "state/sessions" / rid / "codex--legacy.d"
+        directory.mkdir(parents=True)
+        metadata = directory / "metadata.json"
+        canonical = directory / "cumulative.patch"
+        data = b"diff --git a/proof.txt b/proof.txt\n--- a/proof.txt\n+++ b/proof.txt\n@@ -1 +1 @@\n-before\n+after\n"
+        canonical.write_bytes(data)
+        older = directory / ("cumulative-1-" + events.digest(data) + ".patch")
+        older.write_bytes(data)
+        recovered = directory / "recovery" / ("cumulative-3-" + events.digest(data) + ".patch")
+        recovered.parent.mkdir(); recovered.write_bytes(data)
+        metadata.write_text(json.dumps({"version": 2, "mode": "implement", "repo": str(self.toolkit),
+            "caller": "codex", "name": "legacy", "base_sha": self.sha, "canonical_patch": str(canonical),
+            "patch_sha256": events.digest(data), "preserved_generation_artifacts":
+            [{"path": str(recovered), "sha256": events.digest(data), "reason": "uncommitted-state-reset"}]}))
+        manifest = directory / "owner.json"
+        manifest.write_text(json.dumps({"version": 1, "owner_dir": directory.as_posix(), "metadata": metadata.as_posix(),
+                                       "patch_pattern": "cumulative-<generation>-<sha256>.patch"}))
+        with self.assertRaises(events.Blocked):
+            events.verify_implementation_archive(self.root, "qwen", metadata)
+        extra = directory / "unknown.txt"; extra.write_text("must remain")
+        with self.assertRaises(events.Blocked):
+            events.archive_implementation_state(self.root, "qwen", metadata)
+        extra.unlink()
+        original = {str(path): path.read_bytes() for path in (metadata, manifest, canonical, older, recovered)}
+        proof = events.archive_implementation_state(self.root, "qwen", metadata)
+        self.assertEqual(events.archive_implementation_state(self.root, "qwen", metadata), proof)
+        self.assertEqual(events.verify_implementation_archive(self.root, "qwen", metadata), proof)
+        self.assertEqual(proof["original_paid_result"], "unknown")
+        row = json.loads(self.ledger.read_text().splitlines()[0])
+        self.assertEqual(row["operation"], "local-reconciliation")
+        self.assertEqual(row["head"], "")
+        self.assertIsNone(row["parent_run_id"])
+        canonical.write_bytes(b"changed")
+        with self.assertRaises(events.Blocked):
+            events.verify_implementation_archive(self.root, "qwen", metadata)
+        canonical.write_bytes(data)
+        archived = events.read_json(self.root / "evidence" / proof["archive_id"] / "implementation-state-archive.json")
+        for path in original:
+            Path(path).unlink()
+        for entry in archived["files"]:
+            Path(entry["path"]).write_bytes(entry["text"].encode("utf-8"))
+        self.assertEqual({path: Path(path).read_bytes() for path in original}, original)
+        self.assertEqual(events.verify_implementation_archive(self.root, "qwen", metadata), proof)
+        for provider in ("qwen", "kimi"):
+            env = dict(os.environ, AI_REVIEW_EVENT_DIR=str(self.root))
+            env["AI_" + provider.upper() + "_CALLER"] = "codex"
+            env["AI_" + provider.upper() + "_STATE_DIR"] = (self.root / "state").as_posix()
+            result = subprocess.run([bash, str(ROOT / "bin" / ("ai-" + provider)), "delete", "legacy"],
+                                    cwd=self.toolkit, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(directory.exists())
+            self.assertFalse((self.root / "state/locks" / (rid + "--codex--legacy.lock.d")).exists())
+            for path, data in original.items():
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                Path(path).write_bytes(data)
+        row = json.loads(metadata.read_text()); row["evidence_run_id"] = "a" * 32
+        metadata.write_text(json.dumps(row))
+        with self.assertRaises(events.Blocked):
+            events.archive_implementation_state(self.root, "qwen", metadata)
+
+    def test_prepared_paid_report_cannot_be_replaced_by_failure_summary(self):
+        original = self.invocation(rid="e" * 32, provider="qwen", finish=False)
+        owner = self.root / "owner.json"
+        owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(self.root / "workspace")}))
+        events.bind_owner(self.root, "qwen", original["run_id"], owner)
+        events.require_report(self.root, "qwen", original["run_id"])
+        paid = self.root / "paid.md"; paid.write_text("Original paid result")
+        failure = self.root / "failure.md"; failure.write_text("Publication failed")
+        events.prepare_owner_artifact(self.root, "qwen", original["run_id"], owner, "report", paid)
+        events.prepare_owner_artifact(self.root, "qwen", original["run_id"], owner, "report", failure)
+        events.publish_report(self.root, "qwen", original["run_id"], failure)
+        with self.assertRaises(events.Blocked):
+            events.verify_owner(self.root, "qwen", owner)
+        events.publish_report(self.root, "qwen", original["run_id"], paid)
+        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 2)
+        owner.unlink()
+        self.assertEqual(len(events.verify_prepared(self.root, "qwen", original["run_id"], "report", paid)), 2)
+        paid.write_text("Changed")
+        with self.assertRaises(events.Blocked):
+            events.verify_prepared(self.root, "qwen", original["run_id"], "report", paid)
 
     def test_patch_publication_failure_blocks_cleanup_after_report_succeeds(self):
         rid, _, report = self.evidence_fixture()

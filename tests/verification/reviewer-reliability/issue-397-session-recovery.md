@@ -84,6 +84,21 @@ records the recovery slice under #337; it does not close #397 or the parent.
 
 ## Outstanding qualification
 
+The expired-deadline recovery regression passes: recovery makes one bounded
+GET observation before consulting the original polling deadline. A new terminal
+assistant message can be retained after that deadline; an old or incomplete
+message leaves the original deadline and pending fence unchanged. No POST,
+deadline renewal, or automatic replay is introduced (owning focused case: 1/0).
+
+Grok 1.0.13 exposes retained transcript export but no documented authoritative
+remote-run status or acknowledged cancellation command. A live timed-out review
+was exported read-only: 8,321 bytes, SHA-256
+`9e322a20d35ab15f9e500dc995e5c35862981aa6502f62163e194522a0cc750e`.
+The private export contains intermediate paid progress and no terminal verdict.
+Its existing incident and uncertain work lock remain open and untouched. Local
+leader state cannot establish remote cancellation. This is an unresolved
+qualification limitation, not a recovered result or permission to retry.
+
 Required CI, final exact-head independent review, merge, serialized installation,
 and governed Qwen/GLM live canaries remain outstanding for the final integrated
 head. Muse's full suite and final installed continuation proof are also pending.

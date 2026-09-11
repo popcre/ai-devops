@@ -517,6 +517,7 @@ write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELO
       terminal_subtype:(if ($subtype|length)>0 then $subtype else null end),
       terminal_error:$terminal_error,returned_model:(if ($returned|length)>0 then $returned else null end),
       stderr_classification:$class}')" || return 1
+  reviewer_event_publish_report qwen "$file" || return 1
   QUALIFICATION_DIAGNOSTIC_PATH="$file"
 }
 
@@ -562,7 +563,7 @@ valid_impl_record() { # valid_impl_record RID NAME META
 
 write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
   local rid="$1" name="$2" repo="$3" base="$4" sid="$5" wt="$6" terminal="$7" continuity="$8" old="${9:-}"
-  local dir meta patch manifest tmp_patch hash now turns generation created old_patch
+  local dir meta patch manifest tmp_patch hash now turns generation created old_patch old_evidence="" preserved='[]'
   dir="$(impl_dir "$rid" "$name")"; meta="$dir/metadata.json"; manifest="$dir/owner.json"
   mkdir -p "$dir"; chmod 0700 "$dir" 2>/dev/null || true
   tmp_patch="$(mktemp "$dir/.cumulative.XXXXXX")" || return 1
@@ -579,20 +580,31 @@ write_impl_state() { # RID NAME REPO BASE SID WT TERMINAL CONTINUITY [OLD_META]
   write_meta "$manifest" "$(jq -n --arg dir "$dir" --arg meta "$meta" \
     '{version:1,owner_dir:$dir,metadata:$meta,patch_pattern:"cumulative-<generation>-<sha256>.patch"}')" || return 1
   old_patch=""; [ -n "$old" ] && [ -f "$old" ] && old_patch="$(jq -r '.canonical_patch // ""' "$old")"
+  [ -z "$old_patch" ] || old_evidence="$(jq -r '.evidence_run_id // empty' "$old")"
+  [ -z "$old_patch" ] || preserved="$(jq -c '.preserved_generation_artifacts // []' "$old")"
   write_meta "$meta" "$(jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" \
     --arg name "$name" --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg base "$base" \
-    --arg patch "$patch" --arg hash "$hash" --arg created "$created" --arg updated "$now" \
-    --arg terminal "$terminal" --arg continuity "$continuity" --argjson turns "$turns" --argjson generation "$generation" \
+    --arg patch "$patch" --arg hash "$hash" --arg created "$created" --arg updated "$now" --arg evidence_run "${AI_REVIEW_EVENT_RUN_ID:-}" \
+    --arg terminal "$terminal" --arg continuity "$continuity" --argjson turns "$turns" --argjson generation "$generation" --argjson preserved "$preserved" \
     '{version:2,qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"implement",
-      model:$model,base_sha:$base,canonical_patch:$patch,patch_sha256:$hash,generation:$generation,turns:$turns,
-      created:$created,updated:$updated,last_terminal_state:$terminal,incomplete_state:($terminal!="completed"),
+      model:$model,base_sha:$base,canonical_patch:$patch,patch_sha256:$hash,generation:$generation,turns:$turns,evidence_run_id:$evidence_run,preserved_generation_artifacts:$preserved,
+      created:$created,updated:$updated,last_terminal_state:$terminal,provider_terminal_state:$terminal,incomplete_state:($terminal!="completed"),
       continuity_state:$continuity,lifecycle_status:(if $continuity=="exact" then "ready" else "recovery-required" end),
-      ephemeral_state_notice:"Ignored dependencies, build output, downloads, caches, and secrets are not preserved. Generation is wrapper bookkeeping, not a Qwen turn counter."}')"
-  [ -z "$old_patch" ] || [ "$old_patch" = "$patch" ] || rm -f "$old_patch" 2>/dev/null || true
+      ephemeral_state_notice:"Ignored dependencies, build output, downloads, caches, and secrets are not preserved. Generation is wrapper bookkeeping, not a Qwen turn counter."}')" || return 1
+  LIFECYCLE_META="$meta"
+  reviewer_event_evidence prepare-owner-artifact qwen "$LIFECYCLE_OWNER" git-binary-patch "$patch" || return 1
+  reviewer_event_publish_patch qwen "$patch" || return 1
+  if [ -n "$old_patch" ] && [ "$old_patch" != "$patch" ]; then
+    # Retain older unproven generations. Current exact bytes are now durable;
+    # removing historical local state must not invent its prior publication.
+    if [ -n "$old_evidence" ] && reviewer_event_verify_private verify-prepared qwen "$old_evidence" git-binary-patch "$old_patch"; then
+      rm -f "$old_patch" 2>/dev/null || true
+    fi
+  fi
 }
 
 reconcile_impl_patches() { # META RESET_ALLOWED
-  local meta="$1" reset="${2:-0}" dir canonical generation f base fgen
+  local meta="$1" reset="${2:-0}" dir canonical generation f base fgen saved tmp hash evidence_run
   dir="$(dirname "$meta")"; canonical="$(jq -r .canonical_patch "$meta")"; generation="$(jq -r .generation "$meta")"
   for f in "$dir"/cumulative-*.patch; do
     [ -f "$f" ] || continue
@@ -601,12 +613,25 @@ reconcile_impl_patches() { # META RESET_ALLOWED
     fgen="$(printf '%s' "$base" | sed -nE 's/^cumulative-([0-9]+)-[0-9a-f]{64}\.patch$/\1/p')"
     [ -n "$fgen" ] || return 1
     if [ "$fgen" -gt "$generation" ]; then
-      if [ "$reset" = 1 ]; then rm -f "$f" || return 1
+      if [ "$reset" = 1 ]; then
+        [ ! -L "$f" ] && [ ! -L "$dir/recovery" ] || return 1
+        mkdir -p "$dir/recovery" || return 1
+        saved="$dir/recovery/$base"; [ ! -L "$saved" ] || return 1
+        hash="$(sha256_file "$f")"; tmp="$(mktemp "$dir/recovery/.preserve.XXXXXX")" || return 1
+        cp "$f" "$tmp" && [ "$(sha256_file "$tmp")" = "$hash" ] || { rm -f "$tmp"; return 1; }
+        ln "$tmp" "$saved" 2>/dev/null || cmp -s "$tmp" "$saved" || { rm -f "$tmp"; return 1; }
+        rm -f "$tmp"
+        write_meta "$meta" "$(jq --arg path "$saved" --arg hash "$hash" '.preserved_generation_artifacts=((.preserved_generation_artifacts // []) + [{path:$path,sha256:$hash,reason:"uncommitted-state-reset"}] | unique_by(.path))' "$meta")" || return 1
+        [ "$(sha256_file "$f")" = "$hash" ] || return 1
+        rm -f "$f" || return 1
       else
         mark_impl_recovery_required "$meta" uncommitted-state-detected || return 1
         return 2
       fi
-    else rm -f "$f" || return 1; fi
+    else
+      evidence_run="$(jq -r '.evidence_run_id // empty' "$meta")"
+      if [ -n "$evidence_run" ] && reviewer_event_verify_private verify-prepared qwen "$evidence_run" git-binary-patch "$f" 2>/dev/null; then rm -f "$f" || return 1; fi
+    fi
   done
   return 0
 }
@@ -615,7 +640,7 @@ mark_impl_recovery_required() { # META TERMINAL
   local meta="$1" terminal="$2" json
   [ -n "$meta" ] && [ -f "$meta" ] || return 1
   json="$(jq --arg u "$(date -u +%FT%TZ)" --arg t "$terminal" \
-    '.updated=$u | .last_terminal_state=$t | .incomplete_state=true |
+    '.updated=$u | .last_terminal_state=$t | .recovery_reason=$t | .incomplete_state=true |
      .continuity_state="recovery-required" | .lifecycle_status="recovery-required"' "$meta")" || return 1
   write_meta "$meta" "$json"
 }
@@ -645,8 +670,12 @@ cleanup_qualification_probe() {
   stop_run_turn 2>/dev/null || true
   [ -n "$QUALIFICATION_STREAM" ] || return 0
   QUALIFICATION_DIAGNOSTIC_PATH=""
-  write_qualification_diagnostic "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.err" "${RUN_TURN_RC:-130}" \
-    "$QUALIFICATION_RUNTIME_SHA" "$QUALIFICATION_PRELOADER_SHA" timeout 2>/dev/null || true
+  if ! write_qualification_diagnostic "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.err" "${RUN_TURN_RC:-130}" \
+    "$QUALIFICATION_RUNTIME_SHA" "$QUALIFICATION_PRELOADER_SHA" timeout 2>/dev/null; then
+    note "qualification evidence retained: $QUALIFICATION_STREAM"
+    QUALIFICATION_ACTIVE=0
+    return 0
+  fi
   [ -z "$QUALIFICATION_DIAGNOSTIC_PATH" ] || note "diagnostic    : $QUALIFICATION_DIAGNOSTIC_PATH"
   rm -f "$QUALIFICATION_STREAM" "$QUALIFICATION_STREAM.p" "$QUALIFICATION_STREAM.err" 2>/dev/null || true
   QUALIFICATION_ACTIVE=0
@@ -1003,6 +1032,7 @@ write_review_file() {
       facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"$QWEN_ORIGINAL_HEAD_SHA\"}"
     fi
   fi
+  [ -z "${LIFECYCLE_OWNER:-}" ] || reviewer_event_evidence prepare-owner-artifact qwen "$LIFECYCLE_OWNER" report "$out" || return 1
   reviewer_event_publish_report qwen "$out" "$facts" || return 1
   printf '%s' "$out"
 }
@@ -1147,6 +1177,9 @@ cmd_doctor() {
         echo "diagnostic    : $diagnostic"
       else
         echo "FAILED — diagnostic-write-failure"
+        echo "qualification evidence retained: $tmp"
+        QUALIFICATION_STREAM=""
+        return 1
       fi
       rc=1
     fi
@@ -1289,6 +1322,20 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
     || { rm -f "$patch_tmp"; return 1; }
   if [ ! -s "$patch_tmp" ]; then
     rm -f "$patch_tmp"
+    if [ "$kind" = incomplete ]; then
+      report_tmp="$(mktemp "$dir/.qwen-report.XXXXXX")" || return 1
+      sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable
+      {
+        printf '# INCOMPLETE Qwen implementation - %s\n\n' "$name"
+        printf '%s\n' 'No source changes were produced. The provider did not prove successful completion.'
+        printf -- '- Repository: `%s`\n- Qwen session ID: `%s`\n- Base SHA: `%s`\n- Terminal state: `%s`\n' "$repo" "$sid" "$base" "$state"
+      } > "$report_tmp" || return 1
+      chmod 600 "$report_tmp" || return 1
+      ln "$report_tmp" "$report" 2>/dev/null || cmp -s "$report_tmp" "$report" || return 1
+      rm -f "$report_tmp"
+      reviewer_event_evidence prepare-owner-artifact qwen "$owner" report "$report" || return 1
+      reviewer_event_publish_report qwen "$report" || return 1
+    fi
     [ "$kind" = incomplete ] && note "ai-qwen: failed before changes (terminal state: $state); no empty patch was created." \
       || warn "the implement run produced no changes."
     return 2
@@ -1338,6 +1385,15 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
   if [ "$kind" = incomplete ]; then
     [ -z "$turn_patch" ] || mv "$turn_tmp" "$turn_patch" || { rm -f "$turn_tmp" "$patch" "$report_tmp"; return 1; }
     mv "$report_tmp" "$report" || { rm -f "$report_tmp" "$patch"; return 1; }
+  fi
+  reviewer_event_evidence prepare-owner-artifact qwen "$owner" git-binary-patch "$patch" || return 1
+  if [ "$kind" = incomplete ]; then
+    [ -z "$turn_patch" ] || reviewer_event_evidence prepare-owner-artifact qwen "$owner" git-binary-patch "$turn_patch" || return 1
+    reviewer_event_evidence prepare-owner-artifact qwen "$owner" report "$report" || return 1
+  fi
+  reviewer_event_publish_patch qwen "$patch" || return 1
+  if [ "$kind" = incomplete ]; then
+    [ -z "$turn_patch" ] || reviewer_event_publish_patch qwen "$turn_patch" || return 1
     reviewer_event_publish_report qwen "$report" || return 1
     note "ai-qwen: $state with partial changes; command remains unsuccessful."
     note "INCOMPLETE patch written: $patch"
@@ -1353,7 +1409,7 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
 }
 
 lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
-  local original="${1:-1}" artifact_rc=0 state_rc=0 final continuity
+  local original="${1:-1}" artifact_rc=0 state_rc=0 evidence_rc=0 final continuity
   final="$original"
   [ "$LIFECYCLE_ACTIVE" = 1 ] || return "$original"
   LIFECYCLE_ACTIVE=0
@@ -1366,15 +1422,11 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
         "$LIFECYCLE_BASE" "$LIFECYCLE_OWNER" incomplete "$LIFECYCLE_STATE" "$LIFECYCLE_COMMAND_RC" "$LIFECYCLE_OUT" \
         "${LIFECYCLE_PRIOR_TREE:-$LIFECYCLE_BASE}" || artifact_rc=$?
     fi
-    if ! reviewer_event_cleanup_allowed qwen; then
-      LIFECYCLE_PRESERVE=1
-      [ -z "$LIFECYCLE_OWNER" ] || mark_preserved "$LIFECYCLE_OWNER" || true
-      [ -z "$LIFECYCLE_META" ] || mark_impl_recovery_required "$LIFECYCLE_META" report-publication-incomplete || true
-      return 1
-    fi
-    if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ]; then
+    reviewer_event_cleanup_allowed qwen || evidence_rc=1
+    if [ "$artifact_rc" = 0 ] || [ "$artifact_rc" = 2 ] || [ "$evidence_rc" = 1 ]; then
       continuity=exact
       [ "$LIFECYCLE_STATE" = completed ] || continuity=recovery-required
+      [ "$evidence_rc" = 0 ] || continuity=recovery-required
       [ -n "$LIFECYCLE_SID" ] || LIFECYCLE_SID="$(session_id_from "$LIFECYCLE_OUT")"
       [ -n "$LIFECYCLE_SID" ] || continuity=recovery-required
       write_impl_state "$LIFECYCLE_RID" "$LIFECYCLE_NAME" "$LIFECYCLE_REPO" \
@@ -1389,6 +1441,12 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
           warn "canonical Qwen state and recovery metadata could not be saved. Recovery worktree: $LIFECYCLE_WT"
         fi
       fi
+    fi
+    if [ "$evidence_rc" = 1 ]; then
+      LIFECYCLE_PRESERVE=1
+      [ -z "$LIFECYCLE_OWNER" ] || mark_preserved "$LIFECYCLE_OWNER" || true
+      [ -z "$LIFECYCLE_META" ] || mark_impl_recovery_required "$LIFECYCLE_META" report-publication-incomplete || true
+      return 1
     fi
     if [ "$artifact_rc" = 1 ]; then
       LIFECYCLE_PRESERVE=1; final=1
@@ -1811,32 +1869,30 @@ cmd_list() {
 }
 cmd_show()   { jq . "$(find_meta "$(repo_id "$(repo_root)")" "$1")"; }
 cmd_delete() {
+(
   local rid meta dir manifest sess_lock f base
   rid="$(repo_id "$(repo_root)")"; meta="$(find_meta "$rid" "$1")"
   [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
   sess_lock="$(lock_path "$rid" "$1")"
-  [ ! -d "$sess_lock" ] || die "session '$1' has an active turn and cannot be deleted."
+  lock_acquire "$sess_lock" "delete:$1" || die "session '$1' has an active turn and cannot be deleted."
+  trap '[ "$(cat "$sess_lock/pid" 2>/dev/null)" != "$$" ] || lock_release "$sess_lock"' EXIT
   if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
     dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
     same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] || die "refusing to delete untrusted implementation state."
     jq -e --arg dir "$dir" --arg meta "$meta" '.version==1 and .owner_dir==$dir and .metadata==$meta' "$manifest" >/dev/null 2>&1 \
       || die "refusing to delete an implementation directory with an invalid owner manifest."
-    for f in "$dir"/* "$dir"/.[!.]*; do
-      [ -e "$f" ] || continue; base="$(basename "$f")"
-      case "$base" in
-        owner.json|metadata.json|cumulative.patch|.tmp.*|.cumulative.*) ;;
-        cumulative-*.patch) printf '%s' "$base" | grep -Eq '^cumulative-[0-9]+-[0-9a-f]{64}\.patch$' \
-          || die "implementation state directory contains an unowned file and was left in place: $f" ;;
-        *) die "implementation state directory contains an unowned file and was left in place: $f" ;;
-      esac
-    done
-    rm -f "$dir"/metadata.json "$dir"/owner.json "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/.tmp.* "$dir"/.cumulative.*
+    local -a archived_files=("$meta" "$manifest" "$dir"/cumulative.patch "$dir"/cumulative-*.patch "$dir"/recovery/*)
+    reviewer_event_verify_private archive-implementation-state qwen "$meta" || die 'implementation state could not be archived; every local artifact was preserved.'
+    reviewer_event_verify_private verify-implementation-archive qwen "$meta" || die 'implementation state changed after archival; local artifacts were preserved.'
+    for f in "${archived_files[@]}"; do [ ! -e "$f" ] || rm -f -- "$f" || die 'archived state could not be removed; archive remains available.'; done
+    [ ! -d "$dir/recovery" ] || rmdir "$dir/recovery" || die 'unexpected recovery files were preserved.'
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
   else
     release_boundary "$(repo_root)" "qwen-$1" || die "review evidence cleanup refused; session metadata preserved."
     rm -f "$meta"
   fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
+)
 }
 cmd_transcript() {
   local sid qwen repo dir out tmp source base; repo="$(repo_root)"

@@ -938,10 +938,11 @@ poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask too
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+UNCERTAIN_PAID_CALLS="$(grep -c -- '--prompt-file' "$TMP/argv.txt")"
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -Eq 'exact Grok continuation|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -Eq 'continuation-turn collision|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
 run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
 check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"
