@@ -1722,7 +1722,12 @@ cmd_delete() {
     fi
   else
     root="$(jq -r '.repository_root // empty' "$mp")"
-    if [ -n "$root" ] && [ -e "$root" ]; then
+    local rid; rid="$(basename "$(dirname "$mp")")"
+    # The sandbox is named by repository and session name only, so another caller's
+    # same-name session shares it: retire only this caller's side.
+    if sandbox_lock_by_other "$rid" "$CALLER" "$1" || sandbox_record_by_other "$rid" "$CALLER" "$1"; then
+      note "review sandbox for '$1' is shared with another caller's session; kept."
+    elif [ -n "$root" ] && [ -e "$root" ]; then
       release_boundary "$root" "$1" || die "review evidence cleanup refused; provider session and metadata preserved."
     fi
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true

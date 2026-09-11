@@ -544,6 +544,32 @@ check "a positive prune batch is accepted" "pr_batch 25"
 check "new validates the prune batch before pruning" "printf '%s' \"\$NEW_FN\" | grep -q 'prune_batch_valid ||'"
 check "prune refuses a non-numeric removal limit" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$PR_STATE' bash -c 'source \"\$AI_GLM_SOURCE\"; server_up(){ return 0; }; cmd_prune x1' >/dev/null 2>&1; test \$? -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
 
+echo "== delete keeps a sandbox shared across callers =="
+DL_STATE="$TMP/delete-shared-state"; DL_CALLS="$TMP/delete-shared-calls"
+mkdir -p "$DL_STATE/sessions/rid1" "$DL_STATE/locks"; : > "$DL_CALLS"
+dl_meta() { # CALLER NAME
+  jq -n --arg c "$1" --arg n "$2" --arg r "$PR_ROOT" \
+    '{name:$n,type:"review",caller:$c,opencode_session_id:("sid-"+$c+"-"+$n),repository_root:$r}' > "$DL_STATE/sessions/rid1/$1--$2.json"
+}
+dl_meta claude byrecord; dl_meta codex byrecord
+dl_meta claude bylock; mkdir -p "$DL_STATE/locks/rid1--codex--bylock.lock.d"
+dl_meta claude alone
+dl_meta claude ownlock; mkdir -p "$DL_STATE/locks/rid1--claude--ownlock.lock.d"
+run_delete() { # NAME
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$DL_STATE" AI_GLM_CALLER=claude DL_CALLS="$DL_CALLS" DL_NAME="$1" bash -c '
+    source "$AI_GLM_SOURCE"
+    find_meta(){ printf "%s/sessions/rid1/%s--%s.json" "$STATE_DIR" "$CALLER" "$1"; }
+    server_up(){ return 0; }
+    api(){ printf "%s %s\n" "$1" "$2" >> "$DL_CALLS"; }
+    release_boundary(){ printf "release %s\n" "$2" >> "$DL_CALLS"; }
+    cmd_delete "$DL_NAME"' >/dev/null 2>&1
+}
+for dl in byrecord bylock alone ownlock; do run_delete "$dl"; done
+check "delete keeps a sandbox another caller's record shares" "! grep -qx 'release byrecord' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid1/codex--byrecord.json'"
+check "delete keeps a sandbox another caller's lock shares" "! grep -qx 'release bylock' '$DL_CALLS'"
+check "a shared delete still retires this caller's session and record" "grep -qx 'DELETE /session/sid-claude-byrecord' '$DL_CALLS' && grep -qx 'DELETE /session/sid-claude-bylock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--byrecord.json' && test ! -e '$DL_STATE/sessions/rid1/claude--bylock.json'"
+check "an unshared delete still removes its sandbox" "grep -qx 'release alone' '$DL_CALLS' && grep -qx 'release ownlock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
+
 fi
 echo "== implementation job records =="
 JOB_STATE="$TMP/jobs"; mkdir -p "$JOB_STATE"; : > "$TMP/job-calls"; : > "$TMP/job-permission-calls"
