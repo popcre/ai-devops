@@ -1,18 +1,25 @@
 # IMPLEMENTATION PLAN — replace the perpetual shared-db orchestrator with finish-first delivery (2026-08-18)
 
+> **SUPERSEDED FOR IMPLEMENTATION 2026-09-11.** The diagnosis and historical
+> consensus remain useful, but the proposed 1+1 author model predates the later
+> owner-approved eight-author capacity and completed Phase 2 conflict controls.
+> Execute [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md)
+> instead; it preserves safe parallel authoring and covers every newer finding.
+
 Paired handoff: [`HANDOFF.d/2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md`](HANDOFF.d/2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md)
 
 Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](shared-db_orchestrator_failure_analysis.md)
 
 ## STATUS
 
-> **STALE ON ONE POINT, 2026-08-25 — the author-lane count. This plan is a
+> **HISTORICAL CAP NOTE — superseded first on 2026-08-25 and again on
+> 2026-08-28.** This plan is a
 > PROPOSAL, not an operating rule.** Every implementation step below except
 > step 6 (reviewer agreement on the plan text) is still open, so the 1+1 model
-> was never built. Meanwhile Albert raised the author-lane cap from three to
-> five on 2026-08-25 (u2giants/shared-db#1537), and `MAX_AUTHOR_LANES` in
-> `shared-db/scripts/manage-migration-author-lanes.mjs` is what the tooling
-> actually enforces.
+> was never built. Albert raised the author-lane cap from three to five on
+> 2026-08-25, then approved eight after the six-reviewer prerequisite on
+> 2026-08-28. `MAX_AUTHOR_LANES` in
+> `shared-db/scripts/manage-migration-author-lanes.mjs` is the live authority.
 >
 > An automated repository review read this plan's "no automatic lane refill, no
 > utilization target" and the skill's five-lane refill rule as two live rules in
