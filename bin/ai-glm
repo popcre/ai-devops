@@ -1235,6 +1235,21 @@ implementation_changed() { # CLONE BASE
   [ -n "$(git -C "$1" diff --cached --name-only "$2" 2>/dev/null)" ]
 }
 
+write_implementation_report() { # retain the exact planned destination before publication
+  local root="$1" name="$2" kind="$3" branch version
+  GLM_REPORT_KEY="$(printf '%s:%s' "$AI_REVIEW_EVENT_RUN_ID" "$kind" | sha256sum | cut -d' ' -f1)" || return 1
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null || printf unavailable)"
+  implementation_update "$IMPL_META" \
+    '.report_path=(.report_path // $report) | .attempted_report_path=$report |
+     .report_context=(.report_context // {branch:$branch,server_version:$version})' \
+    --arg report "$root/.ai/reviews/glm-$name-$GLM_REPORT_KEY.md" --arg branch "$branch" --arg version "$version" || return 1
+  GLM_REPORT_BRANCH="$(jq -r .report_context.branch "$IMPL_META")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r .report_context.server_version "$IMPL_META")"
+  GLM_REPORT_REQUESTED_AT="$(jq -r .created_at "$IMPL_META")"
+  write_report "$@"
+}
+
 write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 1 export failed
   local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome artifact staged
   implementation_record_path_valid "$meta" && implementation_meta_valid "$meta" || return 1
@@ -1284,12 +1299,16 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
     fi
   done
   rm -f "$patch_tmp" "$report_tmp"
+  implementation_update "$meta" \
+    '.incomplete_patch_path=$patch | .incomplete_report_path=$report |
+     .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report)' \
+    --arg patch "$patch" --arg report "$report" || return 1
   reviewer_event_publish_report glm "$report" || return 1
   reviewer_event_publish_patch glm "$patch" || return 1
   test_failure incomplete-metadata && return 1
   if ! implementation_update "$meta" \
       '.outcome=$outcome | .failure_kind=$kind | .incomplete_patch_path=$patch |
-       .incomplete_report_path=$report | .patch_path=$patch | .report_path=$report |
+       .incomplete_report_path=$report | .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report) |
        .artifact_state="durable" | .changes_present=true | .patch_exists=true |
        .provider_usage_state="unavailable" | .provider_tokens=null' \
       --arg outcome "$outcome" --arg kind "$(implementation_failure_kind "$failure")" \
@@ -1357,9 +1376,9 @@ implementation_cleanup() {
   if [ "$final" != completed ] && [ "$artifact_rc" -eq 2 ] &&
      [ "$(jq -r '.provider_submission_started // false' "$IMPL_META" 2>/dev/null)" = true ]; then
     local failure_report
-    if failure_report="$(write_report "$(jq -r .repository_root "$IMPL_META")" "$(jq -r .name "$IMPL_META")" implement \
+    if failure_report="$(write_implementation_report "$(jq -r .repository_root "$IMPL_META")" "$(jq -r .name "$IMPL_META")" 'implementation failure' \
         "INCOMPLETE: $(implementation_safe_reason "${IMPL_FAILURE:-turn-failed}"). No changes were proven; this is not an approval." null "${IMPL_SID:-unavailable}")"; then
-      implementation_update "$IMPL_META" '.report_path=$report | .artifact_state="durable"' --arg report "$failure_report" || safe=0
+      implementation_update "$IMPL_META" '.report_path=(.report_path // $report) | .artifact_state="durable"' --arg report "$failure_report" || safe=0
     else
       safe=0
     fi
@@ -1536,7 +1555,7 @@ EXCL
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached --binary "$base" > "$patch"; then
     rm -f "$patch"; IMPL_FAILURE="patch-export-failed"
-    report="$(write_report "$root" "$name" "implementation failure" "$text
+    report="$(write_implementation_report "$root" "$name" "implementation failure" "$text
 
 Patch export failed. No patch path was recorded. The terminal job record retains this
 GLM response and the exact failure reason; the disposable clone is still cleaned safely.
@@ -1544,7 +1563,7 @@ GLM response and the exact failure reason; the disposable clone is still cleaned
     implementation_update "$IMPL_META" '.report_path=$report' --arg report "$report" || return 1
     return 1
   fi
-  report="$(write_report "$root" "$name" implement "$text
+  report="$(write_implementation_report "$root" "$name" implement "$text
 
 ## Patch
 

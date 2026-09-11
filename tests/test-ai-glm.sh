@@ -490,6 +490,26 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
 wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt "$(scale_ticks 100)" ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
 
+implementation_publication_cases() {
+  run_fake_impl publication-binary '' "$TMP/no-ready" "$TMP/no-release" success '' binary >"$TMP/publication-binary.out" 2>&1; local binary_rc=$?
+  local binary_meta="$(job_meta publication-binary)" binary_event binary_patch
+  binary_event="$(jq -r .evidence_run_id "$binary_meta")"; binary_patch="$(jq -r .patch_path "$binary_meta")"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$binary_event/"*.report.json > "$TMP/recovered-binary.patch"
+  check "complete binary patch survives centrally after clone cleanup" "test '$binary_rc' -eq 0 && test ! -e \"\$(jq -r .clone_path '$binary_meta')\" && cmp -s '$binary_patch' '$TMP/recovered-binary.patch' && grep -q 'GIT binary patch' '$TMP/recovered-binary.patch'"
+  run_fake_impl publication-refusal '' "$TMP/no-ready" "$TMP/no-release" success publication >"$TMP/publication-refusal.out" 2>&1; local publication_rc=$?
+  local publication_meta="$(job_meta publication-refusal)"
+  check "publication refusal retains exact prompt clone and pending ownership" "test '$publication_rc' -ne 0 && jq -e '.cleanup.clone==\"preserved\" and .cleanup.server_session==\"pending\" and .provider_submission_started==true' '$publication_meta' >/dev/null && test -f \"\$(jq -r .prompt_path '$publication_meta')\" -a -d \"\$(jq -r .clone_path '$publication_meta')\""
+  check "publication refusal retains original paid response at its recorded path" "test -f \"\$(jq -r .report_path '$publication_meta')\" && grep -qx done \"\$(jq -r .report_path '$publication_meta')\""
+  check "publication refusal never deletes paid server session" "! grep -q 'DELETE /session/sid-publication-refusal' '$TMP/job-permission-calls'"
+  run_fake_impl partial-publication '' "$TMP/no-ready" "$TMP/no-release" failure publication binary >"$TMP/partial-publication.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication)"
+  check "incomplete publication refusal records both exact retained artifact paths" "test '$partial_rc' -ne 0 && test -f \"\$(jq -r .incomplete_report_path '$partial_meta')\" -a -f \"\$(jq -r .incomplete_patch_path '$partial_meta')\" -a -d \"\$(jq -r .clone_path '$partial_meta')\""
+}
+if [ "${AI_GLM_OWNER_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_publication_cases
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+
 READY="$TMP/record-ready"; RELEASE="$TMP/record-release"
 run_fake_impl exclusive record "$READY" "$RELEASE" >"$TMP/exclusive.out" 2>&1 & exclusive_pid=$!
 wait_file "$READY"
@@ -668,10 +688,7 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
 touch "$RACE_RELEASE"; wait "$race_pid" || true
 check "abort_completion_race_records_observed_truth" "jq -e '.status==\"completed\" and .outcome==\"completed\" and .incomplete_patch_path==null' '$RACE_META' >/dev/null"
 check "ambiguous_server_state_is_reported_not_deleted" "grep -q 'server state.*ambiguous' '$AI_GLM'"
-run_fake_impl publication-refusal '' "$TMP/no-ready" "$TMP/no-release" success publication >"$TMP/publication-refusal.out" 2>&1; publication_rc=$?
-PUBLICATION_META="$(job_meta publication-refusal)"
-check "publication refusal retains exact prompt clone and pending ownership" "test '$publication_rc' -ne 0 && jq -e '.cleanup.clone==\"preserved\" and .cleanup.server_session==\"pending\" and .provider_submission_started==true' '$PUBLICATION_META' >/dev/null && test -f \"\$(jq -r .prompt_path '$PUBLICATION_META')\" -a -d \"\$(jq -r .clone_path '$PUBLICATION_META')\""
-check "publication refusal never deletes paid server session" "! grep -q 'DELETE /session/sid-publication-refusal' '$TMP/job-permission-calls'"
+implementation_publication_cases
 (cd "$TMP/repoA" && AI_GLM_CALLER=codex AI_GLM_STATE_DIR="$JOB_STATE" "$AI_GLM" delete normal >/dev/null 2>&1)
 check "terminal_record_can_be_cleared_for_safe_name_reuse" "test ! -e '$NORMAL_META'"
 
