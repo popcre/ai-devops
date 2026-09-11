@@ -44,6 +44,16 @@ Its affected incident is partially resolved because the separate large-input
 symptom still awaits #393 live proof. This does not close #394, #337 or #159;
 the original maintenance round is preserved and final #398/#166 remain last.
 
+The bounded #161/#164 evidence repair [PR #411](https://github.com/popcre/ai-devops/pull/411)
+is in production at `be5f1e2c25e12abc4b0c57cf1f1f11ffc83811b1`.
+All 42 focused checks passed; exact-head independent GLM approved
+`d8f8c0a1d338c507ce884888471b3de17eb37ea7`, and queue run `34574548945`
+succeeded. The serialized installed helper hashes to
+`7e37e1bc87c3ac1a7858fbe2dd0bdf2afdf002a6799fad8efb6e31b747341d042`;
+its qualified-fallback matcher passed against captured run `34567280854`.
+Every code safety gate remains required. Final #166 still owns bounded-wait
+deadline/cancellation presentation and the whole-programme cutover proof.
+
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
 `verify.yml` keyed its concurrency group on the head SHA, so superseded runs were never cancelled and the two-runner edge-dev pool filled with builds nobody was waiting for. Fixed outside the phase order because it was blocking every phase. Merges `ee2b5a82`, `aa2f1337`. Issue #204 closed with evidence.
