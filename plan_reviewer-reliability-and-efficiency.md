@@ -10,6 +10,8 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 ## STATUS — implementation, not planning progress
 
+**2026-09-11 closeout checkpoint:** [Exact remaining work and evidence](HANDOFF.d/2026-09-11T1152Z-edge-dev-codex-throughput-reviewer-closeout.md). #417 merged as `c44c10278a7db965f25f22e58ed6a27384606963`, but its landing evidence failure (`34585150426`, job `103217520332`) remains unqualified and installation is pending; installed baseline remains `ecbbe4cd`. PRs #416 and #418–#422/#424 remain open. #395 CI exposes five regression cases; dependent branches inherit failures. A retained GLM terminal usage refusal was incorrectly polled to timeout, requiring repair under the existing terminal/recovery boundaries. #271's private LPAC prototype is not production qualification. No component or maintenance closure is claimed by this checkpoint.
+
 | Coding owner | State | Updated | Required evidence before complete |
 |---|---|---|---|
 | [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; nine-wrapper contract merged and installed as `d8e7450d` via PR #410 | 2026-09-11 | [Exact review, complete CI, installed hashes and identity smoke](tests/verification/reviewer-reliability/issue-393-source-identity.md); governed live comparison and affected incident reconciliation remain |

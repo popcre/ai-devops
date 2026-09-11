@@ -14,6 +14,8 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 ## STATUS — read this first
 
+**2026-09-11 closeout checkpoint:** #159 remains open. [Detailed continuation evidence](HANDOFF.d/2026-09-11T1152Z-edge-dev-codex-throughput-reviewer-closeout.md) records the repair stack, exact reviews, failed CI cases and retained private experiments. GitHub main advanced to `c44c10278a7db965f25f22e58ed6a27384606963` through #417; installed canonical checkout remains `ecbbe4cd2391ff64f9f645dbdcf125fb4a83ec1c`. Landing run `34585150426` reports a failed merge-group-evidence job, so installation and landing qualification of #417 remain pending. #398 retains the original 198-record round and runs last within #337; #166 remains last for #159.
+
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
 2026-09-11 installed component evidence: #396's Grok authentication-link concurrency repair merged through [PR #408](https://github.com/popcre/ai-devops/pull/408) as `e3b4700d1005088065740200a70d68d7574a4243`. Exact-head independent review and required CI passed; the unchanged local suite passed 226/226. Installed SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` passed two concurrent actual-auth initializers and 100 readability/same-inode checks, without paid provider work. Private incident evidence was appended. Broader #396, #337, and #159 remain open; #398 retains the original 198-entry round and runs last within #337, then #166 runs last overall.
