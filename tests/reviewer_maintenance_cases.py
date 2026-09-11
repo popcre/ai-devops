@@ -738,6 +738,25 @@ wait "$job"
         self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
         self.assertEqual(self.ledger.read_bytes(), before)
 
+    def test_shared_publisher_carries_muse_recovery_identity(self):
+        original, recovery = "e" * 32, "f" * 32
+        self.invocation(rid=original, provider="muse")
+        self.invocation(rid=recovery, provider="muse", finish=False)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[-1]["operation"] = "local-finalization"
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        report = self.root / "muse-report.md"
+        report.write_text("Synthetic retained Muse report.\n")
+        env = {**os.environ, "AI_REVIEW_EVENT_DIR": str(self.root), "AI_REVIEW_EVENT_RUN_ID": recovery,
+               "MUSE_RECOVERY_EVENT_RUN_ID": original}
+        result = subprocess.run([self.bash, "-c", 'source "$1"; reviewer_event_publish_report muse "$2"', "fixture",
+                                 str(self.toolkit / "tools/reviewer_event_guard.sh"), str(report)],
+                                cwd=self.toolkit, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(events.verify_reports(self.root, "muse", recovery)), 1)
+        receipt = next((self.root / "evidence" / recovery).glob("*.report.json"))
+        self.assertEqual(json.loads(receipt.read_text())["original_invocation_id"], original)
+
     def test_evidence_rejects_wrong_invocation_and_changed_content(self):
         rid, _, report = self.evidence_fixture()
         with self.assertRaises(events.Blocked):
