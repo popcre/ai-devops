@@ -958,10 +958,12 @@ msg_tokens() { printf '%s' "$1" | jq -c '.tokens // null'; }
 # Reports
 # --------------------------------------------------------------------------------
 write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
-  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver tmp
+  ts="${GLM_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)}"
+  [ -z "${GLM_REPORT_KEY:-}" ] || [[ "$GLM_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
   f="$root/.ai/reviews/glm-$name-$ts.md"
   mkdir -p "$(dirname "$f")"
+  tmp="$(mktemp "$(dirname "$f")/.glm-report.XXXXXX")" || return 1
   branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
   ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
   {
@@ -974,10 +976,28 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     printf '| repository | %s |\n' "$root"
     printf '| branch | %s |\n' "$branch"
     printf '| caller | %s |\n' "$CALLER"
-    printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ -n "${GLM_REPORT_KEY:-}" ]; then
+      printf '| requested | %s |\n' "${GLM_REPORT_REQUESTED_AT:-unavailable}"
+    else
+      printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
     printf '| tokens | `%s` |\n\n' "$tokens"
     printf -- '---\n\n%s\n' "$text"
-  } > "$f"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  else
+    ln "$tmp" "$f" 2>/dev/null || {
+      [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+    }
+  fi
+  rm -f "$tmp"
+  local facts='{"phase":"report-publication"}'
+  if [ -n "${GLM_RECOVERY_EVENT_RUN_ID:-}" ]; then
+    [[ "$GLM_RECOVERY_EVENT_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 1
+    facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"$GLM_RECOVERY_EVENT_RUN_ID\"}"
+  fi
+  reviewer_event_publish_report glm "$f" "$facts" || return 1
   printf '%s' "$f"
 }
 
