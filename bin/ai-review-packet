@@ -42,6 +42,7 @@
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
 #   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
 #   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
+#   ai-review-packet verify-retained <packet-dir>         # validate a sealed packet after source movement
 #   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
 #   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
 #
@@ -227,10 +228,7 @@ cmd_resolve() {
 
 validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   local file="$1" review="${2:-}" source head base digest ref target
-  jq -e 'type=="object" and .schema_version==1 and
-    ([.repository,.base,.head,.target,.target_ref,.merge_base,.source_digest,.rule,.requested_base] | all(type=="string")) and
-    (.head|test("^[0-9a-f]{40}$")) and (.base|test("^[0-9a-f]{40}$")) and
-    (.source_digest|test("^[0-9a-f]{64}$"))' "$file" >/dev/null || die "invalid-source-identity"
+  validate_identity_schema "$file"
   source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
   base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
   [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
@@ -253,6 +251,13 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     fi
     git -C "$review" cat-file -e "$base" || die "snapshot-base-missing"
   fi
+}
+
+validate_identity_schema() { # validate the captured identity without consulting moved source
+  jq -e 'type=="object" and .schema_version==1 and
+    ([.repository,.base,.head,.target,.target_ref,.merge_base,.source_digest,.rule,.requested_base] | all(type=="string")) and
+    (.head|test("^[0-9a-f]{40}$")) and (.base|test("^[0-9a-f]{40}$")) and
+    (.source_digest|test("^[0-9a-f]{64}$"))' "$1" >/dev/null || die "invalid-source-identity"
 }
 
 # A governed caller may request a durable, exact identity receipt. This is
@@ -691,6 +696,31 @@ The evidence was modified after it was sealed. Do not review from it; rebuild."
   fi
 }
 
+cmd_verify_retained() {
+  local pkt want have parts
+  pkt="$(canon "${1:?usage: ai-review-packet verify-retained <packet-dir>}")"
+  [ "$#" -eq 1 ] || die "verify-retained accepts only a packet directory."
+  is_managed "$pkt" || die "$pkt is not a managed review packet."
+  [ -f "$pkt/$HASHFILE" ] || die "$pkt has no $HASHFILE; it is not a review packet."
+  want="$(cat "$pkt/$HASHFILE")"; have="$(hash_packet "$pkt")"
+  [ "$want" = "$have" ] || die "packet hash mismatch in $pkt
+  recorded: $want
+  actual:   $have
+The retained evidence was modified after it was sealed. Keep the paid result blocked."
+  [ -f "$pkt/identity.json" ] || die "packet-identity-missing"
+  validate_identity_schema "$pkt/identity.json"
+  [ -s "$pkt/$MANIFEST" ] && [ -f "$pkt/$PATCH" ] || die "packet-evidence-missing"
+  if [ -f "$pkt/$PATCH_FULL" ]; then
+    parts="$(mktemp)"
+    cat "$pkt"/patch.part-* > "$parts" 2>/dev/null \
+      || { rm -f "$parts"; die "packet-parts-missing"; }
+    cmp -s "$parts" "$pkt/$PATCH_FULL" \
+      || { rm -f "$parts"; die "packet-parts-incomplete"; }
+    rm -f "$parts"
+  fi
+  printf 'ai-review-packet: %s retained evidence verified (%s)\n' "$pkt" "$have"
+}
+
 # The tag is optional so a caller holding a pre-#1296 packet can still clear it,
 # but a caller that knows its tag must pass it: with no tag this only ever
 # touches the bare `.ai-review` directory, never another session's packet.
@@ -703,8 +733,9 @@ case "${1:-}" in
   build)     shift; cmd_build "$@" ;;
   resolve)   shift; cmd_resolve "$@" ;;
   verify)    shift; cmd_verify "$@" ;;
+  verify-retained) shift; cmd_verify_retained "$@" ;;
   path)      shift; cmd_path "$@" ;;
   remove)    shift; cmd_remove "$@" ;;
   --version) printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-packet {build|verify|path|remove} ..." ;;
+  *) die "usage: ai-review-packet {build|verify|verify-retained|path|remove} ..." ;;
 esac

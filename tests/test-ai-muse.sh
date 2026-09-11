@@ -29,6 +29,7 @@ check 'completion requires stop' "grep -q '\[ \"\$FINISH\" != stop \]' '$SCRIPT'
 check 'source state is checked after every turn' "test \"\$(grep -c 'stale response rejected' '$SCRIPT')\" -eq 2"
 check 'temporary files use a securely created directory' "grep -q 'mktemp -d' '$SCRIPT' && grep -q 'trap cleanup EXIT' '$SCRIPT'"
 check 'report writes fail closed' "grep -q 'could not write Muse report' '$SCRIPT'"
+check 'stale-source recovery uses the qualified retained-packet verifier' "grep -q '\"\$PACKET\" verify-retained \"\$PACKET_DIR\"' '$SCRIPT' && grep -q 'verify-retained) shift; cmd_verify_retained' '$ROOT/bin/ai-review-packet'"
 check 'one held-open report staging file is reserved before provider contact and revalidated' "grep -q 'reserve_report_staging' '$SCRIPT' && grep -q 'finish_report_staging' '$SCRIPT' && grep -q 'exec {PUBLISH_FD}' '$SCRIPT' && test \"\$(grep -c 'reserve_report_staging \"\$root\"; before=' '$SCRIPT')\" -eq 2"
 check 'delete takes the same session lock' "grep -q 'cmd_delete.*lock_session' '$SCRIPT'"
 check 'compatibility review still requires a verdict' "grep -q 'REQUIRE_VERDICT=1' '$SCRIPT'"
