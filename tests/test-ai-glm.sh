@@ -545,30 +545,41 @@ check "new validates the prune batch before pruning" "printf '%s' \"\$NEW_FN\" |
 check "prune refuses a non-numeric removal limit" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$PR_STATE' bash -c 'source \"\$AI_GLM_SOURCE\"; server_up(){ return 0; }; cmd_prune x1' >/dev/null 2>&1; test \$? -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
 
 echo "== delete keeps a sandbox shared across callers =="
-DL_STATE="$TMP/delete-shared-state"; DL_CALLS="$TMP/delete-shared-calls"
-mkdir -p "$DL_STATE/sessions/rid1" "$DL_STATE/locks"; : > "$DL_CALLS"
-dl_meta() { # CALLER NAME
-  jq -n --arg c "$1" --arg n "$2" --arg r "$PR_ROOT" \
-    '{name:$n,type:"review",caller:$c,opencode_session_id:("sid-"+$c+"-"+$n),repository_root:$r}' > "$DL_STATE/sessions/rid1/$1--$2.json"
+DL_STATE="$TMP/delete-shared-state"; DL_SB="$TMP/delete-shared-sandboxes"; DL_CALLS="$TMP/delete-shared-calls"; DL_BIN="$TMP/delete-shared-sandbox-bin"
+mkdir -p "$DL_STATE/sessions/rid1" "$DL_STATE/sessions/rid0" "$DL_STATE/locks" "$DL_SB"; : > "$DL_CALLS"
+# Records every sandbox call, and whether the sandbox build lock was held when it ran.
+printf '#!/usr/bin/env bash\nheld=free; [ -d "${3:-}.lock" ] && held=held\nprintf "%%s %%s\\n" "$*" "$held" >> "$DL_CALLS"\n' > "$DL_BIN"; chmod +x "$DL_BIN"
+dl_meta() { # CALLER NAME [RID]
+  local sb="$DL_SB/glm-$2-0123456789ab"; mkdir -p "$sb"
+  jq -n --arg c "$1" --arg n "$2" --arg r "$PR_ROOT" --arg b "$sb" \
+    '{name:$n,type:"review",caller:$c,opencode_session_id:("sid-"+$c+"-"+$n),repository_root:$r,boundary_root:$b}' > "$DL_STATE/sessions/${3:-rid1}/$1--$2.json"
 }
 dl_meta claude byrecord; dl_meta codex byrecord
 dl_meta claude bylock; mkdir -p "$DL_STATE/locks/rid1--codex--bylock.lock.d"
 dl_meta claude alone
 dl_meta claude ownlock; mkdir -p "$DL_STATE/locks/rid1--claude--ownlock.lock.d"
+# A moved checkout: this caller's record was migrated to rid1, the other caller's was not.
+dl_meta claude movedrec; dl_meta codex movedrec rid0
+dl_meta claude movedlock; mkdir -p "$DL_STATE/locks/rid0--codex--movedlock.lock.d"
+dl_meta claude building; mkdir "$DL_SB/glm-building-0123456789ab.lock"
 run_delete() { # NAME
-  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$DL_STATE" AI_GLM_CALLER=claude DL_CALLS="$DL_CALLS" DL_NAME="$1" bash -c '
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$DL_STATE" AI_GLM_CALLER=claude DL_CALLS="$DL_CALLS" DL_NAME="$1" DL_BIN="$DL_BIN" bash -c '
     source "$AI_GLM_SOURCE"
+    SANDBOX_BIN="$DL_BIN"
     find_meta(){ printf "%s/sessions/rid1/%s--%s.json" "$STATE_DIR" "$CALLER" "$1"; }
     server_up(){ return 0; }
     api(){ printf "%s %s\n" "$1" "$2" >> "$DL_CALLS"; }
-    release_boundary(){ printf "release %s\n" "$2" >> "$DL_CALLS"; }
     cmd_delete "$DL_NAME"' >/dev/null 2>&1
 }
-for dl in byrecord bylock alone ownlock; do run_delete "$dl"; done
-check "delete keeps a sandbox another caller's record shares" "! grep -qx 'release byrecord' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid1/codex--byrecord.json'"
-check "delete keeps a sandbox another caller's lock shares" "! grep -qx 'release bylock' '$DL_CALLS'"
-check "a shared delete still retires this caller's session and record" "grep -qx 'DELETE /session/sid-claude-byrecord' '$DL_CALLS' && grep -qx 'DELETE /session/sid-claude-bylock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--byrecord.json' && test ! -e '$DL_STATE/sessions/rid1/claude--bylock.json'"
-check "an unshared delete still removes its sandbox" "grep -qx 'release alone' '$DL_CALLS' && grep -qx 'release ownlock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
+for dl in byrecord bylock alone ownlock movedrec movedlock building; do run_delete "$dl"; done
+check "delete keeps a sandbox another caller's record shares" "! grep -q 'glm-byrecord' '$DL_CALLS' && test -d '$DL_SB/glm-byrecord-0123456789ab' && test -f '$DL_STATE/sessions/rid1/codex--byrecord.json'"
+check "delete keeps a sandbox another caller's lock shares" "! grep -q 'glm-bylock' '$DL_CALLS'"
+check "delete keeps a sandbox shared with a moved checkout's record" "! grep -q 'glm-movedrec' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid0/codex--movedrec.json'"
+check "delete keeps a sandbox shared with a moved checkout's lock" "! grep -q 'glm-movedlock' '$DL_CALLS'"
+check "a shared delete still retires this caller's session and record" "grep -qx 'DELETE /session/sid-claude-byrecord' '$DL_CALLS' && grep -qx 'DELETE /session/sid-claude-movedlock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--byrecord.json' && test ! -e '$DL_STATE/sessions/rid1/claude--movedrec.json'"
+check "an unshared delete removes its exact sandbox under the build lock" "grep -qx 'remove-recorded glm-alone .*/glm-alone-0123456789ab held' '$DL_CALLS' && grep -qx 'remove-recorded glm-ownlock .*/glm-ownlock-0123456789ab held' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
+check "delete leaves no build lock of its own behind" "test ! -e '$DL_SB/glm-alone-0123456789ab.lock' && test ! -e '$DL_SB/glm-byrecord-0123456789ab.lock'"
+check "delete refuses while the sandbox is being built, keeping session and record" "test -f '$DL_STATE/sessions/rid1/claude--building.json' && ! grep -q 'building' '$DL_CALLS' && test -d '$DL_SB/glm-building-0123456789ab.lock'"
 
 fi
 echo "== implementation job records =="

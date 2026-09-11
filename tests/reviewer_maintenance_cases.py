@@ -535,6 +535,7 @@ lock_release(){ :; }
 require_upstream_identity(){ printf upstream; }
 session_record_path(){ printf '%s/absent-session' "$STATE_DIR"; }
 server_up(){ return 0; }
+sandbox_shared(){ return 1; }
 api(){ touch "$STATE_DIR/provider-delete"; }
 note(){ :; }
 die(){ printf '%s\\n' "$*" >&2; exit 1; }
