@@ -74,7 +74,7 @@ Concrete examples were the DCP repair polled repeatedly while undispatched, ten 
 ### In scope
 
 - Urgent application-unblock service class and dispatch rules.
-- Finish-first stage scheduling while retaining up to eight non-conflicting author lanes.
+- Finish-first stage scheduling with no numeric limit on non-conflicting authors.
 - One outcome record from intake through live application verification.
 - Durable event-triggered transitions and machine-readable session snapshots.
 - Early automatic evidence/route qualification.
@@ -105,7 +105,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 ### Already implemented and preserved
 
-- `shared-db/scripts/manage-migration-author-lanes.mjs:55` sets eight active author lanes. Exact read/write claims keep non-conflicting authors parallel while protected blocked claims retain object/version safety.
+- `shared-db/scripts/manage-migration-author-lanes.mjs` currently imposes a numeric active-author ceiling. [shared-db #2773](https://github.com/u2giants/shared-db/issues/2773) removes that ceiling while retaining exact read/write conflict claims, permanent migration-version reservations, lease recovery, and fail-closed unreadable-state behavior.
 - `buildDynamicQueues` at approximately line 714 groups work by conflicts and dependencies.
 - `shared-db/scripts/db-coordination-events.mjs` and the manager's capacity events provide durable lifecycle facts.
 - `shared-db/scripts/orchestrator-flow/` already contains route qualification, preview dependency, evidence bundle, and throughput reporting components.
@@ -122,7 +122,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 - [shared-db #2709](https://github.com/u2giants/shared-db/issues/2709) covers only the wrong comparison base in governed reviewer packets after updating from `main`. `popcre/ai-devops` PR #402 was open at head `407fedbe` on 2026-09-11; re-resolve before acting.
 - [shared-db #2715](https://github.com/u2giants/shared-db/issues/2715) covers the docs-only pull-request deadlock caused by requiring a migration guarded-merge status that no lightweight path posts. It belongs in this programme as a prerequisite to removing maintenance from the orchestrator, but must be implemented by its own repo-maintenance session, not the orchestrator.
 - [shared-db #2716](https://github.com/u2giants/shared-db/issues/2716) proposes automatic serial production promotion after governed review, guarded merge, post-merge preview, dry-run, and automatic evidence gates. It directly addresses repeated technical authorization asks and the unapplied-migration backlog. It belongs in this programme, but its cross-repository policy/workflow implementation must remain independently owned and must not be performed inside the orchestrator context.
-- `plan_shared-db-finish-first-delivery.md` correctly diagnoses outcome-vs-utilization failure, live-verification completion, early preflight, and handoff waste. Its proposed 1+1 capacity premise is superseded by the later owner-approved eight-author model and completed Phase 2 conflict controls. This plan supersedes it for future implementation.
+- `plan_shared-db-finish-first-delivery.md` correctly diagnoses outcome-vs-utilization failure, live-verification completion, early preflight, and handoff waste. Its proposed 1+1 capacity premise and the later eight-author ceiling are superseded: exact conflict claims, not a numeric author count, control safe authorship. This plan supersedes it for future implementation.
 
 ### Still missing
 
@@ -140,7 +140,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 ## 6. Key findings and root cause
 
-1. **The bottleneck is scheduling, not SQL.** Eight author lanes exist, but unrelated work still converges on one manually operated coordinator and serialized stages without a business-impact fast path.
+1. **The bottleneck is scheduling, not SQL.** Independently safe work still converges on one manually operated coordinator, a numeric author ceiling, and serialized delivery stages without a business-impact fast path.
 2. **Safety and throughput were conflated.** Object/version claims and exclusive writes are safety. A perpetual conversation, repeated queue audits, manual handoffs, and unchanged polling are not.
 3. **Completed components are disconnected.** Events, evidence bundles, blocker timing, route qualification, and parallel claims exist but do not form one outcome-driven state machine.
 4. **Late discovery multiplies cost.** Wrong review bases, unusable reviewers, missing producer entries, and unavailable runners are often detected after assignment or expensive checks.
@@ -151,8 +151,8 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 ## 7. Approaches considered and rejected
 
 1. **Move to an organization and call the problem solved.** Rejected: merge itself was measured at 87 seconds in one delayed closeout; most delay occurred before the merge gate.
-2. **Restore the old 1+1 author model.** Rejected: later work safely separated protected claims from capacity and raised active authors to eight. Reducing safe authoring would recreate waiting.
-3. **Increase author lanes again.** Rejected: preview, merge, and production remain serialized; more work-in-progress without finish-first scheduling increases staleness.
+2. **Restore the old 1+1 author model.** Rejected: protected claims are already separate from worker capacity. Any numeric ceiling makes independently safe work wait.
+3. **Raise the author ceiling again.** Rejected: another arbitrary number preserves artificial waiting. Remove the ceiling entirely; exact read/write conflicts remain the admission control, while preview, merge, and production remain serialized.
 4. **Let urgent work bypass gates.** Rejected: urgency changes scheduling, never evidence or safety.
 5. **Use a fixed timeout to kill running reviewers.** Rejected: a quiet healthy review is not dead. The SLO applies to failure to start or lack of durable liveness, with provider-specific evidence.
 6. **Add another dashboard/database.** Rejected: use existing GitHub events and throughput ledgers.
@@ -168,7 +168,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 ### Locked decisions — 2026-09-11
 
-1. Keep up to eight non-conflicting active authors; claims, not a global author mutex, determine safe parallelism.
+1. Remove the numeric author-lane limit entirely. Any number of non-conflicting authors may hold leases; exact read/write claims, permanent version reservations, and fail-closed state determine safe parallelism.
 2. Keep preview, merge, and production writes globally serialized.
 3. Add service classes `urgent-application`, `standard-application`, and `maintenance`. Only a reproducible live outage, blocked application release, security exposure, or owner-declared business deadline qualifies as urgent.
 4. Within the same safety eligibility, order shared-stage work by service class, then finishable critical path, then `createdAt`, then issue number. Never use urgency to jump an object conflict or missing dependency.
@@ -229,7 +229,7 @@ Then add a required `--admit-issue` gate in `shared-db/scripts/manage-migration-
 
 Extend `parseQueueScope`, its schema/fixtures, and `buildDynamicQueues` with `service_class` and a required `impact` block for urgent work. Add deterministic admission that verifies `return_to`, reproduction evidence, affected environment, and qualifying impact. A tooling or maintenance issue cannot self-promote to urgent.
 
-Replace automatic refill ordering with: safety eligibility; urgent service class; already-started/nearest-live critical path; dependency-transitive blocking impact; `createdAt`; issue number. Preserve separate conflict components and all eight author slots. When an urgent issue is eligible and capacity is full, do not revoke another claim; publish `urgent_waiting_capacity` and finish/relinquish the nearest safe slot.
+Replace automatic refill ordering with: safety eligibility; urgent service class; already-started/nearest-live critical path; dependency-transitive blocking impact; `createdAt`; issue number. Preserve separate conflict components but remove numeric author slots and every full-capacity wait/refusal. An eligible non-conflicting author starts immediately; a conflicting author waits on the exact blocking claim, never on an arbitrary global count.
 
 Update `shared-db/AGENTS.md`, the canonical orchestrator skill, operating manual, and tests together.
 
@@ -402,7 +402,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - [ ] Sending sessions and the orchestrator independently reject non-structural work; misclassification cannot consume a lane or shared stage.
 - [ ] The no-database-preview fast lane is machine-enforced, records a reproducible exemption reason/digest, keeps every applicable non-database check, fails closed on uncertainty, and meets its ten-minute qualified-capacity target in a live canary.
 - [ ] Urgent and finish-first scheduling is enforced and tested.
-- [ ] Eight safe author lanes remain available for non-conflicting work.
+- [ ] No numeric author-capacity limit remains; at least 100 concurrent non-conflicting claims are admitted, while the next conflicting claim is refused for its exact object conflict.
 - [ ] One outcome card remains open through live application verification.
 - [ ] Polling and manual state reconstruction are replaced by durable events/snapshots.
 - [ ] Early preflight catches all named late bookkeeping failures.
@@ -437,7 +437,7 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 | Review recommendation | Plan owner |
 |---|---|
 | Urgent application-unblock lane | Steps 2–3 |
-| Parallel non-conflicting authorship | Preserve current eight lanes; Steps 2 and 9 |
+| Parallel non-conflicting authorship | Remove the numeric limit while preserving exact conflict claims; Steps 2 and 9; shared-db #2773 |
 | Binding classification fast path and orchestrator refusal | Steps 1, 2, and 5; #2715 |
 | No-database-preview fast lane for proven non-database work | Step 2A; reuses #2715 and Step 2 |
 | Batch approved migrations | Step 6 |
