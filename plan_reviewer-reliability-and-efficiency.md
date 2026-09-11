@@ -17,7 +17,7 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 | [#393](https://github.com/popcre/ai-devops/issues/393) source identity and complete input | Open; nine-wrapper contract merged and installed as `d8e7450d` via PR #410 | 2026-09-11 | [Exact review, complete CI, installed hashes and identity smoke](tests/verification/reviewer-reliability/issue-393-source-identity.md); governed live comparison and affected incident reconciliation remain |
 | [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open; DeepSeek Unicode/ordinary terminal slice merged, installed and live verified | 2026-09-11 | PR #405 merge `068c6cb9f07c`; 85/0/0 focused checks, exact-head GLM APPROVE, CI `34563556041` and queue `34567376452` successful; installed synthetic Unicode review/replay passed. Governed terminal parity remains in progress |
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, installed recovery proof and 33 preserved incident resolutions](tests/verification/reviewer-reliability/issue-395-durable-evidence.md) |
-| [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Open; Grok auth concurrency slice installed | 2026-09-11 | Auth slice merged `e3b4700d`; allocation/cooldown matrix and governed live proof remain |
+| [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, scoped live proof and incident reconciliation](tests/verification/reviewer-reliability/issue-396-scoped-admission.md) |
 | [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Open | 2026-09-11 | Provider progress/finalization/restart matrix and live canaries |
 | [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; native runtime cannot enforce root-read denial; [measured evidence](docs/codex-windows-containment-2026-09-11.md) | 2026-09-11 | Marker read/write denial proven; outside-read isolation and full network denial remain unqualified; live review pending |
 | [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Complete; merged, installed and live verified | 2026-09-11 | [Pinned semantics, exact review, CI, installed source and retained-result proof](tests/verification/reviewer-reliability/issue-333-truthful-usage.md); no compaction changes |
@@ -47,6 +47,19 @@ bounded #161/#164 acceptance; #337/#159 and final #398/#166 remain open.
 The maintenance round remains `0c62f3dffce145c4b2768855b912b958` with all 198 original candidates. Its installed `show` and exact-round `start --resume` commands work again after an unrelated analysis sidecar was moved out of the checkpoint directory into private analysis storage. The frozen started record still hashes to `aad9e0f327a135d8b684f03768b702aa675981f738924b468215ef61aeefa8f0`. No candidate was reset or disposition invented; final reconciliation remains #398's last step.
 
 **#396 installed slice, 2026-09-11:** [PR #408](https://github.com/popcre/ai-devops/pull/408) merged as `e3b4700d1005088065740200a70d68d7574a4243` after exact-head independent Grok APPROVE on `84274fd629fec8324ecef58373c8b8f011faabb3` and passing required CI/merge queue. Final local Grok suite: 226 passed, zero failed/skipped; focused authentication regressions: seven passed, zero failed/skipped. Installed wrapper SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` matches the tested source. Two concurrent initializers against the actual installed authentication link passed 100 readability/same-inode checks without replacing the existing credential inode; no credential values were read and no provider request was made. The matching private concurrency incident received append-only repair evidence. This does not close the broader availability/cooldown programme or classify the frozen 198-entry round.
+
+**#396 completion, 2026-09-11:** [PR #416](https://github.com/popcre/ai-devops/pull/416)
+merged as `a031c1de77a11bbf16fe5be8699d78dfdc6233e9` after independent
+exact-head approval, PR-head CI `34646058019`, and merge-group run
+`34650896712`. Canonical installation, doctor, scoped replay/isolation,
+eight-writer concurrency, and guarded-expiry proof passed with zero provider
+requests. Two incidents are resolved; the genuine first-call provider-limit
+possibility remains partially resolved with permanent carry-forward evidence.
+The frozen round remains active with all 198 candidates, now 36 incident and
+162 unclassified. No downstream drift was introduced: #394/#397 retain their
+own boundaries, #393/#271 retain their acceptance gates, #398 remains last
+inside #337, and #166 remains last inside #159. The database boundary is
+unchanged.
 
 ## 1. Goal and acceptance model
 
@@ -181,11 +194,11 @@ Gate: `tests/test-ai-review-packet.sh` and `tests/test-ai-review-sandbox.sh` pro
 
 #### Availability. Avoid assigning repeatedly to an account known exhausted (#396)
 
-2026-09-11 coding evidence: the versioned preflight store and scoped admission
-contract are implemented in an isolated worktree. Initial verification passed
-seven behavioral cases and 92 preflight assertions. [Scope, migration, concurrency
-and remaining delivery gates](tests/verification/reviewer-reliability/issue-396-scoped-admission.md).
-Terminal/consumer integration and installed acceptance remain open.
+2026-09-11 completion evidence: the versioned preflight store and scoped
+admission contract passed local behavior, exact-head independent review,
+required CI and merge queue, canonical installation, installed live
+replay/isolation/concurrency/expiry proof, and affected incident
+reconciliation. [Complete evidence](tests/verification/reviewer-reliability/issue-396-scoped-admission.md).
 
 Trace `bin/ai-review-preflight` capacity/quarantine paths, `config/reviewer-capacity.json`, Kimi terminal `usage-limit` classification, diagnostic observation hooks, and shared-db allocation/preflight/failure recording. Existing adapters remain unknown when unsupported. Add only the missing connection from a proven terminal exhaustion observation to a scoped temporary admission backoff. Prefer the existing preflight/quarantine store; if its provider-only key cannot safely represent credential-profile/model scope, extend its versioned schema with migration tests rather than create a second store.
 
