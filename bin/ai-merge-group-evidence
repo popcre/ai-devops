@@ -26,6 +26,9 @@
 # `--require` may be repeated; each named job must have concluded `success` in
 # the pull-request run on the queued head commit. With no `--require`, the run's
 # own conclusion is the only requirement.
+# Windows jobs intentionally skipped for prose-only changes are accepted only
+# after classifying the real, pinned PR diff with the same classifier as CI.
+# Missing jobs, failed jobs, unknown paths and code changes remain fail-closed.
 #
 # Exit status:
 #   0  the queued commit carries matching, complete, successful evidence
@@ -92,8 +95,11 @@ REPO_ARGS=()
 REPO_OWNER="${REPO%%/*}"
 REPO_NAME="${REPO#*/}"
 [ -n "$REPO_OWNER" ] && [ -n "$REPO_NAME" ] && [ "$REPO_OWNER" != "$REPO_NAME" ] || die "invalid GitHub repository $REPO"
-QUEUE_STATE="$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid mergeQueueEntry{headCommit{oid}}}}}' -F owner="$REPO_OWNER" -F name="$REPO_NAME" -F number="$PR_NUMBER" --jq '[.data.repository.pullRequest.headRefOid,.data.repository.pullRequest.mergeQueueEntry.headCommit.oid]|join("|")' 2>/dev/null)"
-IFS='|' read -r HEAD_SHA QUEUED_GROUP <<EOF
+read_queue_state() {
+  gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefOid mergeQueueEntry{headCommit{oid}}}}}' -F owner="$REPO_OWNER" -F name="$REPO_NAME" -F number="$PR_NUMBER" --jq '[.data.repository.pullRequest.headRefOid,.data.repository.pullRequest.mergeQueueEntry.headCommit.oid,.data.repository.pullRequest.baseRefOid]|join("|")' 2>/dev/null
+}
+QUEUE_STATE="$(read_queue_state)"
+IFS='|' read -r HEAD_SHA QUEUED_GROUP BASE_SHA <<EOF
 $QUEUE_STATE
 EOF
 case "$HEAD_SHA" in
@@ -101,6 +107,26 @@ case "$HEAD_SHA" in
 esac
 [ -n "$QUEUED_GROUP" ] || reject "pull request $PR_NUMBER has no readable live merge-queue entry"
 [ "$QUEUED_GROUP" = "$MERGE_GROUP_SHA" ] || reject "pull request $PR_NUMBER is now queued as $QUEUED_GROUP, not workflow commit $MERGE_GROUP_SHA; its evidence would be stale"
+
+PROSE_ONLY=unknown
+classify_queued_change() {
+  [ "$PROSE_ONLY" = unknown ] || return 0
+  case "$BASE_SHA" in ''|*[!0-9a-fA-F]*) reject 'the queued PR base is unreadable; skipped Windows jobs cannot prove coverage' ;; esac
+  [ "${#BASE_SHA}" -eq 40 ] || reject 'the queued PR base is not an exact commit'
+  local root paths classification current_state
+  root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+  [ -f "$root/tools/ci/classify-changes.sh" ] || reject 'the CI change classifier is missing; skipped Windows jobs cannot prove coverage'
+  # Triple-dot is the PR patch against its recorded target, not local main.
+  # No rename detection: moving a script into docs still includes its deletion.
+  paths="$(git diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA" -- 2>/dev/null)" || reject 'the queued PR diff is unavailable; skipped Windows jobs cannot prove coverage'
+  [ -n "$paths" ] || reject 'the queued PR diff is empty; skipped Windows jobs cannot prove coverage'
+  classification="$(printf '%s\n' "$paths" | bash "$root/tools/ci/classify-changes.sh" pull_request)" || reject 'the queued PR classification failed'
+  # Bind the path classification to the same source/base/queue state as the run.
+  current_state="$(read_queue_state)" || reject 'the queue identity could not be rechecked after classification'
+  [ "$current_state" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during path classification'
+  PROSE_ONLY=false
+  if printf '%s\n' "$classification" | grep -qx 'prose_only=true'; then PROSE_ONLY=true; fi
+}
 
 RUNS="$(gh run list ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --workflow "$WORKFLOW" --event pull_request --commit "$HEAD_SHA" --limit 20 --json databaseId,conclusion,status --jq '.[] | [.databaseId, .status, .conclusion] | @tsv' 2>/dev/null)"
 [ -n "$RUNS" ] || reject "no $WORKFLOW run exists for head commit $HEAD_SHA of pull request $PR_NUMBER"
@@ -123,6 +149,16 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
   for job in "${REQUIRED_JOBS[@]}"; do
     line="$(printf '%s\n' "$JOBS" | awk -F'\t' -v want="$job" '$1 == want { print $2; exit }')"
     [ -n "$line" ] || reject "run $RUN_ID never ran the required job $job on head commit $HEAD_SHA"
+    if [ "$line" = skipped ]; then
+      case "$job" in
+        windows-offline|windows-reviewer-safety)
+          classify_queued_change
+          if [ "$PROSE_ONLY" = true ]; then
+            printf 'ai-merge-group-evidence: %s intentionally skipped for verified prose-only PR %s\n' "$job" "$PR_NUMBER"
+            continue
+          fi ;;
+      esac
+    fi
     [ "$line" = 'success' ] || reject "the required job $job concluded $line in run $RUN_ID"
   done
 fi
