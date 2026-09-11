@@ -623,7 +623,11 @@ class Maintenance:
 
 def configuration(toolkit):
     registry = read_json(toolkit / "config/reviewer-registry.json")
-    providers = sorted(k for k, v in registry["providers"].items() if v["registry_state"] == "registered")
+    # Maintenance coverage is historical, so it must retain every known
+    # provider even when the live rotation temporarily removes one. Otherwise
+    # an operational quarantine changes the configuration digest and makes an
+    # already-frozen round impossible to resume or complete.
+    providers = sorted(registry["providers"])
     base = physical(os.environ.get("AI_REVIEWER_STATE_BASE") or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops")
     scoreboard = Path(os.environ.get("AI_REVIEW_SCOREBOARD_FILE", str(Path(os.environ.get(
         "AI_REVIEW_SCOREBOARD_DIR", str(base / "review-scoreboard"))) / "reviews.jsonl")))
