@@ -63,6 +63,9 @@ overrides for controlled tests or machine migration. They are not secrets.
 | `AI_MEMORY_REMOTE` | Canonical private Git remote | `https://github.com/u2giants/ai-devops-memory.git` |
 | `AI_MEMORY_HUB` | Isolated private clone | `~/.cache/ai-devops-memory-private` |
 | `AI_MEMORY_LOG` | Append-only status log | `~/.cache/ai-memory-sync.log` |
+| `AI_MEMORY_STAMP` | Last successful round trip, used by `sync-if-stale` | `~/.cache/ai-memory-sync.last-success` |
+| `AI_MEMORY_MAX_AGE_HOURS` | How stale memory may get before `sync-if-stale` runs a full round trip | `24` |
+| `AI_MEMORY_HEALTH_STATE` | Where `ai-memory-health` records each report so the next one can show the trend | `~/.cache/ai-memory-health.trend` |
 
 Production runs reject any remote other than the canonical private repository
 and use GitHub's API to prove `private=true` before copying machine memory. Test
