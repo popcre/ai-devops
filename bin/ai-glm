@@ -1082,7 +1082,7 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run previous_message
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
@@ -1110,8 +1110,8 @@ cmd_new() {
     die "could not save local metadata for session '$name'."
   fi
   previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
-  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable GLM evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1196,7 +1196,7 @@ $text"
 }
 
 cmd_ask() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run previous_message
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
@@ -1241,8 +1241,8 @@ $REVIEW_HEAD only."
   write_meta "$mp" "$(jq --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" '.last_diagnostic_run_id=$diagnostic|.quota_result=$quota' "$mp")"
   record_diagnostic preflight capacity-checked --local-health healthy
   previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
-  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable GLM evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
