@@ -219,6 +219,9 @@ LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
 ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+=======
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; REVIEW_HEAD=""; API_RESPONSE_FILE=""
+>>>>>>> origin/main
 release_lock() {
   reviewer_event_cleanup_allowed deepseek || return 1
   if [ -n "$REVIEW_SOURCE_TAG" ]; then
@@ -291,6 +294,7 @@ call_api() {
   # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
   # signal cannot release the conversation lock while the request still runs.
   local msgs_file="$1" reply_file="$2" req_file resp_file status_file http_code rc
+<<<<<<< HEAD
   if [ -n "${LOCK_DIR:-}" ]; then
     if [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then
       reviewer_event_evidence require-report deepseek "$REVIEW_SOURCE_WORKSPACE" || return 1
@@ -298,9 +302,18 @@ call_api() {
       reviewer_event_evidence require-report deepseek || return 1
     fi
   fi
-  req_file="$(mktemp)"; resp_file="$(mktemp)"; status_file="$(mktemp)"
-  ACTIVE_API_TMP="$req_file $resp_file $status_file"
+  req_file="$(mktemp)"; status_file="$(mktemp)"
+  # Retain the exact paid response before local parsing or verdict validation.
+  # This is private provider evidence, not a conversation or a usage sidecar.
+  # A doctor still leaves the repository unchanged.
+  if [ -n "${ID:-}" ]; then
+    resp_file="$(mktemp "$SESS_DIR/$ID.response.XXXXXX")" || return 1
+  else
+    resp_file="$(mktemp)" || return 1
+  fi
+  API_RESPONSE_FILE="$resp_file"
   ACTIVE_API_RESPONSE="$resp_file"
+  ACTIVE_API_TMP="$req_file $status_file"
   MODEL="$MODEL" "$PYTHON" - "$msgs_file" >"$req_file" <<'PY'
 import json, os, sys
 messages = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -316,31 +329,42 @@ PY
   ACTIVE_API_PID=""
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   if [ "$rc" -ne 0 ]; then
-    echo "Error: DeepSeek API request failed or exceeded ${CALL_TIMEOUT}s." >&2
+    echo "Error: provider-transport-failure: DeepSeek request failed or exceeded ${CALL_TIMEOUT}s; private response: $resp_file" >&2
     publish_failure_evidence request-failed || return 1
-    rm -f "$req_file" "$resp_file" "$status_file"
+    rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
     return 1
   fi
   if [ "$http_code" != "200" ]; then
-    echo "Error: DeepSeek API returned HTTP $http_code:" >&2
-    cat "$resp_file" >&2
+    echo "Error: provider-http-failure: DeepSeek returned HTTP $http_code; private response: $resp_file" >&2
     publish_failure_evidence "http-$http_code" || return 1
-    rm -f "$req_file" "$resp_file" "$status_file"
+    rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
     return 1
   fi
-  "$PYTHON" -c '
+  "$PYTHON" - "$resp_file" "$reply_file" <<'PY'
 import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-print(data["choices"][0]["message"]["content"])
-' "$resp_file" >"$reply_file"
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+    content = data["choices"][0]["message"]["content"]
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("missing response text")
+    # Python stdout can be cp1252/ascii on Windows even when the response is UTF-8.
+    # Write explicitly to the reply file, never through that implicit encoding.
+    with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as reply:
+        reply.write(content + "\n")
+except (ValueError, KeyError, IndexError, TypeError, OSError):
+    print("Error: invalid-provider-response: response extraction failed; private response retained.", file=sys.stderr)
+    raise SystemExit(1)
+PY
   rc=$?
   [ "$rc" -eq 0 ] || publish_failure_evidence invalid-provider-response || return 1
   if [ -n "${LOCK_DIR:-}" ] && [ "$rc" -eq 0 ]; then
     reviewer_event_publish_report deepseek "$reply_file" || return 1
   fi
-  rm -f "$req_file" "$resp_file" "$status_file"
+  rm -f "$req_file" "$status_file"
+  if [ "$rc" -eq 0 ] && [ -z "${ID:-}" ]; then rm -f "$resp_file"; fi
+  [ "$rc" -eq 0 ] || echo "Private response: $resp_file" >&2
   ACTIVE_API_TMP=""
   return $rc
 }
@@ -439,8 +463,17 @@ review_verdict() {
   "$PYTHON" - "$1" <<'PY'
 import re, sys
 text=sys.argv[1].replace("\r\n","\n")
-m=re.search(r'(?:^|\n)## Verdict[ \t]*\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*(?:\n|$)', text)
-if not m: raise SystemExit(1)
+m=re.search(r'(?:^|\n)## Verdict[ \t]*\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*\s*\Z', text)
+if not m or len(re.findall(r'^## Verdict[ \t]*$', text, re.M)) != 1:
+    raise SystemExit(1)
+fence = None
+for line in text[:m.start()].splitlines():
+    marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
+    if not marker: continue
+    run, rest = marker.groups()
+    if fence is None: fence = run
+    elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip(): fence = None
+if fence is not None: raise SystemExit(1)
 print(m.group(1))
 PY
 }
@@ -633,6 +666,7 @@ case "$SUBCMD" in
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
     "$PYTHON" -c '
 import json, sys
+sys.stdout.reconfigure(encoding="utf-8")
 for m in json.load(open(sys.argv[1], encoding="utf-8")):
     print("--- " + m["role"].upper() + " ---")
     print(m["content"])
@@ -673,7 +707,7 @@ $REVIEW_INSTRUCTION"
     call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; exit 1; }
     REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
-    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; conversation was not created." >&2; exit 1; }; fi
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     if [ "${AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE:-0}" = publish ]; then mkdir -p "$F" || true; fi
     if ! write_atomic "$F" "$CANDIDATE.final"; then
@@ -734,7 +768,7 @@ $REVIEW_INSTRUCTION"
     call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; exit 1; }
     REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
     VERDICT=""
-    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: DeepSeek review ended without a usable verdict; canonical conversation is unchanged." >&2; exit 1; }; fi
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     if ! write_atomic "$F" "$CANDIDATE.final"; then
       rm -f "$CANDIDATE" "$CANDIDATE.final"

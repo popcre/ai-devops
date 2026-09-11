@@ -37,7 +37,9 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
   trap 'printf terminated > "$DEEPSEEK_STUB_TERM_MARKER"; exit 143' TERM
   sleep "$DEEPSEEK_STUB_DELAY"
 }
-if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"stub"}' > "$out"; printf 500; else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
+if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
+elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
+else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
@@ -82,6 +84,12 @@ mv "$TMP/repo/.ai/deepseek-real" "$TMP/repo/.ai/deepseek-sessions"
 history="$TMP/repo/.ai/deepseek-sessions/$SESSION.json"; history_before="$(sha256sum "$history"|cut -d' ' -f1)"
 check "provider failure is nonzero" "DEEPSEEK_STUB_FAIL=1 run reply '$SESSION' failed >/dev/null 2>&1; test \$? -ne 0"
 check "provider failure leaves history unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+DEEPSEEK_STUB_FAIL=1 run reply "$SESSION" failed >"$TMP/http.out" 2>"$TMP/http.err"; http_rc=$?
+check "HTTP failure exposes stable reason without printing private response body" "test '$http_rc' -ne 0 && grep -q provider-http-failure '$TMP/http.err' && ! grep -q private-provider-error-body '$TMP/http.err'"
+DEEPSEEK_STUB_INVALID=1 run reply "$SESSION" malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
+malformed_response="$(sed -n 's/^Private response: //p' "$TMP/malformed.err")"
+check "malformed response is retained and cannot become a successful reply" "test '$malformed_rc' -ne 0 && grep -q invalid-provider-response '$TMP/malformed.err' && test ! -s '$TMP/malformed.out' && jq -e '.choices[0].message.content==null' '$malformed_response'"
+check "malformed reply preserves canonical history" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role)==[\"user\",\"assistant\",\"user\",\"assistant\",\"user\",\"assistant\"]' '$history'"
@@ -100,6 +108,21 @@ calls_before_nonrepo="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "formal review refuses a missing Git commit before provider contact" "test '$nonrepo_rc' -ne 0 && test '$calls_before_nonrepo' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 DEEPSEEK_STUB_REPLY='no verdict' run send review-me --review >/dev/null 2>&1; missing_rc=$?
 check "review mode rejects missing verdict" "test '$missing_rc' -ne 0"
+for invalid_terminal in $'## Verdict\nAPPROVE\nmore text' $'## Verdict\nAPPROVE\n## Verdict\nREJECT' $'```\n## Verdict\nAPPROVE\n```' $'```text\n## Verdict\nAPPROVE'; do
+  terminal_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  DEEPSEEK_STUB_REPLY="$invalid_terminal" run send invalid-terminal --review >"$TMP/terminal.out" 2>"$TMP/terminal.err"; terminal_rc=$?
+  check "review rejects nonterminal or duplicate verdict" "test '$terminal_rc' -ne 0 && ! grep -q '^SESSION_ID:' '$TMP/terminal.out' && grep -q invalid-terminal-verdict '$TMP/terminal.err'"
+  terminal_response="$(sed -n 's/.*Private response: //p' "$TMP/terminal.err")"
+  check "unusable verdict retains paid response without replay" "test -f '$terminal_response' && jq -e '.choices[0].message.content|length>0' '$terminal_response' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((terminal_calls+1))'"
+done
+UNICODE_REPLY=$'Findings: café — 中文\n## Verdict\nAPPROVE'
+PYTHONIOENCODING=ascii DEEPSEEK_STUB_REPLY="$UNICODE_REPLY" run send unicode --review >"$TMP/unicode.out" 2>"$TMP/unicode.err"; unicode_rc=$?
+UNICODE_ID="$(sed -n 's/^SESSION_ID: //p' "$TMP/unicode.out")"
+check "review preserves Unicode under a Windows legacy stdout encoding" "test '$unicode_rc' -eq 0 && grep -q '中文' '$TMP/unicode.out'"
+if [ "$unicode_rc" -eq 0 ]; then
+  PYTHONIOENCODING=ascii run show "$UNICODE_ID" >"$TMP/unicode-show.out" 2>"$TMP/unicode-show.err"; unicode_show_rc=$?
+  check "show preserves Unicode under a legacy stdout encoding" "test '$unicode_show_rc' -eq 0 && grep -q '中文' '$TMP/unicode-show.out'"
+fi
 REVIEW_OUT="$(DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send review-me --review)"; REVIEW_ID="$(printf '%s\n' "$REVIEW_OUT"|sed -n 's/^SESSION_ID: //p')"
 check "review mode accepts usable verdict" "test -n '$REVIEW_ID'"
 METADATA_FAILURE_OUT="$(AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send metadata-failure --review 2>&1)"; METADATA_FAILURE_RC=$?
@@ -255,5 +278,6 @@ set -e
 check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
 check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >/dev/null && jq -e '.status==\"complete\"' '$SOURCE_META'"
+check "list excludes retained provider responses" "! run list | grep -q response"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]
