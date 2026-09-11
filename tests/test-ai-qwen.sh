@@ -142,6 +142,28 @@ unset BAILIAN_CODING_PLAN_API_KEY
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
+qualification_retention_cases(){
+  local dir="$REPO/.ai/reviews/qwen-qualification" retained rc
+  mkdir -p "$REPO/.ai/reviews" "$TMP/qualification-private-temp"
+  [ ! -e "$dir" ] || mv "$dir" "$TMP/qualification-before-retention"
+  printf 'publication blocked by fixture\n' > "$dir"
+  echo wrong-model > "$TMP/mode"
+  TMPDIR="$TMP/qualification-private-temp" run doctor --live > "$TMP/qualification-retention.log" 2>&1; rc=$?
+  rm "$dir"
+  [ ! -e "$TMP/qualification-before-retention" ] || mv "$TMP/qualification-before-retention" "$dir"
+  retained="$(sed -n 's/^qualification evidence retained: //p' "$TMP/qualification-retention.log" | head -1)"
+  if [ "$rc" -ne 0 ] && [ -n "$retained" ] && [ -s "$retained" ] && [ -s "$retained.p" ] && [ -e "$retained.err" ]; then ok 'failed qualification publication preserves exact stream prompt and stderr'; else bad 'failed qualification publication preserves exact stream prompt and stderr'; fi
+  if (
+    source <(sed -n '/^cleanup_qualification_probe() {/,/^}/p' "$SCRIPT")
+    QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$TMP/interrupted-qualification"
+    QUALIFICATION_RUNTIME_SHA=runtime; QUALIFICATION_PRELOADER_SHA=preloader; RUN_TURN_RC=130
+    printf stream > "$QUALIFICATION_STREAM"; printf prompt > "$QUALIFICATION_STREAM.p"; printf stderr > "$QUALIFICATION_STREAM.err"
+    stop_run_turn(){ :; }; write_qualification_diagnostic(){ return 1; }; note(){ :; }
+    cleanup_qualification_probe
+    [ "$QUALIFICATION_ACTIVE" = 0 ] && [ -s "$QUALIFICATION_STREAM" ] && [ -s "$QUALIFICATION_STREAM.p" ] && [ -s "$QUALIFICATION_STREAM.err" ]
+  ); then ok 'interrupted qualification retains raw evidence when publication fails'; else bad 'interrupted qualification retains raw evidence when publication fails'; fi
+  echo review > "$TMP/mode"
+}
 
 # A CLI recorder can supervise the actual review worker. Crash the owner of
 # this fixture's repository lock, then let its supervisor reap it. Never use
@@ -434,6 +456,7 @@ else
   printf '  diagnostic: model-mismatch artifact: '; jq -c . "$QWEN_DIAGNOSTICS"/*.json 2>/dev/null || printf 'missing'; printf '\n'
   bad 'model mismatch leaves only safe actionable metadata'
 fi
+qualification_retention_cases
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true
