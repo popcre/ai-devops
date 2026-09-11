@@ -303,6 +303,7 @@ Keep raw private diagnostics under the existing private issue/state homes. Put s
 - No database migration or cloud/production mutation is needed. Any discovered genuine structure change must be separately routed; this plan conveys no such authority.
 - Do not confuse installed configuration equality with effective running config, exact session ID with full context recall, or provider model context limits with account capacity.
 - Plan publication is preparation. All implementation rows remain open until their evidence exists; no claim that the system is already repaired.
+- At the end of every implementation phase, re-read every downstream phase through plan-end and report any assumption, interface, identifier, decision, or evidence drift before handing off or starting the next phase.
 
 ## 12. Access and environment
 
