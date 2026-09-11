@@ -55,7 +55,18 @@ records the recovery slice under #337; it does not close #397 or the parent.
   passed in the preceding focused run. The first full owning suite recorded
   139 passed and 6 failed: shared cleanup obscured original failure states and
   skipped exact staging/lock cleanup. Dependency `ebbc1773` repairs that cause;
-  integrated verification remains pending. All new recovery cases passed.
+  the integrated full run then recorded 142 passed and 3 cascading fixture
+  failures: a test claimed evidence was missing while retaining a recoverable
+  successful turn. The fixture now removes that proof for the refusal check.
+  The final recovery subset, including #333 immutable usage observations, passed
+  53 checks with zero failures. All new recovery cases passed.
+- GLM elapsed-deadline fixtures: 3 passed, 0 failed. HTTP time and initial sleep
+  count against the existing turn limit; an expired recorded deadline permits
+  no further polling. The existing recovery composite also passed afterward.
+- GLM permission authentication now travels through the existing protected curl
+  configuration pipe. The synthetic regression proves authentication remains
+  present on standard input and absent from command arguments. No real password
+  was inspected; this is code-path evidence, not proof of external disclosure.
 
 ## Outstanding qualification
 
