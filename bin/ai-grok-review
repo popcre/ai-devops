@@ -1134,6 +1134,14 @@ frozen_prefix() {
 # ---------------------------------------------------------------------------
 # Result interpretation
 # ---------------------------------------------------------------------------
+terminal_reason() { # provider stop token -> stable diagnostic, without inference
+  case "$1" in
+    end_turn|EndTurn|stop|completed) printf '%s' "$1" ;;
+    cancelled) printf 'provider_cancelled' ;;
+    max_turns|max_turns_reached|max-turns*) printf 'turn_limit_cancelled' ;;
+    *) printf 'unknown_terminal_reason' ;;
+  esac
+}
 handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   local f="$1" name="$2" turns="$3" sr sid used
   sr="$(jq -r '.stopReason // "missing"' "$f")"
@@ -1145,6 +1153,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
     cancelled)
       note ""
       note "ai-grok-review: Grok cancelled without a final answer."
+      note "  reason: $(terminal_reason "$sr")"
       note "  stopReason  : $sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
       note ""
@@ -1155,6 +1164,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
     max_turns|max_turns_reached|max-turns*)
       note ""
       note "ai-grok-review: Grok stopped WITHOUT a final answer — the turn budget ran out."
+      note "  reason: $(terminal_reason "$sr")"
       note "  stopReason  : $sr"
       note "  turns used  : $used of $turns"
       note "  session     : ${sid:-unknown} (saved as '$name')"
@@ -1167,7 +1177,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
       note "  review and start a fresh, exact-scope session only after correcting that cause."
       return 1 ;;
     *)
-      note "ai-grok-review: unrecognised stopReason '$sr' — refusing to guess. Inspect: $f"
+      note "ai-grok-review: reason: $(terminal_reason "$sr"); refusing to guess. Inspect the retained provider result: $f"
       return 1 ;;
   esac
 }
@@ -1178,6 +1188,24 @@ report_usage() { # report_usage FILE
        + "turns: \(.num_turns // "?") "
        + "cost: $\(.total_cost_usd // 0) "
        + "model: \((.modelUsage // {} | keys | first) // "unknown")"' "$1" >&2
+}
+
+retain_failed_terminal() { # prepare private incomplete evidence before cleanup
+  local out="$1" report="$1.incomplete.md"
+  {
+    printf '# Incomplete Grok turn\n\nThis turn did not produce an accepted review.\n\n'
+    printf 'Provider terminal reason: %s\n\n## Provider result\n\n```json\n' "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")"
+    cat "$out" || return 1
+    printf '\n```\n\n## Provider stderr\n\n```text\n'
+    [ ! -f "$out.err" ] || cat "$out.err" || return 1
+    printf '\n```\n'
+  } > "$report" || return 1
+  if ! reviewer_event_publish_report grok "$report" '{"phase":"terminal-failure"}'; then
+    note "incomplete provider evidence retained: $report"
+    return 1
+  fi
+  note "incomplete provider evidence retained for invocation ${AI_REVIEW_EVENT_RUN_ID:-unknown}"
+  rm -f "$report"
 }
 
 # Grok's `text` concatenates progress narration with the final answer, so every
@@ -1476,17 +1504,19 @@ cmd_new() {
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    --arg terminal_reason "$(terminal_reason "$(jq -r '.stopReason // "?"' "$out")")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
       review_dir:$review_dir, base:$base, head:$head, packet_sha256:$pkthash,
-      turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop}')"
+      turns:$turns, total_tokens:$tokens, total_cost_usd:$cost, last_stop_reason:$stop,last_terminal_reason:$terminal_reason}')"
 
-  finish_turn "$repo" "$name" "$out" "$turns"
-  local st=$?
+  local st=0
+  finish_turn "$repo" "$name" "$out" "$turns" || st=$?
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
@@ -1594,19 +1624,21 @@ $REVIEW_HEAD only."
     --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
     --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
+    --arg terminal_reason "$(terminal_reason "$(jq -r '.stopReason // "?"' "$out")")" \
     --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
     '.head=$head | .base=$base | .packet_sha256=$pkthash |
      .updated=$updated | .turns=(.turns+1)
      | .total_tokens=(.total_tokens+$tokens)
      | .total_cost_usd=(.total_cost_usd+$cost)
-     | .last_stop_reason=$stop' "$meta")"
+     | .last_stop_reason=$stop | .last_terminal_reason=$terminal_reason' "$meta")"
 
-  finish_turn "$repo" "$name" "$out" "$turns"
-  local st=$?
+  local st=0
+  finish_turn "$repo" "$name" "$out" "$turns" || st=$?
   if [ "$st" -eq 0 ]; then
     record_diagnostic "$repo" "$workid" "$name" terminal provider-completed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-confirmation not-requested
   else
-    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(terminal_reason "$(jq -r '.stopReason // "unknown"' "$out")")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
+    retain_failed_terminal "$out" || return 1
   fi
   reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
@@ -1615,7 +1647,7 @@ $REVIEW_HEAD only."
 
 finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
   local repo="$1" name="$2" out="$3" turns="$4" path
-  report_usage "$out"
+  report_usage "$out" || { clear_active_grok; return 1; }
   if ! handle_stop_reason "$out" "$name" "$turns"; then
     clear_active_grok
     return 1
@@ -1630,9 +1662,9 @@ finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
     return 1
   fi
   if [ "${OPT_JSON:-0}" = 1 ]; then
-    cat "$out"
+    cat "$out" || { clear_active_grok; return 1; }
   else
-    extract_answer "$out"
+    extract_answer "$out" || { clear_active_grok; return 1; }
   fi
   [ -n "$path" ] && note "review saved: $path"
   clear_active_grok

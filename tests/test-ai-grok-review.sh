@@ -631,7 +631,42 @@ wait $BGPID 2>/dev/null
   || bad "await_result returned too early (${ELAPSED}s) — the early-return bug is NOT caught"
 
 # 7/8 -----------------------------------------------------------------------
+terminal_reason_cases(){
+  local reason expected output status
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  for reason in cancelled max_turns max_turns_reached max-turns-exhausted PRIVATE_UNKNOWN_STOP; do
+    case "$reason" in cancelled) expected=provider_cancelled;; max*) expected=turn_limit_cancelled;; *) expected=unknown_terminal_reason;; esac
+    jq -n --arg stop "$reason" '{stopReason:$stop,sessionId:"fixture-session",num_turns:99}' > "$TMP/typed-stop.json"
+    output="$(handle_stop_reason "$TMP/typed-stop.json" fixture 99 2>&1)"; status=$?
+    if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq "reason: $expected"; then ok "typed terminal refusal: $reason"; else bad "typed terminal refusal: $reason"; fi
+    if [ "$reason" = cancelled ]; then
+      check 'cancellation at the ceiling does not invent a turn-limit cause' "! printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+    elif [ "$reason" = PRIVATE_UNKNOWN_STOP ]; then
+      check 'unknown provider stop value stays private' "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_STOP"
+    fi
+  done
+  for reason in end_turn EndTurn stop completed; do
+    jq -n --arg stop "$reason" '{stopReason:$stop}' > "$TMP/typed-stop.json"
+    if handle_stop_reason "$TMP/typed-stop.json" fixture 99 >/dev/null 2>&1; then ok "completed terminal spelling: $reason"; else bad "completed terminal spelling: $reason"; fi
+  done
+  if (
+    source <(sed -n '/^finish_turn() {/,/^}/p' "$SCRIPT")
+    report_usage(){ :; }; handle_stop_reason(){ :; }; write_review_file(){ printf report; }
+    clear_active_grok(){ :; }; extract_answer(){ return 1; }
+    PACKET_BIN=true; REVIEW_DIR="$TMP"; PACKET_REL=packet; OPT_JSON=0
+    ! finish_turn repo name "$TMP/typed-stop.json" 99 >/dev/null 2>&1
+  ); then ok 'failed output cannot become success when terminal status is captured'; else bad 'failed output cannot become success when terminal status is captured'; fi
+  if (
+    source <(sed -n '/^retain_failed_terminal() {/,/^}/p' "$SCRIPT")
+    reviewer_event_publish_report(){ return 1; }
+    printf 'private fixture stderr\n' > "$TMP/typed-stop.json.err"
+    ! retain_failed_terminal "$TMP/typed-stop.json" >/dev/null 2>&1
+    test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && test -s "$TMP/typed-stop.json.incomplete.md"
+  ); then ok 'failed incomplete publication preserves source response and stderr'; else bad 'failed incomplete publication preserves source response and stderr'; fi
+}
 echo "== stop_reason handling =="
+terminal_reason_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -643,6 +678,23 @@ check "cancelled has cancellation recovery message" "printf '%s' \"\$OUT\" | gre
 check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
 check "cancelled does not recommend resume"     "! printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
 check "cancelled recommends a fresh session"   "printf '%s' \"\$OUT\" | grep -qi 'fresh named session'"
+CANCELLED_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--t4.json' -print -quit)"
+check 'cancelled session preserves the exact diagnostic class' "jq -e '.last_stop_reason==\"cancelled\" and .last_terminal_reason==\"provider_cancelled\"' '$CANCELLED_META'"
+
+terminal_provider_cases(){
+  local output status meta
+  cp "$TMP/fixture.json" "$TMP/typed-fixture-original.json"
+  echo ok > "$TMP/mode"
+  if run new typed-stop-followup --prompt review >/dev/null 2>&1; then ok 'typed-stop fixture begins with an ordinary completed review'; else bad 'typed-stop fixture begins with an ordinary completed review'; fi
+  jq '.stopReason="max_turns_reached"' "$TMP/typed-fixture-original.json" > "$TMP/fixture.json"
+  output="$(run ask typed-stop-followup --prompt followup 2>&1)"; status=$?
+  printf '%s\n' "$output" > "$TMP/typed-stop-diagnostic.txt"
+  cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
+  meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
+  if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi
+  if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep -q turn_limit_cancelled; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
+}
+terminal_provider_cases
 
 echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1

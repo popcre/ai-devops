@@ -46,6 +46,24 @@ check 'Muse key reaches the provider through a private handoff, never argv or th
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'new publishes preparing state before snapshot preparation' "fn=\$(sed -n '/^cmd_new()/,/^cmd_ask()/p' '$SCRIPT'); state_line=\$(printf '%s\n' \"\$fn\" | grep -n 'status:\"preparing\"' | head -1 | cut -d: -f1); prepare_line=\$(printf '%s\n' \"\$fn\" | grep -n 'prepare \"\$root\"' | head -1 | cut -d: -f1); test \"\$state_line\" -lt \"\$prepare_line\""
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
+startup_reason_cases(){
+  local output rc
+  output="$(AI_MUSE_CALLER= bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: caller_identity_missing'; then ok 'missing Muse caller has a stable startup reason'; else bad 'missing Muse caller has a stable startup reason'; fi
+  output="$(AI_MUSE_CALLER='../unsafe' bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: invalid_caller_identity'; then ok 'invalid Muse caller has a stable startup reason'; else bad 'invalid Muse caller has a stable startup reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    ACTIVE_META=''; die 'fixture startup refusal'
+  ) > "$TMP/startup-reason.log" 2>&1; then bad 'pre-session refusal stays unsuccessful';
+  elif grep -q 'start_failed: fixture startup refusal' "$TMP/startup-reason.log"; then ok 'pre-session refusal stays unsuccessful with a stable reason'; else bad 'pre-session refusal stays unsuccessful with a stable reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    ACTIVE_META=existing; die 'fixture incomplete turn'
+  ) > "$TMP/active-reason.log" 2>&1; then bad 'active session failure stays unsuccessful';
+  elif ! grep -q start_failed "$TMP/active-reason.log"; then ok 'active session failure is not relabeled as startup'; else bad 'active session failure is not relabeled as startup'; fi
+  check 'ordinary Muse help remains available with a valid caller' "AI_MUSE_CALLER=codex bash '$SCRIPT' --help >/dev/null"
+}
 check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
 check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
 check 'report destination is proven exact, ignored, untracked and unlinked' "grep -q 'exact destination is not Git-ignored' '$SCRIPT' && grep -q 'exact destination is tracked' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
@@ -55,6 +73,7 @@ check 'private Windows ACL is revalidated even when a marker already exists' "! 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_MUSE_TEST_DIR="$TMP"
+startup_reason_cases
 mkdir -p "$TMP/installed/bin"
 if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>/dev/null && [ -L "$TMP/installed/bin/ai-muse" ]; then
   check 'installed symlink executes with repository configuration' "AI_MUSE_CALLER=codex '$TMP/installed/bin/ai-muse' --help"
