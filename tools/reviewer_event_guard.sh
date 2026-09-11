@@ -14,6 +14,23 @@ reviewer_event_evidence(){
   env -i "${evidence_env[@]}" "$python" "$event_tool" "$operation" "$provider" "$AI_REVIEW_EVENT_RUN_ID" "$@"
 }
 
+reviewer_event_publish_report(){
+  local provider="$1" report="$2" facts='{"phase":"report-publication"}'
+  [ "$#" -lt 3 ] || facts="$3"
+  reviewer_event_evidence require-report "$provider" || return 1
+  reviewer_event_evidence publish-report "$provider" "$report" "$facts" >/dev/null || return 1
+  reviewer_event_evidence verify-reports "$provider" >/dev/null
+}
+
+reviewer_event_cleanup_allowed(){
+  local provider="$1"
+  [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] || return 0
+  reviewer_event_evidence verify-reports "$provider" >/dev/null || {
+    printf 'required evidence is not durable; retaining local output and review workspace\n' >&2
+    return 1
+  }
+}
+
 reviewer_event_guard(){
   local provider="$1" wrapper="$2"; shift 2
   case "${1:-}" in
@@ -43,6 +60,7 @@ reviewer_event_guard(){
   name="AI_${provider^^}_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   name="AI_${provider^^}_REVIEW_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   [ "$provider" != kimi ] || [ "${1:-}" != start ] || operation=async-submission
+  [ "$provider" != qwen ] || [ "${1:-}" != finalize ] || operation=local-finalization
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID

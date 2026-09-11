@@ -135,9 +135,16 @@ def publish_report(directory, provider, run_id, report, facts=None):
     require(current.st_size == boundary["offset"] and current.st_mtime_ns == boundary["mtime_ns"],
             "report changed during publication; source evidence retained")
     text = data.decode("utf-8")
+    facts = dict(facts or {})
+    original_id = facts.pop("original_invocation_id", None)
     facts = provenance(facts)
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
+        if original_id is not None:
+            original = invocation(directory, provider, original_id)
+            require(start.get("operation") == "local-finalization" and
+                    original["head"] == start["head"] and original["caller"] == start["caller"],
+                    "recovered evidence invocation identity changed")
         current = report.stat()
         require(current.st_size == boundary["offset"] and current.st_mtime_ns == boundary["mtime_ns"],
                 "report changed during publication; source evidence retained")
@@ -146,7 +153,7 @@ def publish_report(directory, provider, run_id, report, facts=None):
         sha = digest(data)
         value = {"schema_version": 1, "run_id": run_id, "provider": provider,
                  "head": start["head"], "caller": start["caller"], "report_sha256": sha,
-                 "report_text": text, "provenance": facts}
+                 "report_text": text, "provenance": facts, "original_invocation_id": original_id}
         path = root / (sha + ".report.json")
         if path.exists():
             require(read_json(path) == value, "published evidence conflicts with this invocation")
@@ -177,6 +184,11 @@ def verify_reports(directory, provider, run_id):
         require(row.get("report_sha256") == sha and path.name == sha + ".report.json",
                 "published report content changed")
         provenance(row.get("provenance"))
+        if row.get("original_invocation_id") is not None:
+            original = invocation(directory, provider, row["original_invocation_id"])
+            require(start.get("operation") == "local-finalization" and
+                    original["head"] == start["head"] and original["caller"] == start["caller"],
+                    "recovered evidence invocation identity changed")
         references.append(run_id + "/" + sha)
     return references
 
@@ -189,7 +201,7 @@ def main():
     if operation == "begin":
         parent = os.environ.get("AI_REVIEW_EVENT_RUN_ID", "")
         kind = sys.argv[3] if len(sys.argv) > 3 else "invocation"
-        require(kind in {"invocation", "async-submission"}, "invalid invocation kind")
+        require(kind in {"invocation", "async-submission", "local-finalization"}, "invalid invocation kind")
         event = {"schema_version": 1, "event": "started", "provider": provider,
                  "operation": kind, "parent_run_id": parent if re.fullmatch(r"[0-9a-f]{32}", parent) else None,
                  "run_id": uuid.uuid4().hex, "timestamp": now(), "repo": git_value("rev-parse", "--show-toplevel"),

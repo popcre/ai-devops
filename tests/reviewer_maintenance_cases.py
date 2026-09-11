@@ -596,6 +596,28 @@ wait "$job"
         self.assertEqual(results[0], results[1])
         self.assertEqual(events.verify_reports(self.root, "grok", rid), [results[0]["reference"]])
 
+    def test_local_finalization_links_original_without_rewriting_it(self):
+        original = "b" * 32
+        self.invocation(rid=original)
+        rid, _, report = self.evidence_fixture()
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows[-1]["operation"] = "local-finalization"
+        self.ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        before = self.ledger.read_bytes()
+        reference = events.publish_report(self.root, "grok", rid, report,
+                                         {"original_invocation_id": original})
+        self.assertEqual(events.verify_reports(self.root, "grok", rid), [reference["reference"]])
+        self.assertEqual(self.ledger.read_bytes(), before)
+        path = self.root / "evidence" / rid / (reference["report_sha256"] + ".report.json")
+        self.assertEqual(json.loads(path.read_text())["original_invocation_id"], original)
+
+    def test_ordinary_invocation_cannot_claim_recovery_link(self):
+        original = "b" * 32
+        self.invocation(rid=original)
+        rid, _, report = self.evidence_fixture()
+        with self.assertRaisesRegex(events.Blocked, "identity changed"):
+            events.publish_report(self.root, "grok", rid, report, {"original_invocation_id": original})
+
     def test_evidence_rejects_wrong_invocation_and_changed_content(self):
         rid, _, report = self.evidence_fixture()
         with self.assertRaises(events.Blocked):
