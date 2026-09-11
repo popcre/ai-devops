@@ -1169,12 +1169,21 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   esac
 }
 
+normalized_usage() {
+  jq 'def count: if type=="number" and isfinite and .>=0 and floor==. then . else null end;
+      def money: if type=="number" and isfinite and .>=0 then . else null end;
+      if (.usage|type)!="object" then .usage={} else . end |
+      .usage.total_tokens |= count | .usage.input_tokens |= count |
+      .usage.cache_read_input_tokens |= count | .total_cost_usd |= money' "$1"
+}
+
 report_usage() { # report_usage FILE
+  normalized_usage "$1" |
   jq -r '"tokens: \(.usage.total_tokens // "?") "
-       + "(uncached in: \(.usage.input_tokens // "?"), cached: \(.usage.cache_read_input_tokens // 0)) "
+       + "(uncached in: \(.usage.input_tokens // "?"), cached: \(.usage.cache_read_input_tokens // "unknown")) "
        + "turns: \(.num_turns // "?") "
-       + "cost: $\(.total_cost_usd // 0) "
-       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' "$1" >&2
+       + "cost: $\(.total_cost_usd // "unknown") "
+       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' >&2
 }
 
 # Grok's `text` concatenates progress narration with the final answer, so every
@@ -1278,7 +1287,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "- Session: \`$(jq -r '.sessionId // "?"' "$f")\`"
     echo "- Model: \`$(jq -r '(.modelUsage // {} | keys | first) // "?"' "$f")\`"
     echo "- stopReason: \`$(jq -r '.stopReason // "?"' "$f")\` · turns: $(jq -r '.num_turns // "?"' "$f")"
-    echo "- Tokens: $(jq -r '.usage.total_tokens // "?"' "$f") (cached $(jq -r '.usage.cache_read_input_tokens // 0' "$f")) · cost: \$$(jq -r '.total_cost_usd // 0' "$f")"
+    echo "- Tokens: $(normalized_usage "$f" | jq -r '.usage.total_tokens // "?"') (cached $(normalized_usage "$f" | jq -r '.usage.cache_read_input_tokens // "unknown"')) · cost: \$$(normalized_usage "$f" | jq -r '.total_cost_usd // "unknown"')"
     echo
     echo "---"
     echo
@@ -1383,7 +1392,7 @@ cmd_doctor() {
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
     run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
     if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
-      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(jq -r '.total_cost_usd // 0' "$tmp"))"
+      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
       lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
@@ -1466,8 +1475,8 @@ cmd_new() {
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
     --arg review_dir "$REVIEW_DIR" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     --argjson turns 1 \
-    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
-    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
+    --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
@@ -1583,14 +1592,16 @@ $REVIEW_HEAD only."
 
   write_meta "$meta" "$(jq \
     --arg updated "$(date -u +%FT%TZ)" \
-    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
-    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
+    --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
     '.head=$head | .base=$base | .packet_sha256=$pkthash |
      .updated=$updated | .turns=(.turns+1)
-     | .total_tokens=(.total_tokens+$tokens)
-     | .total_cost_usd=(.total_cost_usd+$cost)
+     | .total_tokens=(if (.total_tokens|type)!="number" or .total_tokens<0 or $tokens==null then null else .total_tokens+$tokens end)
+     | .total_cost_usd=(if (.total_cost_usd|type)!="number" or .total_cost_usd<0 or $cost==null then null else .total_cost_usd+$cost end)
+     | .total_tokens |= (if type=="number" and isfinite and floor==. then . else null end)
+     | .total_cost_usd |= (if type=="number" and isfinite then . else null end)
      | .last_stop_reason=$stop' "$meta")"
 
   finish_turn "$repo" "$name" "$out" "$turns"
