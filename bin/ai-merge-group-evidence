@@ -141,7 +141,8 @@ read_jobs() {
 }
 
 equivalent_fallback_proven() { # completed same-run replacement, never a failed assertion
-  local jobs="$1" job conclusion status
+  local jobs job conclusion status
+  jobs="$(printf '%s\n' "$1" | sed 's/\r$//')"
   # The workflow runs the identical Codex and Grok suites in these two lanes.
   # Every other reported job must already be complete and clean. Explicitly
   # require the core jobs too; an incomplete API response is not coverage.

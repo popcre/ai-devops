@@ -192,6 +192,9 @@ FALLBACK_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuc
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
 check "same-head equivalent fallback covers a cancelled original lane" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'identical reviewer suites'"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$(printf '%s\n' "$FALLBACK_JOBS" | sed 's/$/\r/')"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
+check "equivalent fallback accepts native Windows job line endings" "test '$RC' -eq 0"
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$(printf '%s' "$FALLBACK_JOBS" | sed 's/cancelled\tcompleted/pending\tin_progress/')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "completed equivalent fallback avoids waiting for redundant running lane" "test '$RC' -eq 0"

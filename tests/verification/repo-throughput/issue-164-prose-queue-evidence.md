@@ -34,7 +34,8 @@ The original lane may remain queued/running or be skipped/cancelled, avoiding a
 redundant wait while preserving all required coverage. No run was cancelled or
 rerun, and no timeout or branch-protection rule was changed.
 
-- Extended regression suite: 41 passed, 0 failed, 0 skipped.
+- Extended regression suite: 42 passed, 0 failed, 0 skipped, including native
+  Windows job-output line endings.
 - The actual exact-head job evidence from run `34567280854` satisfies the narrow
   replacement proof; private job metadata is retained with the review evidence.
 
