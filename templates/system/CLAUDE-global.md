@@ -225,6 +225,15 @@ so one oversized dump is billed dozens of times. Keep routine output under ~40
 lines. Correctness always outranks this rule: when the full text is what you
 need to be right, read the full text and say why.
 
+- **Tool output consumes context even when the app collapses or hides it.** Do
+  not return full logs, JSON, diffs, instruction files, or command output to the
+  conversation. Redirect long output to a scratch file, then return only the
+  decisive result or smallest diagnostic excerpt. Set tool output limits when
+  available.
+- Keep owner-visible progress in plain English and under 120 words. State the
+  business result, blocker, or required owner action; omit implementation detail
+  that does not change one of those.
+
 - Find before you read. `grep -n "pattern" file | head -20`, then read a window
   around the hits. Never guess a line range blind.
 - Once you need more than about 150 lines of a file, read it in one pass instead
