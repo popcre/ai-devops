@@ -554,6 +554,100 @@ wait "$job"
         self.assertEqual(result.returncode, 44, result.stderr)
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         self.assertEqual(rows[-1]["exit_code"], 44)
+        self.assertEqual(rows[-1]["provenance"]["signal"], "TERM")
+        self.assertEqual(rows[-1]["provenance"]["source"], "os-signal")
+        self.assertEqual(rows[-1]["provenance"]["actor_class"], "unknown")
+        self.assertIsNone(rows[-1]["provenance"]["paid_work_may_exist"])
+
+    def evidence_fixture(self):
+        rid = "a" * 32
+        self.invocation(rid=rid, finish=False)
+        checkout = self.root / "disposable-checkout"
+        checkout.mkdir()
+        report = checkout / "report.md"
+        report.write_text("## Verdict\nSynthetic completed reviewer analysis.\n", encoding="utf-8")
+        events.require_report(self.root, "grok", rid)
+        return rid, checkout, report
+
+    def test_evidence_survives_disposable_checkout_removal(self):
+        rid, checkout, report = self.evidence_fixture()
+        reference = events.publish_report(self.root, "grok", rid, report,
+                                         {"last_proven_provider_state": "completed"})
+        shutil.rmtree(checkout)
+        self.assertEqual(events.verify_reports(self.root, "grok", rid), [reference["reference"]])
+        self.assertNotIn(str(checkout), json.dumps(reference))
+        self.assertEqual(len(list((self.root / "evidence" / rid).glob("*.report.json"))), 1)
+
+    def test_evidence_publication_failure_keeps_response_and_blocks_cleanup(self):
+        rid, _, report = self.evidence_fixture()
+        original = report.read_bytes()
+        with patch.object(os, "link", side_effect=OSError("synthetic publication failure")):
+            with self.assertRaises(OSError):
+                events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(report.read_bytes(), original)
+        with self.assertRaisesRegex(events.Blocked, "cleanup and replay refused"):
+            events.verify_reports(self.root, "grok", rid)
+        self.assertEqual(list((self.root / "evidence" / rid).glob("*.report.json")), [])
+
+    def test_evidence_concurrent_publication_is_idempotent(self):
+        rid, _, report = self.evidence_fixture()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: events.publish_report(self.root, "grok", rid, report), range(2)))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(events.verify_reports(self.root, "grok", rid), [results[0]["reference"]])
+
+    def test_evidence_rejects_wrong_invocation_and_changed_content(self):
+        rid, _, report = self.evidence_fixture()
+        with self.assertRaises(events.Blocked):
+            events.publish_report(self.root, "muse", rid, report)
+        reference = events.publish_report(self.root, "grok", rid, report)
+        path = self.root / "evidence" / rid / (reference["report_sha256"] + ".report.json")
+        row = json.loads(path.read_text())
+        row["report_text"] += "changed"
+        path.write_text(json.dumps(row))
+        with self.assertRaisesRegex(events.Blocked, "content changed"):
+            events.verify_reports(self.root, "grok", rid)
+
+    def test_evidence_changed_source_is_not_sealed(self):
+        rid, _, report = self.evidence_fixture()
+        original_snapshot = events.snapshot
+        def changing_snapshot(path, kind):
+            result = original_snapshot(path, kind)
+            if Path(path) == report:
+                with report.open("a") as output:
+                    output.write("late output")
+            return result
+        with patch.object(events, "snapshot", side_effect=changing_snapshot):
+            with self.assertRaisesRegex(events.Blocked, "changed during publication"):
+                events.publish_report(self.root, "grok", rid, report)
+
+    def test_evidence_missing_publication_prevents_terminal_success(self):
+        rid, _, _ = self.evidence_fixture()
+        with patch.dict(os.environ, {"AI_REVIEW_EVENT_DIR": str(self.root)}), \
+                patch.object(sys, "argv", ["events", "finish", "grok", rid, "0"]):
+            with self.assertRaises(events.Blocked):
+                events.main()
+        self.assertEqual([json.loads(line)["event"] for line in self.ledger.read_text().splitlines()], ["started"])
+
+    def test_completed_invocation_cannot_gain_new_evidence_after_the_fact(self):
+        rid, _, report = self.evidence_fixture()
+        reference = events.publish_report(self.root, "grok", rid, report)
+        with patch.dict(os.environ, {"AI_REVIEW_EVENT_DIR": str(self.root)}), \
+                patch.object(sys, "argv", ["events", "finish", "grok", rid, "0"]):
+            events.main()
+        self.assertEqual(events.verify_reports(self.root, "grok", rid), [reference["reference"]])
+        with self.assertRaisesRegex(events.Blocked, "cannot be rewritten"):
+            events.publish_report(self.root, "grok", rid, report)
+
+    def test_interruption_provenance_does_not_invent_actor_or_remote_state(self):
+        for source in ("user-cancellation", "scheduler-interruption", "timeout", "process-death", "unknown"):
+            row = events.provenance({"source": source})
+            self.assertEqual(row["source"], source)
+            self.assertEqual(row["actor_class"], "unknown")
+            self.assertEqual(row["last_proven_provider_state"], "unknown")
+            self.assertIsNone(row["paid_work_may_exist"])
+        with self.assertRaises(events.Blocked):
+            events.provenance({"private_prompt": "DO_NOT_COPY"})
 
     def test_record_candidate_preserves_observed_head(self):
         row = self.invocation()
