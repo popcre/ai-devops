@@ -405,6 +405,7 @@ check "configured_timeout_remains_bounded" "test '$TIMEOUT_ELAPSED' -lt '$TIMEOU
 check "timed_out_paid_work_remains_blocked" "test -f '$TIMEOUT_LOCK/remote-uncertain' && printf '%s' '$TIMED_OUT' | grep -q 'Do not retry'"
 TIMEOUT_WORK="$(cat "$TIMEOUT_LOCK/work_id")"
 TIMEOUT_FENCE_HASH="$(sha256sum "$TIMEOUT_LOCK/remote-uncertain")"
+TIMEOUT_EVENTS_HASH="$(sha256sum "$AI_REVIEW_EVENT_DIR/events.jsonl")"
 (cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure.json" 2> "$TMP/local-failure.err"; LOCAL_FAILURE_RC=$?
 check "local_timeout_has_exact_nonzero_invocation_proof_without_remote_completion" "test '$LOCAL_FAILURE_RC' -eq 0 && jq -e '.failure_code==\"wrapper_terminal_failure\" and .local_reason==\"local_timeout\" and .wrapper_exit_code==1 and .remote_completion==\"unconfirmed\" and .remote_cancellation==\"unconfirmed\" and .authorization==\"none\"' '$TMP/local-failure.json'"
 (cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/local-failure-repeat.json" 2>/dev/null
@@ -426,6 +427,22 @@ cat "$TMP/original-timeout-stderr" > "$TIMEOUT_LOCK/local-stderr"
 mkdir "$TMP/successful-event"
 jq -c --arg run "$(cat "$TIMEOUT_LOCK/event-run-id")" 'if .run_id==$run and .event=="finished" then .exit_code=0|.wrapper_exit_code=0 else . end' "$AI_REVIEW_EVENT_DIR/events.jsonl" > "$TMP/successful-event/events.jsonl"
 check "local_failure_cannot_reclassify_a_successful_wrapper_invocation" "! (cd '$OTHER' && AI_REVIEW_EVENT_DIR='$TMP/successful-event' bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+mv "$TIMEOUT_LOCK/event-run-id" "$TMP/legacy-absent-event"
+mv "$TIMEOUT_LOCK/local-failure.json" "$TMP/legacy-absent-receipt"
+(cd "$OTHER" && bash "$SCRIPT" failure "$TIMEOUT_WORK") > "$TMP/legacy-local-wait.json" 2> "$TMP/legacy-local-wait.err"; LEGACY_WAIT_RC=$?
+check "legacy_exact_diagnostic_proves_only_local_wait_and_retains_unknown_exits" "test '$LEGACY_WAIT_RC' -eq 0 && jq -e '.proof_kind==\"recorded-local-wait\" and .local_wait==\"deadline-ended\" and .event_run_id==null and .event_link==\"absent\" and .outer_wrapper_exit==\"unconfirmed\" and .local_process_exit==\"unconfirmed\" and .remote_completion==\"unconfirmed\" and .governed_artifact==\"not-checked\" and .authorization==\"none\"' '$TMP/legacy-local-wait.json'"
+LEGACY_DIAGNOSTIC="$(find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -name "$TIMEOUT_WORK.json" -print -quit)"
+cp "$LEGACY_DIAGNOSTIC" "$TMP/original-legacy-diagnostic"
+jq '.head="0000000000000000000000000000000000000000"' "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+check "legacy_local_wait_refuses_a_different_head" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+jq '.source_digest="0000000000000000000000000000000000000000000000000000000000000000"' "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+check "legacy_local_wait_refuses_a_different_source_fingerprint" "! (cd '$OTHER' && bash '$SCRIPT' failure '$TIMEOUT_WORK')"
+cat "$TMP/original-legacy-diagnostic" > "$LEGACY_DIAGNOSTIC"
+mv "$TMP/legacy-absent-event" "$TIMEOUT_LOCK/event-run-id"
+mv "$TMP/legacy-absent-receipt" "$TIMEOUT_LOCK/local-failure.json"
+check "legacy_observation_never_releases_original_paid_fence" "test '$TIMEOUT_FENCE_HASH' = \"\$(sha256sum '$TIMEOUT_LOCK/remote-uncertain')\""
+check "local_failure_inspection_creates_no_new_provider_invocation" "test '$TIMEOUT_EVENTS_HASH' = \"\$(sha256sum '$AI_REVIEW_EVENT_DIR/events.jsonl')\""
+if [ "$LEGACY_WAIT_RC" -ne 0 ]; then cat "$TMP/legacy-local-wait.err" >&2; fi
 if [ "${AI_GROK_TIMEOUT_TESTS_ONLY:-0}" = 1 ]; then
   printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
 fi

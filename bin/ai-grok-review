@@ -649,11 +649,66 @@ record_local_failure() { # DIR SUPERVISOR_RC OUTPUT; never establishes remote co
   [ ! -s "$dir/local-stderr" ] || note "  Private diagnostic retained at: $dir/local-stderr"
 }
 
+legacy_local_wait_failure() { # DIR WORK_ID; structured evidence, not inferred exit
+  local dir="$1" work="$2" repo source caller session field diagnostic='' candidate marker snapshot='' digest patch_hash
+  local lifecycle="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+  local sandboxes="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
+  for field in work_id source source_identity caller session; do
+    [ -f "$dir/$field" ] && [ ! -L "$dir/$field" ] || die 'legacy work identity is missing or unsafe.'
+  done
+  repo="$(cat "$dir/source")"; source="$(cat "$dir/source_identity")"
+  caller="$(cat "$dir/caller")"; session="$(cat "$dir/session")"
+  [ "$(cat "$dir/work_id")" = "$work" ] && [ "$caller" = "$CALLER" ] && valid_name "$session" || die 'legacy local wait belongs to another caller/work.'
+  [[ "$source" =~ ^[0-9a-f]{40}:[0-9a-f]{64}:[0-9a-f]{64}$ ]] || die 'legacy source contract is malformed.'
+  [ "$(cd "$repo" && pwd -P)" = "$(cd "$(repo_root)" && pwd -P)" ] || die 'legacy local wait belongs to another repository.'
+  for candidate in "$lifecycle"/diagnostics/*/grok/"$caller/$work.json"; do
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    [ -z "$diagnostic" ] || die 'multiple original local wait diagnostics are ambiguous.'
+    diagnostic="$candidate"
+  done
+  [ -n "$diagnostic" ] || die 'no authoritative original local wait diagnostic exists.'
+  jq -e --arg work "$work" --arg caller "$caller" --arg session "$session" --arg repo "$repo" --arg head "${source%%:*}" '
+    def norm: gsub("\\\\";"/") | (if test("^/[A-Za-z]/") then .[1:2]+":"+.[2:] else . end) |
+      if test("^[A-Za-z]:/") then (.[0:1]|ascii_downcase)+.[1:] else . end;
+    .schema_version==1 and .provider=="grok" and .run_id==$work and .caller==$caller and
+    .session_id==$session and (.repository_root|norm)==($repo|norm) and .head==$head and
+    (.source_digest|test("^[0-9a-f]{64}$")) and .launch_summary.last_observation_type=="provider-started" and
+    .terminal_summary.phase=="terminal" and .terminal_summary.last_observation_type=="provider-deadline" and
+    .terminal_summary.wrapper_exit_code==124 and .terminal_summary.deadline_kind=="wrapper-timeout" and
+    .terminal_summary.failure_class=="timed-out" and .terminal_summary.provider_terminal_reason==null and
+    .terminal_summary.cancellation.confirmation=="unconfirmed"
+    ' "$diagnostic" >/dev/null || die 'original diagnostic does not prove this exact local wait deadline.'
+  digest="$(jq -r .source_digest "$diagnostic")"; patch_hash="${source#*:}"; patch_hash="${patch_hash%%:*}"
+  for candidate in "$sandboxes/grok-$session-"*; do
+    marker="$candidate/.ai-review-sandbox"
+    [ -d "$candidate" ] && [ ! -L "$candidate" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || continue
+    [ "$(head -n 1 "$marker")" = "$(cd "$repo" && pwd -P)" ] || continue
+    grep -qx "source_digest=$digest" "$marker" || continue
+    [ "$(git -C "$candidate" rev-parse HEAD 2>/dev/null)" = "${source%%:*}" ] || continue
+    field="$candidate/.ai-review-grok-$session/patch.diff"
+    [ -f "$field" ] && [ ! -L "$field" ] && [ "$(sha256sum "$field" | awk '{print $1}')" = "$patch_hash" ] || continue
+    [ -z "$snapshot" ] || die 'multiple original source snapshots are ambiguous.'
+    snapshot="$candidate"
+  done
+  [ -n "$snapshot" ] || die 'original local wait source fingerprint has no matching retained snapshot.'
+  jq --arg source "$source" --arg proof "$(sha256sum "$diagnostic" | awk '{print $1}')" '
+    {schema_version:1,provider:"grok",failure_code:"wrapper_terminal_failure",proof_kind:"recorded-local-wait",
+     work_id:.run_id,caller:.caller,session:.session_id,repository:.repository_root,head:.head,
+     source_identity:$source,source_digest:.source_digest,diagnostic_sha256:$proof,
+     local_wait:"deadline-ended",local_wait_code:124,event_run_id:null,event_link:"absent",
+     outer_wrapper_exit:"unconfirmed",local_process_exit:"unconfirmed",remote_completion:"unconfirmed",
+     remote_cancellation:"unconfirmed",provider_fence:"retained",authorization:"none",governed_artifact:"not-checked"}
+    ' "$diagnostic"
+}
+
 cmd_failure() { # exact WORK_ID; read-only evidence inspection, never paid recovery
   local work="$1" dir run events base receipt rows repo source caller session
   [[ "$work" =~ ^[0-9a-f]{32}$ ]] || die 'failure requires the exact 32-character work ID from list.'
   dir="$(work_lock_path "$work")"; receipt="$dir/local-failure.json"
   [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$dir/remote-uncertain" ] && [ ! -L "$dir/remote-uncertain" ] || die 'exact retained paid fence is missing or unsafe.'
+  if [ ! -e "$dir/event-run-id" ] && [ ! -L "$dir/event-run-id" ] && [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+    legacy_local_wait_failure "$dir" "$work"; return $?
+  fi
   for base in event-run-id work_id source source_identity caller session local-failure.json local-stdout local-stderr; do
     [ -f "$dir/$base" ] && [ ! -L "$dir/$base" ] || die 'authoritative local failure binding is missing; historical timeout text cannot supply it.'
   done

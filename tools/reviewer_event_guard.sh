@@ -57,6 +57,8 @@ reviewer_event_cleanup_allowed(){
 
 reviewer_event_guard(){
   local provider="$1" wrapper="$2"; shift 2
+  # Exact local-failure inspection does not submit or finalize provider work.
+  [ "$provider:${1:-}" != grok:failure ] || return 0
   case "${1:-}" in
     doctor) [ "${2:-}" = --live ] || return 0;;
     ''|-h|--help|help|--version|list|show|status|logs|result|path|transcript) return 0;;
