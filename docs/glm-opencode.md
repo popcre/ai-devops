@@ -172,6 +172,7 @@ ai-glm transcript <name>        # full ordered conversation
 ai-glm diff <name>              # OpenCode's own diff for the session
 ai-glm abort <name>             # stop the exact active review or implementation turn
 ai-glm delete <name>            # clear a review or a terminal implementation record
+ai-glm prune                    # delete review sessions idle past retention (default 24h)
 ai-glm doctor                   # full PASS/WARN/FAIL check, nonzero on failure
 ai-glm server status|start|stop|restart
 ```
@@ -185,6 +186,34 @@ Named session creation is locked across the full check, server create, and local
 metadata write. Two same-name calls cannot create an untracked duplicate. On Windows,
 restart waits up to 30 seconds for loopback port 4096 to become free, starts the task
 only after proof, and then waits for health instead of relying on a fixed sleep.
+
+Review sessions are retired automatically. Each review owns a private sandbox that
+OpenCode registers as a project directory, and OpenCode 1.18 re-checks every
+registered directory on the thread that answers HTTP whenever a new review directory
+boots. Governed reviews never call `delete`, so by 2026-09-11 edge-dev held ~400 of
+them and `/global/health` stopped answering for minutes at a time (median refresh
+0.8s under 50 directories, 12s over 300, peaks of 25 minutes under concurrency).
+`ai-glm new` now first retires up to `AI_GLM_PRUNE_BATCH` (5, a positive whole
+number) review sessions idle longer than `AI_GLM_REVIEW_RETENTION_HOURS` (24), and
+`doctor` runs a full prune. The batch is small on purpose: OpenCode boots a session's
+directory instance to delete it (about a second each), so a large batch would slow the
+review that triggered it. A retired review loses its server session, sandbox and record,
+exactly like `delete`. Idle means no activity, poll, provider progress or turn start in
+the window; a locked session is never touched (prune does not reclaim locks, even a dead
+owner's), and retention must exceed the turn timeout. A review sandbox is named by
+repository and session name, not caller, so prune leaves it alone while another caller's
+same-name session holds its lock (the whole review is kept) or still has a record (only
+this caller's session and record go). That final decision is made while holding the
+sandbox's own build lock, which every snapshot build needs, so a same-name session
+cannot start in between. The lock and checks come before the server session is deleted:
+a sandbox being built leaves session and record untouched for a later prune, and once the
+session is deleted its record always goes (a sandbox that will not delete is retried by the
+orphan sweep), so prune never strands a record without its session. An interrupt stops
+prune at once and releases the build lock on the way out. The orphan sweep leaves every
+sandbox alone while any session record cannot be read, since that record may own one.
+Nothing is pruned while the server is down. The first backlog clear on edge-dev removed 401 reviews; `/global/health` kept
+answering throughout (median 0.5s, slowest 11.5s over 18 samples).
+Do not fix a health stall by raising health timeouts; check `ai-glm list` size first.
 
 Scoped implementation:
 ```bash

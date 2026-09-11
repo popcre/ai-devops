@@ -10,6 +10,7 @@
 #   ai-glm implement <name> [...]                              one-shot write job in a throwaway clone
 #   ai-glm list | show <name> | transcript <name> | diff <name>
 #   ai-glm abort <name> | delete <name>
+#   ai-glm prune                                               delete reviews idle past retention
 #   ai-glm doctor
 #   ai-glm server status|start|stop|restart
 #
@@ -1078,6 +1079,10 @@ cmd_new() {
   rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
+  # Every new review registers one more directory with the server; retire a bounded
+  # batch of idle ones first so the registered set cannot grow without limit.
+  prune_batch_valid || die "AI_GLM_PRUNE_BATCH must be a positive whole number (got '$PRUNE_BATCH')."
+  ( cmd_prune "$PRUNE_BATCH" ) >/dev/null 2>&1 || true
   lock="$(lock_path "$rid" "$name")"
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
@@ -1727,6 +1732,177 @@ cmd_delete() {
   note "deleted session: $1"
 }
 
+# --------------------------------------------------------------------------------
+# Review retention. Governed reviews start sessions and never delete them, and each
+# review owns a private sandbox that OpenCode registers as a project directory.
+# OpenCode 1.18 re-checks EVERY registered directory synchronously whenever a new
+# review directory boots, and runs snapshot gc per directory instance, on the same
+# thread that answers HTTP. With ~400 retained reviews the server stopped answering
+# /global/health for minutes at a time (measured on edge-dev 2026-09-11: median
+# directory refresh 0.8s under 50 directories, 12s over 300, peaks of 25 minutes
+# under concurrent reviews). Deleting idle reviews keeps that set bounded; a longer
+# health timeout would only hide the stall.
+# --------------------------------------------------------------------------------
+RETENTION_HOURS="${AI_GLM_REVIEW_RETENTION_HOURS:-24}"
+# Deleting a session makes OpenCode boot that session's directory instance (about a
+# second each, plus a snapshot gc a minute later), so `new` retires only a small batch;
+# at ~30 reviews a day that keeps pace. `ai-glm prune` and doctor clear any backlog.
+PRUNE_BATCH="${AI_GLM_PRUNE_BATCH:-5}"
+prune_batch_valid() { case "$PRUNE_BATCH" in ''|0*|*[!0-9]*) return 1 ;; esac; }
+GLM_SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
+
+newest_epoch() { # newest_epoch PATH -> newest of the file mtime and every recorded timestamp
+  local t e newest
+  newest="$(stat -c %Y "$1" 2>/dev/null || echo 0)"
+  while IFS= read -r t; do
+    e="$(date -u -d "$t" +%s 2>/dev/null || echo 0)"
+    if [ "$e" -gt "$newest" ]; then newest="$e"; fi
+  done < <(jq -r '[.last_activity_at, .last_poll_at, .provider_progress_at, .remote_turn.started_at, .updated_at, .created_at][] | select(type=="string")' "$1" 2>/dev/null || true)
+  printf '%s' "$newest"
+}
+
+prune_claim() { # prune_claim LOCK -> 0 claimed; never waits and never reclaims
+  # Reclaiming a dead owner's lock here (remove, then create) races lock_acquire doing
+  # the same and could hand one review to two processes. Any existing lock is left for
+  # the session's own next use, and the review is reported as kept.
+  local d="$1"
+  mkdir -p "$(dirname "$d")"
+  mkdir "$d" 2>/dev/null || return 1
+  printf '%s' "$$" > "$d/pid"
+}
+
+sandbox_lock_by_other() { # RID CALLER NAME -> 0 when another caller holds this name's lock
+  local l
+  for l in "$STATE_DIR"/locks/"$1"--*--"$3".lock.d; do
+    [ -d "$l" ] && [ "${l##*/}" != "$1--$2--$3.lock.d" ] && return 0
+  done
+  return 1
+}
+sandbox_record_by_other() { # RID CALLER NAME -> 0 when another caller has a record for this name
+  local m
+  for m in "$STATE_DIR"/sessions/"$1"/*--"$3".json; do
+    [ -f "$m" ] && [ "${m##*/}" != "$2--$3.json" ] && [ "$(jq -r '.name // empty' "$m" 2>/dev/null)" = "$3" ] && return 0
+  done
+  return 1
+}
+
+PRUNE_BUILD_LOCK=""
+sandbox_build_claim() { # STAGE -> 0 holding ai-review-sandbox's own build lock (STAGE.lock); never waits
+  mkdir "$1.lock" 2>/dev/null || return 1
+  PRUNE_BUILD_LOCK="$1.lock"
+}
+sandbox_build_release() { # forget first, so an interrupt never removes a lock twice
+  local l="$PRUNE_BUILD_LOCK"; PRUNE_BUILD_LOCK=""
+  [ -z "$l" ] || rmdir "$l" 2>/dev/null || true
+}
+sandbox_references() { # -> boundary basenames of every record; 1 when any record cannot be read
+  local metas=("$STATE_DIR"/sessions/*/*.json) out
+  [ -e "${metas[0]:-}" ] || return 0
+  out="$(jq -r '.boundary_root // empty' "${metas[@]}" 2>/dev/null)" || return 1
+  printf '%s\n' "$out" | sed 's#.*[/\\]##'
+}
+
+prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned), 2 not due
+  local mp="$1" cutoff="$2" name caller rid sid lock boundary root
+  [ "$(jq -r '.type // empty' "$mp" 2>/dev/null)" = review ] || return 2
+  [ "$(newest_epoch "$mp")" -lt "$cutoff" ] || return 2
+  name="$(jq -r '.name // empty' "$mp")"; caller="$(jq -r '.caller // empty' "$mp")"
+  rid="$(basename "$(dirname "$mp")")"; sid="$(jq -r '.opencode_session_id // empty' "$mp")"
+  if ! valid_name "$name" || [ "$(basename "$mp")" != "$caller--$name.json" ]; then
+    warn "review record does not match its own path; left untouched: $mp"; return 1
+  fi
+  lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"
+  prune_claim "$lock" || { warn "review '$name' ($caller) is locked ($(cat "$lock/pid" 2>/dev/null || echo 'owner unknown')); left untouched."; return 1; }
+  # Re-read under the lock: a turn that started while we were claiming wins.
+  if [ "$(newest_epoch "$mp")" -ge "$cutoff" ]; then lock_release "$lock"; return 2; fi
+  # The sandbox is named by repository and session name only, so another caller's
+  # same-name session shares it. A lock held by that caller means it is in use now.
+  if sandbox_lock_by_other "$rid" "$caller" "$name"; then
+    lock_release "$lock"; warn "review '$name' shares its sandbox with another caller's locked session; left untouched."; return 1
+  fi
+  boundary="$(jq -r '.boundary_root // empty' "$mp")"; root="$(jq -r '.repository_root // empty' "$mp")"
+  local remove_sandbox=0 rc=0
+  if [ -n "$boundary" ] && [ -e "$boundary" ] && [ -n "$SANDBOX_BIN" ] &&
+     [ "$(cd "$boundary" && pwd -P)" != "$(cd "$root" 2>/dev/null && pwd -P || true)" ]; then
+    # Every snapshot publish needs the sandbox build lock and happens under that caller's
+    # own lock, held until its record exists. Holding the build lock from here to removal
+    # means no same-name session can start in between. Claim it before deleting anything,
+    # so a refusal leaves session and record together.
+    if ! sandbox_build_claim "$boundary"; then
+      lock_release "$lock"; warn "review sandbox for '$name' is being built; left untouched: $boundary"; return 1
+    fi
+    if sandbox_lock_by_other "$rid" "$caller" "$name" || sandbox_record_by_other "$rid" "$caller" "$name"; then
+      : # shared with another caller's session: retire only this caller's side
+    else
+      remove_sandbox=1
+    fi
+  fi
+  if [ -n "$sid" ] && ! delete_exact_server_session "$sid"; then
+    sandbox_build_release; lock_release "$lock"; warn "server session $sid for '$name' could not be deleted (HTTP $HTTP_STATUS); record kept."; return 1
+  fi
+  # The server session is gone, so the record goes too: a record without its session
+  # can never be continued. A sandbox that will not delete is left for the orphan sweep.
+  if [ "$remove_sandbox" = 1 ] && ! "$SANDBOX_BIN" remove-recorded "glm-$name" "$boundary" >/dev/null 2>&1; then
+    warn "review sandbox for '$name' could not be removed; the orphan sweep will retry: $boundary"; rc=1
+  fi
+  sandbox_build_release
+  rm -f "$mp"
+  lock_release "$lock"
+  return "$rc"
+}
+
+cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
+  local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced=""
+  case "$limit" in ''|*[!0-9]*) die "the prune removal limit must be a whole number (0 means no limit)." ;; esac
+  case "$RETENTION_HOURS" in ''|*[!0-9]*) die "AI_GLM_REVIEW_RETENTION_HOURS must be a whole number of hours." ;; esac
+  [ $((RETENTION_HOURS * 3600)) -gt "$TIMEOUT" ] ||
+    die "review retention (${RETENTION_HOURS}h) must be longer than the turn timeout (${TIMEOUT}s), or a running turn could be pruned."
+  # Server sessions and local records leave together; never orphan either side.
+  server_up || { warn "the GLM server is not answering; nothing was pruned."; return 1; }
+  cutoff=$(( $(date +%s) - RETENTION_HOURS * 3600 ))
+  # A build lock left behind would make every later snapshot of that name refuse to build.
+  # An interrupt must stop here: releasing the lock and carrying on would delete unguarded.
+  trap 'sandbox_build_release' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  shopt -s nullglob
+  for mp in "$STATE_DIR"/sessions/*/*.json; do
+    [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
+    rc=0; prune_review "$mp" "$cutoff" || rc=$?
+    case "$rc" in 0) removed=$((removed + 1)) ;; 1) kept=$((kept + 1)) ;; esac
+  done
+  # Sandboxes whose record is already gone (an interrupted new, or a hand-removed
+  # record) register directories just the same. Only managed, tagged, idle ones.
+  # An unreadable record may still own a sandbox, so its presence stops the sweep.
+  if [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ] && ! referenced="$(sandbox_references)"; then
+    kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."
+  elif [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ]; then
+    for d in "$GLM_SANDBOX_DIR"/glm-*; do
+      [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
+      case "${d##*/}" in *.building.*) continue ;; esac
+      tag="$(printf '%s' "${d##*/}" | sed -nE 's/^(glm-.+)-[0-9a-f]{12}$/\1/p')"
+      [ -n "$tag" ] && [ -d "$d" ] || continue
+      printf '%s\n' "$referenced" | grep -Fqx "${d##*/}" && continue
+      compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null && continue   # a session is starting
+      [ "$(stat -c %Y "$d" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
+      [ "$(stat -c %Y "$d/AI-REVIEW-SANDBOX.md" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
+      sandbox_build_claim "$d" || continue   # being built right now
+      # Re-check under the build lock: a session that locked or recorded this name since wins.
+      if ! referenced="$(sandbox_references)"; then
+        sandbox_build_release; kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."; break
+      fi
+      if compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null || printf '%s\n' "$referenced" | grep -Fqx "${d##*/}"; then
+        sandbox_build_release; continue
+      fi
+      if "$SANDBOX_BIN" remove-recorded "$tag" "$d" >/dev/null 2>&1; then removed=$((removed + 1))
+      else kept=$((kept + 1)); warn "unrecorded review sandbox could not be removed: $d"; fi
+      sandbox_build_release
+    done
+  fi
+  note "pruned $removed idle GLM review item(s) older than ${RETENTION_HOURS}h; $kept kept for a stated reason."
+  [ "$kept" -eq 0 ]
+}
+
 reconcile_implementation_record() { # conservative dead-owner recovery; never trusts PID alone
   local mp="$1" root rid name caller state pid clone sid lock lock_pid clone_state=none session_state=none
   [ "$(jq -r '.type // empty' "$mp" 2>/dev/null)" = implementation ] || return 0
@@ -2085,6 +2261,11 @@ cmd_doctor() {
   else
     printf 'WARN  ambiguous implementation job state was preserved; inspect ai-glm list/show\n'
   fi
+  if server_up && ( cmd_prune ) >/dev/null 2>&1; then
+    printf 'PASS  idle review sessions older than %sh pruned\n' "$RETENTION_HOURS"
+  else
+    printf 'WARN  some idle review sessions were kept; run: ai-glm prune\n'
+  fi
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"
   else
@@ -2100,7 +2281,7 @@ cmd_doctor() {
 # Argument parsing. Overrides that would break cache stability or the safety model
 # are rejected explicitly rather than ignored.
 # --------------------------------------------------------------------------------
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 main() {
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
@@ -2141,6 +2322,7 @@ case "$CMD" in
   diff)       cmd_diff "$ARG" ;;
   abort)      cmd_abort "$ARG" ;;
   delete)     cmd_delete "$ARG" ;;
+  prune)      cmd_prune ;;
   doctor)     cmd_doctor ;;
   server)     cmd_server "$ARG" ;;
   -h|--help|help) usage ;;
