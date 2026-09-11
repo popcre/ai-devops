@@ -385,7 +385,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Classification follows behavior, not directory or filename: plans and declarative discoverability pointers use the lightweight lane; executable instructions, behavior-changing rules, workflows, scripts, tests, configuration, and migrations retain targeted or full code checks.
 - Raw transcripts, secrets, licensed data, and private evidence stay outside public repositories.
 - Update this STATUS table whenever implementation changes reality.
-- At every phase boundary, use a fresh session and re-read all remaining downstream phases.
+- At every phase boundary, use a fresh session, re-read all remaining downstream phases through plan-end, and report any assumption, interface, identifier, decision, or evidence drift before handing off or starting the next phase.
 
 ## 12. Access and environment
 
