@@ -494,7 +494,7 @@ def reconcile_owner(directory, provider, owner, metadata, report):
     require(original is None or caller == original["caller"], "implementation caller differs from original invocation")
     require(name and caller and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base or ""),
             "legacy implementation identity is incomplete")
-    require((meta.get("last_terminal_state") in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
+    require((meta.get("provider_terminal_state", meta.get("last_terminal_state")) in {"completed", "failed", "cancelled", "timed-out", "usage-limit", "turn_limit_cancelled"}) or
             meta.get("status") in {"completed", "failed", "aborted"}, "legacy implementation has no terminal outcome proof")
     report = physical(report)
     _, report_data = snapshot(report, "log")

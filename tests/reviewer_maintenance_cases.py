@@ -859,6 +859,10 @@ wait "$job"
         report = self.root / "qwen-work-synthetic.md"
         report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
         if linked:
+            outcome = json.loads(metadata.read_text())
+            outcome.update(provider_terminal_state="completed", last_terminal_state="report-publication-incomplete",
+                           recovery_reason="report-publication-incomplete")
+            metadata.write_text(json.dumps(outcome))
             original = self.invocation(rid="f" * 32, provider="qwen", finish=False)
             events.bind_owner(self.root, "qwen", original["run_id"], owner)
             events.require_report(self.root, "qwen", original["run_id"])
