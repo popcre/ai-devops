@@ -115,6 +115,7 @@ case "${1:-}" in
     printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
     [ "${MUSE_STUB_MODE:-}" = mixedstart ] && printf '{"type":"step_start","sessionID":"ses_other","part":{"type":"step-start"}}\n'
     [ -z "${MUSE_STUB_TOUCH:-}" ] || printf changed >> "$MUSE_STUB_TOUCH"
+    [ -z "${MUSE_STUB_MOVE_TARGET:-}" ] || git -C "$MUSE_STUB_MOVE_TARGET" update-ref refs/heads/review-target HEAD
     [ -z "${MUSE_STUB_PREAMBLE:-}" ] || printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$MUSE_STUB_PREAMBLE"
     text="${MUSE_STUB_TEXT:-$([ -n "$prior" ] && echo remembered || echo first)}"
     printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$text"
@@ -205,6 +206,12 @@ rm -f -- "$MUSE_STAGING" "$MUSE_STAGING.held"
 rm -rf -- "$REPO/.ai/decoy"
 check 'doctor rejects unknown options' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' doctor --unknown\""
 check 'zero heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'wrong source head is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-head --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/identity-called'"
+check 'missing source base is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-base --base missing-source-target --prompt test\" && test ! -e '$TMP/identity-called'"
+git -C "$REPO" update-ref refs/heads/review-target HEAD^
+check 'target movement during paid response rejects acceptance' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MOVE_TARGET='$REPO' '$SCRIPT' new moved-target --base review-target --prompt test\" > '$TMP/moved-target.log' 2>&1 && grep -q source-target-moved '$TMP/moved-target.log'"
+check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
+git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
 check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
 check 'optional usage failure preserves successful paid response' "cd '$REPO' && eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_TOUCH='$TMP/usage-paid-count' '$SCRIPT' new usage-failure --prompt test\" > '$TMP/usage-failure.log' 2>&1 && grep -q usage-formatting-failed '$REPO'/.ai/reviews/muse-usage-failure-*.md && grep -q first '$TMP/usage-failure.log' && test \"\$(wc -c < '$TMP/usage-paid-count')\" -eq 7"
