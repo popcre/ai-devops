@@ -465,6 +465,13 @@ qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADE
   else printf 'provider-process-transport-failure'; fi
 }
 
+provider_content_filter() { # STREAM STDERR; typed provider errors, not review prose
+  local message
+  message="$(provider_api_error "$1" || true)"
+  printf '%s' "$message" | grep -Eq '(^|[^[:alnum:]_])DataInspectionFailed([^[:alnum:]_]|$)' && return 0
+  [ -s "$2" ] && grep -Eq '(\[API Error:|InternalError\.Algo\.).*DataInspectionFailed([^[:alnum:]_]|$)' "$2"
+}
+
 write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA [CLASS]
   local stream="$1" stderr="$2" provider_rc="$3" runtime_sha="$4" preloader_sha="$5" class="${6:-}"
   local repo dir stamp host file base terminal_exists=false terminal_subtype="" terminal_error=false returned=""
@@ -507,6 +514,10 @@ AWAIT_RESULT_REASON=""
 await_result() { # await_result FILE
   local f="$1"
   AWAIT_RESULT_REASON=""
+  if provider_content_filter "$f" "$f.err"; then
+    AWAIT_RESULT_REASON=content-filter
+    return 1
+  fi
   # run_turn synchronously waits for the provider process and records its exit
   # status before this function is called. Once that process has returned, no
   # later terminal record can appear; waiting again only hides the real stderr.
@@ -731,7 +742,9 @@ record_existing_review_recovery() { # META OUT REASON
   pending="${meta%.json}.pending.jsonl"
   cp "$out" "$pending" 2>/dev/null || : > "$pending"
   chmod 600 "$pending" 2>/dev/null || true
-  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .updated=$u' "$meta")"
+  if [ -f "$out.err" ]; then cp "$out.err" "$pending.stderr"; else : > "$pending.stderr"; fi
+  chmod 600 "$pending.stderr"
+  write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" --arg p "$pending" --arg r "$reason" '.status="recovery-required" | .failure_reason=$r | .recovery_stream=$p | .recovery_stderr=($p+".stderr") | .updated=$u' "$meta")"
 }
 cancel_plain_turn() {
   stop_run_turn
@@ -781,7 +794,11 @@ extract_answer() { # extract_answer FILE
   text="$(jq -r 'select(.type=="result" and .is_error==false) | .result // ""' "$1" 2>/dev/null | sed 's/\r$//' | sed '/^$/d')"
   local api_error; api_error="$(provider_api_error "$1" || true)"
   if [ -n "$api_error" ]; then
-    ANSWER_DEFECT="the provider refused the call and returned no review: $api_error"
+    if printf '%s' "$api_error" | grep -q 'DataInspectionFailed'; then
+      ANSWER_DEFECT="content-filter: the provider refused the call and returned no review"
+    else
+      ANSWER_DEFECT="provider-unavailable: the provider refused the call and returned no review"
+    fi
   elif [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
     ANSWER_DEFECT="the provider produced no answer text at all (it ended mid-run)"
   elif [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then
@@ -1121,12 +1138,14 @@ record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
   pending="${meta%.json}.pending.jsonl"; sid="$(session_id_from "$out")"; [ -n "$sid" ] || sid=unavailable; now="$(date -u +%FT%TZ)"
   cp "$out" "$pending" 2>/dev/null || : > "$pending"
   chmod 600 "$pending" 2>/dev/null || true
+  if [ -f "$out.err" ]; then cp "$out.err" "$pending.stderr"; else : > "$pending.stderr"; fi
+  chmod 600 "$pending.stderr"
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" \
     --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg review_dir "$review_dir" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" \
     --arg packet "$PACKET_HASH" --arg tree "$WORKING_TREE_HASH" --arg pending "$pending" --arg reason "$reason" --arg now "$now" \
     '{qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"review",status:"recovery-required",model:$model,
       review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,
-      recovery_stream:$pending,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
+      recovery_stream:$pending,recovery_stderr:($pending+".stderr"),failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
 LIFECYCLE_PRIOR_TREE=""
@@ -1134,7 +1153,9 @@ LIFECYCLE_PRIOR_TREE=""
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
   local out="$1" err="$2" reason="$3"
   [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
-  if [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
+  if provider_content_filter "$out" "$err"; then
+    printf 'content-filter'
+  elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
     printf 'turn_limit_cancelled'
   elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
@@ -1180,6 +1201,7 @@ mark_preserved() { # mark_preserved OWNER
 
 safe_report_detail() { # safe_report_detail TERMINAL_STATE
   case "$1" in
+    content-filter) printf 'Qwen rejected the request with provider content inspection; no review was accepted.' ;;
     usage-limit) printf 'Qwen reported a usage or billing limit.' ;;
     turn_limit_cancelled) printf 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.' ;;
     timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
@@ -1418,7 +1440,7 @@ start_session() { # start_session NAME MODE
     [ "$mode" != review ] || record_new_review_recovery "$meta" "$repo" "$name" "$workdir" "$out" "$LIFECYCLE_STATE"
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    note "  $(safe_report_detail "$LIFECYCLE_STATE")"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1443,8 +1465,8 @@ start_session() { # start_session NAME MODE
   # skip lifecycle_finalize and lose the run's own record of what happened.
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$mode" = review ] && [ "${FINISH_RC:-0}" = 0 ]; then
-    rm -f "$(jq -r '.recovery_stream // empty' "$meta")"
-    write_meta "$meta" "$(jq --arg sid "$sid" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=1' "$meta")"
+    rm -f "$(jq -r '.recovery_stream // empty' "$meta")" "$(jq -r '.recovery_stderr // empty' "$meta")"
+    write_meta "$meta" "$(jq --arg sid "$sid" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | del(.failure_reason,.recovery_stream,.recovery_stderr) | .updated=$u | .turns=1' "$meta")"
   fi
   lifecycle_finalize 0
   [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
@@ -1539,7 +1561,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     record_existing_review_recovery "$meta" "$out" "$LIFECYCLE_STATE"
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
-    [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
+    note "  $(safe_report_detail "$LIFECYCLE_STATE")"
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
   verify_returned_model "$out"
@@ -1553,8 +1575,8 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   FINISH_RC=0
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$FINISH_RC" = 0 ]; then
-    rm -f "$pending"
-    write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.status="active" | del(.failure_reason,.recovery_stream) | .updated=$u | .turns=(.turns+1)' "$meta")"
+    rm -f "$pending" "$pending.stderr"
+    write_meta "$meta" "$(jq --arg u "$(date -u +%FT%TZ)" '.status="active" | del(.failure_reason,.recovery_stream,.recovery_stderr) | .updated=$u | .turns=(.turns+1)' "$meta")"
     PLAIN_REVIEW_META=""; PLAIN_REVIEW_OUT=""
     rm -f "$pf" "$out" "$out.err"
   else

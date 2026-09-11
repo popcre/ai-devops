@@ -91,6 +91,15 @@ if (mode === 'tool-budget') { console.error('Run aborted: tool-call budget of 3 
 if (mode === 'wall-budget') { console.error('Run aborted: wall-clock budget of 900s exceeded (--max-wall-time).'); process.exit(55); }
 if (mode === 'turn-budget') { console.error('Reached max session turns for this session. Increase the number of turns by specifying maxSessionTurns in settings.json.'); process.exit(53); }
 if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
+if (mode.startsWith('content-filter')) {
+  const error = '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY API_KEY=synthetic-secret]';
+  if (mode === 'content-filter-stderr') { console.error(error); process.exit(1); }
+  if (mode === 'content-filter-assistant') {
+    console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:error}]}}));
+    console.log(JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,result:'## Verdict\nAPPROVE'}));
+  } else console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:error}));
+  process.exit(0);
+}
 if (mode === 'runtime-drift') fs.appendFileSync(path.join(process.env.AI_QWEN_SANITIZER_ROOT, 'lib', 'chunks', 'chunk-test.js'), '\n// live drift\n');
 if (mode === 'write') fs.writeFileSync('qwen.txt', 'qwen change\n');
 if (mode === 'mutate-review') fs.appendFileSync('a.txt', 'bad\n');
@@ -240,6 +249,19 @@ for budget_mode in tool-budget wall-budget turn-budget; do
     || bad "$budget_mode is immediately classified as turn_limit_cancelled"
 done
 check 'budget-limited recovery reports explain the typed terminal reason' "sed -n '/^safe_report_detail()/,/^}/p' '$SCRIPT' | grep -Fq 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.'"
+for filter_mode in content-filter-result content-filter-assistant content-filter-stderr; do
+  echo "$filter_mode" > "$TMP/mode"
+  FILTER_OUT="$(run new "$filter_mode" --prompt review 2>&1)"; FILTER_RC=$?
+  FILTER_META="$(find "$TMP/state/sessions" -name "codex--$filter_mode.json" -print -quit)"
+  check "$filter_mode refuses with exact content-filter reason" "test '$FILTER_RC' -ne 0 && printf '%s' \"\$FILTER_OUT\" | grep -q 'terminal reason: content-filter' && jq -e '.failure_reason==\"content-filter\" and .status==\"recovery-required\"' '$FILTER_META'"
+  check "$filter_mode keeps provider body private and retained" "! printf '%s' \"\$FILTER_OUT\" | grep -q PRIVATE_FILTER_BODY && grep -q PRIVATE_FILTER_BODY \"\$(jq -r .recovery_stream '$FILTER_META')\" \"\$(jq -r .recovery_stderr '$FILTER_META')\""
+done
+echo review > "$TMP/mode"
+run new filter-followup --prompt review >/dev/null 2>&1
+echo content-filter-stderr > "$TMP/mode"
+FILTER_OUT="$(run ask filter-followup --prompt followup 2>&1)"; FILTER_RC=$?
+FILTER_META="$(find "$TMP/state/sessions" -name 'codex--filter-followup.json' -print -quit)"
+check 'follow-up content filter preserves typed reason and private stderr' "test '$FILTER_RC' -ne 0 && jq -e '.failure_reason==\"content-filter\"' '$FILTER_META' && grep -q PRIVATE_FILTER_BODY \"\$(jq -r .recovery_stderr '$FILTER_META')\" && ! printf '%s' \"\$FILTER_OUT\" | grep -q PRIVATE_FILTER_BODY"
 echo review > "$TMP/mode"
 
 run new budget-followup --prompt review >/dev/null 2>&1
