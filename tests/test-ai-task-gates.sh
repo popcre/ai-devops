@@ -180,6 +180,12 @@ check 'a detached HEAD still classifies the working tree' \
 
 newrepo "$TMP/clean"
 check 'no changes at all allows the action' "rc 0 '$TMP/clean' check --before ship"
+check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/clean' check --before production"
+( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
+check 'a declared production task retains its production gate with no file change' \
+  "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)'"
+check 'a declared production task may enter its guarded production path' \
+  "rc 0 '$TMP/clean' check --before production"
 
 printf 'stale and corrupt intent state\n'
 newrepo "$TMP/stale"
@@ -237,6 +243,12 @@ check 'an owner request lifts a non-protected forbidden action' \
   "rc 0 '$TMP/gate' check --before review --owner-request 'Albert asked for a review'"
 check 'the owner request is recorded in the intent state' \
   "out '$TMP/gate' status | jq -e '[.overrides[].kind]|index(\"owner-request\")!=null'"
+( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null
+printf 'x\n' > "$TMP/gate/note.md"
+check 'a stronger declared class supplies the effective gates' \
+  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)'"
+rm -f "$TMP/gate/note.md"
+( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 mkdir -p "$TMP/gate/bin"; printf '#!/bin/sh\n' > "$TMP/gate/bin/ai-review-lifecycle"
 check 'a protected class cannot be owner-requested past a forbidden action' \
   "rc 3 '$TMP/gate' check --before production --owner-request 'please'"

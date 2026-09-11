@@ -346,16 +346,23 @@ cmd_explain(){
     esac
   done
   prepare "$base" "$paths_from"
-  local declared gate required forbidden line
+  local declared effective gate required forbidden line
   declared="$(state_field declared_class)"
-  gate="$(merged_gate "$IDENTITY" "$OBSERVED_CLASS" 2>/dev/null || true)"
+  effective="$OBSERVED_CLASS"
+  if [ -n "$declared" ]; then
+    valid_class "$declared" || fail_closed "recorded task class '$declared' is not a declared change class (stale or corrupt state)."
+    if [ "$OBSERVED_CLASS" = none ] || [ "${TG_RANK[$declared]}" -gt "$OBSERVED_RANK" ]; then
+      effective="$declared"
+    fi
+  fi
+  gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
   required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p' | paste -sd, -)"
 
   if [ "$as_json" = true ]; then
     printf '%s\n' "$(printf '%s\n' "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}" | jq -R -s --arg identity "$IDENTITY" \
       --arg resolved "$IDENTITY_RESOLVED" --arg worktree "$TOPLEVEL" --arg base "$BASE_REF" \
-      --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg policy "$POLICY_FILE" \
+      --arg observed "$OBSERVED_CLASS" --arg declared "$declared" --arg effective "$effective" --arg policy "$POLICY_FILE" \
       --arg required "$required" --arg forbidden "$forbidden" --arg count "$CHANGED_COUNT" '
       {schema_version:1,
        repository:$identity, identity_resolved:($resolved=="true"), worktree:$worktree,
@@ -363,6 +370,7 @@ cmd_explain(){
        changed_count:($count|tonumber),
        declared_class:(if $declared=="" then null else $declared end),
        observed_class:$observed,
+       effective_class:$effective,
        required_gates:(if $required=="" then [] else ($required|split(",")) end),
        forbidden_actions:(if $forbidden=="" then [] else ($forbidden|split(",")) end),
        changes:[splits("\n")|select(length>0)|split("\t")|{class:.[0],path:.[1]}]}')"
@@ -374,6 +382,7 @@ cmd_explain(){
   printf 'base             : %s\n' "${BASE_REF:-<none>}"
   printf 'declared class   : %s\n' "${declared:-<not declared>}"
   printf 'observed class   : %s (%s changed path(s))\n' "$OBSERVED_CLASS" "$CHANGED_COUNT"
+  printf 'effective class  : %s\n' "$effective"
   printf 'required gates   : %s\n' "${required:-<none>}"
   printf 'forbidden actions: %s\n' "${forbidden:-<none>}"
   if [ "$CHANGED_COUNT" -gt 0 ]; then
@@ -408,20 +417,26 @@ cmd_check(){
     esac
   fi
 
-  if [ "$OBSERVED_CLASS" = none ]; then
-    printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"
-    return 0
-  fi
-
-  local declared declared_rank protected
+  local declared declared_rank effective effective_rank protected
   declared="$(state_field declared_class)"
   if [ -z "$declared" ]; then
+    if [ "$OBSERVED_CLASS" = none ]; then
+      case "$action" in
+        deploy|database|infrastructure|production)
+          fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
+        *) printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"; return 0 ;;
+      esac
+    fi
     declared="$OBSERVED_CLASS"
     printf 'ai-task-gates: note: no task class was declared; using the observed class "%s".\n' "$OBSERVED_CLASS" >&2
   fi
   valid_class "$declared" || fail_closed "recorded task class '$declared' is not a declared change class (stale or corrupt state)."
   declared_rank="${TG_RANK[$declared]}"
-  protected="$(class_protected "$OBSERVED_CLASS")"
+  effective="$OBSERVED_CLASS"; effective_rank="$OBSERVED_RANK"
+  if [ "$effective" = none ] || [ "$declared_rank" -gt "$effective_rank" ]; then
+    effective="$declared"; effective_rank="$declared_rank"
+  fi
+  protected="$(class_protected "$effective")"
 
   # 1. Scope drift: the work grew past what was declared.
   if [ "$OBSERVED_RANK" -gt "$declared_rank" ]; then
@@ -445,24 +460,24 @@ cmd_check(){
 
   # 2. Forbidden action for the observed class.
   local gate forbidden required
-  gate="$(merged_gate "$IDENTITY" "$OBSERVED_CLASS")"
+  gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$gate" | sed -n 's/^forbidden\t//p')"
   required="$(printf '%s\n' "$gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     if [ "$protected" = true ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nThis cannot be overridden here. It needs Albert naming the exact resource and action.' \
-        "$action" "$OBSERVED_CLASS" "$IDENTITY")"
+        "$action" "$effective" "$IDENTITY")"
     fi
     if [ -z "$owner_request" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nIf Albert explicitly asked for it, re-run with --owner-request "<reason>".' \
-        "$action" "$OBSERVED_CLASS" "$IDENTITY" "${required:-<none>}")"
+        "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    state_record_override owner-request "$action" "$owner_request" "$OBSERVED_CLASS"
+    state_record_override owner-request "$action" "$owner_request" "$effective"
     printf 'ai-task-gates: "%s" allowed by explicit owner request: %s\n' "$action" "$owner_request"
     return 0
   fi
 
-  printf 'ai-task-gates: "%s" may start for a "%s" change in %s.\n' "$action" "$OBSERVED_CLASS" "$IDENTITY"
+  printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
   return 0
 }
