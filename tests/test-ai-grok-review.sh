@@ -669,6 +669,24 @@ check "usage line reports cached"      "printf '%s' \"\$ERR\" | grep -q 'cached:
 check "usage line reports cost"        "printf '%s' \"\$ERR\" | grep -q 'cost:'"
 check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.6'"
 
+cp "$TMP/fixture.json" "$TMP/usage-full.json"
+jq 'del(.usage, .total_cost_usd)' "$TMP/usage-full.json" > "$TMP/fixture.json"
+run new usage-unknown --prompt x >/dev/null 2>&1
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "missing usage is reported as unknown" "printf '%s' \"\$ERR\" | grep -q 'cached: unknown' && printf '%s' \"\$ERR\" | grep -Fq 'cost: \$unknown'"
+check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:0,cache_read_input_tokens:0} | .total_cost_usd=0' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep -q 'cached: 0' && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_usd={bad:true}' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
+check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "live doctor keeps malformed cost unknown" "run doctor --live | grep -Fq 'cost \$unknown'"
+jq '.usage={total_tokens:1e999,cache_read_input_tokens:1e999} | .total_cost_usd=1e999' "$TMP/usage-full.json" > "$TMP/fixture.json"
+OVERFLOW_OUT="$(run new usage-overflow --prompt x 2>&1)"; OVERFLOW_RC=$?
+check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+cp "$TMP/usage-full.json" "$TMP/fixture.json"
+
 # 11 ------------------------------------------------------------------------
 echo "== verdict_delimiter_extraction =="
 OUT="$(run new t7 --prompt x 2>/dev/null)"
@@ -757,7 +775,7 @@ else
   skip "Windows native fallback runtime test skipped on non-Windows"
   skip "Windows fallback-failure fail-closed test skipped on non-Windows"
 fi
-check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
+check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c '^    preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
 # on_paid_signal ordering: the interrupt path must record paid-work uncertainty
 # BEFORE it attempts the fallible process-tree stop. Both stop helpers are
 # replaced with functions that abort, so a marker can only exist if it was
@@ -920,10 +938,11 @@ poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask too
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+UNCERTAIN_PAID_CALLS="$(grep -c -- '--prompt-file' "$TMP/argv.txt")"
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -Eq 'exact Grok continuation|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -Eq 'continuation-turn collision|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
 run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
 check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"

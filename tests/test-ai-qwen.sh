@@ -78,6 +78,12 @@ if (child.status !== 0) process.exit(70);
 if (process.argv[2] === '--version') { console.log('0.21.11'); process.exit(0); }
 if (process.argv[2] === 'sessions') { console.log(JSON.stringify({sessionId:'qwen-session-1', filePath:path.join(root, 'transcript.jsonl')})); process.exit(0); }
 const mode = fs.existsSync(path.join(root, 'mode')) ? fs.readFileSync(path.join(root, 'mode'), 'utf8').trim() : 'review';
+fs.appendFileSync(path.join(root, 'provider-turns'), 'turn\n');
+if (mode === 'publication-failure') {
+  const events = fs.readFileSync(path.join(root, 'reviewer-events', 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const current = events.filter(event => event.provider === 'qwen' && event.event === 'started').at(-1);
+  fs.writeFileSync(path.join(root, 'reviewer-events', 'evidence', current.run_id, 'required.json'), '{}\n');
+}
 fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
@@ -104,7 +110,7 @@ if (mode === 'mutate-source-committed') {
 if (mode === 'fail') { console.log('{"type":"assistant","message":{"content":[]}}'); process.exit(0); }
 const returnedModel = mode === 'wrong-model' ? 'qwen-other' : 'qwen3.8-max';
 console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:returnedModel,content:[]}}));
-console.log(JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,num_turns:2,result:'## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}));
+console.log(JSON.stringify({type:'result',subtype:'success',session_id:mode==='wrong-session'?'qwen-session-other':'qwen-session-1',is_error:false,num_turns:2,result:'## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}));
 STUBEOF
 cat > "$STUB/op" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -136,6 +142,92 @@ unset BAILIAN_CODING_PLAN_API_KEY
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
+qualification_retention_cases(){
+  local dir="$REPO/.ai/reviews/qwen-qualification" retained rc
+  mkdir -p "$REPO/.ai/reviews" "$TMP/qualification-private-temp"
+  [ ! -e "$dir" ] || mv "$dir" "$TMP/qualification-before-retention"
+  printf 'publication blocked by fixture\n' > "$dir"
+  echo wrong-model > "$TMP/mode"
+  TMPDIR="$TMP/qualification-private-temp" run doctor --live > "$TMP/qualification-retention.log" 2>&1; rc=$?
+  rm "$dir"
+  [ ! -e "$TMP/qualification-before-retention" ] || mv "$TMP/qualification-before-retention" "$dir"
+  retained="$(sed -n 's/^qualification evidence retained: //p' "$TMP/qualification-retention.log" | head -1)"
+  if [ "$rc" -ne 0 ] && [ -n "$retained" ] && [ -s "$retained" ] && [ -s "$retained.p" ] && [ -e "$retained.err" ]; then ok 'failed qualification publication preserves exact stream prompt and stderr'; else bad 'failed qualification publication preserves exact stream prompt and stderr'; fi
+  if (
+    source <(sed -n '/^cleanup_qualification_probe() {/,/^}/p' "$SCRIPT")
+    QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$TMP/interrupted-qualification"
+    QUALIFICATION_RUNTIME_SHA=runtime; QUALIFICATION_PRELOADER_SHA=preloader; RUN_TURN_RC=130
+    printf stream > "$QUALIFICATION_STREAM"; printf prompt > "$QUALIFICATION_STREAM.p"; printf stderr > "$QUALIFICATION_STREAM.err"
+    stop_run_turn(){ :; }; write_qualification_diagnostic(){ return 1; }; note(){ :; }
+    cleanup_qualification_probe
+    [ "$QUALIFICATION_ACTIVE" = 0 ] && [ -s "$QUALIFICATION_STREAM" ] && [ -s "$QUALIFICATION_STREAM.p" ] && [ -s "$QUALIFICATION_STREAM.err" ]
+  ); then ok 'interrupted qualification retains raw evidence when publication fails'; else bad 'interrupted qualification retains raw evidence when publication fails'; fi
+  echo review > "$TMP/mode"
+}
+
+recovery_cases(){
+  local meta pending calls saved_meta saved_stream report before
+  echo review > "$TMP/mode"
+  if [ "${AI_QWEN_METADATA_TESTS_ONLY:-0}" != 1 ]; then
+  mv "$REPO/.ai/reviews" "$REPO/.ai/reviews-before-recovery"
+  printf 'publication blocked by fixture\n' > "$REPO/.ai/reviews"
+  if run new local-recovery --prompt review > "$TMP/recovery-first.log" 2>&1; then bad 'failed report publication is not success'; else ok 'failed report publication is not success'; fi
+  rm "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews-before-recovery" "$REPO/.ai/reviews"
+  meta="$(find "$TMP/state/sessions" -name 'codex--local-recovery.json' -print -quit)"; pending="${meta%.json}.pending.jsonl"
+  check 'failed local publication preserves a proven pending stream and source binding' "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\" and (.recovery_sha256|length)==64 and (.recovery_event_run_id|length)>0' '$meta' && test -s '$pending'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  cp "$meta" "$TMP/recovery-original-meta"; cp "$pending" "$TMP/recovery-original-stream"
+  printf '\nchanged' >> "$pending"
+  check 'changed retained bytes refuse local finalization' "! run finalize local-recovery > '$TMP/recovery-changed.log' 2>&1"
+  cp "$TMP/recovery-original-stream" "$pending"
+  jq '.recovery_runtime_sha256="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'changed runtime identity refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-runtime.log' 2>&1"
+  cp "$TMP/recovery-original-meta" "$meta"
+  cat "$TMP/recovery-original-stream" >> "$pending"
+  local duplicate_digest; duplicate_digest="$(sha256sum "$pending" | cut -d' ' -f1)"
+  jq --arg d "$duplicate_digest" '.recovery_sha256=$d' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'duplicate terminal records cannot be finalized even with a matching stored digest' "! run finalize local-recovery > '$TMP/recovery-duplicate.log' 2>&1"
+  cp "$TMP/recovery-original-stream" "$pending"; cp "$TMP/recovery-original-meta" "$meta"
+  jq '.failure_reason="interrupted-provider-turn"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'uncertain interrupted work cannot become a local completion' "! run finalize local-recovery > '$TMP/recovery-uncertain.log' 2>&1"
+  cp "$TMP/recovery-original-meta" "$meta"
+  cp "$REPO/a.txt" "$TMP/recovery-original-source"
+  printf 'changed source\n' >> "$REPO/a.txt"
+  check 'changed source refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-source.log' 2>&1"
+  cp "$TMP/recovery-original-source" "$REPO/a.txt"
+  check 'local finalization accepts the exact saved turn' "run finalize local-recovery > '$TMP/recovery-finalize.log' 2>&1"
+  check 'finalization publishes metadata before removing pending bytes' "jq -e '.status==\"active\" and .turns==1 and (.last_report_sha256|length)==64' '$meta' && test ! -e '$pending'"
+  before="$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' "$meta")"
+  check 'repeated local finalization reuses the same completion' "run finalize local-recovery > '$TMP/recovery-repeat.log' 2>&1 && test '$before' = \"\$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' '$meta')\""
+  check 'recovery and all refusals spend zero additional provider turns' "test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  fi
+  cat > "$STUB/mv" <<STUBMOVE
+#!/usr/bin/env bash
+destination="\${@: -1}"
+source="\${@: -2:1}"
+if [[ "\$destination" == */codex--metadata-recovery.json ]] && jq -e '.status=="active"' "\$source" >/dev/null 2>&1; then exit 73; fi
+exec "$(command -v mv)" "\$@"
+STUBMOVE
+  chmod +x "$STUB/mv"
+  if PATH="$STUB:$PATH" run new metadata-recovery --prompt review > "$TMP/recovery-metadata.log" 2>&1; then bad 'metadata publication failure cannot discard the pending turn'; else ok 'metadata publication failure cannot discard the pending turn'; fi
+  rm "$STUB/mv"
+  meta="$(find "$TMP/state/sessions" -name 'codex--metadata-recovery.json' -print -quit)"; pending="${meta%.json}.pending.jsonl"
+  check 'metadata failure retains a complete stream after report publication' "test -s '$pending' && jq -e '.status==\"recovery-required\"' '$meta'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  check 'metadata-only recovery finalizes without regenerating' "run finalize metadata-recovery > '$TMP/recovery-metadata-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  check 'metadata recovery reuses one deterministic report' "test \"\$(find '$REPO/.ai/reviews' -name 'qwen-metadata-recovery-*.md' | wc -l)\" -eq 1"
+  echo wrong-session > "$TMP/mode"
+  check 'a follow-up returned under a different session is not accepted' "! run ask metadata-recovery --prompt followup > '$TMP/recovery-wrong-session.log' 2>&1 && jq -e '.status==\"recovery-required\"' '$meta'"
+  calls="$(wc -l < "$TMP/argv.txt")"
+  check 'local recovery cannot adopt a different returned session' "! run finalize metadata-recovery > '$TMP/recovery-wrong-session-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  echo review > "$TMP/mode"
+}
+if [ "${AI_QWEN_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/recovery-install.log" 2>&1 || { cat "$TMP/recovery-install.log"; exit 1; }
+  recovery_cases
+  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
 
 # A CLI recorder can supervise the actual review worker. Crash the owner of
 # this fixture's repository lock, then let its supervisor reap it. Never use
@@ -211,6 +303,20 @@ FIRST_ASK_OUT="$(run ask review-1 --prompt 'follow up' 2>&1)"; FIRST_ASK_RC=$?
 check 'first follow-up completes successfully' "test '$FIRST_ASK_RC' -eq 0"
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
+
+echo publication-failure > "$TMP/mode"
+run new publication-failed --prompt 'retain this completed result' > "$TMP/publication-failed.out" 2>&1; PUBLICATION_RC=$?
+check 'publication failure cannot become an active accepted review' "test '$PUBLICATION_RC' -ne 0 && run show publication-failed | jq -e '.status!=\"active\"'"
+PENDING_REPORT="$(run show publication-failed | jq -r .recovery_stream)"
+check 'publication failure retains completed provider stream' "test -s '$PENDING_REPORT' && grep -q APPROVE '$PENDING_REPORT'"
+TURNS_BEFORE_PUBLICATION_RETRY="$(wc -l < "$TMP/provider-turns")"
+run ask publication-failed --prompt retry > "$TMP/publication-retry.out" 2>&1; PUBLICATION_RETRY_RC=$?
+check 'unpublished review refuses paid replay' "test '$PUBLICATION_RETRY_RC' -ne 0 && test '$TURNS_BEFORE_PUBLICATION_RETRY' -eq \"\$(wc -l < '$TMP/provider-turns')\""
+echo review > "$TMP/mode"
+if [ "${AI_QWEN_DURABILITY_TESTS_ONLY:-0}" = 1 ]; then
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  [ "$FAIL" -eq 0 ]; exit $?
+fi
 
 run new packet-mismatch --prompt review >/dev/null 2>&1
 PACKET_META="$(find "$TMP/state/sessions" -name 'codex--packet-mismatch.json' -print -quit)"
@@ -414,6 +520,7 @@ else
   printf '  diagnostic: model-mismatch artifact: '; jq -c . "$QWEN_DIAGNOSTICS"/*.json 2>/dev/null || printf 'missing'; printf '\n'
   bad 'model mismatch leaves only safe actionable metadata'
 fi
+qualification_retention_cases
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true
@@ -424,7 +531,7 @@ check 'diagnostics redact credentials prompts and raw provider payloads' "! grep
 check 'diagnostics remain under the ignored review evidence area' "git -C '$REPO' check-ignore '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"; INTERRUPT_DIAGNOSTICS_BEFORE="$(find "$QWEN_DIAGNOSTICS" -type f | wc -l)"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" doctor --live >/dev/null 2>&1) & DOCTOR_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
 kill -TERM "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true; wait "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted live qualification retains safe diagnostics' "test \"\$(find '$QWEN_DIAGNOSTICS' -type f | wc -l)\" -gt '$INTERRUPT_DIAGNOSTICS_BEFORE' && grep -l '\"failure_class\":\"timeout\"' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'interrupted live qualification removes temporary secret handoffs' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
@@ -534,7 +641,7 @@ check 'hostile shell startup hooks cannot observe managed credentials' "test ! -
 check 'credentialed Qwen boundary uses only prevalidated absolute executables' "grep -q 'trusted absolute Bash/env executables are required' '$SCRIPT' && grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q '\"\$bash_bin\" --noprofile --norc' '$SCRIPT'"
 echo slow > "$TMP/mode"; rm -f "$TMP/op-env-source"
 (cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
 QWEN_TEMP_ENV="$(cat "$TMP/op-env-source" 2>/dev/null || true)"; kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted managed turn removes its temporary credential-reference file' "test -n '$QWEN_TEMP_ENV' && test ! -e '$QWEN_TEMP_ENV'"
 echo review > "$TMP/mode"
@@ -556,5 +663,6 @@ else
   bad '1Password service token is absent from wrapper post-call processes'
 fi
 
+recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

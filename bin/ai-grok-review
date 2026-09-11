@@ -287,7 +287,7 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "$2" || true
+  "$SANDBOX_BIN" remove-copy "$1" "$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -1076,6 +1076,9 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
 
   : > "$out"
   prepare_active_stop_file
+  if [ -n "${ACTIVE_PAID_LOCK:-}" ]; then
+    reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+  fi
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
@@ -1169,12 +1172,21 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   esac
 }
 
+normalized_usage() {
+  jq 'def count: if type=="number" and isfinite and .>=0 and floor==. then . else null end;
+      def money: if type=="number" and isfinite and .>=0 then . else null end;
+      if (.usage|type)!="object" then .usage={} else . end |
+      .usage.total_tokens |= count | .usage.input_tokens |= count |
+      .usage.cache_read_input_tokens |= count | .total_cost_usd |= money' "$1"
+}
+
 report_usage() { # report_usage FILE
+  normalized_usage "$1" |
   jq -r '"tokens: \(.usage.total_tokens // "?") "
-       + "(uncached in: \(.usage.input_tokens // "?"), cached: \(.usage.cache_read_input_tokens // 0)) "
+       + "(uncached in: \(.usage.input_tokens // "?"), cached: \(.usage.cache_read_input_tokens // "unknown")) "
        + "turns: \(.num_turns // "?") "
-       + "cost: $\(.total_cost_usd // 0) "
-       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' "$1" >&2
+       + "cost: $\(.total_cost_usd // "unknown") "
+       + "model: \((.modelUsage // {} | keys | first) // "unknown")"' >&2
 }
 
 # Grok's `text` concatenates progress narration with the final answer, so every
@@ -1261,7 +1273,7 @@ preflight_review_file() { # preflight_review_file REPO NAME
 }
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
-  local repo="$1" name="$2" f="$3" dir ts out base
+  local repo="$1" name="$2" f="$3" dir ts out base tmp
   ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
@@ -1270,6 +1282,7 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
   [ -z "$PENDING_REVIEW_DIR" ] || [ "$dir" = "$PENDING_REVIEW_DIR" ] || { warn 'refusing Grok review: report destination changed after preflight.'; return 1; }
   mkdir -p "$dir"
   out="$dir/$base"
+  tmp="$(mktemp "$dir/.grok-report.XXXXXX")" || return 1
   {
     echo "# Grok review — $name"
     echo
@@ -1278,12 +1291,15 @@ write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothi
     echo "- Session: \`$(jq -r '.sessionId // "?"' "$f")\`"
     echo "- Model: \`$(jq -r '(.modelUsage // {} | keys | first) // "?"' "$f")\`"
     echo "- stopReason: \`$(jq -r '.stopReason // "?"' "$f")\` · turns: $(jq -r '.num_turns // "?"' "$f")"
-    echo "- Tokens: $(jq -r '.usage.total_tokens // "?"' "$f") (cached $(jq -r '.usage.cache_read_input_tokens // 0' "$f")) · cost: \$$(jq -r '.total_cost_usd // 0' "$f")"
+    echo "- Tokens: $(normalized_usage "$f" | jq -r '.usage.total_tokens // "?"') (cached $(normalized_usage "$f" | jq -r '.usage.cache_read_input_tokens // "unknown"')) · cost: \$$(normalized_usage "$f" | jq -r '.total_cost_usd // "unknown"')"
     echo
     echo "---"
     echo
     jq -r '.text // ""' "$f"
-  } > "$out"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  ln "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  reviewer_event_publish_report grok "$out" || return 1
   printf '%s' "$out"
 }
 
@@ -1383,7 +1399,7 @@ cmd_doctor() {
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
     run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
     if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
-      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(jq -r '.total_cost_usd // 0' "$tmp"))"
+      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
       lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
@@ -1455,19 +1471,19 @@ cmd_new() {
       note "  A first turn that completes but delivers no output has been seen before"
       note "  (session 019fd4ae…, 2026-08-05). Retry once; if it recurs, inspect the log."
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   sid="$(jq -r '.sessionId // ""' "$out")"
-  [ -n "$sid" ] && [ "$sid" != null ] || { rm -f "$pf" "$out" "$out.err"; die "Grok returned no sessionId; cannot continue this workstream."; }
+  [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
     --arg review_dir "$REVIEW_DIR" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH" \
     --argjson turns 1 \
-    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
-    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
+    --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     '{grok_session_id:$sid, repo:$repo, repo_remote:$remote, name:$name, caller:$caller,
       frozen_prefix:$prefix, created:$created, updated:$created,
@@ -1481,6 +1497,7 @@ cmd_new() {
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1578,19 +1595,21 @@ $REVIEW_HEAD only."
       note "  Do not keep retrying this session: start a fresh one with"
       note "    ai-grok-review new ${name}-2 --prompt-file <brief>"
     fi
-    rm -f "$pf" "$out" "$out.err"; exit 1
+    exit 1
   fi
 
   write_meta "$meta" "$(jq \
     --arg updated "$(date -u +%FT%TZ)" \
-    --argjson tokens "$(jq '.usage.total_tokens // 0' "$out")" \
-    --argjson cost "$(jq '.total_cost_usd // 0' "$out")" \
+    --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
+    --argjson cost "$(normalized_usage "$out" | jq '.total_cost_usd')" \
     --arg stop "$(jq -r '.stopReason // "?"' "$out")" \
     --arg head "$REVIEW_HEAD" --arg base "$REVIEW_BASE" --arg pkthash "$PACKET_HASH" \
     '.head=$head | .base=$base | .packet_sha256=$pkthash |
      .updated=$updated | .turns=(.turns+1)
-     | .total_tokens=(.total_tokens+$tokens)
-     | .total_cost_usd=(.total_cost_usd+$cost)
+     | .total_tokens=(if (.total_tokens|type)!="number" or .total_tokens<0 or $tokens==null then null else .total_tokens+$tokens end)
+     | .total_cost_usd=(if (.total_cost_usd|type)!="number" or .total_cost_usd<0 or $cost==null then null else .total_cost_usd+$cost end)
+     | .total_tokens |= (if type=="number" and isfinite and floor==. then . else null end)
+     | .total_cost_usd |= (if type=="number" and isfinite then . else null end)
      | .last_stop_reason=$stop' "$meta")"
 
   finish_turn "$repo" "$name" "$out" "$turns"
@@ -1600,6 +1619,7 @@ $REVIEW_HEAD only."
   else
     record_diagnostic "$repo" "$workid" "$name" terminal provider-failed --exit-code "$rc" --terminal-reason "$(jq -r '.stopReason // "unknown"' "$out")" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class provider-failed
   fi
+  reviewer_event_cleanup_allowed grok || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; return 1; }
   rm -f "$pf" "$out" "$out.err"
   return $st
 }
@@ -1693,6 +1713,7 @@ cmd_delete() {
     fi
   done
   meta="$(find_meta "$rid" "$name")"
+  release_boundary "$(repo_root)" "grok-$name" || die 'review evidence cleanup refused; session metadata preserved.'
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
@@ -1703,7 +1724,6 @@ cmd_delete() {
     [ "$(cat "$record/session" 2>/dev/null || true)" = "$name" ] || continue
     rm -rf -- "$record"
   done
-  release_boundary "$(repo_root)" "grok-$name"   # disposable snapshot, never outlives its session
   note "deleted local session record '$name' (Grok provider history is untouched)."
 }
 
