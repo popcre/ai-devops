@@ -23,6 +23,13 @@ The installation gate is therefore not complete. Re-running unchanged is not
 valid; the private-memory index needs its governed consolidation first, followed
 by a complete installer rerun on the landed Phase 5 source.
 
+The owner authorized the exact Ansible-managed `/worksp/ai-devops` permission
+repair and its normal serialized application on 2026-09-11. The private-memory
+index was then governed down from 17,749 to 3,392 bytes with all 49 fact files
+still indexed, zero coverage findings, the private remote synchronized, and
+rejected recovery refs retained. The remaining Ubuntu blocker is solely the
+managed checkout permission repair and landed-source installation.
+
 ## Controlled acceptance and defect repair
 
 The first nine-scenario run found that declared intent was only a drift ceiling,
@@ -43,7 +50,7 @@ now fail closed.
 Focused proof on an idle `edge-dev-win` runner host:
 
 - `tests/test-ai-task-gates.sh`: **84 passed, 0 failed**.
-- `tests/test-task-gates-phase5-acceptance.sh`: **21 passed, 0 failed**.
+- `tests/test-task-gates-phase5-acceptance.sh`: **23 passed, 0 failed**.
 - Nine controlled scenarios covered documentation-only cleanup, docs-to-code
   drift, ordinary code, reviewer safety, DesignFlow UI, shared-db structure,
   licensed/private evidence, infrastructure, and Oracle production.
@@ -83,7 +90,7 @@ no private file body was opened. All 17 repositories now expose a policy.
 
 1. Exact-head independent approval with this committed test evidence visible.
 2. Pull-request CI and merge-queue landing.
-3. Windows and Ubuntu reinstall from the landed exact source; Ubuntu additionally
-   requires governed private-memory consolidation before its installer can pass.
+3. Merge and apply the separately reviewed Ansible permission repair, then
+   reinstall Ubuntu from the landed exact source.
 4. Final plan/issue updates, handoff retirement, #335 closure, #159 update, and
    #166 unblock only after every preceding gate is green.
