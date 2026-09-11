@@ -80,5 +80,19 @@ while a returned zero retains the adapter scope. The suggested jq 1.7 minimum
 was unsupported: the [official jq 1.6 manual](https://jqlang.org/manual/v1.6/#infinite-nan-isinfinite-isnan-isfinite-isnormal)
 already documents `isfinite`. No unnecessary runtime restriction was added.
 
-Required CI, final review of the null-label refinement, merged installation, and live checks
-of the changed accounting are pending. This evidence does not close #333.
+## Delivery acceptance, 2026-09-11
+
+The exact pull-request head `19b261bb9f87282010722c39d1606ea22cac6981`
+received an independent Muse `APPROVE`; its retained report hashes to
+`a46ccb90de1b54197fd000341d8b707a53aafa7b710a4b7764f3f990cf6133fd`.
+CI run `34612122556` passed Linux, all four Windows sections, the Windows
+aggregate, and the designed reviewer fallback after the bounded primary lane
+ended. The pull request merged as
+`d2e4327d9ef5d2b80219a874e4a4a605b2a19595`.
+
+Installation routes the four affected launchers to the canonical current-main
+source containing that merge. The retained paid Muse fixture and same-session
+recall above remain the live accounting proof; post-install identity confirms
+the reviewed implementation is the one invoked. No request, review-input,
+compaction, or provider-selection behavior changed. This closes #333 without
+claiming a general cache saving.
