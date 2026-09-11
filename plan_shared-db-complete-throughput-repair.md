@@ -9,8 +9,8 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 | Step | State | Date | Evidence / completion gate |
 |---|---|---|---|
 | 0. Reconcile the live baseline and establish one programme ledger | ⬜ open | 2026-09-11 | Commit a redacted baseline that resolves every dependency named in §9.0. |
-| 1. Finish the two known reviewer correctness repairs | ⬜ open | 2026-09-11 | Close shared-db #2705 and #2709 only after their exact-head repairs are merged and live-qualified. |
-| 2. Add urgent application-unblock admission and finish-first scheduling | ⬜ open | 2026-09-11 | Scenario tests prove urgent outcomes dispatch first without weakening object conflicts. |
+| 1. Consume the four independently owned prerequisite repairs | ⬜ open | 2026-09-11 | #2705/#2709/#2715/#2716 have their own sessions; this programme verifies and integrates their landed behavior without duplicating it. |
+| 2. Enforce two-sided structural admission, urgent application-unblock priority, and finish-first scheduling | ⬜ open | 2026-09-11 | Sender and orchestrator both reject non-structural work; urgent outcomes dispatch first without weakening object conflicts. |
 | 3. Make one outcome card authoritative through live verification | ⬜ open | 2026-09-11 | A request cannot close at merge and exposes entered/dispatched/built/live timestamps. |
 | 4. Replace manual polling and session handoffs with durable events and resumable snapshots | ⬜ open | 2026-09-11 | A successor resumes from one generated snapshot and no unchanged-state polling is required. |
 | 5. Add one early, automatic delivery preflight and evidence registration | ⬜ open | 2026-09-11 | Missing sidecar/producer/claim/base/dependency evidence fails before expensive CI or review. |
@@ -87,13 +87,13 @@ Concrete examples were the DCP repair polled repeatedly while undispatched, ten 
 
 - Removing or weakening any database safety assertion.
 - Concurrent writes to preview, merge, or production.
-- Automatic production promotion or implied production authority.
+- An unguarded or judgment-free production promotion path. Issue #2716's proposed automatic path belongs only if every existing machine-verifiable gate passes and any uncertainty escalates to an engineer.
 - Treating urgency as permission to skip review, CI, preview, risk, identity, or live verification.
 - Replacing claims with optimistic Git merge-conflict detection.
 - Deleting claims, refs, branches, worktrees, or evidence because they are old.
 - Making ordinary application row writes or repository maintenance into orchestrator work.
 - Rebuilding completed Phase 1/2 throughput controls.
-- Reimplementing #2705, #2709, #2530, or ai-devops #159 in competing files.
+- Reimplementing #2705, #2709, #2715, #2716, #2530, or ai-devops #159 in competing files or sessions.
 - Committing raw transcripts or private application data.
 
 ## 5. Current state of the code and work
@@ -117,10 +117,13 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 - [shared-db #2705](https://github.com/u2giants/shared-db/issues/2705) covers only allocation of a reviewer whom the same preflight declares unusable. PR #2717 was open at head `1f686f0e` on 2026-09-11 and had failing contract/collision checks; re-resolve before acting.
 - [shared-db #2709](https://github.com/u2giants/shared-db/issues/2709) covers only the wrong comparison base in governed reviewer packets after updating from `main`. `popcre/ai-devops` PR #402 was open at head `407fedbe` on 2026-09-11; re-resolve before acting.
+- [shared-db #2715](https://github.com/u2giants/shared-db/issues/2715) covers the docs-only pull-request deadlock caused by requiring a migration guarded-merge status that no lightweight path posts. It belongs in this programme as a prerequisite to removing maintenance from the orchestrator, but must be implemented by its own repo-maintenance session, not the orchestrator.
+- [shared-db #2716](https://github.com/u2giants/shared-db/issues/2716) proposes automatic serial production promotion after governed review, guarded merge, post-merge preview, dry-run, and automatic evidence gates. It directly addresses repeated technical authorization asks and the unapplied-migration backlog. It belongs in this programme, but its cross-repository policy/workflow implementation must remain independently owned and must not be performed inside the orchestrator context.
 - `plan_shared-db-finish-first-delivery.md` correctly diagnoses outcome-vs-utilization failure, live-verification completion, early preflight, and handoff waste. Its proposed 1+1 capacity premise is superseded by the later owner-approved eight-author model and completed Phase 2 conflict controls. This plan supersedes it for future implementation.
 
 ### Still missing
 
+- Sessions still use judgment-heavy routing and over-send work to the orchestrator; the orchestrator can accept non-structural work instead of deterministically refusing and returning it.
 - No enforced urgent application-unblock class.
 - Queue ordering optimizes numeric priority/eligibility, not “finish the live blocker first.”
 - No authoritative outcome state spanning intake to live application proof.
@@ -167,8 +170,9 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 6. Reuse existing coordination events and blocker ledger as the state store.
 7. Reviewer/runner SLOs govern start/reroute, not cancellation of healthy active work.
 8. Native merge queue activation follows #2530 exactly and preserves all required checks.
-9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions.
-10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same deploy/apply/fix action.
+9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions. If #2716 is authorized and lands, a fully machine-qualified train promotes automatically and serially; any missing or ambiguous proof stops for an engineer, not a non-technical version-number choice from Albert.
+10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
+11. Routing is enforced twice: the sending session must classify from the actual proposed change, and the orchestrator must independently admit only database structure/schema work. A handover, `db-work` label, repository location, or sender assertion is never sufficient.
 
 ### Open implementation judgment
 
@@ -179,7 +183,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 ### Owner-only decisions
 
 - Transfer `u2giants/shared-db` to `popcre/shared-db` and mutate its live GitHub ruleset: follow #2530; planning is not authorization.
-- Every production migration train still needs the existing exact-list production authority and risk decision. Consolidation does not create standing production permission.
+- Activating #2716 changes the standing production policy across global instructions, shared-db rules, and workflow behavior. Its implementing session must present that exact policy change to Albert once before activation unless a current-chat ruling already authorizes it; after activation Albert is not asked to name machine migration versions.
 
 ## 9. Numbered implementation plan
 
@@ -187,33 +191,41 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 #### Step 0 — freeze one live dependency baseline
 
-In a fresh worktree in each repository, re-resolve `origin/main`, #401, shared-db #2530/#2705/#2709, ai-devops #159/#166/#337, open PRs, required checks, active marker, claims, reviewer leases, stage locks, and runner labels. Write a redacted baseline under `tests/verification/shared-db-throughput/` in ai-devops. Map every item in this plan to an existing owner or a new #401 child; never create duplicate implementation owners.
+In a fresh worktree in each repository, re-resolve `origin/main`, #401, shared-db #2530/#2705/#2709/#2715/#2716, ai-devops #159/#166/#337, open PRs, required checks, active marker, claims, reviewer leases, stage locks, and runner labels. Write a redacted baseline under `tests/verification/shared-db-throughput/` in ai-devops. Map every item in this plan to an existing owner or a new #401 child; never create duplicate implementation owners.
 
 **Dependencies:** none. **Parallel:** read-only shared-db and ai-devops inventory may run together.
 
 **Verification gate:** the baseline names exact SHAs/states and `gh issue/pr view` commands that reproduce every drift-prone claim; no private transcript or secret is present.
 
-#### Step 1 — finish #2705 and #2709
+#### Step 1 — consume #2705, #2709, #2715, and #2716 without stealing ownership
 
-For #2705, change the allocation path in `shared-db/scripts/manage-migration-author-lanes.mjs` so the same reconciled `reviewerExecutionPreflight` eligibility used at run time filters candidates before a durable assignment consumes a slot. Preserve the run-time preflight as defense in depth. Add assignment, replacement, quarantine, no-candidate, and concurrent-draw cases to `manage-migration-author-lanes.test.mjs`.
+Do not edit #2705 or #2709 from this programme while their current chat sessions own them. For #2705, verify the landed allocation path filters candidates through the same reconciled `reviewerExecutionPreflight` eligibility used at run time before a durable assignment consumes a slot, while preserving run-time defense in depth.
 
-For #2709, make `ai-review-packet` and every governed wrapper accept and record the contract-declared base SHA, verify it is an ancestor of head, and compute the patch from the real merge-base. Never reuse the pull request's original base after an update-from-main merge. Update wrapper and packet tests, then prove the shared-db work-contract check and independent reviewer see the same file set.
+For #2709, verify the landed `ai-review-packet` and governed wrappers accept and record the contract-declared base SHA, verify ancestry, and compute the patch from the real merge-base. Never reuse the pull request's original base after an update-from-main merge.
+
+Execute #2715 in its own repo-maintenance session. Add a fail-closed prose classifier path that posts the required successful status without dispatching the database guarded-merge workflow; one non-prose/rulebook/config/workflow/script/test/migration file must retain the full path. This removes docs and handoff blockage from the orchestrator.
+
+Execute #2716 in its own cross-repository policy/workflow session after its one policy-activation gate. Align global instructions, shared-db rules, risk gate, dry-run, workflow, serial production lock, evidence assertions, and engineer escalation atomically. Never ask Albert to name migration versions after the approved policy is live.
 
 Do not restart these implementations if their current PRs have landed. Verify, consume their evidence, and close only the remaining gap.
 
-**Verification gate:** an unusable provider is never durably assigned; a branch updated from main produces only branch-owned files; both issues are closed with merged/live evidence.
+**Verification gate:** an unusable provider is never durably assigned; a branch updated from main produces only branch-owned files; a prose-only PR receives its required success without migration dispatch; a fully qualified migration promotes serially after dry-run while every missing/ambiguous proof refuses to an engineer. All four issues close with merged/live evidence from their own owners.
 
 ### Phase B — make application outcomes control scheduling
 
-#### Step 2 — implement urgent admission and finish-first dispatch
+#### Step 2 — enforce two-sided structural admission, then urgent and finish-first dispatch
 
-Extend `parseQueueScope`, its schema/fixtures, and `buildDynamicQueues` in `shared-db/scripts/manage-migration-author-lanes.mjs` with `service_class` and a required `impact` block for urgent work. Add a deterministic admission command that verifies `return_to`, reproduction evidence, affected environment, and qualifying impact. A tooling or maintenance issue cannot self-promote to urgent.
+First make routing non-judgmental. In canonical global/task-gate/shared-db skills, classify the actual proposed change: only schema, table, column, view, function, trigger, RLS, index, constraint, migration, or governed curated-Master-Data structure enters the orchestrator. Database reads, application rows, application code, docs, CI, reviewer tooling, workflows, repository maintenance, and “may need a database fix” remain with their natural owner until exact evidence proves a structure change.
+
+Then add a required `--admit-issue` gate in `shared-db/scripts/manage-migration-author-lanes.mjs`. It independently derives work type and refuses claim, dispatch, reviewer assignment, or shared-stage acquisition for non-structural work. On refusal it posts a typed `rejected_non_structural` event with `return_to` and the evidence needed to reopen classification. The orchestrator may not override it merely because a sender used `db-work`, called it a handover, or placed it in shared-db.
+
+Extend `parseQueueScope`, its schema/fixtures, and `buildDynamicQueues` with `service_class` and a required `impact` block for urgent work. Add deterministic admission that verifies `return_to`, reproduction evidence, affected environment, and qualifying impact. A tooling or maintenance issue cannot self-promote to urgent.
 
 Replace automatic refill ordering with: safety eligibility; urgent service class; already-started/nearest-live critical path; dependency-transitive blocking impact; `createdAt`; issue number. Preserve separate conflict components and all eight author slots. When an urgent issue is eligible and capacity is full, do not revoke another claim; publish `urgent_waiting_capacity` and finish/relinquish the nearest safe slot.
 
 Update `shared-db/AGENTS.md`, the canonical orchestrator skill, operating manual, and tests together.
 
-**Verification gate:** race/scenario tests prove two unrelated authors run concurrently, conflicting objects never do, urgent application work starts before maintenance, and no active work is destructively preempted.
+**Verification gate:** sender fixtures route each structural/non-structural class correctly; adversarial misrouted issues are rejected again by the orchestrator; no non-structural issue can claim a lane or shared stage; two unrelated structural authors run concurrently; conflicting objects never do; urgent application work starts before maintenance; no active work is destructively preempted.
 
 #### Step 3 — add the authoritative outcome lifecycle
 
@@ -251,7 +263,7 @@ Store the preflight input/output digest in the evidence bundle. A later phase re
 
 Add a machine-readable train manifest and manager commands to propose, validate, authorize, dispatch, and close an immutable exact migration list. Validation must prove every file is merged on current main, unapplied on the exact target, not superseded or forbidden, dependency-closed, role-compatible, risk-compatible, and covered by preview/production assertions.
 
-One compatible train receives one consolidated preflight, preview operation, production authorization request, serialized apply, and verification report. Each migration retains its own hash and assertion result. A failure stops the train, records the exact applied prefix from the live ledger, and permits only forward recovery—never replay guesses.
+One compatible train receives one consolidated preflight, preview operation, production-policy evaluation, serialized apply, and verification report. Each migration retains its own hash and assertion result. When #2716 is active, a completely qualified train promotes automatically after the production dry-run. Any missing, failed, or ambiguous proof refuses and escalates to an engineer. A failure stops the train, records the exact applied prefix from the live ledger, and permits only forward recovery—never replay guesses.
 
 Integrate with `.github/workflows/shared-supabase-migrations.yml`, `production_business_risk_gate.py`, current batch/rehearsal code near the manager's existing post-merge batch logic, and ledger drift checks.
 
@@ -312,7 +324,9 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Events/snapshot: deterministic hash; stale input; one wake per transition; no unchanged poll; successor reconstruction.
 - Delivery preflight: sidecar/producer/claim/base/dependency/route/reviewer/runner cases and digest invalidation.
 - Migration train: all eight cases named in Step 6.
+- Admission: every structural type accepted; application rows/code, docs, CI, reviewer tooling, workflows, and repository maintenance rejected by both sender and orchestrator; sender misclassification cannot acquire a claim/stage.
 - Reviewer: #2705 allocation cases, #2709 base cases, unstarted reroute, healthy quiet review, all providers busy.
+- Independent prerequisites: #2715 prose/mixed/rulebook paths and #2716 fully-qualified/refusal/dry-run/serial-lock/engineer-escalation paths.
 - Runner: pickup, non-pickup, replacement, duplicate prevention, aggregate truth.
 - Existing manager, coordination scenario, throughput guard, sidecar, production gate, ledger, SQL, and contract suites remain green.
 
@@ -326,7 +340,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 ### live acceptance
 
 - Read-only baseline and snapshot on the live repository.
-- #2705/#2709 exact-head live qualification.
+- #2705/#2709 exact-head live qualification and #2715/#2716 live behavior proof from their independently owned sessions.
 - Native merge-queue canary after authorized transfer.
 - One urgent and one standard pilot, then the five-outcome trial.
 - Production proof only under separately recorded exact authority.
@@ -361,13 +375,14 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 ### Definition of done
 
 - [ ] Every STATUS row cites an artifact, commit, live run, or rerunnable command.
-- [ ] #2705 and #2709 are genuinely repaired, not merely closed.
+- [ ] #2705, #2709, #2715, and #2716 are genuinely repaired by their independent owners, not merely closed.
+- [ ] Sending sessions and the orchestrator independently reject non-structural work; misclassification cannot consume a lane or shared stage.
 - [ ] Urgent and finish-first scheduling is enforced and tested.
 - [ ] Eight safe author lanes remain available for non-conflicting work.
 - [ ] One outcome card remains open through live application verification.
 - [ ] Polling and manual state reconstruction are replaced by durable events/snapshots.
 - [ ] Early preflight catches all named late bookkeeping failures.
-- [ ] Compatible approved migrations can move as one governed train.
+- [ ] Compatible approved migrations can move as one governed train and, after #2716 policy activation, promote automatically only when every existing machine gate passes.
 - [ ] Reviewer and runner non-start waits reroute within the tested SLO.
 - [ ] Shared-db is in the organization with its native merge queue proven, after explicit authorization.
 - [ ] Canonical and installed operating rules agree.
@@ -391,7 +406,7 @@ Rollback is a reviewed revert of the affected phase plus supported rules reinsta
 
 ### Open questions
 
-No engineering design choice blocks Step 0. Step 8 requires Albert's explicit repository-transfer/settings authority. Each production train requires the existing exact-list authorization. Those are execution gates, not gaps in this plan.
+No engineering design choice blocks Step 0. Step 8 requires Albert's explicit repository-transfer/settings authority. Issue #2716 requires one explicit policy-activation ruling unless its implementation session can cite a current-chat ruling that authorizes the exact global/workflow change; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
 
 ## Coverage of the throughput review
 
@@ -399,20 +414,20 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 |---|---|
 | Urgent application-unblock lane | Steps 2–3 |
 | Parallel non-conflicting authorship | Preserve current eight lanes; Steps 2 and 9 |
-| Binding classification fast path | Steps 2 and 5 |
+| Binding classification fast path and orchestrator refusal | Steps 1, 2, and 5; #2715 |
 | Batch approved migrations | Step 6 |
 | Automatic evidence | Step 5 |
 | Bounded reviewer waits | Steps 1 and 7 |
 | Durable orchestrator/context rollover | Step 4 |
 | Event-driven rather than polling | Step 4 |
-| Stop repeated authorization asks | Steps 3 and 9 |
+| Stop repeated authorization asks and technical version naming | Steps 1, 3, 6, and 9; #2716 |
 | Queue-to-live measurement | Steps 3 and 10 |
 | Organization/native merge queue | Step 8 |
 
 ## Mandatory implementation-plan self-audit
 
 1. **Could a brand-new AI session execute this plan without asking Albert anything? Yes for every reversible planning and implementation step.** §§2, 5, 9, 10, and 12 identify repositories, current components, concrete files/functions, dependencies, commands/evidence, environments, and verification gates. §8 and §13 isolate the only later owner actions: repository transfer/settings and exact production lists.
-2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow coverage, reject the superseded 1+1 premise, and preserve every safety boundary.
+2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow reviewer coverage and #2715/#2716's independent ownership, enforce two-sided non-structural refusal, reject the superseded 1+1 premise, and preserve every safety boundary.
 3. **Is the ultimate goal clear enough for correct judgment when a step is wrong? Yes.** §1 makes live application delivery the outcome, safety preservation the invariant, and explicitly says the goal wins.
 
 Checklist result: all 13 sections are present; the STATUS table, zero-context background, explicit scope, current state, root cause, rejected approaches, locked/open decisions, file-level steps, named tests, access, landing proof, risks, rollback, owner gates, plan/handoff cross-links, discoverability route, and full recommendation coverage are included. No secret or private transcript content is present.
