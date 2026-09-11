@@ -492,7 +492,19 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
 wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt "$(scale_ticks 100)" ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
 
+implementation_partial_publication_case() {
+  run_fake_impl partial-publication-success '' "$TMP/no-ready" "$TMP/no-release" failure '' binary >"$TMP/partial-publication-success.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication-success)" partial_event partial_patch
+  partial_event="$(jq -r .evidence_run_id "$partial_meta")"; partial_patch="$(jq -r .incomplete_patch_path "$partial_meta")"
+  check "incomplete binary publication finishes both prepared obligations before cleanup" "test '$partial_rc' -ne 0 && jq -e '.outcome==\"failed-partial\" and .artifact_state==\"durable\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$partial_meta' >/dev/null"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$partial_event/"*.report.json > "$TMP/recovered-partial.patch"
+  check "incomplete binary patch survives centrally after exact clone cleanup" "test -s '$partial_patch' && cmp -s '$partial_patch' '$TMP/recovered-partial.patch' && grep -q 'GIT binary patch' '$partial_patch'"
+  if [ "$FAIL" -gt 0 ]; then
+    grep -E 'prepared|publication|cleanup refused' "$TMP/partial-publication-success.out" >&2 || true
+  fi
+}
 implementation_publication_cases() {
+  implementation_partial_publication_case
   run_fake_impl publication-binary '' "$TMP/no-ready" "$TMP/no-release" success '' binary >"$TMP/publication-binary.out" 2>&1; local binary_rc=$?
   local binary_meta="$(job_meta publication-binary)" binary_event binary_patch
   binary_event="$(jq -r .evidence_run_id "$binary_meta")"; binary_patch="$(jq -r .patch_path "$binary_meta")"
@@ -507,6 +519,10 @@ implementation_publication_cases() {
   local partial_meta="$(job_meta partial-publication)"
   check "incomplete publication refusal records both exact retained artifact paths" "test '$partial_rc' -ne 0 && test -f \"\$(jq -r .incomplete_report_path '$partial_meta')\" -a -f \"\$(jq -r .incomplete_patch_path '$partial_meta')\" -a -d \"\$(jq -r .clone_path '$partial_meta')\""
 }
+if [ "${AI_GLM_PARTIAL_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_partial_publication_case
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 if [ "${AI_GLM_OWNER_PUBLICATION_ONLY:-0}" = 1 ]; then
   implementation_publication_cases
   printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?

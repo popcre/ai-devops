@@ -1310,8 +1310,9 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
     --arg patch "$patch" --arg report "$report" || return 1
   reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" report "$report" || return 1
   reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" git-binary-patch "$patch" || return 1
-  reviewer_event_publish_report glm "$report" || return 1
+  # Report publication verifies every prepared obligation, including this patch.
   reviewer_event_publish_patch glm "$patch" || return 1
+  reviewer_event_publish_report glm "$report" || return 1
   test_failure incomplete-metadata && return 1
   if ! implementation_update "$meta" \
       '.outcome=$outcome | .failure_kind=$kind | .incomplete_patch_path=$patch |
