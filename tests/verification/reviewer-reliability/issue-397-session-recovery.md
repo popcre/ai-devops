@@ -84,6 +84,26 @@ records the recovery slice under #337; it does not close #397 or the parent.
 
 ## Outstanding qualification
 
+### DeepSeek local publication recovery
+
+The additional DeepSeek slice retains the exact request, original invocation,
+HTTP observation, paid response hash, attachment ledger intent and formal
+packet before local publication. `ai-deepseek-agent finalize SESSION` repairs
+the transcript, ledger and metadata without credentials or a provider request.
+Pending evidence blocks accidental replay. Completed source-stale work remains
+non-authorizing; a later explicit turn can resolve fresh source. Proven HTTP
+refusals can also be finalized locally as incomplete, with a nonzero result and
+ordinary explicit continuation preserved. Unknown transport outcomes and legacy
+markers lacking exact retained intent remain fenced rather than guessed.
+
+The owning offline recovery cases passed 25/0/0 and cover publication faults, changed response
+bytes and source inventories, caller mismatch, repeat finalization, stale
+formal source, HTTP refusal and explicit continuation. The source/identity
+subset passed 32/0/0 before the additional inventory-binding assertion. This
+slice still requires its final exact-head review, CI, installation and live
+qualification; the extraction helper preserves existing terminal parsing for
+the separate #394 native-status repair.
+
 The expired-deadline recovery regression passes: recovery makes one bounded
 GET observation before consulting the original polling deadline. A new terminal
 assistant message can be retained after that deadline; an old or incomplete
