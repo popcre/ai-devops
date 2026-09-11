@@ -298,6 +298,58 @@ def verify_sandbox(directory, sandbox):
         return references
 
 
+def owner_identity(owner):
+    path = physical(owner)
+    boundary, data = snapshot(path, "log")
+    require(boundary["exists"] and data, "implementation owner record is missing")
+    row = json.loads(data)
+    require(isinstance(row, dict), "implementation owner record is invalid")
+    repo = row.get("repo") or row.get("repository_root")
+    workspace = row.get("worktree") or row.get("clone_path")
+    require(repo and workspace, "implementation owner has no exact repository/workspace")
+    return path, boundary, data, row, physical(repo), physical(workspace)
+
+
+def bind_owner(directory, provider, run_id, owner):
+    with event_lock(directory):
+        start = invocation(directory, provider, run_id, active=True)
+        path, boundary, data, row, repo, workspace = owner_identity(owner)
+        require(repo == physical(start["repo"]), "implementation owner repository differs from invocation")
+        require(row.get("evidence_run_id") in {None, run_id}, "implementation owner already belongs to another invocation")
+        identity = {"schema_version": 1, "provider": provider, "run_id": run_id,
+                    "owner": str(path), "repository": str(repo), "workspace": str(workspace)}
+        identity_path = evidence_root(directory, run_id) / "owner.json"
+        if identity_path.exists():
+            require(read_json(identity_path) == identity, "implementation evidence binding changed")
+        else:
+            publish(identity_path, identity)
+        row["evidence_run_id"] = run_id
+        fd, tmp = tempfile.mkstemp(prefix=".evidence-owner.", dir=path.parent)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                output.write(encoded(row)); output.flush(); os.fsync(output.fileno())
+            current, current_data = snapshot(path, "log")
+            require(current == boundary and current_data == data, "implementation ownership changed during binding")
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+
+def verify_owner(directory, provider, owner):
+    with event_lock(directory):
+        path, _, _, row, repo, workspace = owner_identity(owner)
+        run_id = row.get("evidence_run_id")
+        require(isinstance(run_id, str) and re.fullmatch(r"[0-9a-f]{32}", run_id),
+                "legacy implementation ownership has no invocation proof; preserve its metadata, reports and workspace for exact local reconciliation")
+        start = invocation(directory, provider, run_id)
+        identity = read_json(evidence_root(directory, run_id) / "owner.json")
+        require(identity == {"schema_version": 1, "provider": provider, "run_id": run_id,
+                             "owner": str(path), "repository": str(repo), "workspace": str(workspace)} and
+                repo == physical(start["repo"]), "implementation evidence ownership changed")
+        return verify_reports(directory, provider, run_id)
+
+
 def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     """Recover exact legacy ownership without inventing a historical event/head."""
     sandbox = physical(sandbox)
@@ -443,7 +495,10 @@ def main():
                                           "codex" if provider in {"claude", "codex", "gemini"} else "unknown"))}
         append(directory, event)
         print(event["run_id"])
-    elif operation in {"require-report", "publish-report", "verify-reports", "bind-sandbox"}:
+    elif operation == "verify-owner":
+        require(len(sys.argv) == 4, "invalid implementation owner verification")
+        print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
+    elif operation in {"require-report", "publish-report", "verify-reports", "bind-sandbox", "bind-owner"}:
         require(len(sys.argv) >= 4, "missing evidence invocation")
         run_id = sys.argv[3]
         if operation == "require-report":
@@ -451,6 +506,9 @@ def main():
             require_report(directory, provider, run_id)
             if len(sys.argv) >= 5:
                 bind_sandbox(directory, provider, run_id, sys.argv[4], sys.argv[5] if len(sys.argv) == 6 else None)
+        elif operation == "bind-owner":
+            require(len(sys.argv) == 5, "invalid implementation owner binding")
+            bind_owner(directory, provider, run_id, sys.argv[4])
         elif operation == "bind-sandbox":
             require(len(sys.argv) == 5, "invalid sandbox evidence binding")
             bind_sandbox(directory, provider, run_id, sys.argv[4])

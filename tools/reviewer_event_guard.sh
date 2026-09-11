@@ -31,6 +31,19 @@ reviewer_event_publish_report(){
   reviewer_event_evidence verify-reports "$provider" >/dev/null
 }
 
+reviewer_event_verify_private(){
+  local python event_tool name
+  local -a evidence_env=()
+  python="$(command -v python3 || command -v python)" || return 1
+  event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+    [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
+  done
+  env -i "${evidence_env[@]}" "$python" "$event_tool" "$@" >/dev/null
+}
+reviewer_event_verify_sandbox(){ reviewer_event_verify_private verify-sandbox "$1"; }
+reviewer_event_verify_owner(){ reviewer_event_verify_private verify-owner "$1" "$2"; }
+
 reviewer_event_cleanup_allowed(){
   local provider="$1"
   [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] || return 0

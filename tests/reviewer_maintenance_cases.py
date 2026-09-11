@@ -510,6 +510,37 @@ esac
         self.assertIn("await_result", result.stdout)
         self.assertFalse(self.ledger.exists())
 
+    def test_delete_preserves_metadata_and_provider_when_snapshot_cleanup_refuses(self):
+        for provider, wrapper in (("qwen", "ai-qwen"), ("kimi", "ai-kimi"), ("glm", "ai-glm"), ("grok", "ai-grok-review")):
+            with self.subTest(provider=provider):
+                source = (ROOT / "bin" / wrapper).read_text()
+                delete = source.split("\ncmd_delete() {", 1)[1].split("\n}\n", 1)[0]
+                release = source.split("\nrelease_boundary() {", 1)[1].split("\n}\n", 1)[0]
+                meta = self.root / (provider + "-metadata.json")
+                meta.write_text(json.dumps({"mode": "review", "type": "review", "repository_root": str(self.root)}))
+                sandbox = self.root / "refusing-sandbox"
+                sandbox.write_text("#!/usr/bin/env bash\nexit 1\n")
+                sandbox.chmod(0o700)
+                script = self.root / (provider + "-delete.sh")
+                script.write_text('''set -euo pipefail
+STATE_DIR="$1"; META="$2"; SANDBOX_BIN="$3"; CALLER=fixture
+repo_root(){ printf '%s' "$STATE_DIR"; }
+repo_id(){ printf repo; }
+find_meta(){ printf '%s' "$META"; }
+lock_path(){ printf '%s/absent-lock' "$STATE_DIR"; }
+require_upstream_identity(){ printf upstream; }
+session_record_path(){ printf '%s/absent-session' "$STATE_DIR"; }
+server_up(){ return 0; }
+api(){ touch "$STATE_DIR/provider-delete"; }
+note(){ :; }
+die(){ printf '%s\\n' "$*" >&2; exit 1; }
+''' + "release_boundary() {" + release + "\n}\ncmd_delete() {" + delete + "\n}\ncmd_delete fixture\n")
+                result = subprocess.run([self.bash, str(script), str(self.root), str(meta), str(sandbox)],
+                                        capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(meta.exists(), result.stderr)
+                self.assertFalse((self.root / "provider-delete").exists(), result.stderr)
+
     def test_guard_preserves_stdin_stdout_stderr_exit(self):
         result = self.guard(operation="stream", input="unchanged input\n")
         self.assertEqual(result.returncode, 7, result.stderr)
@@ -758,6 +789,28 @@ wait "$job"
             reference = events.publish_report(self.root, "grok", recovery, report,
                                               {"original_invocation_id": original})
             self.assertEqual(events.verify_sandbox(self.root, sandbox), [reference["reference"]])
+
+    def test_implementation_owner_allows_no_paid_cleanup_then_requires_durable_report(self):
+        rid = "b" * 32
+        self.invocation(rid=rid, finish=False)
+        workspace = self.root / "implementation"
+        workspace.mkdir()
+        owner = self.root / "implementation-owner.json"
+        owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
+        events.bind_owner(self.root, "grok", rid, owner)
+        self.assertEqual(events.verify_owner(self.root, "grok", owner), [])
+        events.require_report(self.root, "grok", rid)
+        with self.assertRaises(events.Blocked):
+            events.verify_owner(self.root, "grok", owner)
+        report = self.root / "implementation.md"
+        report.write_text("Synthetic incomplete implementation evidence.")
+        receipt = events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(events.verify_owner(self.root, "grok", owner), [receipt["reference"]])
+        row = json.loads(owner.read_text())
+        row["worktree"] = str(self.root / "other-workspace")
+        owner.write_text(json.dumps(row))
+        with self.assertRaises(events.Blocked):
+            events.verify_owner(self.root, "grok", owner)
 
     def test_shared_publisher_carries_muse_recovery_identity(self):
         original, recovery = "e" * 32, "f" * 32
