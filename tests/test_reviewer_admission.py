@@ -1,6 +1,7 @@
 """Behavioral coverage for scoped refusal backoff; no provider calls."""
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -38,6 +39,17 @@ class AdmissionTests(unittest.TestCase):
                                     ('profile-a', 'model-a', 1030)]:
             self.assertEqual(api.admission(data, profile, model, now)['state'], 'eligible')
         self.assertEqual(api.admission(data, '', 'model-a', 1001)['state'], 'unknown')
+
+    def test_home_aliases_share_profile_without_reading_credentials(self):
+        home = self.directory / 'ActualCase'
+        home.mkdir()
+        original = api.home_profile(str(home))
+        self.assertEqual(original, api.home_profile(str(home / '..' / 'ActualCase')))
+        if os.name == 'nt':
+            self.assertEqual(original, api.home_profile(str(home).swapcase()))
+        self.assertNotEqual(original, api.home_profile(str(self.directory / 'different')))
+        with self.assertRaises(ValueError):
+            api.home_profile('')
 
     def test_replay_cannot_extend_policy(self):
         self.observe()

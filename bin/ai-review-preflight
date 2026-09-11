@@ -52,7 +52,7 @@ admission_store() {
 default_admission() {
   local profile="${AI_REVIEW_ADMISSION_PROFILE:-}" model="${AI_REVIEW_ADMISSION_MODEL:-}"
   if [ "$1" = kimi ]; then
-    [ -n "$profile" ] || profile="$(printf '%s' "${KIMI_CODE_HOME:-$HOME/.kimi-code}" | sha256sum | awk '{print $1}')"
+    [ -n "$profile" ] || profile="$(admission_store profile kimi --home "${KIMI_CODE_HOME:-$HOME/.kimi-code}" | jq -er .credential_profile_scope)" || return 1
     [ -n "$model" ] || model="${AI_KIMI_MODEL:-kimi-code/k3}"
   fi
   admission_store admission "$1" --profile "$profile" --model "$model"
@@ -401,12 +401,17 @@ Usage:
   ai-review-preflight explain <failure-class>
   ai-review-preflight capacity <provider> --json
   ai-review-preflight admission <provider> --profile HASH --model MODEL --json
+  ai-review-preflight profile <provider> --home PATH
   ai-review-preflight observe-refusal <provider> --profile HASH --model MODEL --run-id ID --observed EPOCH --seconds N --reason usage-limit --evidence FILE
 EOF
 }
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  profile)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    admission_store profile "$provider" "$@" ;;
   admission|observe-refusal)
     provider="${1:-}"; shift || true
     valid_provider "$provider" || die "unknown provider '$provider'."

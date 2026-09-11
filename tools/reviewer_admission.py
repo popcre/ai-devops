@@ -19,6 +19,16 @@ def scope_key(profile, model):
     return hashlib.sha256(json.dumps([profile, model], separators=(',', ':')).encode()).hexdigest()
 
 
+def home_profile(home):
+    if not isinstance(home, str) or not home:
+        raise ValueError('credential home path is required for profile identity')
+    # Resolve filesystem spelling, symlinks and Windows junction/case aliases.
+    # Only path metadata is used; credential files are never opened or hashed.
+    canonical = os.path.realpath(home)
+    return {'credential_profile_scope': hashlib.sha256(canonical.encode('utf-8')).hexdigest(),
+            'source_kind': 'canonical-home-path'}
+
+
 def valid_scope(profile, model):
     return all(isinstance(v, str) and 0 < len(v) <= 128 and not any(ord(c) < 32 for c in v)
                for v in (profile, model))
@@ -171,16 +181,19 @@ def observe(directory, provider, profile, model, run_id, observed, now, seconds,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('admission', 'observe', 'quarantine', 'global', 'clear'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen'))
     parser.add_argument('--directory', type=pathlib.Path, required=True)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
+    parser.add_argument('--home')
     parser.add_argument('--run-id', default=''); parser.add_argument('--observed', type=int)
     parser.add_argument('--seconds', type=int, default=1800); parser.add_argument('--reason', default='')
     parser.add_argument('--evidence', type=pathlib.Path)
     args = parser.parse_args()
     now = int(time.time())
-    if args.action == 'observe':
+    if args.action == 'profile':
+        result = home_profile(args.home)
+    elif args.action == 'observe':
         result = observe(args.directory, args.provider, args.profile, args.model, args.run_id,
                          args.observed, now, args.seconds, args.evidence or pathlib.Path(''), args.reason)
     elif args.action == 'admission':
