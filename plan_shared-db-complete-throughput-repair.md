@@ -11,6 +11,7 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 | 0. Reconcile the live baseline and establish one programme ledger | ✅ complete | 2026-09-11 | Redacted live ledger: `tests/verification/shared-db-throughput/2026-09-11-live-baseline.md`; source tips `b6922ea8` / `f3eff56d`. |
 | 1. Consume the four independently owned prerequisite repairs | ⬜ open | 2026-09-11 | #2705/#2709/#2715/#2716 have their own sessions; this programme verifies and integrates their landed behavior without duplicating it. |
 | 2. Enforce two-sided structural admission, urgent application-unblock priority, and finish-first scheduling | ⬜ open | 2026-09-11 | Sender and orchestrator both reject non-structural work; urgent outcomes dispatch first without weakening object conflicts. |
+| 2A. Add a fail-closed no-database-preview fast lane | ⬜ open | 2026-09-11 | Qualifying work bypasses the structural queue and database preview only after a machine-readable classifier proves it cannot change database structure, behavior, permissions, or data. |
 | 3. Make one outcome card authoritative through live verification | ⬜ open | 2026-09-11 | A request cannot close at merge and exposes entered/dispatched/built/live timestamps. |
 | 4. Replace manual polling and session handoffs with durable events and resumable snapshots | ⬜ open | 2026-09-11 | A successor resumes from one generated snapshot and no unchanged-state polling is required. |
 | 5. Add one early, automatic delivery preflight and evidence registration | ⬜ open | 2026-09-11 | Missing sidecar/producer/claim/base/dependency evidence fails before expensive CI or review. |
@@ -20,7 +21,7 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 | 9. Rewrite and install the operating rules without a flag day | ⬜ open | 2026-09-11 | Canonical and installed rules agree; legacy in-flight work remains safely executable. |
 | 10. Run a five-outcome live acceptance trial and close the programme | ⬜ open | 2026-09-11 | Five application outcomes meet §13 with timestamps and live behavior evidence. |
 
-**Fresh-session starting point:** begin at Step 0. Before every later phase, re-read the downstream steps and this STATUS table, then update the table in the same commit as implementation evidence. A row is never complete merely because an issue or pull request exists.
+**Fresh-session starting point:** begin at Step 1 and consume the completed Step 0 ledger rather than rebuilding it. Before every later phase, re-read the downstream steps and this STATUS table, then update the table in the same commit as implementation evidence. A row is never complete merely because an issue or pull request exists.
 
 ## 1. Ultimate goal
 
@@ -77,6 +78,7 @@ Concrete examples were the DCP repair polled repeatedly while undispatched, ten 
 - One outcome record from intake through live application verification.
 - Durable event-triggered transitions and machine-readable session snapshots.
 - Early automatic evidence/route qualification.
+- A fail-closed no-database-preview fast lane for work proven unable to alter database structure, behavior, permissions, or data.
 - Compatible batching of already-approved migrations.
 - Reviewer correctness, liveness, replacement, and runner fallback.
 - Native GitHub merge queue through the already-written transfer plan.
@@ -88,7 +90,8 @@ Concrete examples were the DCP repair polled repeatedly while undispatched, ten 
 - Removing or weakening any database safety assertion.
 - Concurrent writes to preview, merge, or production.
 - An unguarded or judgment-free production promotion path. Issue #2716's proposed automatic path belongs only if every existing machine-verifiable gate passes and any uncertainty escalates to an engineer.
-- Treating urgency as permission to skip review, CI, preview, risk, identity, or live verification.
+- Treating urgency as permission to skip any applicable review, CI, database preview, risk, identity, or live verification gate.
+- Exempting a migration or any database-affecting change from preview because it looks low-risk.
 - Replacing claims with optimistic Git merge-conflict detection.
 - Deleting claims, refs, branches, worktrees, or evidence because they are old.
 - Making ordinary application row writes or repository maintenance into orchestrator work.
@@ -124,6 +127,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 ### Still missing
 
 - Sessions still use judgment-heavy routing and over-send work to the orchestrator; the orchestrator can accept non-structural work instead of deterministically refusing and returning it.
+- There is no general, machine-enforced no-database-preview route for documentation, plans, handoffs, reviewer/queue tooling, CI/workflow maintenance, read-only audits/reporting, tests, or application-only changes that provably cannot affect database structure, behavior, permissions, or data.
 - No enforced urgent application-unblock class.
 - Queue ordering optimizes numeric priority/eligibility, not “finish the live blocker first.”
 - No authoritative outcome state spanning intake to live application proof.
@@ -157,6 +161,8 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 9. **Trust caller-asserted or otherwise unqualified automatic production approval.** Rejected: exact migration lists and business-risk decisions remain governed gates. The accepted #2716 path promotes only when the immutable exact list and every machine-verifiable review, preview, dry-run, risk, identity, serialization, and evidence gate qualify; any missing or ambiguous proof refuses to an engineer.
 10. **Close an outcome at merge.** Rejected: the application is still blocked until correct environment and behavior are verified.
 11. **Duplicate #2705/#2709 fixes in this programme.** Rejected: consume their proven results as prerequisites.
+12. **Preview everything because it is safer.** Rejected: database preview cannot prove non-database work and forcing that work through the structural queue adds delay without adding evidence. The correct control is fail-closed impact classification plus the checks applicable to the actual change.
+13. **Skip preview for changes described as low-risk.** Rejected: prose labels and perceived risk do not prove impact. Every migration and every change that can alter database structure, behavior, permissions, or data retains database preview.
 
 ## 8. Design decisions
 
@@ -173,6 +179,8 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions. If #2716 is authorized and lands, a fully machine-qualified train promotes automatically and serially; any missing or ambiguous proof stops for an engineer, not a non-technical version-number choice from Albert.
 10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
 11. Routing is enforced twice: the sending session must classify from the actual proposed change, and the orchestrator must independently admit only database structure/schema work. A handover, `db-work` label, repository location, or sender assertion is never sufficient.
+12. Database-preview eligibility follows proved impact, not perceived risk. Documentation/plans/handoffs, reviewer and queue tooling, CI/workflow maintenance, read-only audits/reporting, tests, and application-only work may use the no-database-preview lane only when deterministic inspection proves they cannot alter database structure, behavior, permissions, or data. Uncertainty fails closed to the ordinary governed route.
+13. The no-database-preview lane skips only the database rehearsal and structural orchestrator. It retains every applicable code, test, review, security, deployment, and live-behavior gate, records a machine-readable exemption reason, and targets no more than ten minutes from PR-ready to merge-ready when runner capacity is available.
 
 ### Open implementation judgment
 
@@ -226,6 +234,18 @@ Replace automatic refill ordering with: safety eligibility; urgent service class
 Update `shared-db/AGENTS.md`, the canonical orchestrator skill, operating manual, and tests together.
 
 **Verification gate:** sender fixtures route each structural/non-structural class correctly; adversarial misrouted issues are rejected again by the orchestrator; no non-structural issue can claim a lane or shared stage; two unrelated structural authors run concurrently; conflicting objects never do; urgent application work starts before maintenance; no active work is destructively preempted.
+
+#### Step 2A — add the fail-closed no-database-preview fast lane
+
+Extend `shared-db/scripts/orchestrator-flow/qualify-change.mjs`, `scripts/orchestrator-flow/select-preview-route.mjs`, and their tests with an explicit `DATABASE_PREVIEW_REQUIRED` or `NO_DATABASE_PREVIEW` decision plus a stable reason code. Reuse `scripts/lib/orchestrator-admission.mjs` and Step 2's actual-change classification: a filename, label, author statement, or claimed risk level is never sufficient. Every migration and every change that can affect database structure, behavior, permissions, database-executed code, roles/grants/RLS, or data remains `DATABASE_PREVIEW_REQUIRED`. Missing, mixed, generated, or ambiguous impact evidence also requires preview.
+
+For `NO_DATABASE_PREVIEW`, return the work to its natural owner before structural claim, database-reviewer reservation, preview lock, migration guarded-merge dispatch, or structural queue entry. Eligible classes are documentation/plans/handoffs; reviewer and queue tooling; CI/workflow maintenance; read-only audits/reporting; tests that do not mutate a database; and application-only changes proven not to change database structure, behavior, permissions, or data. The classifier must emit the exact class, inspected inputs and digest, exemption reason, applicable non-database checks, and invalidation conditions. A changed input invalidates the decision and reruns classification.
+
+In ai-devops, extend `tools/ci/classify-changes.sh`, `config/task-gates.json`, their schema/selection tests, and the canonical shared-db routing instructions so the natural-owner lane runs its existing applicable checks without a database rehearsal. Reuse #2715's lightweight prose route rather than creating a competing docs classifier. Add queue-to-merge timestamps and a ten-minute PR-ready-to-merge-ready target for qualified fast-lane work; runner outage or an applicable failing check is reported separately and never converted into an exemption.
+
+**Dependencies:** Step 1's #2715 classifier and Step 2's two-sided admission contract. **Parallel:** shared-db reason-code fixtures and ai-devops task-gate/CI-selection fixtures may be authored independently; integration waits for both contracts.
+
+**Verification gate:** every named eligible class produces `NO_DATABASE_PREVIEW`, runs all of its applicable non-database checks, acquires no structural claim/stage/reviewer/preview ref, and records a reproducible exemption digest. Migration, SQL, database-executed code, grants/RLS, data mutation, generated or mixed changes, and ambiguous fixtures produce `DATABASE_PREVIEW_REQUIRED`. A changed file or classifier input invalidates the exemption. A harmless canary reaches merge-ready within ten minutes when qualified capacity is available, while an injected applicable-check failure blocks it.
 
 #### Step 3 — add the authoritative outcome lifecycle
 
@@ -325,6 +345,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Delivery preflight: sidecar/producer/claim/base/dependency/route/reviewer/runner cases and digest invalidation.
 - Migration train: all eight cases named in Step 6.
 - Admission: every structural type accepted; application rows/code, docs, CI, reviewer tooling, workflows, and repository maintenance rejected by both sender and orchestrator; sender misclassification cannot acquire a claim/stage.
+- Preview eligibility: every allowed no-database-preview class; every database-affecting, generated, mixed, and ambiguous refusal; stable reason/digest; invalidation after input change; zero structural refs or reservations for exempt work; all applicable non-database checks retained.
 - Reviewer: #2705 allocation cases, #2709 base cases, unstarted reroute, healthy quiet review, all providers busy.
 - Independent prerequisites: #2715 prose/mixed/rulebook paths and #2716 fully-qualified/refusal/dry-run/serial-lock/engineer-escalation paths.
 - Runner: pickup, non-pickup, replacement, duplicate prevention, aggregate truth.
@@ -333,6 +354,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 ### ai-devops tests
 
 - Canonical skill/global/router parity and installation hash checks.
+- Task-gate and CI-selection fixtures prove the no-database-preview lane reuses the natural owner's existing checks, records its reason, and never treats a database-affecting or uncertain change as exempt.
 - Forbidden active behavior: automatic refill as success metric, repeated unchanged polling, merge-as-completion, duplicate authorization, and mandatory prose reconstruction.
 - Event-aware wait tests and existing #159 CI/reviewer suites.
 - Exact-head independent review for wrapper/evidence safety changes.
@@ -355,6 +377,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Preview, merge, and production remain one at a time.
 - Reviewer failure is not a code finding; runner cancellation is not a test result.
 - A merge queue supplements rather than replaces exact-head approval and production freeze.
+- No-database-preview means no database rehearsal, not no verification. It never applies to migrations or any change that can affect database structure, behavior, permissions, or data; ambiguity requires preview.
 - Classification follows behavior, not directory or filename: plans and declarative discoverability pointers use the lightweight lane; executable instructions, behavior-changing rules, workflows, scripts, tests, configuration, and migrations retain targeted or full code checks.
 - Raw transcripts, secrets, licensed data, and private evidence stay outside public repositories.
 - Update this STATUS table whenever implementation changes reality.
@@ -377,6 +400,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - [ ] Every STATUS row cites an artifact, commit, live run, or rerunnable command.
 - [ ] #2705, #2709, #2715, and #2716 are genuinely repaired by their independent owners, not merely closed.
 - [ ] Sending sessions and the orchestrator independently reject non-structural work; misclassification cannot consume a lane or shared stage.
+- [ ] The no-database-preview fast lane is machine-enforced, records a reproducible exemption reason/digest, keeps every applicable non-database check, fails closed on uncertainty, and meets its ten-minute qualified-capacity target in a live canary.
 - [ ] Urgent and finish-first scheduling is enforced and tested.
 - [ ] Eight safe author lanes remain available for non-conflicting work.
 - [ ] One outcome card remains open through live application verification.
@@ -415,6 +439,7 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 | Urgent application-unblock lane | Steps 2–3 |
 | Parallel non-conflicting authorship | Preserve current eight lanes; Steps 2 and 9 |
 | Binding classification fast path and orchestrator refusal | Steps 1, 2, and 5; #2715 |
+| No-database-preview fast lane for proven non-database work | Step 2A; reuses #2715 and Step 2 |
 | Batch approved migrations | Step 6 |
 | Automatic evidence | Step 5 |
 | Bounded reviewer waits | Steps 1 and 7 |
@@ -427,7 +452,7 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 ## Mandatory implementation-plan self-audit
 
 1. **Could a brand-new AI session execute this plan without asking Albert anything? Yes for every reversible planning and implementation step.** §§2, 5, 9, 10, and 12 identify repositories, current components, concrete files/functions, dependencies, commands/evidence, environments, and verification gates. §8 and §13 isolate the only later owner actions: repository transfer/settings and exact production lists.
-2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow reviewer coverage and #2715/#2716's independent ownership, enforce two-sided non-structural refusal, reject the superseded 1+1 premise, and preserve every safety boundary.
+2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow reviewer coverage and #2715/#2716's independent ownership, enforce two-sided non-structural refusal, define the fail-closed no-database-preview boundary, reject both preview-everything and risk-label exemptions, reject the superseded 1+1 premise, and preserve every safety boundary.
 3. **Is the ultimate goal clear enough for correct judgment when a step is wrong? Yes.** §1 makes live application delivery the outcome, safety preservation the invariant, and explicitly says the goal wins.
 
 Checklist result: all 13 sections are present; the STATUS table, zero-context background, explicit scope, current state, root cause, rejected approaches, locked/open decisions, file-level steps, named tests, access, landing proof, risks, rollback, owner gates, plan/handoff cross-links, discoverability route, and full recommendation coverage are included. No secret or private transcript content is present.
