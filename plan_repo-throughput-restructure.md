@@ -33,6 +33,15 @@ A fresh session selects the remaining registered child that owns its code bounda
 | 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
 | 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
 
+Reviewer programme update (2026-09-11): the bounded DeepSeek Unicode/terminal
+repair #405 landed as `068c6cb9f07c0792f5e579fd004df25f012820a1`, passed
+85/0/0 focused tests, exact-head independent GLM review, PR CI `34563556041`
+and queue `34567376452`, and was installed with a successful paid synthetic
+Unicode review and stored replay. The reviewer plan records the exact hashes.
+Its affected incident is partially resolved because the separate large-input
+symptom still awaits #393 live proof. This does not close #394, #337 or #159;
+the original maintenance round is preserved and final #398/#166 remain last.
+
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
 `verify.yml` keyed its concurrency group on the head SHA, so superseded runs were never cancelled and the two-runner edge-dev pool filled with builds nobody was waiting for. Fixed outside the phase order because it was blocking every phase. Merges `ee2b5a82`, `aa2f1337`. Issue #204 closed with evidence.
