@@ -41,7 +41,7 @@
 #
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
 #   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
-#   ai-review-packet verify <packet-dir>                  # re-derive the hash
+#   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
 #   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
 #   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
 #
@@ -367,9 +367,9 @@ cmd_build() {
   excl="$(git -C "$root" rev-parse --git-path info/exclude)"
   case "$excl" in /*|[A-Za-z]:[/\\]*) ;; *) excl="$root/$excl" ;; esac
   mkdir -p "$(dirname "$excl")"
-  # One glob covers every session's packet, so concurrent reviews do not each
-  # append a line and none of them ever shows up as part of the change.
-  grep -qxF "$PACKET_DIR_BASE*/" "$excl" 2>/dev/null || printf '%s*/\n' "$PACKET_DIR_BASE" >> "$excl"
+  # Ignore only this generated packet, never similarly named user source.
+  local packet_exclusion="/$(basename "$pkt")/"
+  grep -qxF "$packet_exclusion" "$excl" 2>/dev/null || printf '%s\n' "$packet_exclusion" >> "$excl"
 
   # --- tests, BEFORE the evidence is captured ---------------------------------
   # Order matters. A test command can write a log, delete a fixture, or reset a
@@ -483,8 +483,8 @@ EOF
     || die "git diff --name-status $base..$head failed in $root. Nothing was sealed."
   dirty="$(git -C "$root" diff --name-status HEAD)" \
     || die "git diff --name-status HEAD failed in $root. Nothing was sealed."
-  untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null \
-               | grep -v "^$PACKET_DIR_BASE" || true)"
+  untracked="$(git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" \
+    || die "cannot enumerate untracked source files"
   changed="$(list_block "$pkt"   changed-files.txt   "(no committed changes between base and head)" "$changed")"
   dirty="$(list_block "$pkt"     dirty-files.txt     "(none — the working tree is clean)"           "$dirty")"
   untracked="$(list_block "$pkt" untracked-files.txt "(none)"                                        "$untracked")"
