@@ -657,14 +657,23 @@ def main():
         require(operation == "finish" and len(sys.argv) in {5, 6}, "invalid event operation")
         run_id, result = sys.argv[3:5]
         facts = provenance(json.loads(sys.argv[5]) if len(sys.argv) == 6 else None)
+        publication_incomplete = []
         def finish(rows):
             matches = [r for r in rows if r.get("run_id") == run_id]
             require(len(matches) == 1 and matches[0].get("event") == "started" and
                     matches[0].get("provider") == provider, "event has no unique matching start")
-            references = verify_reports(directory, provider, run_id)
-            return {**matches[0], "event": "finished", "timestamp": now(), "exit_code": int(result),
-                    "provenance": facts, "evidence_references": references}
+            try:
+                references = verify_reports(directory, provider, run_id)
+            except (Blocked, OSError, ValueError):
+                references = []
+                publication_incomplete.append(True)
+            return {**matches[0], "event": "finished", "timestamp": now(),
+                    "exit_code": int(result) if int(result) or not publication_incomplete else 1,
+                    "wrapper_exit_code": int(result),
+                    "provenance": facts, "evidence_references": references,
+                    "evidence_state": "publication-incomplete" if publication_incomplete else "verified"}
         append(directory, finish)
+        require(not publication_incomplete, "required evidence publication incomplete; terminal outcome recorded and local recovery retained")
 
 
 if __name__ == "__main__":

@@ -47,6 +47,8 @@ shift
 case "$1" in
   stream) cat; printf 'synthetic stderr\\n' >&2; exit 7;;
   ok) exit 0;;
+  unpublished) reviewer_event_evidence require-report grok; exit 7;;
+  unpublished-ok) reviewer_event_evidence require-report grok; exit 0;;
   secret-env) [ -n "${PROVIDER_TEST_SECRET:-}" ]; exit 4;;
   signal) trap 'exit 44' TERM INT; printf '%s\\n' "$$" > "$SIGNAL_READY"; while true; do sleep 0.1; done;;
 esac
@@ -541,6 +543,26 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
                 self.assertTrue(meta.exists(), result.stderr)
                 self.assertFalse((self.root / "provider-delete").exists(), result.stderr)
 
+    def test_failed_publication_still_records_exact_terminal_exit(self):
+        result = self.guard(operation="unpublished")
+        self.assertEqual(result.returncode, 7)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([row["event"] for row in rows], ["started", "finished"])
+        self.assertEqual(rows[-1]["exit_code"], 7)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
+        self.assertEqual(rows[-1]["evidence_references"], [])
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "grok", rows[-1]["run_id"])
+
+    def test_zero_wrapper_exit_cannot_hide_missing_evidence_from_maintenance(self):
+        result = self.guard(operation="unpublished-ok")
+        self.assertEqual(result.returncode, 1)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["exit_code"], 1)
+        self.assertEqual(rows[-1]["wrapper_exit_code"], 0)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
+        self.assertEqual(len(self.engine.start()["candidates"]), 1)
+
     def test_guard_preserves_stdin_stdout_stderr_exit(self):
         result = self.guard(operation="stream", input="unchanged input\n")
         self.assertEqual(result.returncode, 7, result.stderr)
@@ -928,7 +950,10 @@ wait "$job"
                 patch.object(sys, "argv", ["events", "finish", "grok", rid, "0"]):
             with self.assertRaises(events.Blocked):
                 events.main()
-        self.assertEqual([json.loads(line)["event"] for line in self.ledger.read_text().splitlines()], ["started"])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([row["event"] for row in rows], ["started", "finished"])
+        self.assertNotEqual(rows[-1]["exit_code"], 0)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
 
     def test_completed_invocation_cannot_gain_new_evidence_after_the_fact(self):
         rid, _, report = self.evidence_fixture()
