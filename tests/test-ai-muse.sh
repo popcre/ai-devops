@@ -88,6 +88,7 @@ cat > "$BIN/opencode.exe" <<'EOF'
 case "${1:-}" in
   --version) echo 1.18.12;;
   run)
+    [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
@@ -123,6 +124,34 @@ esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+muse_recovery_cases(){
+  local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
+  : > "$calls"
+  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
+  m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
+  check 'Muse retains exact successful process and event evidence' "jq -e '.retained_turn.process_exit==0 and (.retained_turn.original_invocation_id|length)==32 and (.retained_turn.stream_sha256|length)==64' '$m'"
+  raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/recovery-original"
+  printf 'tamper' >> "$raw"
+  check 'changed retained Muse bytes cannot unlock continuation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\""
+  cp "$TMP/recovery-original" "$raw"
+  check 'completed stale Muse response reconciles without authorizing changed source' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"active\" and .retained_turn.recovery_state==\"completed-stale-source\" and .retained_turn.finalized==true' '$m'"
+  rep="$(jq -r .last_report "$m")"
+  check 'stale Muse report is explicitly non-authorizing' "grep -q NON-AUTHORIZING '$rep'"
+  check 'repeated Muse reconciliation does not repeat paid work' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && test \"\$(wc -l < '$calls')\" -eq 1"
+  check 'normal continuation survives stale completion reconciliation' "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask recovery-stale --prompt continue\""
+  rep="$(jq -r .last_report "$m")"; cp "$rep" "$TMP/recovery-report-original"; report_inode="$(stat -c '%d:%i' "$rep")"
+  tmp="$m.test"; jq '.status="completed_pending_local_checks"' "$m" > "$tmp"; mv "$tmp" "$m"
+  printf 'different' >> "$rep"
+  check 'differing existing Muse report refuses local finalization' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"completed_pending_local_checks\"' '$m'"
+  cat "$TMP/recovery-report-original" > "$rep"
+  check 'identical existing Muse report is reused without replacement or provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && test \"\$(stat -c '%d:%i' '$rep')\" = '$report_inode' && test \"\$(wc -l < '$calls')\" -eq 2"
+  check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\""
+  check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
+}
+if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  muse_recovery_cases
+  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 mkdir -p "$TMP/link-probe-target"
 if ln -s "$TMP/link-probe-target" "$TMP/link-probe" 2>/dev/null; then
   rm -rf -- "$TMP/link-probe"; OUTSIDE_REPORTS="$TMP/outside-reports"; mkdir -p "$OUTSIDE_REPORTS"; printf safe > "$OUTSIDE_REPORTS/sentinel"
@@ -308,9 +337,10 @@ check 'failed provider turns preserve incomplete evidence' "test \"\$(find '$REP
 check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask stale --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$STALE_META'"
 check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask stale --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$STALE_META'"
-check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask stale --prompt mixed\""
-check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask stale --prompt mixed\""
+check 'uncertain retained process cannot be unlocked by a session ID' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\""
+check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' new wrong-resume --prompt first\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-resume --prompt wrong\"; m=\$(find '$TMP/state' -name 'codex--wrong-resume.json' -type f); jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' \"\$m\""
+check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-resume --prompt first\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-resume --prompt mixed\""
+check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-start --prompt first\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask mixed-start --prompt mixed\""
 RETRY_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new retry-delete --prompt test" 2>&1)"; RETRY_META="$(find "$TMP/state" -name 'codex--retry-delete.json' -type f)"; RETRY_TMP="${RETRY_META}.tmp"; jq '.status="provider_deleted"' "$RETRY_META" > "$RETRY_TMP"; mv "$RETRY_TMP" "$RETRY_META"
 check 'delete safely retries after provider was already removed' "cd '$REPO' && eval \"$ENV MUSE_STUB_DELETE_FAIL=1 '$SCRIPT' delete retry-delete\" && test ! -e '$RETRY_META'"
 FAIL_DELETE_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new fail-delete --prompt test" 2>&1)"; FAIL_DELETE_META="$(find "$TMP/state" -name 'codex--fail-delete.json' -type f)"
@@ -327,5 +357,6 @@ check 'compatibility review rejects an undefined verdict' "cd '$REPO' && ! eval 
 check 'compatibility review rejects a legacy undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
 
+muse_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
