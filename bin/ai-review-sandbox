@@ -110,6 +110,15 @@ test_progress() { # test_progress — observable work for loaded fixture waits o
   printf '.\n' >> "$AI_REVIEW_SANDBOX_PROGRESS_FILE"
 }
 
+generated_review_path() { # ROOT RELATIVE_PATH; never exclude source by prefix alone
+  case "$2" in
+    .ai-review/*|.ai-review-sandbox|AI-REVIEW-SANDBOX.md) return 0 ;;
+    .ai-review-*/*)
+      [ -f "$1/${2%%/*}/.ai-review-packet" ] && return 0 ;;
+  esac
+  return 1
+}
+
 source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible tree identity
   local root="$1" output="$2" list diff rel kind bytes digest tree
   list="$(mktemp)"; diff="$(mktemp)"
@@ -127,7 +136,7 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
     "$tree" "$(wc -c < "$diff" | tr -d ' ')" "$(sha256sum "$diff" | cut -d' ' -f1)" >> "$output"
   test_progress || { rm -f "$list" "$diff"; return 1; }
   while IFS= read -r -d '' rel; do
-    case "$rel" in .ai-review*|AI-REVIEW-SANDBOX.md) continue ;; esac
+    if generated_review_path "$root" "$rel"; then continue; fi
     if [ -L "$root/$rel" ]; then
       kind=symlink
       bytes="$(readlink -n "$root/$rel" | wc -c | tr -d ' ')" || { rm -f "$list" "$diff"; return 1; }
@@ -183,7 +192,7 @@ copy_untracked() { # copy_untracked SRC DST — reproduce untracked-but-not-igno
     [ -n "$rel" ] || continue
     # Evidence packets are session-owned generated state. A fresh snapshot must
     # build its own packet and must never copy another live review's packet.
-    case "$rel" in .ai-review*) continue ;; esac
+    if generated_review_path "$src" "$rel"; then continue; fi
     [ "${AI_DEVOPS_TEST_MODE:-0}:${AI_REVIEW_SANDBOX_TEST_FAIL_COPY:-}" != "1:$rel" ] \
       || { rm -f "$list"; return 1; }
     mkdir -p "$dst/$(dirname "$rel")" || { rm -f "$list"; return 1; }
@@ -203,9 +212,12 @@ validate_snapshot_links() { # validate_snapshot_links STAGE
 }
 
 build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
-  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry
+  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry captured_refs
   base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
     || die "worktree $root has no commits yet; there is nothing to snapshot."
+  # Capture refs before copying objects. Another worktree can commit while the
+  # clone runs; reading its newer ref afterward names an object we never copied.
+  captured_refs="$(git -C "$root" for-each-ref --format='update %(refname) %(objectname)' refs/heads refs/remotes)" || return 1
 
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
     git -c core.longpaths=true clone --progress --no-hardlinks "$root" "$build" \
@@ -214,6 +226,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
     git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
       || return 1
   fi
+  run_test_hook after-clone "$root" "$attempt"
   printf '%s\nsource_digest=%s\n' "$root" "$before" > "$build/$MARKER" || return 1
   git -C "$build" remote remove origin >/dev/null 2>&1 || true
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
@@ -226,7 +239,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   # CARRY THE BASE BRANCHES ACROSS. `git clone` puts the source's branches under
   # refs/remotes/origin/, and `remote remove origin` deletes every one of them, so
   # the snapshot ends up with NO refs at all. ai-review-packet's base resolution
-  # tries `main`, `master`, `origin/main`, `origin/master` in that order and --
+  # prefers fetched `origin/main`/`origin/master`, then local `main`/`master`, and --
   # because none of them can exist here -- silently falls through to HEAD~1.
   #
   # On an ordinary linear branch that is merely narrow. On a MERGE commit it is
@@ -237,23 +250,16 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
   # "Merge main into ..." commit): two Codex runs REJECTed the change over a
   # handoff document that came from main and was not part of the pull request.
   #
-  # Carry the remote-tracking branch in preference to a same-named local branch.
-  # The latter may be stale even when the source worktree has fetched current
-  # main; copying it caused review packets to diff against the PR's old base.
-  # This only ADDS refs: HEAD stays detached at $base and the reviewed tree is untouched,
-  # so nothing the reviewer reads changes -- only which commit the diff is taken
-  # against, which is the one thing that was wrong.
-  local base_ref base_sha
-  for base_ref in main master; do
-    base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/remotes/origin/$base_ref^{commit}" 2>/dev/null || true)"
-    [ -n "$base_sha" ] || base_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$base_ref^{commit}" 2>/dev/null || true)"
-    [ -n "$base_sha" ] || continue
-    # The object came from the source we just cloned, so it is present here. A
-    # missing one degrades to the previous behaviour rather than failing the
-    # snapshot: no base ref is exactly the state this block replaces.
-    git -C "$build" cat-file -e "$base_sha^{commit}" 2>/dev/null || continue
-    git -C "$build" update-ref "refs/heads/$base_ref" "$base_sha" 2>/dev/null || return 1
-  done
+  # Preserve remote-tracking refs as remote-tracking refs. They remain useful
+  # evidence even though this disposable copy has no network remote: packet
+  # resolution deliberately prefers a fetched origin/main to a stale local
+  # main. Local branches remain the offline fallback. This only ADDS refs:
+  # HEAD stays detached at $base and the reviewed tree is untouched.
+  # Batch the ref transaction: spawning Git once per branch is especially
+  # expensive on Windows. update-ref rejects unavailable objects atomically.
+  if [ -n "$captured_refs" ]; then
+    printf '%s\n' "$captured_refs" | git -C "$build" update-ref --stdin || return 1
+  fi
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.

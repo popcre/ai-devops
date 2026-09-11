@@ -808,6 +808,7 @@ OUT="$(run new r6 --prompt x 2>&1)"; RC=$?
 git -C "$REPO" checkout -- a.txt 2>/dev/null || true
 [ $RC -ne 0 ] && ok "a read-only review that wrote is a hard failure" || bad "a read-only review that wrote is a hard failure"
 check "message says the restriction is not holding" "printf '%s' \"\$OUT\" | grep -qi 'not holding'"
+check "read-only violation retains priority over source identity refusal" "! printf '%s' \"\$OUT\" | grep -q 'source identity changed during review'"
 echo ok > "$TMP/mode"
 
 echo "== output handling =="

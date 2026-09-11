@@ -22,7 +22,7 @@ CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format
 
 die(){ printf 'ai-claude-review: error: %s\n' "$*" >&2; exit 1; }
 usage(){ cat <<'EOF'
-Usage: ai-claude-review <plan-review|diff-review|security-review|visual-review|final-check>
+Usage: ai-claude-review <plan-review|diff-review|security-review|visual-review|final-check> [--base REF] [--assert-head SHA]
        ai-claude-review doctor [--live]
 
 Claude Opus 5 receives a complete disposable snapshot with only Read, Grep,
@@ -58,6 +58,17 @@ MODE="${1:-}"; case "$MODE" in
   doctor) doctor "${2:-}"; exit 0;;
   plan-review|diff-review|security-review|visual-review|final-check) ;;
   ''|-h|--help|help) usage; exit 0;; *) usage >&2; exit 2;; esac
+shift
+OPT_BASE=""; OPT_ASSERT_HEAD=""; SOURCE_IDENTITY=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base|--assert-head)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+      if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+      shift 2;;
+    *) die "unknown option: $1";;
+  esac
+done
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
 REPO_ROOT="$(git rev-parse --show-toplevel)"; cd "$REPO_ROOT"; validate_command
@@ -69,12 +80,15 @@ mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="claude-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_JSON=""; TMP_TEXT=""; TMP_REPORT=""
 cleanup(){
+  [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
   [ -z "$TMP_JSON" ] || rm -f "$TMP_JSON"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"; [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
   [ -z "$REVIEW_DIR" ] || "$PACKET" remove "$REVIEW_DIR" "$TAG" >/dev/null 2>&1 || true
   "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
+SOURCE_IDENTITY="$(mktemp)" || die 'could not reserve source identity'
+"$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$SOURCE_IDENTITY" || die 'source identity refused before snapshot creation'
 STATE="$($LIFECYCLE begin --provider claude --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
 REVIEW_DIR="$($SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create review snapshot.'; }
 case "$MODE" in
@@ -92,8 +106,8 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
-PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact evidence.'; }
-"$PACKET" verify "$PACKET_DIR" >/dev/null || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
+PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --identity "$SOURCE_IDENTITY" --decision "$DECISION" --class medium)" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact evidence.'; }
+"$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
 
 PROMPT="You are performing a READ-ONLY $MODE. Do not edit, create, commit, push, merge, or delete files.
 
@@ -125,6 +139,11 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.claude-report.XXXXXX")"
   printf '| run | `%s` |\n| provider session | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | `Read,Grep,Glob` |\n\n## Result\n\n' "$RUN_ID" "$(jq -r .session_id "$TMP_JSON")" "$CALLER" "$ELAPSED"
   cat "$TMP_TEXT"
 } > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
+if ! "$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null; then
+  mv "$OUT" "$OUT.stale"
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
+  die 'source identity changed during review; paid report retained as stale.'
+fi
 FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")" || { mv "$OUT" "$OUT.accounting-failed" 2>/dev/null || true; die 'lifecycle accounting failed.'; }
 [ "$(jq -r .stale <<<"$FINAL_STATE")" = false ] && [ "$(jq -r .verdict <<<"$FINAL_STATE")" = "$VERDICT" ] || { mv "$OUT" "$OUT.stale" 2>/dev/null || true; die 'source changed during review.'; }
 printf '%s\n' "$OUT"

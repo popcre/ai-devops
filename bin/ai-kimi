@@ -384,7 +384,12 @@ REVIEW_SNAPSHOT_SECONDS=0; REVIEW_PACKET_SECONDS=0; REVIEW_TEST_SECONDS=0
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
 prepare_review() { # prepare_review ROOT TAG [RECORDED-DIRECTORY]
-  local root="$1" tag="$2" recorded="${3:-}" pkt want snapshot_started packet_started
+  local root="$1" tag="$2" recorded="${3:-}" pkt want snapshot_started packet_started identity=""
+  if [ "$OPT_REVIEW_KIND" = diff ]; then
+    identity="$(mktemp)" || die "could not reserve source identity"
+    "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+      || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
+  fi
   snapshot_started="$(date +%s)"
   REVIEW_DIR="$(review_boundary "$root" "$tag" "$recorded")"
   REVIEW_SNAPSHOT_SECONDS="$(( $(date +%s) - snapshot_started ))"
@@ -428,12 +433,15 @@ EOF
   if [ "${changed_count:-0}" -gt 10 ] || [ "${patch_bytes:-0}" -gt 40960 ]; then review_class="medium"; fi
   packet_started="$(date +%s)"
   pkt="$(AI_REVIEW_PATCH_MAX_BYTES=40960 AI_REVIEW_TEST_TAIL=25 "$PACKET_BIN" build "$REVIEW_DIR" "$tag" --class "$review_class" \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
+  REVIEW_IDENTITY_BOUND=1
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
   # Re-point the preamble now that the packet's real directory name is known.
   PACKET_PREAMBLE="${DIFF_PACKET_PREAMBLE//.ai-review/$PACKET_REL}"
@@ -1247,6 +1255,9 @@ review_worker() { # JOB-DIR PROMPT-FILE
     [ -n "$new_sid" ] || reason=malformed-output
     if [ "$mode" = review ] && [ "$before" != "$(tree_state "$workdir")" ]; then
       reason=readonly-tree-changed
+    fi
+    if [ -z "${reason:-}" ] && [ "$mode" = review ] && [ "$(jq -r '.review_kind // "diff"' "$meta")" = diff ]; then
+      "$PACKET_BIN" verify "$("$PACKET_BIN" path "$workdir" "kimi-$CALLER-$name")" >/dev/null || reason=source-identity-changed
     fi
     defect="$(review_answer_defect "$out")"; [ -n "${reason:-}" ] || [ -z "$defect" ] || reason="$defect"
     if [ -n "${reason:-}" ]; then
@@ -2081,6 +2092,10 @@ continue_implementation() { # NAME RID META [RESET]
 finish_turn() {
   local repo="$1" name="$2" out="$3" path
   ANSWER_DEFECT=""
+  if [ "${REVIEW_IDENTITY_BOUND:-0}" = 1 ] && ! "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null; then
+    note "source identity changed; paid stream retained: $out"
+    return 4
+  fi
   if [ "${OPT_JSON:-0}" = 1 ]; then cat "$out"; else extract_answer "$out"; fi
   path="$(write_review_file "$repo" "$name" "$out")"
   [ -n "$path" ] && note "saved: $path"
