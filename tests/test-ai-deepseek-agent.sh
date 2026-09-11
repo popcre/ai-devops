@@ -244,6 +244,7 @@ set -e
 check "a recovery-required session refuses continuation before any provider contact" "test '$LEDGER_CONT_RC' -ne 0 && test '$LEDGER_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && grep -q 'would understate what DeepSeek saw' '$LEDGER_CONT'"
 check "the recovery marker is not mistaken for a conversation by list" "! run list | grep -q recovery-required"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
+check "list excludes retained provider responses" "! run list | grep -q response"
 else
   SESSION="$(run send source-fixture | sed -n 's/^SESSION_ID: //p')"
 fi
@@ -264,10 +265,14 @@ git -C "$TMP/repo" update-ref refs/heads/non-main-source "$SOURCE_BASE"
 printf 'only this committed source change\n' > "$TMP/repo/source-only.txt"
 git -C "$TMP/repo" add source-only.txt; git -C "$TMP/repo" commit -qm source-fixture
 SOURCE_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
+mkdir -p "$TMP/repo/.ai-review" "$TMP/repo/.ai-review-notes"
+printf 'generated-packet-sentinel\n' > "$TMP/repo/.ai-review/legacy.txt"
+printf 'legitimate-source-sentinel\n' > "$TMP/repo/.ai-review-notes/feature.txt"
 SOURCE_OUT="$(AI_REVIEW_PATCH_MAX_BYTES=64 DEEPSEEK_STUB_REPLY=$'findings\n## Verdict\nAPPROVE' run send source-identity --review --base refs/heads/non-main-source --assert-head "$SOURCE_HEAD")"
 SOURCE_ID="$(printf '%s\n' "$SOURCE_OUT" | sed -n 's/^SESSION_ID: //p')"; SOURCE_META="$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.meta.json"
 check "formal review metadata binds explicit non-main source and full packet digest" "jq -e --arg base '$SOURCE_BASE' --arg head '$SOURCE_HEAD' '.source_identity.base==\$base and .source_identity.head==\$head and (.packet_sha256|test(\"^[0-9a-f]{64}$\"))' '$SOURCE_META'"
 check "formal review attaches the committed diff and complete manifest" "jq -er '.[1].content' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | grep -q 'only this committed source change' && jq -er '.[1].content' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | grep -q 'MANIFEST.md'"
+check "formal review includes legitimate prefixed source and excludes stale generated packets" "jq -e '.[1].content | contains(\"legitimate-source-sentinel\") and (contains(\"generated-packet-sentinel\")|not)' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "formal review preserves sealed packet after disposable snapshot cleanup" "test -f \"\$(jq -r .source_packet_directory '$SOURCE_META')/MANIFEST.sha256\""
 check "split packets attach the complete patch" "jq -e '.source_attached_files|any(endswith(\"patch.full.diff\"))' '$SOURCE_META'"
 SOURCE_MOVE_LOG="$TMP/source-move.log"
@@ -278,6 +283,5 @@ set -e
 check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
 check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >/dev/null && jq -e '.status==\"complete\"' '$SOURCE_META'"
-check "list excludes retained provider responses" "! run list | grep -q response"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

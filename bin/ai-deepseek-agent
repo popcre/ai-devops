@@ -397,7 +397,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   done < <(find "$saved" -type f -print0 | sort -z)
   while IFS= read -r -d '' file; do
     source_files+=("$snapshot/$file")
-  done < <(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z)
+  done < <(git -C "$snapshot" ls-files --others --exclude-standard -z)
   printf '%s\0' "${source_files[@]}" > "$REVIEW_SOURCE_IDENTITY.files" || return 1
   MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${source_files[@]}")" || return 1
   "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1

@@ -174,7 +174,7 @@ qualify_live(){
   record_qualification || die 'live qualification passed but the qualification record could not be written'
   printf 'QUALIFIED session=%s model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=%s\n' "$name" "$MODEL" "$fixture"
 }
-usage(){ printf '%s\n' 'Usage: ai-gemini new|ask [--governed-verdict SHA] <name> [--prompt TEXT|--prompt-file FILE|stdin] ; ai-gemini list|delete <name>|doctor|qualify-live'; }
+usage(){ printf '%s\n' 'Usage: ai-gemini new|ask [--governed-verdict SHA] <name> [--base REF] [--assert-head SHA] [--prompt TEXT|--prompt-file FILE|stdin] ; ai-gemini list|delete <name>|doctor|qualify-live'; }
 take_governed(){ GOVERNED_HEAD=''; if [ "${2:-}" = --governed-verdict ]; then case "${3:-}" in ????????????????????????????????????????) : ;; *) die 'governed verdict head must be a 40-character commit SHA' ;; esac; case "${3}" in *[!0-9a-f]*) die 'governed verdict head must be a 40-character commit SHA' ;; esac; GOVERNED_HEAD="$3"; fi; }
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then

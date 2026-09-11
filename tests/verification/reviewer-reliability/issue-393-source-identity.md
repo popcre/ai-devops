@@ -46,5 +46,14 @@ The source-prefix preservation probe passed 10 checks with no failures. Required
 CI will check the final combined tree rather than treating earlier local counts
 as exact-head evidence.
 
-Exact-head independent review, required CI, merge, installed hashes and a live
+The first independent GLM review identified a remaining packet exclusion that
+hid legitimate `.ai-review-notes/` source. The corrected packet ignores only its
+exact generated directory and no longer filters source names by prefix. The full
+packet run passed 110 checks with one new assertion aimed at the wrong inventory
+location; correcting that assertion to the manifest passed all 58 focused checks,
+including snapshot/build/live verification of the legitimate source directory.
+The Kimi precedence assertion is now committed, and Muse/Gemini help exposes the
+source flags. These changes require a fresh exact-head independent review.
+
+Final exact-head independent review, required CI, merge, installed hashes and a live
 governed comparison are still pending. This artifact does not close #393.
