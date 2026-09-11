@@ -59,6 +59,49 @@ check "managed descriptor handoff delivers the key without exporting it to curl"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
+if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  printf 'retained attachment\n' > "$TMP/repo/recovery-evidence.txt"
+  AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send recovery-paid --file recovery-evidence.txt > "$TMP/recovery.out" 2>&1
+  RECOVERY_RC=$?; RECOVERY_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/recovery.out")"
+  RECOVERY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "paid ledger failure retains exact intent and response" "test '$RECOVERY_RC' -ne 0 && test -f '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.pending/observed.json'"
+  check "pending paid turn refuses replay" "! run reply '$RECOVERY_ID' replay >'$TMP/refused.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "wrong caller cannot finalize retained paid work" "! AI_DEEPSEEK_CALLER=another run finalize '$RECOVERY_ID' >'$TMP/refused.out' 2>&1"
+  check "local finalize repairs exact ledger without provider contact" "run finalize '$RECOVERY_ID' >'$TMP/finalized.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && test ! -e '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.recovery-required'"
+  check "local finalization retains paid transcript and attachment metadata" "jq -e '.[-1].content==\"answer\"' '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.json' && grep -aq recovery-evidence.txt '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.attachments'"
+  check "repeat finalization is idempotent and free" "run finalize '$RECOVERY_ID' >'$TMP/finalized-again.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "explicit continuation remains available after local recovery" "run reply '$RECOVERY_ID' next >'$TMP/next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((RECOVERY_CALLS+1))'"
+  AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE=publish run send transcript-recovery > "$TMP/transcript-failure.out" 2>&1
+  TRANSCRIPT_RC=$?; TRANSCRIPT_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/transcript-failure.out")"
+  TRANSCRIPT_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "transcript publication refusal retains the complete paid request" "test '$TRANSCRIPT_RC' -ne 0 && test -f '$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.pending/messages.json'"
+  # Remove only the empty directory installed by this fixture's write fault.
+  rmdir "$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.json"
+  RESPONSE="$(jq -r .response_path "$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.pending/observed.json")"
+  cp "$RESPONSE" "$TMP/original-response"
+  printf '\nchanged' >> "$RESPONSE"
+  check "changed retained provider bytes refuse finalization" "! run finalize '$TRANSCRIPT_ID' >'$TMP/tamper.out' 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.json'"
+  cp "$TMP/original-response" "$RESPONSE"
+  check "transcript finalization restores paid bytes without replay" "run finalize '$TRANSCRIPT_ID' >'$TMP/transcript-final.out' 2>&1 && test '$TRANSCRIPT_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'retained formal review\n## Verdict\nAPPROVE' run send metadata-recovery --review > "$TMP/metadata-failure.out" 2>&1
+  META_RC=$?; META_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/metadata-failure.out")"
+  META_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "formal metadata failure retains its snapshot and exact packet" "test '$META_RC' -ne 0 && test -d \"\$(jq -r .source_workspace '$TMP/repo/.ai/deepseek-sessions/$META_ID.pending/intent.json')\""
+  rmdir "$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json"
+  SOURCE_FILES="$(jq -r .source_identity_file "$TMP/repo/.ai/deepseek-sessions/$META_ID.pending/intent.json").files"
+  cp "$SOURCE_FILES" "$TMP/source-files-original"
+  printf 'invented-file\0' >> "$SOURCE_FILES"
+  check "changed formal attachment inventory refuses recovery" "! run finalize '$META_ID' >'$TMP/source-inventory-tamper.out' 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json'"
+  cp "$TMP/source-files-original" "$SOURCE_FILES"
+  printf 'changed after paid completion\n' >> "$TMP/repo/tracked"
+  check "stale formal recovery preserves original identity without authorization" "run finalize '$META_ID' >'$TMP/meta-final.out' 2>&1 && jq -e '.status==\"source_changed\" and .verdict==\"\"' '$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json' && test '$META_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  DEEPSEEK_STUB_FAIL=1 run send rejected-http > "$TMP/http-failure.out" 2>&1
+  HTTP_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/http-failure.out")"; HTTP_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "proven HTTP failure finalizes locally but remains non-authorizing" "! run finalize '$HTTP_ID' >'$TMP/http-final.out' 2>&1 && grep -q 'retained-http-500' '$TMP/http-final.out' && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "repeated incomplete finalization stays nonzero" "! run finalize '$HTTP_ID' >'$TMP/http-repeat.out' 2>&1 && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "explicit continuation survives a retained HTTP refusal" "run reply '$HTTP_ID' legitimate-new-turn >'$TMP/http-next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((HTTP_CALLS+1))'"
+  printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 if [ "${AI_DEEPSEEK_SOURCE_TESTS_ONLY:-0}" != 1 ]; then
 DOCTOR_STATE_BEFORE="$(git -C "$TMP/repo" status --porcelain=v1 --untracked-files=all)"
 check "offline doctor succeeds without provider contact" "run doctor | grep -q 'bounded provider timeout'"

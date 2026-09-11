@@ -66,6 +66,9 @@ Usage:
   ai-deepseek-agent show <session-id>
       Print the full transcript.
 
+  ai-deepseek-agent finalize <session-id>
+      Finish an exactly retained paid turn locally, without another API request.
+
   ai-deepseek-agent list
       List open session ids for this repo, newest first.
 
@@ -93,7 +96,7 @@ SUBCMD="${1:-}"
 [ -n "$SUBCMD" ] && shift || true
 
 case "$SUBCMD" in
-  send|reply|show|list|doctor) ;;
+  send|reply|show|list|doctor|finalize) ;;
   ""|-h|--help|help) usage; exit 0 ;;
   *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
@@ -220,12 +223,16 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""; PENDING_DIR=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
-  reviewer_event_cleanup_allowed deepseek || return 1
-  if [ -n "$REVIEW_SOURCE_TAG" ]; then
+  # A pending transaction is the replay fence. Release only this process's
+  # local mutex, retaining its snapshot and paid bytes for local finalization.
+  if [ -z "$PENDING_DIR" ] || [ -f "$PENDING_DIR/complete.json" ]; then
+    reviewer_event_cleanup_allowed deepseek || return 1
+  fi
+  if [ -n "$REVIEW_SOURCE_TAG" ] && { [ -z "$PENDING_DIR" ] || [ -f "$PENDING_DIR/complete.json" ]; }; then
     "$SOURCE_TOOLS/ai-review-sandbox" remove-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG" >/dev/null 2>&1 || true
     REVIEW_SOURCE_TAG=""
   fi
@@ -291,6 +298,134 @@ finally:
 PY
 }
 
+pending_hash() { sha256sum "$1" | awk '{print $1}'; }
+pending_begin() {
+  local candidate="$1" ledger before=absent file tmp
+  PENDING_DIR="$(session_path "$ID" .pending)" || return 1
+  mkdir "$PENDING_DIR" || return 1
+  chmod 0700 "$PENDING_DIR" || return 1
+  cp "$candidate" "$PENDING_DIR/messages.json" || return 1
+  [ ! -f "$F" ] || before="$(pending_hash "$F")"
+  ledger="$(attachments_ledger "$ID")" || return 1
+  [ ! -L "$ledger" ] || return 1
+  if [ -f "$ledger" ]; then cp "$ledger" "$PENDING_DIR/ledger.before" || return 1; else : > "$PENDING_DIR/ledger.before"; fi
+  cp "$PENDING_DIR/ledger.before" "$PENDING_DIR/ledger.after" || return 1
+  : > "$PENDING_DIR/files.nul"
+  for file in ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; do printf '%s\0' "$file" >> "$PENDING_DIR/files.nul" || return 1; done
+  cat "$PENDING_DIR/files.nul" >> "$PENDING_DIR/ledger.after" || return 1
+  jq -n --arg id "$ID" --arg caller "$CALLER" --arg model "$MODEL" --arg repo "$REPO_ROOT" \
+    --arg run "${AI_REVIEW_EVENT_RUN_ID:-}" --arg before "$before" --argjson review "$REVIEW" \
+    --arg head "${REVIEW_HEAD:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)}" \
+    --arg governed "$GOVERNED_HEAD" --arg request "$(pending_hash "$PENDING_DIR/messages.json")" \
+    --arg ledger_before "$(pending_hash "$PENDING_DIR/ledger.before")" --arg ledger_after "$(pending_hash "$PENDING_DIR/ledger.after")" \
+    --arg files "$(pending_hash "$PENDING_DIR/files.nul")" --arg identity "${REVIEW_SOURCE_IDENTITY:-}" \
+    --arg source_files_hash "$(if [ "$REVIEW" = 1 ]; then pending_hash "$REVIEW_SOURCE_IDENTITY.files"; fi)" \
+    --arg packet "${REVIEW_SOURCE_PACKET:-}" --arg packet_hash "${REVIEW_SOURCE_HASH:-}" \
+    --arg workspace "$REVIEW_SOURCE_WORKSPACE" --arg tag "${REVIEW_SOURCE_TAG:-}" \
+    '{schema_version:1,provider:"deepseek",session_id:$id,caller:$caller,model:$model,repository_root:$repo,
+      event_run_id:$run,review:$review,head:$head,governed_head:$governed,before_transcript_sha256:$before,
+      request_sha256:$request,ledger_before_sha256:$ledger_before,ledger_after_sha256:$ledger_after,
+      files_sha256:$files,source_identity_file:$identity,source_files_sha256:$source_files_hash,source_packet:$packet,packet_sha256:$packet_hash,
+      source_workspace:$workspace,source_tag:$tag}' > "$PENDING_DIR/intent.json" || return 1
+  pending_hash "$PENDING_DIR/intent.json" > "$PENDING_DIR/intent.sha256" || return 1
+  chmod 0600 "$PENDING_DIR/"* || return 1
+  rm -f "$candidate"
+  CANDIDATE="$PENDING_DIR/messages.json"; REPLY_FILE="$PENDING_DIR/reply.txt"
+  echo "Retained turn session: $ID" >&2
+}
+
+pending_observed() { # response transport-result HTTP-status
+  [ -n "$PENDING_DIR" ] || return 0
+  local tmp="$PENDING_DIR/observed.tmp"
+  jq -n --arg response "$1" --argjson rc "$2" --arg http "$3" --arg hash "$(pending_hash "$1")" \
+    '{response_path:$response,response_sha256:$hash,transport_exit_code:$rc,http_status:$http}' > "$tmp" || return 1
+  write_atomic "$PENDING_DIR/observed.json" "$tmp" || return 1
+  rm -f "$tmp"
+}
+
+pending_verify() {
+  local intent="$PENDING_DIR/intent.json" file
+  [ -d "$PENDING_DIR" ] && [ ! -L "$PENDING_DIR" ] || return 1
+  for file in intent.json intent.sha256 messages.json ledger.before ledger.after files.nul; do
+    [ -f "$PENDING_DIR/$file" ] && [ ! -L "$PENDING_DIR/$file" ] || return 1
+  done
+  [ "$(pending_hash "$intent")" = "$(cat "$PENDING_DIR/intent.sha256")" ] || return 1
+  jq -e --arg id "$ID" --arg caller "$CALLER" --arg mode "${1:-recover}" --arg repo "$REPO_ROOT" \
+    --arg request "$(pending_hash "$PENDING_DIR/messages.json")" --arg files "$(pending_hash "$PENDING_DIR/files.nul")" \
+    --arg before "$(pending_hash "$PENDING_DIR/ledger.before")" --arg after "$(pending_hash "$PENDING_DIR/ledger.after")" '
+      .schema_version==1 and .provider=="deepseek" and .session_id==$id and (.caller==$caller or $mode=="archive") and
+      .repository_root==$repo and (.event_run_id|test("^[0-9a-f]{32}$")) and (.review==0 or .review==1) and
+      .request_sha256==$request and .files_sha256==$files and .ledger_before_sha256==$before and .ledger_after_sha256==$after
+    ' "$intent" >/dev/null
+}
+
+pending_install_ledger() {
+  local ledger
+  [ "${AI_DEEPSEEK_TEST_LEDGER_FAILURE:-0}" != publish ] || return 1
+  ledger="$(attachments_ledger "$ID")" || return 1
+  "$PYTHON" - "$ledger" "$PENDING_DIR/ledger.before" "$PENDING_DIR/ledger.after" <<'PY'
+import os, sys
+ledger, before, after = sys.argv[1:]
+if os.path.islink(ledger): raise SystemExit(1)
+old, wanted = open(before, 'rb').read(), open(after, 'rb').read()
+try: current = open(ledger, 'rb').read()
+except FileNotFoundError: current = b''
+if not current.startswith(old) or not wanted.startswith(current): raise SystemExit('attachment ledger changed outside the retained turn')
+PY
+  [ "$?" -eq 0 ] || return 1
+  write_atomic "$ledger" "$PENDING_DIR/ledger.after"
+}
+
+pending_complete() {
+  local tmp="$PENDING_DIR/complete.tmp" ledger
+  ledger="$(attachments_ledger "$ID")" || return 1
+  jq -n --arg transcript "$(pending_hash "$F")" --arg ledger "$(pending_hash "$ledger")" --arg incomplete "${INCOMPLETE:-}" \
+    '{state:"complete",incomplete_reason:$incomplete,transcript_sha256:$transcript,ledger_sha256:$ledger}' > "$tmp" || return 1
+  write_atomic "$PENDING_DIR/complete.json" "$tmp" || return 1
+  rm -f "$tmp" "$(recovery_marker "$ID")"
+}
+
+pending_stale_complete() {
+  # Fresh-source continuation is valid only after the original paid evidence
+  # and its non-authorizing metadata were both retained successfully.
+  "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
+  jq -e --arg head "$REVIEW_HEAD" --arg hash "$REVIEW_SOURCE_HASH" \
+    '.status=="source_changed" and .head==$head and .packet_sha256==$hash and .verdict==null' "$(session_path "$ID" .meta.json)" >/dev/null || return 1
+  pending_complete
+}
+
+pending_before_turn() {
+  local old="$PENDING_DIR" ledger archive
+  PENDING_DIR="$(session_path "$ID" .pending)" || return 1
+  if [ ! -e "$PENDING_DIR" ]; then PENDING_DIR="$old"; return 0; fi
+  pending_verify archive && [ -f "$PENDING_DIR/complete.json" ] && [ ! -L "$PENDING_DIR/complete.json" ] || {
+    echo 'Error: a prior paid turn remains pending; use finalize for exact retained completion, never repeat the request.' >&2; return 1;
+  }
+  ledger="$(attachments_ledger "$ID")" || return 1
+  jq -e --arg transcript "$(pending_hash "$F")" --arg ledger "$(pending_hash "$ledger")" \
+    '.state=="complete" and .transcript_sha256==$transcript and .ledger_sha256==$ledger' "$PENDING_DIR/complete.json" >/dev/null || return 1
+  archive="$(session_path "$ID" ".turn-$(jq -r .event_run_id "$PENDING_DIR/intent.json")")" || return 1
+  [ ! -e "$archive" ] && [ ! -L "$archive" ] || return 1
+  mv "$PENDING_DIR" "$archive" || return 1
+  PENDING_DIR=""
+}
+
+extract_api_reply() { # exact private response, decoded reply destination
+  "$PYTHON" - "$1" "$2" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+    content = data["choices"][0]["message"]["content"]
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("missing response text")
+    with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as reply:
+        reply.write(content + "\n")
+except (ValueError, KeyError, IndexError, TypeError, OSError):
+    print("Error: invalid-provider-response: response extraction failed; private response retained.", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 call_api() {
   # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
   # signal cannot release the conversation lock while the request still runs.
@@ -328,6 +463,7 @@ PY
   rc=0; wait "$ACTIVE_API_PID" || rc=$?
   ACTIVE_API_PID=""
   http_code="$(cat "$status_file" 2>/dev/null || true)"
+  pending_observed "$resp_file" "$rc" "$http_code" || return 1
   if [ "$rc" -ne 0 ]; then
     echo "Error: provider-transport-failure: DeepSeek request failed or exceeded ${CALL_TIMEOUT}s; private response: $resp_file" >&2
     publish_failure_evidence request-failed || return 1
@@ -342,21 +478,7 @@ PY
     ACTIVE_API_TMP=""
     return 1
   fi
-  "$PYTHON" - "$resp_file" "$reply_file" <<'PY'
-import json, sys
-try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-    content = data["choices"][0]["message"]["content"]
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("missing response text")
-    # Python stdout can be cp1252/ascii on Windows even when the response is UTF-8.
-    # Write explicitly to the reply file, never through that implicit encoding.
-    with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as reply:
-        reply.write(content + "\n")
-except (ValueError, KeyError, IndexError, TypeError, OSError):
-    print("Error: invalid-provider-response: response extraction failed; private response retained.", file=sys.stderr)
-    raise SystemExit(1)
-PY
+  extract_api_reply "$resp_file" "$reply_file"
   rc=$?
   [ "$rc" -eq 0 ] || publish_failure_evidence invalid-provider-response || return 1
   if [ -n "${LOCK_DIR:-}" ] && [ "$rc" -eq 0 ]; then
@@ -371,8 +493,9 @@ PY
 
 record_usage() {
   # Optional accounting runs only after the conversation is durably published.
-  local usage_record
-  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "${AI_REVIEW_EVENT_RUN_ID:-}")"; then
+  local usage_record usage_run="${DEEPSEEK_RECOVERY_EVENT_RUN_ID:-${AI_REVIEW_EVENT_RUN_ID:-}}"
+  if [ -f "$SESS_DIR/$ID.usage.jsonl" ] && jq -se --arg run "$usage_run" 'any(.[]; .run_id==$run)' "$SESS_DIR/$ID.usage.jsonl" >/dev/null 2>&1; then return 0; fi
+  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "$usage_run")"; then
     { [ ! -L "$SESS_DIR/$ID.usage.jsonl" ] && printf '%s\n' "$usage_record" >> "$SESS_DIR/$ID.usage.jsonl"; } \
       || echo 'Warning: usage publication unavailable; paid response preserved.' >&2
   else
@@ -716,6 +839,86 @@ evidence and return BLOCKED instead of inferring it.
 End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED.'
 
 case "$SUBCMD" in
+  finalize)
+    ID="${1:-}"; [ "$#" = 1 ] || { echo 'Usage: ai-deepseek-agent finalize <session-id>' >&2; exit 2; }
+    F="$(session_path "$ID")" || exit 2
+    acquire_lock "$F" || exit 1
+    PENDING_DIR="$(session_path "$ID" .pending)" || exit 1
+    pending_verify || { echo 'Error: no exact retained turn intent; keep the session fenced.' >&2; exit 1; }
+    if [ -f "$PENDING_DIR/complete.json" ] && [ ! -L "$PENDING_DIR/complete.json" ]; then
+      jq -e --arg transcript "$(pending_hash "$F")" --arg ledger "$(pending_hash "$(attachments_ledger "$ID")")" \
+        '.state=="complete" and .transcript_sha256==$transcript and .ledger_sha256==$ledger' "$PENDING_DIR/complete.json" >/dev/null || exit 1
+      echo "Already finalized session: $ID (retained local evidence only)"
+      [ -z "$(jq -r '.incomplete_reason // ""' "$PENDING_DIR/complete.json")" ]; exit $?
+    fi
+    [ -f "$PENDING_DIR/observed.json" ] && [ ! -L "$PENDING_DIR/observed.json" ] || exit 1
+    API_RESPONSE_FILE="$(jq -r .response_path "$PENDING_DIR/observed.json")"
+    case "$API_RESPONSE_FILE" in "$SESS_DIR/$ID.response."*) ;; *) exit 1;; esac
+    case "${API_RESPONSE_FILE#"$SESS_DIR/"}" in */*|*\\*) exit 1;; esac
+    [ -f "$API_RESPONSE_FILE" ] && [ ! -L "$API_RESPONSE_FILE" ] || exit 1
+    jq -e --arg hash "$(pending_hash "$API_RESPONSE_FILE")" '.transport_exit_code==0 and (.http_status|test("^[1-5][0-9]{2}$")) and .response_sha256==$hash' "$PENDING_DIR/observed.json" >/dev/null || {
+      echo 'Error: retained response does not prove HTTP completion; no replay or finalization.' >&2; exit 1;
+    }
+    MODEL="$(jq -r .model "$PENDING_DIR/intent.json")"; REVIEW="$(jq -r .review "$PENDING_DIR/intent.json")"
+    REVIEW_HEAD="$(jq -r .head "$PENDING_DIR/intent.json")"; GOVERNED_HEAD="$(jq -r .governed_head "$PENDING_DIR/intent.json")"
+    REVIEW_SOURCE_IDENTITY="$(jq -r .source_identity_file "$PENDING_DIR/intent.json")"
+    REVIEW_SOURCE_PACKET="$(jq -r .source_packet "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_SAVED="$REVIEW_SOURCE_PACKET"
+    REVIEW_SOURCE_HASH="$(jq -r .packet_sha256 "$PENDING_DIR/intent.json")"
+    REVIEW_SOURCE_WORKSPACE="$(jq -r .source_workspace "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_TAG="$(jq -r .source_tag "$PENDING_DIR/intent.json")"
+    REVIEW_FILES=(); while IFS= read -r -d '' file; do REVIEW_FILES+=("$file"); done < "$PENDING_DIR/files.nul"
+    DEEPSEEK_RECOVERY_EVENT_RUN_ID="$(jq -r .event_run_id "$PENDING_DIR/intent.json")"
+    STALE=0
+    if [ "$REVIEW" = 1 ]; then
+      [ -f "$REVIEW_SOURCE_IDENTITY.files" ] && [ ! -L "$REVIEW_SOURCE_IDENTITY.files" ] || exit 1
+      [ "$(pending_hash "$REVIEW_SOURCE_IDENTITY.files")" = "$(jq -r .source_files_sha256 "$PENDING_DIR/intent.json")" ] || exit 1
+      [ "$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")" = "$REVIEW_SOURCE_HASH" ] || exit 1
+      "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || exit 1
+      if ! (unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET") >/dev/null 2>&1; then
+        STALE=1; DEEPSEEK_RECOVERY_STATE=completed-stale-source; DEEPSEEK_ORIGINAL_HEAD_SHA="$REVIEW_HEAD"
+      fi
+      reviewer_event_evidence require-report deepseek "$REVIEW_SOURCE_WORKSPACE" "$DEEPSEEK_RECOVERY_EVENT_RUN_ID" || exit 1
+    else
+      reviewer_event_evidence require-report deepseek || exit 1
+    fi
+    REPLY_FILE="$PENDING_DIR/reply.txt"; CANDIDATE="$PENDING_DIR/messages.json"
+    INCOMPLETE=""; VERDICT=""
+    if [ "$(jq -r .http_status "$PENDING_DIR/observed.json")" != 200 ]; then
+      INCOMPLETE="http-$(jq -r .http_status "$PENDING_DIR/observed.json")"
+      cp "$CANDIDATE" "$CANDIDATE.final" || exit 1
+    else
+      extract_api_reply "$API_RESPONSE_FILE" "$REPLY_FILE"; EXTRACT_RC=$?
+      # Exit 2 is reserved for a structurally valid but incomplete response.
+      # It retains text for explicit continuation and can never authorize.
+      case "$EXTRACT_RC" in 0) ;; 2) INCOMPLETE=provider-incomplete;; *) exit "$EXTRACT_RC";; esac
+      REPLY="$(<"$REPLY_FILE")"
+      if [ -z "$INCOMPLETE" ] && [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || exit 1; fi
+      build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY" || exit 1
+    fi
+    if [ -n "$INCOMPLETE" ]; then
+      {
+        printf '# DeepSeek retained incomplete turn\n\nLocal recovery: %s. Non-authorizing; remote completion is not asserted.\n\n' "$INCOMPLETE"
+        cat "$API_RESPONSE_FILE"
+      } > "$PENDING_DIR/incomplete-report.md" || exit 1
+      reviewer_event_publish_report deepseek "$PENDING_DIR/incomplete-report.md" || exit 1
+    else reviewer_event_publish_report deepseek "$REPLY_FILE" || exit 1; fi
+    BEFORE="$(jq -r .before_transcript_sha256 "$PENDING_DIR/intent.json")"
+    if [ -e "$F" ]; then
+      [ -f "$F" ] && [ ! -L "$F" ] || exit 1
+      CURRENT="$(pending_hash "$F")"
+      [ "$CURRENT" = "$BEFORE" ] || [ "$CURRENT" = "$(pending_hash "$CANDIDATE.final")" ] || exit 1
+    else [ "$BEFORE" = absent ] || exit 1; fi
+    write_atomic "$F" "$CANDIDATE.final" || exit 1
+    pending_install_ledger || exit 1
+    record_usage
+    if [ "$REVIEW" = 1 ]; then
+      if [ -n "$INCOMPLETE" ]; then write_review_metadata "$ID" "" incomplete || exit 1
+      elif [ "$STALE" = 1 ]; then write_review_metadata "$ID" "" source_changed || exit 1
+      else write_review_metadata "$ID" "$VERDICT" || exit 1; fi
+    fi
+    pending_complete || exit 1
+    echo "Finalized session: $ID (retained local evidence only; no provider request)"
+    [ -z "$INCOMPLETE" ] || { echo "Error: retained-$INCOMPLETE: incomplete turn finalized without authorization; explicit continuation is available." >&2; exit 1; }
+    ;;
   doctor)
     LIVE=0
     case "${1:-}" in '') ;; --live) LIVE=1;; *) echo "Error: unknown doctor option: $1" >&2; exit 2;; esac
@@ -787,32 +990,33 @@ $REVIEW_INSTRUCTION"
     [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
+    rm -f "$REPLY_FILE"
+    pending_begin "$CANDIDATE" || exit 1
     call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; exit 1; }
-    REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
+    REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
-    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     if [ "${AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE:-0}" = publish ]; then mkdir -p "$F" || true; fi
     if ! write_atomic "$F" "$CANDIDATE.final"; then
-      rm -f "$CANDIDATE" "$CANDIDATE.final"
       release_lock
       echo "Error: the conversation transcript could not be published; no completion was recorded." >&2
       exit 1
     fi
-    rm -f "$CANDIDATE" "$CANDIDATE.final"
     record_usage
-    if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+    if ! pending_install_ledger; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
       echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
-    [ "$REVIEW" = 0 ] || verify_review_source || exit 1
+    [ "$REVIEW" = 0 ] || verify_review_source || { pending_stale_complete || true; exit 1; }
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
       exit 1
     fi
+    pending_complete || exit 1
     release_lock
     if [ -n "$GOVERNED_HEAD" ]; then
       echo "SESSION_ID: $ID" >&2
@@ -856,34 +1060,36 @@ $REVIEW_INSTRUCTION"
 
     acquire_lock "$F" || exit 1
     session_review_identity_matches || exit 1
+    pending_before_turn || exit 1
     [ "$REVIEW" = 0 ] || prepare_review_source "$ID" || exit 1
     CANDIDATE="$(mktemp "$SESS_DIR/.candidate.XXXXXX")"; REPLY_FILE="$(mktemp "$SESS_DIR/.reply.XXXXXX")"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
+    rm -f "$REPLY_FILE"
+    pending_begin "$CANDIDATE" || exit 1
     call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; exit 1; }
-    REPLY="$(<"$REPLY_FILE")"; rm -f "$REPLY_FILE"
+    REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
-    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { rm -f "$CANDIDATE"; echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
+    if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
     build_candidate "$CANDIDATE" "$CANDIDATE.final" assistant "$REPLY"
     if ! write_atomic "$F" "$CANDIDATE.final"; then
-      rm -f "$CANDIDATE" "$CANDIDATE.final"
       release_lock
       echo "Error: the conversation transcript could not be published; canonical conversation is unchanged." >&2
       exit 1
     fi
-    rm -f "$CANDIDATE" "$CANDIDATE.final"
     record_usage
-    if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
+    if ! pending_install_ledger; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
       echo "Error: the conversation was saved, but its attachment record could not be updated. This session is marked recovery-required and cannot be continued until its ledger is reconciled." >&2
       exit 1
     fi
-    [ "$REVIEW" = 0 ] || verify_review_source || exit 1
+    [ "$REVIEW" = 0 ] || verify_review_source || { pending_stale_complete || true; exit 1; }
     if [ "$REVIEW" = 1 ] && ! write_review_metadata "$ID" "$VERDICT"; then
       release_lock
       echo "Error: review transcript was saved, but its required evidence metadata could not be published." >&2
       exit 1
     fi
+    pending_complete || exit 1
     release_lock
     if [ -n "$GOVERNED_HEAD" ] && [ "$VERDICT" = BLOCKED ]; then
       echo 'Error: review-blocked: evidence-based BLOCKED review retained; no authorizing verdict.' >&2
