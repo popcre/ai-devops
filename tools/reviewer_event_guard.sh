@@ -31,6 +31,8 @@ reviewer_event_publish_report(){
   reviewer_event_evidence verify-reports "$provider" >/dev/null
 }
 
+reviewer_event_publish_patch(){ reviewer_event_evidence publish-patch "$1" "$2" >/dev/null; }
+
 reviewer_event_verify_private(){
   local python event_tool name
   local -a evidence_env=()
