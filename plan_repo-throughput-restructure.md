@@ -33,6 +33,13 @@ A fresh session selects the remaining registered child that owns its code bounda
 | 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
 | 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
 
+**#333 implementation evidence, 2026-09-11:** the existing wrappers now have a
+tested accounting implementation with pinned OpenCode semantics and private
+synthetic same-session continuity measurements. [Evidence and remaining gates](tests/verification/reviewer-reliability/issue-333-truthful-usage.md)
+distinguish adapter estimates from billed cost and unknown counters from zero.
+No context or compaction optimization was applied. Exact review, CI, installation
+and live accounting verification remain open; this does not complete #337/#159.
+
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
 `verify.yml` keyed its concurrency group on the head SHA, so superseded runs were never cancelled and the two-runner edge-dev pool filled with builds nobody was waiting for. Fixed outside the phase order because it was blocking every phase. Merges `ee2b5a82`, `aa2f1337`. Issue #204 closed with evidence.

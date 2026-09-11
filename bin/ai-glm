@@ -975,7 +975,7 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     printf '| branch | %s |\n' "$branch"
     printf '| caller | %s |\n' "$CALLER"
     printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf '| tokens | `%s` |\n\n' "$tokens"
+    printf '| last step adapter tokens | `%s` |\n\n' "$tokens"
     printf -- '---\n\n%s\n' "$text"
   } > "$f"
   printf '%s' "$f"
@@ -988,10 +988,12 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
           --arg model "$PROVIDER/$MODEL" --arg caller "$CALLER" \
       '{schema_version:1, ok:true,
         session:{name:$name, type:$kind, id:$sid, caller:$caller, model:$model},
-        response:{text:$text}, usage:$tokens, artifacts:{report:$report}}'
+        response:{text:$text}, usage:$tokens,
+        usage_scope:"last-assistant-step", usage_completeness:"adapter-provider-missingness-unknown",
+        artifacts:{report:$report}}'
   else
     printf '%s\n' "$4"
-    printf '\n--- session: %s (%s)  model: %s/%s  tokens: %s\n--- report: %s\n' \
+    printf '\n--- session: %s (%s)  model: %s/%s  last step adapter tokens: %s\n--- report: %s\n' \
       "$1" "$2" "$PROVIDER" "$MODEL" "${5:-null}" "$6" >&2
   fi
 }

@@ -661,6 +661,9 @@ check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/s
 jq '.usage={total_tokens:0,cache_read_input_tokens:0} | .total_cost_usd=0' "$TMP/usage-full.json" > "$TMP/fixture.json"
 ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
 check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep -q 'cached: 0' && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_usd={bad:true}' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
+check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
 cp "$TMP/usage-full.json" "$TMP/fixture.json"
 
 # 11 ------------------------------------------------------------------------

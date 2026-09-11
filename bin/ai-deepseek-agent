@@ -338,6 +338,18 @@ PY
   return $rc
 }
 
+record_usage() {
+  # Optional accounting runs only after the conversation is durably published.
+  local usage_record
+  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "${AI_REVIEW_EVENT_RUN_ID:-}")"; then
+    { [ ! -L "$SESS_DIR/$ID.usage.jsonl" ] && printf '%s\n' "$usage_record" >> "$SESS_DIR/$ID.usage.jsonl"; } \
+      || echo 'Warning: usage publication unavailable; paid response preserved.' >&2
+  else
+    echo 'Warning: usage extraction unavailable; paid response preserved.' >&2
+  fi
+  return 0
+}
+
 require_review_head() {
   local head
   head="$(git -C "$REPO_ROOT" rev-parse --verify HEAD^{commit} 2>/dev/null || true)"
@@ -734,6 +746,7 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    record_usage
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
@@ -803,6 +816,7 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    record_usage
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock

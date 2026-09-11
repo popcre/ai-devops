@@ -40,7 +40,7 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
 }
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
 elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
-else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
+else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
@@ -70,6 +70,16 @@ check "doctor rejects unknown options" "! run doctor --unknown"
 check "zero provider timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CALL_TIMEOUT=0 run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "nonnumeric connect timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CONNECT_TIMEOUT=nope run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
+check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
+DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
+check "usage sidecar retains each turn and observed zero" "test \"\$(wc -l < '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl')\" -eq 2 && tail -1 '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl' | jq -e '.counters.input==10 and .counters.cache_read==0 and .counters.output==3 and .counters.cost==null'"
+mv "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl" "$TMP/retained-usage.jsonl"
+mkdir "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
+USAGE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+USAGE_REPLY="$(run reply "$SESSION" accounting-fails 2> "$TMP/usage-failure.err")"
+check "usage write failure preserves response without replay" "printf '%s' '$USAGE_REPLY' | grep -q answer && grep -q 'usage publication unavailable' '$TMP/usage-failure.err' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((USAGE_CALLS+1))'"
+rmdir "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
+mv "$TMP/retained-usage.jsonl" "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
 check "send creates a safe session" "test -n '$SESSION' -a -f '$TMP/repo/.ai/deepseek-sessions/$SESSION.json'"
 check "show reads stored session" "run show '$SESSION' | grep -q answer"
 check "provider calls have connection and total time limits" "grep -q -- '--connect-timeout 15 --max-time 300' '$DEEPSEEK_CURL_ARGS'"
@@ -94,7 +104,7 @@ check "malformed response is retained and cannot become a successful reply" "tes
 check "malformed reply preserves canonical history" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
-check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role)==[\"user\",\"assistant\",\"user\",\"assistant\",\"user\",\"assistant\"]' '$history'"
+check "concurrent replies retain complete turns" "jq -e 'length==10 and map(.role)==[range(0;5) | \"user\",\"assistant\"] and ([.[].content] | index(\"concurrent-one\")!=null and index(\"concurrent-two\")!=null)' '$history'"
 history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
 rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
 (cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
