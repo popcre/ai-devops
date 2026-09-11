@@ -491,8 +491,10 @@ def implementation_archive_source(directory, provider, metadata):
             (patch.name == "cumulative.patch" or re.fullmatch(r"cumulative-[0-9]+-[0-9a-f]{64}\.patch", patch.name)),
             "legacy canonical patch path is unproven")
     patch_boundary, patch_data = snapshot(patch, "log")
-    require(patch_boundary["exists"] and digest(patch_data) == meta.get("patch_sha256") and
-            (not patch_data or patch_data.startswith(b"diff --git ")), "legacy canonical patch is missing or changed")
+    patch_sha256 = digest(patch_data)
+    claimed_patch_sha256 = meta.get("patch_sha256")
+    require(patch_boundary["exists"] and (not patch_data or patch_data.startswith(b"diff --git ")),
+            "legacy canonical patch is missing or malformed")
     if meta.get("evidence_run_id"):
         verify_prepared(directory, provider, meta["evidence_run_id"], "git-binary-patch", patch)
     files = {metadata: metadata_data, manifest: manifest_data, patch: patch_data}
@@ -524,6 +526,8 @@ def implementation_archive_source(directory, provider, metadata):
     value = {"schema_version": 1, "provider": provider, "operation": "legacy-state-archive",
              "repository": str(repo), "caller": caller, "base": base,
              "historical_source_authorization": "unknown", "original_paid_result": "unknown",
+             "canonical_patch_integrity": "metadata-match" if claimed_patch_sha256 == patch_sha256 else "metadata-mismatch",
+             "claimed_patch_sha256": claimed_patch_sha256, "archived_patch_sha256": patch_sha256,
              "files": [{"path": str(path), "sha256": digest(data), "text": data.decode("utf-8")}
                        for path, data in sorted(files.items(), key=lambda item: str(item[0]))]}
     return digest(encoded(value))[:32], value

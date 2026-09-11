@@ -1077,7 +1077,11 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   : > "$out"
   prepare_active_stop_file
   if [ -n "${ACTIVE_PAID_LOCK:-}" ]; then
-    reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+    if [ -n "$REVIEW_DIR" ]; then
+      reviewer_event_evidence require-report grok "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
+    else
+      reviewer_event_evidence require-report grok || die 'could not reserve durable review evidence.'
+    fi
   fi
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
@@ -1347,7 +1351,7 @@ EOF
 }
 
 cmd_doctor() {
-  local live=0 grok rc=0 repo upstream workid live_lock
+  local live=0 grok rc=0 repo upstream workid live_lock keep_result=0
   [ "${1:-}" = "--live" ] && live=1
   need jq
   grok="$(resolve_grok)"
@@ -1399,13 +1403,21 @@ cmd_doctor() {
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
     run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
     if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
-      echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
-      lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
+      if reviewer_event_publish_report grok "$tmp" && reviewer_event_cleanup_allowed grok; then
+        echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
+        lock_release "$live_lock"; ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM
+      else
+        echo "FAILED — terminal result retained because durable evidence publication failed"
+        date -u +%FT%TZ > "$live_lock/publication-incomplete"
+        note "  exact terminal result retained for reconciliation: $tmp"
+        ACTIVE_PAID_LOCK=''; trap - EXIT INT TERM; keep_result=1; rc=1
+      fi
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
     fi
     clear_active_grok
-    rm -f "$tmp" "$tmp.prompt" "$tmp.err" 2>/dev/null || true
+    [ "$keep_result" = 1 ] || rm -f "$tmp" "$tmp.err" 2>/dev/null || true
+    rm -f "$tmp.prompt" 2>/dev/null || true
   fi
   return $rc
 }

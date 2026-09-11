@@ -1266,6 +1266,7 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
   implementation_changed "$clone" "$base" || changed_rc=$?
   case "$changed_rc" in 0) ;; 1) return 2 ;; *) return 1 ;; esac
   IMPL_CHANGES_PROVEN=1
+  reviewer_event_evidence require-report glm || return 1
   test_failure incomplete-destination && return 1
   dir="$root/.ai/reviews"; mkdir -p "$dir" 2>/dev/null || return 1
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -1365,7 +1366,8 @@ implementation_cleanup() {
       family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
       kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
       implementation_update "$IMPL_META" \
-        '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+        '.outcome=$outcome | .failure_kind=$kind |
+         .artifact_state=(if .artifact_state=="durable" then "durable" else "none" end) |
          .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
          .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
         || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
@@ -1375,14 +1377,16 @@ implementation_cleanup() {
     family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
     kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
     implementation_update "$IMPL_META" \
-      '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+      '.outcome=$outcome | .failure_kind=$kind |
+       .artifact_state=(if .artifact_state=="durable" then "durable" else "none" end) |
        .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
        .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
       || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
   fi
   # A paid failure without a patch still needs a durable terminal report.
   if [ "$final" != completed ] && [ "$artifact_rc" -eq 2 ] &&
-     [ "$(jq -r '.provider_submission_started // false' "$IMPL_META" 2>/dev/null)" = true ]; then
+     [ "$(jq -r '.provider_submission_started // false' "$IMPL_META" 2>/dev/null)" = true ] &&
+     [ "$(jq -r '.artifact_state // "pending"' "$IMPL_META" 2>/dev/null)" != durable ]; then
     local failure_report
     if failure_report="$(write_implementation_report "$(jq -r .repository_root "$IMPL_META")" "$(jq -r .name "$IMPL_META")" 'implementation failure' \
         "INCOMPLETE: $(implementation_safe_reason "${IMPL_FAILURE:-turn-failed}"). No changes were proven; this is not an approval." null "${IMPL_SID:-unavailable}")"; then
@@ -1568,7 +1572,7 @@ EXCL
 Patch export failed. No patch path was recorded. The terminal job record retains this
 GLM response and the exact failure reason; the disposable clone is still cleaned safely.
 " "$tokens" "$IMPL_SID")" || return 1
-    implementation_update "$IMPL_META" '.report_path=$report' --arg report "$report" || return 1
+    implementation_update "$IMPL_META" '.report_path=$report | .artifact_state="durable"' --arg report "$report" || return 1
     return 1
   fi
   report="$(write_implementation_report "$root" "$name" implement "$text

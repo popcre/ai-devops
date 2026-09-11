@@ -974,6 +974,31 @@ wait "$job"
         with self.assertRaises(events.Blocked):
             events.archive_implementation_state(self.root, "qwen", metadata)
 
+    def test_legacy_archive_records_stale_metadata_hash_without_discarding_owned_patch(self):
+        bash = self.bash
+        self.assertTrue(bash)
+        physical_repo = subprocess.check_output([bash, "-c", "pwd -P"], cwd=self.toolkit).decode().strip()
+        rid = events.digest((physical_repo + "\n").encode())[:12]
+        directory = self.root / "state/sessions" / rid / "codex--mismatch.d"
+        directory.mkdir(parents=True)
+        metadata = directory / "metadata.json"
+        canonical = directory / "cumulative.patch"
+        data = b"diff --git a/proof.txt b/proof.txt\n--- a/proof.txt\n+++ b/proof.txt\n@@ -1 +1 @@\n-before\n+after\n"
+        canonical.write_bytes(data)
+        metadata.write_text(json.dumps({"version": 2, "mode": "implement", "repo": str(self.toolkit),
+            "caller": "codex", "name": "mismatch", "base_sha": self.sha, "canonical_patch": str(canonical),
+            "patch_sha256": "deliberately-stale"}))
+        manifest = directory / "owner.json"
+        manifest.write_text(json.dumps({"version": 1, "owner_dir": directory.as_posix(), "metadata": metadata.as_posix(),
+                                       "patch_pattern": "cumulative-<generation>-<sha256>.patch"}))
+
+        proof = events.archive_implementation_state(self.root, "qwen", metadata)
+        archive = events.read_json(self.root / "evidence" / proof["archive_id"] / "implementation-state-archive.json")
+        self.assertEqual(archive["canonical_patch_integrity"], "metadata-mismatch")
+        self.assertEqual(archive["claimed_patch_sha256"], "deliberately-stale")
+        self.assertEqual(archive["archived_patch_sha256"], events.digest(data))
+        self.assertEqual(events.verify_implementation_archive(self.root, "qwen", metadata), proof)
+
     def test_prepared_paid_report_cannot_be_replaced_by_failure_summary(self):
         original = self.invocation(rid="e" * 32, provider="qwen", finish=False)
         owner = self.root / "owner.json"

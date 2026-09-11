@@ -625,7 +625,7 @@ check "Windows clone enables long paths before checkout" "grep -q 'git -c core.l
 check "Windows exact cleanup uses Git long-path removal" "grep -q 'core.longpaths=true -C.*rm -rf' '$AI_GLM'"
 run_fake_impl patch-failed '' "$TMP/no-ready" "$TMP/no-release" success patch >"$TMP/patch-failed.out" 2>&1; patch_rc=$?
 PATCH_META="$(job_meta patch-failed)"; PATCH_CLONE="$JOB_STATE/wt/$JOB_ID/codex--patch-failed"
-check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .report_path '$PATCH_META')\" != null -a ! -e '$PATCH_CLONE'"
+check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .artifact_state '$PATCH_META')\" = durable -a ! -e '$PATCH_CLONE' && REPORT=\"\$(jq -r .report_path '$PATCH_META')\" && test -s \"\$REPORT\" && grep -q done \"\$REPORT\" && grep -q 'Patch export failed' \"\$REPORT\""
 
 for export_fail in incomplete-destination incomplete-move incomplete-metadata; do
   run_fake_impl "export-$export_fail" '' "$TMP/no-ready" "$TMP/no-release" failure "$export_fail" untracked >"$TMP/export-$export_fail.out" 2>&1; export_rc=$?
