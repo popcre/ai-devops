@@ -31,6 +31,7 @@ cat > "$TMP/bin/curl" <<'STUB'
 printf '%s\n' "$*" >> "$DEEPSEEK_CURL_ARGS"
 env | sort > "$DEEPSEEK_CURL_ENV"
 out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "${DEEPSEEK_STUB_REQUEST:-}" ] || cp "${2#@}" "$DEEPSEEK_STUB_REQUEST"; shift 2;; *) shift;; esac; done
+[ "${DEEPSEEK_GOVERNED_MOVE_HEAD:-0}" != 1 ] || git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm governed-drift
 [ -z "${DEEPSEEK_STUB_MUTATE_SOURCE:-}" ] || printf 'provider-time source movement\n' >> "$DEEPSEEK_STUB_MUTATE_SOURCE"
 [ -z "${DEEPSEEK_STUB_DELAY:-}" ] || {
   printf '%s\n' "$$" > "$DEEPSEEK_STUB_PID_FILE"
@@ -39,7 +40,7 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
 }
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
 elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
-else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}]},open(sys.argv[1],"w"))' "$out"; printf 200; fi
+else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
@@ -64,10 +65,21 @@ check "offline doctor succeeds without provider contact" "run doctor | grep -q '
 check "offline doctor leaves the repository byte state unchanged" "test '$DOCTOR_STATE_BEFORE' = \"\$(git -C '$TMP/repo' status --porcelain=v1 --untracked-files=all)\" && test ! -e '$TMP/repo/.ai/deepseek-sessions'"
 check "live doctor proves exact provider response" "DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY run doctor --live | grep -q 'live provider response'"
 check "live doctor leaves the repository byte state unchanged" "test '$DOCTOR_STATE_BEFORE' = \"\$(git -C '$TMP/repo' status --porcelain=v1 --untracked-files=all)\" && test ! -e '$TMP/repo/.ai/deepseek-sessions'"
+check "live doctor ignores an ambient session ID" "ID=ambient-session DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY run doctor --live | grep -q 'live provider response'"
 check "doctor rejects unknown options" "! run doctor --unknown"
 check "zero provider timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CALL_TIMEOUT=0 run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "nonnumeric connect timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CONNECT_TIMEOUT=nope run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
+check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
+DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
+check "usage sidecar retains each turn and observed zero" "test \"\$(wc -l < '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl')\" -eq 2 && tail -1 '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl' | jq -e '.counters.input==10 and .counters.cache_read==0 and .counters.output==3 and .counters.cost==null'"
+mv "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl" "$TMP/retained-usage.jsonl"
+mkdir "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
+USAGE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+USAGE_REPLY="$(run reply "$SESSION" accounting-fails 2> "$TMP/usage-failure.err")"
+check "usage write failure preserves response without replay" "printf '%s' '$USAGE_REPLY' | grep -q answer && grep -q 'usage publication unavailable' '$TMP/usage-failure.err' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((USAGE_CALLS+1))'"
+rmdir "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
+mv "$TMP/retained-usage.jsonl" "$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl"
 check "send creates a safe session" "test -n '$SESSION' -a -f '$TMP/repo/.ai/deepseek-sessions/$SESSION.json'"
 check "show reads stored session" "run show '$SESSION' | grep -q answer"
 check "provider calls have connection and total time limits" "grep -q -- '--connect-timeout 15 --max-time 300' '$DEEPSEEK_CURL_ARGS'"
@@ -92,7 +104,7 @@ check "malformed response is retained and cannot become a successful reply" "tes
 check "malformed reply preserves canonical history" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
-check "concurrent replies retain complete turns" "jq -e 'length==6 and map(.role)==[\"user\",\"assistant\",\"user\",\"assistant\",\"user\",\"assistant\"]' '$history'"
+check "concurrent replies retain complete turns" "jq -e 'length==10 and map(.role)==[range(0;5) | \"user\",\"assistant\"] and ([.[].content] | index(\"concurrent-one\")!=null and index(\"concurrent-two\")!=null)' '$history'"
 history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
 rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
 (cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
@@ -245,6 +257,44 @@ check "a recovery-required session refuses continuation before any provider cont
 check "the recovery marker is not mistaken for a conversation by list" "! run list | grep -q recovery-required"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
 check "list excludes retained provider responses" "! run list | grep -q response"
+set +e
+GOV_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
+GOV_OTHER=1111111111111111111111111111111111111111
+gov_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+run send wrong --review --governed-verdict "$GOV_OTHER" >"$TMP/gov-bad.out" 2>&1; gov_bad_rc=$?
+check "governed wrong head refuses before provider contact" "test '$gov_bad_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+run send conflicting --review --governed-verdict "$GOV_OTHER" --governed-verdict="$GOV_HEAD" >"$TMP/gov-bad.out" 2>&1; gov_bad_rc=$?
+check "governed duplicate flags cannot hide a mismatched head" "test '$gov_bad_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+run send missing --review --governed-verdict >"$TMP/gov-bad.out" 2>&1; gov_bad_rc=$?
+check "governed missing head refuses before provider contact" "test '$gov_bad_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+run send advisory --governed-verdict "$GOV_HEAD" >"$TMP/gov-bad.out" 2>&1; gov_bad_rc=$?
+check "governed mode requires explicit formal review" "test '$gov_bad_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+DEEPSEEK_STUB_REPLY=$'Findings complete.\nVERDICT: APPROVE '"$GOV_HEAD" run send governed --review --governed-verdict="$GOV_HEAD" >"$TMP/gov.out" 2>"$TMP/gov.err"; gov_rc=$?
+GOV_ID="$(sed -n 's/^SESSION_ID: //p' "$TMP/gov.err")"
+check "governed send emits exact terminal contract without a stdout session header" "test '$gov_rc' -eq 0 && test -n '$GOV_ID' && tail -1 '$TMP/gov.out' | grep -qx 'VERDICT: APPROVE $GOV_HEAD' && ! grep -q '^SESSION_ID:' '$TMP/gov.out'"
+check "governed transcript retains its fixed head and evidence boundary" "jq -e '.[0].content | contains(\"You have NO access to this repository\") and contains(\"VERDICT: APPROVE $GOV_HEAD\")' '$TMP/repo/.ai/deepseek-sessions/$GOV_ID.json'"
+DEEPSEEK_STUB_REPLY=$'Further findings.\nVERDICT: REVISE '"$GOV_HEAD" run reply "$GOV_ID" --review --governed-verdict "$GOV_HEAD" continuation >"$TMP/gov-reply.out" 2>"$TMP/gov-reply.err"; gov_rc=$?
+check "governed continuation preserves exact mode and supports REVISE" "test '$gov_rc' -eq 0 && tail -1 '$TMP/gov-reply.out' | grep -qx 'VERDICT: REVISE $GOV_HEAD'"
+gov_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+run reply "$GOV_ID" ordinary --review >"$TMP/gov-mode.out" 2>&1; gov_rc=$?
+check "governed session refuses a silent switch to ordinary formal mode" "test '$gov_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+run reply "$GOV_ID" plain-followup >"$TMP/gov-mode.out" 2>&1; gov_rc=$?
+check "governed session refuses omitted formal mode before paid work" "test '$gov_rc' -ne 0 && test '$gov_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+DEEPSEEK_STUB_REPLY='ordinary continuation remains available' run reply "$SESSION" normal >"$TMP/ordinary-cont.out" 2>&1; ordinary_rc=$?
+check "ordinary conversations remain continuable without a governed flag" "test '$ordinary_rc' -eq 0 && grep -q 'ordinary continuation remains available' '$TMP/ordinary-cont.out'"
+for gov_bad in $'Evidence.\nVERDICT: APPROVE '"$GOV_OTHER" $'Evidence.\nVERDICT: APPROVE '"$GOV_HEAD"$'\ntrailing text' $'> APPROVE\nEvidence.\nVERDICT: APPROVE '"$GOV_HEAD" $'```\nVERDICT: APPROVE '"$GOV_HEAD"; do
+  DEEPSEEK_STUB_REPLY="$gov_bad" run send invalid-gov --review --governed-verdict "$GOV_HEAD" >"$TMP/gov-invalid.out" 2>"$TMP/gov-invalid.err"; gov_rc=$?
+  check "governed rejects wrong, trailing, extra or fenced decisions" "test '$gov_rc' -ne 0 && test ! -s '$TMP/gov-invalid.out' && grep -q invalid-terminal-verdict '$TMP/gov-invalid.err'"
+done
+DEEPSEEK_STUB_REPLY=$'More evidence needed.\nVERDICT: BLOCKED '"$GOV_HEAD" run send blocked-gov --review --governed-verdict "$GOV_HEAD" >"$TMP/gov-block.out" 2>"$TMP/gov-block.err"; gov_rc=$?
+GOV_BLOCK_ID="$(sed -n 's/^SESSION_ID: //p' "$TMP/gov-block.err")"
+check "governed BLOCKED retains a genuine review without authorizing output" "test '$gov_rc' -ne 0 && test ! -s '$TMP/gov-block.out' && grep -q review-blocked '$TMP/gov-block.err' && jq -e '.verdict==\"BLOCKED\" and .status==\"complete\"' '$TMP/repo/.ai/deepseek-sessions/$GOV_BLOCK_ID.meta.json'"
+DEEPSEEK_STUB_REPLY=$'Evidence supplied.\nVERDICT: REJECT '"$GOV_HEAD" run reply "$GOV_BLOCK_ID" supplied --review --governed-verdict "$GOV_HEAD" >"$TMP/gov-unblock.out" 2>"$TMP/gov-unblock.err"; gov_rc=$?
+check "a blocked governed conversation remains explicitly continuable" "test '$gov_rc' -eq 0 && tail -1 '$TMP/gov-unblock.out' | grep -qx 'VERDICT: REJECT $GOV_HEAD'"
+DEEPSEEK_GOVERNED_MOVE_HEAD=1 DEEPSEEK_STUB_REPLY=$'Findings.\nVERDICT: APPROVE '"$GOV_HEAD" run send moved-gov --review --governed-verdict "$GOV_HEAD" >"$TMP/gov-moved.out" 2>"$TMP/gov-moved.err"; gov_rc=$?
+check "source head movement during a governed paid turn refuses publication" "test '$gov_rc' -ne 0 && test ! -s '$TMP/gov-moved.out' && grep -q 'review source changed' '$TMP/gov-moved.err'"
+GOV_STALE_META="$(find "$TMP/repo/.ai/deepseek-sessions" -name '*.meta.json' -type f -exec grep -l 'source_changed' {} \; | head -1)"
+check "moved-head governed review retains paid transcript and explicit stale metadata" "test -n '$GOV_STALE_META' && jq -e '.status==\"source_changed\" and .governed_head==\"$GOV_HEAD\"' '$GOV_STALE_META' && jq -e '.[-1].role==\"assistant\" and (.[-1].content|contains(\"VERDICT: APPROVE $GOV_HEAD\"))' '${GOV_STALE_META%.meta.json}.json'"
 else
   SESSION="$(run send source-fixture | sed -n 's/^SESSION_ID: //p')"
 fi
