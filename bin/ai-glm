@@ -1082,6 +1082,9 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
       facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"$GLM_ORIGINAL_HEAD_SHA\"}"
     fi
   fi
+  if [ -n "${IMPL_META:-}" ]; then
+    reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" report "$f" || return 1
+  fi
   reviewer_event_publish_report glm "$f" "$facts" || return 1
   printf '%s' "$f"
 }
@@ -1388,8 +1391,23 @@ implementation_changed() { # CLONE BASE
   [ -n "$(git -C "$1" diff --cached --name-only "$2" 2>/dev/null)" ]
 }
 
+write_implementation_report() { # retain the exact planned destination before publication
+  local root="$1" name="$2" kind="$3" branch version
+  GLM_REPORT_KEY="$(printf '%s:%s' "$AI_REVIEW_EVENT_RUN_ID" "$kind" | sha256sum | cut -d' ' -f1)" || return 1
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null || printf unavailable)"
+  implementation_update "$IMPL_META" \
+    '.report_path=(.report_path // $report) | .attempted_report_path=$report |
+     .report_context=(.report_context // {branch:$branch,server_version:$version})' \
+    --arg report "$root/.ai/reviews/glm-$name-$GLM_REPORT_KEY.md" --arg branch "$branch" --arg version "$version" || return 1
+  GLM_REPORT_BRANCH="$(jq -r .report_context.branch "$IMPL_META")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r .report_context.server_version "$IMPL_META")"
+  GLM_REPORT_REQUESTED_AT="$(jq -r .created_at "$IMPL_META")"
+  write_report "$@"
+}
+
 write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 1 export failed
-  local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome
+  local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome artifact staged
   implementation_record_path_valid "$meta" && implementation_meta_valid "$meta" || return 1
   root="$(jq -r .repository_root "$meta")"; name="$(jq -r .name "$meta")"; base="$(jq -r .base_sha "$meta")"
   sid="$(jq -r '.opencode_session_id // "unavailable"' "$meta")"
@@ -1430,17 +1448,30 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
     printf '3. Never apply this incomplete patch without reviewing every change and running the required tests.\n'
   } > "$report_tmp" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
   test_failure incomplete-move && { rm -f "$patch_tmp" "$report_tmp"; return 1; }
-  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
-  if ! mv "$report_tmp" "$report"; then rm -f "$patch" "$report_tmp"; return 1; fi
-  test_failure incomplete-metadata && { rm -f "$patch" "$report"; return 1; }
+  for artifact in "$patch" "$report"; do
+    staged="$patch_tmp"; [ "$artifact" != "$report" ] || staged="$report_tmp"
+    if ! ln "$staged" "$artifact" 2>/dev/null; then
+      [ -f "$artifact" ] && [ ! -L "$artifact" ] && cmp -s "$staged" "$artifact" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+    fi
+  done
+  rm -f "$patch_tmp" "$report_tmp"
+  implementation_update "$meta" \
+    '.incomplete_patch_path=$patch | .incomplete_report_path=$report |
+     .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report)' \
+    --arg patch "$patch" --arg report "$report" || return 1
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" report "$report" || return 1
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" git-binary-patch "$patch" || return 1
+  reviewer_event_publish_report glm "$report" || return 1
+  reviewer_event_publish_patch glm "$patch" || return 1
+  test_failure incomplete-metadata && return 1
   if ! implementation_update "$meta" \
       '.outcome=$outcome | .failure_kind=$kind | .incomplete_patch_path=$patch |
-       .incomplete_report_path=$report | .patch_path=$patch | .report_path=$report |
+       .incomplete_report_path=$report | .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report) |
        .artifact_state="durable" | .changes_present=true | .patch_exists=true |
        .provider_usage_state="unavailable" | .provider_tokens=null' \
       --arg outcome "$outcome" --arg kind "$(implementation_failure_kind "$failure")" \
       --arg patch "$patch" --arg report "$report"; then
-    rm -f "$patch" "$report"; return 1
+    return 1
   fi
   note "INCOMPLETE patch written: $patch"
   note "INCOMPLETE report written: $report"
@@ -1458,12 +1489,12 @@ implementation_cleanup() {
     return 0
   fi
   IMPL_CLEANING=1; trap - EXIT INT TERM HUP
-  rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
+  case "$IMPL_FAILURE" in report-write-failed|artifact-metadata-failed) IMPL_PRESERVE_CLONE=1 ;; esac
   if [ -z "$final" ]; then
     if [ -n "$IMPL_META" ] && implementation_abort_requested "$IMPL_META"; then final=aborted
     else final=failed; fi
   fi
-  if [ "$final" != completed ] && [ -n "$IMPL_CLONE" ] && [ -d "$IMPL_CLONE" ] &&
+  if [ "$final" != completed ] && [ -n "$IMPL_CLONE" ] && [ -d "$IMPL_CLONE/.git" ] &&
      [ -n "$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null)" ]; then
     set +e
     write_incomplete_artifacts "$IMPL_META" "$IMPL_CLONE" "${IMPL_FAILURE:-turn-failed}"
@@ -1499,6 +1530,24 @@ implementation_cleanup() {
        .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
       || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
   fi
+  # A paid failure without a patch still needs a durable terminal report.
+  if [ "$final" != completed ] && [ "$artifact_rc" -eq 2 ] &&
+     [ "$(jq -r '.provider_submission_started // false' "$IMPL_META" 2>/dev/null)" = true ]; then
+    local failure_report
+    if failure_report="$(write_implementation_report "$(jq -r .repository_root "$IMPL_META")" "$(jq -r .name "$IMPL_META")" 'implementation failure' \
+        "INCOMPLETE: $(implementation_safe_reason "${IMPL_FAILURE:-turn-failed}"). No changes were proven; this is not an approval." null "${IMPL_SID:-unavailable}")"; then
+      implementation_update "$IMPL_META" '.report_path=(.report_path // $report) | .artifact_state="durable"' --arg report "$failure_report" || safe=0
+    else
+      safe=0
+    fi
+  fi
+  if [ "$safe" != 1 ] || [ "$IMPL_PRESERVE_CLONE" = 1 ] || ! reviewer_event_verify_owner glm "$IMPL_META"; then
+    implementation_update "$IMPL_META" '.status="failed" | .cleanup={clone:"preserved",server_session:"pending"}' || true
+    warn "Implementation evidence is not fully durable; prompt, server session, clone and ownership record were retained."
+    IMPL_CLEANING=0
+    return 1
+  fi
+  rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
   # Dispose the exact server session before clone removal. On Windows, OpenCode keeps
   # file handles below its session directory until deletion, and removing the clone
   # first both fails on long paths and risks racing a still-live tool.
@@ -1564,11 +1613,11 @@ cmd_implement() {
   IMPL_META="$mp"; IMPL_CLONE="$(implementation_clone_path "$rid" "$name")"
   write_meta "$IMPL_META" "$(jq -n --arg n "$name" --arg r "$root" --arg remote "$(safe_repo_remote "$root")" \
       --arg rid "$rid" --arg c "$CALLER" --arg b "$base" --arg ts "$(date -u +%FT%TZ)" --argjson pid "$$" \
-      --arg provider "$PROVIDER" --arg model "$MODEL" \
+      --arg provider "$PROVIDER" --arg model "$MODEL" --arg clone "$IMPL_CLONE" \
       '{schema_version:3,name:$n,type:"implementation",repository_root:$r,repository_remote:$remote,
         repository_id:$rid,caller:$c,agent:"glm-implement",provider:$provider,model:$model,
         base_sha:$b,owner_pid:$pid,created_at:$ts,updated_at:$ts,status:"starting",
-        clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
+        clone_path:$clone,opencode_session_id:null,patch_path:null,report_path:null,
         finished_at:null,exit_code:null,failure:null,failure_summary:null,
         failure_detail:null,
         failure_detected_at:null,changes_present:null,patch_exists:null,
@@ -1577,11 +1626,13 @@ cmd_implement() {
         cleanup:{clone:"pending",server_session:"pending"}}')" \
     || die "could not save implementation job record '$mp'."
   implementation_meta_valid "$IMPL_META" "$root" || die "new implementation record failed validation."
+  reviewer_event_evidence bind-owner glm "$IMPL_META" || die "could not bind implementation evidence ownership; no provider work was submitted."
   trap 'implementation_cleanup "$?"' EXIT
   trap 'IMPL_FAILURE="interrupted"; IMPL_FINAL_STATE="aborted"; exit 130' INT TERM HUP
   test_pause record
   implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
   IMPL_PF="$(read_prompt)"
+  implementation_update "$IMPL_META" '.prompt_path=$prompt' --arg prompt "$IMPL_PF" || die "could not retain implementation prompt ownership."
   mkdir -p "$(dirname "$IMPL_CLONE")"
   [ ! -e "$IMPL_CLONE" ] || die "canonical implementation clone already exists without a reusable job: $IMPL_CLONE"
   if test_failure clone-create; then
@@ -1625,7 +1676,9 @@ EXCL
   }
   test_pause session
   implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
-  send_prompt "$IMPL_SID" "$IMPL_PF"; rm -f "$IMPL_PF"; IMPL_PF=""
+  reviewer_event_evidence require-report glm || die "could not reserve implementation evidence before provider submission."
+  implementation_update "$IMPL_META" '.provider_submission_started=true' || die "could not record provider submission boundary."
+  send_prompt "$IMPL_SID" "$IMPL_PF"
   set +e
   msg="$(await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META")"; turn_rc=$?
   set -e
@@ -1660,7 +1713,7 @@ EXCL
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached --binary "$base" > "$patch"; then
     rm -f "$patch"; IMPL_FAILURE="patch-export-failed"
-    report="$(write_report "$root" "$name" "implementation failure" "$text
+    report="$(write_implementation_report "$root" "$name" "implementation failure" "$text
 
 Patch export failed. No patch path was recorded. The terminal job record retains this
 GLM response and the exact failure reason; the disposable clone is still cleaned safely.
@@ -1668,7 +1721,7 @@ GLM response and the exact failure reason; the disposable clone is still cleaned
     implementation_update "$IMPL_META" '.report_path=$report' --arg report "$report" || return 1
     return 1
   fi
-  report="$(write_report "$root" "$name" implement "$text
+  report="$(write_implementation_report "$root" "$name" implement "$text
 
 ## Patch
 
@@ -1678,6 +1731,8 @@ GLM response and the exact failure reason; the disposable clone is still cleaned
 $(git -C "$IMPL_CLONE" diff --cached --stat "$base")
 \`\`\`
 " "$tokens" "$IMPL_SID")" || { IMPL_FAILURE="report-write-failed"; return 1; }
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" git-binary-patch "$patch" || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
+  reviewer_event_publish_patch glm "$patch" || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
   implementation_update "$IMPL_META" '.patch_path=$patch | .report_path=$report' --arg patch "$patch" --arg report "$report" || {
     IMPL_FAILURE="artifact-metadata-failed"; return 1
   }
@@ -1800,6 +1855,7 @@ cmd_delete() {
     implementation_active "$state" && die "implementation job '$1' is $state. Abort it and wait for a terminal state before deleting it."
     implementation_cleanup_pending "$mp" && die "implementation job '$1' has failed, but its owner has not finished exact cleanup. Wait, then inspect it with: ai-glm show $1"
     [ -z "$clone" ] || [ ! -e "$clone" ] || die "recorded clone still exists at $clone; refusing to erase its ownership record."
+    reviewer_event_verify_owner glm "$mp" || die "implementation evidence is not durable; ownership record preserved."
     if [ -n "$sid" ] && [ "$(jq -r '.cleanup.server_session // "pending"' "$mp")" != removed ]; then
       server_up || die "the exact server session still needs cleanup, but the server is unavailable. Retry delete after: ai-glm server start"
       delete_exact_server_session "$sid" || die "could not delete exact server session $sid (HTTP $HTTP_STATUS); record preserved."
@@ -1835,6 +1891,11 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   if [ ! -d "$lock" ] || [ "$lock_pid" != "$pid" ]; then
     warn "dead implementation owner has ambiguous lock evidence; left untouched: $mp"; return 1
   fi
+  reviewer_event_verify_owner glm "$mp" || {
+    warn "dead implementation owner lacks durable evidence; all resources were preserved: $mp"
+    warn "Exact legacy recovery uses: ai-reviewer-issue evidence reconcile-owner glm '$mp' '$mp' '$(jq -r '.report_path // "EXACT_RETAINED_REPORT"' "$mp")'"
+    return 1
+  }
   if [ -n "$sid" ]; then
     server_up || { warn "dead implementation owner cannot be reconciled while the server is unavailable: $mp"; return 1; }
     permission_http GET "/session/$sid"

@@ -142,6 +142,28 @@ unset BAILIAN_CODING_PLAN_API_KEY
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
+qualification_retention_cases(){
+  local dir="$REPO/.ai/reviews/qwen-qualification" retained rc
+  mkdir -p "$REPO/.ai/reviews" "$TMP/qualification-private-temp"
+  [ ! -e "$dir" ] || mv "$dir" "$TMP/qualification-before-retention"
+  printf 'publication blocked by fixture\n' > "$dir"
+  echo wrong-model > "$TMP/mode"
+  TMPDIR="$TMP/qualification-private-temp" run doctor --live > "$TMP/qualification-retention.log" 2>&1; rc=$?
+  rm "$dir"
+  [ ! -e "$TMP/qualification-before-retention" ] || mv "$TMP/qualification-before-retention" "$dir"
+  retained="$(sed -n 's/^qualification evidence retained: //p' "$TMP/qualification-retention.log" | head -1)"
+  if [ "$rc" -ne 0 ] && [ -n "$retained" ] && [ -s "$retained" ] && [ -s "$retained.p" ] && [ -e "$retained.err" ]; then ok 'failed qualification publication preserves exact stream prompt and stderr'; else bad 'failed qualification publication preserves exact stream prompt and stderr'; fi
+  if (
+    source <(sed -n '/^cleanup_qualification_probe() {/,/^}/p' "$SCRIPT")
+    QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$TMP/interrupted-qualification"
+    QUALIFICATION_RUNTIME_SHA=runtime; QUALIFICATION_PRELOADER_SHA=preloader; RUN_TURN_RC=130
+    printf stream > "$QUALIFICATION_STREAM"; printf prompt > "$QUALIFICATION_STREAM.p"; printf stderr > "$QUALIFICATION_STREAM.err"
+    stop_run_turn(){ :; }; write_qualification_diagnostic(){ return 1; }; note(){ :; }
+    cleanup_qualification_probe
+    [ "$QUALIFICATION_ACTIVE" = 0 ] && [ -s "$QUALIFICATION_STREAM" ] && [ -s "$QUALIFICATION_STREAM.p" ] && [ -s "$QUALIFICATION_STREAM.err" ]
+  ); then ok 'interrupted qualification retains raw evidence when publication fails'; else bad 'interrupted qualification retains raw evidence when publication fails'; fi
+  echo review > "$TMP/mode"
+}
 
 recovery_cases(){
   local meta pending calls saved_meta saved_stream report before
@@ -498,6 +520,7 @@ else
   printf '  diagnostic: model-mismatch artifact: '; jq -c . "$QWEN_DIAGNOSTICS"/*.json 2>/dev/null || printf 'missing'; printf '\n'
   bad 'model mismatch leaves only safe actionable metadata'
 fi
+qualification_retention_cases
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true
@@ -508,7 +531,7 @@ check 'diagnostics redact credentials prompts and raw provider payloads' "! grep
 check 'diagnostics remain under the ignored review evidence area' "git -C '$REPO' check-ignore '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"; INTERRUPT_DIAGNOSTICS_BEFORE="$(find "$QWEN_DIAGNOSTICS" -type f | wc -l)"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" doctor --live >/dev/null 2>&1) & DOCTOR_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
 kill -TERM "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true; wait "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted live qualification retains safe diagnostics' "test \"\$(find '$QWEN_DIAGNOSTICS' -type f | wc -l)\" -gt '$INTERRUPT_DIAGNOSTICS_BEFORE' && grep -l '\"failure_class\":\"timeout\"' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'interrupted live qualification removes temporary secret handoffs' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
@@ -618,7 +641,7 @@ check 'hostile shell startup hooks cannot observe managed credentials' "test ! -
 check 'credentialed Qwen boundary uses only prevalidated absolute executables' "grep -q 'trusted absolute Bash/env executables are required' '$SCRIPT' && grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q '\"\$bash_bin\" --noprofile --norc' '$SCRIPT'"
 echo slow > "$TMP/mode"; rm -f "$TMP/op-env-source"
 (cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
 QWEN_TEMP_ENV="$(cat "$TMP/op-env-source" 2>/dev/null || true)"; kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted managed turn removes its temporary credential-reference file' "test -n '$QWEN_TEMP_ENV' && test ! -e '$QWEN_TEMP_ENV'"
 echo review > "$TMP/mode"
