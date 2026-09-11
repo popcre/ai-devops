@@ -467,7 +467,7 @@ check 'diagnostics redact credentials prompts and raw provider payloads' "! grep
 check 'diagnostics remain under the ignored review evidence area' "git -C '$REPO' check-ignore '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"; INTERRUPT_DIAGNOSTICS_BEFORE="$(find "$QWEN_DIAGNOSTICS" -type f | wc -l)"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" doctor --live >/dev/null 2>&1) & DOCTOR_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
 kill -TERM "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true; wait "$DOCTOR_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted live qualification retains safe diagnostics' "test \"\$(find '$QWEN_DIAGNOSTICS' -type f | wc -l)\" -gt '$INTERRUPT_DIAGNOSTICS_BEFORE' && grep -l '\"failure_class\":\"timeout\"' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'interrupted live qualification removes temporary secret handoffs' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
@@ -577,7 +577,7 @@ check 'hostile shell startup hooks cannot observe managed credentials' "test ! -
 check 'credentialed Qwen boundary uses only prevalidated absolute executables' "grep -q 'trusted absolute Bash/env executables are required' '$SCRIPT' && grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q '\"\$bash_bin\" --noprofile --norc' '$SCRIPT'"
 echo slow > "$TMP/mode"; rm -f "$TMP/op-env-source"
 (cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
 QWEN_TEMP_ENV="$(cat "$TMP/op-env-source" 2>/dev/null || true)"; kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
 check 'interrupted managed turn removes its temporary credential-reference file' "test -n '$QWEN_TEMP_ENV' && test ! -e '$QWEN_TEMP_ENV'"
 echo review > "$TMP/mode"
