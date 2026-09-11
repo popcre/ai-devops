@@ -77,6 +77,10 @@ same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
 
 --review requires a final ## Verdict heading and APPROVE, REJECT, or BLOCKED.
+Add --governed-verdict SHA (or --governed-verdict=SHA) with --review to emit one
+final VERDICT: APPROVE|REVISE|REJECT SHA line for a governed recorder. The exact
+current commit is required; BLOCKED is retained but returns nonzero. This mode
+prints a new session ID on stderr and keeps stdout for the review only.
 It also tells DeepSeek that it has NO repository access, so it must not claim
 that anything exists or is missing unless the text quotes it, and must return
 BLOCKED when a conclusion would need evidence it was not given. --file may be
@@ -216,7 +220,7 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""
+ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
@@ -365,6 +369,18 @@ PY
   return $rc
 }
 
+record_usage() {
+  # Optional accounting runs only after the conversation is durably published.
+  local usage_record
+  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "${AI_REVIEW_EVENT_RUN_ID:-}")"; then
+    { [ ! -L "$SESS_DIR/$ID.usage.jsonl" ] && printf '%s\n' "$usage_record" >> "$SESS_DIR/$ID.usage.jsonl"; } \
+      || echo 'Warning: usage publication unavailable; paid response preserved.' >&2
+  else
+    echo 'Warning: usage extraction unavailable; paid response preserved.' >&2
+  fi
+  return 0
+}
+
 require_review_head() {
   local head
   head="$(git -C "$REPO_ROOT" rev-parse --verify HEAD^{commit} 2>/dev/null || true)"
@@ -397,7 +413,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   done < <(find "$saved" -type f -print0 | sort -z)
   while IFS= read -r -d '' file; do
     source_files+=("$snapshot/$file")
-  done < <(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z)
+  done < <(git -C "$snapshot" ls-files --others --exclude-standard -z)
   printf '%s\0' "${source_files[@]}" > "$REVIEW_SOURCE_IDENTITY.files" || return 1
   MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${source_files[@]}")" || return 1
   "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
@@ -409,12 +425,12 @@ verify_review_source() {
       local stale meta
       meta="$(session_path "$ID" .meta.json)" || return 1
       stale="$(mktemp "$SESS_DIR/.source-stale.XXXXXX")" || return 1
-      OBSERVED_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" OBSERVED_SOURCE_DIGEST="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$REPO_ROOT" 2>/dev/null || true)" \
+      GOVERNED_HEAD="$GOVERNED_HEAD" OBSERVED_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" OBSERVED_SOURCE_DIGEST="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$REPO_ROOT" 2>/dev/null || true)" \
       "$PYTHON" - "$REVIEW_SOURCE_IDENTITY" "$stale" "$ID" "$REVIEW_SOURCE_HASH" "$REVIEW_SOURCE_SAVED" <<'PY'
 import json, os, sys
 identity_path, output, session_id, packet_hash, packet_directory = sys.argv[1:]
 identity = json.load(open(identity_path, encoding='utf-8'))
-json.dump({'schema_version':2,'provider':'deepseek','session_id':session_id,'head':identity['head'],'source_identity':identity,'observed_head':os.environ['OBSERVED_HEAD'],'observed_source_digest':os.environ['OBSERVED_SOURCE_DIGEST'],'packet_sha256':packet_hash,'source_packet_directory':packet_directory,'status':'source_changed','verdict':None,'reason':'Source evidence changed after the provider returned; the conversation is retained and a new turn must resolve fresh source.'},open(output,'w',encoding='utf-8'),indent=2)
+json.dump({'schema_version':2,'provider':'deepseek','session_id':session_id,'head':identity['head'],'source_identity':identity,'observed_head':os.environ['OBSERVED_HEAD'],'observed_source_digest':os.environ['OBSERVED_SOURCE_DIGEST'],'packet_sha256':packet_hash,'source_packet_directory':packet_directory,'verdict_mode':'governed' if os.environ['GOVERNED_HEAD'] else 'ordinary','governed_head':os.environ['GOVERNED_HEAD'] or None,'status':'source_changed','verdict':None,'reason':'Source evidence changed after the provider returned; the conversation is retained and a new turn must resolve fresh source.'},open(output,'w',encoding='utf-8'),indent=2)
 PY
       if ! write_atomic "$meta" "$stale"; then echo 'Error: stale source metadata could not be published; retained transcript authorizes nothing.' >&2; fi
       rm -f "$stale"
@@ -456,12 +472,23 @@ with open(out, "w", encoding="utf-8") as f: json.dump(messages, f, indent=2)
 }
 
 review_verdict() {
-  "$PYTHON" - "$1" <<'PY'
+  "$PYTHON" - "$1" "$GOVERNED_HEAD" <<'PY'
 import re, sys
 text=sys.argv[1].replace("\r\n","\n")
-m=re.search(r'(?:^|\n)## Verdict[ \t]*\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*\s*\Z', text)
-if not m or len(re.findall(r'^## Verdict[ \t]*$', text, re.M)) != 1:
-    raise SystemExit(1)
+head = sys.argv[2]
+if head:
+    m=re.search(r'(?:^|\n)VERDICT: (APPROVE|REVISE|REJECT|BLOCKED) ' + re.escape(head) + r'[ \t]*\s*\Z', text)
+    if not m: raise SystemExit(1)
+    for line in text[:m.start()].splitlines():
+        stripped=re.sub(r'^[\s>*_#-]+', '', line)
+        stripped=re.sub(r'^VERDICT\s*:\s*', '', stripped, flags=re.I)
+        stripped=re.sub(r'^[\s*_]+', '', stripped)
+        if re.match(r'^(?:APPROVE(?:D)?|REJECT(?:ED)?|REVISE|REQUEST[_\s]CHANGES|BLOCKED)(?![A-Za-z0-9])', stripped, re.I):
+            raise SystemExit(1)
+else:
+    m=re.search(r'(?:^|\n)## Verdict[ \t]*\n[ \t]*(APPROVE|REJECT|BLOCKED)[ \t]*\s*\Z', text)
+    if not m or len(re.findall(r'^## Verdict[ \t]*$', text, re.M)) != 1:
+        raise SystemExit(1)
 fence = None
 for line in text[:m.start()].splitlines():
     marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
@@ -471,6 +498,41 @@ for line in text[:m.start()].splitlines():
     elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip(): fence = None
 if fence is not None: raise SystemExit(1)
 print(m.group(1))
+PY
+}
+
+take_governed_head() {
+  local value="${1,,}"
+  [[ "$value" =~ ^[0-9a-f]{40}$ ]] || { echo 'Error: --governed-verdict requires an exact 40-character commit SHA.' >&2; return 1; }
+  [ -z "$GOVERNED_HEAD" ] || [ "$GOVERNED_HEAD" = "$value" ] || { echo 'Error: conflicting --governed-verdict heads.' >&2; return 1; }
+  GOVERNED_HEAD="$value"
+}
+
+configure_governed_review() {
+  [ -n "$GOVERNED_HEAD" ] || return 0
+  [ "$REVIEW" = 1 ] || { echo 'Error: --governed-verdict requires --review.' >&2; return 1; }
+  [ "$GOVERNED_HEAD" = "$REVIEW_HEAD" ] || { echo 'Error: governed-head-mismatch: requested verdict head is not the current commit.' >&2; return 1; }
+  # Keep the evidence boundary; replace only the ordinary terminal grammar.
+  REVIEW_INSTRUCTION="${REVIEW_INSTRUCTION%$'\n\n'*}
+
+End the response with exactly one final line: VERDICT: APPROVE $GOVERNED_HEAD, VERDICT: REVISE $GOVERNED_HEAD, or VERDICT: REJECT $GOVERNED_HEAD. If evidence is insufficient, use VERDICT: BLOCKED $GOVERNED_HEAD; BLOCKED is retained but cannot authorize anything. Do not put a decision word at the start of any other line, even in a quote or code block. Do not use the ordinary ## Verdict section."
+}
+
+session_verdict_mode_matches() {
+  local meta
+  meta="$(session_path "$ID" .meta.json)" || return 1
+  "$PYTHON" - "$meta" "$GOVERNED_HEAD" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle: meta=json.load(handle)
+except FileNotFoundError:
+    raise SystemExit(0)
+except (OSError, ValueError):
+    print("Error: session verdict metadata is unreadable; retained evidence requires recovery.", file=sys.stderr)
+    raise SystemExit(1)
+if meta.get("verdict_mode", "ordinary") == "governed" and meta.get("governed_head") != sys.argv[2]:
+    print("Error: this governed conversation requires its original --governed-verdict head and --review mode.", file=sys.stderr)
+    raise SystemExit(1)
 PY
 }
 
@@ -530,8 +592,8 @@ raise SystemExit(0 if first.get("role") == "system" and first.get("content") == 
 PY
 }
 
-write_review_metadata() { # id verdict
-  local id="$1" verdict="$2" meta tmp head repo ledger
+write_review_metadata() { # id verdict [status]
+  local id="$1" verdict="$2" status="${3:-complete}" meta tmp head repo ledger
   meta="$(session_path "$id" .meta.json)" || return 1
   tmp="$(mktemp "$SESS_DIR/.meta.XXXXXX")"; repo="$REPO_ROOT"; head="${REVIEW_HEAD:-}"
   [ -n "$head" ] || { rm -f "$tmp"; return 1; }
@@ -542,7 +604,7 @@ write_review_metadata() { # id verdict
   # inspection at that commit.
   # Paths travel as argv and as NUL-delimited bytes, never as newline-joined
   # text, so a name containing spaces or newlines is recorded exactly as given.
-  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" \
+  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
   SOURCE_IDENTITY_FILE="$REVIEW_SOURCE_IDENTITY" SOURCE_PACKET_HASH="$REVIEW_SOURCE_HASH" SOURCE_PACKET_DIRECTORY="$REVIEW_SOURCE_SAVED" \
   "$PYTHON" - "$tmp" "$ledger" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"} <<'PY'
 import json, os, sys
@@ -556,7 +618,7 @@ for part in raw.split(b"\0"):
     if name not in attached: attached.append(name)
 identity = json.load(open(os.environ["SOURCE_IDENTITY_FILE"], encoding="utf-8"))
 source_files = [os.fsdecode(part) for part in open(os.environ["SOURCE_IDENTITY_FILE"] + '.files', 'rb').read().split(b'\0') if part]
-json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":"complete"},open(out,"w",encoding="utf-8"),indent=2)
+json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
 PY
   if [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" = publish ]; then mkdir -p "$meta" || return 1; fi
   if ! write_atomic "$meta" "$tmp"; then rm -f "$tmp"; return 1; fi
@@ -678,6 +740,8 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
         --model) MODEL="${2:-}"; shift 2 ;;
         --system) SYSTEM="${2:-}"; shift 2 ;;
         --review) REVIEW=1; shift ;;
+        --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
+        --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
         --base|--assert-head)
           [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
           if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
@@ -689,6 +753,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
     [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     if [ "$REVIEW" = 1 ] && [ -n "$SYSTEM" ]; then echo "Error: --system cannot be combined with --review; the review evidence boundary owns the system prompt. Put your instructions in the review message instead." >&2; exit 2; fi
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
+    configure_governed_review || exit 1
     MSG="$(with_files_appended "$MSG" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"})" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
@@ -713,6 +778,7 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    record_usage
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
@@ -726,8 +792,13 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     release_lock
-    echo "SESSION_ID: $ID"
-    echo
+    if [ -n "$GOVERNED_HEAD" ]; then
+      echo "SESSION_ID: $ID" >&2
+      [ "$VERDICT" != BLOCKED ] || { echo 'Error: review-blocked: evidence-based BLOCKED review retained; no authorizing verdict.' >&2; exit 1; }
+    else
+      echo "SESSION_ID: $ID"
+      echo
+    fi
     echo "$REPLY"
     ;;
 
@@ -738,6 +809,8 @@ $REVIEW_INSTRUCTION"
       case "$1" in
         --file) REVIEW_FILES+=("${2:-}"); shift 2 ;;
         --review) REVIEW=1; shift ;;
+        --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
+        --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
         --base|--assert-head)
           [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
           if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
@@ -748,10 +821,12 @@ $REVIEW_INSTRUCTION"
     [ -n "$ID" ] && [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent reply <session-id> "<message>"' >&2; exit 2; }
     [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
+    configure_governed_review || exit 1
     F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
+    session_verdict_mode_matches || exit 1
     if recovery_required "$ID"; then echo "Error: this conversation is marked recovery-required because its attachment record fell behind its transcript; its evidence list would understate what DeepSeek saw. Reconcile or delete it before continuing." >&2; exit 1; fi
-    if [ "$REVIEW" = 1 ] && ! review_system_present "$F"; then echo "Error: this conversation was not started as a formal review, so its system prompt is not the review evidence boundary. Start the review with: ai-deepseek-agent send \"<message>\" --review" >&2; exit 1; fi
+    if [ "$REVIEW" = 1 ] && ! review_system_present "$F"; then echo "Error: this conversation was not started as a formal review with this exact verdict mode and head, so its system prompt is not the review evidence boundary. Continue with its original mode/head, or start a new formal review." >&2; exit 1; fi
     MSG="$(with_files_appended "$MSG" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"})" || exit 1
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
@@ -773,6 +848,7 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     rm -f "$CANDIDATE" "$CANDIDATE.final"
+    record_usage
     if ! record_attachments "$ID" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"}; then
       mark_recovery_required "$ID" "attachment ledger write failed after the transcript was published" || true
       release_lock
@@ -786,6 +862,10 @@ $REVIEW_INSTRUCTION"
       exit 1
     fi
     release_lock
+    if [ -n "$GOVERNED_HEAD" ] && [ "$VERDICT" = BLOCKED ]; then
+      echo 'Error: review-blocked: evidence-based BLOCKED review retained; no authorizing verdict.' >&2
+      exit 1
+    fi
     echo "$REPLY"
     ;;
 esac

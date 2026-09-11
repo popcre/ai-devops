@@ -246,7 +246,12 @@ check 'behavioral verifier rejects a sanitizer that retains the credential' "! '
 mv "$TMP/bad-sanitizer.js" "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
 
 : > "$TMP/argv.txt"
+INITIAL_STARTED=$SECONDS
 INITIAL_OUT="$(run new review-1 --prompt 'review this' 2>&1)"; INITIAL_RC=$?
+# Measure the guarded source/runtime startup, not just one process spawn.
+# This provider fixture does no network work. Keep the existing minimum.
+QWEN_STARTUP_TICKS=$(( ((SECONDS-INITIAL_STARTED)*2 + $(budget 2 5)) * 20 ))
+[ "$QWEN_STARTUP_TICKS" -ge "$(scale_ticks 200)" ] || QWEN_STARTUP_TICKS="$(scale_ticks 200)"
 [ "$INITIAL_RC" -eq 0 ] || printf '  diagnostic: initial review: %s\n' "$INITIAL_OUT"
 check 'initial review completes successfully' "test '$INITIAL_RC' -eq 0"
 printf 'preload-test-secret\n' > "$TMP/preload-secret"; chmod 600 "$TMP/preload-secret"
@@ -402,7 +407,7 @@ cp "$TMP/a-before-live-drift" "$REPO/a.txt"
 
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" new crash-new --prompt wait >/dev/null 2>&1) & CRASH_NEW_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && [ -n "$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit 2>/dev/null)" ] && break; sleep .05; done
 CRASH_NEW_META="$(find "$TMP/state/sessions" -name 'codex--crash-new.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'new paid turn is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_NEW_META'"
 crash_recorded_worker "$CRASH_NEW_PID" "$CRASH_CHILD" review:crash-new || exit 1
@@ -415,7 +420,7 @@ if ! run new crash-followup --prompt review >/dev/null 2>&1; then
 fi
 echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask crash-followup --prompt wait >/dev/null 2>&1) & CRASH_FOLLOW_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
 CRASH_FOLLOW_META="$(find "$TMP/state/sessions" -name 'codex--crash-followup.json' -print -quit)"; CRASH_CHILD="$(cat "$TMP/slow-pid" 2>/dev/null || true)"
 check 'follow-up is durable before untrappable termination' "jq -e '.status==\"turn_in_progress\"' '$CRASH_FOLLOW_META'"
 crash_recorded_worker "$CRASH_FOLLOW_PID" "$CRASH_CHILD" ask:crash-followup || exit 1
@@ -425,7 +430,7 @@ CALLS_AFTER_CRASH_FOLLOW="$(wc -l < "$TMP/argv.txt")"; run ask crash-followup --
 echo review > "$TMP/mode"; run new interrupt-followup --prompt review >/dev/null 2>&1
 echo slow > "$TMP/mode"; CALLS_BEFORE_INTERRUPT="$(wc -l < "$TMP/argv.txt")"
 (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" ask interrupt-followup --prompt wait >/dev/null 2>&1) & INTERRUPT_FOLLOWUP_PID=$!
-for _ in $(seq 1 "$(scale_ticks 200)"); do [ "$(wc -l < "$TMP/argv.txt")" -gt "$CALLS_BEFORE_INTERRUPT" ] && break; sleep .05; done
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ "$(wc -l < "$TMP/argv.txt")" -gt "$CALLS_BEFORE_INTERRUPT" ] && break; sleep .05; done
 kill -TERM "$INTERRUPT_FOLLOWUP_PID" 2>/dev/null || true; wait "$INTERRUPT_FOLLOWUP_PID" 2>/dev/null || true
 INTERRUPT_META="$(find "$TMP/state/sessions" -name 'codex--interrupt-followup.json' -print -quit)"
 check 'interrupted follow-up becomes recovery-required with a preserved stream' "jq -e '.status==\"recovery-required\" and .failure_reason==\"interrupted-provider-turn\"' '$INTERRUPT_META' && test -e \"\$(jq -r .recovery_stream '$INTERRUPT_META')\""

@@ -114,7 +114,7 @@ reviewer_event_guard(){
     facts="{\"source\":\"os-signal\",\"phase\":\"wrapper-running\",\"signal\":\"$observed_signal\"}"
   fi
   if ! env -i "${event_env[@]}" "$python" "$event_tool" finish "$provider" "$event_id" "$result" "$facts"; then
-    printf 'reviewer finished, but durable event recording failed; start evidence retained\n' >&2
+    printf 'reviewer finished, but required evidence verification failed; private recovery evidence retained\n' >&2
     [ "$result" -ne 0 ] || result=1
   fi
   exit "$result"

@@ -301,11 +301,26 @@ check "merge_patch_omits_unrelated_main_work" "! grep -q 'not-part-of-the-change
 
 # The sandbox removes the network remote but preserves both ref namespaces.
 # Packet resolution prefers origin/main; an explicit local main still means main.
-git -C "$MERGE_SRC" update-ref refs/heads/main "$(git -C "$MERGE_SRC" rev-parse main^)"
+git -C "$MERGE_SRC" update-ref refs/heads/main "$(git -C "$MERGE_SRC" rev-list --max-parents=0 HEAD)"
 STALE_LOCAL_MAIN="$(git -C "$MERGE_SRC" rev-parse main)"
 git -C "$MERGE_SRC" update-ref refs/remotes/origin/main "$MERGE_MAIN_SHA"
 REMOTE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" remote-wins)"
 check "snapshot_preserves_current_origin_and_explicit_local_main" "[ \"$(git -C "$REMOTE_SNAP" rev-parse origin/main)\" = '$MERGE_MAIN_SHA' ] && [ \"$(git -C "$REMOTE_SNAP" rev-parse main)\" = '$STALE_LOCAL_MAIN' ] && [ '$STALE_LOCAL_MAIN' != '$MERGE_MAIN_SHA' ]"
+
+# Another worktree can publish a new branch tip after the object copy. Snapshot
+# refs must describe the captured objects, never a later live ref transaction.
+git -C "$MERGE_SRC" update-ref refs/heads/concurrent-topic "$MERGE_HEAD_SHA"
+REF_HOOK="$TMP/advance-ref-after-clone.sh"
+cat > "$REF_HOOK" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = after-clone ] || exit 0
+tree="$(git -C "$2" rev-parse HEAD^{tree})"
+new="$(printf 'concurrent snapshot regression\n' | git -C "$2" commit-tree "$tree" -p HEAD)" || exit 1
+git -C "$2" update-ref refs/heads/concurrent-topic "$new"
+EOF
+chmod +x "$REF_HOOK"
+REF_SNAP="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$REF_HOOK" "$SCRIPT" ensure-copy "$MERGE_SRC" concurrent-refs)"
+check "snapshot freezes ref identities before copying objects" "test -n '$REF_SNAP' && test \"$(git -C "$REF_SNAP" rev-parse concurrent-topic 2>/dev/null)\" = '$MERGE_HEAD_SHA' && test \"$(git -C "$MERGE_SRC" rev-parse concurrent-topic)\" != '$MERGE_HEAD_SHA'"
 
 # --- wiring contract ----------------------------------------------------------
 # The snapshot only helps if the reviewer wrappers actually route their review

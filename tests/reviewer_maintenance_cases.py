@@ -47,6 +47,8 @@ shift
 case "$1" in
   stream) cat; printf 'synthetic stderr\\n' >&2; exit 7;;
   ok) exit 0;;
+  unpublished) reviewer_event_evidence require-report grok; exit 7;;
+  unpublished-ok) reviewer_event_evidence require-report grok; exit 0;;
   secret-env) [ -n "${PROVIDER_TEST_SECRET:-}" ]; exit 4;;
   signal) trap 'exit 44' TERM INT; printf '%s\\n' "$$" > "$SIGNAL_READY"; while true; do sleep 0.1; done;;
 esac
@@ -541,6 +543,26 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
                 self.assertTrue(meta.exists(), result.stderr)
                 self.assertFalse((self.root / "provider-delete").exists(), result.stderr)
 
+    def test_failed_publication_still_records_exact_terminal_exit(self):
+        result = self.guard(operation="unpublished")
+        self.assertEqual(result.returncode, 7)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([row["event"] for row in rows], ["started", "finished"])
+        self.assertEqual(rows[-1]["exit_code"], 7)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
+        self.assertEqual(rows[-1]["evidence_references"], [])
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "grok", rows[-1]["run_id"])
+
+    def test_zero_wrapper_exit_cannot_hide_missing_evidence_from_maintenance(self):
+        result = self.guard(operation="unpublished-ok")
+        self.assertEqual(result.returncode, 1)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual(rows[-1]["exit_code"], 1)
+        self.assertEqual(rows[-1]["wrapper_exit_code"], 0)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
+        self.assertEqual(len(self.engine.start()["candidates"]), 1)
+
     def test_guard_preserves_stdin_stdout_stderr_exit(self):
         result = self.guard(operation="stream", input="unchanged input\n")
         self.assertEqual(result.returncode, 7, result.stderr)
@@ -812,7 +834,10 @@ wait "$job"
         with self.assertRaises(events.Blocked):
             events.verify_owner(self.root, "grok", owner)
 
-    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self):
+    def test_linked_implementation_recovers_report_and_missing_patch_without_rebinding(self):
+        self.test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(linked=True)
+
+    def test_legacy_implementation_reconciles_only_exact_report_and_exported_patch(self, linked=False):
         state = self.root / "state"
         workspace = state / "worktrees/qwen.fixture-codex-work/wt"
         workspace.parent.mkdir(parents=True)
@@ -830,16 +855,33 @@ wait "$job"
         owner.write_text(json.dumps({"repo": str(self.toolkit), "worktree": str(workspace), "state": "active"}))
         report = self.root / "qwen-work-synthetic.md"
         report.write_text(f"# Synthetic Qwen report\n- Repo: `{self.toolkit}`\n- Session: `synthetic-session`\n")
+        if linked:
+            original = self.invocation(rid="f" * 32, provider="qwen", finish=False)
+            events.bind_owner(self.root, "qwen", original["run_id"], owner)
+            events.require_report(self.root, "qwen", original["run_id"])
+            events.publish_report(self.root, "qwen", original["run_id"], report)
+            canonical.unlink()
+            with self.assertRaises(events.Blocked):
+                events.publish_patch(self.root, "qwen", original["run_id"], canonical)
+            canonical.write_bytes(patch_data)
+            with self.assertRaisesRegex(events.Blocked, "still active"):
+                events.reconcile_owner(self.root, "qwen", owner, metadata, report)
+            self.write({**original, "event": "finished", "exit_code": 1, "evidence_state": "publication-incomplete"})
+            original_owner = owner.read_bytes()
+            original_ledger = self.ledger.read_bytes()
         extra = workspace / "unexported.txt"
         extra.write_text("must not be discarded")
         with self.assertRaises(events.Blocked):
             events.reconcile_owner(self.root, "qwen", owner, metadata, report)
         extra.unlink()
         result = events.reconcile_owner(self.root, "qwen", owner, metadata, report)
-        self.assertEqual(result["report_count"], 2)
+        self.assertEqual(result["report_count"], 3 if linked else 2)
         self.assertEqual(result["historical_source_authorization"], "unknown")
+        if linked:
+            self.assertEqual(owner.read_bytes(), original_owner)
+            self.assertTrue(self.ledger.read_bytes().startswith(original_ledger))
         report.unlink(); canonical.unlink()
-        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 2)
+        self.assertEqual(len(events.verify_owner(self.root, "qwen", owner)), 3 if linked else 2)
         self.assertTrue(events.reconcile_owner(self.root, "qwen", owner, metadata, report)["already_reconciled"])
 
     def test_patch_publication_failure_blocks_cleanup_after_report_succeeds(self):
@@ -856,6 +898,17 @@ wait "$job"
         references = events.verify_reports(self.root, "grok", rid)
         self.assertEqual(len(references), 2)
         self.assertIn(receipt["reference"], references)
+
+    def test_same_patch_bytes_at_two_owned_paths_remain_distinct_valid_receipts(self):
+        rid, _, report = self.evidence_fixture()
+        events.publish_report(self.root, "grok", rid, report)
+        references = []
+        for name in ("complete.patch", "incomplete.patch"):
+            path = self.root / name
+            path.write_text("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n")
+            references.append(events.publish_patch(self.root, "grok", rid, path)["reference"])
+        self.assertNotEqual(*references)
+        self.assertTrue(set(references).issubset(events.verify_reports(self.root, "grok", rid)))
 
     def test_empty_patch_does_not_replace_required_review_report(self):
         rid, _, report = self.evidence_fixture()
@@ -917,7 +970,10 @@ wait "$job"
                 patch.object(sys, "argv", ["events", "finish", "grok", rid, "0"]):
             with self.assertRaises(events.Blocked):
                 events.main()
-        self.assertEqual([json.loads(line)["event"] for line in self.ledger.read_text().splitlines()], ["started"])
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        self.assertEqual([row["event"] for row in rows], ["started", "finished"])
+        self.assertNotEqual(rows[-1]["exit_code"], 0)
+        self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
 
     def test_completed_invocation_cannot_gain_new_evidence_after_the_fact(self):
         rid, _, report = self.evidence_fixture()

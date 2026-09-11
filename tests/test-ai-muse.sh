@@ -89,6 +89,11 @@ case "${1:-}" in
   --version) echo 1.18.12;;
   run)
     [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
+    if [ -n "${MUSE_STUB_USAGE_FIXTURE:-}" ]; then
+      jq -c '.events[] | .sessionID="ses_new"' "$MUSE_STUB_USAGE_FIXTURE"
+      printf '{"type":"text","sessionID":"ses_new","part":{"text":"usage-proven-response"}}\n'
+      exit 0
+    fi
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
@@ -245,6 +250,8 @@ check 'target movement during paid response rejects acceptance' "cd '$REPO' && !
 check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
 git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
+check 'optional usage failure preserves successful paid response' "cd '$REPO' && eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_TOUCH='$TMP/usage-paid-count' '$SCRIPT' new usage-failure --prompt test\" > '$TMP/usage-failure.log' 2>&1 && grep -q usage-formatting-failed '$REPO'/.ai/reviews/muse-usage-failure-*.md && grep -q first '$TMP/usage-failure.log' && test \"\$(wc -c < '$TMP/usage-paid-count')\" -eq 7"
 check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
 check 'hostile installed profile is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile --prompt test\""
@@ -325,7 +332,7 @@ check 'source changes during a turn reject stale output' "printf '%s' \"\$STALE_
 STALE_META="$(find "$TMP/state" -name 'codex--stale.json' -type f)"
 check 'rejected stale turn preserves its Muse session' "jq -e '.status==\"completed_pending_local_checks\" and .session_id==\"ses_new\"' '$STALE_META'"
 check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'reconciliation cannot clear missing durable evidence' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'"
+check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
