@@ -1097,13 +1097,16 @@ wait "$job"
         original_snapshot = events.snapshot
         def changing_snapshot(path, kind):
             result = original_snapshot(path, kind)
-            if Path(path) == report:
+            # Publication canonicalizes Windows DOS aliases before snapshotting.
+            if Path(path).resolve() == report.resolve():
                 with report.open("a") as output:
                     output.write("late output")
             return result
         with patch.object(events, "snapshot", side_effect=changing_snapshot):
             with self.assertRaisesRegex(events.Blocked, "changed during publication"):
                 events.publish_report(self.root, "grok", rid, report)
+        self.assertTrue(report.read_text().endswith("late output"))
+        self.assertEqual(list((self.root / "evidence" / rid).glob("*.report.json")), [])
 
     def test_evidence_missing_publication_prevents_terminal_success(self):
         rid, _, _ = self.evidence_fixture()
