@@ -91,7 +91,8 @@ if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   printf '\nchanged' >> "$RESPONSE"
   check "changed retained provider bytes refuse finalization" "! run finalize '$TRANSCRIPT_ID' >'$TMP/tamper.out' 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.json'"
   cp "$TMP/original-response" "$RESPONSE"
-  check "transcript finalization restores paid bytes without replay" "run finalize '$TRANSCRIPT_ID' >'$TMP/transcript-final.out' 2>&1 && test '$TRANSCRIPT_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  git -C "$TMP/repo" commit --allow-empty -qm recovery-head-movement
+  check "ordinary transcript finalization survives repository head movement without replay" "run finalize '$TRANSCRIPT_ID' >'$TMP/transcript-final.out' 2>&1 && test '$TRANSCRIPT_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'retained formal review\n## Verdict\nAPPROVE' run send metadata-recovery --review > "$TMP/metadata-failure.out" 2>&1
   META_RC=$?; META_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/metadata-failure.out")"
   META_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
