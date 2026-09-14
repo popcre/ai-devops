@@ -280,7 +280,7 @@ jobs:
 
           if [ "$EVENT" = 'pull_request' ]; then
             lane_result="$SECTION_RESULT"
-            lane_name='the four Windows sections'
+            lane_name='the five Windows sections'
           else
             lane_result="$COMPLETE_RESULT"
             lane_name='the complete Windows matrix'
