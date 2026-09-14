@@ -217,7 +217,15 @@ is busy and stops with exit 3 if it is; `--force` overrides and says so.
 `tests/run-parallel.sh` additionally watches between suites and stops launching
 more if a job arrives mid-series, because a 65-minute run started while idle will
 otherwise be handed one. Both are per-host: a job on any other runner in the pool
-never blocks you, and nothing here serialises the pool.
+never blocks you, and nothing here serialises the pool. Use
+`bin/ai-test-local --check-collision` for a read-only decision without starting
+tests. A busy independent self-hosted runner, GitHub-hosted job, or Blacksmith
+job remains usable capacity; only the same physical host or shared installed
+runtime is inside the stop boundary.
+When several machines genuinely share one installed runtime, set
+`AI_TEST_SHARED_RUNTIME_LOCK` to the same lock-directory path on every machine.
+The launcher then holds that atomic lock for the full local run; the read-only
+probe acquires and releases it before reporting clear.
 
 Measured on a 20-core desktop against current `main`: 58 Bash suites in 825
 seconds of wall clock against 5560 seconds of suite time, and the 16 PowerShell

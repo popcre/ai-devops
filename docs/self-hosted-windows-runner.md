@@ -154,6 +154,13 @@ Start-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops-2'
 
 ## Running a local test series alongside CI
 
+First run `bin/ai-test-local --check-collision`. It matches only runner names
+installed on this physical host. A busy independent self-hosted runner does not
+block this host, and GitHub-hosted or Blacksmith work remains available. Treat a
+shared installed runtime as same-host contention even when the job was launched
+elsewhere. Such a runtime must expose one common lock-directory path through
+`AI_TEST_SHARED_RUNTIME_LOCK`; the launcher holds it for the complete run.
+
 **Bound the concurrency, and scope your cleanup.** The reviewer suites and the CI
 jobs that run them are the same script with the same process name, on the same
 machine. Two rules follow, both learned the hard way on 2026-08-28:

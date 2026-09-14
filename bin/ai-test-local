@@ -16,7 +16,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JOBS=""
 MODE="all"
 FORCE=0
+CHECK_COLLISION=0
 AI_TEST_RUNNER_REPO="${AI_TEST_RUNNER_REPO:-popcre/ai-devops}"
+AI_TEST_SHARED_RUNTIME_LOCK="${AI_TEST_SHARED_RUNTIME_LOCK:-}"
+SHARED_RUNTIME_LOCK="$AI_TEST_SHARED_RUNTIME_LOCK"
+SHARED_RUNTIME_LOCK_HELD=0
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +32,8 @@ usage: bin/ai-test-local [--bash|--powershell|--reviewer|--all] [-j N]
   --reviewer     only the reviewer safety suites (mirrors windows-reviewer-safety)
   -j N           worker slots (default: a quarter of this machine's cores, max 8)
   --force        start even if a CI job is running on this same machine
+  --check-collision
+                 report whether this host may start a local series, then exit
 
 Logs land under .test-logs/. Failing suites are named at the end with their log
 path; rerun just those with: bash tests/run-parallel.sh --rerun-failed
@@ -42,10 +48,51 @@ while [ $# -gt 0 ]; do
     --reviewer) MODE=reviewer; shift ;;
     -j) JOBS="${2:-}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --check-collision) CHECK_COLLISION=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [ "$CHECK_COLLISION" -eq 1 ] && [ "$FORCE" -eq 1 ]; then
+  printf 'ai-test-local: --force and --check-collision cannot be combined; a safety probe cannot bypass itself.\n' >&2
+  exit 2
+fi
+
+release_shared_runtime_lock() {
+  [ "$SHARED_RUNTIME_LOCK_HELD" -eq 1 ] || return 0
+  rmdir -- "$SHARED_RUNTIME_LOCK" 2>/dev/null || true
+  SHARED_RUNTIME_LOCK_HELD=0
+}
+
+release_shared_runtime_lock_on_signal() {
+  local rc="$1"
+  release_shared_runtime_lock
+  trap - EXIT INT TERM
+  exit "$rc"
+}
+
+acquire_shared_runtime_lock() {
+  [ -n "$SHARED_RUNTIME_LOCK" ] || return 0
+  if mkdir -- "$SHARED_RUNTIME_LOCK" 2>/dev/null; then
+    SHARED_RUNTIME_LOCK_HELD=1
+    trap release_shared_runtime_lock EXIT
+    trap 'release_shared_runtime_lock_on_signal 130' INT
+    trap 'release_shared_runtime_lock_on_signal 143' TERM
+    if [ "$CHECK_COLLISION" -eq 1 ]; then
+      release_shared_runtime_lock
+      trap - EXIT INT TERM
+    fi
+    unset AI_TEST_SHARED_RUNTIME_LOCK
+    return 0
+  fi
+  if [ -d "$SHARED_RUNTIME_LOCK" ]; then
+    printf 'ai-test-local: refusing to start -- shared installed runtime is already in use: %s\n' "$SHARED_RUNTIME_LOCK" >&2
+    exit 3
+  fi
+  printf 'ai-test-local: unknown -- shared-runtime lock cannot be created safely: %s\n' "$SHARED_RUNTIME_LOCK" >&2
+  exit 4
+}
 
 # --- refuse to collide with a CI job on THIS machine ------------------------
 # On 2026-08-28 a local series and a CI job shared this desktop. The series'
@@ -95,12 +142,27 @@ refuse_if_local_runner_busy() {
     return 0
   fi
   local names; names="$(local_runner_names)"
-  [ -n "$names" ] || return 0
-  command -v gh >/dev/null 2>&1 || return 0
+  if [ -z "$names" ]; then
+    [ "$CHECK_COLLISION" -eq 0 ] || echo 'ai-test-local: clear -- no GitHub runner installation is shared with this host.'
+    return 0
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    if [ "$CHECK_COLLISION" -eq 1 ]; then
+      echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2
+      exit 4
+    fi
+    return 0
+  fi
 
   local busy_remote
   busy_remote="$(gh api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
-                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || return 0
+                   --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || {
+    if [ "$CHECK_COLLISION" -eq 1 ]; then
+      echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2
+      exit 4
+    fi
+    return 0
+  }
 
   local n busy=""
   while IFS= read -r n; do
@@ -108,7 +170,10 @@ refuse_if_local_runner_busy() {
     printf '%s\n' "$busy_remote" | grep -qxF "$n" && busy="$busy $n"
   done <<< "$names"
 
-  [ -n "$busy" ] || return 0
+  if [ -z "$busy" ]; then
+    [ "$CHECK_COLLISION" -eq 0 ] || printf 'ai-test-local: clear -- this host\x27s runner(s) are idle: %s\n' "$(printf '%s' "$names" | tr '\n' ' ')"
+    return 0
+  fi
   cat >&2 <<MSG
 
 ai-test-local: refusing to start -- a CI job is running on THIS machine.
@@ -154,7 +219,9 @@ run_powershell_suites() {
 }
 
 shopt -s extglob
+acquire_shared_runtime_lock
 refuse_if_local_runner_busy
+[ "$CHECK_COLLISION" -eq 0 ] || exit 0
 case "$MODE" in
   all)        run_bash_suites; run_powershell_suites ;;
   bash)       run_bash_suites ;;

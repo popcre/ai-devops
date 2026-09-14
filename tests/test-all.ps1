@@ -14,6 +14,24 @@ $bash = if ($IsWindows) { 'C:\Program Files\Git\bin\bash.exe' } else { (Get-Comm
 $pwsh = (Get-Command pwsh).Source
 $failures = 0
 $timings = [System.Collections.Generic.List[object]]::new()
+$sharedRuntimeLock = $env:AI_TEST_SHARED_RUNTIME_LOCK
+$sharedRuntimeLockHeld = $false
+if ($sharedRuntimeLock) {
+  try {
+    New-Item -ItemType Directory -Path $sharedRuntimeLock -ErrorAction Stop | Out-Null
+    $sharedRuntimeLockHeld = $true
+  } catch {
+    if (Test-Path -LiteralPath $sharedRuntimeLock -PathType Container) {
+      Write-Error "test-all.ps1: shared installed runtime is already in use: $sharedRuntimeLock"
+      exit 3
+    }
+    Write-Error "test-all.ps1: shared-runtime lock cannot be created safely: $sharedRuntimeLock"
+    exit 4
+  }
+  Remove-Item Env:AI_TEST_SHARED_RUNTIME_LOCK -ErrorAction SilentlyContinue
+}
+
+try {
 
 if ($Shard -and -not ($WindowsPullRequest -and $ExcludeReviewerSafety)) {
   throw '-Shard requires -WindowsPullRequest -ExcludeReviewerSafety.'
@@ -95,3 +113,8 @@ if ($Shard) {
 Write-Host "`nOFFLINE COMPLETE SUMMARY bash=1 bash_scope=$bashSummaryScope powershell=$($tests.Count) failures=$failures"
 if ($failures -ne 0) { exit 1 }
 exit 0
+} finally {
+  if ($sharedRuntimeLockHeld) {
+    Remove-Item -LiteralPath $sharedRuntimeLock -Force -ErrorAction SilentlyContinue
+  }
+}

@@ -17,6 +17,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-selection.sh"
 SUITE_DIR="${AI_TEST_SUITE_DIR:-$ROOT/tests}"
 MANIFEST="${AI_CI_SUITE_MANIFEST:-$ROOT/config/ci-suite-manifest.json}"
+SHARED_RUNTIME_LOCK="${AI_TEST_SHARED_RUNTIME_LOCK:-}"
+SHARED_RUNTIME_LOCK_HELD=0
+
+release_shared_runtime_lock() {
+  [ "$SHARED_RUNTIME_LOCK_HELD" -eq 1 ] || return 0
+  rmdir -- "$SHARED_RUNTIME_LOCK" 2>/dev/null || true
+  SHARED_RUNTIME_LOCK_HELD=0
+}
+release_shared_runtime_lock_on_signal() {
+  local rc="$1"
+  release_shared_runtime_lock
+  trap - EXIT INT TERM
+  exit "$rc"
+}
+if [ -n "$SHARED_RUNTIME_LOCK" ]; then
+  mkdir -- "$SHARED_RUNTIME_LOCK" 2>/dev/null || {
+    [ -d "$SHARED_RUNTIME_LOCK" ] && printf 'test-all.sh: shared installed runtime is already in use: %s\n' "$SHARED_RUNTIME_LOCK" >&2 && exit 3
+    printf 'test-all.sh: shared-runtime lock cannot be created safely: %s\n' "$SHARED_RUNTIME_LOCK" >&2
+    exit 4
+  }
+  SHARED_RUNTIME_LOCK_HELD=1
+  trap release_shared_runtime_lock EXIT
+  trap 'release_shared_runtime_lock_on_signal 130' INT
+  trap 'release_shared_runtime_lock_on_signal 143' TERM
+  unset AI_TEST_SHARED_RUNTIME_LOCK
+fi
 
 only=''; changed_since=''; list_only=false; windows_offline=false; exclude_reviewer_safety=false
 shard=''

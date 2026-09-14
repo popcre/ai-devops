@@ -75,9 +75,11 @@ pipeline. The recovery procedure lives in
   tests before the required suites. Keep routine output compact without hiding
   errors. PowerShell must stay compatible; run Bash tests through Git Bash on
   Windows. This repository has no UI.
-- Never run a local full test series on a Windows host while its GitHub runner
-  is active. For any runner or CI task, follow the live-state checks in
-  [`docs/task-router.md`](docs/task-router.md).
+- Never overlap a local full test series with a GitHub job on the same physical
+  Windows host or a shared installed runtime. Check that boundary with
+  `bin/ai-test-local --check-collision`; a busy remote self-hosted runner does
+  not create a machine-wide stop, and GitHub-hosted and Blacksmith lanes remain
+  usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.
 - A reviewer repair is complete only when tests pass and every affected local

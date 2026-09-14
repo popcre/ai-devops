@@ -382,10 +382,11 @@ keep holding the single runner until it is cancelled explicitly.
   This is scoped to the one host, because the collision is a same-machine
   process-name kill. The pool now has several Windows runners; a job on a
   *different* runner does not block a local series here, and treating it as a
-  block serializes the pool for no benefit. Confirm the runner on **this** host
-  is idle first, and read only its row:
+  block serializes the pool for no benefit. GitHub-hosted, Blacksmith, and an
+  independent self-hosted machine remain usable. The only additional stop is a
+  genuinely shared installed runtime. Confirm this boundary with:
   ```bash
-  gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|"\(.name) busy=\(.busy)"'
+  bin/ai-test-local --check-collision
   ```
 - Scope any cleanup to the series' own process tree. Never issue a bare name
   match against every matching process on the machine.
