@@ -15,7 +15,7 @@ check() {
 classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
 
 windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-reviewer_timeout="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
+reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows job keeps its measured five-minute finalization allowance bounded' '[ "$windows_timeout" = 105 ]'
@@ -23,8 +23,8 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 6 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 5 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 6 ]"
+check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 7 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 7 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
@@ -59,7 +59,7 @@ manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)
 windows_sensitive="$(jq -r '.windows_sensitive_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 windows_offline="$(jq -r '.windows_offline_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 windows_reviewer="$(jq -r '.windows_reviewer_safety_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
-reviewer_workflow_count="$(grep -Fc "foreach (\$test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh'))" "$workflow")"
+reviewer_workflow_count="$(grep -Ec 'test-ai-codex-review\.sh.*test-ai-grok-review\.sh' "$workflow")"
 hosted_without_reviewer="$(comm -23 <(printf "%s\n" "$windows_offline") <(printf "%s\n" "$windows_reviewer"))"
 # The queue gate carries no long jobs by design (#204), so the only thing
 # standing between a queued commit and main is proof that the pull-request run
@@ -145,12 +145,12 @@ grep -Fq '|| github.sha' "$workflow" || {
   printf 'FAIL: manual verification must remain scoped to its immutable source SHA\n' >&2
   exit 1
 }
-# Neither Windows job may run on merge_group; a queue rebuild restarts them,
+# No physical Windows or fallback job may run on merge_group; a queue rebuild restarts them,
 # and the long suite holds a qualified pool host for the better part of an hour.
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
-[ "$windows_skips" -eq 2 ] || {
-  printf 'FAIL: both Windows jobs must be skipped on merge_group
+[ "$windows_skips" -eq 4 ] || {
+  printf 'FAIL: physical Windows routing and fallback jobs must be skipped on merge_group
 ' >&2
   exit 1
 }
@@ -218,7 +218,7 @@ grep -Fq 'run.id !== current' "$workflow" || {
   exit 1
 }
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 7 ] || {
+[ "$cancel_aware_jobs" -eq 9 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
@@ -230,16 +230,68 @@ grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" "$
   printf 'FAIL: untrusted fork pull requests must never reach the persistent self-hosted runner\n' >&2
   exit 1
 }
-grep -Fq "candidate.name === 'windows-reviewer-safety'" "$workflow" &&
-grep -Fq "job.status === 'queued'" "$workflow" &&
-grep -Fq 'const startDeadline = Date.now() + 10 * 60 * 1000' "$workflow" &&
-grep -Fq 'const completionDeadline = Date.now() + 42 * 60 * 1000' "$workflow" &&
+grep -Fq '$process.WaitForExit(30 * 60 * 1000)' "$workflow" &&
+grep -Fq 'proof_result=timed_out' "$workflow" &&
+grep -Fq 'proof_result=failure' "$workflow" &&
+grep -Fq 'proof_result=success' "$workflow" &&
+grep -Fq 'proof_result=cleanup_failure' "$workflow" &&
+grep -Fq "proofResult === 'cleanup_failure' ? 'false' : 'true'" "$workflow" &&
 grep -Fq "needs['reviewer-safety-start-deadline'].result != 'success'" "$workflow" &&
-grep -Fq "core.setOutput('fallback_required', 'true')" "$workflow" &&
+grep -Fq "core.setOutput('fallback_required', fallback)" "$workflow" &&
 grep -Fq "needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true'" "$workflow" || {
   printf 'FAIL: a reviewer lane that does not start or succeed must release the hosted fallback\n' >&2
   exit 1
 }
+
+reviewer_aggregate="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled-failure:/p' "$workflow")"
+reviewer_preferred="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow")"
+reviewer_fallback="$(sed -n '/^  windows-reviewer-fallback:/,/^  windows-reviewer-safety:/p' "$workflow")"
+reviewer_availability="$(sed -n '/^  reviewer-runner-availability:/,/^  windows-reviewer-preferred:/p' "$workflow")"
+printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch'" &&
+printf '%s' "$reviewer_preferred" | grep -q '^[[:space:]]*continue-on-error:[[:space:]]*true' &&
+printf '%s' "$reviewer_preferred" | grep -Fq "needs.reviewer-runner-availability.outputs.preferred_available == 'true'" &&
+grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
+grep -Fq "core.setOutput('preferred_available', 'false')" "$workflow" &&
+! printf '%s' "$reviewer_fallback" | grep -Fq 'github.event.pull_request.head.repo.full_name == github.repository' &&
+printf '%s' "$reviewer_aggregate" | grep -Fq 'needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]' &&
+! printf '%s' "$reviewer_aggregate" | grep -Fq 'needs.windows-reviewer-preferred' || {
+  printf 'FAIL: preferred reviewer failure or scheduling must not block the stable aggregate\n' >&2
+  exit 1
+}
+printf '%s' "$reviewer_aggregate" | grep -Fq "[ \"\$PREFERRED_RESULT\" = 'success' ]" &&
+printf '%s' "$reviewer_aggregate" | grep -Fq "[ \"\$FALLBACK_RESULT\" = 'success' ]" &&
+printf '%s' "$reviewer_aggregate" | grep -Fq "no successful reviewer proof" || {
+  printf 'FAIL: stable reviewer aggregate must accept either complete proof and fail closed without one\n' >&2
+  exit 1
+}
+
+aggregate_script="$(mktemp)"
+awk '
+  /^  windows-reviewer-safety:$/ { in_job=1 }
+  in_job && /^[[:space:]]+run: \|$/ { in_run=1; next }
+  in_run && /^  [a-zA-Z0-9_-]+:$/ { exit }
+  in_run { sub(/^          /, ""); print }
+' "$workflow" >"$aggregate_script"
+chmod +x "$aggregate_script"
+check_reviewer_result() {
+  expected="$1"; shift
+  if env "$@" bash "$aggregate_script" >/dev/null 2>&1; then actual=0; else actual=$?; fi
+  [ "$actual" -eq "$expected" ] || {
+    printf 'FAIL: reviewer aggregate returned %s, expected %s for %s\n' "$actual" "$expected" "$*" >&2
+    exit 1
+  }
+}
+common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
+# Regression: a timed-out or cancelled preferred host is not a global stop when
+# the independent hosted runner completed every identical reviewer assertion.
+check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=success
+check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_RESULT=success
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=failure
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=skipped
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+rm -f "$aggregate_script"
 
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   mutation_dir="$(mktemp -d)"
@@ -265,8 +317,20 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   assert_rejected reviewer-gap
   sed "/needs\['reviewer-safety-start-deadline'\].result != 'success'/d" "$workflow" >"$mutation_dir/watchdog-error-gap.yml"
   assert_rejected watchdog-error-gap
-  sed "/job.status === 'queued'/d" "$workflow" >"$mutation_dir/unbounded-reviewer-queue.yml"
-  assert_rejected unbounded-reviewer-queue
+  sed '/\$process\.WaitForExit(30 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
+  assert_rejected unbounded-reviewer-execution
+  sed '/continue-on-error: true/d' "$workflow" >"$mutation_dir/fatal-preferred-reviewer.yml"
+  assert_rejected fatal-preferred-reviewer
+  sed '/proof_result=failure/d' "$workflow" >"$mutation_dir/hidden-preferred-failure.yml"
+  assert_rejected hidden-preferred-failure
+  sed '/proof_result=cleanup_failure/d' "$workflow" >"$mutation_dir/unfenced-timeout.yml"
+  assert_rejected unfenced-timeout
+  sed "/runner.status === 'online' && !runner.busy/d" "$workflow" >"$mutation_dir/busy-runner-selected.yml"
+  assert_rejected busy-runner-selected
+  sed "/needs.reviewer-runner-availability.outputs.preferred_available == 'true'/d" "$workflow" >"$mutation_dir/availability-bypass.yml"
+  assert_rejected availability-bypass
+  sed "/^  windows-reviewer-fallback:/,/^  windows-reviewer-safety:/ s/always() && !cancelled()/always() \&\& !cancelled() \&\& github.event.pull_request.head.repo.full_name == github.repository/" "$workflow" >"$mutation_dir/fork-fallback-blocked.yml"
+  assert_rejected fork-fallback-blocked
   sed '/Dir::Etc::sourceparts=-/d' "$workflow" >"$mutation_dir/third-party-apt-feed.yml"
   assert_rejected third-party-apt-feed
 fi

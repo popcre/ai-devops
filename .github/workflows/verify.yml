@@ -171,8 +171,11 @@ jobs:
     # The retained-session expansions made DeepSeek and Muse consume more than
     # 31 minutes together in run 34804029887 before the 35-minute ceiling killed
     # their old shared section. Five sections keep those indivisible suites
-    # separate without raising the ceiling or introducing a timeout fallback.
-    timeout-minutes: 35
+    # separate. Exact-head run 34822350212 then showed the indivisible Kimi
+    # section still advancing at 35m13s with no assertion failure, so a bounded
+    # 40-minute ceiling supplies measured finalization headroom without a
+    # same-run fallback or removing any test.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -297,8 +300,41 @@ jobs:
           printf 'windows-offline: %s reported %s; failing closed.\n' "$lane_name" "$lane_result" >&2
           exit 1
 
-  windows-reviewer-safety:
+  reviewer-runner-availability:
     needs: [fast-classifier, manual-preflight]
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true') &&
+      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      preferred_available: ${{ steps.runners.outputs.preferred_available }}
+    steps:
+      - name: Check for an idle qualified reviewer host
+        id: runners
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+          script: |
+            try {
+              const runners = await github.paginate(github.rest.actions.listSelfHostedRunnersForRepo, {
+                ...context.repo, per_page: 100
+              });
+              const available = runners.some(runner =>
+                runner.status === 'online' && !runner.busy &&
+                runner.labels.some(label => label.name === 'ai-devops-windows-qualified')
+              );
+              core.setOutput('preferred_available', available ? 'true' : 'false');
+              core.info(`Idle qualified reviewer host available=${available}.`);
+            } catch (error) {
+              core.setOutput('preferred_available', 'false');
+              core.warning(`Runner availability is unknown; using the independent hosted proof: ${error.message}`);
+            }
+
+  windows-reviewer-preferred:
+    needs: [fast-classifier, manual-preflight, reviewer-runner-availability]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change is prose-only.
@@ -310,9 +346,13 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true') &&
+      needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # Self-hosted on the qualified pool. Moving this job
+    # Deliberate manual diagnostic on the qualified pool. Pull requests and
+    # schedules use the independent hosted proof below, so a runner that turns
+    # busy after this availability sample can delay only its explicitly chosen
+    # manual run, never a required repository check. Moving this job
     # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
     # stalled (#204), so this is not a return to hosted runners: it is a move
     # to a dedicated, qualified, otherwise idle machine. The reviewer suite
@@ -320,7 +360,13 @@ jobs:
     # 33571202823 - well inside the 30 minute ceiling it exceeded while
     # sharing the edge-dev desktop with windows-offline.
     runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]
-    timeout-minutes: 30
+    # This lane is preferred evidence, not the required result. A timeout or
+    # assertion failure must release the identical hosted fallback, whose
+    # stable aggregate below remains fail-closed.
+    continue-on-error: true
+    timeout-minutes: 35
+    outputs:
+      proof_result: ${{ steps.proof.outputs.proof_result }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -332,66 +378,74 @@ jobs:
             throw 'The pinned Windows runner image does not provide jq.'
           }
       - name: Focused Windows reviewer safety suites
+        id: proof
         shell: pwsh
         run: |
           $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $failures = 0
-          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
-            & $bash $test
-            if ($LASTEXITCODE -ne 0) { $failures++ }
+          $command = 'failures=0; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" || failures=$((failures+1)); done; exit "$failures"'
+          $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+          $startInfo.FileName = $bash
+          $startInfo.UseShellExecute = $false
+          $startInfo.ArgumentList.Add('-lc')
+          $startInfo.ArgumentList.Add($command)
+          $process = [System.Diagnostics.Process]::Start($startInfo)
+          if (-not $process.WaitForExit(30 * 60 * 1000)) {
+            & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
+            if ($LASTEXITCODE -ne 0) {
+              "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
+              exit 0
+            }
+            "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Warning 'Preferred reviewer proof reached its 30-minute bound; hosted fallback is required.'
+            exit 0
           }
-          if ($failures -ne 0) { exit 1 }
+          if ($process.ExitCode -eq 0) {
+            "proof_result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "proof_result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Warning "Preferred reviewer proof failed with exit code $($process.ExitCode); hosted fallback is required."
+          }
 
   reviewer-safety-start-deadline:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, reviewer-runner-availability, windows-reviewer-preferred]
     if: >-
-      !cancelled() && github.event_name == 'pull_request' &&
+      !cancelled() && github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true')
+       needs.fast-classifier.outputs.run_long == 'true') &&
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    permissions:
-      actions: read
-      contents: read
+    timeout-minutes: 3
     outputs:
       fallback_required: ${{ steps.watch.outputs.fallback_required }}
+      preferred_result: ${{ steps.watch.outputs.preferred_result }}
     steps:
       - name: Bound the self-hosted reviewer lane start
         id: watch
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          AVAILABLE: ${{ needs.reviewer-runner-availability.outputs.preferred_available }}
+          PROOF_RESULT: ${{ needs.windows-reviewer-preferred.outputs.proof_result }}
         with:
           script: |
-            const startDeadline = Date.now() + 10 * 60 * 1000;
-            // A job may use the full 10-minute start allowance and its own
-            // 30-minute execution ceiling. Keep both inside this deadline.
-            const completionDeadline = Date.now() + 42 * 60 * 1000;
-            while (Date.now() < completionDeadline) {
-              const {data} = await github.rest.actions.listJobsForWorkflowRun({
-                ...context.repo, run_id: context.runId, filter: 'latest', per_page: 100
-              });
-              const job = data.jobs.find(candidate => candidate.name === 'windows-reviewer-safety');
-              if (job && job.status === 'completed') {
-                const fallback = job.conclusion === 'success' ? 'false' : 'true';
-                core.setOutput('fallback_required', fallback);
-                core.info(`Reviewer lane completed conclusion=${job.conclusion}; fallback_required=${fallback}.`);
-                return;
-              }
-              if ((!job || job.status === 'queued') && Date.now() >= startDeadline) {
-                core.setOutput('fallback_required', 'true');
-                core.warning('Reviewer lane did not start within 10 minutes; hosted fallback is required.');
-                return;
-              }
-              await new Promise(resolve => setTimeout(resolve, 15000));
-            }
-            core.setOutput('fallback_required', 'true');
-            core.warning('Reviewer lane did not complete within 42 minutes; hosted fallback is required.');
+            const available = process.env.AVAILABLE === 'true';
+            const proofResult = process.env.PROOF_RESULT || (available ? 'unknown' : 'unavailable');
+            const fallback = proofResult === 'success' || proofResult === 'cleanup_failure' ? 'false' : 'true';
+            core.setOutput('fallback_required', fallback);
+            core.setOutput('preferred_result', proofResult);
+            core.info(`Reviewer host available=${available} proof=${proofResult}; fallback_required=${fallback}.`);
 
   windows-reviewer-fallback:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
     if: >-
-      always() && !cancelled() && github.event_name == 'pull_request' &&
+      always() && !cancelled() && github.event_name != 'merge_group' &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true') &&
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
     runs-on: windows-2025
@@ -415,8 +469,57 @@ jobs:
           }
           if ($failures -ne 0) { exit 1 }
 
+  # Stable required result for reviewer safety. The qualified self-hosted lane
+  # remains preferred, but it is not a machine-wide stop: an independent hosted
+  # fallback that runs every identical assertion is equally valid proof.
+  windows-reviewer-safety:
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]
+    if: >-
+      !cancelled() && github.event_name != 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate reviewer safety proof
+        env:
+          EVENT: ${{ github.event_name }}
+          CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
+          RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
+          RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
+          PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
+          WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
+          FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
+        run: |
+          set -uo pipefail
+          printf 'event=%s classifier=%s run_long=%s preferred=%s watchdog=%s fallback=%s\n' \
+            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
+
+          if [ "$PREFERRED_RESULT" = 'success' ]; then
+            printf 'windows-reviewer-safety: qualified self-hosted proof succeeded.\n'
+            exit 0
+          fi
+          if [ "$FALLBACK_RESULT" = 'success' ]; then
+            printf 'windows-reviewer-safety: independent hosted fallback proof succeeded after preferred result=%s.\n' "$PREFERRED_RESULT"
+            exit 0
+          fi
+
+          legitimate_skip=false
+          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_LONG" != 'true' ]; then
+            legitimate_skip=true
+          fi
+          if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
+            legitimate_skip=true
+          fi
+          if [ "$FALLBACK_RESULT" = 'skipped' ] && [ "$legitimate_skip" = true ]; then
+            printf 'windows-reviewer-safety: reviewer work was legitimately skipped.\n'
+            exit 0
+          fi
+
+          printf 'windows-reviewer-safety: no successful reviewer proof; preferred=%s watchdog=%s fallback=%s.\n' \
+            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT" >&2
+          exit 1
+
   report-scheduled-failure:
-    needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety, windows-reviewer-fallback]
+    needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-24.04
     timeout-minutes: 3
