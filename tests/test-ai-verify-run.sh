@@ -11,7 +11,18 @@ cat >"$TMP/bin/gh" <<'GH'
 printf '%s\n' "$*" >>"$GH_LOG"
 case "$*" in
   'api repos/acme/tool/commits/main --jq .sha') printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
-  'api repos/acme/tool/git/ref/tags/ai-verify-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --jq .object.sha') printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+  'api repos/acme/tool/git/ref/tags/ai-verify-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --jq .object.sha')
+    if [ "${FAKE_TAG_MODE:-}" = mismatch ] || { [ "${FAKE_TAG_MODE:-}" = created-mismatch ] && [ -f "$GH_LOG.tag-created" ]; }; then
+      printf '%s\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    elif [ -n "${FAKE_TAG_MODE:-}" ] && { [ ! -f "$GH_LOG.tag-created" ] || [ "$FAKE_TAG_MODE" = verify-read-error ]; }; then
+      printf '%s\n' '{"message":"Not Found","status":"404"}'
+      exit 1
+    else
+      printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    fi ;;
+  'api --method POST repos/acme/tool/git/refs '* )
+    [ "${FAKE_TAG_MODE:-}" != create-fails ] || exit 1
+    : > "$GH_LOG.tag-created" ;;
   *'run list'*'--event workflow_dispatch'*) printf '%s' "${FAKE_ACTIVE:-}" ;;
   *'run view 42'*'--json event,workflowName'*) printf '%s\n' $'workflow_dispatch\tverify' ;;
   *'run view 42'*) printf '%s\n' $'42\tworkflow_dispatch\tin_progress\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t2026-09-03T00:00:00Z\thttps://example/run/42' ;;
@@ -42,6 +53,25 @@ unset FAKE_ACTIVE
 "$ROOT/bin/ai-verify-run" start --repo acme/tool --ref main --task issue-246 --purpose safety >/dev/null || fail 'safe start failed'
 grep -Fq 'workflow run verify.yml --repo acme/tool --ref ai-verify-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f requester_task=issue-246 -f purpose=safety' "$LOG" || fail 'start was not pinned to immutable SHA provenance'
 grep -q 'run cancel' "$LOG" && fail 'start cancelled a run'
+
+: >"$LOG"
+export FAKE_TAG_MODE=missing-json
+"$ROOT/bin/ai-verify-run" start --repo acme/tool --ref main --task issue-397 --purpose safety >/dev/null 2>&1 || fail 'missing-tag JSON response was mistaken for a SHA'
+grep -Fq 'api --method POST repos/acme/tool/git/refs -f ref=refs/tags/ai-verify-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$LOG" || fail 'missing immutable tag was not created at the requested SHA'
+[ "$(grep -c 'git/ref/tags/' "$LOG")" -eq 2 ] || fail 'created tag was not verified before dispatch'
+[ "$(grep -c 'workflow run' "$LOG")" -eq 1 ] || fail 'missing-tag recovery did not dispatch exactly once'
+grep -q 'run cancel' "$LOG" && fail 'missing-tag recovery cancelled a run'
+
+for mode in mismatch created-mismatch create-fails verify-read-error; do
+  : >"$LOG"; rm -f "$LOG.tag-created"
+  export FAKE_TAG_MODE="$mode"
+  if "$ROOT/bin/ai-verify-run" start --repo acme/tool --ref main --task issue-397 --purpose safety >/dev/null 2>&1; then
+    fail "unsafe tag state was accepted: $mode"
+  fi
+  grep -q 'workflow run' "$LOG" && fail "unsafe tag state dispatched a workflow: $mode"
+  grep -q 'run cancel' "$LOG" && fail "unsafe tag state cancelled a run: $mode"
+done
+unset FAKE_TAG_MODE
 
 : >"$LOG"
 if "$ROOT/bin/ai-verify-run" cancel --repo acme/tool --run-id 42 --reason obsolete >/dev/null 2>&1; then
