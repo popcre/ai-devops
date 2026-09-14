@@ -158,3 +158,38 @@ watermark remain unknown. A session ID or a unique timestamp is not sufficient
 to invent that provenance. Paid transcripts are retained privately and no
 uncertain prompt is automatically repeated. Pre-existing live-checkout sessions
 also cannot acquire an invented isolated historical snapshot.
+
+### Current-main drift gate — closure blocked by incomplete Windows verification
+
+[Run 34856869730](https://github.com/popcre/ai-devops/actions/runs/34856869730)
+tests exact code head `22a7f22b88198e1bcc26ec99ebc135819b8f06f4`.
+The September 14, 16:05 UTC refresh confirms Linux passed, the hosted reviewer fallback
+passed at 15:55:04 UTC, and the reviewer-safety aggregate passed at 15:55:10 UTC.
+The preferred reviewer job reports success, but its log states that its
+30-minute bound was reached at 15:08:40 UTC and hosted fallback was required.
+That job status is not proof that the preferred suite completed; the passing
+hosted fallback supplies the reviewer evidence for this run.
+
+The hosted fallback's completed log reports Codex 49 passed / 0 failed (no
+skip count reported) and Grok 234 passed / 0 failed / 0 skipped. The canonical
+checkout remains clean at `28c86d1b0c4fd9bbb7a1801a4f8b6454b2bbbbfd` and all
+four installed Qwen, GLM, Muse and DeepSeek launchers still resolve there.
+Compared with the installed live-canary head `3098a89a`, Qwen, Muse and
+DeepSeek wrappers are unchanged; GLM's only wrapper change adds the documented
+lost-evidence command to a preservation warning. No new provider replay or
+installation was used for this read-only drift check.
+
+The complete hosted Windows job (`104018683199`) started at 14:38:20 UTC and
+ended CANCELLED at 16:23:47 UTC on September 14, after its 105-minute bound.
+The whole run is CANCELLED. Its log selected all 74 Bash suites, completed only
+the first 18, and entered Kimi as suite 19 at 16:06:51 UTC. Kimi was still
+reporting individual passing checks when cancellation arrived; it produced no
+completed suite result. No full Bash result or PowerShell-suite completion was
+produced. Cancellation is incomplete verification, not an established code
+failure or a passing full run.
+
+#397 remains OPEN. The prior paid-recovery, installation, incident and passing
+fallback evidence remains recorded above; it does not replace the missing full
+Windows proof. The complete-matrix scheduling repair recorded in the latest handoff must provide an
+evidence-backed path to complete verification before closure. Do not rerun this
+unchanged cancelled workflow or infer completion from the reviewer aggregate.
