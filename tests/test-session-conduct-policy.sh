@@ -54,6 +54,12 @@ check 'router makes the canonical checkout landing-only' \
   "grep -Fq 'canonical local checkout is landing-only' '$router'"
 check 'router requires write-capable tasks to use worktrees' \
   "grep -Fq 'write-capable Codex or Claude task uses its own current-upstream worktree' '$router'"
+check 'router scopes Windows runner exclusion to the physical host or runtime' \
+  "grep -Fq 'same physical' '$router' && grep -Fq 'shared installed runtime' '$router'"
+check 'router preserves remote and hosted Windows capacity' \
+  "grep -Fq 'busy remote self-hosted runner does' '$router' && grep -Fq 'GitHub-hosted and Blacksmith lanes remain' '$router'"
+check 'runner guidance routes scheduling decisions through the scoped probe' \
+  "grep -Fq 'bin/ai-test-local --check-collision' '$router' && grep -Fq 'bin/ai-test-local --check-collision' '$ROOT/docs/task-router.md'"
 
 printf '\nSESSION CONDUCT POLICY SUMMARY failures=%s\n' "$failures"
 [ "$failures" -eq 0 ]
