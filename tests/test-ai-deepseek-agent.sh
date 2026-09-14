@@ -56,6 +56,15 @@ check "managed re-exec resolves only the DeepSeek reference behind an empty-envi
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
 check "managed descriptor handoff delivers the key without exporting it to curl" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'live provider response' && ! grep -q '^DEEPSEEK_API_KEY=' '$DEEPSEEK_CURL_ENV'"
+BOUNDARY_BODY="$(sed -n "/^DEEPSEEK_CREDENTIAL_BOUNDARY='/,/^'$/p" "$SCRIPT" | sed '1d;$d')"
+cat > "$TMP/boundary-probe" <<'PROBE'
+#!/usr/bin/env bash
+IFS= read -r managed_key <&9
+printf '%s\n' "${AI_REVIEW_EVENT_RUN_ID:-}|${AI_REVIEW_EVENT_DIR:-}|${DEEPSEEK_RECOVERY_EVENT_RUN_ID:-}|$managed_key|${DEEPSEEK_API_KEY:-absent}" > "$TMP/boundary-probe.out"
+PROBE
+chmod +x "$TMP/boundary-probe"
+DEEPSEEK_API_KEY=fd-key AI_REVIEW_EVENT_RUN_ID=governed-run AI_REVIEW_EVENT_DIR="$TMP/reviewer-events" DEEPSEEK_RECOVERY_EVENT_RUN_ID=recovery-run TMP="$TMP" bash -c "$BOUNDARY_BODY" deepseek-credential-boundary "$TMP/boundary-probe"
+check "managed credential re-exec preserves governed lifecycle identity" "grep -qxF 'governed-run|$TMP/reviewer-events|recovery-run|fd-key|absent' '$TMP/boundary-probe.out'"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
