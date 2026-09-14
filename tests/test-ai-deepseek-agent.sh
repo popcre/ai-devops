@@ -145,9 +145,10 @@ check "HTTP failure finalizes locally without replay and remains incomplete" "! 
 check "provider failure leaves the ordinary conversation unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
 DEEPSEEK_STUB_INVALID=1 run send malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
 MALFORMED_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/malformed.err")"
+MALFORMED_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 malformed_response="$(sed -n 's/^Private response: //p' "$TMP/malformed.err")"
 check "malformed response is retained and cannot become a successful reply" "test '$malformed_rc' -ne 0 && grep -q invalid-provider-response '$TMP/malformed.err' && test ! -s '$TMP/malformed.out' && jq -e '.choices[0].message.content==null' '$malformed_response'"
-check "malformed paid turn remains fenced from replay" "! run reply '$MALFORMED_SESSION' replay >'$TMP/malformed-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/malformed-replay.out'"
+check "malformed paid turn remains fenced from replay" "! run reply '$MALFORMED_SESSION' replay >'$TMP/malformed-replay.out' 2>&1 && test '$MALFORMED_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && test -f '$TMP/repo/.ai/deepseek-sessions/$MALFORMED_SESSION.pending/observed.json'"
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==10 and map(.role)==[range(0;5) | \"user\",\"assistant\"] and ([.[].content] | index(\"concurrent-one\")!=null and index(\"concurrent-two\")!=null)' '$history'"
@@ -396,6 +397,7 @@ SOURCE_MOVE_RC=$?
 set -e
 check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
-check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >/dev/null && jq -e '.status==\"complete\"' '$SOURCE_META'"
+check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >'$TMP/continue-current-source.log' 2>&1 && jq -e '.status==\"complete\"' '$SOURCE_META'"
+[ "$FAIL" -eq 0 ] || cat "$TMP/continue-current-source.log" 2>/dev/null || true
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

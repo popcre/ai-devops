@@ -167,8 +167,8 @@ muse_recovery_cases(){
   check 'identical existing Muse report is reused without replacement or provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/reuse.log' 2>&1 && test \"\$(stat -c '%d:%i' '$rep')\" = '$report_inode' && test \"\$(wc -l < '$calls')\" -eq 2"
   [ "$(jq -r .status "$m")" = active ] || cat "$TMP/reuse.log"
   check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\" > '$TMP/failed-followup.log' 2>&1"
-  check 'exact prior retained completion reconciles locally after a failed follow-up' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/final-reconcile.log' 2>&1 && jq -e '.status==\"active\" and .retained_turn.finalized==true and .retained_turn.recovery_state==\"completed-stale-source\"' '$m' && grep -q NON-AUTHORIZING \"\$(jq -r .last_report '$m')\" && test \"\$(wc -l < '$calls')\" -eq 3"
-  if [ "$(jq -r .status "$m")" != active ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log" "$TMP/final-reconcile.log"; fi
+  check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
+  if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
   rm -f "$TMP/bin/jq"
 }
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
@@ -366,7 +366,7 @@ check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && 
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
 WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
-check 'uncertain retained process cannot be unlocked by a session ID' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\""
+check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
 check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""
 check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new start-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask start-followup --prompt mixed\""
