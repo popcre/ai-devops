@@ -486,7 +486,9 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     # A finished record with nothing left to clean up is still trustworthy history;
     # a live or cleanup-pending job without its repository stays ambiguous.
     jq -e '.status|IN("completed","failed","aborted")' "$f" >/dev/null 2>&1 || return 1
-    ! implementation_cleanup_pending "$f" || return 1
+    jq -e '(.cleanup|type)=="object" and
+      (.cleanup.clone|IN("removed","absent","none")) and
+      (.cleanup.server_session|IN("removed","absent","none"))' "$f" >/dev/null 2>&1 || return 1
   fi
   [ "$caller" = "$expected_caller" ] || return 1
   [ -z "$expected_root" ] || [ "$(canonical_path "$root" "$root")" = "$(canonical_path "$expected_root" "$expected_root")" ] || return 1
