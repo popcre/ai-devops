@@ -388,7 +388,7 @@ pending_complete() {
 pending_stale_complete() {
   # Fresh-source continuation is valid only after the original paid evidence
   # and its non-authorizing metadata were both retained successfully.
-  "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
+  "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" >/dev/null || return 1
   jq -e --arg head "$REVIEW_HEAD" --arg hash "$REVIEW_SOURCE_HASH" \
     '.status=="source_changed" and .head==$head and .packet_sha256==$hash and .verdict==null' "$(session_path "$ID" .meta.json)" >/dev/null || return 1
   pending_complete
@@ -872,7 +872,7 @@ case "$SUBCMD" in
       [ -f "$REVIEW_SOURCE_IDENTITY.files" ] && [ ! -L "$REVIEW_SOURCE_IDENTITY.files" ] || exit 1
       [ "$(pending_hash "$REVIEW_SOURCE_IDENTITY.files")" = "$(jq -r .source_files_sha256 "$PENDING_DIR/intent.json")" ] || exit 1
       [ "$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")" = "$REVIEW_SOURCE_HASH" ] || exit 1
-      "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || exit 1
+      "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" >/dev/null || exit 1
       if ! (unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET") >/dev/null 2>&1; then
         STALE=1; DEEPSEEK_RECOVERY_STATE=completed-stale-source; DEEPSEEK_ORIGINAL_HEAD_SHA="$REVIEW_HEAD"
       fi

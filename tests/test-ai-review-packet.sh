@@ -158,7 +158,7 @@ check "provisional_cannot_approve"            "grep -q 'cannot approve a change'
 # --- hashing ------------------------------------------------------------------
 check "hash_file_written"                     "[ -s '$PKT/MANIFEST.sha256' ]"
 check "fresh_packet_verifies"                 "'$SCRIPT' verify '$PKT'"
-check "fresh_retained_packet_verifies"        "'$SCRIPT' verify-retained '$PKT'"
+check "live-source_packet_is_not_retained_evidence" "! '$SCRIPT' verify-retained '$PKT'"
 check "hash_mismatch_fails_verification" \
   "echo tamper >> '$PKT/patch.diff'; ! '$SCRIPT' verify '$PKT'"
 check "retained_verification_rejects_tampering" "! '$SCRIPT' verify-retained '$PKT'"

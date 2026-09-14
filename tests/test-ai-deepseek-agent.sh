@@ -137,26 +137,32 @@ mv "$TMP/repo/.ai/deepseek-sessions" "$TMP/repo/.ai/deepseek-real"; ln -s "$TMP/
 if [ -L "$TMP/repo/.ai/deepseek-sessions" ]; then check "symlinked session folder is rejected" "! run list"; rm "$TMP/repo/.ai/deepseek-sessions"; else ok "symlink fixture unavailable on this host"; rm -rf "$TMP/repo/.ai/deepseek-sessions"; fi
 mv "$TMP/repo/.ai/deepseek-real" "$TMP/repo/.ai/deepseek-sessions"
 history="$TMP/repo/.ai/deepseek-sessions/$SESSION.json"; history_before="$(sha256sum "$history"|cut -d' ' -f1)"
-check "provider failure is nonzero" "DEEPSEEK_STUB_FAIL=1 run reply '$SESSION' failed >/dev/null 2>&1; test \$? -ne 0"
-check "provider failure leaves history unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
-DEEPSEEK_STUB_FAIL=1 run reply "$SESSION" failed >"$TMP/http.out" 2>"$TMP/http.err"; http_rc=$?
+DEEPSEEK_STUB_FAIL=1 run send failed >"$TMP/http.out" 2>"$TMP/http.err"; http_rc=$?
+HTTP_FAILURE_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/http.err")"
+HTTP_FAILURE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "HTTP failure exposes stable reason without printing private response body" "test '$http_rc' -ne 0 && grep -q provider-http-failure '$TMP/http.err' && ! grep -q private-provider-error-body '$TMP/http.err'"
-DEEPSEEK_STUB_INVALID=1 run reply "$SESSION" malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
+check "HTTP failure finalizes locally without replay and remains incomplete" "! run finalize '$HTTP_FAILURE_SESSION' >'$TMP/http-finalize.out' 2>&1 && grep -q retained-http-500 '$TMP/http-finalize.out' && test '$HTTP_FAILURE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "provider failure leaves the ordinary conversation unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+DEEPSEEK_STUB_INVALID=1 run send malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
+MALFORMED_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/malformed.err")"
 malformed_response="$(sed -n 's/^Private response: //p' "$TMP/malformed.err")"
 check "malformed response is retained and cannot become a successful reply" "test '$malformed_rc' -ne 0 && grep -q invalid-provider-response '$TMP/malformed.err' && test ! -s '$TMP/malformed.out' && jq -e '.choices[0].message.content==null' '$malformed_response'"
-check "malformed reply preserves canonical history" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+check "malformed paid turn remains fenced from replay" "! run reply '$MALFORMED_SESSION' replay >'$TMP/malformed-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/malformed-replay.out'"
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==10 and map(.role)==[range(0;5) | \"user\",\"assistant\"] and ([.[].content] | index(\"concurrent-one\")!=null and index(\"concurrent-two\")!=null)' '$history'"
-history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
 rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
-(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
-for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
+INTERRUPT_SESSION="$(run send interrupt-seed | sed -n 's/^SESSION_ID: //p')"
+interrupt_history="$TMP/repo/.ai/deepseek-sessions/$INTERRUPT_SESSION.json"
+history_before_signal="$(sha256sum "$interrupt_history"|cut -d' ' -f1)"
+(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$INTERRUPT_SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$interrupt_history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
 kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
-check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$interrupt_history'|cut -d' ' -f1)\""
 provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"
 check "interrupted reply stops its provider child before unlocking" "test -f '$DEEPSEEK_STUB_TERM_MARKER' && ! kill -0 '$provider_pid' 2>/dev/null"
-check "interrupted reply releases its owned lock" "test ! -d '$history.lock'"
+check "interrupted reply releases its owned lock" "test ! -d '$interrupt_history.lock'"
+check "interrupted paid turn remains fenced from replay" "! run reply '$INTERRUPT_SESSION' replay >'$TMP/interrupted-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/interrupted-replay.out'"
 mkdir -p "$TMP/not-a-repo"
 calls_before_nonrepo="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 (cd "$TMP/not-a-repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_REPLY=$'## Verdict\nAPPROVE' "$SCRIPT" send no-head --review) >/dev/null 2>&1; nonrepo_rc=$?

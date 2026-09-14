@@ -167,8 +167,8 @@ muse_recovery_cases(){
   check 'identical existing Muse report is reused without replacement or provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/reuse.log' 2>&1 && test \"\$(stat -c '%d:%i' '$rep')\" = '$report_inode' && test \"\$(wc -l < '$calls')\" -eq 2"
   [ "$(jq -r .status "$m")" = active ] || cat "$TMP/reuse.log"
   check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\" > '$TMP/failed-followup.log' 2>&1"
-  check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
-  if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
+  check 'exact prior retained completion reconciles locally after a failed follow-up' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/final-reconcile.log' 2>&1 && jq -e '.status==\"active\" and .retained_turn.finalized==true and .retained_turn.recovery_state==\"completed-stale-source\"' '$m' && grep -q NON-AUTHORIZING \"\$(jq -r .last_report '$m')\" && test \"\$(wc -l < '$calls')\" -eq 3"
+  if [ "$(jq -r .status "$m")" != active ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log" "$TMP/final-reconcile.log"; fi
   rm -f "$TMP/bin/jq"
 }
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
