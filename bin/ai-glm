@@ -479,7 +479,17 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
   root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
   name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
   valid_name "$name" || return 1
-  [ -d "$root" ] && [ "$rid" = "$(repo_id "$root")" ] || return 1
+  if [ -d "$root" ]; then
+    [ "$rid" = "$(repo_id "$root")" ] || return 1
+  else
+    # The job's repository was removed after the job ended (a deleted worktree).
+    # A finished record with nothing left to clean up is still trustworthy history;
+    # a live or cleanup-pending job without its repository stays ambiguous.
+    jq -e '.status|IN("completed","failed","aborted")' "$f" >/dev/null 2>&1 || return 1
+    jq -e '(.cleanup|type)=="object" and
+      (.cleanup.clone|IN("removed","absent","none")) and
+      (.cleanup.server_session|IN("removed","absent","none"))' "$f" >/dev/null 2>&1 || return 1
+  fi
   [ "$caller" = "$expected_caller" ] || return 1
   [ -z "$expected_root" ] || [ "$(canonical_path "$root" "$root")" = "$(canonical_path "$expected_root" "$expected_root")" ] || return 1
   clone="$(jq -r '.clone_path // empty' "$f")"

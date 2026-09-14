@@ -853,6 +853,20 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
   bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$FORGED_META" || true' >/dev/null 2>&1
 check "live_owner_and_forged_or_outside_paths_are_never_swept" "test -d '$FORGED_CLONE' -a -f '$FORGED_META' -a \"\$(jq -r .status '$FORGED_META')\" = running"
 
+GONE_ROOT="$TMP/deleted-worktree"
+for gone in completed:removed failed:removed running:removed failed:pending completed:failed completed:preserved completed:ambiguous completed:missing; do
+  GONE_META="$(job_meta "gone-${gone%%:*}-${gone##*:}")"
+  jq --arg n "gone-${gone%%:*}-${gone##*:}" --arg root "$GONE_ROOT" --arg st "${gone%%:*}" --arg cl "${gone##*:}"     --arg clone "$JOB_STATE/wt/$JOB_ID/codex--gone-${gone%%:*}-${gone##*:}" --argjson pid 99999997     '.name=$n | .repository_root=$root | .status=$st | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .cleanup={clone:$cl,server_session:"removed"} | if $cl == "missing" then del(.cleanup) else . end'     "$FAILED_META" > "$GONE_META"
+done
+gone_warns() {
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" GONE_META="$(job_meta "$1")"     bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$GONE_META"' 2>&1 | grep -c 'malformed implementation record' || true
+}
+check "finished job whose repository was deleted is not malformed" "test \"\$(gone_warns gone-completed-removed)\" = 0 -a \"\$(gone_warns gone-failed-removed)\" = 0"
+for gone in running-removed failed-pending completed-failed completed-preserved completed-ambiguous completed-missing; do
+  check "job without its repository and without confirmed cleanup stays malformed ($gone)" "test \"\$(gone_warns gone-$gone)\" = 1"
+done
+for gone in completed-removed failed-removed running-removed failed-pending completed-failed completed-preserved completed-ambiguous completed-missing; do rm -f "$(job_meta gone-$gone)"; done
+
 READY_A="$TMP/a-ready"; READY_B="$TMP/b-ready"; RELEASE_A="$TMP/a-release"; RELEASE_B="$TMP/b-release"
 run_fake_impl parallel-a record "$READY_A" "$RELEASE_A" >"$TMP/a.out" 2>&1 & pid_a=$!
 run_fake_impl parallel-b record "$READY_B" "$RELEASE_B" >"$TMP/b.out" 2>&1 & pid_b=$!
