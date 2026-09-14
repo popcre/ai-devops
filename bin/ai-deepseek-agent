@@ -388,10 +388,24 @@ pending_complete() {
 pending_stale_complete() {
   # Fresh-source continuation is valid only after the original paid evidence
   # and its non-authorizing metadata were both retained successfully.
-  "$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" >/dev/null || return 1
+  local retained_snapshot retained_digest expected_digest retained_verify
+  retained_snapshot="$(head -1 "$REVIEW_SOURCE_PACKET/.ai-review-packet" 2>/dev/null || true)"
+  [ -d "$retained_snapshot" ] \
+    || { echo 'Error: retained DeepSeek isolated source snapshot is unavailable.' >&2; return 1; }
+  retained_digest="$("$SOURCE_TOOLS/ai-review-sandbox" digest "$retained_snapshot" 2>/dev/null || true)"
+  expected_digest="$(jq -r .source_digest "$REVIEW_SOURCE_PACKET/identity.json" 2>/dev/null || true)"
+  [ -n "$retained_digest" ] && [ "$retained_digest" = "$expected_digest" ] \
+    || { echo 'Error: retained DeepSeek isolated source snapshot digest changed.' >&2; return 1; }
+  if ! retained_verify="$("$SOURCE_TOOLS/ai-review-packet" verify-retained "$REVIEW_SOURCE_PACKET" 2>&1)"; then
+    [ -z "$retained_verify" ] || printf '%s\n' "$retained_verify" >&2
+    echo 'Error: retained DeepSeek source packet did not pass isolated-snapshot verification.' >&2
+    return 1
+  fi
   jq -e --arg head "$REVIEW_HEAD" --arg hash "$REVIEW_SOURCE_HASH" \
-    '.status=="source_changed" and .head==$head and .packet_sha256==$hash and .verdict==null' "$(session_path "$ID" .meta.json)" >/dev/null || return 1
-  pending_complete
+    '.status=="source_changed" and .head==$head and .packet_sha256==$hash and .verdict==null' "$(session_path "$ID" .meta.json)" >/dev/null \
+    || { echo 'Error: retained DeepSeek non-authorizing metadata did not match the paid turn.' >&2; return 1; }
+  pending_complete \
+    || { echo 'Error: retained DeepSeek completion fence could not be published.' >&2; return 1; }
 }
 
 pending_before_turn() {
@@ -523,7 +537,8 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   REVIEW_SOURCE_WORKSPACE="$snapshot"
   REVIEW_SOURCE_PACKET="$("$SOURCE_TOOLS/ai-review-packet" build "$snapshot" "$REVIEW_SOURCE_TAG" --identity "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_HASH="$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")"
-  saved="$REVIEW_SOURCE_IDENTITY.packet"
+  saved="$SESS_DIR/.ai-review-$REVIEW_SOURCE_TAG"
+  [ ! -e "$saved" ] && [ ! -L "$saved" ] || return 1
   cp -R "$REVIEW_SOURCE_PACKET" "$saved" || return 1
   REVIEW_SOURCE_SAVED="$saved"
   REVIEW_SOURCE_PACKET="$saved"

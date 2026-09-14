@@ -398,6 +398,6 @@ set -e
 check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
 check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >'$TMP/continue-current-source.log' 2>&1 && jq -e '.status==\"complete\"' '$SOURCE_META'"
-[ "$FAIL" -eq 0 ] || cat "$TMP/continue-current-source.log" 2>/dev/null || true
+[ "$FAIL" -eq 0 ] || cat "$SOURCE_MOVE_LOG" "$TMP/continue-current-source.log" 2>/dev/null || true
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]
