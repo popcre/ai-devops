@@ -304,6 +304,25 @@ The command verifies the exact stored workspace and provider-session/report link
 publishes the prepared evidence, then records cleanup ownership. It does not infer
 ownership from a shared repository or head, synthesize a historical run ID, or
 claim historical source authorization. Unknown or missing evidence remains unknown.
+
+When a review's report is provably gone (its caller worktree was deleted, or its
+publication failed and no report from that invocation survives), the owner records
+that loss instead of inventing evidence:
+
+```text
+ai-reviewer-issue evidence reconcile-lost PROVIDER SANDBOX "REASON"
+```
+
+Only GLM is accepted: the report search depends on GLM's report naming, so any
+other provider is refused rather than risk missing a recoverable report. It
+refuses while the invocation is still running, while a required patch or
+prepared artifact exists, and while a report that review could have written still exists (the exact
+review name; for an owned invocation, any such report newer than its start), and
+refuses when partial evidence was published. It writes `evidence-lost.json` with the
+reason and time beside the invocation's requirement — a new `local-reconciliation`
+invocation for a legacy sandbox — and records cleanup ownership. Verification then
+reports the terminal reference `RUN_ID/evidence-lost`, which prune honours; the
+paid result stays recorded as unknown, never as published.
 Implementation workspaces use the same private event store and bind their existing
 owner record to the original invocation. Before that invocation reserves paid work,
 ordinary setup cleanup remains available; afterwards cleanup requires its receipt.

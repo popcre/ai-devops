@@ -2049,7 +2049,7 @@ prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned)
     # is the metadata that recovery needs, so the whole review stays until it is reconciled.
     if [ "$remove_sandbox" = 1 ] && ! sandbox_evidence_reconciled "$boundary"; then
       sandbox_build_release; lock_release "$lock"
-      warn "review '$name' has unreconciled review evidence; session, record and sandbox kept for: ai-reviewer-issue evidence reconcile-sandbox glm $boundary METADATA REPORT"
+      warn "review '$name' has unreconciled review evidence; session, record and sandbox kept for: ai-reviewer-issue evidence reconcile-sandbox glm $boundary METADATA REPORT (or, if the report is provably gone: reconcile-lost glm $boundary REASON)"
       return 1
     fi
   fi
