@@ -547,6 +547,10 @@ lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"
+mkdir -p "$(dirname "$lost_patch")"; printf '{}\n' > "$lost_patch"
+check "reconcile-lost refuses while a required patch is unpublished" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+rm -r "$(dirname "$lost_patch")"
 check "reconcile-lost records an owned invocation's loss beside its requirement" "lost owned 'report publication failed' && test -f '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
 # Recording ownership touches the marker, so an unrecorded sandbox waits a retention period again.
 touch -d '3 days ago' "$PR_SB/glm-lostorphan-0123456789ab"

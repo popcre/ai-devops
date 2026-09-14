@@ -283,7 +283,7 @@ def verify_reports(directory, provider, run_id):
         # An owner-recorded loss is a terminal state, not evidence: it is written only by
         # reconcile-lost, after proving no report for this invocation still exists.
         lost = root / "evidence-lost.json"
-        if lost.is_file():
+        if lost.is_file() and not paths and not lost_blockers(root):
             row = read_json(lost)
             require(row.get("schema_version") == 1 and row.get("run_id") == run_id and row.get("provider") == provider and
                     row.get("head") == start["head"] and row.get("caller") == start["caller"] and
@@ -822,11 +822,17 @@ def lost_report_candidates(provider, sandbox, source, since=None):
                   (since is None or path.stat().st_mtime >= since))
 
 
+def lost_blockers(root):
+    """Required patches or prepared artifacts: evidence a loss record must never cover."""
+    return sorted(list((root / "artifacts").glob("*.json")) + list((root / "prepared").glob("*.json")))
+
+
 def record_lost(directory, provider, run_id, sandbox, reason):
     start = invocation(directory, provider, run_id)
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
+    require(not lost_blockers(root), "required patch or prepared evidence exists; loss not recorded")
     path = root / "evidence-lost.json"
     if not path.exists():
         publish(path, {"schema_version": 1, "run_id": run_id, "provider": provider, "head": start["head"],
