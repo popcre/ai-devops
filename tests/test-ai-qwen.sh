@@ -97,6 +97,16 @@ if (mode === 'tool-budget') { console.error('Run aborted: tool-call budget of 3 
 if (mode === 'wall-budget') { console.error('Run aborted: wall-clock budget of 900s exceeded (--max-wall-time).'); process.exit(55); }
 if (mode === 'turn-budget') { console.error('Reached max session turns for this session. Increase the number of turns by specifying maxSessionTurns in settings.json.'); process.exit(53); }
 if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
+if (mode.startsWith('content-filter')) {
+  const error = '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY API_KEY=synthetic-secret]';
+  if (mode === 'content-filter-stderr') { console.error(error); process.exit(1); }
+  if (mode === 'content-filter-assistant' || mode === 'content-filter-stderr-success') {
+    if (mode === 'content-filter-stderr-success') console.error(error);
+    console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:mode === 'content-filter-assistant' ? [{type:'text',text:error}] : []}}));
+    console.log(JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,result:'## Verdict\nAPPROVE'}));
+  } else console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:error}));
+  process.exit(0);
+}
 if (mode === 'runtime-drift') fs.appendFileSync(path.join(process.env.AI_QWEN_SANITIZER_ROOT, 'lib', 'chunks', 'chunk-test.js'), '\n// live drift\n');
 if (mode === 'write') fs.writeFileSync('qwen.txt', 'qwen change\n');
 if (mode === 'mutate-review') fs.appendFileSync('a.txt', 'bad\n');
@@ -167,6 +177,25 @@ qualification_retention_cases(){
 
 recovery_cases(){
   local meta pending calls saved_meta saved_stream report before
+  # A failed private stderr copy must not publish metadata claiming retention.
+  for recovery_kind in existing new; do
+    if (
+      source <(sed -n '/^record_existing_review_recovery() {/,/^}/p; /^record_new_review_recovery() {/,/^}/p' "$SCRIPT")
+      touch "$TMP/copy-failure.err"; rm -f "$TMP/copy-failure-written"
+      REVIEW_RUNTIME_SHA=x; REVIEW_PRELOADER_SHA=y; REVIEW_BASE=x; REVIEW_HEAD=y
+      PACKET_HASH=x; WORKING_TREE_HASH=y; CALLER=codex; QWEN_MODEL=fixture
+      preserve_review_stream(){ case "$2" in *.stderr) return 1;; *) return 0;; esac; }
+      sha256_file(){ printf digest; }; chmod(){ :; }
+      session_id_from(){ printf session; }; repo_remote(){ printf remote; }
+      jq(){ printf '{}'; }; write_meta(){ touch "$TMP/copy-failure-written"; }
+      if [ "$recovery_kind" = existing ]; then
+        record_existing_review_recovery "$TMP/copy-meta.json" "$TMP/copy-failure" reason; copy_rc=$?
+      else
+        record_new_review_recovery "$TMP/copy-meta.json" repo name dir "$TMP/copy-failure" reason; copy_rc=$?
+      fi
+      [ "$copy_rc" -ne 0 ] && [ ! -e "$TMP/copy-failure-written" ]
+    ); then ok "$recovery_kind recovery refuses failed stderr retention"; else bad "$recovery_kind recovery refuses failed stderr retention"; fi
+  done
   echo review > "$TMP/mode"
   if [ "${AI_QWEN_METADATA_TESTS_ONLY:-0}" != 1 ]; then
   mv "$REPO/.ai/reviews" "$REPO/.ai/reviews-before-recovery"
@@ -183,6 +212,13 @@ recovery_cases(){
   jq '.recovery_runtime_sha256="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
   check 'changed runtime identity refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-runtime.log' 2>&1"
   cp "$TMP/recovery-original-meta" "$meta"
+  printf 'changed private stderr\n' > "$pending.stderr"
+  check 'changed retained stderr refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-stderr-changed.log' 2>&1 && grep -q 'stderr is missing or changed' '$TMP/recovery-stderr-changed.log'"
+  printf '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY]\n' > "$pending.stderr"
+  local stderr_digest; stderr_digest="$(sha256sum "$pending.stderr" | cut -d' ' -f1)"
+  jq --arg d "$stderr_digest" '.recovery_stderr_sha256=$d' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'even hash-bound stderr filter cannot finalize a success-shaped stream' "! run finalize local-recovery > '$TMP/recovery-filter.log' 2>&1 && grep -q content-filter '$TMP/recovery-filter.log' && ! grep -q PRIVATE_FILTER_BODY '$TMP/recovery-filter.log'"
+  : > "$pending.stderr"; cp "$TMP/recovery-original-meta" "$meta"
   cat "$TMP/recovery-original-stream" >> "$pending"
   local duplicate_digest; duplicate_digest="$(sha256sum "$pending" | cut -d' ' -f1)"
   jq --arg d "$duplicate_digest" '.recovery_sha256=$d' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
@@ -195,6 +231,16 @@ recovery_cases(){
   printf 'changed source\n' >> "$REPO/a.txt"
   check 'changed source refuses local finalization' "! run finalize local-recovery > '$TMP/recovery-source.log' 2>&1"
   cp "$TMP/recovery-original-source" "$REPO/a.txt"
+  jq 'del(.recovery_stderr_sha256)' "$meta" > "$meta.tmp"; mv "$meta.tmp" "$meta"
+  check 'partial v2 stderr metadata cannot downgrade to legacy recovery' "! run finalize local-recovery > '$TMP/recovery-partial-v2.log' 2>&1 && grep -q 'stderr is missing or changed' '$TMP/recovery-partial-v2.log'"
+  jq 'del(.recovery_evidence_version,.recovery_stderr,.recovery_stderr_sha256)' "$TMP/recovery-original-meta" > "$meta"
+  check 'unbound stderr sidecar cannot downgrade to legacy recovery' "! run finalize local-recovery > '$TMP/recovery-orphan-stderr.log' 2>&1 && grep -q 'cannot be downgraded' '$TMP/recovery-orphan-stderr.log'"
+  mv "$pending.stderr" "$TMP/recovery-original-stderr"
+  cp "$meta" "$TMP/recovery-legacy-meta"
+  check 'v1 saved answer publishes only non-authorizing incomplete evidence' "! run finalize local-recovery > '$TMP/recovery-legacy.log' 2>&1 && grep -q 'INCOMPLETE: legacy stderr evidence unavailable' '$TMP/recovery-legacy.log' && ! grep -q APPROVE '$TMP/recovery-legacy.log'"
+  check 'v1 incomplete recovery preserves original state and paid stream' "cmp -s '$meta' '$TMP/recovery-legacy-meta' && cmp -s '$pending' '$TMP/recovery-original-stream' && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
+  check 'v1 saved answer stays private and explicitly incomplete' "grep -l 'INCOMPLETE: legacy stderr evidence unavailable; saved answer is non-authorizing.' '$REPO/.ai/reviews'/qwen-local-recovery-incomplete-*.md >/dev/null"
+  mv "$TMP/recovery-original-stderr" "$pending.stderr"; cp "$TMP/recovery-original-meta" "$meta"
   check 'local finalization accepts the exact saved turn' "run finalize local-recovery > '$TMP/recovery-finalize.log' 2>&1"
   check 'finalization publishes metadata before removing pending bytes' "jq -e '.status==\"active\" and .turns==1 and (.last_report_sha256|length)==64' '$meta' && test ! -e '$pending'"
   before="$(jq -c '{turns,last_report,last_report_sha256,last_finalized_stream_sha256}' "$meta")"
@@ -222,6 +268,48 @@ STUBMOVE
   check 'local recovery cannot adopt a different returned session' "! run finalize metadata-recovery > '$TMP/recovery-wrong-session-finalize.log' 2>&1 && test '$calls' -eq \"\$(wc -l < '$TMP/argv.txt')\""
   echo review > "$TMP/mode"
 }
+terminal_token_cases(){
+  local token expected ANSWER_DEFECT filter_rc
+  source <(sed -n '/^provider_api_error() {/,/^}/p; /^provider_content_filter() {/,/^}/p; /^extract_answer() {/,/^}/p' "$SCRIPT")
+  for token in DataInspectionFailed DataInspectionFailedSuffix PrefixDataInspectionFailed; do
+    expected=provider-unavailable; [ "$token" != DataInspectionFailed ] || expected=content-filter
+    jq -nc --arg text "[API Error: $token: PRIVATE_BODY]" '{type:"result",is_error:false,result:$text}' > "$TMP/token-result.jsonl"
+    extract_answer "$TMP/token-result.jsonl" >/dev/null
+    check "typed filter token boundary: $token" "printf '%s' \"\$ANSWER_DEFECT\" | grep -q '^$expected:'"
+    printf '[API Error: %s: PRIVATE_BODY]\n' "$token" > "$TMP/token-stderr"
+    : > "$TMP/token-empty.jsonl"
+    provider_content_filter "$TMP/token-empty.jsonl" "$TMP/token-stderr"; filter_rc=$?
+    if [ "$expected" = content-filter ]; then
+      check "stderr filter token boundary: $token" "test '$filter_rc' -eq 0"
+    else
+      check "stderr filter token boundary: $token" "test '$filter_rc' -ne 0"
+    fi
+  done
+}
+terminal_filter_cases(){
+  for filter_mode in content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success; do
+    echo "$filter_mode" > "$TMP/mode"
+    FILTER_OUT="$(run new "$filter_mode" --prompt review 2>&1)"; FILTER_RC=$?
+    FILTER_META="$(find "$TMP/state/sessions" -name "codex--$filter_mode.json" -print -quit)"
+    check "$filter_mode refuses with exact content-filter reason" "test '$FILTER_RC' -ne 0 && printf '%s' \"\$FILTER_OUT\" | grep -q 'terminal reason: content-filter' && jq -e '.failure_reason==\"content-filter\" and .status==\"recovery-required\"' '$FILTER_META'"
+    check "$filter_mode keeps provider body private and retained" "! printf '%s' \"\$FILTER_OUT\" | grep -q PRIVATE_FILTER_BODY && grep -q PRIVATE_FILTER_BODY \"\$(jq -r .recovery_stream '$FILTER_META')\" \"\$(jq -r .recovery_stderr '$FILTER_META')\""
+  done
+  echo review > "$TMP/mode"
+  run new filter-followup --prompt review >/dev/null 2>&1
+  echo content-filter-stderr > "$TMP/mode"
+  FILTER_OUT="$(run ask filter-followup --prompt followup 2>&1)"; FILTER_RC=$?
+  FILTER_META="$(find "$TMP/state/sessions" -name 'codex--filter-followup.json' -print -quit)"
+  check 'follow-up content filter preserves typed reason and private stderr' "test '$FILTER_RC' -ne 0 && jq -e '.failure_reason==\"content-filter\"' '$FILTER_META' && grep -q PRIVATE_FILTER_BODY \"\$(jq -r .recovery_stderr '$FILTER_META')\" && ! printf '%s' \"\$FILTER_OUT\" | grep -q PRIVATE_FILTER_BODY"
+  echo review > "$TMP/mode"
+}
+terminal_token_cases
+if [ "${AI_QWEN_TERMINAL_TESTS_ONLY:-0}" = 1 ]; then
+  env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/terminal-install.log" 2>&1 || { cat "$TMP/terminal-install.log"; exit 1; }
+  terminal_filter_cases
+  recovery_cases
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
 if [ "${AI_QWEN_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen > "$TMP/recovery-install.log" 2>&1 || { cat "$TMP/recovery-install.log"; exit 1; }
   recovery_cases
@@ -351,7 +439,7 @@ for budget_mode in tool-budget wall-budget turn-budget; do
     || bad "$budget_mode is immediately classified as turn_limit_cancelled"
 done
 check 'budget-limited recovery reports explain the typed terminal reason' "sed -n '/^safe_report_detail()/,/^}/p' '$SCRIPT' | grep -Fq 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.'"
-echo review > "$TMP/mode"
+terminal_filter_cases
 
 run new budget-followup --prompt review >/dev/null 2>&1
 echo tool-budget > "$TMP/mode"
@@ -521,10 +609,11 @@ else
   bad 'model mismatch leaves only safe actionable metadata'
 fi
 qualification_retention_cases
-for fixture in authentication allowance model-unavailable transport empty fail terminal-error timeout runtime-drift; do
+for fixture in authentication allowance model-unavailable transport empty fail terminal-error content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true
 done
+check 'content inspection failures retain their exact safe diagnostic class' "jq -e 'select(.failure_class==\"content-filter\")' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'all governed live failure classes are deterministic' "for class in authentication-failure allowance-exhaustion requested-model-unavailable provider-process-transport-failure empty-provider-stream missing-terminal-result terminal-result-error timeout wrapper-runtime-evidence-drift; do grep -l \"\\\"failure_class\\\":\\\"\$class\\\"\" '$QWEN_DIAGNOSTICS'/*.json >/dev/null || return 1; done"
 check 'diagnostic schema retains the required safe evidence' "jq -e '.host and .timestamp and .requested_model and .wrapper_sha256 and .runtime_sha256 and .preloader_sha256 and (.provider_exit_status|type==\"number\") and (.terminal_record_exists|type==\"boolean\") and (.terminal_error|type==\"boolean\") and .stderr_classification' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
 check 'diagnostics redact credentials prompts and raw provider payloads' "! grep -ER 'must-not-survive|secret raw payload|Reply with exactly' '$QWEN_DIAGNOSTICS'"

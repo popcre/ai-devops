@@ -47,6 +47,24 @@ check 'Muse key reaches the provider through a private handoff, never argv or th
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'new publishes preparing state before snapshot preparation' "fn=\$(sed -n '/^cmd_new()/,/^cmd_ask()/p' '$SCRIPT'); state_line=\$(printf '%s\n' \"\$fn\" | grep -n 'status:\"preparing\"' | head -1 | cut -d: -f1); prepare_line=\$(printf '%s\n' \"\$fn\" | grep -n 'prepare \"\$root\"' | head -1 | cut -d: -f1); test \"\$state_line\" -lt \"\$prepare_line\""
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
+startup_reason_cases(){
+  local output rc
+  output="$(AI_MUSE_CALLER= bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: caller_identity_missing'; then ok 'missing Muse caller has a stable startup reason'; else bad 'missing Muse caller has a stable startup reason'; fi
+  output="$(AI_MUSE_CALLER='../unsafe' bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: invalid_caller_identity'; then ok 'invalid Muse caller has a stable startup reason'; else bad 'invalid Muse caller has a stable startup reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    MUSE_FAILURE_PHASE=startup; ACTIVE_META=''; die 'fixture startup refusal'
+  ) > "$TMP/startup-reason.log" 2>&1; then bad 'pre-session refusal stays unsuccessful';
+  elif grep -q 'start_failed: fixture startup refusal' "$TMP/startup-reason.log"; then ok 'pre-session refusal stays unsuccessful with a stable reason'; else bad 'pre-session refusal stays unsuccessful with a stable reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    MUSE_FAILURE_PHASE=provider-turn; ACTIVE_META=existing; die 'fixture incomplete turn'
+  ) > "$TMP/active-reason.log" 2>&1; then bad 'active session failure stays unsuccessful';
+  elif grep -q 'ai-muse: error: fixture incomplete turn' "$TMP/active-reason.log" && ! grep -q start_failed "$TMP/active-reason.log"; then ok 'active session failure is not relabeled as startup'; else bad 'active session failure is not relabeled as startup'; fi
+  check 'ordinary Muse help remains available with a valid caller' "AI_MUSE_CALLER=codex bash '$SCRIPT' --help >/dev/null"
+}
 check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
 check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
 check 'report destination is proven exact, ignored, untracked and unlinked' "grep -q 'exact destination is not Git-ignored' '$SCRIPT' && grep -q 'exact destination is tracked' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
@@ -56,6 +74,7 @@ check 'private Windows ACL is revalidated even when a marker already exists' "! 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_MUSE_TEST_DIR="$TMP"
+startup_reason_cases
 mkdir -p "$TMP/installed/bin"
 if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>/dev/null && [ -L "$TMP/installed/bin/ai-muse" ]; then
   check 'installed symlink executes with repository configuration' "AI_MUSE_CALLER=codex '$TMP/installed/bin/ai-muse' --help"
@@ -171,6 +190,27 @@ muse_recovery_cases(){
   if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
   rm -f "$TMP/bin/jq"
 }
+failure_phase_cases(){
+  local calls="$TMP/phase-calls" mode rc count m raw digest
+  : > "$calls"
+  for mode in fail unexpected; do
+    if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE='$mode' MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live") > "$TMP/phase-$mode.log" 2>&1; then rc=0; else rc=$?; fi
+    count="$(wc -l < "$calls")"
+    if [ "$rc" -ne 0 ] && [ "$count" -gt 0 ] && grep -q 'ai-muse: error:' "$TMP/phase-$mode.log" && ! grep -q start_failed "$TMP/phase-$mode.log"; then ok "live doctor $mode after provider launch is not startup failure"; else bad "live doctor $mode after provider launch is not startup failure"; fi
+  done
+  count="$(wc -l < "$calls")"
+  check 'doctor prelaunch refusal is startup failure without another provider call' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' AI_MUSE_DOCTOR_TIMEOUT=0 '$SCRIPT' doctor --live\" > '$TMP/phase-prelaunch.log' 2>&1; grep -q start_failed '$TMP/phase-prelaunch.log' && test \"\$(wc -l < '$calls')\" -eq '$count'"
+  if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new phase-retained --prompt test") > "$TMP/phase-new.log" 2>&1; then bad 'phase fixture creates retained provider evidence'; return; fi
+  m="$(find "$TMP/state" -name 'codex--phase-retained.json' -type f -print -quit)"
+  raw="$(jq -r .retained_turn.stream "$m")"
+  printf 'tampered' >> "$raw"; digest="$(sha256sum "$raw")"; count="$(wc -l < "$calls")"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
+}
+failure_phase_cases
+if [ "${AI_MUSE_PHASE_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
   printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
