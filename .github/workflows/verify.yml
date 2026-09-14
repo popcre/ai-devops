@@ -161,20 +161,17 @@ jobs:
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true')
     strategy:
-      # One failing section must never hide the result of the other three:
+      # One failing section must never hide the result of the other four:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4]
+        section: [1, 2, 3, 4, 5]
     runs-on: windows-2025
-    # The longest single suite in the lane, test-ai-kimi.sh, measured 1,048-1,098
-    # seconds across the three sampled runs, and it alone sets the floor for any
-    # section: no split can make a section shorter than its slowest indivisible
-    # suite. Four sections put the measured worst section at about 18.3 minutes
-    # against the issue's 20-minute p90 bound, with hosted checkout overhead
-    # measured at roughly 15 seconds. This 35-minute ceiling is sized to bound a
-    # genuine hang with headroom over that worst section; it is not a target.
+    # The retained-session expansions made DeepSeek and Muse consume more than
+    # 31 minutes together in run 34804029887 before the 35-minute ceiling killed
+    # their old shared section. Five sections keep those indivisible suites
+    # separate without raising the ceiling or introducing a timeout fallback.
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -186,10 +183,10 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The pinned Windows runner image does not provide jq.'
           }
-      - name: Windows-sensitive section ${{ matrix.section }} of 4
+      - name: Windows-sensitive section ${{ matrix.section }} of 5
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/5'
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
