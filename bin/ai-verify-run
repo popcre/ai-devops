@@ -49,7 +49,9 @@ case "$command_name" in
       exit 3
     fi
     dispatch_ref="ai-verify-${sha}"
-    tag_sha="$(gh api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha 2>/dev/null || true)"
+    # gh may write an error JSON body to stdout on a missing ref. A failed
+    # lookup is not a SHA; discard its payload before the guarded creation.
+    tag_sha="$(gh api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha 2>/dev/null)" || tag_sha=''
     if [ -z "$tag_sha" ]; then
       gh api --method POST "repos/$repo/git/refs" \
         -f "ref=refs/tags/$dispatch_ref" -f "sha=$sha" >/dev/null || exit 1
