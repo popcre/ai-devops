@@ -37,8 +37,43 @@ checks with zero failures on September 14; its summary does not report a skip
 count. Its log is `.test-logs/bash-20260914T154535Z-279217/test-ai-qwen.sh.log`.
 The complete Muse owning suite passed 159 checks with zero failures; its summary
 does not report a skip count. Its log is
-`.test-logs/bash-20260914T154352Z-266653/test-ai-muse.sh.log`. The full Grok
-owning suite remains in progress; narrow cases are not full-suite acceptance.
+`.test-logs/bash-20260914T154352Z-266653/test-ai-muse.sh.log`. The complete Grok
+owning suite passed 270 checks with zero failures and zero skips; its log is
+`.test-logs/bash-20260914T153612Z-211330/test-ai-grok-review.sh.log`.
+
+Independent GLM review of `d676261b1bc972503e7ad8e8956c7b7adf011886` returned
+REQUEST CHANGES. Follow-up addresses Muse management-command phase labels and
+corroborates Grok's native terminal format against installed evidence. The
+review correctly retained the pending owner decision on legacy Qwen recovery.
+This is not independent approval, and the earlier complete-suite results do
+not qualify subsequent code changes without their relevant verification.
+
+The Muse follow-up selects management/reconciliation phases before metadata
+lookup, runtime validation or locking. Actual mocked CLI checks for missing
+records, a busy retained session and a refused provider deletion passed
+58/0/0, preserving foreign ownership and metadata and making no generated turn.
+The private log is `C:/tmp/394-muse-management-phase.log`.
+
+Grok native-format corroboration used the retained terminal metadata of incident
+`20260911T054028Z-edge-dev-grok-419831`, without a provider call. The installed
+runtime reports `grok 1.0.13 (5e9a58528b76) [stable]`; its executable SHA-256 is
+`bf43dc75f5478a106eab1e86d422c963e4dbe9666cf14dab363733d27bf1e672`.
+The real store uses `GROK_HOME/sessions/<encoded-working-directory>/<sessionId>/updates.jsonl`.
+The retained event has `params.sessionId`, `params.update.prompt_id`,
+`params.update.sessionUpdate=turn_completed`, `params.update.stop_reason=cancelled`
+and `params._meta.cancellationCategory=max_turns_reached`. Both observed IDs
+are UUID-shaped and satisfy the wrapper's current charset gate.
+
+The actual candidate capture and reason functions consumed that real native
+metadata with a tiny **synthetic result** containing only those proven IDs and
+the cancellation token. They produced exactly one native match and
+`turn_limit_cancelled`, with the result digest verified. The matched native
+event SHA-256 is `c12ffe7bc5637135aeb72ebf257343c2992f4aaf71a23c8189e3ec42c8a664e4`;
+the native file remained unchanged. This establishes parser/schema compatibility,
+not a successful historical review, historical executable identity, or a future
+ID-format guarantee. The private proof is
+`C:/Temp/394-native-f2-5z7ac8pv/verification.json`; no raw transcript or response
+body is included in this public record.
 
 Cross-review found that metadata presence alone did not prove whether Muse had
 contacted the provider. The first full-suite attempt was interrupted to repair

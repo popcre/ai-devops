@@ -29,7 +29,13 @@ SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
 RUN_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ai-muse.XXXXXX")"
 chmod 700 "$RUN_TMP" 2>/dev/null || true
-MUSE_FAILURE_PHASE=startup
+# Management commands cannot fail to launch a review turn. Select their phase
+# before metadata lookup, locking or runtime validation can refuse the command.
+case "${1:-}" in
+  new|ask|review|doctor) MUSE_FAILURE_PHASE=startup ;;
+  reconcile) MUSE_FAILURE_PHASE=retained-turn ;;
+  *) MUSE_FAILURE_PHASE=management ;;
+esac
 
 die(){
   if [ "${MUSE_FAILURE_PHASE:-startup}" = startup ]; then
@@ -443,7 +449,6 @@ cmd_transcript(){ local m; m="$(find_meta "$1")"; runtime_env; "$BIN" export "$(
 cmd_reconcile(){
   local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected
   m="$(find_meta "$name")"; root="$(repo_root)"; rid="$(repo_id "$root")"; lock_session "$rid" "$name"
-  MUSE_FAILURE_PHASE=retained-turn
   jq -e --arg name "$name" --arg caller "$CALLER" --arg rid "$rid" --arg model "$MODEL" --arg version "$VERSION" '.name==$name and .caller==$caller and .repository_id==$rid and .model==$model and .retained_turn.model==$model and .retained_turn.runtime_version==$version and (.retained_turn.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$")) and .retained_turn.process_exit==0' "$m" >/dev/null || die 'no exact successful retained Muse process exists; keep uncertain work fenced, never replay it.'
   [ "$(cd "$(jq -r .repository_root "$m")" && pwd -P)" = "$(cd "$root" && pwd -P)" ] || die 'retained Muse work belongs to a different repository.'
   status="$(jq -r .status "$m")"

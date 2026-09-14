@@ -143,7 +143,9 @@ case "${1:-}" in
     [ "${MUSE_STUB_MODE:-}" = mixed ] && printf '{"type":"text","sessionID":"ses_other","part":{"type":"text","text":"wrong"}}\n'
     [ "${MUSE_STUB_MODE:-}" = nostop ] || printf '{"type":"step_finish","sessionID":"%s","part":{"type":"step-finish","reason":"stop","tokens":{"total":3}}}\n' "$sid";;
   export) [ -z "${MUSE_STUB_EXPORT_FAIL:-}" ] || exit 7; printf '{"sessionID":"%s","messages":[]}' "$2";;
-  session) [ "$2" = delete ] && [ -z "${MUSE_STUB_DELETE_FAIL:-}" ];;
+  session)
+    [ -z "${MUSE_STUB_MANAGEMENT_CALLS_FILE:-}" ] || printf 'session %s\n' "$2" >> "$MUSE_STUB_MANAGEMENT_CALLS_FILE"
+    [ "$2" = delete ] && [ -z "${MUSE_STUB_DELETE_FAIL:-}" ];;
   *) exit 2;;
 esac
 EOF
@@ -191,8 +193,10 @@ muse_recovery_cases(){
   rm -f "$TMP/bin/jq"
 }
 failure_phase_cases(){
-  local calls="$TMP/phase-calls" mode rc count m raw digest
+  local calls="$TMP/phase-calls" mode rc count m raw digest lock metadata_digest command
+  local management_calls="$TMP/phase-management-calls"
   : > "$calls"
+  : > "$management_calls"
   for mode in fail unexpected; do
     if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE='$mode' MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live") > "$TMP/phase-$mode.log" 2>&1; then rc=0; else rc=$?; fi
     count="$(wc -l < "$calls")"
@@ -202,6 +206,18 @@ failure_phase_cases(){
   check 'doctor prelaunch refusal is startup failure without another provider call' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' AI_MUSE_DOCTOR_TIMEOUT=0 '$SCRIPT' doctor --live\" > '$TMP/phase-prelaunch.log' 2>&1; grep -q start_failed '$TMP/phase-prelaunch.log' && test \"\$(wc -l < '$calls')\" -eq '$count'"
   if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new phase-retained --prompt test") > "$TMP/phase-new.log" 2>&1; then bad 'phase fixture creates retained provider evidence'; return; fi
   m="$(find "$TMP/state" -name 'codex--phase-retained.json' -type f -print -quit)"
+  count="$(wc -l < "$calls")"; metadata_digest="$(sha256sum "$m")"
+  for command in reconcile show transcript delete; do
+    if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' '$SCRIPT' $command phase-missing") > "$TMP/phase-missing-$command.log" 2>&1; then rc=0; else rc=$?; fi
+    if [ "$rc" -ne 0 ] && grep -q "no session 'phase-missing'" "$TMP/phase-missing-$command.log" && ! grep -q start_failed "$TMP/phase-missing-$command.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ ! -s "$management_calls" ]; then ok "$command missing metadata is a management refusal without provider calls"; else bad "$command missing metadata is a management refusal without provider calls"; fi
+  done
+  lock="$TMP/state/locks/$(jq -r .repository_id "$m")--codex--phase-retained.lock.d"
+  mkdir -p "$lock"; printf '%s\n' "$$" > "$lock/pid"; printf 'phase-owner\n' > "$lock/token"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-busy.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'is busy' "$TMP/phase-busy.log" && ! grep -q start_failed "$TMP/phase-busy.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ ! -s "$management_calls" ] && [ "$(cat "$lock/token")" = phase-owner ] && [ "$metadata_digest" = "$(sha256sum "$m")" ]; then ok 'busy reconciliation preserves the other owner without startup or provider calls'; else bad 'busy reconciliation preserves the other owner without startup or provider calls'; fi
+  rm -f "$lock/pid" "$lock/token"; rmdir "$lock"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' MUSE_STUB_DELETE_FAIL=1 '$SCRIPT' delete phase-retained") > "$TMP/phase-delete.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'could not positively confirm deletion' "$TMP/phase-delete.log" && ! grep -q start_failed "$TMP/phase-delete.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ "$(cat "$management_calls")" = 'session delete' ] && [ "$metadata_digest" = "$(sha256sum "$m")" ]; then ok 'provider deletion refusal preserves metadata without claiming startup or generating another turn'; else bad 'provider deletion refusal preserves metadata without claiming startup or generating another turn'; fi
   raw="$(jq -r .retained_turn.stream "$m")"
   printf 'tampered' >> "$raw"; digest="$(sha256sum "$raw")"; count="$(wc -l < "$calls")"
   if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
