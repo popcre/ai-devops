@@ -313,7 +313,10 @@ that loss instead of inventing evidence:
 ai-reviewer-issue evidence reconcile-lost PROVIDER SANDBOX "REASON"
 ```
 
-It refuses while a report that review could have written still exists (the exact
+Only GLM is accepted: the report search depends on GLM's report naming, so any
+other provider is refused rather than risk missing a recoverable report. It
+refuses while the invocation is still running, while a required patch or
+prepared artifact exists, and while a report that review could have written still exists (the exact
 review name; for an owned invocation, any such report newer than its start), and
 refuses when partial evidence was published. It writes `evidence-lost.json` with the
 reason and time beside the invocation's requirement — a new `local-reconciliation`

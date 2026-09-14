@@ -544,6 +544,7 @@ run_prune 1
 check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
 lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
+check "reconcile-lost refuses providers whose report naming it cannot search" "python '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
 check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"

@@ -808,6 +808,9 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     return {"run_id": run_id, "report_count": len(report_values), "historical_source_authorization": "unknown"}
 
 
+LOST_REPORT_PROVIDERS = {"glm"}
+
+
 def lost_report_candidates(provider, sandbox, source, since=None):
     """Reports this review could still have written; any one of them refuses a loss record."""
     match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
@@ -850,6 +853,9 @@ def reconcile_lost(directory, provider, sandbox, reason):
     """Owner-recorded terminal state for a review whose report provably no longer exists."""
     require(isinstance(reason, str) and reason.strip() and "\n" not in reason and len(reason) <= 500,
             "reconcile-lost requires the owner's one-line reason (at most 500 characters)")
+    # Report-existence proof depends on each provider's report naming; only GLM's is known here.
+    # Another provider could keep a recoverable report this search would miss.
+    require(provider in LOST_REPORT_PROVIDERS, "reconcile-lost cannot prove a " + provider + " report is gone; use reconcile-sandbox")
     sandbox = physical(sandbox)
     marker = physical(sandbox / ".ai-review-sandbox")
     boundary, marker_data = snapshot(marker, "log")
