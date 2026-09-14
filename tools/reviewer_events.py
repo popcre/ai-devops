@@ -2,6 +2,7 @@
 """Allowlisted invocation evidence, with no provider secrets or raw output."""
 import json
 import contextlib
+import datetime
 import os
 import re
 from pathlib import Path
@@ -279,6 +280,16 @@ def verify_reports(directory, provider, run_id):
         if key not in artifacts:
             missing_keys.add(key)
     if not reports or missing_keys or missing_prepared(directory, provider, run_id, references):
+        # An owner-recorded loss is a terminal state, not evidence: it is written only by
+        # reconcile-lost, after proving no report for this invocation still exists.
+        lost = root / "evidence-lost.json"
+        if lost.is_file():
+            row = read_json(lost)
+            require(row.get("schema_version") == 1 and row.get("run_id") == run_id and row.get("provider") == provider and
+                    row.get("head") == start["head"] and row.get("caller") == start["caller"] and
+                    row.get("report_state") == "lost" and isinstance(row.get("reason"), str) and row["reason"].strip(),
+                    "evidence-lost record identity changed")
+            return sorted(set(references + [run_id + "/evidence-lost"]))
         # Earlier valid patch receipts remain useful when only the report
         # failed. A local finalizer must supply every still-missing artifact.
         recovered = recovered_references(directory, provider, run_id, missing_keys)
@@ -797,6 +808,80 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     return {"run_id": run_id, "report_count": len(report_values), "historical_source_authorization": "unknown"}
 
 
+def lost_report_candidates(provider, sandbox, source, since=None):
+    """Reports this review could still have written; any one of them refuses a loss record."""
+    match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
+    require(match, "sandbox name does not identify its review")
+    # Only this exact review name: a sibling such as NAME-r3 is a different review.
+    pattern = re.compile(re.escape(provider + "-" + match[1] + "-") +
+                         r"(?:\d{8}T\d{6}Z|[0-9a-f]{64})(?:\.incomplete)?\.md")
+    reviews = source / ".ai" / "reviews"
+    if not reviews.is_dir():
+        return []
+    return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
+                  (since is None or path.stat().st_mtime >= since))
+
+
+def record_lost(directory, provider, run_id, sandbox, reason):
+    start = invocation(directory, provider, run_id)
+    root = evidence_root(directory, run_id)
+    require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
+    require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
+    path = root / "evidence-lost.json"
+    if not path.exists():
+        publish(path, {"schema_version": 1, "run_id": run_id, "provider": provider, "head": start["head"],
+                       "caller": start["caller"], "sandbox": sandbox.name, "report_state": "lost",
+                       "reason": reason, "recorded_at": now(), "historical_source_authorization": "unknown"})
+
+
+def reconcile_lost(directory, provider, sandbox, reason):
+    """Owner-recorded terminal state for a review whose report provably no longer exists."""
+    require(isinstance(reason, str) and reason.strip() and "\n" not in reason and len(reason) <= 500,
+            "reconcile-lost requires the owner's one-line reason (at most 500 characters)")
+    sandbox = physical(sandbox)
+    marker = physical(sandbox / ".ai-review-sandbox")
+    boundary, marker_data = snapshot(marker, "log")
+    require(boundary["exists"] and marker_data, "sandbox marker is missing")
+    lines = marker_data.decode("utf-8").splitlines()
+    source = physical(lines[0])
+    owners = [line.removeprefix("evidence_owner=") for line in lines if line.startswith("evidence_owner=")]
+    if not owners:
+        found = lost_report_candidates(provider, sandbox, source)
+        require(not found, "a report still exists; reconcile it with reconcile-sandbox: " + (str(found[0]) if found else ""))
+        identity = {"provider": provider, "sandbox": sandbox.name, "marker_sha256": digest(marker_data), "report_state": "lost"}
+        run_id = digest(encoded(identity))[:32]
+        event = {"schema_version": 1, "event": "started", "provider": provider, "operation": "local-reconciliation",
+                 "parent_run_id": None, "run_id": run_id, "timestamp": now(), "repo": str(source), "head": "",
+                 "caller": "unknown"}
+        append(directory, lambda rows: None if any(row.get("run_id") == run_id for row in rows) else event)
+        require_report(directory, provider, run_id)
+        with event_lock(directory):
+            record_lost(directory, provider, run_id, sandbox, reason)
+            references = verify_reports(directory, provider, run_id)
+            prefix = "" if "evidence_format=1" in lines else "evidence_format=1\n"
+            write_sandbox_owner(marker, boundary, marker_data, prefix + "evidence_owner=" + provider + ":" + run_id)
+        finish_reconciliation(directory, provider, run_id, references)
+        owners = [provider + ":" + run_id]
+    else:
+        for owner in owners:
+            owner_provider, run_id = owner.split(":")
+            require(owner_provider == provider, "sandbox evidence belongs to another provider")
+            with event_lock(directory):
+                try:
+                    verify_reports(directory, provider, run_id)
+                    continue
+                except Blocked:
+                    pass
+                started = invocation(directory, provider, run_id)["timestamp"]
+                # A report older than the invocation belongs to an earlier turn, never to this one.
+                since = datetime.datetime.fromisoformat(started).timestamp() - 60
+                found = lost_report_candidates(provider, sandbox, source, since)
+                require(not found, "a report from this invocation may still exist; recover it: " + (str(found[0]) if found else ""))
+                record_lost(directory, provider, run_id, sandbox, reason)
+    return {"sandbox": str(sandbox), "owners": owners, "report_state": "lost",
+            "references": verify_sandbox(directory, sandbox)}
+
+
 def finish_reconciliation(directory, provider, run_id, references):
     start = invocation(directory, provider, run_id)
     require(start.get("operation") in {"local-reconciliation", "local-finalization"}, "not a local reconciliation invocation")
@@ -833,6 +918,9 @@ def main():
     elif operation == "reconcile-sandbox":
         require(len(sys.argv) >= 6, "reconcile-sandbox requires provider, sandbox, metadata, and exact report paths")
         print(json.dumps(reconcile_sandbox(directory, provider, sys.argv[3], sys.argv[4], sys.argv[5:])))
+    elif operation == "reconcile-lost":
+        require(len(sys.argv) == 5, "reconcile-lost requires provider, sandbox and the owner's reason")
+        print(json.dumps(reconcile_lost(directory, provider, sys.argv[3], sys.argv[4])))
     elif operation == "begin":
         parent = os.environ.get("AI_REVIEW_EVENT_RUN_ID", "")
         kind = sys.argv[3] if len(sys.argv) > 3 else "invocation"

@@ -526,6 +526,33 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_
 check "an interrupted prune never strands a record without its session" "grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test ! -e '$PR_STATE/sessions/rid1/claude--intr.json' && test ! -e '$PR_SB/glm-intr-0123456789ab' && test ! -e '$PR_CALLS.race'"
 check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intr2 '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intr2.json' && test -d '$PR_SB/glm-intr2-0123456789ab'"
 check "an interrupted prune still releases its build lock" "! ls -d '$PR_SB'/*.lock >/dev/null 2>&1"
+# A review whose report is provably gone gets an explicit, owner-recorded terminal state (#442).
+PR_STATE="$TMP/prune-state-lost"; PR_SB="$TMP/prune-sandboxes-lost"; PR_ROOT="$TMP/prune-root-lost"; : > "$PR_CALLS"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB" "$PR_ROOT/.ai/reviews"
+pr_source() { printf '%s\n%s' "$PR_ROOT" "$2" > "$PR_SB/glm-$1-0123456789ab/.ai-review-sandbox"; touch -d '3 days ago' "$PR_SB/glm-$1-0123456789ab"; }
+pr_meta lost review "$PR_OLD"; pr_source lost ''
+pr_sandbox lostorphan old >/dev/null; pr_source lostorphan ''
+pr_meta present review "$PR_OLD"; pr_source present ''
+printf 'report\n' > "$PR_ROOT/.ai/reviews/glm-present-20260911T000000Z.md"
+printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
+# Owned by an invocation whose report publication failed; its only report is an earlier turn's.
+lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && python "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
+python "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
+python "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
+pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
+printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
+run_prune 1
+check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
+lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
+check "reconcile-lost requires the owner's reason" "! lost lost ''"
+check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
+check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+check "reconcile-lost records an owned invocation's loss beside its requirement" "lost owned 'report publication failed' && test -f '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+# Recording ownership touches the marker, so an unrecorded sandbox waits a retention period again.
+touch -d '3 days ago' "$PR_SB/glm-lostorphan-0123456789ab"
+run_prune 1
+check "prune retires reviews whose loss is recorded" "test ! -e '$PR_STATE/sessions/rid1/claude--lost.json' && test ! -e '$PR_SB/glm-lost-0123456789ab' && grep -q sid-lost '$PR_CALLS' && test ! -e '$PR_SB/glm-lostorphan-0123456789ab' && test ! -e '$PR_SB/glm-owned-0123456789ab'"
+check "a review whose report still exists stays kept" "test -f '$PR_STATE/sessions/rid1/claude--present.json' && test -d '$PR_SB/glm-present-0123456789ab'"
 # An unreadable record may own a sandbox, so the orphan sweep leaves every sandbox alone.
 PR_STATE="$TMP/prune-state-bad"; PR_SB="$TMP/prune-sandboxes-bad"
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
