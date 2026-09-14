@@ -228,6 +228,16 @@ No owner decision is open. The user authorized this holistic plan and issue reor
 
 ## 9. Execution plan
 
+At the end of every phase, re-read every downstream phase through final #166
+and #159 closure, together with the reviewer programme plan. Record any changed
+assumption, interface, identifier, authority or evidence before proceeding.
+September 14 continuation: the reviewer-sequence handoff records #397 first,
+its cancelled full run and unshipped scheduling repair. Historical references
+below to an unsplit complete matrix describe the baseline, not a prohibition on
+the reviewed complete-mode partition: preserve all coverage and require actual
+full hosted completion before accepting that repair. #166 consumes completed
+measurements, not the proposed partition or its local fixtures.
+
 ### Phase A — behavior and reliability
 
 #### A1. #165 — waiting and growth rules

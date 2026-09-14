@@ -8,19 +8,32 @@ owner: codex/reviewer-programme-20260914
 
 ## 0. Decisions only the owner can make
 
-**Qwen legacy recovery restriction — answer still pending.** Recommend allowing
+**Qwen legacy recovery restriction — expert recommendation obtained September 14.** Recommend allowing
 old saved answers to be recovered privately as incomplete, without approving
 changes when their original error output was never saved. This preserves the
 answer and avoids inventing missing evidence, but removes the former ability
 to finalize those old records as accepted reviews. The standing instruction
 requires approval before reducing a capability. An asynchronous question was
-asked; no answer or permission has been received. Do not infer consent.
+asked. Albert replied that he is non-technical and unqualified to judge this,
+and explicitly requested GLM 5.3. That consultation is complete: GLM recommends
+keeping the restriction because the missing refusal evidence cannot be recovered
+trustworthily. Codex agrees. Do not ask Albert to adjudicate the technical design
+again. The consultation is technical advice, not permission to reduce capability;
+before installing the restriction, any still-required authorization must be one
+plain consequence-based request with this recommendation, not a technical menu.
+No installation, record deletion or bulk review replay has been authorized here.
 
 At 16:29 UTC, a metadata-only scan found 37 pending local-validation records
 without any of the new stderr/version bindings, among 62 metadata files. This
 is compatibility exposure, not proof that all 37 otherwise qualify to finalize.
 No record was modified. The candidate and independent reviewer both retain
 this release blocker. New version-2 records retain normal verified recovery.
+
+**Already settled — do not re-ask:** use GLM 5.3 for this judgment; preserve saved
+answers; missing historical error evidence must not be invented. Fresh reviews
+are only for still-relevant changes that need approval, never all 37 automatically.
+Consolidate any genuinely outstanding owner actions in one message; do the
+authorized technical preparation first.
 
 No other owner decision is currently needed. The separate merge-policy task's
 landing is a coordination dependency, not a request for Albert to merge.
@@ -102,8 +115,13 @@ focused policy log is `C:/Temp/397-complete-workflow-policy.log`.
 Task `01a09d96-91f5-7471-81f9-4fdda96c3591` owns PR admission/merge-group closure,
 `verification-closure`, rulesets and its workflow changes in
 `C:/repos/ai-devops-worktrees/merge-queue-required-gate-20260914`.
-Its local full suite was still active at last direct message; its independent
-review and shipping were pending that completion. Do not duplicate or cancel it.
+Fresh-session inspection at 17:43 UTC found its complete local suite passed
+75 Bash and 18 PowerShell suites. Independent review rejected an earlier head
+for a missing checkout; that was fixed and amended head `a6d0be3c` was under
+renewed review in its latest commentary. The app returned an interrupted/notLoaded
+task state, so do not assume a live worker. No landing SHA was received and remote
+main was still `5e08cef1573a54cd06e244c62a2c5fbffc742cc1`. Re-resolve status with
+the owner task; do not take over, duplicate or cancel it.
 
 It explicitly allowed preparation/testing of our disjoint full-Windows block,
 **with no push/merge until its landing**, then rebase and focused policy/coverage
@@ -137,6 +155,19 @@ follow-up states **no remaining code defects** at `0d521f44`, but verdict remain
 represent it as final approval. Follow-up report under the worktree:
 `.ai/reviews/glm-issue394-terminal-review-20260914-5967fafa7c41bdf77627ebbbb385cd3c0022553090234b685c9ffd536280d3cc.md`.
 Reuse this session, not a new one, after the remaining gate is settled.
+
+Subsequent owner-requested advisory turn is complete. Wrapper metadata and report
+footer confirm `zai-coding-plan/glm-5.3`; GLM itself could not inspect its model
+configuration from the read-only snapshot. Report under the same worktree:
+`.ai/reviews/glm-issue394-terminal-review-20260914-7e899205368f8456e352faa3411b464363e99be3791a178a741686df6b046cc1.md`;
+local log `C:/Temp/394-glm-owner-decision.log`. Verdict: RECOMMEND KEEP the legacy
+restriction; not final merge approval. Legacy stream bindings prove the retained
+answer's identity, not absence of a stderr-only refusal. Prior cleanup removed
+that stderr. Preserve private INCOMPLETE output and all old evidence; triage each
+record's current target before requesting a fresh bounded review. Do not adopt
+the advisory suggestion to delete old records: preservation rules still apply.
+GLM's suggestion that practical impact is small was not a record-by-record audit;
+cost and eligibility remain unmeasured. No further code change was recommended.
 
 The existing verification note documents actual Grok 1.0.13 native metadata:
 the candidate parser consumed a real retained event plus a tiny **synthetic**
@@ -175,7 +206,14 @@ contract publication, provider assignment, PR, installation or database write:
 
 Integrate #394 consumer before #393: they edit the same owning files. Port
 semantic deltas onto then-current main; never copy old `.agent` evidence.
-Shared-db #2707/PR2749 were open; #2694/PR2750 retain #396 consumer obligations.
+Closeout refresh at 18:07 UTC: shared-db #2707/PR2749 remain open, but #2694
+is CLOSED and PR2750 is MERGED at `1c436f46a7ae4b9c0dde15bb9b6b11558c92bade`
+(PR head `0e5bfc4580e990fe5f26065028812ce48138be92`). Shared-db remote main was
+`cc6ed5fe50556c4ea9548e2a08694f957f7265b9`. The prepared #396 slice is still
+uncommitted; before any successor work, compare its exact semantic delta and
+acceptance against that landing. Do not reopen #2694, duplicate PR2750, or infer
+that the local candidate is fully superseded without that comparison. This is
+newly observed drift deferred to continuation, not a new repair started here.
 Old PR2749 mixes source and terminal work and is not a fresh approval.
 
 ### Later gates remain open
@@ -293,10 +331,21 @@ Qwen stale-base incident20260910T081507Z-edge-dev-qwen-1166 remains #393.
 8. Continue #271 only through supported containment gates. Keep it open if the
    platform still cannot deny outside reads/write/network while reading the
    allowed snapshot. Do not turn its external blocker into #337/#159 completion.
-9. Deliver #396 consumer follow-through and then #398 actual dispositions,
+9. Reconcile #396 consumer preparation with now-merged PR2750 first (see §3);
+   deliver only a proven remaining obligation, then #398 actual dispositions,
    installed matrix and bounded recurrence/legacy audit. Only then close #337;
    finish #166 with the other task's real evidence, waiter/runner obligations and
    final measured acceptance before #159. Gate: every remaining contract proven.
+
+10. At the end of EVERY phase, re-read all downstream phases through plan-end in
+    both `plan_reviewer-reliability-and-efficiency.md` and
+    `plan_repo-throughput-restructure.md`; record assumption, interface,
+    identifier, authority and evidence drift before advancing. For #166 include
+    final p50/p90 by change type, queue p95, rebuild counts, landed-versus-handoff
+    outcomes, injected required-check failure and administrator recovery proof.
+    Coordinate any live ruleset authority with the separate owner task; its
+    authorization cannot be guessed from old plan wording. Gate: plans, live
+    issues and this handoff agree, and every remaining acceptance is accounted for.
 
 ## 7. Constraints and gotchas
 
@@ -326,14 +375,19 @@ indirection/1Password vault vibe_coding, never in prompts or arguments.
 
 All three shared-db preparation worktrees remain live and uncommitted. The two
 toolkit code branches are locally committed, unpushed. This prose closeout branch
-contains only this handoff and the #397 status/evidence update; its eventual
-prose PR is separate from the held code branches. No cleanup is authorized here.
+landed its handoff and #397 status/evidence update through PR456 at verified
+`5e08cef1573a54cd06e244c62a2c5fbffc742cc1`. Fresh-session prose updates use
+`C:/repos/ai-devops-worktrees/reviewer-fresh-session-20260914`, branch
+`codex/reviewer-fresh-session-20260914`, from that current-main commit. These
+prose changes are separate from held code branches. No cleanup is authorized here.
 
 ## 9. Open risks and continuation ownership
 
 As of September14: #397's full hosted runtime remains unmeasured after the split;
-the other task's landing is required first. #394's §0 decision remains unanswered;
-its review is not final approval. #271 is externally blocked. #398 has140 unknown
+the other task's landing is required first. #394 has GLM's technical recommendation
+and Codex agreement; §0 records the remaining authorization boundary without
+asking Albert to judge mechanics. Its review is not final approval. #271 is
+externally blocked. #398 has140 unknown
 proposals, not140 completed dispositions. Shared-db main/contracts/leases are
 dynamic and must be re-resolved. No background notification was promised or
 automation created; continuation is explicit after the peer handoff/user answer.
@@ -392,3 +446,33 @@ automation created; continuation is explicit after the peer handoff/user answer.
    the legacy Qwen restriction, consolidated in §0 with recommendation and impact.
    The peer landing and #271 support gap are not silently converted to approval
    requests. No workstream or parent is described as complete.
+5. Fresh-session whole-plan audit: yes — both plans were read end-to-end;
+   §§2–3 and6 preserve every remaining child through #159, the consumer ordering,
+   current failed run, prepared code and expert recommendation. Step10 and both
+   phase specifications require downstream re-reading and drift reporting.
+   Older handoffs remain because their next-step acceptance is unfinished.
+
+## Session closeout check — September 14, 18:07 UTC
+
+- PR456 and PR457 are MERGED; their handoff/plan changes were verified on
+  origin/main, latest `8bb654660b76f79ef331c18c4a36fb80b7aa149f`.
+- No database/preview/production write, migration, author claim or marker was
+  owned here. Live marker2893 belongs to Claude and is untouched. Existing
+  repo-maintenance issue2707/PR2749 owns terminal/source continuation; closed
+  issue2694/merged PR2750 requires comparison, not duplicate intake.
+- All three agent blocks remain accurate. The two toolkit code trees are clean
+  with local-only commits; all three consumer trees retain exactly their named
+  two modified source/test files. Preserve these five worktrees, private review
+  reports, logs and candidate evidence for continuation. Do not delete old records.
+- Credential sweep: reviewed session inputs, owned prose/code deltas and all six
+  modified consumer files; no newly introduced credential or .env file found.
+  No vault write was needed. This is scoped to session-owned changes, not a
+  claim to have audited the machine's credential stores.
+- Documentation pass: GLM recommendation and full-plan drift were published in
+  PR457; the newly merged consumer dependency is corrected above. No installed
+  behavior changed during closeout, so no new runtime test or installation was
+  started. Prior exact-head tests/reviews remain evidence with the stated limits.
+- Clean merged prose-only worktrees may be removed after the final prose merge
+  and process/path checks. Keep every unmerged code/consumer worktree. The
+  surviving handoff on main is the continuation record; no background work or
+  automatic notification is promised.
