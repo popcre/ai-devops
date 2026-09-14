@@ -26,6 +26,16 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 
+**September 14 continuation order:** #397 → #394 → #393 → #271 → #398 →
+#337 → #166 → #159, with #396 consumer follow-through before #398. The
+[current handoff](HANDOFF.d/2026-09-14T1653Z-edge-dev-codex-reviewer-sequence-blockers.md)
+records local prepared commits, the separate queue-policy task's exclusive
+ownership, GLM 5.3's legacy-Qwen recommendation and remaining release gates.
+This order supersedes the historical narrative order in §9; its acceptance
+requirements still apply. At every phase end, re-read both plans to final #159
+closure and record downstream drift. Completed #333/#395/#396 toolkit work
+must not be repeated because an older historical paragraph still says pending.
+
 The bounded #405 installed proof uses wrapper SHA-256
 `be0f1cdd8708355d76285e7c3ba682fe4e137ec3fb8097a13ea30434098b47c6`.
 One paid synthetic formal-review turn preserved the exact Unicode sentinel,
