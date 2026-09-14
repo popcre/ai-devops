@@ -384,15 +384,6 @@ check_provider() { # PROVIDER REPO LIVE BASE
   [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
     || die "base ref does not resolve: $base"
 
-  tag="preflight-$provider-$$"
-  # Always isolate preflight. Ordinary wrappers keep their packet in an
-  # ordinary clone while a reviewer reads it; a preflight packet must never
-  # replace or delete that live evidence.
-  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
-  PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
-  trap cleanup_check EXIT
-  packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
-  "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
   wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
   set +e
   if [ "$provider" = muse ]; then
@@ -411,6 +402,18 @@ check_provider() { # PROVIDER REPO LIVE BASE
     printf '%s\n' "$out" | tail -12 >&2
     return 1
   fi
+  # Reject unhealthy providers before preparing evidence for a review they
+  # cannot receive. A successful doctor still cannot authorize dispatch until
+  # the complete isolated packet has been built and verified below.
+  tag="preflight-$provider-$$"
+  # Always isolate preflight. Ordinary wrappers keep their packet in an
+  # ordinary clone while a reviewer reads it; a preflight packet must never
+  # replace or delete that live evidence.
+  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
+  PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
+  trap cleanup_check EXIT
+  packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
+  "${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}" verify "$packet" >/dev/null
   printf 'PASS provider=%s repository=%s packet=verified health=ok allowance=%s\n' \
     "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
 }
