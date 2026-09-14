@@ -8,6 +8,54 @@ PASS=0; FAIL=0
 
 cd "$REPO_ROOT"
 
+echo "== timed-out reviewer cleanup must be proven =="
+if grep -Fq 'Get-CimInstance Win32_Process' tools/ci/stop-process-tree.ps1 &&
+   grep -Fq '$survivors.Count -eq 0' tools/ci/stop-process-tree.ps1; then
+  ok "cleanup helper verifies the captured Windows process tree"
+else
+  bad "cleanup helper does not verify the captured Windows process tree"
+fi
+if [ "${OS:-}" = "Windows_NT" ]; then
+cleanup_fixture="$(mktemp -d)"
+printf '@exit /b 9\r\n' >"$cleanup_fixture/fail.cmd"
+printf '@exit /b 0\r\n' >"$cleanup_fixture/noop.cmd"
+printf '%s\n' 'param([string]$PidFlag,[int]$Target,[string]$Tree,[string]$Force)' 'Stop-Process -Id $Target -Force' 'exit 0' >"$cleanup_fixture/parent-only.ps1"
+printf '%s\n' '$child = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") -PassThru' '$child.Id | Set-Content -Path $env:CHILD_PID_FILE' 'Start-Sleep -Seconds 30' >"$cleanup_fixture/spawn-tree.ps1"
+HELPER="$(cygpath -w "$REPO_ROOT/tools/ci/stop-process-tree.ps1")" \
+FAKE_FAIL="$(cygpath -w "$cleanup_fixture/fail.cmd")" \
+FAKE_NOOP="$(cygpath -w "$cleanup_fixture/noop.cmd")" \
+PARENT_ONLY="$(cygpath -w "$cleanup_fixture/parent-only.ps1")" \
+SPAWN_TREE="$(cygpath -w "$cleanup_fixture/spawn-tree.ps1")" \
+CHILD_PID_FILE="$(cygpath -w "$cleanup_fixture/child.pid")" \
+pwsh -NoProfile -Command '
+  function New-Sleeper {
+    Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") -PassThru
+  }
+  $first = New-Sleeper
+  & $env:HELPER -TargetProcessId $first.Id -TaskkillPath $env:FAKE_FAIL -WaitMilliseconds 200 2>$null
+  $taskkillFailure = $LASTEXITCODE
+  Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue
+  $second = New-Sleeper
+  & $env:HELPER -TargetProcessId $second.Id -TaskkillPath $env:FAKE_NOOP -WaitMilliseconds 200 2>$null
+  $nonExit = $LASTEXITCODE
+  Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue
+  $parent = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @("-NoProfile", "-File", $env:SPAWN_TREE) -PassThru
+  $deadline = [DateTime]::UtcNow.AddSeconds(5)
+  while (-not (Test-Path $env:CHILD_PID_FILE) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+  if (-not (Test-Path $env:CHILD_PID_FILE)) { Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue; exit 1 }
+  $childId = [int](Get-Content $env:CHILD_PID_FILE)
+  Start-Sleep -Milliseconds 500
+  & $env:HELPER -TargetProcessId $parent.Id -TaskkillPath $env:PARENT_ONLY -WaitMilliseconds 200 2>$null
+  $orphanedChild = $LASTEXITCODE
+  Stop-Process -Id $parent.Id,$childId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 100
+  if ($taskkillFailure -ne 20 -or $nonExit -ne 21 -or $orphanedChild -ne 21) { exit 1 }
+' && ok "taskkill failure, root survival and descendant survival all fail closed" || bad "reviewer cleanup can be reported complete without proof"
+rm -rf "$cleanup_fixture"
+else
+  ok "dynamic process-tree cleanup fixture is reserved for Windows CI"
+fi
+
 echo "== PowerShell files must be pure ASCII =="
 # Windows PowerShell 5.1 reads a BOM-less .ps1 as Windows-1252. A UTF-8 em dash
 # (E2 80 94) then decodes to a smart RIGHT DOUBLE QUOTATION MARK, which PowerShell
