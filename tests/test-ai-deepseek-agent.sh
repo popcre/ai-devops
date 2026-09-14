@@ -59,6 +59,49 @@ check "managed descriptor handoff delivers the key without exporting it to curl"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
+if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  printf 'retained attachment\n' > "$TMP/repo/recovery-evidence.txt"
+  AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send recovery-paid --file recovery-evidence.txt > "$TMP/recovery.out" 2>&1
+  RECOVERY_RC=$?; RECOVERY_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/recovery.out")"
+  RECOVERY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "paid ledger failure retains exact intent and response" "test '$RECOVERY_RC' -ne 0 && test -f '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.pending/observed.json'"
+  check "pending paid turn refuses replay" "! run reply '$RECOVERY_ID' replay >'$TMP/refused.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "wrong caller cannot finalize retained paid work" "! AI_DEEPSEEK_CALLER=another run finalize '$RECOVERY_ID' >'$TMP/refused.out' 2>&1"
+  check "local finalize repairs exact ledger without provider contact" "run finalize '$RECOVERY_ID' >'$TMP/finalized.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && test ! -e '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.recovery-required'"
+  check "local finalization retains paid transcript and attachment metadata" "jq -e '.[-1].content==\"answer\"' '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.json' && grep -aq recovery-evidence.txt '$TMP/repo/.ai/deepseek-sessions/$RECOVERY_ID.attachments'"
+  check "repeat finalization is idempotent and free" "run finalize '$RECOVERY_ID' >'$TMP/finalized-again.out' 2>&1 && test '$RECOVERY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "explicit continuation remains available after local recovery" "run reply '$RECOVERY_ID' next >'$TMP/next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((RECOVERY_CALLS+1))'"
+  AI_DEEPSEEK_TEST_TRANSCRIPT_FAILURE=publish run send transcript-recovery > "$TMP/transcript-failure.out" 2>&1
+  TRANSCRIPT_RC=$?; TRANSCRIPT_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/transcript-failure.out")"
+  TRANSCRIPT_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "transcript publication refusal retains the complete paid request" "test '$TRANSCRIPT_RC' -ne 0 && test -f '$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.pending/messages.json'"
+  # Remove only the empty directory installed by this fixture's write fault.
+  rmdir "$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.json"
+  RESPONSE="$(jq -r .response_path "$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.pending/observed.json")"
+  cp "$RESPONSE" "$TMP/original-response"
+  printf '\nchanged' >> "$RESPONSE"
+  check "changed retained provider bytes refuse finalization" "! run finalize '$TRANSCRIPT_ID' >'$TMP/tamper.out' 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$TRANSCRIPT_ID.json'"
+  cp "$TMP/original-response" "$RESPONSE"
+  check "transcript finalization restores paid bytes without replay" "run finalize '$TRANSCRIPT_ID' >'$TMP/transcript-final.out' 2>&1 && test '$TRANSCRIPT_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  AI_DEEPSEEK_TEST_METADATA_FAILURE=publish DEEPSEEK_STUB_REPLY=$'retained formal review\n## Verdict\nAPPROVE' run send metadata-recovery --review > "$TMP/metadata-failure.out" 2>&1
+  META_RC=$?; META_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/metadata-failure.out")"
+  META_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "formal metadata failure retains its snapshot and exact packet" "test '$META_RC' -ne 0 && test -d \"\$(jq -r .source_workspace '$TMP/repo/.ai/deepseek-sessions/$META_ID.pending/intent.json')\""
+  rmdir "$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json"
+  SOURCE_FILES="$(jq -r .source_identity_file "$TMP/repo/.ai/deepseek-sessions/$META_ID.pending/intent.json").files"
+  cp "$SOURCE_FILES" "$TMP/source-files-original"
+  printf 'invented-file\0' >> "$SOURCE_FILES"
+  check "changed formal attachment inventory refuses recovery" "! run finalize '$META_ID' >'$TMP/source-inventory-tamper.out' 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json'"
+  cp "$TMP/source-files-original" "$SOURCE_FILES"
+  printf 'changed after paid completion\n' >> "$TMP/repo/tracked"
+  check "stale formal recovery preserves original identity without authorization" "run finalize '$META_ID' >'$TMP/meta-final.out' 2>&1 && jq -e '.status==\"source_changed\" and .verdict==\"\"' '$TMP/repo/.ai/deepseek-sessions/$META_ID.meta.json' && test '$META_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  DEEPSEEK_STUB_FAIL=1 run send rejected-http > "$TMP/http-failure.out" 2>&1
+  HTTP_ID="$(sed -n 's/^Retained turn session: //p' "$TMP/http-failure.out")"; HTTP_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  check "proven HTTP failure finalizes locally but remains non-authorizing" "! run finalize '$HTTP_ID' >'$TMP/http-final.out' 2>&1 && grep -q 'retained-http-500' '$TMP/http-final.out' && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "repeated incomplete finalization stays nonzero" "! run finalize '$HTTP_ID' >'$TMP/http-repeat.out' 2>&1 && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  check "explicit continuation survives a retained HTTP refusal" "run reply '$HTTP_ID' legitimate-new-turn >'$TMP/http-next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((HTTP_CALLS+1))'"
+  printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 if [ "${AI_DEEPSEEK_SOURCE_TESTS_ONLY:-0}" != 1 ]; then
 DOCTOR_STATE_BEFORE="$(git -C "$TMP/repo" status --porcelain=v1 --untracked-files=all)"
 check "offline doctor succeeds without provider contact" "run doctor | grep -q 'bounded provider timeout'"
@@ -94,26 +137,33 @@ mv "$TMP/repo/.ai/deepseek-sessions" "$TMP/repo/.ai/deepseek-real"; ln -s "$TMP/
 if [ -L "$TMP/repo/.ai/deepseek-sessions" ]; then check "symlinked session folder is rejected" "! run list"; rm "$TMP/repo/.ai/deepseek-sessions"; else ok "symlink fixture unavailable on this host"; rm -rf "$TMP/repo/.ai/deepseek-sessions"; fi
 mv "$TMP/repo/.ai/deepseek-real" "$TMP/repo/.ai/deepseek-sessions"
 history="$TMP/repo/.ai/deepseek-sessions/$SESSION.json"; history_before="$(sha256sum "$history"|cut -d' ' -f1)"
-check "provider failure is nonzero" "DEEPSEEK_STUB_FAIL=1 run reply '$SESSION' failed >/dev/null 2>&1; test \$? -ne 0"
-check "provider failure leaves history unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
-DEEPSEEK_STUB_FAIL=1 run reply "$SESSION" failed >"$TMP/http.out" 2>"$TMP/http.err"; http_rc=$?
+DEEPSEEK_STUB_FAIL=1 run send failed >"$TMP/http.out" 2>"$TMP/http.err"; http_rc=$?
+HTTP_FAILURE_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/http.err")"
+HTTP_FAILURE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "HTTP failure exposes stable reason without printing private response body" "test '$http_rc' -ne 0 && grep -q provider-http-failure '$TMP/http.err' && ! grep -q private-provider-error-body '$TMP/http.err'"
-DEEPSEEK_STUB_INVALID=1 run reply "$SESSION" malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
+check "HTTP failure finalizes locally without replay and remains incomplete" "! run finalize '$HTTP_FAILURE_SESSION' >'$TMP/http-finalize.out' 2>&1 && grep -q retained-http-500 '$TMP/http-finalize.out' && test '$HTTP_FAILURE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "provider failure leaves the ordinary conversation unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+DEEPSEEK_STUB_INVALID=1 run send malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
+MALFORMED_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/malformed.err")"
+MALFORMED_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 malformed_response="$(sed -n 's/^Private response: //p' "$TMP/malformed.err")"
 check "malformed response is retained and cannot become a successful reply" "test '$malformed_rc' -ne 0 && grep -q invalid-provider-response '$TMP/malformed.err' && test ! -s '$TMP/malformed.out' && jq -e '.choices[0].message.content==null' '$malformed_response'"
-check "malformed reply preserves canonical history" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+check "malformed paid turn remains fenced from replay" "! run reply '$MALFORMED_SESSION' replay >'$TMP/malformed-replay.out' 2>&1 && test '$MALFORMED_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && test -f '$TMP/repo/.ai/deepseek-sessions/$MALFORMED_SESSION.pending/observed.json'"
 DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-one >/dev/null & p1=$!; DEEPSEEK_STUB_DELAY=1 run reply "$SESSION" concurrent-two >/dev/null & p2=$!
 wait "$p1"; r1=$?; wait "$p2"; r2=$?; check "concurrent replies both complete" "test '$r1' -eq 0 -a '$r2' -eq 0"
 check "concurrent replies retain complete turns" "jq -e 'length==10 and map(.role)==[range(0;5) | \"user\",\"assistant\"] and ([.[].content] | index(\"concurrent-one\")!=null and index(\"concurrent-two\")!=null)' '$history'"
-history_before_signal="$(sha256sum "$history"|cut -d' ' -f1)"
 rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
-(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
-for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
+INTERRUPT_SESSION="$(run send interrupt-seed | sed -n 's/^SESSION_ID: //p')"
+interrupt_history="$TMP/repo/.ai/deepseek-sessions/$INTERRUPT_SESSION.json"
+history_before_signal="$(sha256sum "$interrupt_history"|cut -d' ' -f1)"
+(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$INTERRUPT_SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$interrupt_history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
 kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
-check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$interrupt_history'|cut -d' ' -f1)\""
 provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"
 check "interrupted reply stops its provider child before unlocking" "test -f '$DEEPSEEK_STUB_TERM_MARKER' && ! kill -0 '$provider_pid' 2>/dev/null"
-check "interrupted reply releases its owned lock" "test ! -d '$history.lock'"
+check "interrupted reply releases its owned lock" "test ! -d '$interrupt_history.lock'"
+check "interrupted paid turn remains fenced from replay" "! run reply '$INTERRUPT_SESSION' replay >'$TMP/interrupted-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/interrupted-replay.out'"
 mkdir -p "$TMP/not-a-repo"
 calls_before_nonrepo="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 (cd "$TMP/not-a-repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_REPLY=$'## Verdict\nAPPROVE' "$SCRIPT" send no-head --review) >/dev/null 2>&1; nonrepo_rc=$?
@@ -325,6 +375,21 @@ check "formal review attaches the committed diff and complete manifest" "jq -er 
 check "formal review includes legitimate prefixed source and excludes stale generated packets" "jq -e '.[1].content | contains(\"legitimate-source-sentinel\") and (contains(\"generated-packet-sentinel\")|not)' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "formal review preserves sealed packet after disposable snapshot cleanup" "test -f \"\$(jq -r .source_packet_directory '$SOURCE_META')/MANIFEST.sha256\""
 check "split packets attach the complete patch" "jq -e '.source_attached_files|any(endswith(\"patch.full.diff\"))' '$SOURCE_META'"
+IDENTITY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+IDENTITY_HASH="$(sha256sum "$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json" | cut -d' ' -f1)"
+check "formal continuation refuses changed caller before provider contact" "! AI_DEEPSEEK_CALLER=another-caller run reply '$SOURCE_ID' changed-caller --review >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "formal continuation refuses changed model without altering the paid transcript" "! DEEPSEEK_MODEL=deepseek-reasoner run reply '$SOURCE_ID' changed-model --review >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_HASH' = \"\$(sha256sum '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | cut -d' ' -f1)\" && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+cp "$SOURCE_META" "$TMP/original-meta.json"
+jq 'del(.model)' "$SOURCE_META" > "$TMP/legacy-meta.json"; cp "$TMP/legacy-meta.json" "$SOURCE_META"
+check "legacy formal identity is not invented from the current model setting" "! run reply '$SOURCE_ID' legacy --review >'$TMP/identity.out' 2>&1 && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+cp "$TMP/original-meta.json" "$SOURCE_META"
+check "ordinary conversations preserve model selection across process restarts" "DEEPSEEK_MODEL=deepseek-reasoner DEEPSEEK_STUB_REQUEST='$TMP/plain-model-request.json' run reply '$SESSION' ordinary-model >/dev/null && jq -e '.model==\"deepseek-reasoner\"' '$TMP/plain-model-request.json'"
+IDENTITY_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
+AI_DEEPSEEK_CALLER=codex DEEPSEEK_STUB_REPLY=$'Findings.\nVERDICT: APPROVE '"$IDENTITY_HEAD" run send identity-governed --review --governed-verdict "$IDENTITY_HEAD" > "$TMP/identity-gov.out" 2> "$TMP/identity-gov.err"
+IDENTITY_GOV="$(sed -n 's/^SESSION_ID: //p' "$TMP/identity-gov.err")"; IDENTITY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "governed caller change refuses before submission" "test -n '$IDENTITY_GOV' && ! AI_DEEPSEEK_CALLER=claude run reply '$IDENTITY_GOV' changed --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "governed model change refuses before submission" "! AI_DEEPSEEK_CALLER=codex DEEPSEEK_MODEL=deepseek-reasoner run reply '$IDENTITY_GOV' changed --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "exact governed identity continues in a fresh wrapper process" "AI_DEEPSEEK_CALLER=codex DEEPSEEK_STUB_REPLY=\$'Follow-up.\\nVERDICT: APPROVE $IDENTITY_HEAD' run reply '$IDENTITY_GOV' unchanged --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' && tail -1 '$TMP/identity.out' | grep -qx 'VERDICT: APPROVE $IDENTITY_HEAD'"
 SOURCE_MOVE_LOG="$TMP/source-move.log"
 set +e
 DEEPSEEK_STUB_MUTATE_SOURCE="$TMP/repo/tracked" DEEPSEEK_STUB_REPLY=$'paid response\n## Verdict\nAPPROVE' run reply "$SOURCE_ID" changed-during-review --review > "$SOURCE_MOVE_LOG" 2>&1
@@ -332,6 +397,7 @@ SOURCE_MOVE_RC=$?
 set -e
 check "source movement refuses authorization after retaining the paid response" "test '$SOURCE_MOVE_RC' -ne 0 && grep -q 'paid response was retained in session $SOURCE_ID' '$SOURCE_MOVE_LOG' && jq -e '.[-1].content|contains(\"paid response\")' '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json'"
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
-check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >/dev/null && jq -e '.status==\"complete\"' '$SOURCE_META'"
+check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >'$TMP/continue-current-source.log' 2>&1 && jq -e '.status==\"complete\"' '$SOURCE_META'"
+[ "$FAIL" -eq 0 ] || cat "$SOURCE_MOVE_LOG" "$TMP/continue-current-source.log" 2>/dev/null || true
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

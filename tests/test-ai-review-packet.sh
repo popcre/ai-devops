@@ -158,7 +158,7 @@ check "provisional_cannot_approve"            "grep -q 'cannot approve a change'
 # --- hashing ------------------------------------------------------------------
 check "hash_file_written"                     "[ -s '$PKT/MANIFEST.sha256' ]"
 check "fresh_packet_verifies"                 "'$SCRIPT' verify '$PKT'"
-check "fresh_retained_packet_verifies"        "'$SCRIPT' verify-retained '$PKT'"
+check "live-source_packet_is_not_retained_evidence" "! '$SCRIPT' verify-retained '$PKT'"
 check "hash_mismatch_fails_verification" \
   "echo tamper >> '$PKT/patch.diff'; ! '$SCRIPT' verify '$PKT'"
 check "retained_verification_rejects_tampering" "! '$SCRIPT' verify-retained '$PKT'"
@@ -262,6 +262,13 @@ check "build_rejects_forged_head_identity" "! '$SCRIPT' build '$IDENTITY_SNAPSHO
 echo changed-untracked > "$STALE/identity-new.txt"
 check "identity_rejects_untracked_source_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 check "retained_packet_survives_proven_source_movement" "'$SCRIPT' verify-retained '$IDENTITY_PACKET'"
+check "retained_verification_preserves_stale_evidence_without_receipt" "AI_REVIEW_SOURCE_RECEIPT_FILE='$STALE/.ai/reviews/retained-must-not-authorize.json' '$SCRIPT' verify-retained '$IDENTITY_PACKET' > '$TMP/retained.log' && grep -q NON-AUTHORIZING '$TMP/retained.log' && test ! -e '$STALE/.ai/reviews/retained-must-not-authorize.json'"
+echo snapshot-tamper > "$IDENTITY_SNAPSHOT/retained-tamper.txt"
+check "retained_verification_refuses_changed_snapshot" "! '$SCRIPT' verify-retained '$IDENTITY_PACKET'"
+rm "$IDENTITY_SNAPSHOT/retained-tamper.txt"
+printf 'tamper' >> "$IDENTITY_PACKET/MANIFEST.md"
+check "retained_verification_refuses_changed_packet" "! '$SCRIPT' verify-retained '$IDENTITY_PACKET'"
+head -c -6 "$IDENTITY_PACKET/MANIFEST.md" > "$TMP/restored-manifest"; mv "$TMP/restored-manifest" "$IDENTITY_PACKET/MANIFEST.md"
 rm "$STALE/identity-new.txt"
 git -C "$STALE" update-ref refs/heads/release HEAD
 check "identity_rejects_target_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
