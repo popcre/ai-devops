@@ -35,6 +35,8 @@ reject 'a failed merge-group evidence gate blocks closure' bash "$TOOL" merge_gr
 reject 'a failed merge-group Linux run blocks closure' bash "$TOOL" merge_group success true success failure skipped skipped
 check 'a complete merge group closes without repeating Windows suites' bash "$TOOL" merge_group success true success success skipped skipped
 reject 'a classifier failure remains fail closed' bash "$TOOL" pull_request failure true success success success success
+reject 'a missing run-long output remains fail closed' bash "$TOOL" pull_request success '' success skipped success success
+reject 'a malformed run-long output remains fail closed' bash "$TOOL" pull_request success maybe success skipped success success
 
 [ "$failures" -eq 0 ] || exit 1
 printf 'verify-closure tests passed\n'

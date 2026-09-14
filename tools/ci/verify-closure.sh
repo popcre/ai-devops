@@ -41,17 +41,21 @@ fi
   echo "verify-closure: unsupported required-check event $EVENT." >&2
   exit 2
 }
-if [ "$RUN_LONG" = true ]; then
-  [ "$LINUX_RESULT" = success ] || {
-    echo 'verify-closure: exact-head Linux verification did not succeed.' >&2
-    exit 1
-  }
-else
-  [ "$LINUX_RESULT" = skipped ] || {
-    echo 'verify-closure: prose-only Linux result was not the declared skip.' >&2
-    exit 1
-  }
-fi
+case "$RUN_LONG" in
+  true)
+    [ "$LINUX_RESULT" = success ] || {
+      echo 'verify-closure: exact-head Linux verification did not succeed.' >&2
+      exit 1
+    } ;;
+  false)
+    [ "$LINUX_RESULT" = skipped ] || {
+      echo 'verify-closure: prose-only Linux result was not the declared skip.' >&2
+      exit 1
+    } ;;
+  *)
+    echo 'verify-closure: classifier run-long output was missing or malformed.' >&2
+    exit 1 ;;
+esac
 [ "$WINDOWS_RESULT" = success ] || {
   echo 'verify-closure: exact-head Windows verification did not succeed.' >&2
   exit 1
