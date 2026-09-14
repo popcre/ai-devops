@@ -135,12 +135,94 @@ if command -v pwsh >/dev/null 2>&1; then
   owner_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 2/2 2>&1)"
   check 'a section that does not own the PowerShell suites says so and skips them' \
     'printf "%s" "$owner_out" | grep -Fq "POWERSHELL SUITES run in section 1 of 2"'
-  guard_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -Shard 1/2 2>&1)"
+  guard_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -Shard 1/2 2>&1)"
   guard_rc=$?
-  check 'PowerShell sectioning is refused outside the ordinary pull-request lane' \
-    '[ "$guard_rc" -ne 0 ] && printf "%s" "$guard_out" | grep -Fq -- "-Shard requires -WindowsPullRequest -ExcludeReviewerSafety."'
+  check 'PowerShell ordinary Windows sectioning still requires the reviewer split' \
+    '[ "$guard_rc" -ne 0 ] && printf "%s" "$guard_out" | grep -Fq -- "Windows -Shard requires -ExcludeReviewerSafety."'
 else
   ok 'PowerShell section ownership skipped because pwsh is unavailable'
+fi
+
+# Complete sections discover all names independently of the PR manifest.
+lane_manifest '[["test-sec-a.sh"],["test-sec-c.sh"]]'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-000-future.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-z-nonwindows.sh"
+complete_all="$(run --list | grep '^test-' | LC_ALL=C sort)"
+complete_one="$(run --shard 1/3 --list | grep '^test-')"
+complete_two="$(run --shard 2/3 --list | grep '^test-')"
+complete_three="$(run --shard 3/3 --list | grep '^test-')"
+complete_union="$(printf '%s\n' "$complete_one" "$complete_two" "$complete_three" | LC_ALL=C sort)"
+check 'complete sections cover every dynamic suite exactly once' \
+  '[ "$complete_union" = "$complete_all" ] && [ "$(printf "%s\n" "$complete_union" | sort -u)" = "$complete_union" ]'
+check 'complete sections retain reviewer, non-Windows and future suite names' \
+  'printf "%s\n" "$complete_union" | grep -Fxq test-windows-defect.sh && printf "%s\n" "$complete_union" | grep -Fxq test-z-nonwindows.sh && printf "%s\n" "$complete_union" | grep -Fxq test-000-future.sh'
+check 'complete assignment is sorted round-robin and deterministic' \
+  '[ "$complete_one" = "$(printf "test-000-future.sh\ntest-sec-c.sh")" ] && [ "$complete_two" = "$(printf "test-linux-only.sh\ntest-windows-defect.sh")" ] && [ "$complete_three" = "$(printf "test-sec-a.sh\ntest-z-nonwindows.sh")" ] && [ "$complete_one" = "$(run --shard 1/3 --list | grep "^test-")" ]'
+run --shard 1/3 > "$TMP/complete-one.log" 2>&1; complete_rc1=$?
+run --shard 2/3 > "$TMP/complete-two.log" 2>&1; complete_rc2=$?
+run --shard 3/3 > "$TMP/complete-three.log" 2>&1; complete_rc3=$?
+check 'a complete-section defect fails exactly its owning section' \
+  '[ "$complete_rc1" -eq 0 ] && [ "$complete_rc2" -ne 0 ] && [ "$complete_rc3" -eq 0 ] && grep -q "tests=2 failures=1" "$TMP/complete-two.log"'
+for invalid_shard in '' 1 1/2/3 /2 1/ 0/2 3/2 1/0 1/7 999999999999999999999/2; do
+  run --shard "$invalid_shard" --list >/dev/null 2>&1; invalid_complete_rc=$?
+  check "complete section refuses malformed or empty assignment: $invalid_shard" '[ "$invalid_complete_rc" -eq 2 ]'
+done
+run --shard 1/3 --only sec --list >/dev/null 2>&1; complete_only_rc=$?
+run --shard 1/3 --changed-since HEAD --list >/dev/null 2>&1; complete_changed_rc=$?
+run --shard 1/3 --shard 2/3 --list >/dev/null 2>&1; complete_duplicate_rc=$?
+check 'complete sectioning rejects filtered and duplicate selections' \
+  '[ "$complete_only_rc" -eq 2 ] && [ "$complete_changed_rc" -eq 2 ] && [ "$complete_duplicate_rc" -eq 2 ]'
+check 'complete sections leave ordinary declared PR sections unchanged' \
+  '[ "$(run --windows-offline --exclude-reviewer-safety --shard 1/2 --list | grep "^test-")" = test-sec-a.sh ]'
+
+if command -v pwsh >/dev/null 2>&1; then
+  # Copy only the existing entry points into an isolated miniature repository.
+  # Its PowerShell discovery must never invoke this repository's real suites.
+  ps_fixture="$TMP/ps-fixture/tests"; mkdir -p "$ps_fixture"
+  cp "$ROOT/tests/test-all.ps1" "$ROOT/tests/test-all.sh" "$ROOT/tests/lib-selection.sh" "$ps_fixture/"
+  cat > "$ps_fixture/test-alpha.ps1" <<'PS'
+Add-Content -LiteralPath $env:AI_TEST_EXEC_TRACE -Value 'POWERSHELL-alpha'
+exit 0
+PS
+  cat > "$ps_fixture/test-beta.ps1" <<'PS'
+Add-Content -LiteralPath $env:AI_TEST_EXEC_TRACE -Value 'POWERSHELL-beta'
+exit 0
+PS
+  cat > "$SUITES/test-000-future.sh" <<'BASH'
+printf 'BASH\n' >> "$AI_TEST_EXEC_TRACE"
+exit 0
+BASH
+  export AI_TEST_EXEC_TRACE="$TMP/ps-execution.log"
+  if command -v cygpath >/dev/null 2>&1; then AI_TEST_EXEC_TRACE="$(cygpath -m "$AI_TEST_EXEC_TRACE")"; fi
+  ps_run(){ AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ps_fixture/test-all.ps1" "$@"; }
+  : > "$AI_TEST_EXEC_TRACE"
+  ps_run -Shard 1/3 > "$TMP/ps-complete-1.log" 2>&1; ps_complete1=$?
+  ps_run -Shard 2/3 > "$TMP/ps-complete-2.log" 2>&1; ps_complete2=$?
+  ps_run -Shard 3/3 > "$TMP/ps-complete-3.log" 2>&1; ps_complete3=$?
+  check 'complete PowerShell sections run every PowerShell suite exactly once' \
+    '[ "$ps_complete1" -eq 0 ] && [ "$ps_complete2" -ne 0 ] && [ "$ps_complete3" -eq 0 ] && [ "$(grep -c POWERSHELL-alpha "$AI_TEST_EXEC_TRACE")" -eq 1 ] && [ "$(grep -c POWERSHELL-beta "$AI_TEST_EXEC_TRACE")" -eq 1 ]'
+  printf '\nexit 9\n' >> "$ps_fixture/test-beta.ps1"
+  # Replace the fixture's terminal status; the original earlier exit must not hide it.
+  sed -i '/^exit 0$/d' "$ps_fixture/test-beta.ps1"
+  ps_run -Shard 1/3 > "$TMP/ps-complete-failed.log" 2>&1; ps_failure_rc=$?
+  check 'complete PowerShell owner propagates an injected PowerShell failure' \
+    '[ "$ps_failure_rc" -ne 0 ] && grep -q "powershell=2 failures=1" "$TMP/ps-complete-failed.log"'
+  for owner in null 0 4 1.5 '"bad"'; do
+    jq --argjson owner "$owner" '.windows_offline_powershell_shard=$owner' "$MANIFEST" > "$TMP/bad-owner.json"
+    : > "$AI_TEST_EXEC_TRACE"
+    AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$TMP/bad-owner.json" pwsh -NoProfile -File "$ps_fixture/test-all.ps1" -Shard 1/3 > "$TMP/ps-invalid-owner.log" 2>&1; ps_invalid_owner_rc=$?
+    check "invalid PowerShell owner refuses before any suite: $owner" '[ "$ps_invalid_owner_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ]'
+  done
+  : > "$AI_TEST_EXEC_TRACE"
+  ps_run -Shard 1/999 > "$TMP/ps-oversized-selection.log" 2>&1; ps_oversized_rc=$?
+  check 'oversized complete selection refuses before either language executes a suite' \
+    '[ "$ps_oversized_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "complete section count exceeds discovered suites" "$TMP/ps-oversized-selection.log"'
+  jq '.windows_offline_shards=[["test-sec-a.sh"]]' "$MANIFEST" > "$TMP/incomplete-pr-selection.json"
+  : > "$AI_TEST_EXEC_TRACE"
+  AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$TMP/incomplete-pr-selection.json" pwsh -NoProfile -File "$ps_fixture/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 1/1 > "$TMP/ps-incomplete-pr.log" 2>&1; ps_incomplete_pr_rc=$?
+  check 'incomplete PR selection refuses before either language executes a suite' \
+    '[ "$ps_incomplete_pr_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "do not cover the Windows lane exactly" "$TMP/ps-incomplete-pr.log"'
+  unset AI_TEST_EXEC_TRACE
 fi
 
 printf '{' >"$MANIFEST"

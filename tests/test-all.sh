@@ -11,6 +11,7 @@
 #   test-all.sh --windows-offline --exclude-reviewer-safety --shard <i>/<n>
 #                                      run only declared section <i> of <n> (#210)
 #   test-all.sh --list                 print the selection and exit without running
+#   test-all.sh --shard <i>/<n>         partition every discovered suite round-robin
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib-selection.sh
@@ -45,7 +46,7 @@ if [ -n "$SHARED_RUNTIME_LOCK" ]; then
 fi
 
 only=''; changed_since=''; list_only=false; windows_offline=false; exclude_reviewer_safety=false
-shard=''
+shard=''; shard_requested=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --only)
@@ -58,28 +59,36 @@ while [ $# -gt 0 ]; do
     --exclude-reviewer-safety) exclude_reviewer_safety=true; shift ;;
     --shard)
       [ $# -ge 2 ] || { printf 'test-all.sh: --shard needs <i>/<n>\n' >&2; exit 2; }
+      [ "$shard_requested" = false ] || { printf 'test-all.sh: duplicate --shard\n' >&2; exit 2; }
+      shard_requested=true
       shard="$2"; shift 2 ;;
     --list) list_only=true; shift ;;
-    -h|--help) sed -n '2,13p' "$ROOT/tests/test-all.sh"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$ROOT/tests/test-all.sh"; exit 0 ;;
     *) printf 'test-all.sh: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done
 [ "$exclude_reviewer_safety" = false ] || [ "$windows_offline" = true ] || {
   printf 'test-all.sh: --exclude-reviewer-safety requires --windows-offline\n' >&2; exit 2; }
-# Sections exist only for the ordinary pull-request Windows lane. Scheduled,
-# manual, qualification and no-argument runs stay complete and unsectioned, so
-# the backstop can never be narrowed by a sectioning mistake (issue #210).
+# PR sections retain their declared assignment. Complete sections partition
+# every discovered suite; no-argument runs retain the complete serial backstop.
 shard_index=''; shard_total=''
-if [ -n "$shard" ]; then
-  [ "$windows_offline" = true ] && [ "$exclude_reviewer_safety" = true ] || {
-    printf 'test-all.sh: --shard requires --windows-offline --exclude-reviewer-safety\n' >&2; exit 2; }
+if [ "$shard_requested" = true ]; then
+  [ "$windows_offline" = false ] || [ "$exclude_reviewer_safety" = true ] || {
+    printf 'test-all.sh: Windows --shard requires --exclude-reviewer-safety\n' >&2; exit 2; }
+  [ -z "$only$changed_since" ] || {
+    printf 'test-all.sh: --shard cannot be combined with --only or --changed-since\n' >&2; exit 2; }
   # Exactly one slash. Splitting on the first and last slash independently
   # would read `1/2/4` as section 1 of 4 and run a real, wrong selection.
+  [[ "$shard" =~ ^[0-9]+/[0-9]+$ ]] || {
+    printf 'test-all.sh: --shard must be <i>/<n>, got %s\n' "$shard" >&2; exit 2; }
   shard_index="${shard%%/*}"; shard_total="${shard#*/}"
   case "$shard_index" in *[!0-9]*|'') shard_index='' ;; esac
   case "$shard_total" in *[!0-9]*|'') shard_total='' ;; esac
   [ -n "$shard_index" ] && [ -n "$shard_total" ] || {
     printf 'test-all.sh: --shard must be <i>/<n>, got %s\n' "$shard" >&2; exit 2; }
+  [ "${#shard_index}" -le 9 ] && [ "${#shard_total}" -le 9 ] || {
+    printf 'test-all.sh: --shard values exceed the supported integer range\n' >&2; exit 2; }
+  shard_index=$((10#$shard_index)); shard_total=$((10#$shard_total))
   [ "$shard_total" -ge 1 ] || {
     printf 'test-all.sh: --shard count must be at least 1, got %s\n' "$shard_total" >&2; exit 2; }
   [ "$shard_index" -ge 1 ] && [ "$shard_index" -le "$shard_total" ] || {
@@ -167,6 +176,15 @@ elif [ "$windows_offline" = true ]; then
   fi
 else
   tests=("${all_tests[@]}")
+  if [ -n "$shard" ]; then
+    [ "$shard_total" -le "${#all_tests[@]}" ] || {
+      printf 'test-all.sh: complete section count exceeds discovered suites\n' >&2; exit 2; }
+    tests=()
+    for ((i=0; i<${#all_tests[@]}; i++)); do
+      [ "$((i % shard_total + 1))" -ne "$shard_index" ] || tests+=("${all_tests[i]}")
+    done
+    reason="every Bash suite, complete section $shard_index of $shard_total"
+  fi
 fi
 
 printf 'BASH SELECTION %s selected=%s of %s\n' "$reason" "${#tests[@]}" "${#all_tests[@]}"

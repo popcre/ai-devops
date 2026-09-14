@@ -18,7 +18,7 @@ windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback:/,/^  report-scheduled-failure:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-check 'complete Windows job keeps its measured five-minute finalization allowance bounded' '[ "$windows_timeout" = 105 ]'
+check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
@@ -126,6 +126,24 @@ check 'the aggregate fails closed on anything but a justified skip' \
 # The scheduled backstop must watch the complete matrix, never a section of it.
 check 'the scheduled reporter watches the complete Windows matrix' \
   "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -qF 'windows-offline-complete'"
+complete_block="$(awk '/^  windows-offline-complete:/{f=1;next} f&&/^  [a-z]/{exit} f' "$workflow")"
+complete_sections="$(printf '%s\n' "$complete_block" | sed -n 's/^[[:space:]]*section:[[:space:]]*//p' | tr -d '\r')"
+complete_count="$(printf '%s' "$complete_sections" | jq -er 'if type=="array" and length>0 and .==[range(1;length+1)] then length else error("invalid complete sections") end' 2>/dev/null || printf 0)"
+check 'complete Windows matrix declares every section exactly once' \
+  '[ "$complete_count" -ge 2 ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$complete_count" ]'
+check 'complete sections retain every test and report failures independently' \
+  'printf "%s" "$complete_block" | grep -qF "fail-fast: false" && printf "%s" "$complete_block" | grep -qF "test-all.ps1 -Shard" && printf "%s" "$complete_block" | grep -qF "matrix.section }}/$complete_count" && ! printf "%s" "$complete_block" | grep -Eq -- "-WindowsPullRequest|-ExcludeReviewerSafety"'
+complete_union=''; complete_selection_ok=true
+for ((section=1; section<=complete_count; section++)); do
+  if selected="$(bash "$ROOT/tests/test-all.sh" --shard "$section/$complete_count" --list 2>/dev/null)"; then
+    complete_union+=$'\n'"$(printf '%s\n' "$selected" | grep '^test-')"
+  else
+    complete_selection_ok=false
+  fi
+done
+complete_union="$(printf '%s\n' "$complete_union" | sed '/^$/d' | LC_ALL=C sort)"
+check 'complete workflow sections cover actual Bash discovery with no omissions or duplicates' \
+  '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$actual_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
   '[ -z "$(comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
@@ -163,10 +181,10 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
   exit 1
 }
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
-# workflow_dispatch keep the no-argument complete runner as the backstop.
+# workflow_dispatch keep the complete sharded runner as the backstop.
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
 [ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
-grep -Eq '^[[:space:]]*\.\\tests\\test-all\.ps1[[:space:]]*$' "$workflow" &&
+printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
 sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -Fq "github.event_name == 'pull_request'" &&
 sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -Fq "github.event_name != 'pull_request'" || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2

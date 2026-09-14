@@ -3,8 +3,8 @@ param(
   [switch]$ExcludeReviewerSafety,
   # Ordinary pull-request Windows verification is divided into declared,
   # balanced sections that run on independent hosted machines (issue #210).
-  # Scheduled, manual, qualification and no-argument runs pass no section and
-  # remain the complete backstop.
+  # Without WindowsPullRequest, sections partition the complete Bash inventory.
+  # No-argument runs remain the complete serial backstop.
   [string]$Shard = ''
 )
 
@@ -33,19 +33,42 @@ if ($sharedRuntimeLock) {
 
 try {
 
-if ($Shard -and -not ($WindowsPullRequest -and $ExcludeReviewerSafety)) {
-  throw '-Shard requires -WindowsPullRequest -ExcludeReviewerSafety.'
+if ($ExcludeReviewerSafety -and -not $WindowsPullRequest) {
+  throw '-ExcludeReviewerSafety requires -WindowsPullRequest.'
+}
+if ($Shard -and $WindowsPullRequest -and -not $ExcludeReviewerSafety) {
+  throw 'Windows -Shard requires -ExcludeReviewerSafety.'
 }
 $shardIndex = 0
 $shardTotal = 0
-if ($Shard) {
-  if ($Shard -notmatch '^([0-9]+)/([0-9]+)$') { throw "-Shard must be <i>/<n>, got $Shard." }
+if ($PSBoundParameters.ContainsKey('Shard')) {
+  if ($Shard -notmatch '^([0-9]{1,9})/([0-9]{1,9})$') { throw "-Shard must be <i>/<n>, got $Shard." }
   $shardIndex = [int]$Matches[1]
   $shardTotal = [int]$Matches[2]
   if ($shardTotal -lt 1) { throw "-Shard count must be at least 1, got $shardTotal." }
   if ($shardIndex -lt 1 -or $shardIndex -gt $shardTotal) {
     throw "-Shard index $shardIndex is outside 1..$shardTotal."
   }
+}
+
+# Validate PowerShell ownership before starting any Bash or PowerShell suite.
+$runPowerShell = $true
+if ($Shard) {
+  $manifestPath = if ($env:AI_CI_SUITE_MANIFEST) { $env:AI_CI_SUITE_MANIFEST }
+                  else { Join-Path $root 'config/ci-suite-manifest.json' }
+  if (-not (Test-Path -LiteralPath $manifestPath)) {
+    throw "Windows suite manifest is missing: $manifestPath"
+  }
+  $owner = (Get-Content -Raw -LiteralPath $manifestPath -ErrorAction Stop |
+    ConvertFrom-Json -ErrorAction Stop).windows_offline_powershell_shard
+  if ($null -eq $owner -or [string]$owner -notmatch '^[0-9]{1,9}$') {
+    throw 'Windows suite manifest does not declare a valid windows_offline_powershell_shard.'
+  }
+  $owner = [int]$owner
+  if ($owner -lt 1 -or $owner -gt $shardTotal) {
+    throw "windows_offline_powershell_shard $owner is outside 1..$shardTotal."
+  }
+  $runPowerShell = ($owner -eq $shardIndex)
 }
 
 $bashScope = if ($WindowsPullRequest) { 'WINDOWS-SENSITIVE' } else { 'COMPLETE' }
@@ -59,32 +82,22 @@ if ($ExcludeReviewerSafety) {
   $bashArgs += '--exclude-reviewer-safety'
 }
 if ($Shard) { $bashArgs += @('--shard', $Shard) }
+if ($Shard) {
+  # Validate the complete selection before either language executes a suite.
+  # The existing selector owns both dynamic inventory and declared PR coverage.
+  $selectionProof = & $bash @bashArgs --list 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Bash section selection is invalid: $($selectionProof -join [Environment]::NewLine)"
+  }
+}
 & $bash @bashArgs
 if ($LASTEXITCODE -ne 0) { $failures++ }
 $elapsed = [int]((Get-Date) - $started).TotalSeconds
 $timings.Add([pscustomobject]@{ Seconds = $elapsed; Suite = "test-all.sh ($($bashScope.ToLowerInvariant()) Bash suite)" })
 Write-Host "----- BASH SUITE took ${elapsed}s -----"
 
-$runPowerShell = $true
-if ($Shard) {
-  $manifestPath = if ($env:AI_CI_SUITE_MANIFEST) { $env:AI_CI_SUITE_MANIFEST }
-                  else { Join-Path $root 'config/ci-suite-manifest.json' }
-  if (-not (Test-Path -LiteralPath $manifestPath)) {
-    throw "Windows suite manifest is missing: $manifestPath"
-  }
-  $owner = (Get-Content -Raw -LiteralPath $manifestPath |
-    ConvertFrom-Json).windows_offline_powershell_shard
-  if ($null -eq $owner) {
-    throw 'Windows suite manifest does not declare windows_offline_powershell_shard.'
-  }
-  $owner = [int]$owner
-  if ($owner -lt 1 -or $owner -gt $shardTotal) {
-    throw "windows_offline_powershell_shard $owner is outside 1..$shardTotal."
-  }
-  $runPowerShell = ($owner -eq $shardIndex)
-  if (-not $runPowerShell) {
+if ($Shard -and -not $runPowerShell) {
     Write-Host "`nPOWERSHELL SUITES run in section $owner of $shardTotal; section $shardIndex skips them by declaration."
-  }
 }
 
 $tests = @()

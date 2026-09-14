@@ -149,8 +149,10 @@ complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
 the separate `windows-reviewer-safety` lane owns Codex and Grok. A hosted
 watchdog runs those omitted suites on `windows-2025` if the qualified lane does
-not report success. Scheduled, manual, qualification, and local no-argument
-runs keep the complete Bash plus PowerShell matrix. The exact assignment and
+not report success. Scheduled and manual Windows jobs split the complete Bash
+set across independent hosted sections; PowerShell runs once in its declared
+section. Qualification and local no-argument runs keep the complete Bash plus
+PowerShell matrix. The exact assignment and
 fallback are fail-closed in `config/ci-suite-manifest.json` and the workflow
 policy tests.
 New offline tests named `tests/test-*.sh` or `tests/test-*.ps1` are discovered
@@ -197,9 +199,11 @@ It extends the existing change classifier; do not create per-repository copies.
 
 ### Running the suites concurrently on one machine
 
-`tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time, which is
-correct but slow: the complete Windows set takes about 70 minutes, and the hosted
-CI queue often adds more before a single test starts. For a local pre-check, run
+`tests/test-all.sh` and `tests/test-all.ps1` run one suite at a time. The complete
+Windows run reached its 105-minute bound in run `34856869730` before finishing
+the Bash set. Complete-mode `-Shard <i>/<n>` partitions every discovered Bash
+suite across independent hosts while retaining PowerShell's single declared
+owner; without `-Shard`, the complete entry point is unchanged. For a local pre-check, run
 the same suites, unchanged, across worker slots on this machine:
 
 ```bash
