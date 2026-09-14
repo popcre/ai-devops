@@ -538,7 +538,6 @@ printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
 # Owned by an invocation whose report publication failed; its only report is an earlier turn's.
 lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && python "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
 python "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
-python "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
 pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
 printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 run_prune 1
@@ -547,6 +546,8 @@ lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+python "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
 lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"
 mkdir -p "$(dirname "$lost_patch")"; printf '{}\n' > "$lost_patch"
 check "reconcile-lost refuses while a required patch is unpublished" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"

@@ -829,6 +829,12 @@ def lost_blockers(root):
 
 def record_lost(directory, provider, run_id, sandbox, reason):
     start = invocation(directory, provider, run_id)
+    if start.get("operation") != "local-reconciliation":
+        # A running provider may still publish its paid result; only a finished invocation can have lost it.
+        # (Legacy markers predate evidence ownership, so no live run can own one.)
+        _, data = snapshot(directory / "events.jsonl", "jsonl")
+        require(any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
+                    for line in data.splitlines()), "reviewer invocation is still active; loss not recorded")
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
