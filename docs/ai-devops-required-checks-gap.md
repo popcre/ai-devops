@@ -1,32 +1,25 @@
-# ai-devops: one CI job runs but cannot block a merge
+# ai-devops required-check closure
 
-**Written 2026-09-01.** Repository: `popcre/ai-devops`.
+**Written 2026-09-01; resolved 2026-09-14.** Repository: `popcre/ai-devops`.
 
-## What has to be done
+## Required contract
 
-Add `windows-reviewer-safety` to the required status checks of the `main`
-ruleset (`main: pull request + merge queue`, ruleset id `21564317`). Today that
-list contains only `linux-offline` and `windows-offline`.
+The `main` ruleset (`main: pull request + merge queue`, ruleset id `21564317`)
+requires the single stable context `verification-closure`.
 
-This is a repository-settings change and needs the owner's word before it is
-made.
+On a pull request, that context succeeds only after exact-head Linux, Windows,
+and reviewer-safety proof has finished successfully. On a merge group, it
+succeeds only after the queued head's evidence gate and the fresh Linux suite
+both succeed. The long Windows suites remain on independent pull-request
+runners and are not repeated in the queue.
 
 ## Why
 
-`.github/workflows/verify.yml` defines **three** jobs:
-
-| Job | Required? | What it proves |
-| --- | --- | --- |
-| `linux-offline` | yes | the Linux test suite |
-| `windows-offline` | yes | the Windows test suite |
-| `windows-reviewer-safety` | **no** | the reviewer wrappers behave safely on Windows |
-
-The third job runs `tests/test-ai-codex-review.sh` and
-`tests/test-ai-grok-review.sh` under Git Bash on `windows-2025`, counts the
-failures, and exits 1 if there are any. It does everything a blocking check
-does — except block. Because it is not in the ruleset's required list, a pull
-request whose reviewer-safety suite is **red** still satisfies every required
-check and merges.
+Requiring leaf jobs independently is unsafe when their event topology differs.
+On 2026-09-14, PR #452 entered the queue while its exact-head run was unfinished.
+The merge-group evidence job correctly refused that state, but the ruleset
+required only `linux-offline`; GitHub therefore landed merge commit
+`22a7f22b88198e1bcc26ec99ebc135819b8f06f4` despite the failed evidence job.
 
 That is the exact failure shape this repository already knows: a check that
 runs when someone remembers to look is not a mechanical check. These particular
@@ -46,7 +39,9 @@ in-flight database work. `ai-devops` has no equivalent gate:
 - Its only `rev-parse origin/main` (`bin/ai-memory-sync`) is memory-sync
   reconciliation, not a merge gate.
 
-There is nothing to port.
+The stable closure context is the mechanical boundary: it reports on both pull
+requests and merge groups and converts any missing, unfinished, skipped outside
+the declared prose path, or failed proof into a blocking failure.
 
 ## What is already protected
 
@@ -61,4 +56,4 @@ above is the single missing piece, not a missing foundation.
 gh api repos/popcre/ai-devops/rulesets/21564317 --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context'
 ```
 
-It should list three contexts, including `windows-reviewer-safety`.
+It must list exactly `verification-closure`.

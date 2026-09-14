@@ -74,8 +74,16 @@ check 'the queue evidence gate demands both Windows lanes' \
 # blocks every pull request permanently - both halves of the #204 incident.
 check 'the queue evidence gate reports on every event, not only merge groups' \
   "! awk '/^  merge-group-evidence:/{f=1;next} f&&/^  [a-z]/{exit} f' '$workflow' | grep -q \"if: .*event_name == 'merge_group'\""
+check 'one stable required closure covers pull requests and merge groups' \
+  "grep -q '^  verification-closure:' '$workflow' && sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -q \"github.event_name == 'pull_request'.*github.event_name == 'merge_group'\""
+check 'the required closure depends on every pull-request and queue proof' \
+  "grep -Fq 'needs: [fast-classifier, merge-group-evidence, linux-offline, windows-offline, windows-reviewer-safety]' '$workflow'"
+check 'the required closure delegates to the regression-tested evaluator' \
+  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -Fq 'bash tools/ci/verify-closure.sh'"
+check 'the required closure checks out its evaluator before running it' \
+  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
 
-check 'manifest declares 74 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 74 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 74 ]"
+check 'manifest declares 75 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 75 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 75 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
@@ -218,7 +226,7 @@ grep -Fq 'run.id !== current' "$workflow" || {
   exit 1
 }
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 9 ] || {
+[ "$cancel_aware_jobs" -eq 10 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }

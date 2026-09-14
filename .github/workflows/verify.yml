@@ -518,6 +518,31 @@ jobs:
             "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT" >&2
           exit 1
 
+  # The ruleset requires this one stable context on both pull_request and
+  # merge_group. On a pull request it closes over every exact-head platform and
+  # reviewer proof before GitHub may admit the change to the queue. In the
+  # queue it closes over the fresh Linux run and merge-group-evidence, so an
+  # evidence refusal cannot be hidden by an unrelated green required job.
+  verification-closure:
+    needs: [fast-classifier, merge-group-evidence, linux-offline, windows-offline, windows-reviewer-safety]
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Close every required verification path
+        run: |
+          bash tools/ci/verify-closure.sh \
+            "${{ github.event_name }}" \
+            "${{ needs.fast-classifier.result }}" \
+            "${{ needs.fast-classifier.outputs.run_long }}" \
+            "${{ needs.merge-group-evidence.result }}" \
+            "${{ needs.linux-offline.result }}" \
+            "${{ needs.windows-offline.result }}" \
+            "${{ needs.windows-reviewer-safety.result }}"
+
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

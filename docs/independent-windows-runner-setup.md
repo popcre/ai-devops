@@ -606,10 +606,10 @@ losing it stops `windows-reviewer-safety` from ever starting - a dead host leave
 that job *queued*, not failed, so it never reports. `windows-offline` is
 unaffected: it runs in GitHub's hosted lane, which is exactly why that lane was
 kept. This does not
-freeze merging: rulesets `21183703` and `21564317` require `linux-offline` only,
-and both Windows jobs are skipped on `merge_group`. The damage is silent loss of
-reviewer-suite proof, which is the gap recorded in
-[`ai-devops-required-checks-gap.md`](ai-devops-required-checks-gap.md).
+freeze merging: both Windows jobs remain skipped on `merge_group`, while the
+required `verification-closure` context verifies their exact-head pull-request
+proof and the queue's evidence gate. A busy or unavailable self-hosted runner
+still leaves the independent hosted lanes usable.
 
 Check the pool with:
 

@@ -73,6 +73,7 @@
     "test-uninstall.sh",
     "test-windows-runner-qualification-workflow.sh",
     "test-windows-bash-selection.sh",
+    "test-verify-closure.sh",
     "test-windows-scripts.sh",
     "test-workflow-policy.sh"
   ],

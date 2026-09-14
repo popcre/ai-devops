@@ -70,8 +70,10 @@ That combination is the hosted machine missing the timing window, not a defect.
 Confirm it by comparing the two lanes **within one run** before suspecting a
 branch — `main` run
 [33809598271](https://github.com/popcre/ai-devops/actions/runs/33809598271) is a
-clean example on `main` with no pull request involved. Only `linux-offline` is a
-required check, so this does not block a merge.
+clean example on `main` with no pull request involved. Pull requests and merge
+groups are now blocked by `verification-closure`, which requires the applicable
+Linux, Windows, reviewer, and queued-head evidence without tying that closure
+to any one physical runner.
 
 Do not raise a timeout to make these pass; that discards the signal the two-lane
 split exists to preserve. The fail-closed removal of this overlap was delivered
