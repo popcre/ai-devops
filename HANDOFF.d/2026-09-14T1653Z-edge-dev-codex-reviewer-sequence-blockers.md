@@ -206,7 +206,14 @@ contract publication, provider assignment, PR, installation or database write:
 
 Integrate #394 consumer before #393: they edit the same owning files. Port
 semantic deltas onto then-current main; never copy old `.agent` evidence.
-Shared-db #2707/PR2749 were open; #2694/PR2750 retain #396 consumer obligations.
+Closeout refresh at 18:07 UTC: shared-db #2707/PR2749 remain open, but #2694
+is CLOSED and PR2750 is MERGED at `1c436f46a7ae4b9c0dde15bb9b6b11558c92bade`
+(PR head `0e5bfc4580e990fe5f26065028812ce48138be92`). Shared-db remote main was
+`cc6ed5fe50556c4ea9548e2a08694f957f7265b9`. The prepared #396 slice is still
+uncommitted; before any successor work, compare its exact semantic delta and
+acceptance against that landing. Do not reopen #2694, duplicate PR2750, or infer
+that the local candidate is fully superseded without that comparison. This is
+newly observed drift deferred to continuation, not a new repair started here.
 Old PR2749 mixes source and terminal work and is not a fresh approval.
 
 ### Later gates remain open
@@ -324,7 +331,8 @@ Qwen stale-base incident20260910T081507Z-edge-dev-qwen-1166 remains #393.
 8. Continue #271 only through supported containment gates. Keep it open if the
    platform still cannot deny outside reads/write/network while reading the
    allowed snapshot. Do not turn its external blocker into #337/#159 completion.
-9. Deliver #396 consumer follow-through and then #398 actual dispositions,
+9. Reconcile #396 consumer preparation with now-merged PR2750 first (see §3);
+   deliver only a proven remaining obligation, then #398 actual dispositions,
    installed matrix and bounded recurrence/legacy audit. Only then close #337;
    finish #166 with the other task's real evidence, waiter/runner obligations and
    final measured acceptance before #159. Gate: every remaining contract proven.
@@ -443,3 +451,28 @@ automation created; continuation is explicit after the peer handoff/user answer.
    current failed run, prepared code and expert recommendation. Step10 and both
    phase specifications require downstream re-reading and drift reporting.
    Older handoffs remain because their next-step acceptance is unfinished.
+
+## Session closeout check — September 14, 18:07 UTC
+
+- PR456 and PR457 are MERGED; their handoff/plan changes were verified on
+  origin/main, latest `8bb654660b76f79ef331c18c4a36fb80b7aa149f`.
+- No database/preview/production write, migration, author claim or marker was
+  owned here. Live marker2893 belongs to Claude and is untouched. Existing
+  repo-maintenance issue2707/PR2749 owns terminal/source continuation; closed
+  issue2694/merged PR2750 requires comparison, not duplicate intake.
+- All three agent blocks remain accurate. The two toolkit code trees are clean
+  with local-only commits; all three consumer trees retain exactly their named
+  two modified source/test files. Preserve these five worktrees, private review
+  reports, logs and candidate evidence for continuation. Do not delete old records.
+- Credential sweep: reviewed session inputs, owned prose/code deltas and all six
+  modified consumer files; no newly introduced credential or .env file found.
+  No vault write was needed. This is scoped to session-owned changes, not a
+  claim to have audited the machine's credential stores.
+- Documentation pass: GLM recommendation and full-plan drift were published in
+  PR457; the newly merged consumer dependency is corrected above. No installed
+  behavior changed during closeout, so no new runtime test or installation was
+  started. Prior exact-head tests/reviews remain evidence with the stated limits.
+- Clean merged prose-only worktrees may be removed after the final prose merge
+  and process/path checks. Keep every unmerged code/consumer worktree. The
+  surviving handoff on main is the continuation record; no background work or
+  automatic notification is promised.
