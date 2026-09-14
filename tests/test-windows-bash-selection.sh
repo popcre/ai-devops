@@ -8,7 +8,13 @@ MANIFEST="$TMP/manifest.json"
 pass=0; fail=0
 ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1" >&2; }
-check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+check() {
+  if eval "$2" >/dev/null 2>&1; then ok "$1"
+  else
+    bad "$1"
+    [ "$#" -lt 3 ] || cat "$3" >&2
+  fi
+}
 run() { AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$ROOT/tests/test-all.sh" "$@"; }
 
 help="$(bash "$ROOT/tests/test-all.sh" --help)"
@@ -180,6 +186,18 @@ if command -v pwsh >/dev/null 2>&1; then
   # Its PowerShell discovery must never invoke this repository's real suites.
   ps_fixture="$TMP/ps-fixture/tests"; mkdir -p "$ps_fixture"
   cp "$ROOT/tests/test-all.ps1" "$ROOT/tests/test-all.sh" "$ROOT/tests/lib-selection.sh" "$ps_fixture/"
+  # Assert on the actual exception message, not PowerShell's host-dependent
+  # colored/wrapped error display. Keep exit status and suite execution intact.
+  cat > "$ps_fixture/invoke-selection.ps1" <<'PS'
+param([string]$Shard, [switch]$WindowsPullRequest, [switch]$ExcludeReviewerSafety)
+try {
+  & "$PSScriptRoot/test-all.ps1" @PSBoundParameters
+  exit $LASTEXITCODE
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+PS
   cat > "$ps_fixture/test-alpha.ps1" <<'PS'
 Add-Content -LiteralPath $env:AI_TEST_EXEC_TRACE -Value 'POWERSHELL-alpha'
 exit 0
@@ -194,7 +212,7 @@ exit 0
 BASH
   export AI_TEST_EXEC_TRACE="$TMP/ps-execution.log"
   if command -v cygpath >/dev/null 2>&1; then AI_TEST_EXEC_TRACE="$(cygpath -m "$AI_TEST_EXEC_TRACE")"; fi
-  ps_run(){ AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ps_fixture/test-all.ps1" "$@"; }
+  ps_run(){ AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ps_fixture/invoke-selection.ps1" "$@"; }
   : > "$AI_TEST_EXEC_TRACE"
   ps_run -Shard 1/3 > "$TMP/ps-complete-1.log" 2>&1; ps_complete1=$?
   ps_run -Shard 2/3 > "$TMP/ps-complete-2.log" 2>&1; ps_complete2=$?
@@ -216,12 +234,12 @@ BASH
   : > "$AI_TEST_EXEC_TRACE"
   ps_run -Shard 1/999 > "$TMP/ps-oversized-selection.log" 2>&1; ps_oversized_rc=$?
   check 'oversized complete selection refuses before either language executes a suite' \
-    '[ "$ps_oversized_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "complete section count exceeds discovered suites" "$TMP/ps-oversized-selection.log"'
+    '[ "$ps_oversized_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "complete section count exceeds discovered suites" "$TMP/ps-oversized-selection.log"' "$TMP/ps-oversized-selection.log"
   jq '.windows_offline_shards=[["test-sec-a.sh"]]' "$MANIFEST" > "$TMP/incomplete-pr-selection.json"
   : > "$AI_TEST_EXEC_TRACE"
-  AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$TMP/incomplete-pr-selection.json" pwsh -NoProfile -File "$ps_fixture/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 1/1 > "$TMP/ps-incomplete-pr.log" 2>&1; ps_incomplete_pr_rc=$?
+  AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$TMP/incomplete-pr-selection.json" pwsh -NoProfile -File "$ps_fixture/invoke-selection.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 1/1 > "$TMP/ps-incomplete-pr.log" 2>&1; ps_incomplete_pr_rc=$?
   check 'incomplete PR selection refuses before either language executes a suite' \
-    '[ "$ps_incomplete_pr_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "do not cover the Windows lane exactly" "$TMP/ps-incomplete-pr.log"'
+    '[ "$ps_incomplete_pr_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "do not cover the Windows lane exactly" "$TMP/ps-incomplete-pr.log"' "$TMP/ps-incomplete-pr.log"
   unset AI_TEST_EXEC_TRACE
 fi
 
