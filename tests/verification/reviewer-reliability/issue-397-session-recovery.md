@@ -1,7 +1,8 @@
 # Issue #397: exact-session completion recovery
 
 This is the qualification record required by the reviewer reliability plan. It
-records the recovery slice under #337; it does not close #397 or the parent.
+records the completed recovery slice under #337. Parent #159 remains open for
+its later children.
 
 ## Root causes and repaired behavior
 
@@ -82,7 +83,7 @@ records the recovery slice under #337; it does not close #397 or the parent.
   32 checks with zero failures/skips; unknown legacy model provenance is not
   inferred from current configuration.
 
-## Outstanding qualification
+## Final integrated qualification
 
 ### DeepSeek local publication recovery
 
@@ -96,13 +97,11 @@ refusals can also be finalized locally as incomplete, with a nonzero result and
 ordinary explicit continuation preserved. Unknown transport outcomes and legacy
 markers lacking exact retained intent remain fenced rather than guessed.
 
-The owning offline recovery cases passed 25/0/0 and cover publication faults, changed response
+The owning offline recovery cases cover publication faults, changed response
 bytes and source inventories, caller mismatch, repeat finalization, stale
-formal source, HTTP refusal and explicit continuation. The source/identity
-subset passed 32/0/0 before the additional inventory-binding assertion. This
-slice still requires its final exact-head review, CI, installation and live
-qualification; the extraction helper preserves existing terminal parsing for
-the separate #394 native-status repair.
+formal source, HTTP refusal and explicit continuation. The final DeepSeek suite
+passed 131/0/0, including 26/0/0 focused recovery checks. The extraction helper
+preserves existing terminal parsing for the separate #394 native-status repair.
 
 The expired-deadline recovery regression passes: recovery makes one bounded
 GET observation before consulting the original polling deadline. A new terminal
@@ -119,12 +118,40 @@ Its existing incident and uncertain work lock remain open and untouched. Local
 leader state cannot establish remote cancellation. This is an unresolved
 qualification limitation, not a recovered result or permission to retry.
 
-Required CI, final exact-head independent review, merge, serialized installation,
-and governed Qwen/GLM live canaries remain outstanding for the final integrated
-head. Muse's full suite and final installed continuation proof are also pending.
-The wider #397 matrix still includes Kimi, Grok, Gemini, DeepSeek, two callers and
-repositories, and GLM service restart versus Muse process restart. Existing
-provider tests must be reused; no replacement generic harness is introduced.
+PR #447 landed the provider recovery matrix as
+`24279f17b960f20e7731bd80e8fd82e6dec5bbbe`. Its exact source head
+`6bf539b9004c97e8207bcdc0da60c67602b79563` received independent APPROVE;
+required run `34837962149` and merge-queue run `34842163354` passed. Installed
+live canaries then exposed two defects: protected DeepSeek re-entry dropped the
+governed run identity, and an ordinary retained DeepSeek turn could remain
+fenced after source movement. PR #453 repaired both and landed as
+`3098a89a65df5b5de2c00debc0653e7df0871c85`. Its exact head
+`cbfec6023ef4199c10f09a06f93f54891cd41ddb` received independent APPROVE;
+required run `34848157010` and merge-queue run `34852705794` passed. The
+canonical installation at `3098a89a` passed the machine-tools doctor.
+
+Installed governed live evidence on exact `3098a89a` proves:
+
+- Qwen retained a paid terminal result when local report publication failed,
+  then `finalize` published it without provider resubmission.
+- GLM retained a completed turn across a service restart, and `recover`
+  published the same exact-session result without replay.
+- Muse returned APPROVE, then a separate wrapper process continued the same
+  repository/caller/model/source conversation and returned APPROVE again.
+- DeepSeek preserved a formal session across an initial durable BLOCKED result,
+  accepted the requested large attachment evidence in the same conversation,
+  and returned exact-head APPROVE. The attachment set exceeded the Windows
+  command-line ceiling, proving protected attachment transport rather than
+  inline argument transport.
+
+The exact suites exercise Kimi, Grok, Gemini, DeepSeek, Qwen, GLM and Muse
+restart/continuation, two repository/caller identities, concurrent names and
+changed-identity refusal. They reuse each provider's owning tests; no generic
+replacement harness was introduced. DeepSeek incident
+`20260911T005524Z-edge-dev-deepseek-294011` has an append-only RESOLVED record
+with the live evidence. Qwen incident
+`20260910T081507Z-edge-dev-qwen-1166` remains open because its stale PR-base
+symptom belongs to #393 source-identity acceptance, not this recovery slice.
 
 Legacy GLM records without an original invocation binding and prior-assistant
 watermark remain unknown. A session ID or a unique timestamp is not sufficient
