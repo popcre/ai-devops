@@ -85,6 +85,7 @@ reviewer_event_guard(){
   name="AI_${provider^^}_REVIEW_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   [ "$provider" != kimi ] || [ "${1:-}" != start ] || operation=async-submission
   [ "$provider" != qwen ] || [ "${1:-}" != finalize ] || operation=local-finalization
+  [ "$provider" != deepseek ] || [ "${1:-}" != finalize ] || operation=local-finalization
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
