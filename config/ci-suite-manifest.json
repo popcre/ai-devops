@@ -155,8 +155,10 @@
       "test-ai-kimi.sh"
     ],
     [
+      "test-ai-deepseek-agent.sh"
+    ],
+    [
       "test-ai-adopt-globals.sh",
-      "test-ai-deepseek-agent.sh",
       "test-ai-gemini-usage.sh",
       "test-ai-grok-implement.sh",
       "test-ai-install-skills.sh",
@@ -181,5 +183,5 @@
       "test-ai-qwen.sh"
     ]
   ],
-  "windows_offline_powershell_shard": 2
+  "windows_offline_powershell_shard": 3
 }
