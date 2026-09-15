@@ -46,7 +46,12 @@ ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID --reason expected-r
 ```
 
 Allowed reasons are `expected-refusal`, `quota-exhaustion`, `user-cancellation`,
-`application-failure`, `duplicate-event`, and `in-progress`. A nonzero wrapper
+`application-failure`, `duplicate-event`, `in-progress`, and
+`evidence-unavailable`. The last reason is terminal for the frozen candidate and
+requires both exact provenance through `--evidence` and an explicit retained
+obligation through `--carry-forward`; it does not reconstruct or silently drop
+missing history, and it does not create a duplicate candidate in the next
+bounded round. A nonzero wrapper
 exit is a candidate, not an automatic diagnosis. `in-progress` applies only to
 an invocation without a terminal event and needs current worker evidence. It
 remains carried into subsequent rounds until a terminal event accounts for it;

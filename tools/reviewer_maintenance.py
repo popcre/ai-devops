@@ -456,8 +456,13 @@ class Maintenance:
             else:
                 require(not candidate.get("existing_issue_id"), "existing incidents must use their resolution workflow")
                 require(reason in {"expected-refusal", "quota-exhaustion", "user-cancellation",
-                                   "application-failure", "duplicate-event", "in-progress"}, "unknown non-defect reason")
-                require(not carry, "use incident carry-forward for unresolved repairs")
+                                   "application-failure", "duplicate-event", "in-progress",
+                                   "evidence-unavailable"}, "unknown non-defect reason")
+                if reason == "evidence-unavailable":
+                    require(carry, "evidence-unavailable needs an explicit carry-forward record")
+                    record.update(carry_forward=self.evidence(carry))
+                else:
+                    require(not carry, "use incident carry-forward for unresolved repairs")
                 if reason == "in-progress":
                     require(candidate["classification"] == "completion-unproven", "only unfinished invocations can be in progress")
                 record.update(kind="non-defect", reason=reason, evidence=self.evidence(evidence))
@@ -555,10 +560,14 @@ class Maintenance:
             else:
                 require(outcome.get("kind") == "non-defect" and outcome.get("reason") in
                         {"expected-refusal", "quota-exhaustion", "user-cancellation", "application-failure",
-                         "duplicate-event", "in-progress"} and outcome.get("evidence"), "invalid non-defect outcome")
+                         "duplicate-event", "in-progress", "evidence-unavailable"} and
+                        outcome.get("evidence"), "invalid non-defect outcome")
                 if outcome["reason"] == "in-progress":
                     require(candidate["classification"] == "completion-unproven", "invalid in-progress classification")
                     carry.append({**candidate, "carry_kind": "in-progress"})
+                if outcome["reason"] == "evidence-unavailable":
+                    require(outcome.get("carry_forward"),
+                            "evidence-unavailable requires explicit carry-forward provenance")
             for field in ("evidence", "carry_forward"):
                 if field in outcome:
                     require(self.evidence(outcome[field]["reference"]) == outcome[field], "outcome evidence changed")

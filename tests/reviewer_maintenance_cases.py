@@ -246,6 +246,21 @@ esac
         with self.assertRaises(m.Blocked):
             self.engine.outcome(record["id"], record["candidates"][0]["id"], reason="expected-refusal")
 
+    def test_evidence_unavailable_requires_provenance_and_terminal_carry_forward(self):
+        self.invocation()
+        record = self.engine.start()
+        candidate = record["candidates"][0]
+        with self.assertRaisesRegex(m.Blocked, "explicit carry-forward"):
+            self.engine.outcome(record["id"], candidate["id"], reason="evidence-unavailable",
+                                evidence="proof.txt")
+        self.engine.outcome(record["id"], candidate["id"], reason="evidence-unavailable",
+                            evidence="proof.txt", carry="proof.txt")
+        completed = self.complete(record)
+        outcome = completed["outcomes"][0]
+        self.assertEqual(outcome["reason"], "evidence-unavailable")
+        self.assertIn("carry_forward", outcome)
+        self.assertEqual(completed["carry_forward"], [])
+
     def test_conflicting_outcome_refused(self):
         self.invocation()
         record = self.engine.start()
