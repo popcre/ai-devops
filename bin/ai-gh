@@ -26,7 +26,8 @@
 #   AI_GH_MIN_SPACING_SECONDS  gap between any two calls (default 3)
 #   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
 #   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
-#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 900)
+#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 300; no call holds it that long)
+#   AI_GH_NO_WAIT_LOCK_SECONDS with AI_GH_NO_WAIT=1, max lock wait before exit 75 (default 10)
 #   AI_GH_QUOTA_PROBE_SECONDS  hourly-budget probe cache age (default 300; "off" disables)
 #   AI_GH_QUOTA_PAUSE_PCT      pause machine-wide until reset below this % remaining (default 20)
 #   AI_GH_QUOTA_SLOW_PCT / AI_GH_QUOTA_SLOW_SPACING  below 40% remaining, space calls 30s
@@ -42,7 +43,7 @@ set -uo pipefail
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
 BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
-STALE="${AI_GH_LOCK_STALE_SECONDS:-900}"
+STALE="${AI_GH_LOCK_STALE_SECONDS:-300}"
 LOCK="$STATE/lock.d"
 say(){ printf 'ai-gh: %s\n' "$*" >&2; }
 isnum(){ case "$1" in ''|*[!0-9]*) return 1;; esac; }
@@ -74,23 +75,42 @@ now(){ date +%s; }
 readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
 
 HELD=0
-release(){ [ "$HELD" = 1 ] && rm -rf "$LOCK"; HELD=0; }
+TOKEN="$$.$RANDOM.$RANDOM.$(date +%s)"
+# Reclaim by atomic rename to a private quarantine name, never rm of the live
+# path: two waiters cannot both delete it, and a new owner is never removed.
+quarantine(){ local q="$LOCK.stale.$$.$RANDOM"; mv "$LOCK" "$q" 2>/dev/null && rm -rf "$q"; }
+# Release only a lock this process still owns (token match).
+release(){
+  if [ "$HELD" = 1 ]; then
+    local info; info="$(cat "$LOCK/owner" 2>/dev/null)"
+    [ "${info##* }" = "$TOKEN" ] && quarantine
+  fi
+  HELD=0
+}
 trap release EXIT
 trap 'release; exit 130' INT TERM
+# Lock liveness is age-based only: pid checks are unreliable across Git Bash,
+# MSYS and WSL pid namespaces sharing one state directory.
 acquire(){
+  local waited=0
   while :; do
     if mkdir "$LOCK" 2>/dev/null; then
-      echo "$$ $(now)" > "$LOCK/owner"; HELD=1; return 0
+      echo "$$ $(now) $TOKEN" > "$LOCK/owner"; HELD=1; return 0
     fi
-    local info pid ts
-    info="$(cat "$LOCK/owner" 2>/dev/null)"; pid="${info%% *}"; ts="${info##* }"
-    if isnum "${ts:-}" && [ $(( $(now) - ts )) -gt "$STALE" ]; then
-      say "removing abandoned lock held by pid $pid since $ts"; rm -rf "$LOCK"; continue
+    local info ts age
+    info="$(cat "$LOCK/owner" 2>/dev/null)"; ts="$(echo "$info" | awk '{print $2}')"
+    if isnum "${ts:-}"; then
+      age=$(( $(now) - ts ))
+      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; quarantine; continue; fi
+    else
+      # Owner never written (holder killed between mkdir and write): use the directory age.
+      age=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
+      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; quarantine; continue; fi
     fi
-    if isnum "${pid:-}" && ! kill -0 "$pid" 2>/dev/null && [ -n "$ts" ] && [ $(( $(now) - ts )) -gt 5 ]; then
-      rm -rf "$LOCK"; continue
+    if [ "${AI_GH_NO_WAIT:-0}" = 1 ] && [ "$waited" -ge "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" ]; then
+      say "another GitHub call holds the throttle lock; not waiting (AI_GH_NO_WAIT=1)."; exit 75
     fi
-    sleep 1
+    sleep 1; waited=$(( waited + 1 ))
   done
 }
 
@@ -121,7 +141,7 @@ QUOTA_PROBE="${AI_GH_QUOTA_PROBE_SECONDS:-300}"
 PAUSE_PCT="${AI_GH_QUOTA_PAUSE_PCT:-20}"
 SLOW_PCT="${AI_GH_QUOTA_SLOW_PCT:-40}"
 SLOW_SPACING="${AI_GH_QUOTA_SLOW_SPACING:-30}"
-redact(){ sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/[REDACTED]/g; s/^([<>]? *[Aa]uthorization:).*/\1 [REDACTED]/; s/(token|password|secret)([=: ]+)[^ ]+/\1\2[REDACTED]/Ig'; }
+redact(){ sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/[REDACTED]/g; s/([Aa]uthorization[=:] *).*/\1[REDACTED]/; s/([Bb]earer|[Bb]asic) +[A-Za-z0-9._~+\/=-]+/\1 [REDACTED]/g; s/(token|password|secret)([=: ]+)[^ ]+/\1\2[REDACTED]/Ig'; }
 probe_quota(){
   local q
   q="$("$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
@@ -134,6 +154,8 @@ if [ "$QUOTA_PROBE" != off ]; then
   if ! isnum "${qts:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ]; then
     probe_quota
     { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
+    # The probe is a request too: keep normal spacing before the real call.
+    [ "$SPACING" -gt 0 ] && sleep "$SPACING"
   fi
   if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
     pct=$(( qrem * 100 / qlim ))
@@ -145,12 +167,16 @@ if [ "$QUOTA_PROBE" != off ]; then
     fi
     if [ "$pct" -lt "$SLOW_PCT" ]; then
       gap=$(( $(readnum "$STATE/last_call") + SLOW_SPACING - $(now) ))
+      if [ "$gap" -gt 0 ] && [ "${AI_GH_NO_WAIT:-0}" = 1 ]; then
+        say "hourly GitHub budget below ${SLOW_PCT}%; next call allowed in ${gap}s, not waiting (AI_GH_NO_WAIT=1)."; exit 75
+      fi
       [ "$gap" -gt 0 ] && sleep "$gap"
     fi
     printf '%s %s %s %s\n' "$qts" $(( qrem > 0 ? qrem - 1 : 0 )) "$qlim" "$qreset" > "$STATE/quota"
   fi
 fi
 
+qreset_cached="${qreset:-}"
 err="$(mktemp)"
 now > "$STATE/last_call"
 "$REAL" "$@" 2> "$err"
@@ -162,7 +188,11 @@ if [ "$rc" -ne 0 ]; then
   # credentials redacted. gh does not surface response headers on failure, so
   # the header snapshot comes from a free `rate_limit` request made right after.
   hdr=''
-  [ "$QUOTA_PROBE" != off ] && hdr="$("$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
+  # Header snapshot: one request, never after a SECONDARY limit refusal (it would
+  # add to the burst GitHub is already refusing).
+  secondary=0
+  grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
+  [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ] && hdr="$("$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
   {
     printf '=== %s rc=%s args=%s\n' "$(date -u +%FT%TZ)" "$rc" "$*"
     printf -- '--- status: %s\n' "$(grep -Eo 'HTTP [0-9]{3}' "$err" | head -1)"
@@ -176,7 +206,10 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
   kind=secondary
   if grep -Eiq 'API rate limit exceeded|rate limit exceeded for' "$err"; then
     kind=primary
-    [ "$QUOTA_PROBE" != off ] && probe_quota && read -r _ _ _ qreset < "$STATE/quota" && isnum "$qreset" && [ $(( qreset - $(now) )) -gt "$wait" ] && wait=$(( qreset - $(now) ))
+    # Window reset from the header snapshot already taken, else the cached quota; no new request.
+    qreset="$(printf '%s\n' "$hdr" | grep -Ei '^x-ratelimit-reset:' | grep -Eo '[0-9]+' | head -1)"
+    isnum "${qreset:-}" || qreset="${qreset_cached:-}"
+    isnum "${qreset:-}" && [ $(( qreset - $(now) )) -gt "$wait" ] && wait=$(( qreset - $(now) ))
   fi
   new=$(( $(now) + wait ))
   [ "$new" -gt "$(readnum "$STATE/backoff_until")" ] && echo "$new" > "$STATE/backoff_until"

@@ -15,7 +15,7 @@ case "${FAKE_MODE:-ok}" in
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
   quota) if [ "$*" = "api rate_limit --jq [.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv" ]; then printf '%s\t5000\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
-  primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Github-Request-Id: F95F:1E2E31\n'; elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
+  primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n' $(( $(date +%s) + 3000 )); elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
   counter) n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"; [ "$n" -ge 2 ] && echo '{"status":"completed"}' || echo '{"status":"in_progress"}' ;;
 esac
 echo "end $(date +%s%N)" >> "$FAKE_LOG"
@@ -77,9 +77,21 @@ FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api nope >/dev/null 2>&1
 check 'ordinary failures are logged too' "grep -q 'args=api nope' '$TMP/state/failures.log' && grep -q 'HTTP 404: Not Found' '$TMP/state/failures.log'"
 rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
-# Stale lock from a dead process is recovered.
-mkdir -p "$TMP/state/lock.d"; echo "999999 $(( $(date +%s) - 60 ))" > "$TMP/state/lock.d/owner"
-check 'abandoned lock from a dead process is recovered' "timeout 20 '$GH' z"
+# Stale lock is recovered by age; a young lock with a live-looking owner is not stolen.
+mkdir -p "$TMP/state/lock.d"; echo "999999 $(( $(date +%s) - 400 )) tok" > "$TMP/state/lock.d/owner"
+check 'abandoned lock older than the stale limit is recovered' "timeout 20 '$GH' z"
+mkdir -p "$TMP/state/lock.d"; : > "$TMP/state/lock.d/owner"; touch -d '@'$(( $(date +%s) - 120 )) "$TMP/state/lock.d"
+check 'lock with an empty owner record is recovered' "timeout 20 '$GH' z"
+mkdir -p "$TMP/state/lock.d"; echo "999999 $(date +%s) other" > "$TMP/state/lock.d/owner"
+AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
+check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
+rm -rf "$TMP/state/lock.d"
+check 'release never removes a lock owned by someone else' "grep -q 'TOKEN' '$GH' && grep -q 'quarantine' '$GH'"
+check 'redaction covers Bearer and inline Authorization' "[ \"\$(printf 'args=api -H Authorization: Bearer eyJabc.def\n' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'args=api -H Authorization: [REDACTED]' ] && [ \"\$(echo 'x Bearer eyJabc' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'x Bearer [REDACTED]' ]"
+: > "$FAKE_LOG"; rm -f "$TMP/state/backoff_until"
+FAKE_MODE=secondary AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" pr view 9 >/dev/null 2>&1
+check 'no header snapshot request after a secondary refusal' "! grep -q 'api --include' '$FAKE_LOG'"
+rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
 # ai-gh-wait
 AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
