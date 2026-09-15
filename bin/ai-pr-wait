@@ -82,9 +82,22 @@ THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo
 if [ -x "$THROTTLE" ]; then
   export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
-    export AI_GH_STATE_DIR="${AI_GH_STATE_DIR:-$(mktemp -d)}" AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
+    if [ -z "${AI_GH_STATE_DIR:-}" ]; then
+      AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
+      trap 'rm -rf "$TMP_STATE_DIR"' EXIT
+    fi
+    export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
   fi
   GH_RUNNER="$THROTTLE"
+  # Allowance = the longest the throttle can spend before gh starts (lock wait +
+  # spacing). Without it the supervisor could kill a healthy call and leave the
+  # shared lock behind.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=2}"
+  export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
+  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + ${AI_GH_MIN_SPACING_SECONDS:-3} ))
+else
+  printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
+  THROTTLE_ALLOWANCE_SECONDS=0
 fi
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
@@ -116,7 +129,10 @@ bounded_gh() {
   # 125 means the overall deadline expired before any GitHub process started;
   # 124 remains the supervisor's genuine request-timeout result.
   [ "$remaining" -gt 0 ] || return 125
-  limit="$API_TIMEOUT_SECONDS"
+  # The throttle may spend a few seconds acquiring the shared lock or honouring
+  # spacing before gh even starts; add that allowance so a healthy call is never
+  # killed as hung (a kill would leave the shared lock behind).
+  limit=$(( API_TIMEOUT_SECONDS + THROTTLE_ALLOWANCE_SECONDS ))
   [ "$limit" -le "$remaining" ] || limit="$remaining"
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
     printf '%s\n' "$GH_RUNNER" > "$AI_PR_WAIT_TEST_TRACE.resolved"

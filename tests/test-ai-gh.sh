@@ -86,7 +86,24 @@ mkdir -p "$TMP/state/lock.d"; echo "999999 $(date +%s) other" > "$TMP/state/lock
 AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
 check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
 rm -rf "$TMP/state/lock.d"
-check 'release never removes a lock owned by someone else' "grep -q 'TOKEN' '$GH' && grep -q 'quarantine' '$GH'"
+# Behavioural: a holder's release must not remove a lock that now belongs to another owner.
+mkdir -p "$TMP/state/lock.d"; echo "1 $(date +%s) newowner" > "$TMP/state/lock.d/owner"
+AI_GH_STATE_DIR="$TMP/state" bash -c 'HELD=1; TOKEN=mine; LOCK="'"$TMP"'/state/lock.d"; quarantine(){ mv "$LOCK" "$LOCK.q" 2>/dev/null && rm -rf "$LOCK.q"; }; info="$(cat "$LOCK/owner")"; [ "${info##* }" = "$TOKEN" ] && quarantine; true'
+check 'release leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
+rm -rf "$TMP/state/lock.d"
+# Command-line redaction: secret values passed as flags never reach the log.
+: > "$TMP/state/failures.log"
+FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api repos/x -f password=hunter2 --body 's3cr3tvalue' >/dev/null 2>&1
+FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" secret set MY_KEY --body 'topsecret42' >/dev/null 2>&1
+check 'flag values and secret-set arguments are never logged' "! grep -qE 'hunter2|s3cr3tvalue|topsecret42|MY_KEY' '$TMP/state/failures.log' && grep -q 'args=secret set' '$TMP/state/failures.log'"
+check 'a plain token message stays diagnosable' "[ \"\$(echo 'token in keyring is invalid' | bash -c \"\$(sed -n '/^redact()/p' '$GH'); redact\")\" = 'token in keyring is invalid' ]"
+# Slow mode below 40% remaining.
+rm -f "$TMP/state/quota" "$TMP/state/backoff_until"; echo 0 > "$TMP/state/last_call"
+FAKE_MODE=quota FAKE_REMAINING=1500 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_QUOTA_SLOW_SPACING=30 AI_GH_NO_WAIT=1 "$GH" pr view 7 >/dev/null 2>&1; rc=$?
+FAKE_MODE=quota FAKE_REMAINING=1500 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_QUOTA_SLOW_SPACING=30 AI_GH_NO_WAIT=1 "$GH" pr view 8 >/dev/null 2>&1; rc2=$?
+check "below 40% remaining the next call is spaced out (NO_WAIT gives up with 75)" "[ $rc -eq 0 ] && [ $rc2 -eq 75 ]"
+rm -f "$TMP/state/quota" "$TMP/state/backoff_until"
+"$WAIT" --interval >/dev/null 2>&1; check 'an option without a value is refused, not looped on' "[ $? -eq 3 ]"
 check 'redaction covers Bearer and inline Authorization' "[ \"\$(printf 'args=api -H Authorization: Bearer eyJabc.def\n' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'args=api -H Authorization: [REDACTED]' ] && [ \"\$(echo 'x Bearer eyJabc' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'x Bearer [REDACTED]' ]"
 : > "$FAKE_LOG"; rm -f "$TMP/state/backoff_until"
 FAKE_MODE=secondary AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" pr view 9 >/dev/null 2>&1

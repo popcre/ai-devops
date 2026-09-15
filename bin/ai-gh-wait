@@ -21,9 +21,14 @@ MIN=300
 INTERVAL=300; TIMEOUT=120; REGEX=''
 while [ $# -gt 0 ]; do
   case "$1" in
-    --until-regex) REGEX="${2:-}"; shift 2 ;;
-    --interval) INTERVAL="${2:-}"; shift 2 ;;
-    --timeout-minutes) TIMEOUT="${2:-}"; shift 2 ;;
+    --until-regex|--interval|--timeout-minutes)
+      [ $# -ge 2 ] || { say "$1 needs a value"; exit 3; }
+      case "$1" in
+        --until-regex) REGEX="$2" ;;
+        --interval) INTERVAL="$2" ;;
+        --timeout-minutes) TIMEOUT="$2" ;;
+      esac
+      shift 2 ;;
     --) shift; break ;;
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) say "unknown option $1"; exit 3 ;;
