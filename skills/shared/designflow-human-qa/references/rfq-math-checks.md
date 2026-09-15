@@ -4,6 +4,11 @@ Treat RFQ mathematics as a business-critical workflow. Do not decide correctness
 from whether a cell changed. Calculate the expected result independently and
 compare displayed and persisted values.
 
+Unless the screen labels a different rule, calculate margin as
+`(selling price - applicable cost) / selling price`. If the screen does not state
+the royalty basis or margin rule, report that missing business rule as a finding;
+do not invent a basis or silently choose one.
+
 ## Required sourcing-manager pass
 
 Use a disposable licensed RFQ with simple, non-zero inputs. Record the before
