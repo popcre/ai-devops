@@ -89,6 +89,29 @@ ELAPSED=$SECONDS
 check "a fast successful request returns without an orphan timer" \
   "test -f '$TMP/fast-called' && test '$RC' -eq 0 && test '$ELAPSED' -lt 5 && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit abc123' && ! grep -q '( sleep \"\$limit\"' '$CMD'"
 
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+printf '%s\n' "$(( count + 1 ))" > "$AI_PR_WAIT_TEST_MARKER"
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[]}}}}]}}}}}'
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 4 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+rm -f "$TMP/clock" "$TMP/deadline-called"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/deadline-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+check "deadline after a proven pending read is not mislabeled as an API failure" \
+  "test '$RC' -eq 2 && test \"$(cat "$TMP/deadline-called")\" -eq 1 && printf '%s' \"$OUT\" | grep -q 'still in progress after 1m' && ! printf '%s' \"$OUT\" | grep -q 'could not read PR'"
+
 check "it exits on an ejection instead of waiting" \
   "grep -q 'EJECTED from the merge queue' '$CMD'"
 check "it exits on a failing check instead of waiting" \

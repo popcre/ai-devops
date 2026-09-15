@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -uo pipefail
-# Issue #166 queue canary: this comment intentionally changes no test behavior.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 fast_workflow="$ROOT/.github/workflows/fast-classifier.yml"
