@@ -37,9 +37,12 @@ independent hosted machines (issue #210), while `windows-reviewer-safety` requir
 Grok proof. A qualified-pool diagnostic is available only on an explicit full
 manual run. The section boundaries live
 in `config/ci-suite-manifest.json`, and `tests/test-all.sh` refuses to run a
-section unless the declared sections reconstitute the lane exactly. Scheduled,
-manual, and qualification runs ignore the sections entirely and retain the
-complete hosted Windows Bash matrix in `windows-offline-complete`. A single
+section unless the declared sections reconstitute the lane exactly. Scheduled
+and full manual runs use `windows-offline-complete` on five independent hosted
+machines: all discovered Bash suites are sorted and partitioned round-robin,
+and section 3 runs all PowerShell suites exactly once. This complete mode does
+not use the reduced pull-request manifest. Qualification and no-argument local
+entrypoints retain their serial behavior. A single
 aggregate job keeps the stable name `windows-offline` and fails closed on any
 lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning both unchanged suites

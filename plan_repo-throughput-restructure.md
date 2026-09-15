@@ -214,7 +214,8 @@ These are locked unless new evidence invalidates their reason.
 - One outcome parent (#159), one nested reviewer programme (#337), independently verifiable coding children, and final cutover #166; #89/#98/#112 are historical sources.
 - Preserve assertions/capabilities; fix reliability before required-check renaming.
 - Separate fast workflow; coarse categories now; keep `skills/` verified.
-- Scheduled complete matrix includes unsplit Windows Bash.
+- Scheduled complete matrix retains every Windows Bash suite; current complete
+  mode partitions that full inventory over five independent hosts.
 - Ruleset cutover runs last and preserves `OrganizationAdmin` recovery.
 
 ### Bounded implementer judgment
@@ -224,15 +225,30 @@ These are locked unless new evidence invalidates their reason.
 - Choose the smallest queue lever reaching p95 without reduced coverage.
 - Repair similar reviewer races within #160 when bounded; otherwise create a named sub-issue before closing it.
 
-No owner decision is open. The user authorized this holistic plan and issue reorganization. Safety reduction or production infrastructure changes require new authority.
+The user authorized this holistic plan and issue reorganization. The current
+#394 release decision is recorded in section0 of the linked continuation
+handoff: preserve legacy answers while withholding approval authority when
+original error evidence is missing. Safety reduction or production
+infrastructure changes require new authority.
 
 ## 9. Execution plan
 
 At the end of every phase, re-read every downstream phase through final #166
 and #159 closure, together with the reviewer programme plan. Record any changed
 assumption, interface, identifier, authority or evidence before proceeding.
-September 14 continuation: the reviewer-sequence handoff records #397 first,
-its cancelled full run and unshipped scheduling repair. Historical references
+September 14 continuation: the reviewer-sequence handoff records #397 first.
+PR459 resolved the separate merge-policy blocker; PR460's complete-mode
+partition and PR461's launcher repair have landed. The first partitioned run
+completed all75 Bash and18 PowerShell suites within existing bounds, exposing
+two failures repaired in merged PR462 at e2985684. Repaired complete run34905839047
+passed on the identical Git tree:75 Linux suites, all75 Windows Bash and18
+PowerShell suites, and the completed hosted reviewer fallback. Serialized
+installation, exact source hashes and ordinary installed preflight passed.
+#397's recovery slice is accepted; the parent programme remains open.
+The #396 consumer preparation exactly matches merged shared-db PR2750 and must
+not be reimplemented. GLM5.3's #394 legacy-Qwen recommendation still needs the
+documented owner decision; #271/#398 and final #166/#159 gates remain distinct.
+Historical references
 below to an unsplit complete matrix describe the baseline, not a prohibition on
 the reviewed complete-mode partition: preserve all coverage and require actual
 full hosted completion before accepting that repair. #166 consumes completed
