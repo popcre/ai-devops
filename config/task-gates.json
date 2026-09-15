@@ -532,9 +532,7 @@
           "required": [
             "exact-resource-and-action-authorization"
           ],
-          "forbidden_actions": [
-            "production"
-          ]
+          "forbidden_actions": []
         }
       }
     }

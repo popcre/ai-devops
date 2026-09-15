@@ -105,6 +105,16 @@ infra_json="$(explain "$TMP/infra" main.tf)"
 check 'infrastructure retains plan and exact-resource authorization' "jq -e '.observed_class==\"infrastructure\" and ([\"read-only-baseline\",\"reviewed-plan\",\"exact-resource-owner-authorization\"]- .required_gates|length==0)' <<<\"\$infra_json\""
 check 'infrastructure fixture refuses apply entry point' "rc '$TMP/infra' 3 check --before infrastructure"
 
+# The Ansible owner explicitly authorized the exact /worksp/ai-devops repair.
+# Its repository keeps exact-resource authorization but may now reach the
+# serialized production workflow that applies the reviewed change.
+new_repo "$TMP/ansible" u2giants/ansible
+start "$TMP/ansible" production
+mkdir -p "$TMP/ansible/roles/fixture/tasks"; printf '%s\n' '---' > "$TMP/ansible/roles/fixture/tasks/main.yml"
+ansible_json="$(explain "$TMP/ansible" roles/fixture/tasks/main.yml)"
+check 'authorized Ansible work retains exact resource-and-action authorization' "jq -e '.observed_class==\"infrastructure\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)' <<<\"\$ansible_json\""
+check 'authorized Ansible work may enter its serialized production workflow' "rc '$TMP/ansible' 0 check --before production"
+
 # 9. Oracle production is allowed only when explicitly declared at production strength.
 new_repo "$TMP/oracle" u2giants/theoracle
 write_policy "$TMP/oracle" '{"schema_version":1,"paths":[{"glob":".github/workflows/**","class":"deployment"}],"gates":{"deployment":{"required":["repository-workflow-compliance","managed-platform-release-review","exact-owner-action-authorization"],"forbidden_actions":[]}}}'
