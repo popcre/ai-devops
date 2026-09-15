@@ -10,6 +10,15 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 ## STATUS — implementation, not planning progress
 
+**2026-09-15 completion:** #271 passed the reduced native-Windows gate with
+marker/diff reading, source-write refusal, sealed exact-head identity, and a
+substantive REJECT verdict. #398 added terminal evidence-unavailable handling in
+merge `c95ecc72838de98f493327df3be52eff3f033e2a`, accounted the frozen 198-entry
+round and bounded successors with zero blockers, and recorded all nine adapters.
+Only governed-and-installed GLM, Grok, and Muse received live calls; all three
+returned substantive exact-head APPROVE verdicts. Every nested child and #337
+is closed; #166 subsequently merged through the protected queue as `d49100a2`.
+
 **2026-09-11 delivery checkpoint:** #417's failed landing-evidence job was a fail-closed timing race: its required pull-request run was still queued, not failed. #333 merged as `d2e4327d9ef5d2b80219a874e4a4a605b2a19595`; #395 merged as `972d03b601dd18815627e1d268f3a7375516820b`. Both passed their product and fallback gates, received exact-head independent approval, were installed from current `main`, and have live retained-result proof. #395's 33 frozen-round evidence gaps are preserved as incidents with repair evidence; their unknowable historical causes were not inferred. The round remains open for #398, which still runs last inside #337; #166 remains last for #159. #271's private LPAC prototype is not production qualification.
 
 | Coding owner | State | Updated | Required evidence before complete |
@@ -19,10 +28,10 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, installed recovery proof and 33 preserved incident resolutions](tests/verification/reviewer-reliability/issue-395-durable-evidence.md) |
 | [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, scoped live proof and incident reconciliation](tests/verification/reviewer-reliability/issue-396-scoped-admission.md) |
 | [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Complete; merged, installed and full current-source acceptance passed | 2026-09-14 | [Exact reviews, CI/queue, installed recovery and full coverage proof](tests/verification/reviewer-reliability/issue-397-session-recovery.md); PR460/461/462 landed through e2985684; successful run34905839047 has the identical Git tree,75 Linux suites,75 distinct Windows Bash suites,18 PowerShell suites and completed hosted reviewer proof; installed ordinary preflight and failure-path checks passed |
-| [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only review | Open; owner removed outside-read/network-denial gates | 2026-09-15 | Marker read and source-write denial proven; sealed exact-head substantive live review pending |
+| [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only review | Complete | 2026-09-15 | Marker/diff read, source-write refusal, sealed exact head/digest, and substantive live REJECT; retired environment gates were not rerun |
 | [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Complete; merged, installed and live verified | 2026-09-11 | [Pinned semantics, exact review, CI, installed source and retained-result proof](tests/verification/reviewer-reliability/issue-333-truthful-usage.md); no compaction changes |
 | [#169](https://github.com/popcre/ai-devops/issues/169) shared wrapper infrastructure | Installed acceptance complete | 2026-09-11 | [Installed hash, fixture adapter, both migrated launcher checks and incident audit](tests/verification/reviewer-reliability/issue-169-installed-primitives.md); allocation/recovery remain #396/#397 |
-| [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Open; runs last inside #337 | 2026-09-15 | All 198 candidates dispositioned by exact-evidence classification, resolution, partial carry-forward, or terminal evidence-unavailable with provenance; all nine adapter rows recorded, with live installed checks only for adapters evidenced as enabled from the governed allocation state and inspected installed configuration, and exact disabled/unsupported interface evidence with zero provider calls otherwise; historical candidates remain dispositioned regardless of current enabled state; bounded recurrence scan |
+| [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Complete | 2026-09-15 | Frozen 198/198 accounted; bounded accumulated 617/617 accounted; immediate interval had no new completed failure, with 17 explicit partial carries and one independently active worker; nine adapter rows and three enabled live verdicts recorded |
 
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 

@@ -4,25 +4,29 @@
 
 **Parent issue:** [#159](https://github.com/popcre/ai-devops/issues/159)
 
-2026-09-11: #396 is complete. [Exact-head review, CI, merge, installation,
-live proof and incident reconciliation](tests/verification/reviewer-reliability/issue-396-scoped-admission.md)
-all passed. This preserves #398's frozen reconciliation and #166's final gate.
+2026-09-15: the programme is complete. #271, #398, and #337 closed with reduced
+reviewer acceptance; #166's exact-head repair and queue canary merged as
+`d49100a26ff622c9015b73fca67d881c9fe1b92c`. [Final ruleset, timing, queue,
+recovery, and origin/main evidence](tests/verification/repo-throughput/issue-166-final-cutover.md)
+all passed without a ruleset mutation or new injected failure.
 
 **Replacement authored:** 2026-08-28 by Codex on `edge-dev`
 
 **Source baseline:** `9a77ce67e492316f457b78fb3e9b8ce7d332995b` on `main`
 
-**Active handoff:** [`HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md`](HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md)
+**Active handoff:** none. The final #159 continuation handoff is retired in the
+completion commit; older handoffs remain historical records in Git history.
 
 This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. #159 now has three clear workstreams: completed CI/queue throughput children, reviewer reliability programme #337, and final cutover #166.
 
 ## STATUS — read this first
 
-**2026-09-11 closeout checkpoint:** #159 remains open. #396 merged through PR
-#416 as `a031c1de77a11bbf16fe5be8699d78dfdc6233e9`, passed exact-head review,
-PR-head CI `34646058019`, merge-group run `34650896712`, canonical installation,
-installed live proof, and incident reconciliation. #398 retains the original
-198-record round and runs last within #337; #166 remains last for #159.
+**2026-09-15 completion:** every registered delivery row is complete. #398
+accounted its frozen 198 entries plus bounded successor intervals; #337 closed
+after every nested child; #166 verified the effective ruleset read-only and PR
+#475 passed the required aggregate and merge queue. Landing commit `d49100a2`
+is on `origin/main`; this final documentation commit reconciles the plans,
+evidence, issues, and handoff before #159 closes.
 
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
@@ -37,7 +41,7 @@ classified; the round remains active with all 198 candidates, 36 incident and
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
-| 2 | [#337](https://github.com/popcre/ai-devops/issues/337) | Reviewer correctness, reliability, evidence, and measured efficiency programme; includes completed #160 | open; source identity installed, remaining component repairs active | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md); [nine-wrapper source contract installed at `d8e7450d`](tests/verification/reviewer-reliability/issue-393-source-identity.md), exact landing run `34577200959` passed; governed live comparison and integrated acceptance remain pending; original 198-entry round `0c62f3dffce145c4b2768855b912b958` preserved |
+| 2 | [#337](https://github.com/popcre/ai-devops/issues/337) | Reviewer correctness, reliability, evidence, and measured efficiency programme; includes completed #160 | done | #271 reduced live acceptance; #398 completed rounds `0c62f3d`, `49d3ae7`, and `a19ce41`; all nested issues closed 2026-09-15 |
 | 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | done | Closeout merge `baa3ac1`; engineering and live failover evidence remain in [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
@@ -49,7 +53,7 @@ classified; the round remains active with all 198 candidates, 36 incident and
 | 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | installed acceptance complete | Merge `26e893db03754b6668238c266142f8e61abb01bc`; [installed hash, fixture adapter and both migrated providers verified](tests/verification/reviewer-reliability/issue-169-installed-primitives.md). Allocation/disposition remains #396; recovery remains #397. |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
 | 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
-| 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
+| 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | done | [Final ruleset, timing, waiter, PR-head, queue, and landing evidence](tests/verification/repo-throughput/issue-166-final-cutover.md); merge `d49100a2` |
 
 **#333 implementation evidence, 2026-09-11:** the existing wrappers now have a
 tested accounting implementation with pinned OpenCode semantics and private
