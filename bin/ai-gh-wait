@@ -56,7 +56,9 @@ while :; do
     fails=0
     [ "$out" != "$prev" ] && printf '%s\n' "$out"
     prev="$out"
-    printf '%s' "$out" | grep -Eq -- "$REGEX" && exit 0
+    # Here-string, not a pipe: with pipefail, grep -q closing a large pipe early
+    # would turn a real match into a failure.
+    grep -Eq -- "$REGEX" <<<"$out" && exit 0
   fi
   [ $(( $(date +%s) + delay )) -lt "$deadline" ] || { say "deadline reached"; exit 2; }
   sleep "$delay"

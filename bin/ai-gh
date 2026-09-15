@@ -12,7 +12,7 @@
 # process on the machine passes through.
 #
 # What it enforces, across every process that uses the same state directory:
-#   - Serialization: one GitHub call at a time, through a lock directory.
+#   - Serialization: GitHub call starts are spaced through a lock directory (released before gh runs).
 #   - Spacing: at least AI_GH_MIN_SPACING_SECONDS (default 3) between calls.
 #   - Back-off: a rate-limit refusal (a 403/429 whose message says rate limit,
 #     "secondary rate limit", "abuse detection", Retry-After; an ordinary 403
@@ -29,7 +29,6 @@
 #   AI_GH_MIN_SPACING_SECONDS  gap between any two calls (default 3)
 #   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
 #   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
-#   AI_GH_ACCOUNT              state partition (GitHub limits are per account)
 #   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 300). A call
 #                              that legitimately runs longer (a big clone or a long
 #                              paginated read) should be raised with this variable,
@@ -49,10 +48,11 @@
 #   75  GitHub refused with a rate limit (back-off recorded), or back-off active with AI_GH_NO_WAIT=1
 set -uo pipefail
 
-# GitHub's limits are per account, so back-off and budget state is partitioned by
-# account. AI_GH_ACCOUNT names it (default: GH_HOST/GITHUB_USER if set, else
-# "default"); u2giants and popcre therefore never pause each other.
-STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle/${AI_GH_ACCOUNT:-${GITHUB_USER:-${GH_HOST:-default}}}}"
+# One machine-wide state directory. Deliberately NOT split per account: an
+# environment variable is not the signed-in account, and a wrong split would
+# silently remove the serialization between sessions. A back-off on one account
+# may therefore also pause the other; that is the safe failure.
+STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
 BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
 STALE="${AI_GH_LOCK_STALE_SECONDS:-300}"
@@ -100,11 +100,19 @@ reclaim(){
   local sampled="$1" g="$LOCK.reclaim" cur gage
   if ! mkdir "$g" 2>/dev/null; then
     gage=$(( $(now) - $(stat -c %Y "$g" 2>/dev/null || now) ))
-    [ "$gage" -gt 30 ] && rm -rf "$g"
+    # Atomic rename, never rm of the live gate path (a racer may have just made a new one).
+    if [ "$gage" -gt 30 ]; then local gq="$g.stale.$$.$RANDOM"; mv "$g" "$gq" 2>/dev/null && rm -rf "$gq"; fi
     return 1
   fi
   cur="$(cat "$LOCK/owner" 2>/dev/null)"
-  [ "$cur" = "$sampled" ] && quarantine
+  if [ -z "$sampled" ]; then
+    # No owner record: re-check under the gate that it is still empty AND old,
+    # so a brand-new lock whose owner line is not written yet is never taken.
+    local dage=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
+    [ -z "$cur" ] && [ "$dage" -gt 60 ] && quarantine
+  else
+    [ "$cur" = "$sampled" ] && quarantine
+  fi
   rmdir "$g" 2>/dev/null
   return 0
 }
@@ -233,8 +241,13 @@ fi
 
 qreset_cached="${qreset:-}"
 err="$(mktemp)"
-ERRFILE="$err"; trap 'rm -f "$ERRFILE"; release' EXIT; trap 'rm -f "$ERRFILE"; release; exit 130' INT TERM
 now > "$STATE/last_call"
+# The lock serializes call STARTS (spacing, budget, back-off bookkeeping) and is
+# released before gh runs. GitHub limits count requests, not concurrency, so a
+# long clone or a hung request must never hold every other session hostage, and
+# a supervisor hard-kill during the call can no longer leave the lock behind.
+release
+ERRFILE="$err"; trap 'rm -f "$ERRFILE"' EXIT; trap 'rm -f "$ERRFILE"; exit 130' INT TERM
 # stderr is passed through live (prompts and progress stay visible) and copied
 # for the failure record.
 exec 4>&1

@@ -36,11 +36,17 @@ AI_GH_MIN_SPACING_SECONDS=2 "$GH" a >/dev/null; AI_GH_MIN_SPACING_SECONDS=2 "$GH
 s1=$(awk '/^start/{print $2}' "$FAKE_LOG" | sed -n 1p); s2=$(awk '/^start/{print $2}' "$FAKE_LOG" | sed -n 2p)
 check 'calls are spaced by the minimum interval' "[ $(( (s2 - s1) / 1000000 )) -ge 1000 ]"
 
-# Serialization across concurrent processes: no two fake calls overlap.
+# Serialization across concurrent processes: call STARTS are spaced, and a slow
+# call does not hold the lock while it runs.
 : > "$FAKE_LOG"
-for i in 1 2 3; do FAKE_SLEEP=1 "$GH" p$i >/dev/null & done; wait
-check 'concurrent processes never overlap GitHub calls' "awk '/^start/{if(open){exit 1} open=1} /^end/{open=0}' '$FAKE_LOG' && [ \$(grep -c '^start' '$FAKE_LOG') -eq 3 ]"
+for i in 1 2 3; do AI_GH_MIN_SPACING_SECONDS=1 FAKE_SLEEP=3 "$GH" p$i >/dev/null & done; wait
+check 'concurrent processes space their GitHub call starts' "[ \$(grep -c '^start' '$FAKE_LOG') -eq 3 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 900) exit 1}'"
 check 'lock is released after calls' "[ ! -d '$TMP/state/lock.d' ]"
+: > "$FAKE_LOG"
+FAKE_SLEEP=4 "$GH" slow >/dev/null & sp=$!
+sleep 1
+start=$(date +%s); timeout 3 "$GH" quick >/dev/null; qrc=$?; wait "$sp"
+check 'a slow call does not block the next caller' "[ $qrc -eq 0 ]"
 
 # Secondary rate limit: back-off uses Retry-After, no retry, and blocks later calls.
 : > "$FAKE_LOG"
@@ -121,7 +127,6 @@ rm -rf "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"
 FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api z -fkey=gluedsecret 2> "$TMP/live-err" >/dev/null
 check "gh's error output reaches the caller" "grep -q 'HTTP 404: Not Found' '$TMP/live-err'"
 check 'glued flag values are not logged' "! grep -q gluedsecret '$TMP/state/failures.log'"
-check 'state is partitioned per GitHub account by default' "grep -q 'AI_GH_ACCOUNT' '$GH'"
 rm -f "$TMP/state/backoff_until"
 check 'redaction covers Bearer and inline Authorization' "[ \"\$(printf 'args=api -H Authorization: Bearer eyJabc.def\n' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'args=api -H Authorization: [REDACTED]' ] && [ \"\$(echo 'x Bearer eyJabc' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'x Bearer [REDACTED]' ]"
 : > "$FAKE_LOG"; rm -f "$TMP/state/backoff_until"
