@@ -94,7 +94,8 @@ if [ -x "$THROTTLE" ]; then
   # shared lock behind.
   [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=2}"
   export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
-  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + ${AI_GH_MIN_SPACING_SECONDS:-3} ))
+  # lock wait + call spacing + the spacing the budget probe adds before the call
+  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} ))
 else
   printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
   THROTTLE_ALLOWANCE_SECONDS=0

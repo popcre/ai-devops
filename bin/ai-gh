@@ -29,7 +29,11 @@
 #   AI_GH_MIN_SPACING_SECONDS  gap between any two calls (default 3)
 #   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
 #   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
-#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 300; no call holds it that long)
+#   AI_GH_ACCOUNT              state partition (GitHub limits are per account)
+#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 300). A call
+#                              that legitimately runs longer (a big clone or a long
+#                              paginated read) should be raised with this variable,
+#                              or it will have its lock reclaimed under it.
 #   AI_GH_NO_WAIT_LOCK_SECONDS with AI_GH_NO_WAIT=1, max lock wait before exit 75 (default 10)
 #   AI_GH_QUOTA_PROBE_SECONDS  hourly-budget probe cache age (default 300; "off" disables)
 #   AI_GH_QUOTA_PAUSE_PCT      below this % remaining (default 20) the machine is put
@@ -45,7 +49,10 @@
 #   75  GitHub refused with a rate limit (back-off recorded), or back-off active with AI_GH_NO_WAIT=1
 set -uo pipefail
 
-STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+# GitHub's limits are per account, so back-off and budget state is partitioned by
+# account. AI_GH_ACCOUNT names it (default: GH_HOST/GITHUB_USER if set, else
+# "default"); u2giants and popcre therefore never pause each other.
+STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle/${AI_GH_ACCOUNT:-${GITHUB_USER:-${GH_HOST:-default}}}}"
 SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
 BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
 STALE="${AI_GH_LOCK_STALE_SECONDS:-300}"
@@ -87,12 +94,19 @@ quarantine(){ local q="$LOCK.stale.$$.$RANDOM"; mv "$LOCK" "$q" 2>/dev/null && r
 # Reclaim of someone else's lock is itself serialized, and the staleness is
 # re-checked while holding that gate, so two waiters cannot reclaim in sequence
 # and have the second one carry off the first one's fresh lock.
+# The gate itself is self-healing: a gate left behind by a killed process is
+# removed once it is older than 30s, so it can never wedge the machine.
 reclaim(){
-  local sampled="$1" g="$LOCK.reclaim" cur
-  mkdir "$g" 2>/dev/null || { sleep 1; return 1; }
+  local sampled="$1" g="$LOCK.reclaim" cur gage
+  if ! mkdir "$g" 2>/dev/null; then
+    gage=$(( $(now) - $(stat -c %Y "$g" 2>/dev/null || now) ))
+    [ "$gage" -gt 30 ] && rm -rf "$g"
+    return 1
+  fi
   cur="$(cat "$LOCK/owner" 2>/dev/null)"
   [ "$cur" = "$sampled" ] && quarantine
   rmdir "$g" 2>/dev/null
+  return 0
 }
 # Release only a lock this process still owns (token match).
 release(){
@@ -121,11 +135,11 @@ acquire(){
     info="$(cat "$LOCK/owner" 2>/dev/null)"; ts="$(echo "$info" | awk '{print $2}')"
     if isnum "${ts:-}"; then
       age=$(( $(now) - ts ))
-      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info"; continue; fi
+      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info" && continue; fi
     else
       # Owner never written (holder killed between mkdir and write): use the directory age.
       age=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
-      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info"; continue; fi
+      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info" && continue; fi
     fi
     if [ "${AI_GH_NO_WAIT:-0}" = 1 ] && [ "$waited" -ge "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" ]; then
       say "another GitHub call holds the throttle lock; not waiting (AI_GH_NO_WAIT=1)."; exit 75
@@ -174,8 +188,10 @@ safe_args(){
   for a in "$@"; do
     if [ "$skip" = 1 ]; then out="$out [REDACTED]"; skip=0; continue; fi
     case "$a" in
-      -f|-F|-b|--field|--raw-field|--body|--body-file|--arg|--jq) out="$out $a"; skip=1 ;;
-      --field=*|--raw-field=*|--body=*|--arg=*) out="$out ${a%%=*}=[REDACTED]" ;;
+      -f|-F|-b|-H|--field|--raw-field|--body|--body-file|--arg|--jq|--header) out="$out $a"; skip=1 ;;
+      --field=*|--raw-field=*|--body=*|--arg=*|--header=*) out="$out ${a%%=*}=[REDACTED]" ;;
+      # Values glued to a short flag (-fname=value, -bVALUE, -HAuthorization: x).
+      -f?*|-F?*|-b?*|-H?*) out="$out ${a:0:2}[REDACTED]" ;;
       *) out="$out $a" ;;
     esac
   done
@@ -247,7 +263,7 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
   ra="$(grep -Eio 'retry-after"?:? *[0-9]+' "$err" | grep -Eo '[0-9]+' | head -1)"
   wait="$BACKOFF"; isnum "${ra:-}" && [ "$ra" -gt "$wait" ] && wait="$ra"
   kind=secondary
-  if grep -Eiq 'API rate limit exceeded|rate limit exceeded for' "$err"; then
+  if grep -Eiq 'API rate limit( already)? exceeded|rate limit( already)? exceeded for' "$err"; then
     kind=primary
     # Window reset from the header snapshot already taken, else the cached quota; no new request.
     qreset="$(printf '%s\n' "$hdr" | grep -Ei '^x-ratelimit-reset:' | grep -Eo '[0-9]+' | head -1)"

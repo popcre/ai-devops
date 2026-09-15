@@ -104,6 +104,25 @@ FAKE_MODE=quota FAKE_REMAINING=1500 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_QUOTA_SL
 check "below 40% remaining the next call is spaced out (NO_WAIT gives up with 75)" "[ $rc -eq 0 ] && [ $rc2 -eq 75 ]"
 rm -f "$TMP/state/quota" "$TMP/state/backoff_until"
 "$WAIT" --interval >/dev/null 2>&1; check 'an option without a value is refused, not looped on' "[ $? -eq 3 ]"
+# A reclaim gate left behind by a killed process must not wedge the machine.
+mkdir -p "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"
+echo "999999 $(( $(date +%s) - 400 )) tok" > "$TMP/state/lock.d/owner"
+touch -d '@'$(( $(date +%s) - 120 )) "$TMP/state/lock.d.reclaim"
+check 'an abandoned reclaim gate is cleared instead of hanging' "timeout 25 '$GH' zz"
+rm -rf "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"
+# A stuck gate must still let a NO_WAIT caller give up rather than loop.
+mkdir -p "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"
+echo "999999 $(( $(date +%s) - 400 )) tok" > "$TMP/state/lock.d/owner"
+AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 timeout 25 "$GH" zz >/dev/null 2>&1; rc=$?
+check 'a stuck reclaim gate still lets NO_WAIT callers exit 75' "[ $rc -eq 75 ]"
+rm -rf "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"
+# Error output reaches the caller live, and glued flag values are not logged.
+: > "$TMP/state/failures.log"
+FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api z -fkey=gluedsecret 2> "$TMP/live-err" >/dev/null
+check "gh's error output reaches the caller" "grep -q 'HTTP 404: Not Found' '$TMP/live-err'"
+check 'glued flag values are not logged' "! grep -q gluedsecret '$TMP/state/failures.log'"
+check 'state is partitioned per GitHub account by default' "grep -q 'AI_GH_ACCOUNT' '$GH'"
+rm -f "$TMP/state/backoff_until"
 check 'redaction covers Bearer and inline Authorization' "[ \"\$(printf 'args=api -H Authorization: Bearer eyJabc.def\n' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'args=api -H Authorization: [REDACTED]' ] && [ \"\$(echo 'x Bearer eyJabc' | bash -c \"\$(grep '^redact()' '$GH'); redact\")\" = 'x Bearer [REDACTED]' ]"
 : > "$FAKE_LOG"; rm -f "$TMP/state/backoff_until"
 FAKE_MODE=secondary AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" pr view 9 >/dev/null 2>&1
