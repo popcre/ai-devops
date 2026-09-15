@@ -105,6 +105,12 @@ open PRs = `<list>`.
   a production feed goes live, any drop/rename/delete) are Albert's. Present
   evidence and options; decide nothing.
 
+- **No GitHub polling.** Check a run or pull request once. To wait, use one
+  `ai-pr-wait <pr>` (checks at most every 5 minutes) or a completion
+  notification. Never `gh run watch`, `--watch`, `gh pr checks --watch`, or a
+  sleep loop around `gh`. On a rate-limit refusal stop calling GitHub until the
+  reset. (2026-09-15 rate-limit incident.)
+
 ## 7. Proving the work
 
 "It applied successfully" proves nothing — the ledger can record a migration whose
