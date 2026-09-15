@@ -92,6 +92,7 @@ case "$(uname -s 2>/dev/null || true)" in
 esac
 
 DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+WAIT_STARTED_SECONDS=$SECONDS
 
 bounded_gh() {
   local now remaining limit
@@ -160,7 +161,31 @@ LAST=''
 API_STDERR=/dev/null
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
   API_STDERR="$AI_PR_WAIT_TEST_TRACE.stderr"
+else
+  API_STDERR="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-stderr.XXXXXX")" || {
+    printf 'ai-pr-wait: could not create diagnostic file\n' >&2
+    exit 3
+  }
+  trap 'rm -f "$API_STDERR"' EXIT
 fi
+
+elapsed_seconds() {
+  printf '%s' "$(( SECONDS - WAIT_STARTED_SECONDS ))"
+}
+
+read_failure_cause() {
+  local cause
+  cause="$(tr '\r\n' '  ' < "$API_STDERR" 2>/dev/null | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//' | cut -c1-240)"
+  if [ -n "$cause" ]; then
+    printf '%s' "$cause"
+  elif [ "$GH_RC" -eq 124 ]; then
+    printf 'request exceeded the %ss API limit' "$API_TIMEOUT_SECONDS"
+  elif [ "$GH_RC" -ne 0 ]; then
+    printf 'GitHub client exited %s without a diagnostic' "$GH_RC"
+  else
+    printf 'GitHub returned an empty or invalid pull-request response'
+  fi
+}
 
 deadline_reached() {
   [ "$(date +%s)" -ge "$DEADLINE" ]
@@ -184,11 +209,12 @@ while :; do
   GH_RC=$?
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
+    READ_CAUSE="$(read_failure_cause)"
     if [ "$GH_RC" -eq 125 ] && [ -n "$LAST" ]; then
       say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
       exit 2
     fi
-    say "ai-pr-wait: could not read PR #$PR (transient); retrying"
+    say "ai-pr-wait: could not read PR #$PR after $(elapsed_seconds)s (transient: $READ_CAUSE); retrying"
     if deadline_reached; then
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       exit 2

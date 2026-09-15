@@ -66,8 +66,39 @@ check "repeated API failure still exits at the deadline" \
 
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -eq 1 ]; then
+  printf '%s\n' 'temporary upstream reset' >&2
+  exit 1
+fi
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeCommit":{"oid":"retry123"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}}}}}'
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+rm -f "$TMP/transient-called"
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/transient-trace" AI_PR_WAIT_TEST_MARKER="$TMP/transient-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a transient read reports its cause and elapsed time, then recovers" \
+  "test '$RC' -eq 0 && test \"$(cat "$TMP/transient-called")\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'after [0-9][0-9]*s (transient: temporary upstream reset); retrying' && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit retry123' && ! printf '%s' \"$OUT\" | grep -q 'deadline - giving up'"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
 : > "${AI_PR_WAIT_TEST_MARKER:?}"
 sleep 300
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 rm -f "$TMP/clock"
 SECONDS=0
