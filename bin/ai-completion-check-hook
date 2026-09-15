@@ -84,6 +84,7 @@ FUTURE_COMMITMENTS=(
   "starting now"
   "next i'll"
   "next i’ll"
+  "next i will"
   "i'll come back with"
   "i’ll come back with"
   "kicking off"
@@ -117,18 +118,21 @@ if [[ -z "$matched" ]]; then
   # evidence stays fail-open, as every turn end runs this hook.
   transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
   [[ -n "$transcript" && -r "$transcript" ]] || exit 0
-  no_action="$(tail -n 400 "$transcript" 2>/dev/null | jq -s '
+  no_action="$(tail -n 400 "$transcript" 2>/dev/null | jq -s --arg current "$message" '
     def human_turn:
       (.type == "user") and
       (([.message.content[]? | select(.type? == "tool_result")] | length) == 0);
     def tool_call:
       ([.message.content[]? | select(.type? == "tool_use")] | length) > 0;
+    def assistant_text:
+      [.message.content[]? | select(.type? == "text") | .text] | join("");
     reduce .[] as $entry
-      ({saw_human:false, saw_tool:false};
-       if ($entry | human_turn) then {saw_human:true, saw_tool:false}
+      ({saw_human:false, saw_tool:false, last_assistant_text:""};
+       if ($entry | human_turn) then {saw_human:true, saw_tool:false, last_assistant_text:.last_assistant_text}
        elif .saw_human and ($entry | tool_call) then .saw_tool = true
+       elif .saw_human and ($entry.type? == "assistant") then .last_assistant_text = ($entry | assistant_text)
        else . end)
-    | (.saw_human and (.saw_tool | not))
+    | (.saw_human and (.saw_tool | not) and (.last_assistant_text == $current))
   ' 2>/dev/null || true)"
   [[ "$no_action" == "true" ]] || exit 0
 fi

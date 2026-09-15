@@ -66,17 +66,20 @@ NO_ACTION_TRANSCRIPT="$TMP/no-action.jsonl"
 TOOL_ACTION_TRANSCRIPT="$TMP/tool-action.jsonl"
 printf '%s\n' \
   '{"type":"user","message":{"content":"Fix the failing tests."}}' \
-  '{"type":"assistant","message":{"content":[{"type":"text","text":"I will."}]}}' >"$NO_ACTION_TRANSCRIPT"
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"I am going to proceed now."}]}}' >"$NO_ACTION_TRANSCRIPT"
 printf '%s\n' \
   '{"type":"user","message":{"content":"Fix the failing tests."}}' \
   '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' \
-  '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}' >"$TOOL_ACTION_TRANSCRIPT"
+  '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"Next I will summarize the result."}]}}' >"$TOOL_ACTION_TRANSCRIPT"
 check "'I'm proceeding' with no tool call is stopped" \
-  "[ -n \"\$(fire f1 \"I'm proceeding now and I'll come back with the result.\" '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
-future_out="$(fire f2 "Starting now." "{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}")"
+  "[ -n \"\$(fire f1 'I am going to proceed now.' '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
+future_out="$(fire f2 "I am going to proceed now." "{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}")"
 check "future block names the no-action defect" "printf '%s' \"\$future_out\" | grep -q 'no tool call'"
 check "the same promise after a tool call is silent" \
-  "[ -z \"\$(fire f3 \"Next I'll summarize the result.\" '{\"transcript_path\":\"$TOOL_ACTION_TRANSCRIPT\"}')\" ]"
+  "[ -z \"\$(fire f3 'Next I will summarize the result.' '{\"transcript_path\":\"$TOOL_ACTION_TRANSCRIPT\"}')\" ]"
+check "a valid stale transcript stays fail-open" \
+  "[ -z \"\$(fire f6 'Starting now.' '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
 check "a promise without transcript evidence stays fail-open" \
   "[ -z \"\$(fire f4 \"I'll start now.\")\" ]"
 check "a malformed transcript stays fail-open" \
