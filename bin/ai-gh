@@ -157,19 +157,21 @@ acquire(){
       continue
     fi
     local info ts age
-    info="$(cat "$LOCK/owner" 2>/dev/null)"; ts="$(echo "$info" | awk '{print $2}')"
-    if isnum "${ts:-}"; then
-      age=$(( $(now) - ts ))
-      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info" && continue; fi
-    else
-      # Owner never written (holder killed between mkdir and write): use the directory age.
-      age=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
-      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info" && continue; fi
-    fi
+    # Checked before any reclaim, so a reclaim that keeps failing (Windows refusing
+    # to remove an open file) can never keep a NO_WAIT caller spinning.
     if [ "${AI_GH_NO_WAIT:-0}" = 1 ] && [ "$waited" -ge "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" ]; then
       say "another GitHub call holds the throttle lock; not waiting (AI_GH_NO_WAIT=1)."; exit 75
     fi
-    sleep 1; waited=$(( waited + 1 ))
+    info="$(cat "$LOCK/owner" 2>/dev/null)"; ts="$(echo "$info" | awk '{print $2}')"
+    if isnum "${ts:-}"; then
+      age=$(( $(now) - ts ))
+      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info" && { waited=$(( waited + 1 )); continue; }; fi
+    else
+      # Owner never written (holder killed between mkdir and write): use the directory age.
+      age=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
+      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info" && { waited=$(( waited + 1 )); continue; }; fi
+    fi
+    sleep 0.25; waited_q=$(( ${waited_q:-0} + 1 )); [ $(( waited_q % 4 )) -eq 0 ] && waited=$(( waited + 1 ))
   done
 }
 
@@ -187,9 +189,12 @@ while [ "$(now)" -lt "$until_ts" ]; do
   acquire
   until_ts="$(readnum "$STATE/backoff_until")"
 done
-last="$(readnum "$STATE/last_call")"
-gap=$(( last + SPACING - $(now) ))
-[ "$gap" -gt 0 ] && sleep "$gap"
+# Spacing in milliseconds: whole-second timestamps let two starts land almost
+# together across a second boundary.
+now_ms(){ local t; t="$(date +%s%3N)"; isnum "$t" && echo "$t" || echo $(( $(now) * 1000 )); }
+sleep_ms(){ [ "$1" -gt 0 ] && sleep "$(( $1 / 1000 )).$(printf '%03d' $(( $1 % 1000 )))"; return 0; }
+gap_ms=$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))
+sleep_ms "$gap_ms"
 
 # Hourly budget (PRIMARY limit: 5000 requests/hour shared by every process on
 # one token). `gh api rate_limit` does not count against the limit. The probe
@@ -200,6 +205,12 @@ QUOTA_PROBE="${AI_GH_QUOTA_PROBE_SECONDS:-300}"
 PAUSE_PCT="${AI_GH_QUOTA_PAUSE_PCT:-20}"
 SLOW_PCT="${AI_GH_QUOTA_SLOW_PCT:-40}"
 SLOW_SPACING="${AI_GH_QUOTA_SLOW_SPACING:-30}"
+# A bad value must fail loudly, never silently skip the budget protections. The
+# slow spacing is slept while holding the lock, so it must stay below the stale limit.
+for v in PAUSE_PCT SLOW_PCT SLOW_SPACING; do isnum "${!v}" || { say "$v must be a whole number"; exit 2; }; done
+{ [ "$QUOTA_PROBE" = off ] || isnum "$QUOTA_PROBE"; } || { say "AI_GH_QUOTA_PROBE_SECONDS must be a whole number or off"; exit 2; }
+isnum "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" || { say "AI_GH_NO_WAIT_LOCK_SECONDS must be a whole number"; exit 2; }
+[ "$SLOW_SPACING" -lt "$STALE" ] || { say "AI_GH_QUOTA_SLOW_SPACING must be below AI_GH_LOCK_STALE_SECONDS"; exit 2; }
 # Redaction of log TEXT. The narrow `token=`/`token:` form is deliberate: a bare
 # "token in keyring is invalid" message must stay readable to be diagnosable.
 redact(){ sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/[REDACTED]/g; s/([Aa]uthorization[=:] *).*/\1[REDACTED]/; s/([Bb]earer|[Bb]asic) +[A-Za-z0-9._~+\/=-]+/\1 [REDACTED]/g; s/(token|password|secret|api[_-]?key)([=:]"?)[^ "]+/\1\2[REDACTED]/Ig'; }
@@ -260,7 +271,7 @@ fi
 
 qreset_cached="${qreset:-}"
 err="$(mktemp)"
-put "$STATE/last_call" "$(now)"
+put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 # The lock serializes call STARTS (spacing, budget, back-off bookkeeping) and is
 # released before gh runs. GitHub limits count requests, not concurrency, so a
 # long clone or a hung request must never hold every other session hostage, and
@@ -273,7 +284,7 @@ exec 4>&1
 rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
 exec 4>&-
 isnum "${rc:-}" || rc=1
-put "$STATE/last_call" "$(now)"
+put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 if [ "$rc" -ne 0 ]; then
   # Exact failure record: HTTP status, rate-limit headers, and message body,
   # credentials redacted. gh does not surface response headers on failure, so

@@ -93,9 +93,19 @@ AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
 check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
 rm -rf "$TMP/state/lock.d"
 # Behavioural: a holder's release must not remove a lock that now belongs to another owner.
-mkdir -p "$TMP/state/lock.d"; echo "1 $(date +%s) newowner" > "$TMP/state/lock.d/owner"
-AI_GH_STATE_DIR="$TMP/state" bash -c 'HELD=1; TOKEN=mine; LOCK="'"$TMP"'/state/lock.d"; quarantine(){ mv "$LOCK" "$LOCK.q" 2>/dev/null && rm -rf "$LOCK.q"; }; info="$(cat "$LOCK/owner")"; [ "${info##* }" = "$TOKEN" ] && quarantine; true'
-check 'release leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
+# Real script: while it holds the lock during its spacing sleep, the owner record
+# is replaced; its release must leave that other owner's lock in place.
+echo $(( $(date +%s%3N) )) > "$TMP/state/last_call_ms"
+AI_GH_MIN_SPACING_SECONDS=5 "$GH" relcheck >/dev/null 2>&1 & rp=$!
+for i in $(seq 1 200); do [ -s "$TMP/state/lock.d/owner" ] && break; sleep 0.05; done
+echo "1 $(date +%s) newowner" > "$TMP/state/lock.d/owner"
+wait "$rp"
+check 'release (real script) leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
+# A lock that keeps looking abandoned but cannot be reclaimed must not trap a NO_WAIT caller.
+mkdir -p "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"; echo "1 $(( $(date +%s) - 400 )) stuck" > "$TMP/state/lock.d/owner"
+AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 timeout 30 "$GH" z >/dev/null 2>&1; rc=$?
+check 'NO_WAIT gives up with 75 even while reclaim attempts keep failing' "[ $rc -eq 75 ]"
+rm -rf "$TMP/state/lock.d.reclaim"
 rm -rf "$TMP/state/lock.d"
 # Command-line redaction: secret values passed as flags never reach the log.
 : > "$TMP/state/failures.log"
@@ -150,6 +160,17 @@ AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 90 "$WAIT" --until-
 check 'wait exits 2 at its deadline' "[ $rc -eq 2 ]"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 20 "$WAIT" --until-regex x --interval 1 -- run watch 1 >/dev/null 2>&1; rc=$?
 check 'wait does not retry a command the throttle refuses' "[ $rc -eq 3 ]"
+cat > "$TMP/pending-gh" <<'EOF'
+#!/usr/bin/env bash
+n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"
+if [ "$n" -ge 4 ]; then echo 'build pass'; exit 0; fi
+echo 'build pending'; exit 8
+EOF
+chmod +x "$TMP/pending-gh"; echo 0 > "$FAKE_COUNT"
+AI_GH_REAL_GH="$TMP/pending-gh" AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 60 "$WAIT" --until-regex 'pass' --interval 1 --timeout-minutes 1 -- pr checks 1 >/dev/null 2>&1; rc=$?
+check 'wait treats a pending exit (gh pr checks: 8) as not-done, not as failure' "[ $rc -eq 0 ] && [ \$(cat '$FAKE_COUNT') -eq 4 ]"
+AI_GH_QUOTA_PAUSE_PCT=abc "$GH" pr view 1 >/dev/null 2>&1; rc=$?
+check 'a non-numeric budget setting is refused, not silently skipped' "[ $rc -eq 2 ]"
 check 'ai-pr-wait routes through the throttle' "grep -q 'ai-gh' '$ROOT/bin/ai-pr-wait'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

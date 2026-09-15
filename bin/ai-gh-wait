@@ -19,6 +19,8 @@ say(){ printf 'ai-gh-wait: %s\n' "$*" >&2; }
 MIN=300
 [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_GH_WAIT_TEST_MIN_INTERVAL:-}" ] && MIN="$AI_GH_WAIT_TEST_MIN_INTERVAL"
 INTERVAL=300; TIMEOUT=120; REGEX=''
+# Exit codes that mean "not finished yet" rather than failure (gh pr checks: 8).
+PENDING="${AI_GH_WAIT_PENDING_CODES:-8}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --until-regex|--interval|--timeout-minutes)
@@ -51,10 +53,12 @@ while :; do
     say "GitHub back-off active; next attempt in ${delay}s"
   elif [ "$rc" -eq 2 ]; then
     say "the throttle refused this command (rc=2); not retrying"; exit 3
-  elif [ "$rc" -ne 0 ]; then
+  elif [ "$rc" -ne 0 ] && ! printf ' %s ' "$PENDING" | grep -q " $rc "; then
     fails=$((fails+1)); say "gh failed (rc=$rc, attempt $fails)"
     [ "$fails" -ge 3 ] && { say "three consecutive failures; stopping"; exit 1; }
   else
+    # rc 0, or a "not done yet" exit such as 8 from `gh pr checks` while checks
+    # are pending: the output is real state, so it is shown and matched.
     fails=0
     [ "$out" != "$prev" ] && printf '%s\n' "$out"
     prev="$out"
