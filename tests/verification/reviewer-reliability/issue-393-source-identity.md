@@ -1,5 +1,8 @@
 # #393: exact source identity through every reviewer
 
+Status: accepted on current `main`. This record closes #393 only; #271, #337,
+#166 and #159 remain open in the documented sequence.
+
 Owner: reviewer source identity under #337 and #159. This record extends the
 existing reviewer verification directory; it is not another review harness.
 
@@ -92,6 +95,25 @@ base `7414afefd6cf841609df7c42429638403780406c`; explicit assertions passed.
 | `ai-review-packet` | `69b78a4144b5b102c67edc0d08a087680a6996bde2bd7ebb4b9b1f32744bc31b` |
 | `ai-review-sandbox` | `306e2f2d003901ed9e8154fa0b73761fe507abab31a4dfd2cb39d2bc6bc3cbb4` |
 
-The governed live comparison and affected private incident reconciliation remain
-pending. PR #344 remains open until that acceptance is complete. This checkpoint
-does not close #393, #337 or #159, reset the 198-record round, or advance #398/#166.
+## Final governed acceptance — 2026-09-15
+
+The separately governed consumer landed through shared-db PR #2940 as
+`91de3134fa5d5c7b3bfb6d537822e3b4211e5f4b`. Its exact-head Muse review approved
+`5cda865befcf56f86cf3139144c10ec650c5dc0a` and emitted source evidence matching
+the live repository, `main` target, base, head, merge-base, five-file inventory,
+file-set digest, packet digest and private create-only receipt. The 68-test suite
+passed with no failures, cancellations or skips. Those fixtures exercise real
+rename and delete status parsing, case-sensitive identities, and real Windows
+long/short path aliases; the governed live run proves the same receipt and source
+path is active in the delivered consumer.
+
+All shared-db checks passed, including the 291-site semantic truth audit and the
+ephemeral database suite. No database, preview or production write occurred.
+Shared-db #2939 is closed, and obsolete combined PR #2749 remains preserved and
+closed. The stale-local-main Qwen incident
+`20260910T081507Z-edge-dev-qwen-1166` now has an append-only resolved record tied
+to the merged toolkit repair and this verification record.
+
+PR #344 is superseded: its useful source-base obligation is present in the
+merged nine-wrapper contract, while its older head must not overwrite later
+reviewer repairs. The frozen 198-record maintenance round is unchanged.
