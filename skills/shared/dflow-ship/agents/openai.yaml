@@ -1,0 +1,4 @@
+interface:
+  display_name: "dflow-ship"
+  short_description: "Ship DesignFlow work for Uma"
+  default_prompt: "Use $dflow-ship to test and ship this DesignFlow work through its sandbox branch and PR to develop, then verify the sandbox deployment."

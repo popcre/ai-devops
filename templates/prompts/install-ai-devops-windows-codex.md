@@ -17,7 +17,7 @@ if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --sou
    installer.
 4. Verify these exist after the script finishes:
    - `$HOME\.codex\skills\codex-github-ship\SKILL.md`
-   - `$HOME\.codex\skills\codex-session-closeout\SKILL.md`
+   - `$HOME\.codex\skills\wrap-up\SKILL.md`
    - `$HOME\.codex\skills\codex-context-optimizer\SKILL.md`
    - `$HOME\.codex\skills\codex-transcript-miner\SKILL.md`
    - `$HOME\.codex\AGENTS.md`
