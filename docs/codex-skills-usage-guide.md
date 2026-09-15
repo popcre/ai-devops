@@ -40,9 +40,9 @@ machine where the sync is run; distribution is not a broadcast.
 | "push and commit" / "commit and push" / "is everything pushed and committed?" | "use `codex-github-ship`" or just "push and commit" |
 | "sync this repo with github.com" / "pull latest repo from github.com" | "use `codex-github-ship`" |
 | "update the .md files, but do not close out / commit / deploy" | "use `codex-docs-update`" |
-| Long end-of-session documentation prompt | "use `codex-session-closeout`" or "wrap up" |
+| Long end-of-session documentation prompt | "use `wrap-up`" or "wrap up" |
 | `update_.md.docx` / "create the standard .md files for this repo" | "use `codex-repo-docs-overhaul`" |
-| `uma_designflow_prompt.docx` / DesignFlow sandbox start/end workflow | "use `codex-dflow-plm`" |
+| `uma_designflow_prompt.docx` / DesignFlow ship workflow | "use `dflow-ship`" |
 | `new application one big prompt.docx` / "set up a brand-new app" | "use `codex-new-application`" |
 | `devops procedure deploying from github.docx` / CI/CD rules | "use `codex-cicd-pipeline`" |
 | "is HANDOFF.md comprehensive enough for a fresh developer?" | "use `handoff-writer`" |
@@ -59,13 +59,14 @@ machine where the sync is run; distribution is not a broadcast.
 - `codex-docs-update`: doc-only durable markdown update, with no closeout side
   effects.
 - `codex-repo-docs-overhaul`: standard new-repo/big-change documentation system.
-- `codex-dflow-plm`: DesignFlow PLM sandbox branch, AG-Grid, browser-proof
-  verification for UI fixes, and Uma PR rules.
+- `dflow-session-start`: shared Claude/Codex DesignFlow sandbox synchronization.
+- `dflow-ship`: shared Claude/Codex tests, sandbox push, Uma PR, and live
+  verification procedure.
 - `codex-new-application`: brand-new app setup, docs, CI/CD, and optional
   Hetz/Coolify deploy path.
 - `codex-cicd-pipeline`: GitHub/GHCR/Coolify CI/CD creation and audit rules.
-- `codex-session-closeout`: docs update, handoff quality gate, secret hygiene,
-  git state, and final evidence report.
+- `wrap-up`: shared Claude/Codex closeout with DesignFlow detection, docs,
+  handoff quality gate, secret hygiene, project-aware shipping, and final proof.
 - `codex-context-optimizer`: minimal context loading, prompt compression, and
   lower-cost model guidance.
 - `codex-transcript-miner`: transcript discovery, safe analysis, repeated prompt

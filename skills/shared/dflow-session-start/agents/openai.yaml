@@ -1,0 +1,4 @@
+interface:
+  display_name: "dflow-session-start"
+  short_description: "Start a DesignFlow session safely"
+  default_prompt: "Use $dflow-session-start to synchronize the DesignFlow sandbox branches and apply the shared session safeguards before beginning work."

@@ -1,6 +1,6 @@
 ---
 name: dflow-session-start
-description: DesignFlow PLM session opener. Use at the start of any dflow session, or when the user says "pull develop into sandbox-albert" or any branch-sync variant. Syncs all six designflow repos and loads the standing dflow rules Albert used to paste manually every session.
+description: Shared Claude and Codex DesignFlow PLM session opener. Use at the start of any dflow session, or when the user says "pull develop into sandbox-albert" or any branch-sync variant. Syncs all six designflow repos and loads the standing dflow rules Albert used to paste manually every session.
 ---
 
 # dflow-session-start

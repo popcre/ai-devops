@@ -1,11 +1,11 @@
 ---
 name: wrap-up
-description: One-phrase end-of-session closer. Use when the user says "wrap up", "wrap it up", "dflow wrap up", "wrap up dflow", "close out this session", "we're done here", or "end of session" — ANY "wrap up" variant, including project-prefixed ones like "dflow wrap up", routes HERE, not to a ship-only skill. In a shared-database or orchestrator session it first runs the `shared-db-handover` gate. Chains the four closing rituals: docs update FIRST, then secrets sweep, handoff-safe state, push verification, workspace close-out (uncommitted files, branch, worktree), and a next-session prompt — then gives a single plain-English closing report. This skill OWNS "wrap up"; it delegates the ship step to the project ship skill (dflow → dflow-ship) but never the other way around.
+description: One-phrase Claude and Codex end-of-session closer. Use when the user says "wrap up", "wrap it up", "dflow wrap up", "wrap up dflow", "close out this session", "we're done here", "end of session", asks for the full end-of-session documentation update, asks whether the handoff is comprehensive enough for a fresh developer, or asks whether everything is pushed and committed before ending. ANY "wrap up" variant, including project-prefixed ones like "dflow wrap up", routes HERE, not to a ship-only skill. It detects DesignFlow repositories first and assigns their ship step to `dflow-ship`. In a shared-database or orchestrator session it runs the `shared-db-handover` gate. Chains docs update, secrets sweep, handoff-safe state, project-aware shipping, workspace close-out, and a next-session prompt, then gives one plain-English closing report.
 ---
 
 # wrap-up
 
-One word closes the session properly. Runs the four closing rituals in order
+One word closes the session properly. Runs the closing rituals in order
 and ends with a single consolidated report. From this point on the session takes
 on no new work — see the scope freeze below. Skip nothing silently — if a step
 doesn't apply, say so in the report.
@@ -46,11 +46,30 @@ already in flight or writing it down for the next session.
 
 > Any message containing "wrap up" belongs to this skill, even when a project
 > name is attached. Do NOT route "dflow wrap up" to `dflow-ship` — `dflow-ship`
-> is only Step 4 (ship & verify) of this skill's chain, and it does not update
+> is only Step 5 (ship & verify) of this skill's chain, and it does not update
 > the .md docs. Running it alone silently skips the docs step. This skill runs
 > docs FIRST, then calls `dflow-ship` for the ship step.
 
-## Step 0 — the shared-database gate (run this FIRST, before step 1)
+## Step 0 — detect the project ship skill (run this FIRST)
+
+Resolve the current repository rather than relying on the folder name:
+
+1. Run `git rev-parse --show-toplevel` and `git remote get-url origin`.
+2. Treat the session as DesignFlow only when the origin is in the `popcre`
+   organization and the repository is one of these six exact names:
+   `designflow-bff`, `designflow-frontend`, `designflow-backend`,
+   `designflow-item-master`, `designflow-tracking`, or
+   `designflow-data-syncing`.
+3. If it is DesignFlow, load and run the `dflow-ship` skill for this closeout's
+   ship step. Do not substitute a generic GitHub ship procedure. Run the
+   safety and documentation steps below before `dflow-ship` commits anything,
+   so new docs are included and secrets cannot be committed accidentally.
+
+This check is mandatory even when Albert says only "wrap up" and does not name
+DesignFlow. A path containing `dflow` is not enough; the verified origin and
+exact repository name are the gate.
+
+## Step 1 — the shared-database gate
 
 Before anything else, answer this out loud in the session: **did this session
 touch the shared Supabase database or `u2giants/shared-db`, dispatch sub-agents,
@@ -70,14 +89,15 @@ incomplete, and so is an orchestrator session that ends with its marker open.
 
 ## The chain
 
-1. **Docs** — run the `session-docs-update` skill: record what this session
-   learned or changed in the right .md files (AGENTS.md / docs/ / your own
-   `HANDOFF.d/` file), mirror any shared-backend change to `u2giants/shared-db`.
-   If nothing durable changed, state that explicitly.
-2. **Secrets** — run the `secrets-to-1password` skill: sweep the session for
+2. **Docs** — run the installed client documentation skill
+   (`session-docs-update` on Claude; `codex-docs-update` on Codex): record what
+   this session learned or changed in the right .md files (AGENTS.md / docs/ /
+   your own `HANDOFF.d/` file), and route any shared-backend change through its
+   governed repository. If nothing durable changed, state that explicitly.
+3. **Secrets** — run the `secrets-to-1password` skill: sweep the session for
    any credential that appeared and store it in the `vibe_coding` vault with
    rich notes.
-3. **Handoff-safe state** — every touched repo: no mystery untracked files,
+4. **Handoff-safe state** — every touched repo: no mystery untracked files,
    no half-done merges. If work is unfinished, write **ONE NEW file of your own**:
    `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
    `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`) to the full
@@ -100,17 +120,23 @@ incomplete, and so is an orchestrator session that ends with its marker open.
      `handoff-pointer: v1`), migrate it per `handoff-writer`: `git mv` it verbatim
      into `HANDOFF.d/` as one open workstream, then write the pointer.
    - **Do NOT open, edit, tidy, or delete another session's `HANDOFF.d/` file.**
-   - **Retention:** delete YOUR `HANDOFF.d/` file when the work it describes is
-     proven done (git history keeps the text). If `HANDOFF.d/` holds **more than
-     5** files, warn loudly in the closing report — list them oldest-first with
-     dates and ask which are actually finished.
-4. **Ship & verify** — commit and push everything per each repo's rules
-   (dflow → `dflow-ship`: PR to develop; hetz apps → `deploy-and-verify`:
-   Actions/GHCR/Coolify + live SHA check; everything else → main). Confirm
+   - **Retention:** delete YOUR `HANDOFF.d/` file only when the work is proven
+     done and the successor rule in `handoff-writer` passes: the issue is
+     closed, the landed outcome is verified, and no unfinished work remains.
+     A closed issue creates a **SUCCESSOR REVIEW** candidate; it is not proof of
+     completion. Report candidates by name and owner. File count alone is never
+     a problem.
+5. **Ship & verify** — commit and push everything per each repository's own
+   `AGENTS.md` and documented delivery rules. DesignFlow uses `dflow-ship` and
+   a PR to `develop`. Hetz/Coolify apps use `deploy-and-verify` on Claude or
+   `codex-github-ship` on Codex, including Actions/GHCR/Coolify and live-SHA
+   proof. Other repositories use their installed client ship skill and local
+   rules. Never infer that another repository permits a direct push to `main`;
+   use its required branch, PR, review, merge, and deployment gates. Confirm
    working trees are clean and pushes landed. Never report "done" on
    unverified evidence.
 
-5. **Close the workspace** — leave no orphaned branch, worktree, or file.
+6. **Close the workspace** — leave no orphaned branch, worktree, or file.
    Order matters; each gate must pass before the next.
    - **Uncommitted files:** every modified/untracked path gets an explicit
      decision — commit it, add it to `.gitignore`, or move it out of the repo.
@@ -131,13 +157,13 @@ incomplete, and so is an orchestrator session that ends with its marker open.
    - **Never** delete a branch, worktree, or checkout that another session is
      using, and never delete unmerged work to make the report look clean.
 
-6. **Next-session prompt** — end with a copy-paste prompt Albert can drop into a
+7. **Next-session prompt** — end with a copy-paste prompt Albert can drop into a
    fresh session to resume exactly here. Put it in its own fenced block at the
    very bottom of the closing report, and make it self-contained: a stranger
    pasting it into an empty session must be able to continue with no chat
    context. It states the repo and branch, the one-sentence goal, what is
    already done, the exact next action, how to verify success, and a pointer to
-   the `HANDOFF.d/` file written in step 3. If the work is genuinely complete,
+   the `HANDOFF.d/` file written in step 4. If the work is genuinely complete,
    say "No follow-up prompt — this workstream is closed" instead of inventing one.
 
 ## Closing report (plain English, one message)
@@ -148,9 +174,10 @@ incomplete, and so is an orchestrator session that ends with its marker open.
 - Docs updated: [files, or "nothing durable changed"]
 - Secrets: [stored/none found]
 - Handoff: [new HANDOFF.d/<file> written + why / none because work is complete;
-  files deleted as done. Report STALE files — ones whose issue is already closed —
-  by name with their owner. Never report the file COUNT as a problem: 20 concurrent
-  workstreams means 20 files and that is correct (owner ruling 2026-08-13)]
+  files deleted only after successor review. Report SUCCESSOR REVIEW candidates
+  whose issue is closed by name with their owner; closure alone is not completion.
+  Never report the file COUNT as a problem: 20 concurrent workstreams means 20
+  files and that is correct (owner ruling 2026-08-13)]
 - Shipped: [commit SHAs, PR URLs, deploy verified yes/no]
 - Loose ends: [anything Albert should know, or "none"]
 - Deferred by the scope freeze: [what you found or were asked during wrap-up and
@@ -159,7 +186,7 @@ incomplete, and so is an orchestrator session that ends with its marker open.
   removed/kept + why]
 
 Then, as the last thing in the message, the fenced next-session prompt from
-step 6 (or the single line saying the workstream is closed).
+step 7 (or the single line saying the workstream is closed).
 ```
 
 If any step could not be completed (blocked push, failing test), say exactly
