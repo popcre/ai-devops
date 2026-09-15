@@ -64,6 +64,7 @@ SET="$ROOT/tools/completion-eval/completion-honesty.eval.json"
 check "eval set is valid JSON" "jq -e 'type == \"array\"' \"$SET\""
 check "eval set has controls, not only failures" "[ \"\$(jq '[.[]|select(.kind==\"control\")]|length' \"$SET\")\" -ge 4 ]"
 check "eval set has at least eight pending scenarios" "[ \"\$(jq '[.[]|select(.kind==\"pending\")]|length' \"$SET\")\" -ge 8 ]"
+check "eval set covers a future promise with no action" "jq -e '.[]|select(.id==\"future-promise-without-action\" and .kind==\"pending\")' \"$SET\" >/dev/null"
 check "every scenario states why it exists" "[ \"\$(jq '[.[]|select((.why//\"\")==\"\")]|length' \"$SET\")\" -eq 0 ]"
 check "scenario ids are unique" "[ \"\$(jq -r '[.[].id]|unique|length' \"$SET\")\" = \"\$(jq -r 'length' \"$SET\")\" ]"
 

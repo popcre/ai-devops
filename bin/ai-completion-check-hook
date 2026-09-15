@@ -26,7 +26,40 @@ payload="$(cat 2>/dev/null || true)"
 command -v jq >/dev/null 2>&1 || exit 0
 
 event="$(printf '%s' "$payload" | jq -r '.hook_event_name // empty' 2>/dev/null || true)"
+session="$(printf '%s' "$payload" | jq -r '.session_id // "nosession"' 2>/dev/null || echo nosession)"
+safe_session="$(printf '%s' "$session" | tr -c 'A-Za-z0-9._-' '_')"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ai-devops/completion-check"
+action_dir="$state_dir/actions"
+action_file="$action_dir/$safe_session"
+action_marker="$action_file.action"
 case "$event" in
+  UserPromptSubmit)
+    mkdir -p "$action_dir" 2>/dev/null || exit 0
+    rm -f "$action_marker" 2>/dev/null || true
+    printf 'no-action\n' >"$action_file.tmp.$$" 2>/dev/null && mv "$action_file.tmp.$$" "$action_file" 2>/dev/null || true
+    exit 0 ;;
+  PostToolUse)
+    mkdir -p "$action_dir" 2>/dev/null || exit 0
+    tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+    case "$tool_name" in
+      Write|Edit|MultiEdit|NotebookEdit) action_state=action ;;
+      Bash)
+        tool_command="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // empty' 2>/dev/null || true)"
+        if printf '%s' "$tool_command" | grep -Eiq '(^|[;&|[:space:]])(apply_patch|git[[:space:]]+(add|commit|push|merge|rebase|cherry-pick)|pytest|python[[:space:]]+-m[[:space:]]+(pytest|unittest)|npm[[:space:]]+(test|run)|pnpm[[:space:]]+(test|run)|yarn[[:space:]]+(test|run)|bash[[:space:]]+tests/[^;&|[:space:]]*|\./tests/[^;&|[:space:]]*|dotnet[[:space:]]+test|go[[:space:]]+test|cargo[[:space:]]+test|make|cmake[[:space:]]+--build)([;&|[:space:]]|$)'; then
+          action_state=action
+        else action_state=inspection
+        fi ;;
+      # Reads, searches, delegated diagnosis, web/connector calls, and unknown
+      # future tools do not prove implementation. This avoids a new connector
+      # silently becoming a bypass merely because its name is unfamiliar.
+      *) action_state=inspection ;;
+    esac
+    # The separate marker makes action evidence monotonic and race-safe when
+    # parallel tool completions arrive together. Inspection may update the
+    # diagnostic state file, but it can never remove this marker.
+    if [ "$action_state" = action ]; then : > "$action_marker" 2>/dev/null || true; fi
+    printf '%s\n' "$action_state" >"$action_file.tmp.$$" 2>/dev/null && mv "$action_file.tmp.$$" "$action_file" 2>/dev/null || true
+    exit 0 ;;
   Stop|SubagentStop|"") ;;
   *) exit 0 ;;
 esac
@@ -75,6 +108,19 @@ COMPLETION_CLAIMS=(
 
 FUTURE_COMMITMENTS=(
   "i'm proceeding"
+  "proceeding now"
+  "i will proceed"
+  "i'm running"
+  "i am running"
+  "running now"
+  "i'm monitoring"
+  "i am monitoring"
+  "monitoring now"
+  "i'm continuing"
+  "i am continuing"
+  "continuing now"
+  "i'll update you"
+  "i will update you"
   "i’ll proceed"
   "i'll proceed"
   "i'll start"
@@ -113,43 +159,24 @@ if [[ -z "$matched" ]]; then
   [[ -n "$matched" ]] || exit 0
   match_kind="future"
 
-  # A future-tense promise is blocked only when the transcript proves that the
-  # current turn made no tool call. Missing, delayed, or malformed transcript
-  # evidence stays fail-open, as every turn end runs this hook.
-  transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
-  [[ -n "$transcript" && -r "$transcript" ]] || exit 0
-  no_action="$(tail -n 400 "$transcript" 2>/dev/null | jq -s --arg current "$message" '
-    def human_turn:
-      (.type == "user") and
-      (([.message.content[]? | select(.type? == "tool_result")] | length) == 0);
-    def tool_call:
-      ([.message.content[]? | select(.type? == "tool_use")] | length) > 0;
-    def assistant_text:
-      [.message.content[]? | select(.type? == "text") | .text] | join("");
-    reduce .[] as $entry
-      ({saw_human:false, saw_tool:false, last_assistant_text:""};
-       if ($entry | human_turn) then {saw_human:true, saw_tool:false, last_assistant_text:.last_assistant_text}
-       elif .saw_human and ($entry | tool_call) then .saw_tool = true
-       elif .saw_human and ($entry.type? == "assistant") then .last_assistant_text = ($entry | assistant_text)
-       else . end)
-    | (.saw_human and (.saw_tool | not) and (.last_assistant_text == $current))
-  ' 2>/dev/null || true)"
-  [[ "$no_action" == "true" ]] || exit 0
+  # UserPromptSubmit starts each turn with no action. Read-only inspection does
+  # not fulfil a promise to proceed with implementation, while any unknown
+  # older-client tool event stays fail-open. Missing event evidence also stays
+  # fail-open. Unknown tool kinds are inspection, so adding a connector cannot
+  # silently bypass the promise guard.
+  [[ -f "$action_file" ]] && [[ ! -f "$action_marker" ]] || exit 0
 fi
 
 # Re-entry guard. One block per user prompt: after firing, the same prompt_id is
 # recorded and never blocked again, so the session's next turn ends normally even
 # if it repeats the phrase. This is what makes a stop loop impossible on builds
 # that do not send stop_hook_active.
-session="$(printf '%s' "$payload" | jq -r '.session_id // "nosession"' 2>/dev/null || echo nosession)"
 prompt="$(printf '%s' "$payload" | jq -r '.prompt_id // empty' 2>/dev/null || true)"
 [[ -n "$prompt" ]] || prompt="$(printf '%s' "$message" | cksum 2>/dev/null | tr -d ' \n' || true)"
 [[ -n "$prompt" ]] || exit 0
 
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ai-devops/completion-check"
 mkdir -p "$state_dir" 2>/dev/null || exit 0
 # Session ids are opaque; keep only characters that are safe in a filename.
-safe_session="$(printf '%s' "$session" | tr -c 'A-Za-z0-9._-' '_')"
 state_file="$state_dir/$safe_session"
 
 if [[ -f "$state_file" ]] && grep -qxF "$prompt" "$state_file" 2>/dev/null; then
@@ -160,7 +187,7 @@ printf '%s\n' "$prompt" >>"$state_file" 2>/dev/null || exit 0
 tail -n 50 "$state_file" >"$state_file.tmp" 2>/dev/null && mv "$state_file.tmp" "$state_file" 2>/dev/null || true
 
 if [[ "$match_kind" == "future" ]]; then
-  reason="You committed to an action in this reply (\"$matched\") but the transcript shows no tool call in this turn. Either perform it now, or state plainly that it is not started and why."
+  reason="You committed to an action in this reply (\"$matched\") but the turn shows no implementation, test, or other execution action. Either perform it now, or state plainly that it is not started and why."
 else
   reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
 fi
