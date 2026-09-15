@@ -100,6 +100,7 @@ count="$(cat "$state" 2>/dev/null || printf 0)"
 count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
 if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
+rm -f "$TMP/bin/sleep"
 rm -f "$TMP/clock"
 SECONDS=0
 OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/hung-trace" AI_PR_WAIT_TEST_MARKER="$TMP/hung-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 --api-timeout-seconds 1 2>&1)"; RC=$?
