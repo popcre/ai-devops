@@ -64,6 +64,19 @@ OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
 
+# A recorded machine-wide back-off: the throttle exits 75 without calling GitHub,
+# and ai-pr-wait treats it as temporary and gives up only at its deadline.
+mkdir -p "$TMP/bo-state"; echo $(( $(date +%s) + 3600 )) > "$TMP/bo-state/backoff_until"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+: > "${AI_PR_WAIT_TEST_MARKER:?}"
+echo '{}'
+EOF
+chmod +x "$TMP/bin/gh"; rm -f "$TMP/clock" "$TMP/bo-called"
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_GH_STATE_DIR="$TMP/bo-state" AI_PR_WAIT_TEST_MARKER="$TMP/bo-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+check "a throttle back-off (exit 75) is temporary: GitHub is not called and the wait ends at its deadline" \
+  "test ! -e '$TMP/bo-called' && test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'transient'"
+
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
