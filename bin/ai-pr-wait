@@ -82,7 +82,7 @@ THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo
 if [ -x "$THROTTLE" ]; then
   export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
-    export AI_GH_STATE_DIR="${AI_GH_STATE_DIR:-$(mktemp -d)}" AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}"
+    export AI_GH_STATE_DIR="${AI_GH_STATE_DIR:-$(mktemp -d)}" AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
   fi
   GH_RUNNER="$THROTTLE"
 fi

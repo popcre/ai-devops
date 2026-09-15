@@ -27,6 +27,11 @@
 #   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
 #   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
 #   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 900)
+#   AI_GH_QUOTA_PROBE_SECONDS  hourly-budget probe cache age (default 300; "off" disables)
+#   AI_GH_QUOTA_PAUSE_PCT      pause machine-wide until reset below this % remaining (default 20)
+#   AI_GH_QUOTA_SLOW_PCT / AI_GH_QUOTA_SLOW_SPACING  below 40% remaining, space calls 30s
+#   Logs: $AI_GH_STATE_DIR/failures.log (every failed call: status, headers,
+#   body, redacted) and refusals.log (rate-limit refusals and budget pauses).
 #   AI_GH_REAL_GH              path of the real gh (default: first gh on PATH that is not this file)
 #
 # Exit status: gh's own status, or
@@ -107,19 +112,76 @@ last="$(readnum "$STATE/last_call")"
 gap=$(( last + SPACING - $(now) ))
 [ "$gap" -gt 0 ] && sleep "$gap"
 
+# Hourly budget (PRIMARY limit: 5000 requests/hour shared by every process on
+# one token). `gh api rate_limit` does not count against the limit. The probe
+# result is cached for QUOTA_PROBE seconds and decremented locally per call.
+# Below QUOTA_PAUSE_PCT remaining, the machine pauses until the window resets;
+# below QUOTA_SLOW_PCT, calls are spaced QUOTA_SLOW_SPACING seconds apart.
+QUOTA_PROBE="${AI_GH_QUOTA_PROBE_SECONDS:-300}"
+PAUSE_PCT="${AI_GH_QUOTA_PAUSE_PCT:-20}"
+SLOW_PCT="${AI_GH_QUOTA_SLOW_PCT:-40}"
+SLOW_SPACING="${AI_GH_QUOTA_SLOW_SPACING:-30}"
+redact(){ sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/[REDACTED]/g; s/^([<>]? *[Aa]uthorization:).*/\1 [REDACTED]/; s/(token|password|secret)([=: ]+)[^ ]+/\1\2[REDACTED]/Ig'; }
+probe_quota(){
+  local q
+  q="$("$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
+  set -- $q
+  isnum "${1:-}" && isnum "${2:-}" && isnum "${3:-}" && [ "$2" -gt 0 ] || return 1
+  printf '%s %s %s %s\n' "$(now)" "$1" "$2" "$3" > "$STATE/quota"
+}
+if [ "$QUOTA_PROBE" != off ]; then
+  read -r qts qrem qlim qreset < "$STATE/quota" 2>/dev/null || qts=0
+  if ! isnum "${qts:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ]; then
+    probe_quota
+    read -r qts qrem qlim qreset < "$STATE/quota" 2>/dev/null || qts=0
+  fi
+  if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
+    pct=$(( qrem * 100 / qlim ))
+    if [ "$pct" -lt "$PAUSE_PCT" ] && [ "$(now)" -lt "${qreset:-0}" ]; then
+      echo "$qreset" > "$STATE/backoff_until"
+      printf '%s budget-pause remaining=%s/%s reset=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" >> "$STATE/refusals.log"
+      say "hourly GitHub budget low (${qrem}/${qlim}); machine-wide pause until the window resets in $(( qreset - $(now) ))s."
+      exit 75
+    fi
+    if [ "$pct" -lt "$SLOW_PCT" ]; then
+      gap=$(( $(readnum "$STATE/last_call") + SLOW_SPACING - $(now) ))
+      [ "$gap" -gt 0 ] && sleep "$gap"
+    fi
+    printf '%s %s %s %s\n' "$qts" $(( qrem > 0 ? qrem - 1 : 0 )) "$qlim" "$qreset" > "$STATE/quota"
+  fi
+fi
+
 err="$(mktemp)"
 now > "$STATE/last_call"
 "$REAL" "$@" 2> "$err"
 rc=$?
 now > "$STATE/last_call"
 cat "$err" >&2
+if [ "$rc" -ne 0 ]; then
+  # Exact failure record: HTTP status, rate-limit headers, and message body,
+  # credentials redacted. gh does not surface response headers on failure, so
+  # the header snapshot comes from a free `rate_limit` request made right after.
+  hdr=''
+  [ "$QUOTA_PROBE" != off ] && hdr="$("$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
+  {
+    printf '=== %s rc=%s args=%s\n' "$(date -u +%FT%TZ)" "$rc" "$*"
+    printf -- '--- status: %s\n' "$(grep -Eo 'HTTP [0-9]{3}' "$err" | head -1)"
+    printf -- '--- message body (stderr):\n'; cat "$err"
+    printf -- '--- headers (retry-after, x-ratelimit-*, request id) at failure time:\n%s\n' "${hdr:-unavailable}"
+  } | redact >> "$STATE/failures.log"
+fi
 if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit exceeded|API rate limit|HTTP 429|too many requests|retry-after' "$err"; then
   ra="$(grep -Eio 'retry-after"?:? *[0-9]+' "$err" | grep -Eo '[0-9]+' | head -1)"
   wait="$BACKOFF"; isnum "${ra:-}" && [ "$ra" -gt "$wait" ] && wait="$ra"
+  kind=secondary
+  if grep -Eiq 'API rate limit exceeded|rate limit exceeded for' "$err"; then
+    kind=primary
+    [ "$QUOTA_PROBE" != off ] && probe_quota && read -r _ _ _ qreset < "$STATE/quota" && isnum "$qreset" && [ $(( qreset - $(now) )) -gt "$wait" ] && wait=$(( qreset - $(now) ))
+  fi
   new=$(( $(now) + wait ))
   [ "$new" -gt "$(readnum "$STATE/backoff_until")" ] && echo "$new" > "$STATE/backoff_until"
-  printf '%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$rc" "${ra:-none}" "$wait" "${1:-} ${2:-}" >> "$STATE/refusals.log"
-  say "GitHub refused with a rate limit. Machine-wide back-off for ${wait}s recorded. Do not retry sooner."
+  { printf '%s kind=%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$kind" "$rc" "${ra:-none}" "$wait" "$*"; sed 's/^/    /' "$err"; } | redact >> "$STATE/refusals.log"
+  say "GitHub refused with a $kind rate limit. Machine-wide back-off for ${wait}s recorded. Do not retry sooner."
   rm -f "$err"; exit 75
 fi
 rm -f "$err"

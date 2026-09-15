@@ -14,12 +14,14 @@ case "${FAKE_MODE:-ok}" in
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
+  quota) if [ "$*" = "api rate_limit --jq [.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv" ]; then printf '%s\t5000\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
+  primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Github-Request-Id: F95F:1E2E31\n'; elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
   counter) n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"; [ "$n" -ge 2 ] && echo '{"status":"completed"}' || echo '{"status":"in_progress"}' ;;
 esac
 echo "end $(date +%s%N)" >> "$FAKE_LOG"
 EOF
 chmod +x "$FAKE"
-export AI_GH_REAL_GH="$FAKE" FAKE_LOG="$TMP/log" AI_GH_STATE_DIR="$TMP/state" AI_GH_MIN_SPACING_SECONDS=0 FAKE_COUNT="$TMP/count"
+export AI_GH_REAL_GH="$FAKE" FAKE_LOG="$TMP/log" AI_GH_STATE_DIR="$TMP/state" AI_GH_MIN_SPACING_SECONDS=0 FAKE_COUNT="$TMP/count" AI_GH_QUOTA_PROBE_SECONDS=off
 
 check 'passes arguments and output through' "[ \"\$('$GH' pr view 5)\" = 'out:pr view 5' ]"
 check 'gh run watch is refused without calling GitHub' "! '$GH' run watch 12 && ! grep -q 'run watch' '$FAKE_LOG'"
@@ -55,6 +57,25 @@ before=$(date +%s)
 FAKE_MODE=secondary-short "$GH" api y >/dev/null 2>&1; rc=$?
 check 'short Retry-After is raised to the 600s floor' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/backoff_until') -ge $((before + 600)) ]"
 rm -f "$TMP/state/backoff_until"
+
+# Hourly (primary) budget.
+rm -f "$TMP/state/quota"
+FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
+check 'healthy budget allows the call and caches quota' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q ' 2999 5000 ' '$TMP/state/quota'"
+rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
+FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
+check 'budget below 20% pauses machine-wide without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
+rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
+before=$(date +%s)
+FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" pr list >/dev/null 2>&1; rc=$?
+check 'primary limit refusal backs off until the window resets' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/backoff_until') -ge $((before + 2900)) ] && grep -q 'kind=primary' '$TMP/state/refusals.log'"
+check 'refusal log keeps the exact refusal text' "grep -q 'API rate limit exceeded for user ID 55610577' '$TMP/state/refusals.log'"
+check 'failure log records status, headers and body' "grep -q 'status: HTTP 403' '$TMP/state/failures.log' && grep -qi 'x-ratelimit-remaining: 0' '$TMP/state/failures.log' && grep -q 'X-Github-Request-Id: F95F:1E2E31' '$TMP/state/failures.log'"
+check 'failure and refusal logs redact credentials' "! grep -q 'ghp_abcdef' '$TMP/state/failures.log' '$TMP/state/refusals.log' && grep -q REDACTED '$TMP/state/failures.log'"
+rm -f "$TMP/state/backoff_until"
+FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api nope >/dev/null 2>&1
+check 'ordinary failures are logged too' "grep -q 'args=api nope' '$TMP/state/failures.log' && grep -q 'HTTP 404: Not Found' '$TMP/state/failures.log'"
+rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
 # Stale lock from a dead process is recovered.
 mkdir -p "$TMP/state/lock.d"; echo "999999 $(( $(date +%s) - 60 ))" > "$TMP/state/lock.d/owner"
