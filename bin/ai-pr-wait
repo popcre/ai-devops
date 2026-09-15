@@ -97,7 +97,9 @@ bounded_gh() {
   local now remaining limit
   now="$(date +%s)"
   remaining=$(( DEADLINE - now ))
-  [ "$remaining" -gt 0 ] || return 124
+  # 125 means the overall deadline expired before any GitHub process started;
+  # 124 remains the supervisor's genuine request-timeout result.
+  [ "$remaining" -gt 0 ] || return 125
   limit="$API_TIMEOUT_SECONDS"
   [ "$limit" -le "$remaining" ] || limit="$remaining"
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
@@ -177,9 +179,15 @@ wait_for_next_poll() {
 while :; do
   # One GraphQL call carries everything that decides the outcome, including the
   # merge-queue membership that `gh pr view` does not report.
+  GH_RC=0
   Q="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){nodes{... on CheckRun{name conclusion}}}}}}}}}}" 2>"$API_STDERR")"
+  GH_RC=$?
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
+    if [ "$GH_RC" -eq 125 ] && [ -n "$LAST" ]; then
+      say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
+      exit 2
+    fi
     say "ai-pr-wait: could not read PR #$PR (transient); retrying"
     if deadline_reached; then
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
