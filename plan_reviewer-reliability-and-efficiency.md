@@ -18,7 +18,7 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 | [#394](https://github.com/popcre/ai-devops/issues/394) terminal outcomes and diagnostics | Open; DeepSeek Unicode/ordinary terminal slice merged, installed and live verified | 2026-09-11 | PR #405 merge `068c6cb9f07c`; 85/0/0 focused checks, exact-head GLM APPROVE, CI `34563556041` and queue `34567376452` successful; installed synthetic Unicode review/replay passed. Governed terminal parity remains in progress |
 | [#395](https://github.com/popcre/ai-devops/issues/395) durable evidence and interruption provenance | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, installed recovery proof and 33 preserved incident resolutions](tests/verification/reviewer-reliability/issue-395-durable-evidence.md) |
 | [#396](https://github.com/popcre/ai-devops/issues/396) availability, cooldown, and concurrency | Complete; merged, installed and live verified | 2026-09-11 | [Exact review, CI, scoped live proof and incident reconciliation](tests/verification/reviewer-reliability/issue-396-scoped-admission.md) |
-| [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Recovery delivery recorded; closure blocked by incomplete full Windows verification | 2026-09-14 | [Exact reviews, CI/queue, install, recovery canaries and current-main gate](tests/verification/reviewer-reliability/issue-397-session-recovery.md); run `34856869730` CANCELLED at the 105-minute bound after 18/74 Bash suites; Kimi suite 19 unfinished, no full or PowerShell result; Linux and hosted reviewer fallback passed after preferred timeout |
+| [#397](https://github.com/popcre/ai-devops/issues/397) provider execution and same-session recovery | Complete; merged, installed and full current-source acceptance passed | 2026-09-14 | [Exact reviews, CI/queue, installed recovery and full coverage proof](tests/verification/reviewer-reliability/issue-397-session-recovery.md); PR460/461/462 landed through e2985684; successful run34905839047 has the identical Git tree,75 Linux suites,75 distinct Windows Bash suites,18 PowerShell suites and completed hosted reviewer proof; installed ordinary preflight and failure-path checks passed |
 | [#271](https://github.com/popcre/ai-devops/issues/271) Codex Windows read-only sandbox | Open; native runtime cannot enforce root-read denial; [measured evidence](docs/codex-windows-containment-2026-09-11.md) | 2026-09-11 | Marker read/write denial proven; outside-read isolation and full network denial remain unqualified; live review pending |
 | [#333](https://github.com/popcre/ai-devops/issues/333) truthful usage and measured context efficiency | Complete; merged, installed and live verified | 2026-09-11 | [Pinned semantics, exact review, CI, installed source and retained-result proof](tests/verification/reviewer-reliability/issue-333-truthful-usage.md); no compaction changes |
 | [#169](https://github.com/popcre/ai-devops/issues/169) shared wrapper infrastructure | Installed acceptance complete | 2026-09-11 | [Installed hash, fixture adapter, both migrated launcher checks and incident audit](tests/verification/reviewer-reliability/issue-169-installed-primitives.md); allocation/recovery remain #396/#397 |
@@ -28,9 +28,12 @@ Owner: reviewer infrastructure, [issue #337](https://github.com/popcre/ai-devops
 
 **September 14 continuation order:** #397 → #394 → #393 → #271 → #398 →
 #337 → #166 → #159, with #396 consumer follow-through before #398. The
-[current handoff](HANDOFF.d/2026-09-14T1653Z-edge-dev-codex-reviewer-sequence-blockers.md)
-records local prepared commits, the separate queue-policy task's exclusive
-ownership, GLM 5.3's legacy-Qwen recommendation and remaining release gates.
+[current handoff](HANDOFF.d/2026-09-14T2133Z-edge-dev-codex-reviewer-acceptance-continuation.md)
+records preserved commits, the delivered separate queue-policy repair PR459,
+GLM 5.3's legacy-Qwen recommendation and remaining release gates. The #396
+consumer preparation's source/test changes exactly match merged shared-db
+PR2750; do not implement that same change again. Its integrated #398 acceptance
+remains separate. The predecessor handoff retains additional future evidence.
 This order supersedes the historical narrative order in §9; its acceptance
 requirements still apply. At every phase end, re-read both plans to final #159
 closure and record downstream drift. Completed #333/#395/#396 toolkit work
