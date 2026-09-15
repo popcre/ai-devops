@@ -1,7 +1,7 @@
 # Issue #394: terminal diagnostic parity
 
-Status: preparation and verification in progress. This record does not close
-#394, #337, or #159. Delivery follows #397's current-main acceptance gate.
+Status: accepted on current `main`. This record closes #394 only; #337 and
+#159 remain open for their later sequence positions.
 
 ## Scope and preserved behavior
 
@@ -99,18 +99,35 @@ flag are a separately delivered repository-maintenance slice in shared-db.
 Source-receipt integration remains #393. Both sides must agree on the stable
 failure reason and reject a failed wrapper that prints a fake approval.
 
-## Remaining delivery gates
+## Delivered acceptance
 
-Full owning suites and the owner decision are complete. Exact-head independent
-review, required CI and merge queue, canonical installation, installed live
-checks, consumer acceptance, and affected incident reconciliation remain pending.
-PRs #418/#419 are reconciled only after their surviving obligations are
-delivered. The frozen 198-candidate maintenance round is unchanged.
+PR #464 merged through the protected queue as
+`9e94e73a3feb1b1fff44efaab5f200b21e5a88e2`. Exact-head GLM 5.3 review approved
+its reviewed head, and the pull-request and merge-group suites passed. The
+canonical Windows checkout was fast-forwarded to the merge commit and the
+managed launchers resolve to its Qwen, Muse and Grok wrappers.
 
-Installed acceptance will reuse the owning refusal fixtures and normal
-governed Qwen, Muse and Grok reviews. Deliberately provoking paid content-filter
-or turn-limit failures is not required. The existing DeepSeek Unicode and
-same-session evidence remains applicable while its shipped wrapper is unchanged.
+Installed normal canaries completed through all three providers. Qwen returned
+the requested model and an approving read-only report after the official
+standalone 0.23.0 runtime and credential hardening were restored; Muse and Grok
+both read the repository and returned `CANARY_OK`. No canary edited a file.
+
+The shared-db consumer landed separately through guarded PR #2932 as
+`86a9aca6a9b5086b0effb0fb17f7e24bdb658990`. Its 52-test suite, 286-site semantic
+truth audit, contract gate, tools checks, ephemeral database checks and exact-head
+governed Muse review passed. No database or production write was performed, and
+shared-db #2707 is closed.
+
+All four affected incident packages now carry append-only `partially-resolved`
+records tied to the toolkit merge and installed reports. The remaining provider
+limit or unknown historical cause is stated in each record. PRs #418/#419 are
+obsolete because their surviving terminal obligations are present in #464; their
+branches remain preserved. The frozen 198-candidate maintenance round is unchanged.
+
+Installed acceptance reused the owning refusal-fixture results and completed
+normal Qwen, Muse and Grok reviews. It did not deliberately provoke a paid
+content-filter or turn-limit failure. The existing DeepSeek Unicode and
+same-session evidence remained applicable because its shipped wrapper was unchanged.
 
 The affected historical incidents require partial, evidence-backed resolution:
 Qwen `20260910T223006Z-edge-dev-qwen-94730`, Muse
@@ -119,4 +136,4 @@ Qwen `20260910T223006Z-edge-dev-qwen-94730`, Muse
 `20260911T054028Z-edge-dev-grok-419831`. Better classification does not repair a
 provider limit or establish an unknown historical cause. Preserve those
 limitations explicitly; successful normal canaries cannot rewrite the original
-failed outcomes. No resolution record has been appended during preparation.
+failed outcomes. Each incident now has that partial resolution recorded.
