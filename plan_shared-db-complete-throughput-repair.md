@@ -195,6 +195,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 17. **(2026-09-15) Hold every merge until the previous item's production finishes "so runs don't collide."** Rejected: the stage leases already serialize writers. Holding whole pipelines adds waiting without adding safety (Step 2).
 18. **(2026-09-15) Solve the stall with only the "produce proofs yourself" rule.** Rejected as insufficient: it fixes cause 1 only. Causes 2–5 each need their own step.
 19. **(2026-09-15) Periodic "still open" summaries as the visibility mechanism.** Rejected: repeated unchanged lists hid the lack of closures. Visibility comes from a no-progress alarm plus transition-only reports (Step 4).
+20. **(2026-09-15) Ask Albert a question whose answer is already recorded.** Rejected: on #2802 the orchestrator asked Albert several times "who knows which style guide files show a real person's likeness." The answer was already in `u2giants/shared-db` `docs/style-guides-characters-and-royalties.md` §2 and `docs/business-rules/licensing-master-data.md`. Making Albert re-supply what the repo or chat already holds is the same failure as asking him to copy and paste (Step 4).
 
 ## 8. Design decisions
 
@@ -221,6 +222,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 15. **Wait only on a named exclusive stage.** Merge-ready work may wait only for the specific preview, merge, or production lease it needs, or for an exact object/dependency conflict. "Wait until another item's production finishes" is forbidden unless the two items share an object or dependency.
 16. **No-progress alarm.** If no owned outcome makes a stage transition for two hours, the orchestrator must tell Albert immediately: what is stuck, the exact blocker, and the one action that unblocks it. Unchanged "still open" summaries are not reports.
 17. **Edge-history refusals are defects, not decisions.** When a delivery tool refuses a legitimate history (a pre-merge preview apply, a recovery run, a drop-then-recreate rebuild, a renumber), the repair goes into the tool with a regression fixture. The orchestrator does not route each occurrence through a manual detour more than once.
+18. **Answer from the record before asking Albert.** Before any question goes under "What I need from you", the orchestrator and its agents search the repository docs, the issue and its comments, and the current chat. They ask Albert only for a decision recorded nowhere, and the question names where they looked. They never ask him to relay, copy, or re-paste anything already in the chat, the repo, or another session. (Albert, 2026-09-15.)
 
 ### Open implementation judgment
 
@@ -322,10 +324,11 @@ The current manual owner-authorized marker succession remains until Codex/Claude
 - report only when an owned outcome changes stage, when a genuine owner decision is needed, or when the alarm fires; an unchanged "Still open" list is never sent on its own;
 - fire the alarm when any owned outcome has had no stage transition for two hours, or when zero outcomes have closed in four hours of active work. The alarm names the stuck outcome, the exact blocker (lease holder, refusal text, or missing evidence), and the single action that unblocks it;
 - include a closures-in-this-session count in every owner report, so "busy but not delivering" is visible at a glance.
+- never ask Albert anything the record already answers (locked decision 18). The skill requires a search of repo docs, the issue thread, and the chat before any "What I need from you" question, and the question names the sources checked. Real example: #2802's likeness-source question, answered in `docs/style-guides-characters-and-royalties.md` §2.
 
 Implement the timer in `--orchestrator-snapshot` output (a `stalled_outcomes` list with minutes since last transition). Put the reporting rule in the canonical `shared-db-orchestrator` skill. The real example: about 12 hours of repeated summaries, and zero closures surfaced only when Albert asked.
 
-**Verification gate:** a fixture successor reconstructs the exact active map from the snapshot; an unchanged queued item produces zero repeated comments/polls; each meaningful transition wakes once; a simulated agent emits no orchestrator message for intermediate or unchanged progress and emits exactly one message on completion or genuine blockage; a fixture outcome idle for 121 minutes appears in `stalled_outcomes` and the skill-instruction test requires the alarm wording; a snapshot with unchanged state produces no owner report.
+**Verification gate:** a fixture successor reconstructs the exact active map from the snapshot; an unchanged queued item produces zero repeated comments/polls; each meaningful transition wakes once; a simulated agent emits no orchestrator message for intermediate or unchanged progress and emits exactly one message on completion or genuine blockage; a fixture outcome idle for 121 minutes appears in `stalled_outcomes` and the skill-instruction test requires the alarm wording; a snapshot with unchanged state produces no owner report; a #2802-shaped fixture (owner question whose answer exists in a repo doc) resolves from the doc and produces no owner ask, while a genuinely unrecorded decision produces one ask citing the sources searched.
 
 #### Step 5 — one early delivery preflight and automatic evidence registration
 
@@ -421,7 +424,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - Urgent admission: qualifying outage/release/security/deadline; maintenance self-promotion refusal; missing impact/return address refusal.
 - Queue ordering: urgent vs standard vs maintenance; transitive blocker; created-at tie; issue-number tie; object conflict; full capacity; no destructive preemption.
 - Outcome lifecycle: every legal transition; every illegal skip; merge-not-live; evidence re-derivation; generated-type requirement; one live-proof dispatch at `production_applied`; the `--emit-live-proof-brief` template validates; malformed or multiple evidence blocks refuse by field name.
-- Events/snapshot: deterministic hash; stale input; one wake per transition; no unchanged poll; successor reconstruction; `stalled_outcomes` at 121 idle minutes; no owner report on unchanged state.
+- Events/snapshot: deterministic hash; stale input; one wake per transition; no unchanged poll; successor reconstruction; `stalled_outcomes` at 121 idle minutes; no owner report on unchanged state; recorded-answer question produces no owner ask (#2802 fixture).
 - Holds and versions: an unrelated-production hold refuses; a named-lease hold is accepted; `--re-reserve-version` for a #2934-shaped claim keeps the PR, burns the old version, and never unreserves objects.
 - Pass-2 rebuild: create→drop, drop→recreate same signature, recreate new signature, pre-existing routine→drop, named-parameter drop.
 - Review carry-forward: evidence-only commit and diff-identical refresh keep approvals; an implementation change voids them.
@@ -440,7 +443,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 
 - Canonical skill/global/router parity and installation hash checks.
 - Task-gate and CI-selection fixtures prove the no-database-preview lane reuses the natural owner's existing checks, records its reason, and never treats a database-affecting or uncertain change as exempt.
-- Forbidden active behavior: automatic refill as success metric, repeated unchanged polling, merge-as-completion, duplicate authorization, mandatory prose reconstruction, asking Albert to relay live-proof requests to another session, holds that name an unrelated item's production, and unchanged "still open" owner reports (2026-09-15).
+- Forbidden active behavior: automatic refill as success metric, repeated unchanged polling, merge-as-completion, duplicate authorization, mandatory prose reconstruction, asking Albert to relay live-proof requests to another session, holds that name an unrelated item's production, unchanged "still open" owner reports, and owner questions already answered in the repo or chat, including any copy/paste/relay request (2026-09-15).
 - Event-aware wait tests and existing #159 CI/reviewer suites.
 - Exact-head independent review for wrapper/evidence safety changes.
 
@@ -499,6 +502,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 - [ ] Pass-2 rebuild, pre-merge preview evidence, and recovery-to-automatic-production handle the 2026-09-15 edge histories with regression fixtures.
 - [ ] Evidence-only commits keep review; reviewer turn-limit and local-preflight failures reroute.
 - [ ] The two-hour no-progress alarm and transition-only owner reports are live in the installed orchestrator skill.
+- [ ] The answer-from-the-record rule (locked decision 18) is in the installed orchestrator skill, and the #2802 fixture passes.
 - [ ] Compatible approved migrations can move as one governed train and, after #2716 policy activation, promote automatically only when every existing machine gate passes.
 - [ ] Reviewer and runner non-start waits reroute within the tested SLO.
 - [ ] Shared-db is in the organization with its native merge queue proven, after explicit authorization.
@@ -551,6 +555,7 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 | (2026-09-15 stall) Pre-merge preview apply rejected; recovery skipped automatic production | Step 6 |
 | (2026-09-15 stall) Reviewer turn-limit, local doctor timeout, same-slot handback | Step 7 |
 | (2026-09-15 stall) Repeated summaries hid zero closures | Step 4 (no-progress alarm) |
+| (2026-09-15) Owner asked for answers already in the repo (#2802) | Step 4 (answer-from-the-record rule) |
 
 ## Mandatory implementation-plan self-audit
 
@@ -558,6 +563,6 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow reviewer coverage and #2715/#2716's independent ownership, enforce two-sided non-structural refusal, define the fail-closed no-database-preview boundary, reject both preview-everything and risk-label exemptions, reject the superseded 1+1 premise, and preserve every safety boundary.
 3. **Is the ultimate goal clear enough for correct judgment when a step is wrong? Yes.** §1 makes live application delivery the outcome, safety preservation the invariant, and explicitly says the goal wins.
 
-**2026-09-15 integration re-audit.** Could a fresh session implement the stall repairs without asking anything? Yes. §3's second trigger defines each cause with verbatim refusal text, PR/run identifiers, and the step that owns it. Steps 2–7 name the target file, command, or workflow job and the behavior when done, and each extends that step's verification gate. §7 items 14–19 record the rejected shortcuts, including closing at `production_applied`, quarantining contract 3, and whole-pipeline holds. §8 locked decisions 14–17 carry Albert's ruling. §10 names the new tests, and §13 extends done, risks, and the coverage table. Gap found and fixed during audit: the drift-prone identifiers needed an explicit re-resolve instruction, which is now in §11.
+**2026-09-15 integration re-audit.** Could a fresh session implement the stall repairs without asking anything? Yes. §3's second trigger defines each cause with verbatim refusal text, PR/run identifiers, and the step that owns it. Steps 2–7 name the target file, command, or workflow job and the behavior when done, and each extends that step's verification gate. §7 items 14–19 record the rejected shortcuts, including closing at `production_applied`, quarantining contract 3, and whole-pipeline holds. §8 locked decisions 14–18 carry Albert's ruling. §10 names the new tests, and §13 extends done, risks, and the coverage table. Gap found and fixed during audit: the drift-prone identifiers needed an explicit re-resolve instruction, which is now in §11.
 
 Checklist result: all 13 sections are present; the STATUS table, zero-context background, explicit scope, current state, root cause, rejected approaches, locked/open decisions, file-level steps, named tests, access, landing proof, risks, rollback, owner gates, plan/handoff cross-links, discoverability route, and full recommendation coverage are included. No secret or private transcript content is present.
