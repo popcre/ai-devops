@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ai-gh — the machine-wide GitHub call throttle. Use it instead of bare `gh`.
+#
+# WHY THIS EXISTS. On 2026-09-15 parallel sub-agents of the shared-db
+# orchestrator each polled GitHub every 60-90 seconds (`gh run watch`, sleep
+# loops). GitHub refused requests with its SECONDARY (burst) limit while
+# `gh api rate_limit` still showed 5000/5000. It was the second time. The
+# primary counter cannot see this limit, so each session "checking the quota"
+# is no protection. The only fix is one shared gate that every AI process on
+# the machine passes through.
+#
+# What it enforces, across every process that uses the same state directory:
+#   - Serialization: one GitHub call at a time, through a lock directory.
+#   - Spacing: at least AI_GH_MIN_SPACING_SECONDS (default 3) between calls.
+#   - Back-off: a secondary-limit or rate-limit refusal (HTTP 403/429,
+#     "secondary rate limit", "abuse detection", Retry-After) puts the whole
+#     machine in back-off for max(Retry-After, AI_GH_BACKOFF_SECONDS=600).
+#     A refused call is never retried by this tool: no hot loop.
+#   - Watch commands (`gh run watch`, `--watch`) are refused. Wait with
+#     `ai-gh-wait` (minimum 5-minute interval) or `ai-pr-wait` instead.
+#
+# Usage: ai-gh <any gh arguments>
+#
+# Environment:
+#   AI_GH_STATE_DIR            shared state (default ~/.ai-devops/gh-throttle)
+#   AI_GH_MIN_SPACING_SECONDS  gap between any two calls (default 3)
+#   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
+#   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
+#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 900)
+#   AI_GH_REAL_GH              path of the real gh (default: first gh on PATH that is not this file)
+#
+# Exit status: gh's own status, or
+#   2   refused usage (a watch command)
+#   75  GitHub refused with a rate limit (back-off recorded), or back-off active with AI_GH_NO_WAIT=1
+set -uo pipefail
+
+STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
+BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
+STALE="${AI_GH_LOCK_STALE_SECONDS:-900}"
+LOCK="$STATE/lock.d"
+say(){ printf 'ai-gh: %s\n' "$*" >&2; }
+isnum(){ case "$1" in ''|*[!0-9]*) return 1;; esac; }
+for v in SPACING BACKOFF STALE; do isnum "${!v}" || { say "$v must be a whole number"; exit 2; }; done
+
+prev=''
+for a in "$@"; do
+  if [ "$a" = --watch ] || { [ "$prev" = run ] && [ "$a" = watch ]; }; then
+    say "watch commands are forbidden (they poll GitHub every few seconds and trip the secondary rate limit)."
+    say "wait with: ai-gh-wait --until-regex <pattern> -- <gh args>   (minimum 5-minute interval), or ai-pr-wait <pr>"
+    exit 2
+  fi
+  prev="$a"
+done
+
+self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+REAL="${AI_GH_REAL_GH:-}"
+if [ -z "$REAL" ]; then
+  while IFS= read -r cand; do
+    r="$(readlink -f "$cand" 2>/dev/null || echo "$cand")"
+    [ "$r" = "$self" ] || [ "$(basename "$r")" = ai-gh ] && continue
+    REAL="$cand"; break
+  done < <(type -ap gh 2>/dev/null)
+fi
+[ -n "$REAL" ] || { say "the real gh is not installed"; exit 3; }
+
+mkdir -p "$STATE" || { say "cannot create $STATE"; exit 3; }
+now(){ date +%s; }
+readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
+
+HELD=0
+release(){ [ "$HELD" = 1 ] && rm -rf "$LOCK"; HELD=0; }
+trap release EXIT
+trap 'release; exit 130' INT TERM
+acquire(){
+  while :; do
+    if mkdir "$LOCK" 2>/dev/null; then
+      echo "$$ $(now)" > "$LOCK/owner"; HELD=1; return 0
+    fi
+    local info pid ts
+    info="$(cat "$LOCK/owner" 2>/dev/null)"; pid="${info%% *}"; ts="${info##* }"
+    if isnum "${ts:-}" && [ $(( $(now) - ts )) -gt "$STALE" ]; then
+      say "removing abandoned lock held by pid $pid since $ts"; rm -rf "$LOCK"; continue
+    fi
+    if isnum "${pid:-}" && ! kill -0 "$pid" 2>/dev/null && [ -n "$ts" ] && [ $(( $(now) - ts )) -gt 5 ]; then
+      rm -rf "$LOCK"; continue
+    fi
+    sleep 1
+  done
+}
+
+acquire
+until_ts="$(readnum "$STATE/backoff_until")"
+while [ "$(now)" -lt "$until_ts" ]; do
+  left=$(( until_ts - $(now) ))
+  if [ "${AI_GH_NO_WAIT:-0}" = 1 ]; then
+    say "GitHub back-off active for ${left}s more (a rate-limit refusal was recorded); not calling GitHub."
+    exit 75
+  fi
+  release
+  say "GitHub back-off active; sleeping ${left}s before this call."
+  sleep "$left"
+  acquire
+  until_ts="$(readnum "$STATE/backoff_until")"
+done
+last="$(readnum "$STATE/last_call")"
+gap=$(( last + SPACING - $(now) ))
+[ "$gap" -gt 0 ] && sleep "$gap"
+
+err="$(mktemp)"
+now > "$STATE/last_call"
+"$REAL" "$@" 2> "$err"
+rc=$?
+now > "$STATE/last_call"
+cat "$err" >&2
+if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit exceeded|API rate limit|HTTP 429|too many requests|retry-after' "$err"; then
+  ra="$(grep -Eio 'retry-after"?:? *[0-9]+' "$err" | grep -Eo '[0-9]+' | head -1)"
+  wait="$BACKOFF"; isnum "${ra:-}" && [ "$ra" -gt "$wait" ] && wait="$ra"
+  new=$(( $(now) + wait ))
+  [ "$new" -gt "$(readnum "$STATE/backoff_until")" ] && echo "$new" > "$STATE/backoff_until"
+  printf '%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$rc" "${ra:-none}" "$wait" "${1:-} ${2:-}" >> "$STATE/refusals.log"
+  say "GitHub refused with a rate limit. Machine-wide back-off for ${wait}s recorded. Do not retry sooner."
+  rm -f "$err"; exit 75
+fi
+rm -f "$err"
+exit "$rc"

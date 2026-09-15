@@ -31,7 +31,7 @@ set -uo pipefail
 PR=''
 REPO=''
 TIMEOUT_MINUTES=180
-INTERVAL=60
+INTERVAL=300
 API_TIMEOUT_SECONDS=30
 OWNER_REQUEST=''
 
@@ -70,6 +70,22 @@ esac
 command -v gh >/dev/null 2>&1 || { printf 'ai-pr-wait: gh is not installed\n' >&2; exit 3; }
 command -v jq >/dev/null 2>&1 || { printf 'ai-pr-wait: jq is not installed\n' >&2; exit 3; }
 GH_RUNNER="$(command -v gh)"
+# GitHub waits poll at most every five minutes and every call goes through the
+# machine-wide throttle (2026-09-15 secondary-limit incident, popcre/ai-devops#401).
+# During a recorded back-off the throttle exits 75 at once rather than sleeping
+# past the per-request timeout; the loop treats that as transient and waits.
+if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
+  printf 'ai-pr-wait: --interval %ss raised to the 300-second GitHub wait minimum\n' "$INTERVAL" >&2
+  INTERVAL=300
+fi
+THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
+if [ -x "$THROTTLE" ]; then
+  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
+    export AI_GH_STATE_DIR="${AI_GH_STATE_DIR:-$(mktemp -d)}" AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}"
+  fi
+  GH_RUNNER="$THROTTLE"
+fi
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
 BASH_RUNNER="$(command -v bash 2>/dev/null || true)"

@@ -22,6 +22,7 @@
     "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-health.sh",
+    "test-ai-gh.sh",
     "test-ai-memory-index-hook.sh",
     "test-ai-memory-sync-fanout.sh",
     "test-ai-memory-sync.sh",
