@@ -2,6 +2,9 @@
 
 Use this as the expected business-role map. Confirm actual access in the running
 site because navigation visibility and server permissions have historically drifted.
+Use a dedicated QA login for each role when proving permissions. Admin
+impersonation is useful for mapping menus, but it is not proof that a role's
+denied actions or Vendor/Factory isolation are enforced.
 
 ## Admin
 

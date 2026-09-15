@@ -25,6 +25,9 @@ factory's business record, upload confidential artwork, or complete a production
 action against real data. Inspect confirmation and cancellation behavior when the
 final effect is not clearly disposable.
 
+Invitation testing stops before the send action unless Albert supplied an
+approved disposable recipient address for this QA run.
+
 Sample movement history is append-only. Do not create a protected movement merely
 to test deletion unless the resulting record is approved residue. Prefer lifecycle
 closeout, dispose, or loss actions when that is the business-correct path.
