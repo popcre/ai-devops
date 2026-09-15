@@ -24,6 +24,8 @@ check "orchestrator forbids inherited successor route" "grep -qi 'inherit.*prede
 check "manual requires reclassification from scratch" "grep -qi 'successor issue must write this block from scratch' '$MANUAL'"
 check "Codex global carries successor rule" "grep -qi 'Route every successor from its own work' '$CODEX'"
 check "Claude global carries successor rule" "grep -qi 'Route every successor from its own work' '$CLAUDE'"
+check "Codex global names and classifies shared-db blockers" "grep -qi 'Name shared-db blockers and their route' '$CODEX' && grep -qi 'orchestrator work or' '$CODEX'"
+check "Claude global names and classifies shared-db blockers" "grep -qi 'Name shared-db blockers and their route' '$CLAUDE' && grep -qi 'orchestrator work or' '$CLAUDE'"
 check "misroute preserves private artifacts" "grep -qi 'private artifact' '$ORCH'"
 check "review safety gate is scoped to this toolkit, not every project" "grep -qi 'Independent review is required for the reviewer safety path' '$REPO_AGENTS' && grep -qi 'Ordinary plans' '$REPO_AGENTS'"
 check "skill separates protected claims from active-author capacity" "grep -qi 'Protected blocked claims do not consume active-author capacity' '$ORCH'"

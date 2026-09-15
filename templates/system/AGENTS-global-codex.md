@@ -129,6 +129,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
   in the skill; do not load or copy them into ordinary sessions.
+- **Name shared-db blockers and their route.** When any session cannot proceed
+  because it is waiting on shared-db work, its reply must clearly list every
+  blocking shared-db issue number and label each issue as orchestrator work or
+  non-orchestrator work.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.
