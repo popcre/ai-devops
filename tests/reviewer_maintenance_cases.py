@@ -260,6 +260,7 @@ esac
         self.assertEqual(outcome["reason"], "evidence-unavailable")
         self.assertIn("carry_forward", outcome)
         self.assertEqual(completed["carry_forward"], [])
+        self.assertEqual(self.engine.start()["candidates"], [])
 
     def test_conflicting_outcome_refused(self):
         self.invocation()

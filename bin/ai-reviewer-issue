@@ -48,7 +48,7 @@ Usage:
   ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
                            --issue ISSUE-ID [--carry-forward PATH --evidence PATH]
   ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID
-                           --reason REASON --evidence PATH-OR-URL
+                           --reason REASON --evidence PATH-OR-URL [--carry-forward PATH]
   ai-reviewer-issue maintenance complete ROUND-ID --proof PATH
   ai-reviewer-issue maintenance carry-forward ROUND-ID CANDIDATE-ID
                            --remaining PATH --evidence PATH-OR-URL
