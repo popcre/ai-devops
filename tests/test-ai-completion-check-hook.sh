@@ -62,28 +62,40 @@ mention_out="$(fire m3 "$mention_msg")"
 check "a MENTION of the trigger phrase mid-reply is NOT caught" "[ -z \"\$mention_out\" ]"
 
 # --- a promise of action must be backed by action in this turn -----------------
-NO_ACTION_TRANSCRIPT="$TMP/no-action.jsonl"
-TOOL_ACTION_TRANSCRIPT="$TMP/tool-action.jsonl"
-printf '%s\n' \
-  '{"type":"user","message":{"content":"Fix the failing tests."}}' \
-  '{"type":"assistant","message":{"content":[{"type":"text","text":"I am going to proceed now."}]}}' >"$NO_ACTION_TRANSCRIPT"
-printf '%s\n' \
-  '{"type":"user","message":{"content":"Fix the failing tests."}}' \
-  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' \
-  '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}' \
-  '{"type":"assistant","message":{"content":[{"type":"text","text":"Next I will summarize the result."}]}}' >"$TOOL_ACTION_TRANSCRIPT"
-check "'I'm proceeding' with no tool call is stopped" \
-  "[ -n \"\$(fire f1 'I am going to proceed now.' '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
-future_out="$(fire f2 "I am going to proceed now." "{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}")"
-check "future block names the no-action defect" "printf '%s' \"\$future_out\" | grep -q 'no tool call'"
-check "the same promise after a tool call is silent" \
-  "[ -z \"\$(fire f3 'Next I will summarize the result.' '{\"transcript_path\":\"$TOOL_ACTION_TRANSCRIPT\"}')\" ]"
-check "a valid stale transcript stays fail-open" \
-  "[ -z \"\$(fire f6 'Starting now.' '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
-check "a promise without transcript evidence stays fail-open" \
+fire init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+future_out="$(fire f1 "I am going to proceed now.")"
+check "'I'm proceeding' with no execution action is stopped" "[ -n \"\$future_out\" ]"
+check "future block names the no-action defect" "printf '%s' \"\$future_out\" | grep -q 'no implementation, test, or other execution action'"
+for future_phrase in 'Running now; I will update you.' 'Monitoring now; I will update you.' 'Continuing now; I will update you.'; do
+  fire phrase-init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+  check "future activity phrase is stopped: $future_phrase" "[ -n \"\$(fire \"phrase-$future_phrase\" '$future_phrase')\" ]"
+done
+fire init2 '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+fire inspect '' '{"hook_event_name":"PostToolUse","tool_name":"Read"}' >/dev/null
+check "inspection alone does not fulfil a future promise" \
+  "[ -n \"\$(fire f2 'I will proceed now.')\" ]"
+fire shellread '' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"rg -n TODO ."}}' >/dev/null
+check "read-only shell use does not fulfil a future promise" \
+  "[ -n \"\$(fire f2b 'Proceeding now.')\" ]"
+fire connector '' '{"hook_event_name":"PostToolUse","tool_name":"mcp__example__lookup"}' >/dev/null
+check "an unknown connector cannot become a future-promise bypass" \
+  "[ -n \"\$(fire f2c 'I will proceed now.')\" ]"
+fire tool '' '{"hook_event_name":"PostToolUse","tool_name":"Edit"}' >/dev/null
+check "the same promise after an execution action is silent" \
+  "[ -z \"\$(fire f3 'Next I will summarize the result.')\" ]"
+fire init-race '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+(fire race-action '' '{"hook_event_name":"PostToolUse","tool_name":"Edit"}' >/dev/null) & race_action_pid=$!
+(fire race-read '' '{"hook_event_name":"PostToolUse","tool_name":"Read"}' >/dev/null) & race_read_pid=$!
+wait "$race_action_pid"; wait "$race_read_pid"
+check "parallel inspection cannot erase execution evidence" \
+  "[ -z \"\$(fire f3-race 'I will proceed now.')\" ]"
+fire init3 '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+fire shelltest '' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"bash tests/test-focused.sh"}}' >/dev/null
+check "a test command is an execution action" \
+  "[ -z \"\$(fire f3b 'I will proceed with the report now.')\" ]"
+rm -f "$XDG_STATE_HOME/ai-devops/completion-check/actions/sess-1"
+check "a promise without activity-event evidence stays fail-open" \
   "[ -z \"\$(fire f4 \"I'll start now.\")\" ]"
-check "a malformed transcript stays fail-open" \
-  "printf 'not json\n' >'$TMP/bad-transcript'; [ -z \"\$(fire f5 \"Kicking off now.\" '{\"transcript_path\":\"$TMP/bad-transcript\"}')\" ]"
 
 # --- silence where silence is correct ------------------------------------------
 check "an ordinary reply is silent" "[ -z \"\$(fire p4 'Here is the diff. Two tests fail on line 40.')\" ]"
@@ -104,6 +116,8 @@ CH="$TMP/claudehome"; mkdir -p "$CH"
 printf '{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo pre-existing"}]}]}}\n' > "$CH/settings.json"
 HOME="$TMP/fakehome" bash "$INSTALL" --claude-home "$CH" --repo-root "$ROOT" >/dev/null 2>&1
 check "installer registers the hook" "grep -q 'completion-check-hook' \"$CH/settings.json\""
+check "installer registers turn-start activity" "jq -e '.hooks.UserPromptSubmit | length == 1' \"$CH/settings.json\" >/dev/null"
+check "installer registers tool-use activity" "jq -e '.hooks.PostToolUse | length == 1' \"$CH/settings.json\" >/dev/null"
 check "installer keeps the pre-existing Stop hook" "grep -q 'pre-existing' \"$CH/settings.json\""
 check "installer keeps unrelated settings" "grep -q '\"theme\"' \"$CH/settings.json\""
 check "installer leaves valid JSON" "jq -e 'type == \"object\"' \"$CH/settings.json\""

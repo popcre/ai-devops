@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check>' '       ai-review <claude|codex> <mode> --owner-request "<why Albert asked for it>"' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review <claude|codex> <mode> --owner-request "<why Albert asked for it>" [review options]' '       ai-review doctor'; }
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
@@ -10,11 +10,20 @@ case "${1:-}" in
   -h|--help|help|'') usage; exit 0 ;;
   *) printf 'ai-review: error: %s is advisory or quarantined and cannot satisfy an approval gate. Use claude or codex.\n' "${1:-unknown}" >&2; exit 2 ;;
 esac
-shift; mode="${1:-}"
-owner_request=""
-if [ "$#" -eq 3 ] && [ "${2:-}" = --owner-request ]; then owner_request="$3"; set -- "$1"; fi
-[ "$#" -eq 1 ] || { usage >&2; exit 2; }
+shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
+owner_request=""; wrapper_args=("$mode")
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --owner-request)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
+      owner_request="$2"; shift 2 ;;
+    --tests|--base|--assert-head)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
+      wrapper_args+=("$1" "$2"); shift 2 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
 # The approval gate is the front door, so the task gate belongs here: a review
 # the change set does not call for must not reach a provider wrapper at all.
 # bin/* is symlinked onto PATH, so resolve the real script location before
@@ -42,8 +51,8 @@ export AI_REVIEW_OWNER_REQUEST="$owner_request"
 # A plan review runs before the work exists and is how a session decides what
 # the work is. Gating it on the class of a change set that has not been
 # written yet would refuse the very step that sets the class.
-if [ "$mode" = plan-review ]; then exec "$wrapper" "$mode"; fi
+if [ "$mode" = plan-review ]; then exec "$wrapper" "${wrapper_args[@]}"; fi
 gate_args=()
 [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
 tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
-exec "$wrapper" "$mode"
+exec "$wrapper" "${wrapper_args[@]}"

@@ -217,9 +217,12 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   and both pointing at a stable copy under `~/.config/ai-devops/` rather than
   into a repo checkout that might move.
   `bin/ai-install-memory-hook` registers the `PostToolUse` memory-index hook;
-  `bin/ai-install-completion-check-hook` registers the `Stop` closeout hook
-  (`bin/ai-completion-check-hook`), which stops a turn that claims completion
-  until the session has accounted for every deliverable — see
+  `bin/ai-install-completion-check-hook` registers the
+  `UserPromptSubmit`, `PostToolUse`, and `Stop` closeout hooks
+  (`bin/ai-completion-check-hook`). The first two record whether the current
+  turn performed an implementation, test, or other execution action; read-only
+  inspection remains insufficient, and the last stops a no-action turn that promises future action
+  or any turn that claims completion before every deliverable is accounted for — see
   [`../plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md).
   Each refuses to write if `settings.json` does not parse, and neither ever
   removes the other. Verify with `--check`.
