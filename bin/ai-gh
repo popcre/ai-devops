@@ -130,10 +130,10 @@ probe_quota(){
   printf '%s %s %s %s\n' "$(now)" "$1" "$2" "$3" > "$STATE/quota"
 }
 if [ "$QUOTA_PROBE" != off ]; then
-  read -r qts qrem qlim qreset < "$STATE/quota" 2>/dev/null || qts=0
+  { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
   if ! isnum "${qts:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ]; then
     probe_quota
-    read -r qts qrem qlim qreset < "$STATE/quota" 2>/dev/null || qts=0
+    { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
   fi
   if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
     pct=$(( qrem * 100 / qlim ))
