@@ -517,7 +517,7 @@ These were named follow-ons in the old plan. They remain inside parent #159 so t
 
 **Change:** repoint required contexts only after names stabilize; preserve history protection/admin bypass; remove stale contexts; record final comparison.
 
-**Gates:** throwaway PR reports every required context and enters/merges through queue; no stale context; recovery proven; §1 measures recorded; all children and #159 close; active handoff retires in completion commit.
+**Gates:** throwaway PR reports every required context and enters/merges through queue; no stale context; recovery proven by recording pre-cutover ruleset values (contexts, OrganizationAdmin bypass actor, and batch settings), verifying the bypass actor live on the effective ruleset, and citing #164's already-evidenced injected-failure and recovery cycle—#166 injects no new deliberate ruleset break; §1 measures recorded from existing run data and queue timeline events with no dedicated sampling campaign; all children and #159 close; active handoff retires in completion commit.
 
 ## 10. Tests required
 
