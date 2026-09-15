@@ -29,10 +29,10 @@
 #   AI_GH_MIN_SPACING_SECONDS  gap between any two calls (default 3)
 #   AI_GH_BACKOFF_SECONDS      minimum back-off after a refusal (default 600)
 #   AI_GH_NO_WAIT=1            during back-off, exit 75 at once instead of sleeping
-#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 300). A call
-#                              that legitimately runs longer (a big clone or a long
-#                              paginated read) should be raised with this variable,
-#                              or it will have its lock reclaimed under it.
+#   AI_GH_LOCK_STALE_SECONDS   lock age treated as abandoned (default 90). The lock
+#                              covers only bookkeeping and a time-limited budget probe,
+#                              never the gh call itself, so a long call cannot be reclaimed.
+#   AI_GH_PROBE_TIMEOUT_SECONDS  time limit on each budget/header probe (default 15)
 #   AI_GH_NO_WAIT_LOCK_SECONDS with AI_GH_NO_WAIT=1, max lock wait before exit 75 (default 10)
 #   AI_GH_QUOTA_PROBE_SECONDS  hourly-budget probe cache age (default 300; "off" disables)
 #   AI_GH_QUOTA_PAUSE_PCT      below this % remaining (default 20) the machine is put
@@ -55,15 +55,16 @@ set -uo pipefail
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 SPACING="${AI_GH_MIN_SPACING_SECONDS:-3}"
 BACKOFF="${AI_GH_BACKOFF_SECONDS:-600}"
-STALE="${AI_GH_LOCK_STALE_SECONDS:-300}"
+STALE="${AI_GH_LOCK_STALE_SECONDS:-90}"
+PROBE_TIMEOUT="${AI_GH_PROBE_TIMEOUT_SECONDS:-15}"
 LOCK="$STATE/lock.d"
 say(){ printf 'ai-gh: %s\n' "$*" >&2; }
 isnum(){ case "$1" in ''|*[!0-9]*) return 1;; esac; }
-for v in SPACING BACKOFF STALE; do isnum "${!v}" || { say "$v must be a whole number"; exit 2; }; done
+for v in SPACING BACKOFF STALE PROBE_TIMEOUT; do isnum "${!v}" || { say "$v must be a whole number"; exit 2; }; done
 
 prev=''
 for a in "$@"; do
-  if [ "$a" = --watch ] || { [ "$prev" = run ] && [ "$a" = watch ]; }; then
+  if [ "$a" = --watch ] || [ "${a%%=*}" = --watch ] || { [ "$prev" = run ] && [ "$a" = watch ]; }; then
     say "watch commands are forbidden (they poll GitHub every few seconds and trip the secondary rate limit)."
     say "wait with: ai-gh-wait --until-regex <pattern> -- <gh args>   (minimum 5-minute interval), or ai-pr-wait <pr>"
     exit 2
@@ -85,12 +86,28 @@ fi
 mkdir -p "$STATE" || { say "cannot create $STATE"; exit 3; }
 now(){ date +%s; }
 readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
+# Atomic state write (temp file then rename), so a reader never sees a half-written value.
+put(){ local t="$1.tmp.$$.$RANDOM"; if printf '%s\n' "$2" > "$t" && mv -f "$t" "$1" 2>/dev/null; then return 0; fi; rm -f "$t"; printf '%s\n' "$2" > "$1"; }
+# Back-off only ever moves later: never shorten a back-off another process recorded.
+extend_backoff(){ [ "$1" -gt "$(readnum "$STATE/backoff_until")" ] && put "$STATE/backoff_until" "$1"; return 0; }
 
 HELD=0
 TOKEN="$$.$RANDOM.$RANDOM.$(date +%s)"
 # Reclaim by atomic rename to a private quarantine name, never rm of the live
 # path: two waiters cannot both delete it, and a new owner is never removed.
-quarantine(){ local q="$LOCK.stale.$$.$RANDOM"; mv "$LOCK" "$q" 2>/dev/null && rm -rf "$q"; }
+# Windows can refuse a rename while another process has the owner file open, so
+# the rename is retried, and as a last resort the lock is removed in place.
+quarantine(){
+  local q i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    q="$LOCK.stale.$$.$RANDOM"
+    if mv "$LOCK" "$q" 2>/dev/null; then rm -rf "$q"; return 0; fi
+    [ -d "$LOCK" ] || return 0
+    sleep 0.2
+  done
+  say "lock rename refused repeatedly; removing it in place"
+  rm -rf "$LOCK" 2>/dev/null
+}
 # Reclaim of someone else's lock is itself serialized, and the staleness is
 # re-checked while holding that gate, so two waiters cannot reclaim in sequence
 # and have the second one carry off the first one's fresh lock.
@@ -207,15 +224,17 @@ safe_args(){
 }
 probe_quota(){
   local q
-  q="$("$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
+  q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
   set -- $q
   isnum "${1:-}" && isnum "${2:-}" && isnum "${3:-}" && [ "$2" -gt 0 ] || return 1
-  printf '%s %s %s %s\n' "$(now)" "$1" "$2" "$3" > "$STATE/quota"
+  put "$STATE/quota" "$(now) $1 $2 $3"
 }
 if [ "$QUOTA_PROBE" != off ]; then
   { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
   if ! isnum "${qts:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ]; then
-    probe_quota
+    # A failed probe (signed out, other host) is cached as a marker so later
+    # calls do not repeat it and pay the extra spacing sleep every time.
+    probe_quota || put "$STATE/quota" "$(now) unknown unknown 0"
     { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
     # The probe is a request too: keep normal spacing before the real call.
     [ "$SPACING" -gt 0 ] && sleep "$SPACING"
@@ -223,7 +242,7 @@ if [ "$QUOTA_PROBE" != off ]; then
   if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
     pct=$(( qrem * 100 / qlim ))
     if [ "$pct" -lt "$PAUSE_PCT" ] && [ "$(now)" -lt "${qreset:-0}" ]; then
-      echo "$qreset" > "$STATE/backoff_until"
+      extend_backoff "$qreset"
       printf '%s budget-pause remaining=%s/%s reset=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" >> "$STATE/refusals.log"
       say "hourly GitHub budget low (${qrem}/${qlim}); machine-wide pause until the window resets in $(( qreset - $(now) ))s."
       exit 75
@@ -235,26 +254,26 @@ if [ "$QUOTA_PROBE" != off ]; then
       fi
       [ "$gap" -gt 0 ] && sleep "$gap"
     fi
-    printf '%s %s %s %s\n' "$qts" $(( qrem > 0 ? qrem - 1 : 0 )) "$qlim" "$qreset" > "$STATE/quota"
+    put "$STATE/quota" "$qts $(( qrem > 0 ? qrem - 1 : 0 )) $qlim $qreset"
   fi
 fi
 
 qreset_cached="${qreset:-}"
 err="$(mktemp)"
-now > "$STATE/last_call"
+put "$STATE/last_call" "$(now)"
 # The lock serializes call STARTS (spacing, budget, back-off bookkeeping) and is
 # released before gh runs. GitHub limits count requests, not concurrency, so a
 # long clone or a hung request must never hold every other session hostage, and
 # a supervisor hard-kill during the call can no longer leave the lock behind.
 release
 ERRFILE="$err"; trap 'rm -f "$ERRFILE"' EXIT; trap 'rm -f "$ERRFILE"; exit 130' INT TERM
-# stderr is passed through live (prompts and progress stay visible) and copied
-# for the failure record.
+# stderr is passed through live (messages stay visible; gh may hide its spinner
+# because stderr is a pipe) and copied for the failure record.
 exec 4>&1
 rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
 exec 4>&-
 isnum "${rc:-}" || rc=1
-now > "$STATE/last_call"
+put "$STATE/last_call" "$(now)"
 if [ "$rc" -ne 0 ]; then
   # Exact failure record: HTTP status, rate-limit headers, and message body,
   # credentials redacted. gh does not surface response headers on failure, so
@@ -264,12 +283,12 @@ if [ "$rc" -ne 0 ]; then
   # add to the burst GitHub is already refusing).
   secondary=0
   grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
-  [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ] && hdr="$("$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
+  [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ] && hdr="$(timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
   {
     printf '=== %s rc=%s args=%s\n' "$(date -u +%FT%TZ)" "$rc" "$(safe_args "$@")"
     printf -- '--- status: %s\n' "$(grep -Eo 'HTTP [0-9]{3}' "$err" | head -1)"
     printf -- '--- message body (stderr):\n'; cat "$err"
-    printf -- '--- headers (retry-after, x-ratelimit-*, request id) at failure time:\n%s\n' "${hdr:-unavailable}"
+    printf -- '--- headers (retry-after, x-ratelimit-*, request id) from a rate_limit request made right after the failure, not the failed call:\n%s\n' "${hdr:-unavailable}"
   } | redact >> "$STATE/failures.log"
 fi
 if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit exceeded|API rate limit|HTTP 429|too many requests|retry-after' "$err"; then
@@ -284,7 +303,7 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
     isnum "${qreset:-}" && [ $(( qreset - $(now) )) -gt "$wait" ] && wait=$(( qreset - $(now) ))
   fi
   new=$(( $(now) + wait ))
-  [ "$new" -gt "$(readnum "$STATE/backoff_until")" ] && echo "$new" > "$STATE/backoff_until"
+  extend_backoff "$new"
   { printf '%s kind=%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$kind" "$rc" "${ra:-none}" "$wait" "$(safe_args "$@")"; sed 's/^/    /' "$err"; } | redact >> "$STATE/refusals.log"
   say "GitHub refused with a $kind rate limit. Machine-wide back-off for ${wait}s recorded. Do not retry sooner."
   rm -f "$err"; exit 75

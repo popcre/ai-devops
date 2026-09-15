@@ -43,12 +43,14 @@ STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 deadline=$(( $(date +%s) + TIMEOUT * 60 ))
 prev=''; fails=0
 while :; do
-  out="$(AI_GH_NO_WAIT=1 "$GH" "$@" 2>/dev/null)"; rc=$?
+  out="$(AI_GH_NO_WAIT=1 "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible
   delay="$INTERVAL"
   if [ "$rc" -eq 75 ]; then
     until_ts="$(cat "$STATE/backoff_until" 2>/dev/null)"; case "$until_ts" in ''|*[!0-9]*) until_ts=0;; esac
     left=$(( until_ts - $(date +%s) )); [ "$left" -gt "$delay" ] && delay="$left"
     say "GitHub back-off active; next attempt in ${delay}s"
+  elif [ "$rc" -eq 2 ]; then
+    say "the throttle refused this command (rc=2); not retrying"; exit 3
   elif [ "$rc" -ne 0 ]; then
     fails=$((fails+1)); say "gh failed (rc=$rc, attempt $fails)"
     [ "$fails" -ge 3 ] && { say "three consecutive failures; stopping"; exit 1; }

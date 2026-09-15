@@ -87,6 +87,7 @@
     "test-ai-deepseek-agent.sh",
     "test-ai-gemini.sh",
     "test-ai-gemini-usage.sh",
+    "test-ai-gh.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -116,6 +117,7 @@
     "test-ai-deepseek-agent.sh",
     "test-ai-gemini.sh",
     "test-ai-gemini-usage.sh",
+    "test-ai-gh.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -182,6 +184,7 @@
     [
       "test-ai-claude-review.sh",
       "test-ai-codex-memories.sh",
+      "test-ai-gh.sh",
       "test-ai-qwen.sh"
     ]
   ],

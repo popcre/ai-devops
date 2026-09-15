@@ -92,10 +92,12 @@ if [ -x "$THROTTLE" ]; then
   # Allowance = the longest the throttle can spend before gh starts (lock wait +
   # spacing). Without it the supervisor could kill a healthy call and leave the
   # shared lock behind.
-  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=2}"
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
   export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
   # lock wait + call spacing + the spacing the budget probe adds before the call
-  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} ))
+  # + the time-limited budget probe made while holding the lock
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
+  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
 else
   printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
   THROTTLE_ALLOWANCE_SECONDS=0
