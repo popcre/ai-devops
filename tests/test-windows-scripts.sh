@@ -187,6 +187,10 @@ echo "== portable Codex defaults =="
 if grep -q 'codex-portable.toml' bin/setup-machine.ps1 && grep -q -- '-not (Test-Path -LiteralPath $codexConfigPath)' bin/setup-machine.ps1; then
   ok "setup seeds Codex defaults only when config is absent"
 else bad "Codex defaults may overwrite an established config"; fi
+if grep -q 'configure-codex-statusline.ps1' bin/setup-machine.ps1 &&
+   grep -A7 '^\[tui\]$' config/codex-portable.toml | grep -q 'context-remaining'; then
+  ok "Windows setup standardizes the Codex context status line"
+else bad "Windows setup does not standardize the Codex context status line"; fi
 if grep -q '^model = "gpt-5.6-sol"' config/codex-portable.toml &&
    grep -q 'model_reasoning_effort = "medium"' config/codex-portable.toml; then
   ok "portable Codex defaults pin safe effort without hard-coding a model"
