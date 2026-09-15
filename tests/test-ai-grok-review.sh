@@ -440,13 +440,20 @@ echo hold > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
 poll_until_progress "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub' \
   "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/int.err' '$TMP/int.out' '$TMP/hold-started'" \
-  "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || true
+  "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || {
+    printf '  fixture diagnostic: interrupt worker alive=%s\n' "$(kill -0 "$INT_PID" 2>/dev/null && printf yes || printf no)" >&2
+    sed 's/^/  fixture stderr: /' "$TMP/int.err" >&2
+  }
 LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '$TMP/hold-started'"
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"
 check "directed signal terminates and reaps the owned local Grok child" "test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
+if [ "${AI_GROK_INTERRUPT_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\npassed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
+  ((FAIL == 0)); exit $?
+fi
 BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new interrupted --prompt x 2>&1 )"; BLOCKED_RC=$?
 [ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_only_its_exact_duplicate" || bad "remote_uncertainty_blocks_only_its_exact_duplicate"
 echo ok > "$TMP/mode"

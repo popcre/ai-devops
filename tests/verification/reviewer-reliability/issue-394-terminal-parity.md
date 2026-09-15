@@ -30,16 +30,22 @@ replayed to qualify this change.
 
 ## Verification in progress
 
-On Windows through Git Bash, the Muse real-command phase fixtures passed
-52/0/0 and the narrow Grok terminal/native-witness cases passed 30/0/0. These
-counts are passed/failed/skipped. The complete Qwen owning suite passed 166
-checks with zero failures on September 14; its summary does not report a skip
-count. Its log is `.test-logs/bash-20260914T154535Z-279217/test-ai-qwen.sh.log`.
-The complete Muse owning suite passed 159 checks with zero failures; its summary
-does not report a skip count. Its log is
-`.test-logs/bash-20260914T154352Z-266653/test-ai-muse.sh.log`. The complete Grok
-owning suite passed 270 checks with zero failures and zero skips; its log is
-`.test-logs/bash-20260914T153612Z-211330/test-ai-grok-review.sh.log`.
+On Windows through Git Bash, the rebased candidate's Qwen terminal/recovery
+slice passed42/0/0 and Muse's management/refusal slice passed58/0/0. Complete
+owning suites then passed Qwen166/0 (skip count unreported), Muse165/0 (skip
+count unreported), and Grok270/0/0. Private logs are
+`C:/Temp/394-qwen-terminal-current.log`, `394-muse-phase-current.log`,
+`394-qwen-full-current.log`, `394-muse-full-current.log`, and
+`394-grok-full-repaired.log`.
+
+The first rebased Grok full run passed267/270 checks but its interrupt fixture
+stalled before the provider-ready marker on a degraded host. The surrounding
+uncertain-work and lock protections passed. A test-only focused mode now prints
+safe fixture stderr if readiness stalls, without changing wrapper behavior or
+the assertions. The focused interrupt section passed34/0/0, including process
+termination, uncertainty preservation and owned-lock release; the subsequent
+full270/0/0 run proved the failure did not recur. The failed run is retained at
+`C:/Temp/394-grok-full-current.log`; it is diagnostic evidence, not acceptance.
 
 Independent GLM review of `d676261b1bc972503e7ad8e8956c7b7adf011886` returned
 REQUEST CHANGES. Follow-up addresses Muse management-command phase labels and
@@ -83,8 +89,10 @@ explicit phase checks exercised above.
 The candidate Qwen compatibility path preserves pre-stderr recovery records
 and privately publishes their sealed saved answer as INCOMPLETE, without an
 authorizing verdict or a provider request. It does not invent missing error
-evidence. This legacy-only restriction is awaiting the owner's decision;
-partial version-2 metadata or orphan stderr is never treated as legacy.
+evidence. Albert approved GLM 5.3's recommendation on September 14: retain these
+old answers privately but prevent approval authority when their original error
+evidence is missing. No record deletion or automatic replay is authorized.
+Partial version-2 metadata or orphan stderr is never treated as legacy.
 
 The governed consumer's terminal mappings and DeepSeek terminal invocation
 flag are a separately delivered repository-maintenance slice in shared-db.
@@ -93,9 +101,9 @@ failure reason and reject a failed wrapper that prints a fake approval.
 
 ## Remaining delivery gates
 
-Full owning suites, safety/parity verification, exact-head independent review,
-required CI and merge queue, canonical installation, installed live checks,
-consumer acceptance, and affected incident reconciliation remain pending.
+Full owning suites and the owner decision are complete. Exact-head independent
+review, required CI and merge queue, canonical installation, installed live
+checks, consumer acceptance, and affected incident reconciliation remain pending.
 PRs #418/#419 are reconciled only after their surviving obligations are
 delivered. The frozen 198-candidate maintenance round is unchanged.
 
