@@ -61,6 +61,27 @@ mention_msg="A turn ending on the phrase nothing is needed gets stopped once.\n\
 mention_out="$(fire m3 "$mention_msg")"
 check "a MENTION of the trigger phrase mid-reply is NOT caught" "[ -z \"\$mention_out\" ]"
 
+# --- a promise of action must be backed by action in this turn -----------------
+NO_ACTION_TRANSCRIPT="$TMP/no-action.jsonl"
+TOOL_ACTION_TRANSCRIPT="$TMP/tool-action.jsonl"
+printf '%s\n' \
+  '{"type":"user","message":{"content":"Fix the failing tests."}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"I will."}]}}' >"$NO_ACTION_TRANSCRIPT"
+printf '%s\n' \
+  '{"type":"user","message":{"content":"Fix the failing tests."}}' \
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}' >"$TOOL_ACTION_TRANSCRIPT"
+check "'I'm proceeding' with no tool call is stopped" \
+  "[ -n \"\$(fire f1 \"I'm proceeding now and I'll come back with the result.\" '{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}')\" ]"
+future_out="$(fire f2 "Starting now." "{\"transcript_path\":\"$NO_ACTION_TRANSCRIPT\"}")"
+check "future block names the no-action defect" "printf '%s' \"\$future_out\" | grep -q 'no tool call'"
+check "the same promise after a tool call is silent" \
+  "[ -z \"\$(fire f3 \"Next I'll summarize the result.\" '{\"transcript_path\":\"$TOOL_ACTION_TRANSCRIPT\"}')\" ]"
+check "a promise without transcript evidence stays fail-open" \
+  "[ -z \"\$(fire f4 \"I'll start now.\")\" ]"
+check "a malformed transcript stays fail-open" \
+  "printf 'not json\n' >'$TMP/bad-transcript'; [ -z \"\$(fire f5 \"Kicking off now.\" '{\"transcript_path\":\"$TMP/bad-transcript\"}')\" ]"
+
 # --- silence where silence is correct ------------------------------------------
 check "an ordinary reply is silent" "[ -z \"\$(fire p4 'Here is the diff. Two tests fail on line 40.')\" ]"
 check "a reply naming pending work is silent" "[ -z \"\$(fire p5 'The loader is still pending; I am building it next.')\" ]"

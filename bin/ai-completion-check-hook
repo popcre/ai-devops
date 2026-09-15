@@ -73,6 +73,23 @@ COMPLETION_CLAIMS=(
   "nothing from you"
 )
 
+FUTURE_COMMITMENTS=(
+  "i'm proceeding"
+  "i’ll proceed"
+  "i'll proceed"
+  "i'll start"
+  "i’ll start"
+  "i'm going to"
+  "i am going to"
+  "starting now"
+  "next i'll"
+  "next i’ll"
+  "i'll come back with"
+  "i’ll come back with"
+  "kicking off"
+  "let me now"
+)
+
 # Judge how the reply CLOSES, not the whole essay. A completion claim is a way of
 # ENDING a turn; the same words in the middle of an explanation are prose. This
 # is why the mention-of-itself false positive happened, and it is the same fix
@@ -86,7 +103,35 @@ lower="$(printf '%s' "$closing" | tr '[:upper:]' '[:lower:]')"
 for claim in "${COMPLETION_CLAIMS[@]}"; do
   if [[ "$lower" == *"$claim"* ]]; then matched="$claim"; break; fi
 done
-[[ -n "$matched" ]] || exit 0
+
+match_kind="completion"
+if [[ -z "$matched" ]]; then
+  for commitment in "${FUTURE_COMMITMENTS[@]}"; do
+    if [[ "$lower" == *"$commitment"* ]]; then matched="$commitment"; break; fi
+  done
+  [[ -n "$matched" ]] || exit 0
+  match_kind="future"
+
+  # A future-tense promise is blocked only when the transcript proves that the
+  # current turn made no tool call. Missing, delayed, or malformed transcript
+  # evidence stays fail-open, as every turn end runs this hook.
+  transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
+  [[ -n "$transcript" && -r "$transcript" ]] || exit 0
+  no_action="$(tail -n 400 "$transcript" 2>/dev/null | jq -s '
+    def human_turn:
+      (.type == "user") and
+      (([.message.content[]? | select(.type? == "tool_result")] | length) == 0);
+    def tool_call:
+      ([.message.content[]? | select(.type? == "tool_use")] | length) > 0;
+    reduce .[] as $entry
+      ({saw_human:false, saw_tool:false};
+       if ($entry | human_turn) then {saw_human:true, saw_tool:false}
+       elif .saw_human and ($entry | tool_call) then .saw_tool = true
+       else . end)
+    | (.saw_human and (.saw_tool | not))
+  ' 2>/dev/null || true)"
+  [[ "$no_action" == "true" ]] || exit 0
+fi
 
 # Re-entry guard. One block per user prompt: after firing, the same prompt_id is
 # recorded and never blocked again, so the session's next turn ends normally even
@@ -110,7 +155,11 @@ printf '%s\n' "$prompt" >>"$state_file" 2>/dev/null || exit 0
 # Keep the file small; only the recent turns of this session matter.
 tail -n 50 "$state_file" >"$state_file.tmp" 2>/dev/null && mv "$state_file.tmp" "$state_file" 2>/dev/null || true
 
-reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
+if [[ "$match_kind" == "future" ]]; then
+  reason="You committed to an action in this reply (\"$matched\") but the transcript shows no tool call in this turn. Either perform it now, or state plainly that it is not started and why."
+else
+  reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
+fi
 
 # Three shapes, one message: hookSpecificOutput is the documented Stop decision
 # control, decision/reason is the older form still honored by installed builds,
