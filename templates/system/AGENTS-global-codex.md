@@ -92,6 +92,7 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   reply where it comes up, not when Albert next asks. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
+- **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
