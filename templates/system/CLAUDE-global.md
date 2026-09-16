@@ -50,6 +50,9 @@ Rules for the block:
 
 - Every bullet starts with who holds it: `You —`, `Another session —`,
   `Waiting on —`, `Blocked —`.
+- A `Waiting on —` bullet names the owner and its last verified activity
+  time; an unowned item is `Blocked —` and must be assigned before the reply
+  ends.
 - One line per bullet, at most five bullets, most urgent first.
 - Nothing pending may appear anywhere but here. Never write "two things worth
   telling you", "one thing to flag", or "worth noting" in the body — if it is
@@ -192,6 +195,9 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
   configurable values out of code, test created code, and verify UI changes
   visually before reporting completion.
+- Before planning a live proof, trace the feature's live call path end to end
+  (trigger, code, every guard it must pass) and list every blocker at once. A
+  scheduled job that did not do its work must exit non-zero.
 - GitHub is the source of truth: repository to automated checks to deployment.
   Never live-edit a server.
 - Never replace operating-system binaries. Use project-owned tools or supported
@@ -304,6 +310,8 @@ command, or a security judgement. A subagent reports a verdict plus the verbatim
 evidence line behind it; you make the decision, not the subagent.
 A sub-agent report that is neither finished work nor a blocker with its verbatim evidence line is a failure; resume that agent immediately.
 When relaying owner authority to a sub-agent, quote Albert's exact words and state that they came from his chat message.
+Before dispatching parallel agents, list the files each will touch; overlapping work goes to one agent in sequence.
+Every dispatch prompt says: create a uniquely named worktree and verify its branch before every commit; only the agent that opened an issue closes it.
 
 ## Waiting is not reporting
 
