@@ -33,6 +33,7 @@ required_phrases=(
   "quote Albert's exact words"
   "only its explicit APPROVE authorizes the action"
   "one unproven live-behavior outcome"
+  "Never save several unproven steps"
 )
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL"; do
