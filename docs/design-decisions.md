@@ -263,3 +263,67 @@ Every destructive reset in this script must also fail closed; otherwise a
 damaged hidden clone can look healthy. Regression coverage:
 `tests/test-ai-memory-sync.sh`.
 
+## Investigation mode is advisory and must not reuse formal review
+
+Looks like:
+Giving reviewers shell and internet should just turn the existing review
+command into a capable mode, or ship with a CLI upgrade.
+
+Actually:
+Parent #253 Option B adds a separate `investigate` command. Formal review stays
+structurally read-only. GLM, Kimi, Qwen, and Grok reuse existing implement
+isolation; Muse needs a new capable agent. Investigation reports must say
+`INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`. CLI upgrades are out of this
+plan. Children are independent after Step 0. Muse Spark agreed with this
+correction on 2026-09-16 (`VERDICT: AGREE`, no material objections).
+
+Why:
+Read-only reviewers cannot run tests, so they guess. Converting the judge into
+a capable mode would destroy independent approval. Bundling upgrades with the
+new command made every original child too big. Owner 2026-09-03 and 2026-09-16.
+
+Do not change because:
+A future session that widens formal review, aliases GLM `implement` (which
+forbids the network), waits for Muse on a GLM OpenCode upgrade, or pulls Grok
+#249's broker into #513 would undo the locked split. Plan:
+[`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md).
+
+## Grok #253 investigate and Grok #249 integration-review are different tracks
+
+Looks like:
+Grok deeper testing is one job, and #249's brokered Linux boundary is how to
+do it.
+
+Actually:
+#513 / `ai-grok-implement investigate` is Option B on pin `1.0.13`: isolated
+copy, shell allowed, advisory banner, `ai-grok-review` unchanged (deny Bash,
+no web search). #249 remains the stronger deny-by-default brokered
+integration-review and is not implemented by #253.
+
+Why:
+Albert asked for a #253 child for Grok. Option B forbids an egress broker.
+#249 stays its own workstream.
+
+Do not change because:
+Implementing #249 inside #513, or enabling Bash on `ai-grok-review`, would mix
+the judge with look-into-this and pull in machinery this parent rejected.
+
+## `ai-muse` caller is the actual current client, including Grok
+
+Looks like:
+The ask-muse skill examples only list `AI_MUSE_CALLER=claude` or `codex`, so
+Grok cannot start Muse.
+
+Actually:
+`bin/ai-muse` accepts any `name_ok` caller. On 2026-09-16 a Grok session used
+`AI_MUSE_CALLER=grok` and completed Muse Spark session `253-plan-opinion`.
+Never impersonate Claude or Codex to satisfy the examples.
+
+Why:
+Caller identity keys the session record. Reusing another client's value
+collides conversations.
+
+Do not change because:
+A Grok session that sets `claude` or `codex` can attach to or collide with
+that client's Muse sessions.
+
