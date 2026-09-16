@@ -141,6 +141,9 @@ Albert approved concurrent migration authoring on 2026-08-14.
   objects and versions; they are never reported as working slots without live
   worker evidence.
 - Maintain one dynamic queue per lane, grouped by exact object overlap. Recompute them after every merge.
+- Run a live queue audit BEFORE every allocation and every refill tick, not only
+  after one. An audit run afterwards describes a decision already taken; the
+  audit is what the decision is supposed to be made from.
 - When any author lane frees, run a live queue audit immediately. Close stale
   already-delivered issues instead of duplicating them, then dispatch the next
   genuinely eligible issue in an isolated worktree. Maintain explicit successor
@@ -186,7 +189,24 @@ Audit and cleanup:
 node scripts/manage-migration-author-lanes.mjs --audit
 node scripts/manage-migration-author-lanes.mjs --queue-audit
 node scripts/manage-migration-author-lanes.mjs --cleanup-stale
+node scripts/manage-migration-author-lanes.mjs --abandonment-audit
 ```
+
+`--abandonment-audit` is the read-only report that the `Author Lane Abandonment
+Audit` workflow also runs hourly. It writes nothing anywhere and cannot: the
+reconciler's write hooks are removed before it runs. Exit 0 is a clean lane set,
+exit 2 means at least one lease has EXPIRED, and exit 3 means the state could not
+be read and must never be treated as clean.
+
+An expired lease is not an abandoned one. Expiry is a clock running out;
+abandonment is a fact somebody recorded in an `abandonment-audit` issue naming the
+exact claim, pull request, head and owner. Never delete a claim, a lock, a
+reservation or a ref to free a lane, and never relinquish on expiry alone. Open
+the abandonment-audit issue first, then run the guarded
+`--relinquish-author-lease` command the report prints, with the observed worktree
+state. The orchestrator may retire work only where the worktree is `clean` or
+proven `absent`; `dirty` or `remote` work is potentially recoverable and is
+Albert's decision.
 
 `--queue-audit` must classify every open `db-work` issue across independent status,
 work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
