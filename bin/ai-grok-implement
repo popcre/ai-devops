@@ -251,24 +251,29 @@ create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
 # never as an environment value, argument, report, or patch.
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   local grok="$1"; shift
-  local tmp_home grok_home auth_src rc=0
+  local tmp_root user_home grok_home auth_src rc=0
   mkdir -p "$IMPL_DIR"
-  tmp_home="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
-  grok_home="$tmp_home/.grok"
-  mkdir -p "$grok_home"
-  chmod 700 "$tmp_home" "$grok_home" 2>/dev/null || true
+  tmp_root="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
+  user_home="$tmp_root/user"
+  grok_home="$tmp_root/grok"
+  mkdir -p "$user_home" "$grok_home"
+  chmod 700 "$tmp_root" "$user_home" "$grok_home" 2>/dev/null || true
   auth_src="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
   if [ -f "$auth_src" ]; then
-    ln "$auth_src" "$grok_home/auth.json" 2>/dev/null \
-      || { rm -rf "$tmp_home"; die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."; }
+    ln "$auth_src" "$grok_home/auth.json" 2>/dev/null || true
+    if ! [ "$auth_src" -ef "$grok_home/auth.json" ]; then
+      rm -rf "$tmp_root"
+      die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."
+    fi
   fi
   local native_home native_grok_home
-  native_home="$(native_path "$tmp_home")"
+  native_home="$(native_path "$user_home")"
   native_grok_home="$(native_path "$grok_home")"
-  # Keep the operator PATH and Windows process environment so native Grok can
-  # spawn Bash. env -i cancelled live shell turns (2026-09-16). Strip secrets
-  # in a subshell instead, and override only the home/isolation variables.
+  # HOME is empty and separate from GROK_HOME so `~/.grok/auth.json` is not in
+  # the user home. GROK_HOME must stay in the Grok process environment or the
+  # launcher cannot authenticate; a Bash child of that process can read it.
   local -a env_args=(
+    "PATH=$PATH"
     "HOME=$native_home"
     "GROK_HOME=$native_grok_home"
     "GROK_CLAUDE_SKILLS_ENABLED=false" "GROK_CLAUDE_RULES_ENABLED=false"
@@ -279,6 +284,19 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
     "GROK_CURSOR_HOOKS_ENABLED=false" "GROK_CURSOR_SESSIONS_ENABLED=false"
     "GROK_CODEX_SESSIONS_ENABLED=false"
   )
+  local n
+  for n in LANG LC_ALL TERM SHELL TMPDIR TMP TEMP \
+           SYSTEMROOT WINDIR COMSPEC PATHEXT OS SystemDrive \
+           USERNAME USERDOMAIN COMPUTERNAME \
+           NUMBER_OF_PROCESSORS PROCESSOR_ARCHITECTURE \
+           PROCESSOR_IDENTIFIER PROCESSOR_LEVEL PROCESSOR_REVISION \
+           ProgramFiles ProgramW6432 ProgramData PUBLIC ALLUSERSPROFILE \
+           HOMEDRIVE HOMEPATH MSYSTEM MSYSTEM_PREFIX MSYSTEM_CARCH \
+           MSYSTEM_CHOST MINGW_PREFIX MINGW_CHOST MINGW_PACKAGE_PREFIX \
+           EXEPATH ORIGINAL_PATH ORIGINAL_TEMP ORIGINAL_TMP \
+           TMPDIR_FOR_TEST AI_GROK_TEST_VERSION; do
+    [ -n "${!n:-}" ] && env_args+=("$n=${!n}")
+  done
   if is_windows; then
     env_args+=("USERPROFILE=$native_home")
     env_args+=("APPDATA=$native_home\\AppData\\Roaming")
@@ -287,17 +305,8 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
     env_args+=("XDG_CACHE_HOME=$native_home\\.cache")
     env_args+=("XDG_DATA_HOME=$native_home\\.local\\share")
   fi
-  (
-    unset OP_SERVICE_ACCOUNT_TOKEN OP_SERVICE_ACCOUNT_TOKEN_FILE \
-          GH_TOKEN GITHUB_TOKEN GITHUB_TOKEN_FILE \
-          AWS_SECRET_ACCESS_KEY AWS_ACCESS_KEY_ID AWS_SESSION_TOKEN \
-          SSH_AUTH_SOCK SSH_AGENT_PID \
-          GOOGLE_APPLICATION_CREDENTIALS \
-          OPENAI_API_KEY ANTHROPIC_API_KEY XAI_API_KEY GROK_API_KEY \
-          AI_TEST_OPERATOR_SECRET 2>/dev/null || true
-    env "${env_args[@]}" "$grok" "$@"
-  ) || rc=$?
-  rm -rf "$tmp_home"
+  env -i "${env_args[@]}" "$grok" "$@" || rc=$?
+  rm -rf "$tmp_root"
   return "$rc"
 }
 

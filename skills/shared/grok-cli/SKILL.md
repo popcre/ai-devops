@@ -194,10 +194,17 @@ ai-grok-implement list | doctor
 ```
 
 `investigate` is advisory look-into-this mode. It runs in an isolated remote-less
-copy with the shell allowed so Grok can run builds, tests, and a public HTTP
-check. The brief and doctor output say `INVESTIGATION — ADVISORY, NOT FORMAL
-APPROVAL`. Do not treat it as exact-head approval. Do not add Bash or web search
-to `ai-grok-review`. Do not use this command to build the #249 broker.
+copy with Bash allowed. The brief and doctor output say `INVESTIGATION —
+ADVISORY, NOT FORMAL APPROVAL`. Do not treat it as exact-head approval. Do not
+add Bash or web search to `ai-grok-review`. Do not use this command to build the
+#249 broker.
+
+On the qualified pin (1.0.13), live Windows headless Bash currently returns
+`stopReason: cancelled` for both `investigate` and `run --allow-shell`. Offline
+tests prove the wrapper passes `--allow Bash`. Do not upgrade the pin in this
+workstream. A Bash child of a live Grok process can read the isolated
+`GROK_HOME` auth file; that is how Grok authenticates and is not an env-var
+secret.
 
 It creates the isolated worktree itself with `git worktree add`, bases it on `origin/main`
 by default, converts every path to native Windows form, keeps the brief inside the

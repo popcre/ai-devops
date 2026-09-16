@@ -263,7 +263,7 @@ if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE -e '--always-approve' -e 'permi
 else
   ok "implementer_never_uses_blanket_approval"
 fi
-grep -q 'native_home="$(native_path "$tmp_home")"' "$SCRIPT" \
+grep -q 'native_home="$(native_path "$user_home")"' "$SCRIPT" \
   && grep -q 'USERPROFILE=$native_home' "$SCRIPT" \
   && ok "investigate_windows_home_is_native" || bad "investigate_windows_home_is_native"
 if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'cp -P .*auth\.json|cp .*auth\.json'; then
@@ -271,8 +271,9 @@ if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'cp -P .*auth\.json|cp .*auth\.
 else
   ok "investigate_never_copies_auth"
 fi
-grep -q 'rm -rf "$tmp_home"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
-grep -q 'unset OP_SERVICE_ACCOUNT_TOKEN' "$SCRIPT" && ok "investigate_unsets_operator_tokens" || bad "investigate_unsets_operator_tokens"
+grep -q 'rm -rf "$tmp_root"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
+grep -q 'env -i' "$SCRIPT" && ok "investigate_launches_allowlisted_env" || bad "investigate_launches_allowlisted_env"
+grep -q 'auth_src" -ef "$grok_home/auth.json"' "$SCRIPT" && ok "investigate_proves_same_inode_auth" || bad "investigate_proves_same_inode_auth"
 
 # --- 14. investigate (issue #513) --------------------------------------------
 inv_case() { # inv_case NAME MODE REPO [extra args...]

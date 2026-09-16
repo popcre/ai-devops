@@ -62,6 +62,8 @@ Grok is pinned to one exact CLI build in `config/provider-cli-versions.json`
 - Look-into-this: `ai-grok-implement investigate <name> --repo <path> --prompt-file <f>`.
   This reuses the isolated copy with the shell allowed. The report is labeled
   `INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`. It is not issue #249.
+  On pin 1.0.13, live Windows headless Bash currently returns cancelled for
+  both this command and `run --allow-shell`. Offline tests prove the flags.
 
 Never call `grok` directly for these jobs.
 
