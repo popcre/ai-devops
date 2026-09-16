@@ -33,7 +33,7 @@ approach.
 | Plans | Completion owner or durable evidence |
 |---|---|
 | `plan_ai-glm-permission-deadlock.md`, `plan_ai-glm-permission-failures.md`, `plan_ai-grok-review.md` | Complete STATUS tables and repository history |
-| `plan_codex_reviewer_trust_repair.md`, `plan_gemini_reviewer_safety_repair.md`, `plan_kimi_reviewer_completion_repair.md`, `plan_muse_reviewer_availability_repair.md`, `plan_qwen_reviewer_evidence_repair.md`, `plan_reviewer_shared_evidence_integrity.md` | Complete STATUS tables and completed reviewer repair evidence |
+| `plan_codex_reviewer_trust_repair.md`, `plan_gemini_reviewer_safety_repair.md`, `plan_kimi_reviewer_completion_repair.md`, `plan_muse_reviewer_availability_repair.md`, `plan_qwen_reviewer_evidence_repair.md`, `plan_reviewer_shared_evidence_integrity.md` | Complete STATUS tables; Qwen re-proved on EDGE-DEV 2026-09-16 |
 | `plan_completion-honesty-enforcement.md` | Core rollout complete; residual issues #103, #108, and #119 own their narrower follow-ups |
 | `plan_context-engineering-consolidation.md` | Complete STATUS and `docs/context-engineering.md` |
 | `plan_glm-implementation-job-tracking.md`, `plan_glm-incomplete-implementation-recovery.md`, `plan_glm-service-reliability.md` | Complete STATUS tables and current GLM operating documentation |
@@ -42,7 +42,7 @@ approach.
 | `plan_phase3-config-consolidation.md`, `plan_sync-machine-wrapper-reconciliation.md` | Complete STATUS tables and current restore/configuration documentation |
 | `plan_progress-wait-misuse-guard.md` | Closed issue #89 and current wait-policy tests |
 | `plan_pop-business-rules-skill.md` | PR #492, installed live trigger evidence, and closed issue #35 |
-| `plan_reintegrate-gemini-flash-3-8-qwen-3-8-max.md` | Closed issue #261 and completed STATUS |
+| `plan_reintegrate-gemini-flash-3-8-qwen-3-8-max.md` | Closed issue #261; Gemini 2026-09-04; Qwen EDGE-DEV restore 2026-09-16 in `docs/verification/qwen-rotation-restore-2026-09-16.md` |
 | `plan_reviewer_lease_liveness.md` | Closed issue #283; implementation lives in `u2giants/shared-db` |
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
