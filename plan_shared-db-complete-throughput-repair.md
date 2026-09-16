@@ -1,6 +1,6 @@
 # Implementation plan — complete shared-db throughput repair
 
-Paired handoffs: [`HANDOFF.d/2026-09-11T0425Z-edge-dev-codex-shared-db-throughput-plan-401.md`](HANDOFF.d/2026-09-11T0425Z-edge-dev-codex-shared-db-throughput-plan-401.md) (original plan) and [`HANDOFF.d/2026-09-15T1430Z-edge-dev-claude-orchestrator-stall-integration-401.md`](HANDOFF.d/2026-09-15T1430Z-edge-dev-claude-orchestrator-stall-integration-401.md) (2026-09-15 twelve-hour stall findings integrated into Steps 2, 3, 4, 5, 6, and 7)
+Paired handoff: [`HANDOFF.d/2026-09-16T0030Z-edge-dev-claude-programme-401-final-acceptance.md`](HANDOFF.d/2026-09-16T0030Z-edge-dev-claude-programme-401-final-acceptance.md) (2026-09-15 final acceptance audit; retires the earlier `-401` handoffs)
 
 Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
@@ -9,17 +9,26 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 | Step | State | Date | Evidence / completion gate |
 |---|---|---|---|
 | 0. Reconcile the live baseline and establish one programme ledger | ✅ complete | 2026-09-11 | Redacted live ledger: `tests/verification/shared-db-throughput/2026-09-11-live-baseline.md`; source tips `b6922ea8` / `f3eff56d`. |
-| 1. Consume the four independently owned prerequisite repairs | ⬜ open | 2026-09-11 | #2705/#2709/#2715/#2716 have their own sessions; this programme verifies and integrates their landed behavior without duplicating it. |
-| 2. Enforce two-sided structural admission, urgent application-unblock priority, and finish-first scheduling | ⬜ open | 2026-09-15 | Sender and orchestrator both reject non-structural work; urgent outcomes dispatch first without weakening object conflicts; merge-ready work waits only on a named exclusive stage, never on another item's production; a claimed version can be re-reserved without closing its PR (2026-09-15 addition). |
-| 2A. Add a fail-closed no-database-preview fast lane | ⬜ open | 2026-09-11 | Qualifying work bypasses the structural queue and database preview only after a machine-readable classifier proves it cannot change database structure, behavior, permissions, or data. |
-| 3. Make one outcome card authoritative through live verification | ⬜ open | 2026-09-15 | A request cannot close at merge and exposes entered/dispatched/built/live timestamps; the outcome owner produces the live proof itself instead of waiting on another session (2026-09-15 addition). |
-| 4. Replace manual polling and session handoffs with durable events and resumable snapshots | ⬜ open | 2026-09-15 | A successor resumes from one generated snapshot and no unchanged-state polling is required; a no-progress alarm escalates to Albert after two hours without a stage transition (2026-09-15 addition). |
-| 5. Add one early, automatic delivery preflight and evidence registration | ⬜ open | 2026-09-15 | Missing sidecar/producer/claim/base/dependency evidence fails before expensive CI or review; the contract-test rebuild reproduces a drop-then-recreate history exactly; evidence-only commits do not void review (2026-09-15 addition). |
-| 6. Add the governed approved-migration train | ⬜ open | 2026-09-15 | A compatible exact list uses one consolidated preview/apply proof; incompatible items refuse by name; a migration applied to preview before merge is accepted as preview evidence and a recovery run can qualify automatic production (2026-09-15 addition). |
-| 7. Bound reviewer and runner waits with truthful fallback | ⬜ open | 2026-09-15 | An unstarted reviewer or queued runner changes route within its SLO without cancelling healthy work; turn-limit exhaustion and local preflight timeouts reroute instead of stalling (2026-09-15 addition). |
-| 8. Transfer to `popcre` and activate GitHub's native merge queue | ⬜ open | 2026-09-11 | Complete the gates in `u2giants/shared-db` plan `plan_shared_db_popcre_transfer_merge_queue.md`. |
-| 9. Rewrite and install the operating rules without a flag day | ⬜ open | 2026-09-11 | Canonical and installed rules agree; legacy in-flight work remains safely executable. |
-| 10. Run a five-outcome live acceptance trial and close the programme | ⬜ open | 2026-09-11 | Five application outcomes meet §13 with timestamps and live behavior evidence. |
+| 1. Consume the four independently owned prerequisite repairs | 🟨 code landed, not accepted | 2026-09-15 | #2705, #2709 and #2715 are CLOSED. #2716 is still OPEN: shared-db PR #2736 merged, and the ai-devops policy half is PR #412. No live fully-qualified automatic promotion and no live refusal-path proof exists yet. |
+| 2. Enforce two-sided structural admission, urgent application-unblock priority, and finish-first scheduling | 🟨 code landed, not accepted | 2026-09-15 | Code: #2727 CLOSED via shared-db PR #2738 (`5d89c5e2`). NOT ACCEPTED: the 2026-09-15 additions (named lease/conflict only, safe re-reservation without closing a PR, no unrelated production hold) have no linked live acceptance evidence. |
+| 2A. Add a fail-closed no-database-preview fast lane | 🟨 code landed, not accepted | 2026-09-15 | Code: #2912 CLOSED via shared-db PR #2795 (`585a9d2b`), prerequisite PR #2750 (`1c436f46`). NOT ACCEPTED: no authenticated live sender-to-receiver canary is linked. |
+| 3. Make one outcome card authoritative through live verification | ⬜ open | 2026-09-15 | A request cannot close at merge and exposes entered/dispatched/built/live timestamps; the outcome owner produces the live proof itself instead of waiting on another session (2026-09-15 addition). NOT ACCEPTED: no linked outcome shows the owner dispatching application proof within 30 minutes of `production_applied` without waiting on Albert or another session. |
+| 4. Replace manual polling and session handoffs with durable events and resumable snapshots | 🟨 code landed, not accepted | 2026-09-15 | Code: #2728 CLOSED via shared-db PR #2861 (`c7c9a7a2`). NOT ACCEPTED: no linked live successor-resume proof, and no proof that the two-hour no-progress alarm is installed and fires. |
+| 5. Add one early, automatic delivery preflight and evidence registration | 🟨 code landed, known gap | 2026-09-15 | Code: early-preflight/pass-2 merged under #2728. KNOWN OPEN REQUIREMENT: #2728 records that the single sidecar declaration registry does not exist, so the complete evidence-registration gate is unproven. |
+| 6. Add the governed approved-migration train | 🟨 code landed, not accepted | 2026-09-15 | Code: #2729 CLOSED via shared-db PR #2862 (`89ec62d2`). NOT ACCEPTED: no live train proves compatible batching and incompatible refusal by name. |
+| 7. Bound reviewer and runner waits with truthful fallback | 🟨 code landed, not accepted | 2026-09-15 | Code: reroute landed under #2729; reviewer verdict-store cap #2987 CLOSED via shared-db PR #2984 (`1f7dbe47`). NOT ACCEPTED: no live reviewer/runner non-start proves reroute within the tested SLO without cancelling healthy work. |
+| 8. Transfer to `popcre` and activate GitHub’s native merge queue | ⛔ not started, not authorized by #401 | 2026-09-15 | `popcre/shared-db` does not exist; the canonical repository is still `u2giants/shared-db`. Transfer, access settings, native one-PR merge queue and additive gate proof are all absent. #401 authorizes planning and tracking only, so this step needs its own owner authorization before any execution. |
+| 9. Rewrite and install the operating rules without a flag day | ⬜ open | 2026-09-15 | Canonical and installed rules agree; legacy in-flight work remains safely executable. NOT PROVEN: open ai-devops PR #412 is direct contrary evidence of canonical/installed equality. |
+| 10. Run a five-outcome live acceptance trial and close the programme | ⬜ open | 2026-09-15 | Five application outcomes meet §13 with timestamps and live behavior evidence. ENTIRELY UNPROVEN: no committed report exists, so dispatch targets, unchanged polling, manual state rebuild, repeated authorization, reviewer selection validity, safety regressions, live-proof timeliness, idle periods and the required ≥ 50% median request-to-live improvement (with raw `n` and exceptions) all lack evidence. |
+
+**Legend.** ✅ complete — accepted with live evidence. 🟨 code landed, not accepted — the
+implementation merged on `main` but the plan’s live behavior gate has no linked proof.
+⬜ open. ⛔ not started and not authorized by this issue.
+
+**Acceptance audit of 2026-09-15** (recorded on popcre/ai-devops#401) rechecked every row
+against live GitHub. `u2giants/shared-db` main was `921fef3a`. Merged programme work proves
+landed implementation only; it does not satisfy the five-outcome live gate in Step 10.
+**Do not close #401** until every row above is ✅.
 
 **Fresh-session starting point:** begin at Step 1 and consume the completed Step 0 ledger rather than rebuilding it. Before every later phase, re-read the downstream steps and this STATUS table, then update the table in the same commit as implementation evidence. A row is never complete merely because an issue or pull request exists.
 
