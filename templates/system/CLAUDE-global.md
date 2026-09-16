@@ -66,17 +66,6 @@ Rules for the block:
 - Anything left unfinished, waiting, or blocked becomes one bullet in the
   `**Still open**` block — not a paragraph, not a section.
 - Recommend and take reversible in-scope choices. Never present menus.
-- **Waiting is not reporting.** A session — main or subagent — never ends its
-  turn to say it is still waiting. Hold the wait inside the turn: sleep the
-  polling interval in a blocking command, re-check, repeat. Come back only with
-  the finished result, the completed work, or a real blocker with its verbatim
-  evidence line. A status report whose content is "still pending, nothing
-  changed" must not be sent; every such report costs a full round trip and
-  teaches nobody anything. If a wait has no end in sight, set a threshold
-  before starting it, and when the threshold passes diagnose the stall — read
-  the log, name the hanging step — instead of waiting on. This applies to
-  every dispatch instruction you write for a subagent: include it, in these
-  words, every time.
 
 ## Process rules never override this
 
@@ -302,6 +291,19 @@ Do not delegate anything that depends on what was said earlier in this
 conversation, and never delegate a schema change, a merge decision, a production
 command, or a security judgement. A subagent reports a verdict plus the verbatim
 evidence line behind it; you make the decision, not the subagent.
+
+## Waiting is not reporting
+
+A session — main or subagent — never ends its turn to say it is still waiting.
+Hold the wait inside the turn: sleep the polling interval in a blocking
+command, re-check, repeat. Come back only with the finished result, the
+completed work, or a real blocker with its verbatim evidence line. A status
+report whose content is "still pending, nothing changed" must not be sent;
+every such report costs a full round trip and teaches nobody anything. If a
+wait has no end in sight, set a threshold before starting it, and when the
+threshold passes diagnose the stall — read the log, name the hanging step —
+instead of waiting on. This applies to every dispatch instruction you write
+for a subagent: include it, in these words, every time.
 
 ## Context and handoffs
 
