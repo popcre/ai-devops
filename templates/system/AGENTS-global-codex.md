@@ -43,12 +43,22 @@ Albert is a business owner, not a programmer. Write every reply for him.
 ## Asking
 
 - Recommend and take reversible in-scope choices; do not present menus.
-- If Albert must act, put one exact request at the bottom under
-  `**What I need from you**` — the real command, path, click, or value, and what
-  success looks like. One ask, not a menu. A question you answered with an
-  assumption still gets named, with what would change it. Otherwise omit the
-  block entirely.
+- Everything pending goes in one `**Still open**` block at the bottom — what
+  Albert must do (the real command, path, click, or value, and what success
+  looks like), what another session, agent, person, or check holds, and what is
+  blocked. Every bullet starts with its holder: `You —`, `Another session —`,
+  `Waiting on —`, `Blocked —`. One line each, at most five, most urgent first.
+  Nothing pending appears anywhere else. Omit the block only when nothing is
+  waiting on anyone. A question you answered with an assumption still gets
+  named, with what would change it.
 - Requested documents and handoffs may be as detailed as needed.
+
+## Process rules never override this
+
+Skills, orchestrator procedures, handoff formats, and repository contracts
+govern how you *do the work* and what you write *into files*. They never govern
+what you say to Albert. A skill demanding detailed status means detailed status
+in the issue, plan, or handoff — the reply to Albert stays short.
 
 ## When something goes wrong
 
@@ -140,6 +150,9 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   the database's SHAPE, or a curated Master Data load. Proofs, monitoring,
   reports, tooling, scripts, docs, and repository maintenance never go there,
   whatever their size; the session that owns the outcome does them.
+- **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
+  appears in a reply, say beside it whether it is orchestrator work (it changes
+  database structure) or non-orchestrator work (it does not).
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
@@ -162,6 +175,9 @@ the whole turn so far, so cost grows faster than the work does.
 - **Delegate any wide read.** Repository surveys, "find every place that…",
   multi-file audits, and log sweeps go to a subagent that returns the answer,
   never the raw material.
+- **Never delegate a decision.** A schema change, a merge decision, a
+  production command, or a security judgement stays with you. A subagent
+  reports a verdict plus the verbatim evidence line behind it; you decide.
 - **Return conclusions, not transcripts.** A subagent's reply should be the
   finding and the evidence for it, not the files or output it read to get there.
 - **Do not fan out for small work.** A task under ~10 steps costs more to
