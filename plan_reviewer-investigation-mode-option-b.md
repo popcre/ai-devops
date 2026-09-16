@@ -2,9 +2,9 @@
 
 Plan owner: issue [#253](https://github.com/popcre/ai-devops/issues/253)
 
-Plan handoff: [`HANDOFF.d/2026-09-16T1948Z-edge-dev-grok-reviewer-investigation-plan-fix.md`](HANDOFF.d/2026-09-16T1948Z-edge-dev-grok-reviewer-investigation-plan-fix.md)
+Plan handoff: [`HANDOFF.d/2026-09-16T2013Z-edge-dev-grok-253-grok-child.md`](HANDOFF.d/2026-09-16T2013Z-edge-dev-grok-253-grok-child.md)
 
-Predecessor planning handoff (retired by this correction): `HANDOFF.d/2026-09-04T0055Z-edge-dev-codex-reviewer-investigation-option-b.md`
+Predecessor planning handoff (retired by this update): `HANDOFF.d/2026-09-16T1948Z-edge-dev-grok-reviewer-investigation-plan-fix.md`
 
 Repository: `popcre/ai-devops`
 
@@ -21,17 +21,22 @@ Correction baseline: `origin/main` `2719315e13fc6e3cb99511dced33915ea46f4d47` (2
 | 2. Kimi investigate on the current CLI | #255 | ⬜ open | Required artifacts are listed in Step 2 |
 | 3. Qwen investigate on the current CLI; repair discovery only if still broken | #256 | ⬜ open | Required artifacts are listed in Step 3 |
 | 4. Muse investigate on the current OpenCode pin | #257 | ⬜ open | Required artifacts are listed in Step 4 |
-| 5. Cross-provider integration, exact-head review, and merge | #253 | ⬜ open | Required artifacts are listed in Step 5 |
+| 5. Grok investigate on the current pin | #513 | ⬜ open | Required artifacts are listed in Step 5 |
+| 6. Cross-provider integration, exact-head review, and merge | #253 | ⬜ open | Required artifacts are listed in Step 6 |
 
-**2026-09-16 correction (locked):** the 2026-09-04 plan mixed a thin `investigate` command with OpenCode/Kimi/Qwen upgrades and made Muse wait on GLM's upgrade. That mix is withdrawn. Deliver investigation on the currently qualified pin. Upgrades are out of this plan. Steps 1–4 are independent after Step 0.
+**2026-09-16 correction (locked):** the 2026-09-04 plan mixed a thin `investigate` command with OpenCode/Kimi/Qwen upgrades and made Muse wait on GLM's upgrade. That mix is withdrawn. Deliver investigation on the currently qualified pin. Upgrades are out of this plan. Provider children are independent after Step 0.
+
+**2026-09-16 Muse Spark:** session `253-plan-opinion` returned `VERDICT: AGREE` with no material objections. Its two notes were already in this file: Qwen discovery repair stays conditional on a Step 0 mismatch; Step 6 (then Step 5) checks labels and banners only and must not factor shared code (#169). No further plan edit was required for Muse.
+
+**2026-09-16 owner:** add Grok as a #253 child (#513). Same Option B rules. Do not implement the #249 broker here.
 
 Fresh session starts at **Step 0**. Re-read the remaining downstream steps before each provider child. Do not start a child until Step 0 has a baseline artifact.
 
 ## 1. Ultimate goal
 
-GLM 5.3, Kimi, Qwen, and Muse must be able to look into software thoroughly: run builds and tests, inspect live behavior, and reach the public internet when the work requires it. Advice from that look-into-this mode never counts as a pass. The strict read-only judge stays as it is. Do this with the fewest new parts. Do not hand a reviewer the operator's credentials. Do not let it change the checkout other sessions are using.
+GLM 5.3, Kimi, Qwen, Muse, and Grok must be able to look into software thoroughly: run builds and tests, inspect live behavior, and reach the public internet when the work requires it. Advice from that look-into-this mode never counts as a pass. The strict read-only judge stays as it is. Do this with the fewest new parts. Do not hand a reviewer the operator's credentials. Do not let it change the checkout other sessions are using.
 
-Option B: reuse each provider's existing wrapper. For GLM, Kimi, and Qwen, add a thin explicit `investigate` command on top of the capable path they already have. For Muse, add the missing capable path. Do not build a shared lifecycle framework. Do not upgrade a CLI or harness in this plan.
+Option B: reuse each provider's existing wrapper. For GLM, Kimi, Qwen, and Grok, add a thin explicit `investigate` command on top of the capable path they already have. For Muse, add the missing capable path. Do not build a shared lifecycle framework. Do not upgrade a CLI or harness in this plan. Do not build Grok's separate brokered integration-review (#249) in this plan.
 
 If a step conflicts with this goal, the goal wins — stop and flag it.
 
@@ -45,6 +50,7 @@ Affected reviewers:
 - **Kimi Code**, driven headlessly through `bin/ai-kimi`. Not version-pinned in `config/provider-cli-versions.json`.
 - **Qwen Code**, driven headlessly through `bin/ai-qwen`. Not version-pinned in `config/provider-cli-versions.json`.
 - **Muse Spark 1.3 Contributor**, driven through repository-pinned OpenCode direct mode by `bin/ai-muse`. Same OpenCode pin `1.18.12`. Model: `meta-model-api/muse-spark-1.3-contributor`.
+- **Grok Build 4.6**, driven through `bin/ai-grok-review` (read-only) and `bin/ai-grok-implement` (isolated write runs). Pin: `config/provider-cli-versions.json` `1.0.13`. Child issue #513.
 
 “Formal review” means the existing read-only judge whose output may satisfy an independent review gate. “Investigation” means a capable advisory turn with shell and public internet. Investigation output never becomes formal approval merely because it reached a verdict.
 
@@ -66,25 +72,28 @@ On 2026-09-16 Albert asked whether the 2026-09-04 Option B plan and GitHub child
 - Qwen child #256 stacked three jobs: discovery repair, CLI upgrade, and the new mode.
 - The 2026-09-04 plan said to land directly on `main`. Current policy is feature-branch-PR.
 
+On 2026-09-16 Muse Spark session `253-plan-opinion` re-read this plan and the wrapper files and returned `VERDICT: AGREE` with no material objections. The two notes it left were already in this file: keep Qwen discovery repair strictly conditional on a Step 0 mismatch, and keep the final cross-provider step to labels and banners so #169 is not pulled in. Albert then asked whether Grok already had this named look-into-this mode (it does not) and to create a #253 child for Grok. That child is #513.
+
 Planning-time version observations from 2026-09-04 (OpenCode `1.18.12` vs then-current `1.18.27`, Kimi `0.36.1` vs `0.40.1`, Qwen `0.21.15` vs `0.23.0`, Muse Spark 1.2) are historical. They are not pins and not work in this plan. Step 0 re-checks what is installed and what the repository currently qualifies.
 
 ## 4. Scope — in and out
 
 ### In scope
 
-- One explicit `investigate` command on each of the four existing wrappers.
+- One explicit `investigate` command on each of GLM, Kimi, Qwen, Muse, and Grok.
 - Shell, build/test, and outbound public-internet capability inside a disposable remote-less repository copy.
 - Reuse of existing named sessions, clone/worktree lifecycle, remote removal, provider credential handoff, completion parsing, bounded execution, incomplete artifact recovery, and report publication.
 - A dedicated GLM investigation profile, because `glm-implement` forbids the network and must keep doing so for real build jobs.
 - A dedicated Muse investigation agent, because Muse has no capable path today.
 - For Kimi and Qwen: a thin command over the existing implement lifecycle; a dedicated investigation profile only if that is smaller than conditional mutation of the implement profile.
+- For Grok: a thin `investigate` command that reuses `ai-grok-implement`'s isolated worktree and `--allow-shell` path. Do not merge the review and implement wrappers. Do not change `ai-grok-review`.
 - Qwen binary discovery repair **only if Step 0 still shows** that PowerShell and `ai-qwen doctor` disagree. That repair is a prerequisite of honest qualification, not an upgrade.
 - Windows and Ubuntu doctor, documentation, skill, and live qualification updates for the new command.
 - Exact-head independent final review because this is a reviewer safety-path change.
 
 ### Not in this plan
 
-- Any OpenCode, Kimi Code, or Qwen Code upgrade, pin change, or “move to current stable.”
+- Any OpenCode, Kimi Code, Qwen Code, or Grok Build upgrade, pin change, or “move to current stable.”
 - Any Muse model upgrade. Current pin is Spark 1.3 Contributor; leave it unless Step 0 proves the authenticated inventory no longer serves that exact model, in which case stop and flag — do not quietly pick a newer one as part of investigation.
 - A new shared lifecycle library or broad wrapper consolidation (issue #169).
 - Unrestricted execution in the live shared checkout.
@@ -92,14 +101,15 @@ Planning-time version observations from 2026-09-04 (OpenCode `1.18.12` vs then-c
 - An egress allowlist/broker, container platform, VM platform, daemon fleet, or new network service.
 - Automatic application of complete or incomplete reviewer patches.
 - Treating investigation output as formal read-only approval.
-- Grok, Gemini, DeepSeek, Claude, or Codex reviewer changes. Grok's separate integration-review access work remains issue #249 / `plan_grok_integration-review-access.md`.
+- Gemini, DeepSeek, Claude, or Codex reviewer changes.
+- Grok issue #249 / `plan_grok_integration-review-access.md`: the brokered, deny-by-default integration-review tier. #513 is Option B on the current pin. It does not close, replace, or implement #249.
 - Reviewer-assisted stuck-session routing (issue #198 / `plan_reviewer-assisted-problem-solving.md`). That plan must not grow shell/internet into formal review; this plan must not grow a stuck-session skill.
 - Production infrastructure or shared-database writes.
 - Direct pushes to `main`.
 
 ## 5. Current state of the code
 
-No `investigate` command exists on any of the four wrappers as of `origin/main` `2719315e` (2026-09-16). `rg investigate bin/ai-{glm,kimi,qwen,muse}` has no command dispatch.
+No `investigate` command exists on GLM, Kimi, Qwen, Muse, or Grok as of `origin/main` `82216ba3` (2026-09-16). `rg investigate bin/ai-{glm,kimi,qwen,muse,grok-review,grok-implement}` has no command dispatch.
 
 Existing reusable machinery on that SHA:
 
@@ -108,10 +118,12 @@ Existing reusable machinery on that SHA:
 - `bin/ai-kimi`: `cmd_implement` at 2244, dispatch at 2317. `config/kimi/local-implement.md` grants Bash and states Bash can still use the network; web and subagent tools are absent. `config/kimi/readonly-review.md` has no Bash and no network.
 - `bin/ai-qwen`: `cmd_implement` at 1932, dispatch at 1988. Implementation runs `--safe-mode --sandbox --approval-mode yolo` inside a wrapper-owned disposable worktree (header lines 33–40). `resolve_qwen` at 254–282 does **not** search `PATH`; it checks `AI_QWEN_BIN` then a short list of official standalone locations. `cmd_doctor` at 1102 uses `resolve_qwen`. Whether the 2026-09-04 “PowerShell finds it, doctor does not” fault still reproduces is unknown until Step 0.
 - `bin/ai-muse`: commands are `new`, `ask`, `list`, `show`, `transcript`, `reconcile`, `delete`, `doctor`, and legacy `review` (dispatch 558–566). There is no `implement` and no `investigate`. `config/opencode-muse/agent/muse-review.md` has `bash: false` and `webfetch: false`. Named sessions, private snapshots, private credential handoff, terminal `step_finish` proof, and durable reports already exist.
+- `bin/ai-grok-review` is read-only: `--deny Edit --deny Bash` and `--disable-web-search` (header ~104–106, 1453). There is no `investigate` command.
+- `bin/ai-grok-implement`: `cmd_run` at 258, `--allow-shell` at 270, Bash allow/deny at 343, dispatch `run` at 490. Isolated real git worktree. Shell is optional and off by default. No `investigate` command.
 - `config/opencode/version` pins `1.18.12` for both GLM and Muse.
 - `config/provider-cli-versions.json` pins Grok `1.0.13` and leaves Kimi and Qwen unpinned.
 
-The 2026-09-04 plan, parent #253, children #254–#257, and the predecessor handoff landed as planning-only. Implementation never started. GitHub children still describe upgrades; this correction rewrites those issue bodies to match this file.
+The 2026-09-04 plan, parent #253, and children #254–#257 landed as planning-only. The 2026-09-16 correction rewrote those issue bodies (no upgrades, independent children). Muse agreed with that correction. Grok child #513 was added the same day. Implementation never started.
 
 A concurrent worktree `C:/repos/ai-devops/.claude/worktrees/parent-issue-253-status-9293e4` on branch `claude/parent-issue-253-status-9293e4` exists at an older SHA. Do not edit it. Do not reuse that branch name.
 
@@ -123,7 +135,8 @@ Canonical checkout `C:\repos\ai-devops` is landing-only. Implement in a dedicate
 2. GLM investigation cannot be a silent alias of `implement` as it exists today, because `glm-implement.md` forbids the network. Reuse the clone/lock/export/cleanup lifecycle; bind a **separate** investigation agent that allows Bash and public internet. Leave `glm-implement.md` unchanged for real build jobs.
 3. Kimi investigation can reuse the implement worktree path. Bash already reaches the network. Do not add a Web tool or subagent unless a canary proves Bash cannot perform a harmless public HTTP GET.
 4. Qwen investigation can reuse the sandboxed implement worktree path. Do not adopt `qwen serve`, Channels, or native multi-agent workflows.
-5. Muse is the only provider that needs a new capable execution path. Its wrapper already has session, report, key-handoff, sandbox, and completion foundations, but only a no-shell agent.
+5. Muse is the only provider among the original four that needs a new capable execution path. Its wrapper already has session, report, key-handoff, sandbox, and completion foundations, but only a no-shell agent.
+5a. Grok is like GLM/Kimi/Qwen, not like Muse: `ai-grok-implement` already has an isolated worktree and optional Bash. `ai-grok-review` must stay deny-Bash / no web search. Investigation is a named advisory command over the implement path, not a widening of the approval reviewer.
 6. A disposable remote-less copy is not an elaborate network sandbox. It is the existing helper that stops a shell-capable reviewer from modifying the checkout shared by concurrent sessions and keeps evidence tied to a stable source state.
 7. Internet access turns every readable credential into an exfiltration risk. Launch with an allowlisted environment, inject only the provider credential required for the model call through the existing private mechanism, and remove/scrub it before reviewer shell children run.
 8. Native provider completion differs. Kimi relies on recorded `session.resume_hint`; Qwen requires a terminal successful `result`; OpenCode/Muse uses structured stop/`step_finish`; GLM validates server/session/model state. Exit zero alone is never completion.
@@ -165,6 +178,10 @@ Both consume pin `1.18.12` today. Muse can add a Bash-enabled agent on that pin.
 
 Superseded by `config/repository-policy.json` `feature-branch-pr` for `popcre/ai-devops`.
 
+### Rejected 2026-09-16: implement Grok #249 inside this parent
+
+#249 is a stronger brokered integration-review with a Linux execution boundary and deny-by-default network broker. That is extra machinery relative to Option B. Albert asked for a #253 child for Grok. #513 reuses `ai-grok-implement` on pin `1.0.13`. #249 stays open as its own workstream.
+
 ### Rejected 2026-09-16: use `implement` as the user-facing investigation command
 
 Albert asked for reviewers that can look into software. `implement` means write a change. A separate `investigate` command is a small interface addition that keeps advice from being mistaken for a build job or a formal pass.
@@ -175,7 +192,9 @@ Albert asked for reviewers that can look into software. `implement` means write 
 
 - **2026-09-03, owner:** reviewers must gain shell and internet capability for deeper testing.
 - **2026-09-03, owner:** least-moving-parts Option B; no shared lifecycle-core rewrite.
-- **2026-09-16, owner:** fix the plans after independent reading found bundled upgrades, Muse-after-GLM coupling, and stacked Qwen scope. This file is that fix.
+- **2026-09-16, owner:** fix the plans after independent reading found bundled upgrades, Muse-after-GLM coupling, and stacked Qwen scope.
+- **2026-09-16, Muse Spark:** `VERDICT: AGREE`; no material objections. Two notes already present in this file (conditional Qwen discovery repair; final step is labels/banners only).
+- **2026-09-16, owner:** add Grok as a #253 child. Same Option B. Do not implement #249 here.
 - Investigation uses existing capable machinery and a disposable remote-less repository copy.
 - Investigation and formal review remain separate modes and evidence classes. Investigation reports must say `INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`.
 - Reviewer shell children receive no operator credentials. Only the minimum provider credential may enter the model launcher, through existing private/self-deleting handoff, and must be absent from child environments and arguments.
@@ -183,7 +202,7 @@ Albert asked for reviewers that can look into software. `implement` means write 
 - No auto-application of reviewer changes.
 - No CLI/harness/model upgrade in this plan. Keep the currently qualified pin.
 - Work on a feature branch and pull request. Never push to `main`.
-- GLM, Kimi, Qwen, and Muse children are independent after Step 0.
+- GLM, Kimi, Qwen, Muse, and Grok children are independent after Step 0.
 
 ### Open implementation judgment
 
@@ -192,21 +211,22 @@ Albert asked for reviewers that can look into software. `implement` means write 
 - Whether Kimi/Qwen need a dedicated `investigate.md` profile or can reuse the implement profile with a different report banner. Choose the smaller change that still labels the turn advisory and does not weaken formal review.
 - Whether Qwen discovery is still broken. Step 0 decides. If doctor and PowerShell resolve the same binary, do not “repair” anything.
 - Whether Bash alone is enough public internet for a canary (harmless HTTP GET) or a provider-native web tool is required. Prefer Bash. Add a native web tool only if the canary cannot be done through Bash without new machinery.
+- Whether Grok's public command is `ai-grok-implement investigate` or a thin extra dispatcher. Choose the smaller tested change. Do not merge `ai-grok-review` and `ai-grok-implement`. Do not enable Bash or web search on `ai-grok-review`.
 
 ## 9. Ordered implementation plan
 
 ### Step 0 — re-resolve source truth, ownership, and current pins (#253)
 
-1. Read `AGENTS.md`, then `docs/architecture.md`, `docs/development.md`, `docs/design-decisions.md`, `docs/critical-incidents.md`, and the verification headers of `bin/ai-glm`, `bin/ai-kimi`, `bin/ai-qwen`, `bin/ai-muse`, and `bin/ai-review-sandbox`.
+1. Read `AGENTS.md`, then `docs/architecture.md`, `docs/development.md`, `docs/design-decisions.md`, `docs/critical-incidents.md`, and the verification headers of `bin/ai-glm`, `bin/ai-kimi`, `bin/ai-qwen`, `bin/ai-muse`, `bin/ai-grok-review`, `bin/ai-grok-implement`, and `bin/ai-review-sandbox`.
 2. From a dedicated worktree of current `origin/main`, run `git status --short`, `git fetch origin main`, `git rev-parse HEAD origin/main`, `git merge-base --is-ancestor` in both directions, and `git worktree list --porcelain`. Do not pull, reset, clean, or overwrite dirty files in the canonical checkout. Do not reuse branch `claude/parent-issue-253-status-9293e4`.
 3. Record exact current native versions, binary paths, `--help`, doctors, configured models, and sanitized environment behavior on Windows and Ubuntu under `tests/verification/reviewer-investigation-option-b/<UTC>-baseline/`. Do not store credentials or raw transcripts.
 4. On Windows, compare `ai-qwen doctor` binary identity with PowerShell `Get-Command qwen`. Record whether they match. That single fact decides whether #256 includes a discovery repair.
-5. Confirm repository pins: OpenCode `config/opencode/version`, Muse model in `bin/ai-muse` and `config/opencode-muse/`, GLM model, Kimi/Qwen unpinned presence. Do not look up “latest stable” in order to upgrade. Latest is out of scope.
+5. Confirm repository pins: OpenCode `config/opencode/version`, Muse model in `bin/ai-muse` and `config/opencode-muse/`, GLM model, Grok `config/provider-cli-versions.json`, Kimi/Qwen unpinned presence. Do not look up “latest stable” in order to upgrade. Latest is out of scope.
 6. Before any local full suite, check `bin/ai-test-local --check-collision`. Only a busy job on this same physical host or a shared installed runtime blocks a local suite here.
 
 **Verification gate:** the baseline artifact identifies current HEAD/origin ancestry, every overlapping dirty path and owner, installed versions, doctors, the Qwen discovery match/mismatch, and that no child will upgrade a pin. No implementation begins with ambiguous ownership.
 
-**Natural context cut:** after Step 0, update this STATUS table and re-read Steps 1–5. Steps 1–4 may then proceed independently, each on its own feature branch from then-current `origin/main`.
+**Natural context cut:** after Step 0, update this STATUS table and re-read Steps 1–6. Steps 1–5 may then proceed independently, each on its own feature branch from then-current `origin/main`.
 
 ### Step 1 — GLM investigate on the current OpenCode pin (#254)
 
@@ -265,22 +285,37 @@ Targets: `bin/ai-muse` (dispatch 558–566), new `config/opencode-muse/agent/mus
 
 **Verification gate:** issue #257 holds redacted evidence for OpenCode `1.18.12` (or the pin Step 0 recorded) and Muse Spark 1.3 Contributor, working shell/public HTTP, credential-free tool children, remote-less disposable copy, truthful completion/reconciliation/recovery, and unchanged formal read-only review. Land through a feature-branch PR.
 
-### Step 5 — cross-provider integration, independent review, and merge (#253)
+### Step 5 — Grok investigate on the current pin (#513)
 
-Depends on #254–#257 being merged to `origin/main` (or a stacked PR set whose merge order is proven). Do not factor shared code merely for textual uniformity.
+Do **not** upgrade Grok. Do **not** change `config/provider-cli-versions.json`. Do **not** implement issue #249.
+
+Targets: `bin/ai-grok-implement` (`cmd_run` 258, `--allow-shell` 270, Bash toggle 343, dispatch 490), `bin/ai-grok-review` only to prove it stays read-only, `tests/test-ai-grok-implement.sh`, `tests/test-ai-grok-review.sh`, `docs/model-setup.md`, `docs/development.md`, `skills/shared/grok-cli/SKILL.md`.
+
+1. Add an explicit `investigate` command with shell and public internet by reusing the isolated implement worktree and `--allow-shell` path. Choose the smaller tested entrypoint. Do not merge the two Grok wrappers.
+2. User-facing report must say `INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`.
+3. Keep `ai-grok-review` deny-Bash and `--disable-web-search`. Do not add investigate by widening the approval reviewer.
+4. Launch with an allowlisted environment. Provider/operator credentials are absent from shell children, arguments, reports, patches, and logs.
+5. Preserve bounded turns, exact session identity, terminal completion proof, incomplete artifact recovery, and cleanup.
+6. Update focused tests, doctor, docs, and shared skill. Do not add upgrade/pin-change assertions.
+
+**Verification gate:** issue #513 holds redacted evidence for Grok `1.0.13` (or the pin Step 0 recorded), successful shell/internet investigation, credential-free children, unchanged formal read-only review, recoverable interruption, and no #249 broker. Land through a feature-branch PR.
+
+### Step 6 — cross-provider integration, independent review, and merge (#253)
+
+Depends on #254–#257 and #513 being merged to `origin/main` (or a stacked PR set whose merge order is proven). Do not factor shared code merely for textual uniformity. Muse required this “labels and banners only” limit.
 
 Targets: `docs/task-router.md` investigation row (already present), `docs/architecture.md`, `docs/development.md`, `docs/design-decisions.md`, `docs/critical-incidents.md` only for durable new incidents, `docs/skills-map.md`, affected shared skills, installation inventory. `AGENTS.md` already routes reviewer work to `docs/task-router.md`; do not add a duplicate router row.
 
-1. Re-fetch `origin/main` and confirm each child merge SHA. Verify all four child issues refer to current artifacts rather than superseded heads.
+1. Re-fetch `origin/main` and confirm each child merge SHA. Verify all five child issues refer to current artifacts rather than superseded heads.
 2. Record durable design decisions: formal review remains judge mode; investigation is capable advisory mode; Option B avoids shared-core work; upgrades were deliberately excluded.
-3. Verify consistent command vocabulary and report labels across all four providers while retaining native completion semantics.
+3. Verify consistent command vocabulary and report labels across all five providers while retaining native completion semantics.
 4. Run all focused provider suites, setup/restore checks, secret scans, shell-format checks, and the complete offline Bash plus PowerShell verification when the protected Windows host is free. Class is reviewer-safety. Run `ai-task-gates check --before review` before paid exact-head review and `--before ship` before merge.
 5. Install the exact tree on Windows and Ubuntu, then run each doctor plus one live investigation canary per provider. Store only redacted aggregate evidence under `tests/verification/reviewer-investigation-option-b/`.
 6. Run one read-only exact-head independent final review against the frozen tree. The reviewer may be any qualified independent provider that is not the implementing agent. Correct substantive findings and repeat on the new exact head.
 7. Before the final commit, run `git var GIT_COMMITTER_IDENT` and require `Albert Hazan <u2giants@users.noreply.github.com>`. Stage only owned files. Open or update the pull request; merge through the queue. Do not `gh pr merge --admin` for this step: implementation is not prose. Confirm the intended SHA on `origin/main`.
 8. Close child issues only when their evidence is current. Close parent #253 only after all children are closed, the exact-head gate passes, installed live canaries pass, and this STATUS table cites artifact paths. Delete this plan's open handoff in the completion commit.
 
-**Verification gate:** all four reviewers have working `investigate` modes and unchanged formal review modes on both supported operating systems; the exact-head full suite and independent review pass; installed live canaries pass; no secret appears in repository, output, process arguments, or reviewer child environment; the final SHA is on `origin/main`; issues #254–#257 and parent #253 are closed with evidence; no CLI pin changed.
+**Verification gate:** all five reviewers have working `investigate` modes and unchanged formal review modes on both supported operating systems; the exact-head full suite and independent review pass; installed live canaries pass; no secret appears in repository, output, process arguments, or reviewer child environment; the final SHA is on `origin/main`; issues #254–#257, #513, and parent #253 are closed with evidence; no CLI pin changed; #249 is untouched.
 
 ## 10. Tests required
 
@@ -294,6 +329,7 @@ Every provider suite must add named behavior for:
 - Provider keys and representative operator-secret canaries are absent from tool-child environment, command arguments, report, patch, and logs.
 - Formal review still cannot use shell, write, edit, or network tools.
 - GLM `implement` still cannot use the network.
+- Grok formal review still cannot use Bash or web search. Grok implement without `investigate` still defaults to deny-Bash.
 - Exit zero without the provider-specific terminal event fails.
 - Timeout, cancellation, provider failure, and interrupted changed work produce truthful terminal metadata and recoverable incomplete artifacts.
 - Exact named-session continuation is preserved; another session cannot be selected accidentally.
@@ -308,6 +344,8 @@ Focused suites (Git Bash on Windows):
 - `tests/test-ai-qwen.sh`
 - `tests/test-ai-muse.sh`
 - `tests/test-muse-opencode-contract.sh`
+- `tests/test-ai-grok-review.sh`
+- `tests/test-ai-grok-implement.sh`
 - the existing sandbox, lifecycle, setup, version-pin, secret-scan, and skill-trigger tests named by each wrapper header and `docs/development.md`
 - final complete Bash suite through Git Bash and complete PowerShell suite through the repository's documented Windows runner path, only when `bin/ai-test-local --check-collision` allows it
 
@@ -332,7 +370,7 @@ Live tests must use harmless content, a public non-authenticated HTTP endpoint, 
 
 ## 12. Access and environment
 
-- GitHub: authenticated `ai-gh` (not raw `gh`) to `https://github.com/popcre/ai-devops`; parent #253 and children #254–#257 are the work ledger.
+- GitHub: authenticated `ai-gh` (not raw `gh`) to `https://github.com/popcre/ai-devops`; parent #253 and children #254–#257 and #513 are the work ledger.
 - Implementation worktree: dedicated clone of current `origin/main`, branch named for the child (for example `grok/254-glm-investigate`). Source of truth is freshly fetched `origin/main`.
 - Windows shell: PowerShell for native setup/status; `C:\Program Files\Git\bin\bash.exe` for Bash scripts/tests.
 - Ubuntu: configured ai-devops reviewer host and non-root `ai` user according to `templates/system/machine-atlas.md`. Do not guess host/user details.
@@ -343,12 +381,13 @@ Live tests must use harmless content, a public non-authenticated HTTP endpoint, 
 
 ### Definition of done
 
-- [ ] Parent issue #253 has exactly the four intended child issues #254–#257 and every child is closed with current evidence that matches this corrected plan (no upgrade claims).
-- [ ] `ai-glm`, `ai-kimi`, `ai-qwen`, and `ai-muse` each expose a documented `investigate` mode with shell and public internet.
+- [ ] Parent issue #253 has exactly the five intended child issues #254–#257 and #513 and every child is closed with current evidence that matches this corrected plan (no upgrade claims).
+- [ ] `ai-glm`, `ai-kimi`, `ai-qwen`, `ai-muse`, and Grok each expose a documented `investigate` mode with shell and public internet.
 - [ ] Investigation runs only in a disposable remote-less copy and does not inherit operator credentials.
 - [ ] Formal review remains structurally read-only and clearly distinct from advisory investigation.
 - [ ] GLM `implement` still cannot use the network.
-- [ ] No OpenCode/Kimi/Qwen/Muse pin or model changed unless Step 0 proved the current model unavailable — and that case was flagged, not silently replaced.
+- [ ] No OpenCode/Kimi/Qwen/Muse/Grok pin or model changed unless Step 0 proved the current model unavailable — and that case was flagged, not silently replaced.
+- [ ] Issue #249 is unchanged by this plan.
 - [ ] Focused, full offline, installation, hostile, and authenticated live tests pass with redacted artifacts.
 - [ ] Independent exact-head final review passes after the final content change.
 - [ ] Documentation, skills, plan STATUS, and handoff state match the shipped implementation.
@@ -364,6 +403,8 @@ Live tests must use harmless content, a public non-authenticated HTTP endpoint, 
 - **Private repository leakage:** do not use internet-capable investigation on protected/licensed content without an explicit safe evidence packet.
 - **GLM implement accidentally gaining network:** add tests that implement still cannot reach the network after investigate lands.
 - **Muse key surviving into Bash children:** prove deletion before first model-controlled shell.
+- **Grok approval reviewer accidentally gaining Bash or web search:** tests must keep `ai-grok-review` deny-Bash and `--disable-web-search` after investigate lands.
+- **Pulling #249 into #513:** stop; this parent forbids the broker.
 
 ### Rollback
 
@@ -375,8 +416,8 @@ No owner decision is currently required. Implementation judgment is limited to t
 
 ## Mandatory plan self-audit
 
-1. **Could a brand-new AI session execute this plan without asking a question? Yes.** Sections 1–4 define the business outcome, product, trigger, terminology, scope, and exclusions including the 2026-09-16 upgrade split; Sections 5–8 carry exact current SHA, file:line machinery, findings, rejected approaches (including the withdrawn 2026-09-04 couplings), and locked/open decisions; Section 9 provides ordered file-level work and a verification gate for every step; Sections 10–13 provide tests, rules, access, landing, rollback, and closure.
-2. **Does the plan carry every relevant background, nuance, and rejected approach? Yes.** Sections 3, 5, 6, 7, and 8 record the 2026-09-03 owner request, the 2026-09-16 correction, why GLM cannot alias implement as-is, why Muse must not wait on GLM, why upgrades are out, why feature-branch-PR replaced direct-to-main, the Qwen discovery-if-still-broken rule, and the #198/#249/#169 boundaries.
-3. **Is the ultimate goal clear enough for correct judgment if a step is wrong? Yes.** Section 1 states the owner-visible outcome, fewest-moving-parts Option B, no upgrades, the harm/credential boundary, and that the goal wins over a conflicting step.
+1. **Could a brand-new AI session execute this plan without asking a question? Yes.** Sections 1–4 define the business outcome including Grok #513, Muse's AGREE, terminology, scope, and exclusions (upgrades out, #249 broker out); Sections 5–8 carry current machinery including `ai-grok-review` / `ai-grok-implement`, findings, rejected approaches, and locked/open decisions; Section 9 provides Steps 0–6 with verification gates; Sections 10–13 provide tests, rules, access, landing, rollback, and closure.
+2. **Does the plan carry every relevant background, nuance, and rejected approach? Yes.** Sections 3, 5, 6, 7, and 8 record the 2026-09-03 owner request, the 2026-09-16 correction, Muse Spark AGREE with notes already present, why Grok is Option B not #249, why GLM cannot alias implement as-is, why Muse must not wait on GLM, why upgrades are out, and the #198/#249/#169 boundaries.
+3. **Is the ultimate goal clear enough for correct judgment if a step is wrong? Yes.** Section 1 states the owner-visible outcome for five reviewers, fewest-moving-parts Option B, no upgrades, no #249 broker, the harm/credential boundary, and that the goal wins over a conflicting step.
 
 Checklist result: **PASS**. All 13 sections are present; the plan is standalone; every step names targets, dependencies, and evidence gates; locked and open decisions are labeled; tests are behavioral; identifiers and environments are defined; secrets are location-only; completion includes PR, exact-head review, installation, live qualification, documentation, issue closure, and `origin/main` proof.
