@@ -365,6 +365,7 @@ for unfinished work — `handoff-writer`'s own rule). Instead:
 no skill files. Then:
 
 ```bash
+until gh pr checks <n> --repo u2giants/shared-db --required >/dev/null 2>&1 || [ $? -eq 8 ]; do sleep 10; done
 gh pr checks <n> --repo u2giants/shared-db --required --watch --interval 30
 gh pr merge <n> --repo u2giants/shared-db --squash
 ```
@@ -381,6 +382,9 @@ gh pr merge <n> --repo u2giants/shared-db --squash
 - If the required status never appears, the PR is not prose-only: the
   `Documents-only merge authorization` job log names the offending file. Remove
   that file from the PR rather than switching lanes.
+- The `until` line matters: for the first seconds after the PR opens, `--watch`
+  exits at once with "no checks reported" and the merge is then refused (live
+  proof #3060, 2026-09-16).
 - Wait with `gh pr checks --required`, not a `statusCheckRollup` count: the
   rollup includes an unnamed commit status that never finishes.
 - Record the PR number in the marker comment; close the marker after the merge.

@@ -12,6 +12,7 @@ require "$HANDOVER" "## Fast close — nothing unfinished: no PR, under 5 minute
 require "$HANDOVER" "one comment on your marker issue"
 require "$HANDOVER" "do NOT write a \`HANDOFF.d/\` file"
 require "$HANDOVER" "gh pr checks <n> --repo u2giants/shared-db --required --watch --interval 30"
+require "$HANDOVER" "until gh pr checks <n> --repo u2giants/shared-db --required >/dev/null 2>&1 || [ \$? -eq 8 ]; do sleep 10; done"
 require "$HANDOVER" "gh pr merge <n> --repo u2giants/shared-db --squash"
 require "$HANDOVER" "**Never** use \`--admin\`"
 require "$HANDOVER" "dispatch \`guarded-migration-merge\` for prose"
