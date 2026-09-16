@@ -8,9 +8,16 @@
 #
 #   ai-grok-implement run <name> --repo <path> --prompt-file <f> [--ref <ref>]
 #                                [--max-turns N] [--allow-shell] [--keep]
+#   ai-grok-implement investigate <name> --repo <path> --prompt-file <f>
+#                                [--ref <ref>] [--max-turns N] [--keep]
 #   ai-grok-implement cleanup <name> [--force]
 #   ai-grok-implement list
 #   ai-grok-implement doctor
+#
+# investigate is advisory look-into-this mode (issue #513 / parent #253 Option B):
+# isolated remote-less copy, Bash and public internet allowed via Bash, report
+# labeled INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL. It does not change
+# ai-grok-review (still deny-Bash / no web search). It is not issue #249.
 #
 # ---------------------------------------------------------------------------
 # STEP 0 VERIFICATION — captured 2026-08-12 against Grok 0.2.112 on al8960ofc
@@ -55,7 +62,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
 IMPL_DIR="$STATE_DIR/implement"
@@ -219,14 +226,98 @@ worktree_root() { # worktree_root REPO
   printf '%s-grok-worktrees' "$1"
 }
 
+# Investigation cannot use a linked git worktree: remotes live in the shared
+# .git/config, so stripping them would also disarm the caller's primary repo.
+# A --no-hardlinks clone is the same isolation root and --cwd contract as run,
+# with an independent git dir that can drop remotes.
+create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
+  local repo="$1" wt="$2" base="$3" r
+  mkdir -p "$(dirname "$wt")"
+  git -c core.longpaths=true clone --quiet --no-hardlinks "$repo" "$wt" \
+    || die "failed to create investigation copy $wt."
+  git -C "$wt" checkout --quiet --detach "$base" \
+    || die "failed to detach investigation copy at $base."
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    git -C "$wt" remote remove "$r" >/dev/null 2>&1 \
+      || die "failed to remove remote '$r' from investigation copy."
+  done < <(git -C "$wt" remote)
+  [ -z "$(git -C "$wt" remote)" ] \
+    || die "investigation copy still has a usable git remote."
+}
+
+# Operator secrets must not reach Grok's process or its Bash children. Grok
+# auth stays file-based in an isolated GROK_HOME (same contract as review):
+# never as an environment value, argument, report, or patch.
+launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
+  local grok="$1"; shift
+  local tmp_root user_home grok_home auth_src rc=0
+  mkdir -p "$IMPL_DIR"
+  tmp_root="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
+  user_home="$tmp_root/user"
+  grok_home="$tmp_root/grok"
+  mkdir -p "$user_home" "$grok_home"
+  chmod 700 "$tmp_root" "$user_home" "$grok_home" 2>/dev/null || true
+  auth_src="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  if [ -f "$auth_src" ]; then
+    ln "$auth_src" "$grok_home/auth.json" 2>/dev/null || true
+    if ! [ "$auth_src" -ef "$grok_home/auth.json" ]; then
+      rm -rf "$tmp_root"
+      die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."
+    fi
+  fi
+  local native_home native_grok_home
+  native_home="$(native_path "$user_home")"
+  native_grok_home="$(native_path "$grok_home")"
+  # HOME is empty and separate from GROK_HOME so `~/.grok/auth.json` is not in
+  # the user home. GROK_HOME must stay in the Grok process environment or the
+  # launcher cannot authenticate; a Bash child of that process can read it.
+  local -a env_args=(
+    "PATH=$PATH"
+    "HOME=$native_home"
+    "GROK_HOME=$native_grok_home"
+    "GROK_CLAUDE_SKILLS_ENABLED=false" "GROK_CLAUDE_RULES_ENABLED=false"
+    "GROK_CLAUDE_AGENTS_ENABLED=false" "GROK_CLAUDE_MCPS_ENABLED=false"
+    "GROK_CLAUDE_HOOKS_ENABLED=false" "GROK_CLAUDE_SESSIONS_ENABLED=false"
+    "GROK_CURSOR_SKILLS_ENABLED=false" "GROK_CURSOR_RULES_ENABLED=false"
+    "GROK_CURSOR_AGENTS_ENABLED=false" "GROK_CURSOR_MCPS_ENABLED=false"
+    "GROK_CURSOR_HOOKS_ENABLED=false" "GROK_CURSOR_SESSIONS_ENABLED=false"
+    "GROK_CODEX_SESSIONS_ENABLED=false"
+  )
+  local n
+  for n in LANG LC_ALL TERM SHELL TMPDIR TMP TEMP \
+           SYSTEMROOT WINDIR COMSPEC PATHEXT OS SystemDrive \
+           USERNAME USERDOMAIN COMPUTERNAME \
+           NUMBER_OF_PROCESSORS PROCESSOR_ARCHITECTURE \
+           PROCESSOR_IDENTIFIER PROCESSOR_LEVEL PROCESSOR_REVISION \
+           ProgramFiles ProgramW6432 ProgramData PUBLIC ALLUSERSPROFILE \
+           HOMEDRIVE HOMEPATH MSYSTEM MSYSTEM_PREFIX MSYSTEM_CARCH \
+           MSYSTEM_CHOST MINGW_PREFIX MINGW_CHOST MINGW_PACKAGE_PREFIX \
+           EXEPATH ORIGINAL_PATH ORIGINAL_TEMP ORIGINAL_TMP \
+           TMPDIR_FOR_TEST AI_GROK_TEST_VERSION; do
+    [ -n "${!n:-}" ] && env_args+=("$n=${!n}")
+  done
+  if is_windows; then
+    env_args+=("USERPROFILE=$native_home")
+    env_args+=("APPDATA=$native_home\\AppData\\Roaming")
+    env_args+=("LOCALAPPDATA=$native_home\\AppData\\Local")
+    env_args+=("XDG_CONFIG_HOME=$native_home\\.config")
+    env_args+=("XDG_CACHE_HOME=$native_home\\.cache")
+    env_args+=("XDG_DATA_HOME=$native_home\\.local\\share")
+  fi
+  env -i "${env_args[@]}" "$grok" "$@" || rc=$?
+  rm -rf "$tmp_root"
+  return "$rc"
+}
+
 is_primary() { # is_primary REPO PATH — refuse to ever remove the main checkout
   local a b
   a="$(cd "$1" && pwd -P)"; b="$(cd "$2" 2>/dev/null && pwd -P || echo /nonexistent)"
   [ "$a" = "$b" ]
 }
 
-remove_worktree() { # remove_worktree REPO WT NAME -> 0 removed and proven gone
-  local repo="$1" wt="$2" name="$3" grok; grok="$(resolve_grok)"
+remove_worktree() { # remove_worktree REPO WT NAME [KIND] -> 0 removed and proven gone
+  local repo="$1" wt="$2" name="$3" kind="${4:-worktree}" grok; grok="$(resolve_grok)"
   is_primary "$repo" "$wt" && die "refusing to remove the primary checkout ($repo)."
 
   # Grok's own bookkeeping first, as the skill requires. The subcommand is `rm`,
@@ -234,8 +325,12 @@ remove_worktree() { # remove_worktree REPO WT NAME -> 0 removed and proven gone
   # here is the expected case and is not an error.
   "$grok" worktree rm "$name" >/dev/null 2>&1 || true
 
-  git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
-  git -C "$repo" worktree prune >/dev/null 2>&1 || true
+  if [ "$kind" = clone ]; then
+    rm -rf "$wt"
+  else
+    git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
+    git -C "$repo" worktree prune >/dev/null 2>&1 || true
+  fi
 
   # Prove it is gone in BOTH ledgers. `-Fw` and not a bare substring match: a
   # short run name like `nd` is a substring of Grok's own "No worktrees found."
@@ -253,21 +348,34 @@ remove_worktree() { # remove_worktree REPO WT NAME -> 0 removed and proven gone
 }
 
 # ---------------------------------------------------------------------------
-# run
+# run / investigate
 # ---------------------------------------------------------------------------
-cmd_run() {
+cmd_run() { execute_isolated run "$@"; }
+cmd_investigate() { execute_isolated investigate "$@"; }
+
+execute_isolated() {
+  local mode="$1"; shift
   local name="${1:-}"; shift || true
-  [ -n "$name" ] || die "usage: ai-grok-implement run <name> --repo <path> --prompt-file <f> [--ref <ref>] [--max-turns N] [--allow-shell] [--keep]"
+  local usage
+  if [ "$mode" = investigate ]; then
+    usage="usage: ai-grok-implement investigate <name> --repo <path> --prompt-file <f> [--ref <ref>] [--max-turns N] [--keep]"
+  else
+    usage="usage: ai-grok-implement run <name> --repo <path> --prompt-file <f> [--ref <ref>] [--max-turns N] [--allow-shell] [--keep]"
+  fi
+  [ -n "$name" ] || die "$usage"
   case "$name" in *[!A-Za-z0-9._-]*) die "run name must be [A-Za-z0-9._-] only: '$name'";; esac
 
   local repo="" pf="" ref="" turns="$DEFAULT_MAX_TURNS" allow_shell=0 keep=0
+  [ "$mode" = investigate ] && allow_shell=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo)        repo="${2:-}"; shift 2 ;;
       --prompt-file) pf="${2:-}";   shift 2 ;;
       --ref)         ref="${2:-}";  shift 2 ;;
       --max-turns)   turns="${2:-}"; shift 2 ;;
-      --allow-shell) allow_shell=1; shift ;;
+      --allow-shell)
+        [ "$mode" = investigate ] && die "unknown option '--allow-shell'. Investigation always allows the shell; do not pass --allow-shell."
+        allow_shell=1; shift ;;
       --keep)        keep=1; shift ;;
       *) die "unknown option '$1'. This wrapper deliberately refuses to forward arbitrary grok flags." ;;
     esac
@@ -288,11 +396,16 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
     || die "base ref '$ref' does not resolve in $repo."
   local base_sha; base_sha="$(git -C "$repo" rev-parse "$ref^{commit}")"
 
-  local wt_root wt branch
+  local wt_root wt branch copy_kind="worktree"
   wt_root="$(worktree_root "$repo")"; wt="$wt_root/$name"; branch="grok/$name"
   [ -e "$wt" ] && die "worktree path already exists: $wt (run 'ai-grok-implement cleanup $name' first)."
-  git -C "$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 \
-    && die "branch '$branch' already exists in $repo. Clean up the previous run first."
+  if [ "$mode" != investigate ]; then
+    git -C "$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 \
+      && die "branch '$branch' already exists in $repo. Clean up the previous run first."
+  else
+    branch=""
+    copy_kind="clone"
+  fi
 
   local before; before="$(primary_fingerprint "$repo")"
 
@@ -303,9 +416,14 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   require_supported_grok_version "$grok"
 
   mkdir -p "$wt_root"
-  git -C "$repo" worktree add -q -b "$branch" "$wt" "$base_sha" \
-    || die "failed to create worktree $wt from $ref."
-  note "ai-grok-implement: worktree $wt on branch $branch @ ${base_sha:0:7} (from $ref)"
+  if [ "$mode" = investigate ]; then
+    create_investigate_copy "$repo" "$wt" "$base_sha"
+    note "ai-grok-implement: investigation copy $wt @ ${base_sha:0:7} (from $ref); remote-less"
+  else
+    git -C "$repo" worktree add -q -b "$branch" "$wt" "$base_sha" \
+      || die "failed to create worktree $wt from $ref."
+    note "ai-grok-implement: worktree $wt on branch $branch @ ${base_sha:0:7} (from $ref)"
+  fi
 
   # The brief is copied INSIDE the worktree. A prompt file living outside the
   # isolated tree is one more path Grok can be told to look for and fail on.
@@ -320,10 +438,20 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   local art="$IMPL_DIR/${CALLER}__${name}.d"
   rm -rf "$art"; mkdir -p "$art"
   {
+    if [ "$mode" = investigate ]; then
+      printf 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL\n\n'
+      printf 'This turn may use the shell and the public internet inside this isolated copy.\n'
+      printf 'Findings cannot satisfy formal exact-head approval. Do not commit, push, or merge.\n\n'
+    fi
     printf '# Working directory contract\n\n'
     printf 'Your current working directory is `%s`.\n' "$(native_path "$wt")"
-    printf 'It IS the isolated git worktree for this task, on branch `%s`, based on `%s` (%s).\n' \
-           "$branch" "$ref" "${base_sha:0:7}"
+    if [ "$mode" = investigate ]; then
+      printf 'It IS the isolated remote-less git copy for this investigation, based on `%s` (%s).\n' \
+             "$ref" "${base_sha:0:7}"
+    else
+      printf 'It IS the isolated git worktree for this task, on branch `%s`, based on `%s` (%s).\n' \
+             "$branch" "$ref" "${base_sha:0:7}"
+    fi
     printf 'Do NOT look for another worktree. Do NOT touch any other checkout of this repository.\n'
     printf 'Do NOT commit, push, merge, or run destructive commands. Edit files in place; the diff is collected for you.\n'
     printf 'Read files with bounded chunks. If a path is missing, list the directory you are in rather than guessing another root.\n\n'
@@ -337,10 +465,21 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   # Permission set. NOT `--permission-mode auto`: auto-cancelling a tool ends the
   # run with stopReason "Cancelled" (measured 2026-08-12). An explicit --deny is
   # reported to Grok, which then works around it and still finishes.
-  local perms=(--permission-mode acceptEdits
-               --allow Read --allow Grep --allow Edit --allow Write
-               --disable-web-search --no-memory)
-  if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
+  # Investigation keeps --disable-web-search: public HTTP is Bash (curl/wget).
+  # acceptEdits auto-approves file edits but can still cancel a headless Bash
+  # tool (live 2026-09-16 canary, stopReason cancelled on turn 1). Investigation
+  # therefore uses default plus an explicit Bash allow, never auto.
+  local perms
+  if [ "$mode" = investigate ]; then
+    perms=(--permission-mode default
+           --allow Read --allow Grep --allow Edit --allow Write --allow Bash
+           --disable-web-search --no-memory)
+  else
+    perms=(--permission-mode acceptEdits
+           --allow Read --allow Grep --allow Edit --allow Write
+           --disable-web-search --no-memory)
+    if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
+  fi
 
   # NOTE: --worktree is deliberately NOT passed. Grok 1.0.13 documents that
   # headless mode (-p) creates no worktree from that flag, and its absence is
@@ -353,7 +492,11 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
               --output-format json)
 
   set +e
-  "$grok" "${args[@]}" > "$out" 2> "$err"
+  if [ "$mode" = investigate ]; then
+    launch_grok_allowlisted "$grok" "${args[@]}" > "$out" 2> "$err"
+  else
+    "$grok" "${args[@]}" > "$out" 2> "$err"
+  fi
   local rc=$?
   set -e
 
@@ -366,28 +509,35 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   local primary_ok=1
   [ "$before" = "$after" ] || primary_ok=0
 
-  local stop cost tokens
+  local stop cost tokens session_id
   stop="$(jq -r '.stopReason // "missing"' "$out" 2>/dev/null || echo missing)"
   cost="$(jq -r '.total_cost_usd // 0' "$out" 2>/dev/null || echo 0)"
   tokens="$(jq -r '.usage.total_tokens // 0' "$out" 2>/dev/null || echo 0)"
+  session_id="$(jq -r '.sessionId // "unavailable"' "$out" 2>/dev/null || echo unavailable)"
 
   local status="ok" reasons=""
   terminal_json_ok "$out" || { status="failed"; reasons="$reasons no-terminal-json(stopReason=$stop);"; }
-  [ -s "$diff" ] || { status="failed"; reasons="$reasons empty-diff;"; }
+  # Implementation must produce a change. Investigation may only observe.
+  if [ "$mode" != investigate ]; then
+    [ -s "$diff" ] || { status="failed"; reasons="$reasons empty-diff;"; }
+  fi
   [ "$primary_ok" -eq 1 ] || { status="failed"; reasons="$reasons primary-checkout-changed;"; }
 
   write_record "$name" "$(jq -n \
     --arg name "$name" --arg caller "$CALLER" --arg repo "$repo" --arg wt "$wt" \
     --arg branch "$branch" --arg ref "$ref" --arg base "$base_sha" \
     --arg status "$status" --arg stop "$stop" --arg reasons "$reasons" \
+    --arg mode "$mode" --arg copy_kind "$copy_kind" --arg session "$session_id" \
     --argjson rc "$rc" --argjson cost "${cost:-0}" --argjson tokens "${tokens:-0}" \
     --arg diff "$diff" --arg out "$out" \
     '{name:$name,caller:$caller,repo:$repo,worktree:$wt,branch:$branch,ref:$ref,
       base_sha:$base,status:$status,stopReason:$stop,failure_reasons:$reasons,
+      mode:$mode,copy_kind:$copy_kind,sessionId:$session,
       exit_code:$rc,cost_usd:$cost,tokens:$tokens,diff:$diff,result:$out}')"
 
   note ""
   note "ai-grok-implement: exit=$rc (recorded, never trusted) stopReason=$stop"
+  [ "$mode" = investigate ] && note "  mode       : INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL"
   [ -s "$out" ] && report_usage "$out"
   note "  diff       : $diff ($(wc -l < "$diff" | tr -d ' ') lines)"
   note "  worktree   : $wt"
@@ -402,10 +552,11 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
     return 1
   fi
 
+  [ "$mode" = investigate ] && printf 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL\n'
   cat "$out"
   if [ "$keep" -eq 0 ]; then
-    if remove_worktree "$repo" "$wt" "$name"; then
-      git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
+    if remove_worktree "$repo" "$wt" "$name" "$copy_kind"; then
+      [ -n "$branch" ] && git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
       note "ai-grok-implement: worktree removed and proven absent from grok + git ledgers."
     else
       die "cleanup verification FAILED for '$name'. Do not treat this run as finished."
@@ -427,20 +578,21 @@ cmd_cleanup() {
     case "$1" in --force) force=1; shift ;; *) die "unknown option '$1'." ;; esac
   done
   need jq
-  local rec repo wt branch diff status
+  local rec repo wt branch diff status copy_kind
   rec="$(read_record "$name")"
   repo="$(printf '%s' "$rec" | jq -r .repo)"
   wt="$(printf '%s'   "$rec" | jq -r .worktree)"
   branch="$(printf '%s' "$rec" | jq -r .branch)"
   diff="$(printf '%s' "$rec" | jq -r .diff)"
   status="$(printf '%s' "$rec" | jq -r .status)"
+  copy_kind="$(printf '%s' "$rec" | jq -r '.copy_kind // "worktree"')"
 
   if [ "$status" != "ok" ] && [ "$force" -eq 0 ] && [ -s "$diff" ]; then
     die "run '$name' FAILED and its worktree holds a non-empty diff ($diff).
 Review it before deleting unique work, then re-run with --force."
   fi
-  if remove_worktree "$repo" "$wt" "$name"; then
-    git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
+  if remove_worktree "$repo" "$wt" "$name" "$copy_kind"; then
+    [ -n "$branch" ] && [ "$branch" != "null" ] && git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
     note "ai-grok-implement: '$name' removed and proven absent."
     return 0
   fi
@@ -479,22 +631,26 @@ cmd_doctor() {
   printf 'auth (models): '
   if "$grok" models >/dev/null 2>&1; then echo OK; else echo "FAILED — run 'grok login'"; fi
   echo "state dir    : $IMPL_DIR"
+  echo "run          : isolated worktree; Bash denied unless --allow-shell"
+  echo "investigate  : isolated remote-less copy; Bash + public internet; INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL"
   echo ""
   echo "NOTE: 'grok --worktree' creates no worktree in headless mode (-p)."
   echo "      This wrapper creates the worktree with git and passes only --cwd."
+  echo "NOTE: investigate is not formal review and is not issue #249."
 }
 
 main() {
   local cmd="${1:-}"; shift || true
   case "$cmd" in
     run)     cmd_run "$@" ;;
+    investigate) cmd_investigate "$@" ;;
     cleanup) cmd_cleanup "$@" ;;
     list)    cmd_list "$@" ;;
     doctor)  cmd_doctor "$@" ;;
     --version|-v) echo "ai-grok-implement $VERSION" ;;
     ''|-h|--help|help)
-      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) die "unknown command '$cmd'. Try: run | cleanup | list | doctor" ;;
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$cmd'. Try: run | investigate | cleanup | list | doctor" ;;
   esac
 }
 

@@ -82,6 +82,12 @@ semantic fields: missing evidence is a skill review failure, while the wrapper
 continues to enforce terminal completion, fixed permissions, session reuse,
 cache reporting, and cost reporting.
 
+Advisory look-into-this work is `ai-grok-implement investigate` (issue #513):
+shell and public internet in a remote-less copy, labeled not-formal-approval.
+Do not add Bash or web search to `ai-grok-review`. Do not implement the #249
+broker in that command. Test both wrappers in
+`tests/test-ai-grok-implement.sh` and `tests/test-ai-grok-review.sh`.
+
 Kimi is the exception to metrics reporting: its headless output exposes no context,
 cache, token, cost, or returned-model values. Test exact-id session reuse, current-file
 re-reading, and same-session durable-state recovery instead. Never inspect or edit its

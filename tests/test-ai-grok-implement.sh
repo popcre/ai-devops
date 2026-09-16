@@ -43,8 +43,13 @@ case "${1:-}" in
              case "${2:-}" in list) echo "No worktrees found." ;; rm) exit 1 ;; esac; exit 0 ;;
 esac
 # Locate --cwd and honour the mode file.
-cwd=""; prev=""
-for a in "$@"; do [ "$prev" = "--cwd" ] && cwd="$a"; prev="$a"; done
+cwd=""; prev=""; allow_bash=0
+for a in "$@"; do
+  [ "$prev" = "--cwd" ] && cwd="$a"
+  [ "$prev" = "--allow" ] && [ "$a" = "Bash" ] && allow_bash=1
+  prev="$a"
+done
+env > "$TMPDIR_FOR_TEST/child.env" 2>/dev/null || true
 mode="$(cat "$TMPDIR_FOR_TEST/mode" 2>/dev/null || echo ok)"
 case "$(uname -s)" in
   MSYS*|MINGW*|CYGWIN*)
@@ -55,6 +60,7 @@ case "$(uname -s)" in
 esac
 case "$mode" in
   ok)        printf 'grok was here\n' > "$posix/made-by-grok.txt"
+             [ "$allow_bash" = 1 ] && printf 'HTTP/1.1 200\n' > "$posix/http-canary.txt"
              echo '{"text":"done","stopReason":"EndTurn","sessionId":"s1","num_turns":3,"usage":{"total_tokens":100,"cache_read_input_tokens":10},"total_cost_usd":0.01,"modelUsage":{"grok-4.6-build":{}}}' ;;
   cancelled) printf 'partial\n' > "$posix/partial.txt"
              echo '{"text":"","stopReason":"Cancelled","sessionId":"s2","num_turns":2,"usage":{"total_tokens":50},"total_cost_usd":0.02,"modelUsage":{"grok-4.6-build":{}}}' ;;
@@ -114,6 +120,9 @@ else
 fi
 grep -q -- '--permission-mode acceptEdits' "$TMP/argv.txt" && ok "never_uses_permission_mode_auto" || bad "never_uses_permission_mode_auto"
 grep -q -- '--max-turns' "$TMP/argv.txt" && ok "max_turns_always_present" || bad "max_turns_always_present"
+grep -q -- '--deny Bash' "$TMP/argv.txt" && ok "run_defaults_to_deny_bash" || bad "run_defaults_to_deny_bash"
+grep -q -- '--allow Bash' "$TMP/argv.txt" && bad "run_defaults_to_deny_bash_no_allow" || ok "run_defaults_to_deny_bash_no_allow"
+grep -q -- '--disable-web-search' "$TMP/argv.txt" && ok "run_disables_web_search" || bad "run_disables_web_search"
 
 # --- 3. --cwd is a native path -----------------------------------------------
 # Windows Grok needs a native drive path; Linux Grok needs an absolute POSIX path.
@@ -254,6 +263,108 @@ if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE -e '--always-approve' -e 'permi
 else
   ok "implementer_never_uses_blanket_approval"
 fi
+grep -q 'native_home="$(native_path "$user_home")"' "$SCRIPT" \
+  && grep -q 'USERPROFILE=$native_home' "$SCRIPT" \
+  && ok "investigate_windows_home_is_native" || bad "investigate_windows_home_is_native"
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'cp -P .*auth\.json|cp .*auth\.json'; then
+  bad "investigate_never_copies_auth"
+else
+  ok "investigate_never_copies_auth"
+fi
+grep -q 'rm -rf "$tmp_root"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
+grep -q 'env -i' "$SCRIPT" && ok "investigate_launches_allowlisted_env" || bad "investigate_launches_allowlisted_env"
+grep -q 'auth_src" -ef "$grok_home/auth.json"' "$SCRIPT" && ok "investigate_proves_same_inode_auth" || bad "investigate_proves_same_inode_auth"
+
+# --- 14. investigate (issue #513) --------------------------------------------
+inv_case() { # inv_case NAME MODE REPO [extra args...]
+  local name="$1" mode="$2" repo="$3"; shift 3
+  echo "$mode" > "$TMP/mode"
+  : > "$TMP/argv.txt"
+  : > "$TMP/child.env"
+  "$SCRIPT" investigate "$name" --repo "$repo" --prompt-file "$BRIEF" "$@" >"$TMP/out.$name" 2>"$TMP/err.$name"
+  printf '%s' $?
+}
+
+"$SCRIPT" --help 2>/dev/null | grep -q 'investigate' && ok "investigate_in_help" || bad "investigate_in_help"
+"$SCRIPT" doctor 2>&1 | grep -q 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL' \
+  && ok "doctor_labels_investigate_advisory" || bad "doctor_labels_investigate_advisory"
+
+R7="$TMP/r7"; mkrepo "$R7"
+export OP_SERVICE_ACCOUNT_TOKEN='canary-op-service-token'
+export GH_TOKEN='canary-gh-token'
+export GITHUB_TOKEN='canary-github-token'
+export AI_TEST_OPERATOR_SECRET='canary-operator-secret'
+rc="$(inv_case inv1 ok "$R7" --keep)"
+[ "$rc" = 0 ] && ok "investigate_happy_path" || bad "investigate_happy_path (rc=$rc: $(cat "$TMP/err.inv1"))"
+grep -q -- '--allow Bash' "$TMP/argv.txt" && ok "investigate_allows_bash" || bad "investigate_allows_bash"
+grep -q -- '--deny Bash' "$TMP/argv.txt" && bad "investigate_does_not_deny_bash" || ok "investigate_does_not_deny_bash"
+grep -q -- '--permission-mode default' "$TMP/argv.txt" && ok "investigate_uses_default_permissions" || bad "investigate_uses_default_permissions"
+grep -q -- '--permission-mode acceptEdits' "$TMP/argv.txt" && bad "investigate_does_not_use_acceptEdits" || ok "investigate_does_not_use_acceptEdits"
+grep -q -- '--disable-web-search' "$TMP/argv.txt" && ok "investigate_keeps_web_search_disabled" || bad "investigate_keeps_web_search_disabled"
+if grep -q -- '--worktree' "$TMP/argv.txt"; then bad "investigate_never_passes_worktree_flag"; else ok "investigate_never_passes_worktree_flag"; fi
+grep -q 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL' "$AI_GROK_STATE_DIR/implement/claude__inv1.d/brief.md" \
+  && ok "investigate_brief_is_advisory" || bad "investigate_brief_is_advisory"
+[ -f "$R7-grok-worktrees/inv1/http-canary.txt" ] && ok "investigate_http_canary_via_bash" || bad "investigate_http_canary_via_bash"
+[ -z "$(git -C "$R7-grok-worktrees/inv1" remote 2>/dev/null)" ] \
+  && ok "investigate_copy_is_remote_less" || bad "investigate_copy_is_remote_less"
+[ -e "$R7/made-by-grok.txt" ] && bad "investigate_does_not_write_primary" || ok "investigate_does_not_write_primary"
+[ -e "$R7/http-canary.txt" ] && bad "investigate_http_not_in_primary" || ok "investigate_http_not_in_primary"
+[ "$(git -C "$R7" status --porcelain)" = "" ] && ok "investigate_primary_clean" || bad "investigate_primary_clean"
+if grep -Eq 'canary-op-service-token|canary-gh-token|canary-github-token|canary-operator-secret' "$TMP/child.env" \
+     "$AI_GROK_STATE_DIR/implement/claude__inv1.d/brief.md" \
+     "$AI_GROK_STATE_DIR/implement/claude__inv1.d/changes.diff" \
+     "$AI_GROK_STATE_DIR/implement/claude__inv1.d/result.json" \
+     "$TMP/argv.txt" 2>/dev/null; then
+  bad "investigate_child_has_no_operator_secrets"
+else
+  ok "investigate_child_has_no_operator_secrets"
+fi
+grep -q '"sessionId":"s1"' "$TMP/out.inv1" && ok "investigate_records_session_identity" || bad "investigate_records_session_identity"
+"$SCRIPT" cleanup inv1 >/dev/null 2>&1 && ok "investigate_cleanup" || bad "investigate_cleanup"
+[ -e "$R7-grok-worktrees/inv1" ] && bad "investigate_cleanup_removes_copy" || ok "investigate_cleanup_removes_copy"
+unset OP_SERVICE_ACCOUNT_TOKEN GH_TOKEN GITHUB_TOKEN AI_TEST_OPERATOR_SECRET
+
+R8="$TMP/r8"; mkrepo "$R8"
+rc="$(inv_case invnd nodiff "$R8")"
+[ "$rc" = 0 ] && ok "investigate_empty_diff_is_success" || bad "investigate_empty_diff_is_success ($(cat "$TMP/err.invnd"))"
+
+R9="$TMP/r9"; mkrepo "$R9"
+rc="$(inv_case invcx cancelled "$R9")"
+[ "$rc" != 0 ] && ok "investigate_cancelled_is_failure" || bad "investigate_cancelled_is_failure"
+[ -e "$R9-grok-worktrees/invcx/partial.txt" ] && ok "investigate_failure_preserves_copy" || bad "investigate_failure_preserves_copy"
+"$SCRIPT" cleanup invcx >/dev/null 2>&1 && bad "investigate_cleanup_refuses_unique_work" || ok "investigate_cleanup_refuses_unique_work"
+"$SCRIPT" cleanup invcx --force >/dev/null 2>&1 && ok "investigate_cleanup_force" || bad "investigate_cleanup_force"
+
+R10="$TMP/r10"; mkrepo "$R10"
+rc="$(inv_case invmt empty "$R10")"
+[ "$rc" != 0 ] && ok "investigate_exit_zero_without_json_is_failure" || bad "investigate_exit_zero_without_json_is_failure"
+"$SCRIPT" cleanup invmt --force >/dev/null 2>&1
+
+if "$SCRIPT" investigate zz --repo "$R10" --prompt-file "$BRIEF" --sandbox danger >/dev/null 2>&1; then
+  bad "investigate_refuses_arbitrary_flags"
+else
+  ok "investigate_refuses_arbitrary_flags"
+fi
+if "$SCRIPT" investigate zz --repo "$R10" --prompt-file "$BRIEF" --allow-shell >/dev/null 2>&1; then
+  bad "investigate_refuses_allow_shell_flag"
+else
+  ok "investigate_refuses_allow_shell_flag"
+fi
+
+# Default implement path still denies Bash after investigate lands.
+R11="$TMP/r11"; mkrepo "$R11"
+: > "$TMP/argv.txt"
+rc="$(run_case shell0 ok "$R11" --keep)"
+[ "$rc" = 0 ] && ok "run_still_works_after_investigate" || bad "run_still_works_after_investigate"
+grep -q -- '--deny Bash' "$TMP/argv.txt" && ok "run_still_defaults_to_deny_bash" || bad "run_still_defaults_to_deny_bash"
+[ -f "$R11-grok-worktrees/shell0/http-canary.txt" ] && bad "run_without_shell_has_no_http_canary" || ok "run_without_shell_has_no_http_canary"
+"$SCRIPT" cleanup shell0 >/dev/null 2>&1
+
+: > "$TMP/argv.txt"
+rc="$(run_case shell1 ok "$R11" --allow-shell --keep)"
+[ "$rc" = 0 ] && ok "run_allow_shell_still_works" || bad "run_allow_shell_still_works"
+grep -q -- '--allow Bash' "$TMP/argv.txt" && ok "run_allow_shell_enables_bash" || bad "run_allow_shell_enables_bash"
+"$SCRIPT" cleanup shell1 >/dev/null 2>&1
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

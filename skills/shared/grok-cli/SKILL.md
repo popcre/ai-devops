@@ -1,6 +1,6 @@
 ---
 name: grok-cli
-description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, or delegated Grok coding.
+description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
 ---
 
 # Grok CLI
@@ -188,9 +188,23 @@ code**, use the companion wrapper:
 
 ```bash
 ai-grok-implement run <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
+ai-grok-implement investigate <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
 ai-grok-implement cleanup <name> [--force]
 ai-grok-implement list | doctor
 ```
+
+`investigate` is advisory look-into-this mode. It runs in an isolated remote-less
+copy with Bash allowed. The brief and doctor output say `INVESTIGATION —
+ADVISORY, NOT FORMAL APPROVAL`. Do not treat it as exact-head approval. Do not
+add Bash or web search to `ai-grok-review`. Do not use this command to build the
+#249 broker.
+
+On the qualified pin (1.0.13), live Windows headless Bash currently returns
+`stopReason: cancelled` for both `investigate` and `run --allow-shell`. Offline
+tests prove the wrapper passes `--allow Bash`. Do not upgrade the pin in this
+workstream. A Bash child of a live Grok process can read the isolated
+`GROK_HOME` auth file; that is how Grok authenticates and is not an env-var
+secret.
 
 It creates the isolated worktree itself with `git worktree add`, bases it on `origin/main`
 by default, converts every path to native Windows form, keeps the brief inside the
