@@ -38,21 +38,23 @@ Canonical short hashes: Claude body `8b7a6d5b2e34`, Codex body `e08911fd4e39`.
 | 916 | yes | DRIFT: both bodies; 41 Claude / 37 Codex skill files (checkout 378 commits behind) | yes — `D:\repos\ai-devops` fast-forwarded, `ai-adopt-globals` rc 0 | MATCH both bodies; 0 skill files differ |
 | hetz user `ai` | yes | DRIFT: both bodies; 19 skill files in each tree | yes — `/worksp/ai-devops` moved detached to `ece11e45` (clean), `install.sh` rc 0, `ai-adopt-globals` as `ai` rc 0 | MATCH both bodies; 0 skill files differ |
 | hetz user `root` | yes | DRIFT: both bodies; 38 Claude / 34 Codex skill files | yes — `ai-adopt-globals` as root rc 0 | MATCH both bodies; 0 skill files differ |
-| EDGE-RUNN-ENVY | yes (SSH as `ahazan`) | no installed Claude or Codex home at all (`File Not Found` for `.claude` and `.codex`) | not applicable — CI runner with no AI client installed; nothing can run stale rules there | NOT PROVEN EQUAL (no installed rules) |
-| EDGE-ALIEN | NO | not measured | no | NOT PROVEN |
-| t16 | NO | not measured | no | NOT PROVEN |
+| EDGE-RUNN-ENVY | yes (SSH as `ahazan`) | no installed Claude or Codex home at all (`File Not Found` for `.claude` and `.codex`) | no | NOT APPLICABLE (owner ruling 2026-09-16: CI runner, no Claude or Codex) |
+| EDGE-ALIEN | NO (irrelevant) | not measured | no | NOT APPLICABLE (owner ruling 2026-09-16: CI runner / popdam processor, no Claude or Codex) |
+| t16 | NO — Tailscale online but SSH refused (re-tried 2026-09-16 after owner update) | not measured | no | NOT PROVEN |
 
 Unreachable evidence (verbatim):
 
 - EDGE-ALIEN: `ssh: connect to host 100.65.60.70 port 22: Connection timed out`
   (Tailscale itself answers: `pong from edge-alien (100.65.60.70) via 192.168.3.51:41641 in 2ms`, so the SSH service is not accepting connections).
-- t16: `100.96.221.71    t16    u2giants@    windows  offline, last seen 4d ago` (from `tailscale status`; there is also no SSH alias for it).
+- t16 (first attempt): `offline, last seen 4d ago` in `tailscale status`.
+- t16 (retry after it came online, key `916-alien`, users `ahazan2` and `ahazan`): `ssh: connect to host 100.96.221.71 port 22: Connection timed out`, while `pong from t16 (100.96.221.71) via 10.0.5.62:41641 in 11ms`. The SSH service on t16 is not accepting connections; there is no SSH alias for it either.
 
 ## Verdict
 
-Step 9 is **not accepted**. Every reachable AI client machine (edge-dev,
-al8960ofc, 916, hetz `ai`, hetz `root`) now equals canonical main, but EDGE-ALIEN
-and t16 could not be measured, and EDGE-RUNN-ENVY has no installed rules.
+Step 9 is **not accepted**. Every in-scope machine except t16 (edge-dev,
+al8960ofc, 916, hetz `ai`, hetz `root`) equals canonical main. EDGE-ALIEN and
+EDGE-RUNN-ENVY are out of scope. t16 remains unmeasured: its SSH service does
+not accept connections.
 
 Side effect to note: edge-dev had been carrying the unmerged PR #486 rule text
 in its installed globals. Adoption replaced it with main; it returns when #486
