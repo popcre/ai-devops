@@ -29,6 +29,9 @@ required_phrases=(
   "original capability still works"
   "present symptom suppression as a fix"
   "Do not load unrelated handoffs"
+  "resume that agent immediately"
+  "quote Albert's exact words"
+  "only its explicit APPROVE authorizes the action"
 )
 
 for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL"; do
