@@ -19,6 +19,18 @@ git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf 'base\n' > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm init
 git -C "$R" remote add origin 'https://user:secret@GitHub.COM/Owner/Repo.git'
 
+FRONT="$REPO_ROOT/bin/ai-review"
+FRONT_STUB="$TMP/front-wrapper"
+cat > "$FRONT_STUB" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$AI_TEST_FRONT_LOG"
+EOF
+chmod +x "$FRONT_STUB"
+export AI_TEST_FRONT_LOG="$TMP/front.log"
+(cd "$R" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
+check "approval front door forwards exact test and source options" \
+  "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
+
 PREFLIGHT="$TMP/preflight"
 cat > "$PREFLIGHT" <<'EOF'
 #!/usr/bin/env bash
