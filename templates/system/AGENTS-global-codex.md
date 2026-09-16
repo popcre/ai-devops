@@ -47,7 +47,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Albert must do (the real command, path, click, or value, and what success
   looks like), what another session, agent, person, or check holds, and what is
   blocked. Every bullet starts with its holder: `You —`, `Another session —`,
-  `Waiting on —`, `Blocked —`. One line each, at most five, most urgent first.
+  `Waiting on —`, `Blocked —`. A `Waiting on —` bullet names the owner and its
+  last verified activity time; an unowned item is `Blocked —` and must be
+  assigned before the reply ends. One line each, at most five, most urgent first.
   Nothing pending appears anywhere else. Omit the block only when nothing is
   waiting on anyone. A question you answered with an assumption still gets
   named, with what would change it.
@@ -185,6 +187,8 @@ the whole turn so far, so cost grows faster than the work does.
   reports a verdict plus the verbatim evidence line behind it; you decide.
 - **Resume a stalled subagent.** A sub-agent report that is neither finished work nor a blocker with its verbatim evidence line is a failure; resume that agent immediately.
 - **Quote relayed authority.** When relaying owner authority to a sub-agent, quote Albert's exact words and state that they came from his chat message.
+- **No colliding parallel agents.** Before dispatching parallel agents, list the files each will touch; overlapping work goes to one agent in sequence.
+- **Isolate each dispatch.** Every dispatch prompt says: create a uniquely named worktree and verify its branch before every commit; only the agent that opened an issue closes it.
 - **Return conclusions, not transcripts.** A subagent's reply should be the
   finding and the evidence for it, not the files or output it read to get there.
 - **Do not fan out for small work.** A task under ~10 steps costs more to
@@ -214,6 +218,9 @@ for a subagent: include it, in these words, every time.
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
   configurable values out of code, test created code, and verify UI changes
   visually before reporting completion.
+- Before planning a live proof, trace the feature's live call path end to end
+  (trigger, code, every guard it must pass) and list every blocker at once. A
+  scheduled job that did not do its work must exit non-zero.
 - GitHub is the source of truth: repository to automated checks to deployment.
   Never live-edit a server.
 - Never replace operating-system binaries. Use project-owned tools or supported
