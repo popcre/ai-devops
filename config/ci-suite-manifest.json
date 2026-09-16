@@ -239,6 +239,7 @@
     "test-mcp-env-launch.ps1",
     "test-memory-sync-scheduled-task.ps1",
     "test-qualify-windows-runner.ps1",
+    "test-reconcile-smart-app-control.ps1",
     "test-repo-identity.ps1",
     "test-windows-ai-kimi-shim.ps1",
     "test-windows-ai-provider-clis.ps1",
