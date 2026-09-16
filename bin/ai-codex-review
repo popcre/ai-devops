@@ -42,7 +42,7 @@ protect_windows_path(){
 }
 secure_review_directory(){ chmod 700 "$1" 2>/dev/null && protect_windows_path "$1" directory; }
 usage(){ cat <<'EOF'
-Usage: ai-codex-review <plan-review|diff-review|security-review|visual-review|final-check> [--tests <command>]
+Usage: ai-codex-review <plan-review|diff-review|security-review|visual-review|final-check> [--tests <command>] [--base REF] [--assert-head SHA]
        ai-codex-review doctor
 
 The review runs in a complete disposable snapshot under Codex's read-only
@@ -105,8 +105,13 @@ esac
 
 shift
 TESTS_COMMAND=""
+OPT_BASE=""; OPT_ASSERT_HEAD=""; SOURCE_IDENTITY=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --base|--assert-head)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+      if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+      shift 2;;
     --tests)
       [ -z "$TESTS_COMMAND" ] || die '--tests may be supplied only once.'
       [ "$#" -ge 2 ] && [ -n "$2" ] || die '--tests requires a non-empty command.'
@@ -134,6 +139,8 @@ git check-ignore --no-index -q -- "$OUT_REL" || die "exact report destination is
 TAG="codex-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; REVIEW_DIR=""; PACKET_DIR=""; TMP_OUT=""; TMP_ERR=""; TMP_REPORT=""; PROVIDER_PID=""; FAILURE_REPORT=""
 cleanup(){
+  reviewer_event_cleanup_allowed codex || return 1
+  [ -z "$SOURCE_IDENTITY" ] || rm -f "$SOURCE_IDENTITY"
   [ -z "$TMP_OUT" ] || rm -f "$TMP_OUT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"
   [ -z "$TMP_REPORT" ] || rm -f "$TMP_REPORT"
@@ -154,6 +161,7 @@ preserve_failure_diagnostic(){ # FAILURE_CLASS
     tail -c 32768 "$TMP_ERR" | sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file && mv "$tmp" "$path" && protect_windows_path "$path" file || { rm -f "$tmp"; return 1; }
+  reviewer_event_publish_report codex "$path" || return 1
   FAILURE_REPORT="$path"; printf '%s' "$path"
 }
 
@@ -185,6 +193,9 @@ interrupt_review(){
 }
 trap interrupt_review HUP INT TERM
 
+SOURCE_IDENTITY="$(mktemp)" || die 'could not reserve source identity'
+"$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$SOURCE_IDENTITY" \
+  || die 'source identity refused before snapshot creation'
 STATE="$($LIFECYCLE begin --provider codex --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" \
   || die 'provider preflight failed; no review was assigned.'
 REVIEW_DIR="$($SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" \
@@ -205,11 +216,11 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
-PACKET_ARGS=(build "$REVIEW_DIR" "$TAG" --decision "$DECISION" --class medium)
+PACKET_ARGS=(build "$REVIEW_DIR" "$TAG" --identity "$SOURCE_IDENTITY" --decision "$DECISION" --class medium)
 [ -z "$TESTS_COMMAND" ] || PACKET_ARGS+=(--tests "$TESTS_COMMAND")
 PACKET_DIR="$($PACKET "${PACKET_ARGS[@]}")" \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact review evidence.'; }
-"$PACKET" verify "$PACKET_DIR" >/dev/null \
+"$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
 
 # The prompt reaches Codex on stdin, which no shell converts. On Git Bash the
@@ -257,6 +268,7 @@ esac
 TMP_OUT="$(mktemp "$REPORT_DIR/.codex-output.XXXXXX")"
 TMP_ERR="$(mktemp "$REPORT_DIR/.codex-error.XXXXXX")"
 chmod 600 "$TMP_OUT" "$TMP_ERR" 2>/dev/null || die 'could not protect temporary provider output.'
+reviewer_event_evidence require-report codex "$REVIEW_DIR" || die 'could not reserve durable review evidence.'
 set +e
 # A sealed repository review needs Codex authentication, but no user-configured
 # MCP servers. Loading them adds unrelated network capabilities and can expose
@@ -295,6 +307,12 @@ chmod 600 "$TMP_REPORT" 2>/dev/null || die 'could not protect temporary report o
 mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
 chmod 600 "$OUT" 2>/dev/null || die 'could not protect the completed report.'
 protect_windows_path "$OUT" file || die 'could not enforce the completed report Windows ACL.'
+reviewer_event_publish_report codex "$OUT" || die 'report publication failed; local evidence retained.'
+if ! "$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null; then
+  mv "$OUT" "$OUT.stale"
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
+  die 'source identity changed during review; paid report retained as stale.'
+fi
 
 FINAL_STATE=""
 if ! FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")"; then

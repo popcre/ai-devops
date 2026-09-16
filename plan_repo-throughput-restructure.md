@@ -4,24 +4,44 @@
 
 **Parent issue:** [#159](https://github.com/popcre/ai-devops/issues/159)
 
+2026-09-15: the programme is complete. #271, #398, and #337 closed with reduced
+reviewer acceptance; #166's exact-head repair and queue canary merged as
+`d49100a26ff622c9015b73fca67d881c9fe1b92c`. [Final ruleset, timing, queue,
+recovery, and origin/main evidence](tests/verification/repo-throughput/issue-166-final-cutover.md)
+all passed without a ruleset mutation or new injected failure.
+
 **Replacement authored:** 2026-08-28 by Codex on `edge-dev`
 
 **Source baseline:** `9a77ce67e492316f457b78fb3e9b8ce7d332995b` on `main`
 
-**Active handoff:** [`HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md`](HANDOFF.d/2026-08-28T1858Z-edge-dev-codex-repo-throughput-restructure.md)
+**Active handoff:** none. The final #159 continuation handoff is retired in the
+completion commit; older handoffs remain historical records in Git history.
 
 This replaces the earlier plan and consolidates every still-relevant obligation from that plan, `HANDOFF.d/2026-08-27T1630Z-edge-dev-claude-repo-throughput-restructure.md`, and superseded issues #89, #98, and #112. Git history preserves the sources. #159 now has three clear workstreams: completed CI/queue throughput children, reviewer reliability programme #337, and final cutover #166.
 
 ## STATUS — read this first
 
+**2026-09-15 completion:** every registered delivery row is complete. #398
+accounted its frozen 198 entries plus bounded successor intervals; #337 closed
+after every nested child; #166 verified the effective ruleset read-only and PR
+#475 passed the required aggregate and merge queue. Landing commit `d49100a2`
+is on `origin/main`; this final documentation commit reconciles the plans,
+evidence, issues, and handoff before #159 closes.
+
 A fresh session selects the remaining registered child that owns its code boundary. Reviewer work runs through #337 and its children. Final cutover #166 always runs last. Update this table in the same commit as completed work; cite a commit, CI run, or `tests/verification/` artifact, never an issue number alone.
 
-2026-09-11 installed component evidence: #396's Grok authentication-link concurrency repair merged through [PR #408](https://github.com/popcre/ai-devops/pull/408) as `e3b4700d1005088065740200a70d68d7574a4243`. Exact-head independent review and required CI passed; the unchanged local suite passed 226/226. Installed SHA256 `c40012683a67f87878c90bb5b4acfd8431d02c1f032fa2afc6e72e723e115260` passed two concurrent actual-auth initializers and 100 readability/same-inode checks, without paid provider work. Private incident evidence was appended. Broader #396, #337, and #159 remain open; #398 retains the original 198-entry round and runs last within #337, then #166 runs last overall.
+2026-09-11 installed component evidence: #396's authentication-link and scoped
+admission repairs are complete through PRs #408 and #416. The final installed
+proof covered replay, profile/model isolation, eight concurrent observations,
+and guarded expiry without a provider request. Three frozen candidates were
+classified; the round remains active with all 198 candidates, 36 incident and
+162 unclassified. #337 and #159 remain open; #398 runs last within #337, then
+#166 runs last overall. The database boundary did not move.
 
 | Order | Issue | Deliverable | State | Evidence |
 |---|---:|---|---|---|
 | 1 | [#165](https://github.com/popcre/ai-devops/issues/165) | Session waiting and repository growth rules | done | Merge `15991e63e53dbded3d52c218ff7f62430ef05bca`; [`tests/verification/repo-throughput/issue-165-session-conduct.md`](tests/verification/repo-throughput/issue-165-session-conduct.md) |
-| 2 | [#337](https://github.com/popcre/ai-devops/issues/337) | Reviewer correctness, reliability, evidence, and measured efficiency programme; includes completed #160 | open; component hierarchy rebuilt 2026-09-11 | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md); restored 198-entry round `0c62f3dffce145c4b2768855b912b958` |
+| 2 | [#337](https://github.com/popcre/ai-devops/issues/337) | Reviewer correctness, reliability, evidence, and measured efficiency programme; includes completed #160 | done | #271 reduced live acceptance; #398 completed rounds `0c62f3d`, `49d3ae7`, and `a19ce41`; all nested issues closed 2026-09-15 |
 | 3 | [#209](https://github.com/popcre/ai-devops/issues/209) | Independent Windows runner pool | done | Closeout merge `baa3ac1`; engineering and live failover evidence remain in [`docs/independent-windows-runner-setup.md`](docs/independent-windows-runner-setup.md) |
 | 4 | [#161](https://github.com/popcre/ai-devops/issues/161) | Fast change-aware CI | done | Merge `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50`; [`tests/verification/repo-throughput/issue-161-focused.md`](tests/verification/repo-throughput/issue-161-focused.md) |
 | 5 | [#162](https://github.com/popcre/ai-devops/issues/162) | Remove duplicate Windows and post-merge verification | done | [`tests/verification/repo-throughput/issue-162-duplicate-windows.md`](tests/verification/repo-throughput/issue-162-duplicate-windows.md) |
@@ -30,10 +50,36 @@ A fresh session selects the remaining registered child that owns its code bounda
 | 8 | [#210](https://github.com/popcre/ai-devops/issues/210) | Bounded parallel Windows verification | done | [`tests/verification/repo-throughput/issue-210-windows-sections.md`](tests/verification/repo-throughput/issue-210-windows-sections.md) |
 | 9 | [#164](https://github.com/popcre/ai-devops/issues/164) | Merge-queue convergence | done | [`tests/verification/repo-throughput/issue-164-merge-queue-convergence.md`](tests/verification/repo-throughput/issue-164-merge-queue-convergence.md) |
 | 10 | [#167](https://github.com/popcre/ai-devops/issues/167) | Shared offline test harness | done | [`tests/verification/repo-throughput/issue-167-shared-harness.md`](tests/verification/repo-throughput/issue-167-shared-harness.md) |
-| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | source merged; integrated live acceptance open | Merge `26e893db03754b6668238c266142f8e61abb01bc`; remaining allocation/disposition behavior belongs to #396 rather than extending this extraction issue. |
+| 11 | [#169](https://github.com/popcre/ai-devops/issues/169) | Shared provider-wrapper infrastructure, now a #337 child | installed acceptance complete | Merge `26e893db03754b6668238c266142f8e61abb01bc`; [installed hash, fixture adapter and both migrated providers verified](tests/verification/reviewer-reliability/issue-169-installed-primitives.md). Allocation/disposition remains #396; recovery remains #397. |
 | 12 | [#168](https://github.com/popcre/ai-devops/issues/168) | Root plan backlog consolidation | done | [`tests/verification/repo-throughput/issue-168-plan-backlog.md`](tests/verification/repo-throughput/issue-168-plan-backlog.md) |
 | 13 | [#212](https://github.com/popcre/ai-devops/issues/212) | Truthful reviewer incident evidence, now historical groundwork under #395 | done | Repair `113839d39f0179b66bda86f79ef5761ee8eb70ca` is on `origin/main`; focused recorder regression passed 2026-09-10; affected private incident has an append-only resolution. |
-| 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | open; runs last | Explicit owner authority for the live ruleset remains required. |
+| 14 | [#166](https://github.com/popcre/ai-devops/issues/166) | Required-check cutover and final throughput proof | done | [Final ruleset, timing, waiter, PR-head, queue, and landing evidence](tests/verification/repo-throughput/issue-166-final-cutover.md); merge `d49100a2` |
+
+**#333 implementation evidence, 2026-09-11:** the existing wrappers now have a
+tested accounting implementation with pinned OpenCode semantics and private
+synthetic same-session continuity measurements. [Evidence and remaining gates](tests/verification/reviewer-reliability/issue-333-truthful-usage.md)
+distinguish adapter estimates from billed cost and unknown counters from zero.
+No context or compaction optimization was applied. Exact review, CI, installation
+and live accounting verification remain open; this does not complete #337/#159.
+
+Reviewer programme update (2026-09-11): the bounded DeepSeek Unicode/terminal
+repair #405 landed as `068c6cb9f07c0792f5e579fd004df25f012820a1`, passed
+85/0/0 focused tests, exact-head independent GLM review, PR CI `34563556041`
+and queue `34567376452`, and was installed with a successful paid synthetic
+Unicode review and stored replay. The reviewer plan records the exact hashes.
+Its affected incident is partially resolved because the separate large-input
+symptom still awaits #393 live proof. This does not close #394, #337 or #159;
+the original maintenance round is preserved and final #398/#166 remain last.
+
+The bounded #161/#164 evidence repair [PR #411](https://github.com/popcre/ai-devops/pull/411)
+is in production at `be5f1e2c25e12abc4b0c57cf1f1f11ffc83811b1`.
+All 42 focused checks passed; exact-head independent GLM approved
+`d8f8c0a1d338c507ce884888471b3de17eb37ea7`, and queue run `34574548945`
+succeeded. The serialized installed helper hashes to
+`7e37e1bc87c3ac1a7858fbe2dd0bdf2afdf002a6799fad8efb6e31b747341d042`;
+its qualified-fallback matcher passed against captured run `34567280854`.
+Every code safety gate remains required. Final #166 still owns bounded-wait
+deadline/cancellation presentation and the whole-programme cutover proof.
 
 ### Unplanned work that landed inside this plan — #204 (2026-09-02)
 
@@ -172,7 +218,8 @@ These are locked unless new evidence invalidates their reason.
 - One outcome parent (#159), one nested reviewer programme (#337), independently verifiable coding children, and final cutover #166; #89/#98/#112 are historical sources.
 - Preserve assertions/capabilities; fix reliability before required-check renaming.
 - Separate fast workflow; coarse categories now; keep `skills/` verified.
-- Scheduled complete matrix includes unsplit Windows Bash.
+- Scheduled complete matrix retains every Windows Bash suite; current complete
+  mode partitions that full inventory over five independent hosts.
 - Ruleset cutover runs last and preserves `OrganizationAdmin` recovery.
 
 ### Bounded implementer judgment
@@ -182,9 +229,34 @@ These are locked unless new evidence invalidates their reason.
 - Choose the smallest queue lever reaching p95 without reduced coverage.
 - Repair similar reviewer races within #160 when bounded; otherwise create a named sub-issue before closing it.
 
-No owner decision is open. The user authorized this holistic plan and issue reorganization. Safety reduction or production infrastructure changes require new authority.
+The user authorized this holistic plan and issue reorganization. The current
+#394 release decision is recorded in section0 of the linked continuation
+handoff: preserve legacy answers while withholding approval authority when
+original error evidence is missing. Safety reduction or production
+infrastructure changes require new authority.
 
 ## 9. Execution plan
+
+At the end of every phase, re-read every downstream phase through final #166
+and #159 closure, together with the reviewer programme plan. Record any changed
+assumption, interface, identifier, authority or evidence before proceeding.
+September 14 continuation: the reviewer-sequence handoff records #397 first.
+PR459 resolved the separate merge-policy blocker; PR460's complete-mode
+partition and PR461's launcher repair have landed. The first partitioned run
+completed all75 Bash and18 PowerShell suites within existing bounds, exposing
+two failures repaired in merged PR462 at e2985684. Repaired complete run34905839047
+passed on the identical Git tree:75 Linux suites, all75 Windows Bash and18
+PowerShell suites, and the completed hosted reviewer fallback. Serialized
+installation, exact source hashes and ordinary installed preflight passed.
+#397's recovery slice is accepted; the parent programme remains open.
+The #396 consumer preparation exactly matches merged shared-db PR2750 and must
+not be reimplemented. GLM5.3's #394 legacy-Qwen recommendation still needs the
+documented owner decision; #271/#398 and final #166/#159 gates remain distinct.
+Historical references
+below to an unsplit complete matrix describe the baseline, not a prohibition on
+the reviewed complete-mode partition: preserve all coverage and require actual
+full hosted completion before accepting that repair. #166 consumes completed
+measurements, not the proposed partition or its local fixtures.
 
 ### Phase A — behavior and reliability
 
@@ -449,7 +521,7 @@ These were named follow-ons in the old plan. They remain inside parent #159 so t
 
 **Change:** repoint required contexts only after names stabilize; preserve history protection/admin bypass; remove stale contexts; record final comparison.
 
-**Gates:** throwaway PR reports every required context and enters/merges through queue; no stale context; recovery proven; §1 measures recorded; all children and #159 close; active handoff retires in completion commit.
+**Gates:** throwaway PR reports every required context and enters/merges through queue; no stale context; recovery proven by recording pre-cutover ruleset values (contexts, OrganizationAdmin bypass actor, and batch settings), verifying the bypass actor live on the effective ruleset, and citing #164's already-evidenced injected-failure and recovery cycle—#166 injects no new deliberate ruleset break; §1 measures recorded from existing run data and queue timeline events with no dedicated sampling campaign; all children and #159 close; active handoff retires in completion commit.
 
 ## 10. Tests required
 

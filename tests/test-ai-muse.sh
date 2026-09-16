@@ -29,6 +29,7 @@ check 'completion requires stop' "grep -q '\[ \"\$FINISH\" != stop \]' '$SCRIPT'
 check 'source state is checked after every turn' "test \"\$(grep -c 'stale response rejected' '$SCRIPT')\" -eq 2"
 check 'temporary files use a securely created directory' "grep -q 'mktemp -d' '$SCRIPT' && grep -q 'trap cleanup EXIT' '$SCRIPT'"
 check 'report writes fail closed' "grep -q 'could not write Muse report' '$SCRIPT'"
+check 'stale-source recovery uses the qualified retained-packet verifier' "grep -q '\"\$PACKET\" verify-retained \"\$PACKET_DIR\"' '$SCRIPT' && grep -q 'verify-retained) shift; cmd_verify_retained' '$ROOT/bin/ai-review-packet'"
 check 'one held-open report staging file is reserved before provider contact and revalidated' "grep -q 'reserve_report_staging' '$SCRIPT' && grep -q 'finish_report_staging' '$SCRIPT' && grep -q 'exec {PUBLISH_FD}' '$SCRIPT' && test \"\$(grep -c 'reserve_report_staging \"\$root\"; before=' '$SCRIPT')\" -eq 2"
 check 'delete takes the same session lock' "grep -q 'cmd_delete.*lock_session' '$SCRIPT'"
 check 'compatibility review still requires a verdict' "grep -q 'REQUIRE_VERDICT=1' '$SCRIPT'"
@@ -46,6 +47,24 @@ check 'Muse key reaches the provider through a private handoff, never argv or th
 check 'new session metadata uses atomic replacement' "grep -q 'tmp=\"\$(tmp_file)\"; jq -n --arg name' '$SCRIPT'"
 check 'new publishes preparing state before snapshot preparation' "fn=\$(sed -n '/^cmd_new()/,/^cmd_ask()/p' '$SCRIPT'); state_line=\$(printf '%s\n' \"\$fn\" | grep -n 'status:\"preparing\"' | head -1 | cut -d: -f1); prepare_line=\$(printf '%s\n' \"\$fn\" | grep -n 'prepare \"\$root\"' | head -1 | cut -d: -f1); test \"\$state_line\" -lt \"\$prepare_line\""
 check 'review profile explicitly removes dangerous tools' "for tool in write edit patch bash webfetch task; do grep -q \"^  \$tool: false\$\" '$ROOT/config/opencode-muse/agent/muse-review.md' || exit 1; done"
+startup_reason_cases(){
+  local output rc
+  output="$(AI_MUSE_CALLER= bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: caller_identity_missing'; then ok 'missing Muse caller has a stable startup reason'; else bad 'missing Muse caller has a stable startup reason'; fi
+  output="$(AI_MUSE_CALLER='../unsafe' bash "$SCRIPT" --help 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] && printf '%s' "$output" | grep -q 'start_failed: invalid_caller_identity'; then ok 'invalid Muse caller has a stable startup reason'; else bad 'invalid Muse caller has a stable startup reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    MUSE_FAILURE_PHASE=startup; ACTIVE_META=''; die 'fixture startup refusal'
+  ) > "$TMP/startup-reason.log" 2>&1; then bad 'pre-session refusal stays unsuccessful';
+  elif grep -q 'start_failed: fixture startup refusal' "$TMP/startup-reason.log"; then ok 'pre-session refusal stays unsuccessful with a stable reason'; else bad 'pre-session refusal stays unsuccessful with a stable reason'; fi
+  if (
+    source <(sed -n '/^die(){/,/^}/p' "$SCRIPT")
+    MUSE_FAILURE_PHASE=provider-turn; ACTIVE_META=existing; die 'fixture incomplete turn'
+  ) > "$TMP/active-reason.log" 2>&1; then bad 'active session failure stays unsuccessful';
+  elif grep -q 'ai-muse: error: fixture incomplete turn' "$TMP/active-reason.log" && ! grep -q start_failed "$TMP/active-reason.log"; then ok 'active session failure is not relabeled as startup'; else bad 'active session failure is not relabeled as startup'; fi
+  check 'ordinary Muse help remains available with a valid caller' "AI_MUSE_CALLER=codex bash '$SCRIPT' --help >/dev/null"
+}
 check 'caller identity is explicit' "! AI_MUSE_CALLER= bash '$SCRIPT' --help 2>/dev/null"
 check 'shared skill selects the real client and all recovery guidance carries it' "grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/docs/muse-opencode.md' && grep -q 'AI_MUSE_CALLER=codex ai-muse doctor' '$ROOT/bin/setup-opencode-muse.sh' && grep -q 'export AI_MUSE_CALLER=codex' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'export AI_MUSE_CALLER=claude' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse transcript' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\"\$AI_MUSE_CALLER\" ai-muse reconcile' '$ROOT/skills/shared/ask-muse/SKILL.md' && grep -q 'AI_MUSE_CALLER=\$CALLER ai-muse transcript' '$SCRIPT' && grep -q \"AI_MUSE_CALLER='codex'\" '$ROOT/bin/setup-machine.ps1'"
 check 'report destination is proven exact, ignored, untracked and unlinked' "grep -q 'exact destination is not Git-ignored' '$SCRIPT' && grep -q 'exact destination is tracked' '$SCRIPT' && grep -q 'is a linked path' '$SCRIPT'"
@@ -55,6 +74,7 @@ check 'private Windows ACL is revalidated even when a marker already exists' "! 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_MUSE_TEST_DIR="$TMP"
+startup_reason_cases
 mkdir -p "$TMP/installed/bin"
 if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>/dev/null && [ -L "$TMP/installed/bin/ai-muse" ]; then
   check 'installed symlink executes with repository configuration' "AI_MUSE_CALLER=codex '$TMP/installed/bin/ai-muse' --help"
@@ -88,6 +108,12 @@ cat > "$BIN/opencode.exe" <<'EOF'
 case "${1:-}" in
   --version) echo 1.18.12;;
   run)
+    if [ -n "${MUSE_STUB_USAGE_FIXTURE:-}" ]; then
+      jq -c '.events[] | .sessionID="ses_new"' "$MUSE_STUB_USAGE_FIXTURE"
+      printf '{"type":"text","sessionID":"ses_new","part":{"text":"usage-proven-response"}}\n'
+      exit 0
+    fi
+    [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
@@ -110,18 +136,101 @@ case "${1:-}" in
     printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
     [ "${MUSE_STUB_MODE:-}" = mixedstart ] && printf '{"type":"step_start","sessionID":"ses_other","part":{"type":"step-start"}}\n'
     [ -z "${MUSE_STUB_TOUCH:-}" ] || printf changed >> "$MUSE_STUB_TOUCH"
+    [ -z "${MUSE_STUB_MOVE_TARGET:-}" ] || git -C "$MUSE_STUB_MOVE_TARGET" update-ref refs/heads/review-target HEAD
     [ -z "${MUSE_STUB_PREAMBLE:-}" ] || printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$MUSE_STUB_PREAMBLE"
     text="${MUSE_STUB_TEXT:-$([ -n "$prior" ] && echo remembered || echo first)}"
     printf '{"type":"text","sessionID":"%s","part":{"type":"text","text":"%s"}}\n' "$sid" "$text"
     [ "${MUSE_STUB_MODE:-}" = mixed ] && printf '{"type":"text","sessionID":"ses_other","part":{"type":"text","text":"wrong"}}\n'
     [ "${MUSE_STUB_MODE:-}" = nostop ] || printf '{"type":"step_finish","sessionID":"%s","part":{"type":"step-finish","reason":"stop","tokens":{"total":3}}}\n' "$sid";;
   export) [ -z "${MUSE_STUB_EXPORT_FAIL:-}" ] || exit 7; printf '{"sessionID":"%s","messages":[]}' "$2";;
-  session) [ "$2" = delete ] && [ -z "${MUSE_STUB_DELETE_FAIL:-}" ];;
+  session)
+    [ -z "${MUSE_STUB_MANAGEMENT_CALLS_FILE:-}" ] || printf 'session %s\n' "$2" >> "$MUSE_STUB_MANAGEMENT_CALLS_FILE"
+    [ "$2" = delete ] && [ -z "${MUSE_STUB_DELETE_FAIL:-}" ];;
   *) exit 2;;
 esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+muse_recovery_cases(){
+  local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
+  local real_jq
+  real_jq="$(command -v jq)"
+  # Reproduce the former second-write failure without weakening the required
+  # retained-turn metadata write. Recovery must never recompute that choice.
+  { printf '#!/usr/bin/env bash\n'; printf '%s\n' 'case "$*" in *'"'"'.retained_turn.usage_json=$usage'"'"'*) exit 73;; esac'; printf 'exec %q "$@"\n' "$real_jq"; } > "$TMP/bin/jq"
+  chmod +x "$TMP/bin/jq"
+  : > "$calls"
+  if [ "${AI_MUSE_REPORT_RECOVERY_ONLY:-0}" = 1 ]; then
+    (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new recovery-stale --prompt test") >/dev/null
+    m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
+  else
+  check 'stale completed Muse turn is retained before rejection' "cd '$REPO' && ! eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new recovery-stale --prompt test\""
+  m="$(find "$TMP/state" -name 'codex--recovery-stale.json' -type f -print -quit)"
+  check 'Muse retains exact successful process and event evidence' "jq -e '.retained_turn.process_exit==0 and (.retained_turn.original_invocation_id|length)==32 and (.retained_turn.stream_sha256|length)==64' '$m'"
+  check 'optional accounting failure is retained atomically with the paid turn' "jq -e '.retained_turn.usage_json|fromjson|.availability_reason==\"usage-formatting-failed\"' '$m'"
+  raw="$(jq -r .retained_turn.stream "$m")"; cp "$raw" "$TMP/recovery-original"
+  printf 'tamper' >> "$raw"
+  check 'changed retained Muse bytes cannot unlock continuation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\""
+  cp "$TMP/recovery-original" "$raw"
+  check 'completed stale Muse response reconciles without authorizing changed source' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/reconcile.log' 2>&1 && jq -e '.status==\"active\" and .retained_turn.recovery_state==\"completed-stale-source\" and .retained_turn.finalized==true' '$m'"
+  rep="$(jq -r .last_report "$m")"
+  if [ "$rep" = null ]; then cat "$TMP/reconcile.log"; return; fi
+  check 'stale Muse report is explicitly non-authorizing' "grep -q NON-AUTHORIZING '$rep'"
+  check 'recovery preserves the original unavailable accounting instead of recomputing it' "grep -q usage-formatting-failed '$rep'"
+  check 'repeated Muse reconciliation does not repeat paid work' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && test \"\$(wc -l < '$calls')\" -eq 1"
+  fi
+  check 'normal continuation survives stale completion reconciliation' "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' ask recovery-stale --prompt continue\""
+  rep="$(jq -r .last_report "$m")"; cp "$rep" "$TMP/recovery-report-original"; report_inode="$(stat -c '%d:%i' "$rep")"
+  tmp="$m.test"; jq '.status="completed_pending_local_checks"' "$m" > "$tmp"; mv "$tmp" "$m"
+  printf 'different' >> "$rep"
+  check 'differing existing Muse report refuses local finalization' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"completed_pending_local_checks\"' '$m'"
+  cat "$TMP/recovery-report-original" > "$rep"
+  check 'identical existing Muse report is reused without replacement or provider call' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile recovery-stale\" > '$TMP/reuse.log' 2>&1 && test \"\$(stat -c '%d:%i' '$rep')\" = '$report_inode' && test \"\$(wc -l < '$calls')\" -eq 2"
+  [ "$(jq -r .status "$m")" = active ] || cat "$TMP/reuse.log"
+  check 'failed Muse follow-up remains uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE=fail '$SCRIPT' ask recovery-stale --prompt failure\" > '$TMP/failed-followup.log' 2>&1"
+  check 'session identity alone cannot reconcile an unproven turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile recovery-stale\" && jq -e '.status==\"provider_outcome_uncertain\"' '$m' && test \"\$(wc -l < '$calls')\" -eq 3"
+  if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
+  rm -f "$TMP/bin/jq"
+}
+failure_phase_cases(){
+  local calls="$TMP/phase-calls" mode rc count m raw digest lock metadata_digest command
+  local management_calls="$TMP/phase-management-calls"
+  : > "$calls"
+  : > "$management_calls"
+  for mode in fail unexpected; do
+    if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MODE='$mode' MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live") > "$TMP/phase-$mode.log" 2>&1; then rc=0; else rc=$?; fi
+    count="$(wc -l < "$calls")"
+    if [ "$rc" -ne 0 ] && [ "$count" -gt 0 ] && grep -q 'ai-muse: error:' "$TMP/phase-$mode.log" && ! grep -q start_failed "$TMP/phase-$mode.log"; then ok "live doctor $mode after provider launch is not startup failure"; else bad "live doctor $mode after provider launch is not startup failure"; fi
+  done
+  count="$(wc -l < "$calls")"
+  check 'doctor prelaunch refusal is startup failure without another provider call' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' AI_MUSE_DOCTOR_TIMEOUT=0 '$SCRIPT' doctor --live\" > '$TMP/phase-prelaunch.log' 2>&1; grep -q start_failed '$TMP/phase-prelaunch.log' && test \"\$(wc -l < '$calls')\" -eq '$count'"
+  if ! (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new phase-retained --prompt test") > "$TMP/phase-new.log" 2>&1; then bad 'phase fixture creates retained provider evidence'; return; fi
+  m="$(find "$TMP/state" -name 'codex--phase-retained.json' -type f -print -quit)"
+  count="$(wc -l < "$calls")"; metadata_digest="$(sha256sum "$m")"
+  for command in reconcile show transcript delete; do
+    if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' '$SCRIPT' $command phase-missing") > "$TMP/phase-missing-$command.log" 2>&1; then rc=0; else rc=$?; fi
+    if [ "$rc" -ne 0 ] && grep -q "no session 'phase-missing'" "$TMP/phase-missing-$command.log" && ! grep -q start_failed "$TMP/phase-missing-$command.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ ! -s "$management_calls" ]; then ok "$command missing metadata is a management refusal without provider calls"; else bad "$command missing metadata is a management refusal without provider calls"; fi
+  done
+  lock="$TMP/state/locks/$(jq -r .repository_id "$m")--codex--phase-retained.lock.d"
+  mkdir -p "$lock"; printf '%s\n' "$$" > "$lock/pid"; printf 'phase-owner\n' > "$lock/token"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-busy.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'is busy' "$TMP/phase-busy.log" && ! grep -q start_failed "$TMP/phase-busy.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ ! -s "$management_calls" ] && [ "$(cat "$lock/token")" = phase-owner ] && [ "$metadata_digest" = "$(sha256sum "$m")" ]; then ok 'busy reconciliation preserves the other owner without startup or provider calls'; else bad 'busy reconciliation preserves the other owner without startup or provider calls'; fi
+  rm -f "$lock/pid" "$lock/token"; rmdir "$lock"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' MUSE_STUB_MANAGEMENT_CALLS_FILE='$management_calls' MUSE_STUB_DELETE_FAIL=1 '$SCRIPT' delete phase-retained") > "$TMP/phase-delete.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'could not positively confirm deletion' "$TMP/phase-delete.log" && ! grep -q start_failed "$TMP/phase-delete.log" && [ "$count" -eq "$(wc -l < "$calls")" ] && [ "$(cat "$management_calls")" = 'session delete' ] && [ "$metadata_digest" = "$(sha256sum "$m")" ]; then ok 'provider deletion refusal preserves metadata without claiming startup or generating another turn'; else bad 'provider deletion refusal preserves metadata without claiming startup or generating another turn'; fi
+  raw="$(jq -r .retained_turn.stream "$m")"
+  printf 'tampered' >> "$raw"; digest="$(sha256sum "$raw")"; count="$(wc -l < "$calls")"
+  if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
+}
+failure_phase_cases
+if [ "${AI_MUSE_PHASE_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
+if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  muse_recovery_cases
+  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 mkdir -p "$TMP/link-probe-target"
 if ln -s "$TMP/link-probe-target" "$TMP/link-probe" 2>/dev/null; then
   rm -rf -- "$TMP/link-probe"; OUTSIDE_REPORTS="$TMP/outside-reports"; mkdir -p "$OUTSIDE_REPORTS"; printf safe > "$OUTSIDE_REPORTS/sentinel"
@@ -200,7 +309,15 @@ rm -f -- "$MUSE_STAGING" "$MUSE_STAGING.held"
 rm -rf -- "$REPO/.ai/decoy"
 check 'doctor rejects unknown options' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' doctor --unknown\""
 check 'zero heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'wrong source head is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-head --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/identity-called'"
+check 'missing source base is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-base --base missing-source-target --prompt test\" && test ! -e '$TMP/identity-called'"
+git -C "$REPO" update-ref refs/heads/review-target HEAD^
+check 'target movement during paid response rejects acceptance' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MOVE_TARGET='$REPO' '$SCRIPT' new moved-target --base review-target --prompt test\" > '$TMP/moved-target.log' 2>&1 && grep -q source-target-moved '$TMP/moved-target.log'"
+check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
+git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
+check 'optional usage failure preserves successful paid response' "cd '$REPO' && eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_TOUCH='$TMP/usage-paid-count' '$SCRIPT' new usage-failure --prompt test\" > '$TMP/usage-failure.log' 2>&1 && grep -q usage-formatting-failed '$REPO'/.ai/reviews/muse-usage-failure-*.md && grep -q first '$TMP/usage-failure.log' && test \"\$(wc -c < '$TMP/usage-paid-count')\" -eq 7"
 check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
 check 'hostile installed profile is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile --prompt test\""
@@ -270,7 +387,7 @@ LOCK="$TMP/state/locks/$(jq -r .repository_id "$META")--codex--debate.lock.d"; m
 check 'delete refuses an active session' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' delete debate\""
 check 'refused delete preserves the active lock' "test -d '$LOCK'"
 rm -rf "$LOCK"
-check 'delete removes metadata and snapshot' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete debate\" && test ! -e '$META'"
+check 'delete preserves unpublished completed evidence and metadata' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' delete debate\" && test -f '$META' && test -d \"\$(jq -r .review_dir '$META')\""
 DEAD_META_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new dead-owner --prompt test" 2>&1)"
 DEAD_META="$(find "$TMP/state" -name 'codex--dead-owner.json' -type f)"; DEAD_LOCK="$TMP/state/locks/$(jq -r .repository_id "$DEAD_META")--codex--dead-owner.lock.d"; mkdir -p "$DEAD_LOCK"; printf '99999999\n' > "$DEAD_LOCK/pid"
 check 'dead lock owner is reconciled' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete dead-owner\" && test ! -e '$DEAD_LOCK'"
@@ -281,7 +398,7 @@ check 'source changes during a turn reject stale output' "printf '%s' \"\$STALE_
 STALE_META="$(find "$TMP/state" -name 'codex--stale.json' -type f)"
 check 'rejected stale turn preserves its Muse session' "jq -e '.status==\"completed_pending_local_checks\" and .session_id==\"ses_new\"' '$STALE_META'"
 check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'explicit reconciliation re-enables continuation' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\"; jq -e '.status==\"active\" and (.reconciled_at|length>0)' '$STALE_META'"
+check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
@@ -298,12 +415,17 @@ wait "$SLOW_PID"
 check 'new emits its session and exact state path before provider completion' "grep -q 'Muse session started: visible-slow' '$SLOW_LOG' && grep -Fq 'State: $SLOW_META' '$SLOW_LOG'"
 check 'slow turn emits bounded progress' "grep -q 'Muse turn active:' '$SLOW_LOG'"
 check 'failed provider turns preserve incomplete evidence' "test \"\$(find '$REPO/.ai/reviews' -name 'muse-*-incomplete-*.md' | wc -l)\" -ge 4"
-check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask stale --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$STALE_META'"
+FAILURE_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new failure-followup --prompt test" 2>&1)"
+FAILURE_META="$(find "$TMP/state" -name 'codex--failure-followup.json' -type f)"
+check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask failure-followup --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$FAILURE_META'"
 check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
-check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask stale --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$STALE_META'"
-check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask stale --prompt mixed\""
-check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask stale --prompt mixed\""
+WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
+WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
+check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
+check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
+check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""
+check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new start-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask start-followup --prompt mixed\""
 RETRY_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new retry-delete --prompt test" 2>&1)"; RETRY_META="$(find "$TMP/state" -name 'codex--retry-delete.json' -type f)"; RETRY_TMP="${RETRY_META}.tmp"; jq '.status="provider_deleted"' "$RETRY_META" > "$RETRY_TMP"; mv "$RETRY_TMP" "$RETRY_META"
 check 'delete safely retries after provider was already removed' "cd '$REPO' && eval \"$ENV MUSE_STUB_DELETE_FAIL=1 '$SCRIPT' delete retry-delete\" && test ! -e '$RETRY_META'"
 FAIL_DELETE_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new fail-delete --prompt test" 2>&1)"; FAIL_DELETE_META="$(find "$TMP/state" -name 'codex--fail-delete.json' -type f)"
@@ -320,5 +442,6 @@ check 'compatibility review rejects an undefined verdict' "cd '$REPO' && ! eval 
 check 'compatibility review rejects a legacy undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
 
+muse_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

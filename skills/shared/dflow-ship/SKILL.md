@@ -1,6 +1,6 @@
 ---
 name: dflow-ship
-description: DesignFlow PLM (dflow) ship step — test, commit, push, PR to develop, verify the sandbox Cloud Build deploy. Use for a pure ship request ("push and commit", "commit and push", "update the PR for my branch sandbox-albert with develop", "is everything pushed and committed?") WHEN WORKING IN A DFLOW REPO (the six popcre designflow-* repos on branch sandbox-albert / albert-2sandbox). For the hetz/Coolify apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw) use `deploy-and-verify` instead. This is NOT the session closer — it does not update docs, sweep secrets, or write a handoff; for "wrap up"/"close out"/"end of session" use `wrap-up`, which runs docs FIRST and then calls this skill.
+description: Shared Claude and Codex DesignFlow PLM ship step — test, commit, push, PR to develop, verify the sandbox Cloud Build deploy. Use for a pure ship request ("push and commit", "commit and push", "update the PR for my branch sandbox-albert with develop", "is everything pushed and committed?") WHEN WORKING IN A DFLOW REPO (the six popcre designflow-* repos on branch sandbox-albert / albert-2sandbox). For the hetz/Coolify apps (poppim-web, popcrm-web, popdam3, monitor, hiclaw) use `deploy-and-verify` instead. This is NOT the session closer — it does not update docs, sweep secrets, or write a handoff; for "wrap up"/"close out"/"end of session" use `wrap-up`, which detects the repository and delegates its ship step here.
 ---
 
 # dflow-ship
@@ -44,14 +44,20 @@ instead — same phrases, different pipeline. When in doubt, check `git remote -
 6. **Verify live.** When the build lands, confirm the sandbox site
    (alsand / alsand2 .designflow.app) serves the new commit. For UI changes,
    log in (sandbox email+password are in 1Password, vault `vibe_coding`) and
-   screenshot the changed screen; compare against the requirement before
-   declaring success.
+   verify the exact user flow in Playwright or a controlled browser and capture
+   the changed screen. Assert meaningful page content, not only a route change
+   or visible wrapper. For routed detail pages, verify a stable heading or body
+   section renders, no blank page appears, and the browser has no relevant
+   console errors, page errors, failed API responses, or error-toast text.
+   Compare the result against the requirement before declaring success.
 7. **Report** in plain English: commit SHAs, PR URLs, deploy status, and what
    was visually verified. Never report "done" on evidence you didn't collect.
 
 ## Follow-ups (mandatory at session end)
 
-- **Run `session-docs-update`** — do not merely offer it. The skill itself
-  decides what needs updating and says so if nothing durable changed, so running
-  it is always safe. Skipping docs is the #1 recurring wrap-up failure.
-- If the session touched the shared backend, run `shared-db-change` rules.
+- **Run the installed client documentation skill** (`session-docs-update` on
+  Claude; `codex-docs-update` on Codex) — do not merely offer it. The skill
+  itself decides what needs updating and says so if nothing durable changed, so
+  running it is always safe. Skipping docs is the #1 recurring wrap-up failure.
+- If the session touched the shared backend, run the installed shared-database
+  skill (`shared-db-change` on Claude; `codex-shared-db-change` on Codex).

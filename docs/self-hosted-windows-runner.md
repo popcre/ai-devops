@@ -25,43 +25,58 @@ Self-hosting fixes two separate things:
    the baseline inflation these suites suffer from — see the header of
    [`tests/lib-test-timing.sh`](../tests/lib-test-timing.sh).
 
-The cost is real and accepted: verification only happens while that machine is on
-and logged in.
+The cost applies only to explicit host-bound diagnosis and qualification: those
+runs require the selected machine to be on and logged in. Required pull-request
+and scheduled verification remains hosted.
 
 ### Why the reviewer suites have their own lane
 
 For pull requests, `windows-offline-section` runs the Windows-sensitive Bash set
-and all PowerShell suites, divided into four declared sections on four
-independent hosted machines (issue #210); `windows-reviewer-safety` owns Codex
-and Grok on the qualified pool as an early signal. The section boundaries live
+and all PowerShell suites, divided into five declared sections on five
+independent hosted machines (issue #210), while `windows-reviewer-safety` requires hosted Codex and
+Grok proof. A qualified-pool diagnostic is available only on an explicit full
+manual run. The section boundaries live
 in `config/ci-suite-manifest.json`, and `tests/test-all.sh` refuses to run a
-section unless the declared sections reconstitute the lane exactly. Scheduled,
-manual, and qualification runs ignore the sections entirely and retain the
-complete hosted Windows Bash matrix in `windows-offline-complete`. A single
+section unless the declared sections reconstitute the lane exactly. Scheduled
+and full manual runs use `windows-offline-complete` on five independent hosted
+machines: all discovered Bash suites are sorted and partitioned round-robin,
+and section 3 runs all PowerShell suites exactly once. This complete mode does
+not use the reduced pull-request manifest. Qualification and no-argument local
+entrypoints retain their serial behavior. A single
 aggregate job keeps the stable name `windows-offline` and fails closed on any
 lane result other than success. The ordinary pull-request
-hosted matrix omits Codex and Grok only after assigning them to that lane. A
-hosted watchdog observes the self-hosted job: if it is skipped or fails, does
-not start within 10 minutes, or does not complete within 42 minutes,
-`windows-reviewer-fallback` runs both omitted suites on `windows-2025`. This is
-the fail-closed contract delivered by issue #260. A watchdog error also
-releases the fallback rather than trusting an empty output.
-On the hosted image those two suites can intermittently go red on `main` itself
-with a recognisable signature:
+hosted matrix omits Codex and Grok only after assigning both unchanged suites
+to `windows-reviewer-fallback` on an independent `windows-2025` host. That job
+is the required pull-request and scheduled proof. The qualified self-hosted
+lane remains available on an explicit full manual run for host-bound diagnosis,
+but it cannot queue or fail a repository-wide verification run. Its 30-minute
+execution bound must prove the full process tree stopped before any independent
+work is released. This is the host-specific fail-closed contract: a physical
+host can fence its own shared runtime, never unrelated hosted capacity.
+
+The prior 30-minute hosted experiment could intermittently go red on healthy
+`main` with a recognisable duration signature:
 
 - `test-ai-grok-review.sh` takes 2000s or more against a ~650s green baseline,
   and total `BASH SUITE TIMINGS seconds=` lands near 5700-5800 instead of ~4400.
 - The failures are the Grok concurrency and lock-serialization assertions, e.g.
   `different_named_sessions_can_ask_concurrently`,
   `same_next_ask_turn_is_serialized`, `uncertain_ask_blocks_its_exact_retry`.
-- `windows-reviewer-safety` passes in the same run, on the same commit.
+- `windows-reviewer-safety` passed in the same run, on the same commit.
+
+That duration ceiling is not reused. The complete hosted reviewer proof has a
+60-minute bound; exact-head run 34807026089 passed it in about 43 minutes while
+the preferred remote host timed out. Assertion failures still fail the stable
+`windows-reviewer-safety` aggregate.
 
 That combination is the hosted machine missing the timing window, not a defect.
 Confirm it by comparing the two lanes **within one run** before suspecting a
 branch — `main` run
 [33809598271](https://github.com/popcre/ai-devops/actions/runs/33809598271) is a
-clean example on `main` with no pull request involved. Only `linux-offline` is a
-required check, so this does not block a merge.
+clean example on `main` with no pull request involved. Pull requests and merge
+groups are now blocked by `verification-closure`, which requires the applicable
+Linux, Windows, reviewer, and queued-head evidence without tying that closure
+to any one physical runner.
 
 Do not raise a timeout to make these pass; that discards the signal the two-lane
 split exists to preserve. The fail-closed removal of this overlap was delivered
@@ -99,10 +114,10 @@ checkout:
 | `edge-dev-win` | `C:\actions-runner` | `GitHubActionsRunner-aidevops` |
 | `edge-dev-win-2` | `C:\actions-runner-2` | `GitHubActionsRunner-aidevops-2` |
 
-Two exist so `windows-offline` and `windows-reviewer-safety` run **in parallel**
-rather than one queueing behind the other; with a single runner a full pass took
-roughly twice as long in wall clock. Do not add a third without a reason — each
-one competes for the same cores, and oversubscribing this machine is what starves
+Two registrations remain available for explicit host-bound diagnostics; they
+are not used by required pull-request or scheduled verification. Do not run
+both on the same physical machine at once or add a third without a reason — each
+competes for the same cores and installed runtime, and oversubscription starves
 a runner's heartbeat (see the 2026-08-28 entry in
 [`critical-incidents.md`](critical-incidents.md)).
 
@@ -110,49 +125,101 @@ The `edge-dev` label sits alongside the automatic `self-hosted`, `Windows`, and
 `X64` labels, which is what `runs-on: [self-hosted, Windows, X64, edge-dev]`
 selects.
 
-Since 2026-09-02 the two heavy `verify` Windows jobs no longer select this
-label: `windows-offline` and `windows-reviewer-safety` run on
-`ai-devops-windows-qualified`, a pool of dedicated hosts documented in
+The required pull-request lanes do not select this label or any persistent
+runner: `windows-offline` and `windows-reviewer-safety` use independent hosted
+machines. An explicit full manual run may select
+`ai-devops-windows-qualified`, the dedicated pool documented in
 [`independent-windows-runner-setup.md`](independent-windows-runner-setup.md).
-These two runners still serve every other workflow that asks for `edge-dev`.
+The registrations remain available only for deliberate manual workflows that
+ask for `edge-dev`.
 
-Neither is a Windows service — installing one requires an elevated shell. Both
-run from scheduled tasks triggered at logon for the interactive user.
+Neither is a Windows service — installing one requires an elevated shell. At
+most one registration and scheduled task may be active on this physical host.
+A deliberate manual diagnostic selects one; the other must remain stopped or
+disabled for the whole run because both share the installed runtime and cores.
 
-**Consequence:** verification runs only while that machine is powered on and that
-user is logged in. A queued job simply waits. Nothing fails; nothing finishes
-either.
+**Consequence:** only that manual diagnostic depends on the machine. Hosted
+repository verification continues independently if the local host is off,
+busy, or unavailable.
 
-**Creating the scheduled task needs an elevated shell.** A non-elevated session
-can start a runner directly (so it works immediately) but cannot make it survive
-a reboot. From an **Administrator** PowerShell:
+**Creating an on-demand scheduled task needs an elevated shell.** Do not attach
+an at-logon or recurring trigger. From an **Administrator** PowerShell:
 
 ```powershell
-schtasks /create /tn "GitHubActionsRunner-aidevops-2" /tr "C:\actions-runner-2\run.cmd" /sc onlogon /rl LIMITED /f
+$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c C:\actions-runner-2\run.cmd'
+Register-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops-2' -Action $action -User "$env:USERDOMAIN\$env:USERNAME" -RunLevel Limited
+Disable-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops-2'
 ```
 
-## Checking it
+## Selecting and checking one registration
+
+Choose one task for the manual diagnostic. Stop and disable its peer before
+enabling the selected task; recovery follows the same order and must never
+start a selected listener until the peer is proven stopped:
+
+```powershell
+$selected = 'GitHubActionsRunner-aidevops'
+$peer = 'GitHubActionsRunner-aidevops-2'
+$selectedRoot = 'C:\actions-runner'
+$peerRoot = 'C:\actions-runner-2'
+
+function Stop-And-ProveRunner([string]$taskName, [string]$runnerRoot) {
+    $runnerPrefix = $runnerRoot.TrimEnd('\') + '\'
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if ($task.State -eq 'Running') {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    }
+    Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        $owned = @(Get-CimInstance Win32_Process | Where-Object {
+            ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($runnerPrefix, [StringComparison]::OrdinalIgnoreCase)) -or
+            ($_.CommandLine -and $_.CommandLine.IndexOf($runnerPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        })
+        if ($task.State -ne 'Running' -and $owned.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "$taskName did not stop cleanly; refusing to start another registration on this host."
+}
+
+Stop-And-ProveRunner $peer $peerRoot
+Enable-ScheduledTask -TaskName $selected
+Start-ScheduledTask -TaskName $selected
+```
+
+Validate that the selected registration is `online` and its peer is `offline`:
 
 ```bash
 gh api repos/popcre/ai-devops/actions/runners --jq '.runners[]|{name,status,busy}'
 ```
 
-Every runner must report `online`. If one reports `offline`, check whether its
-process is actually alive before re-registering anything:
+If the selected registration reports `offline`, inspect the process before any
+recovery. A live listener plus an `offline` status means the selected machine
+is saturated; reduce its load and do not re-register or start the peer:
 
 ```powershell
 Get-Process -Name 'Runner.Listener','Runner.Worker' -ErrorAction SilentlyContinue
 ```
 
-**A live process plus an `offline` status means the machine is saturated, not
-that the runner is broken** — the heartbeat is being starved. Reduce the load; do
-not re-register. If the process is genuinely gone:
+After the diagnostic, restore the serialized stopped state:
 
 ```powershell
-Start-ScheduledTask -TaskName 'GitHubActionsRunner-aidevops-2'
+Stop-And-ProveRunner $selected $selectedRoot
 ```
 
+Any command error, timeout, running task, or registration-owned process is a
+hard stop. Do not enable the peer or start unrelated work on the shared runtime
+until the failed cleanup is diagnosed and the proof succeeds.
+
 ## Running a local test series alongside CI
+
+First run `bin/ai-test-local --check-collision`. It matches only runner names
+installed on this physical host. A busy independent self-hosted runner does not
+block this host, and GitHub-hosted or Blacksmith work remains available. Treat a
+shared installed runtime as same-host contention even when the job was launched
+elsewhere. Such a runtime must expose one common lock-directory path through
+`AI_TEST_SHARED_RUNTIME_LOCK`; the launcher holds it for the complete run.
 
 **Bound the concurrency, and scope your cleanup.** The reviewer suites and the CI
 jobs that run them are the same script with the same process name, on the same
@@ -174,9 +241,9 @@ Registration tokens expire in one hour, so fetch one at the moment you use it
 $t = gh api --method POST repos/popcre/ai-devops/actions/runners/registration-token --jq '.token'; Set-Location C:\actions-runner; .\config.cmd --unattended --url https://github.com/popcre/ai-devops --token $t --name edge-dev-win --labels edge-dev --work _work --replace
 ```
 
-## Going back to hosted runners
+## Required verification versus host diagnostics
 
-Change both Windows jobs in `.github/workflows/verify.yml` back to
-`runs-on: windows-2025`. Nothing else in the repository depends on the runners,
-and the required check names do not change either way — which is deliberate, so
-ruleset `21564317` needs no edit to move in either direction.
+Required Windows jobs already use hosted runners. Keep the qualified
+self-hosted registrations for explicit manual diagnosis, qualification, and
+reproduction on a known physical host. Removing that capability requires a
+separate owner decision; it is not part of routine CI routing.

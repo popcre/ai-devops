@@ -177,14 +177,35 @@ export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
 check "Muse preflight supplies its mandatory caller identity" "$SCRIPT check muse '$REPO' | grep -q 'health=ok'"
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
-START=$(date +%s); OUT="$($SCRIPT check kimi "$REPO" 2>&1)"; RC=$?; ELAPSED=$(( $(date +%s) - START ))
+export MOCK_PREFLIGHT_EVIDENCE_LOG="$TMP/evidence-operations"
+export MOCK_PREFLIGHT_PACKET="$ROOT/bin/ai-review-packet"
+export MOCK_PREFLIGHT_SANDBOX="$ROOT/bin/ai-review-sandbox"
+cat > "$TMP/bin/packet-observer" <<'EOF'
+#!/usr/bin/env bash
+printf 'packet %s\n' "$1" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"
+if [ "${MOCK_PREFLIGHT_VERIFY_FAIL:-0}" = 1 ] && [ "$1" = verify ]; then exit 79; fi
+exec "$MOCK_PREFLIGHT_PACKET" "$@"
+EOF
+cat > "$TMP/bin/sandbox-observer" <<'EOF'
+#!/usr/bin/env bash
+printf 'sandbox %s\n' "$1" >> "$MOCK_PREFLIGHT_EVIDENCE_LOG"
+exec "$MOCK_PREFLIGHT_SANDBOX" "$@"
+EOF
+chmod +x "$TMP/bin/packet-observer" "$TMP/bin/sandbox-observer"
+START=$(date +%s); OUT="$(AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?; ELAPSED=$(( $(date +%s) - START ))
 [ "$RC" -ne 0 ] && ok "invalid Kimi credential fails" || bad "invalid Kimi credential fails"
 [ "$ELAPSED" -lt 10 ] && ok "invalid Kimi credential fails under ten seconds" || bad "invalid Kimi credential fails under ten seconds"
+[ ! -e "$MOCK_PREFLIGHT_EVIDENCE_LOG" ] && ok "unhealthy provider is rejected before preparing review evidence" || bad "unhealthy provider is rejected before preparing review evidence"
 printf '%s' "$OUT" | grep -q authentication-failed && ok "authentication failure is classified" || bad "authentication failure is classified"
 check "failed provider is quarantined with the shared status contract" "$SCRIPT status kimi | jq -e '.status==\"quarantined\" and .failure_class==\"authentication-failed\"'"
 
 check "quarantine skips provider without contact" "echo old > '$TMP/contact'; AI_REVIEW_KIMI_WRAPPER='$TMP/contact' $SCRIPT check kimi '$REPO' 2>&1 | grep -q quarantined"
 check "clear removes quarantine" "$SCRIPT clear kimi && $SCRIPT status kimi | grep -q installed-healthy"
+
+OUT="$(AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'packet=verified health=ok' && grep -qx 'sandbox ensure-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet build' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet verify' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'packet remove' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && grep -qx 'sandbox remove-copy' "$MOCK_PREFLIGHT_EVIDENCE_LOG" && ok "healthy provider retains complete isolated evidence checks and cleanup" || bad "healthy provider retains complete isolated evidence checks and cleanup"
+OUT="$(MOCK_PREFLIGHT_VERIFY_FAIL=1 AI_REVIEW_KIMI_WRAPPER="$TMP/bin/good" AI_REVIEW_PACKET_BIN="$TMP/bin/packet-observer" $SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
+[ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep -q 'health=ok' && ok "healthy doctor cannot bypass failed packet verification" || bad "healthy doctor cannot bypass failed packet verification"
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/allowance"
 OUT="$($SCRIPT check kimi "$REPO" 2>&1)"; RC=$?
@@ -217,6 +238,21 @@ check "a missing registry never reports a provider as usable"   "AI_REVIEW_REGIS
 check "guidance exists for empty-report" "$SCRIPT explain empty-report | grep -qi 'not as an approval'"
 check "guidance exists for not-registered" "$SCRIPT explain not-registered | grep -qi 'registry'"
 
+
+echo '== scoped refusal admission'
+PYTHON="$(command -v python3 || command -v python)"
+check "scoped store expiry, migration, concurrency and killed-owner behavior" "'$PYTHON' '$ROOT/tests/test_reviewer_admission.py'"
+printf 'synthetic terminal refusal\n' > "$TMP/refusal.json"
+OBSERVED="$(date +%s)"
+$SCRIPT clear kimi >/dev/null
+check "terminal refusal creates policy backoff without quota claim" "$SCRIPT observe-refusal kimi --profile profile-a --model model-a --run-id run-a --observed '$OBSERVED' --seconds 120 --reason usage-limit --evidence '$TMP/refusal.json' | jq -e '.state==\"backoff\" and .quota_state==\"unknown\" and .reset_at==null'"
+check "matching scope is not allocatable despite healthy install" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-a $SCRIPT status kimi | jq -e '.usable==false and .status==\"installed-healthy\" and .admission.state==\"backoff\"'"
+$SCRIPT clear kimi >/dev/null
+$SCRIPT observe-refusal kimi --profile profile-a --model model-a --run-id run-a --observed "$OBSERVED" --seconds 120 --reason usage-limit --evidence "$TMP/refusal.json" >/dev/null
+check "different profile remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-b AI_REVIEW_ADMISSION_MODEL=model-a $SCRIPT usable kimi | jq -e '.usable==true'"
+check "different model remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-b $SCRIPT usable kimi | jq -e '.usable==true'"
+check "capacity remains unknown during policy backoff" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reset_at==null'"
+check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine kimi authentication-failed --seconds 30 && $SCRIPT admission kimi --profile profile-a --model model-a --json | jq -e '.state==\"backoff\"'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -46,7 +46,12 @@ ai-reviewer-issue maintenance classify ROUND-ID CANDIDATE-ID --reason expected-r
 ```
 
 Allowed reasons are `expected-refusal`, `quota-exhaustion`, `user-cancellation`,
-`application-failure`, `duplicate-event`, and `in-progress`. A nonzero wrapper
+`application-failure`, `duplicate-event`, `in-progress`, and
+`evidence-unavailable`. The last reason is terminal for the frozen candidate and
+requires both exact provenance through `--evidence` and an explicit retained
+obligation through `--carry-forward`; it does not reconstruct or silently drop
+missing history, and it does not create a duplicate candidate in the next
+bounded round. A nonzero wrapper
 exit is a candidate, not an automatic diagnosis. `in-progress` applies only to
 an invocation without a terminal event and needs current worker evidence. It
 remains carried into subsequent rounds until a terminal event accounts for it;
@@ -276,6 +281,79 @@ Original local evidence packages remain historical records and must not be
 rewritten.
 
 ## Closing a repaired incident
+
+### Durable report publication and cleanup
+
+Reviewer wrappers reserve report evidence before paid review work. Prepared reports
+are published as immutable private receipts in the existing reviewer-events store;
+the event ledger contains only opaque references. A publication failure
+retains local output and refuses cleanup. Successful failure-diagnostic publication
+does not turn an interrupted or failed review into an approval.
+
+Managed snapshot markers record every paid invocation that used them. Removal and
+refresh verify each invocation's durable receipt, including a separately recorded
+local finalization linked to the original invocation. A stale-source finalization
+preserves the original head and explicitly remains non-authorizing for current
+source. It never submits another provider request or rewrites the original event.
+New standalone snapshots have an explicit empty ownership list and retain ordinary
+creation, refresh, and removal behavior.
+
+Older snapshots without ownership proof are retained until exact private metadata
+and prepared reports establish their identity. Recover them locally with:
+
+```text
+ai-reviewer-issue evidence reconcile-sandbox PROVIDER SANDBOX METADATA REPORT [REPORT ...]
+```
+
+The command verifies the exact stored workspace and provider-session/report link,
+publishes the prepared evidence, then records cleanup ownership. It does not infer
+ownership from a shared repository or head, synthesize a historical run ID, or
+claim historical source authorization. Unknown or missing evidence remains unknown.
+
+When a review's report is provably gone (its caller worktree was deleted, or its
+publication failed and no report from that invocation survives), the owner records
+that loss instead of inventing evidence:
+
+```text
+ai-reviewer-issue evidence reconcile-lost PROVIDER SANDBOX "REASON"
+```
+
+Only GLM is accepted: the report search depends on GLM's report naming, so any
+other provider is refused rather than risk missing a recoverable report. It
+refuses while the invocation is still running, while a required patch or
+prepared artifact exists, and while a report that review could have written still exists (the exact
+review name; for an owned invocation, any such report newer than its start), and
+refuses when partial evidence was published. It writes `evidence-lost.json` with the
+reason and time beside the invocation's requirement — a new `local-reconciliation`
+invocation for a legacy sandbox — and records cleanup ownership. Verification then
+reports the terminal reference `RUN_ID/evidence-lost`, which prune honours; the
+paid result stays recorded as unknown, never as published.
+Implementation workspaces use the same private event store and bind their existing
+owner record to the original invocation. Before that invocation reserves paid work,
+ordinary setup cleanup remains available; afterwards cleanup requires its receipt.
+For legacy implementation owners, use `ai-reviewer-issue evidence reconcile-owner
+PROVIDER OWNER METADATA REPORT`. This verifies the exact session/report identity
+and that every Git-visible workspace change equals the existing canonical patch,
+then preserves both report and patch centrally. Unexported files or differing work
+remain blocked for recovery; a later cleanup never assumes they were published.
+Current implementation owners additionally retain the exact prepared report and
+patch paths and hashes. Reconciliation republishes every missing original
+artifact; a different report from the same session cannot replace a paid result.
+`ai-reviewer-issue evidence verify-prepared PROVIDER ORIGINAL_RUN_ID KIND PATH`
+checks that proof even after the disposable owner file has been removed.
+
+Explicit Qwen and Kimi implementation-state deletion first archives the complete
+owned local state in the existing private evidence store. The equivalent local
+commands are `ai-reviewer-issue evidence archive-implementation-state PROVIDER
+METADATA` and `ai-reviewer-issue evidence verify-implementation-archive PROVIDER
+METADATA`. They preserve the exact metadata, owner manifest, canonical patch,
+older owned generations, and explicitly recorded recovery patches. Unknown files,
+changed bytes, and missing known paid-result evidence refuse deletion. A legacy
+archive records the original paid result as unknown; preserving surviving bytes
+does not reconstruct lost evidence or grant source approval.
+Use `ai-reviewer-issue evidence verify-sandbox SANDBOX` to check the resulting
+cleanup proof. Keep all command arguments and artifacts private; this operation is
+not a disposition sweep and does not change a frozen maintenance round.
 
 A reviewer repair is not complete merely because its tests pass or a wrapper is
 installed. Every local incident whose recorded symptoms the repair addresses

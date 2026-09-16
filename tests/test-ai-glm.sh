@@ -24,6 +24,105 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+glm_recovery_cases(){
+  local fixture="$TMP/recovery"
+  mkdir -p "$fixture/repo" "$fixture/state/sessions/fixture" "$fixture/packet"
+  git -C "$fixture/repo" init -q
+  git -C "$fixture/repo" config user.name Test; git -C "$fixture/repo" config user.email test@example.com
+  printf 'source\n' > "$fixture/repo/source"; git -C "$fixture/repo" add source; git -C "$fixture/repo" commit -qm fixture
+  printf '%064d' 0 > "$fixture/packet/MANIFEST.sha256"
+  cat > "$fixture/cases.sh" <<'RECOVERY_CASES'
+set -e
+source "$AI_GLM_SOURCE"
+CALLER=codex; STATE_DIR="$FIXTURE/state"; PROMPT_TEXT=''; PROMPT_FILE=''; REPO_OVERRIDE="$FIXTURE/repo"; OPT_BASE=''; OPT_TESTS=''; OPT_DECISION=''; OPT_ASSERT_HEAD=''; JSON_OUT=0
+TIMEOUT=8; POLL_SECS=1; LOCK_TIMEOUT=1
+repo_id(){ printf fixture; }
+packet_fixture(){ case "$1" in path) printf '%s/packet' "$FIXTURE";; verify) test ! -f "$FIXTURE/stale";; verify-retained) test -f "$FIXTURE/packet/MANIFEST.sha256";; *) return 1;; esac; }
+PACKET_BIN=packet_fixture
+require_review_server(){ :; }
+reviewer_event_evidence(){ :; }
+sleep(){ :; }
+handle_permissions(){ :; }
+api(){ [ "$1" = GET ] || { printf POST >> "$FIXTURE/submissions"; return 99; }; if [[ "$2" == */message?limit=1 ]]; then cat "$FIXTURE/history"; elif [ "$2" = /global/health ]; then printf '{"version":"%s"}' "${API_SERVER_VERSION:-original-server}"; else printf '{}'; fi; }
+send_prompt(){ printf POST >> "$FIXTURE/submissions"; return 99; }
+last_assistant(){
+  local count; count="$(cat "$FIXTURE/polls")"; count=$((count+1)); printf '%s' "$count" > "$FIXTURE/polls"
+  if [ "$count" -le 2 ]; then printf '{"id":"old","finish":"stop","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"content":[{"type":"text","text":"old answer"}]}'
+  else printf '{"id":"new","finish":"stop","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"content":[{"type":"text","text":"new answer"}]}'
+  fi
+}
+eval "$(declare -f write_report | sed '1s/write_report/original_write_report/')"
+reviewer_event_publish_report(){ :; }
+write_report(){ [ ! -e "$FIXTURE/fail-report" ] || return 73; printf '%s' "$4" > "$FIXTURE/report.md"; printf '%s/report.md' "$FIXTURE"; }
+meta="$STATE_DIR/sessions/fixture/codex--exact.json"
+head="$(git -C "$REPO_OVERRIDE" rev-parse HEAD)"
+jq -n --arg head "$head" --arg root "$REPO_OVERRIDE" --arg boundary "$FIXTURE/packet" '{type:"review",name:"exact",caller:"codex",model:"glm-5.3",provider:"zai-coding-plan",repository_root:$root,opencode_session_id:"session-exact",remote_turn:{state:"pending",previous_message_id:"old",original_invocation_id:("a"*32),started_at:"2026-09-11T00:00:00Z",head:$head,boundary_root:$boundary,packet_sha256:("0"*64)}}' > "$meta"
+printf 0 > "$FIXTURE/polls"; : > "$FIXTURE/submissions"; : > "$FIXTURE/fail-report"
+printf '{"error":"transport"}' > "$FIXTURE/history"
+if previous_message_id session > "$FIXTURE/watermark-error.log" 2>&1; then exit 20; fi
+printf '{"data":[]}' > "$FIXTURE/history"
+[ "$(previous_message_id session)" = '' ] || exit 21
+printf '{"data":[{"id":"old"}]}' > "$FIXTURE/history"
+[ "$(previous_message_id session)" = old ] || exit 22
+if (cmd_recover exact) > "$FIXTURE/first.log" 2>&1; then exit 10; fi
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] || exit 11
+jq -e '.remote_turn.state=="completed-unpublished" and (.remote_turn.terminal_sha256|length)==64' "$meta" >/dev/null || exit 12
+[ -s "${meta%.json}.terminal.json" ] || exit 13
+cp "$meta" "$FIXTURE/original-meta"
+printf 'changed' >> "${meta%.json}.terminal.json"
+if (cmd_recover exact) > "$FIXTURE/changed.log" 2>&1; then exit 14; fi
+head -c -7 "${meta%.json}.terminal.json" > "$FIXTURE/restored"; mv "$FIXTURE/restored" "${meta%.json}.terminal.json"
+rm "$FIXTURE/fail-report"
+(cmd_recover exact) > "$FIXTURE/final.log" 2>&1 || exit 15
+jq -e '.remote_turn==null and .last_completed_turn.previous_message_id=="old" and (.last_completed_turn.report_sha256|length)==64' "$meta" >/dev/null || exit 16
+[ "$(cat "$FIXTURE/report.md")" = 'new answer' ] || exit 17
+(cmd_recover exact) > "$FIXTURE/repeat.log" 2>&1 || exit 18
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] && [ ! -s "$FIXTURE/submissions" ] || exit 19
+cp "$FIXTURE/original-meta" "$meta"
+: > "$FIXTURE/stale"
+(cmd_recover exact) > "$FIXTURE/stale.log" 2>&1 || exit 23
+jq -e '.remote_turn==null and .last_completed_turn.recovery_state=="completed-stale-source" and .last_completed_turn.authorizing==false' "$meta" >/dev/null || exit 24
+grep -q 'NON-AUTHORIZING' "$FIXTURE/report.md" || exit 25
+grep -q 'RETAINED non-authorizing' "$FIXTURE/stale.log" || exit 26
+[ "$(cat "$FIXTURE/polls")" -eq 3 ] && [ ! -s "$FIXTURE/submissions" ] || exit 27
+cp "$FIXTURE/original-meta" "$meta"
+jq 'del(.remote_turn.original_invocation_id)' "$meta" > "$FIXTURE/legacy"; mv "$FIXTURE/legacy" "$meta"
+if (cmd_recover exact) > "$FIXTURE/legacy.log" 2>&1; then exit 28; fi
+jq -e '.remote_turn.state=="completed-unpublished"' "$meta" >/dev/null || exit 29
+restore_report_context "$FIXTURE/original-meta"
+GLM_REPORT_KEY="$(jq -r .remote_turn.terminal_sha256 "$FIXTURE/original-meta")"
+GLM_REPORT_REQUESTED_AT="$(jq -r .remote_turn.started_at "$FIXTURE/original-meta")"
+original_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 30
+original_report_sha="$(sha256sum "$original_report" | cut -d' ' -f1)"
+original_report_inode="$(stat -c '%d:%i' "$original_report")"
+API_SERVER_VERSION=changed-after-completion
+git -C "$REPO_OVERRIDE" branch -m renamed-after-completion
+repeated_report="$(original_write_report "$REPO_OVERRIDE" exact review 'retained answer' '{}' session-exact)" || exit 31
+[ "$original_report" = "$repeated_report" ] && [ "$original_report_sha" = "$(sha256sum "$repeated_report" | cut -d' ' -f1)" ] && [ "$original_report_inode" = "$(stat -c '%d:%i' "$repeated_report")" ] || exit 32
+grep -q 'original-server' "$repeated_report" && ! grep -q 'renamed-after-completion\|changed-after-completion' "$repeated_report" || exit 33
+rm -f "$FIXTURE/stale"
+jq '.remote_turn.state="pending" | .remote_turn.deadline_epoch=1' "$FIXTURE/original-meta" > "$meta"
+(cmd_recover exact) > "$FIXTURE/expired-complete.log" 2>&1 || exit 34
+[ "$(cat "$FIXTURE/polls")" -eq 4 ] && [ ! -s "$FIXTURE/submissions" ] || exit 35
+jq -e '.remote_turn==null and .last_completed_turn.previous_message_id=="old"' "$meta" >/dev/null || exit 36
+jq '.remote_turn.state="pending" | .remote_turn.deadline_epoch=1' "$FIXTURE/original-meta" > "$meta"
+printf 0 > "$FIXTURE/polls"
+if (cmd_recover exact) > "$FIXTURE/expired-old.log" 2>&1; then exit 37; fi
+[ "$(cat "$FIXTURE/polls")" -eq 1 ] && [ ! -s "$FIXTURE/submissions" ] || exit 38
+jq -e '.remote_turn.state=="pending"' "$meta" >/dev/null || exit 39
+printf 'RECOVERY_OK expired observation=1 submissions=0\n'
+RECOVERY_CASES
+  AI_GLM_SOURCE="$AI_GLM" FIXTURE="$fixture" bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1
+  local result=$?
+  check 'GLM waits for a new assistant, preserves failed publication, and observes expired completion without replay' "test '$result' -eq 0 && grep -q 'RECOVERY_OK expired observation=1 submissions=0' '$fixture/result.log'"
+  if [ "$result" -ne 0 ]; then printf 'recovery fixture exit=%s\n' "$result"; cat "$fixture/result.log" "$fixture/first.log" "$fixture/final.log" 2>/dev/null; fi
+}
+if [ "${AI_GLM_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
+  trap 'rm -rf "$TMP"' EXIT
+  glm_recovery_cases
+  printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+  ((FAIL == 0)); exit $?
+fi
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -34,9 +133,55 @@ export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
 
+glm_deadline_cases() {
+  local result
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 0 > "$DEADLINE_DIR/clock"; : > "$DEADLINE_DIR/calls"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }
+    sleep(){ printf "%s" "$(( $(glm_now) + $1 ))" > "$DEADLINE_DIR/clock"; }
+    server_pw(){ printf synthetic-password; }
+    curl(){ local max=0; while [ "$#" -gt 0 ]; do if [ "$1" = -m ]; then max="$2"; shift; fi; shift; done; printf "%s\n" "$max" >> "$DEADLINE_DIR/calls"; sleep "$max"; printf 000; return 28; }
+    implementation_update(){ printf deadline > "$DEADLINE_DIR/reason"; }
+    TIMEOUT=10; POLL_SECS=1; PERMISSION_HTTP_TIMEOUT=20; PERMISSION_HTTP_ATTEMPTS=3; TURN_META=""
+    set +e; await_turn sid name implement "$DEADLINE_DIR" fake-meta >/dev/null; rc=$?
+    printf "%s:%s:%s:%s" "$rc" "$(glm_now)" "$(wc -l < "$DEADLINE_DIR/calls" | tr -d " ")" "$(cat "$DEADLINE_DIR/calls")"
+  ')"
+  check "HTTP permission time counts toward the wall deadline without retries past it" "test '$result' = '124:10:1:4' && grep -qx deadline '$TMP/reason'"
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 7 > "$DEADLINE_DIR/clock"; : > "$DEADLINE_DIR/calls"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }; sleep(){ printf unexpected >> "$DEADLINE_DIR/calls"; }
+    handle_permissions(){ printf unexpected >> "$DEADLINE_DIR/calls"; }
+    implementation_update(){ :; }
+    printf "%s" "{\"remote_turn\":{\"deadline_epoch\":5,\"previous_message_id\":\"old\"}}" > "$DEADLINE_DIR/pending"
+    TIMEOUT=100; TURN_META="$DEADLINE_DIR/pending"
+    set +e; await_turn sid name implement "$DEADLINE_DIR" fake-meta >/dev/null; rc=$?
+    printf "%s:%s:%s" "$rc" "$(glm_now)" "$(wc -c < "$DEADLINE_DIR/calls" | tr -d " ")"
+  ')"
+  check "recovery does not restart an expired original turn deadline" "test '$result' = '124:7:0'"
+  result="$(AI_GLM_SOURCE="$AI_GLM" DEADLINE_DIR="$TMP" bash -c '
+    source "$AI_GLM_SOURCE"
+    printf 100 > "$DEADLINE_DIR/clock"; printf "{}" > "$DEADLINE_DIR/pending"
+    glm_now(){ cat "$DEADLINE_DIR/clock"; }; TIMEOUT=10
+    mark_remote_turn_pending "$DEADLINE_DIR/pending" old || exit 1
+    jq -r ".remote_turn.deadline_epoch" "$DEADLINE_DIR/pending"
+  ')"
+  check "original deadline is durable before provider submission" "test '$result' = 110"
+}
+if [ "${AI_GLM_DEADLINE_TESTS_ONLY:-0}" = 1 ]; then
+  glm_deadline_cases
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+
+if [ "${AI_GLM_IMPL_TESTS_ONLY:-0}" != 1 ]; then
 echo "== static checks =="
 check "ai-glm is executable"                "test -x '$AI_GLM'"
 check "ai-glm parses"                       "bash -n '$AI_GLM'"
+AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; JSON_OUT=1; emit usage-fixture review synthetic "unchanged answer" "{\"input\":0}" report.md' > "$TMP/usage-scope.json"
+check "GLM labels last-step usage without inventing whole-turn completeness" "jq -e '.response.text==\"unchanged answer\" and .usage.input==0 and .usage_scope==\"last-assistant-step\" and .usage_completeness==\"adapter-provider-missingness-unknown\"' '$TMP/usage-scope.json'"
+AI_GLM_SOURCE="$AI_GLM" bash -c 'source "$AI_GLM_SOURCE"; JSON_OUT=1; emit usage-fixture review synthetic "unchanged answer" null report.md' > "$TMP/usage-unavailable.json"
+check "GLM explicitly reports absent usage as unavailable while preserving the answer" "jq -e '.response.text==\"unchanged answer\" and .usage==null and .usage_scope==\"last-assistant-step\" and .usage_completeness==\"unavailable\"' '$TMP/usage-unavailable.json'"
 check "GLM password is streamed to curl instead of exposed in argv" "grep -q 'curl_auth_config | curl --config -' '$AI_GLM' && ! grep -q 'curl .* -u ' '$AI_GLM'"
 check "both GLM review dispatches gate capacity before send_prompt" "test \"\$(grep -c 'if ! capacity_gate' '$AI_GLM')\" -eq 2 && grep -q \"exhausted).*return 3\" '$AI_GLM'"
 check "GLM diagnostics distinguish local health and permission transport" "grep -q 'local-health-timeout' '$AI_GLM' && grep -q 'permission-endpoint-timeout' '$AI_GLM'"
@@ -48,7 +193,7 @@ printf '{"name":"pending","remote_turn":{"state":"pending","started_at":"2026-09
 AI_GLM_SOURCE="$AI_GLM" PENDING_META="$PENDING_META" bash -c 'source "$AI_GLM_SOURCE"; remote_turn_pending "$PENDING_META"; clear_remote_turn_pending "$PENDING_META"; ! remote_turn_pending "$PENDING_META"; mark_remote_turn_pending "$PENDING_META"; remote_turn_pending "$PENDING_META"; jq -e ".remote_turn.started_at | type == \"string\"" "$PENDING_META" >/dev/null'
 check "a durable pending paid turn blocks retry until a proven terminal result clears it" "jq -e '.remote_turn.state==\"pending\"' '$PENDING_META' >/dev/null"
 check "both GLM review paths record pending remote work before submission" "test \"\$(grep -c 'mark_remote_turn_pending \"\$mp\"' '$AI_GLM')\" -eq 2"
-check "both GLM review paths clear pending work only after terminal model verification" "test \"\$(grep -c 'clear_remote_turn_pending \"\$mp\"' '$AI_GLM')\" -eq 2"
+check "GLM review and recovery paths clear pending work only after report publication" "test \"\$(grep -c 'record_review_publication \"\$mp\" \"\$report\" && clear_remote_turn_pending' '$AI_GLM')\" -eq 3"
 ASK_FN="$(sed -n '/^cmd_ask()/,/^IMPL_META=/p' "$AI_GLM")"
 ASK_LOCK_LINE="$(printf '%s\n' "$ASK_FN" | grep -n 'lock_acquire' | head -1 | cut -d: -f1)"
 ASK_PENDING_LINE="$(printf '%s\n' "$ASK_FN" | grep -n 'remote_turn_pending' | head -1 | cut -d: -f1)"
@@ -118,6 +263,7 @@ else
   ok "doctor symlink check skipped (host created a copy)"
 fi
 
+fi
 echo "== repository + session identity =="
 mkdir -p "$TMP/repoA" "$TMP/repoB"
 for d in repoA repoB; do
@@ -127,6 +273,7 @@ for d in repoA repoB; do
   git -C "$TMP/$d" -c user.email=t@example.com -c user.name=t commit -qm init
 done
 # Same basename in different places must NOT collide.
+if [ "${AI_GLM_IMPL_TESTS_ONLY:-0}" != 1 ]; then
 idA="$(cd "$TMP/repoA" && printf '%s\n%s' "$(git rev-parse --show-toplevel)" "" | sha256sum | cut -c1-12)"
 idB="$(cd "$TMP/repoB" && printf '%s\n%s' "$(git rev-parse --show-toplevel)" "" | sha256sum | cut -c1-12)"
 check "distinct repos get distinct ids"     "test '$idA' != '$idB'"
@@ -219,6 +366,13 @@ WIN_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADL
   schtasks(){ :; }; sleep(){ :; }; server_up(){ n=$((n+1)); [ "$n" -ge 2 ]; }
   cmd_server start' 2>&1)"; WIN_RC=$?
 [ "$WIN_RC" -eq 0 ] && printf '%s' "$WIN_OUT" | grep -q 'started and healthy' && ok "Windows start waits for health" || bad "Windows start waits for health"
+# The failure must point at the log the scheduled task actually writes, not a path
+# nothing ever creates (observed 2026-09-11).
+WINFAIL_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_DEADLINE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=1
+  schtasks(){ :; }; sleep(){ :; }; server_up(){ return 1; }
+  wait_for_server_health restarted' 2>&1)"; WINFAIL_RC=$?
+[ "$WINFAIL_RC" -ne 0 ] && printf '%s' "$WINFAIL_OUT" | grep -qF "Inspect: $TMP/cfg/opencode/server.log" && ok "Windows start failure names the real server log" || bad "Windows start failure names the real server log"
 
 echo "== platform-correct doctor checks =="
 # `stat -c %a` reports a synthesised mode on NTFS regardless of the ACL, so the 0600
@@ -295,7 +449,7 @@ check "default timeout remains 1800s"       "grep -q 'AI_GLM_TIMEOUT:-1800' '$AI
 # the raw worktree, whose git control files sit outside any single-directory
 # boundary. See bin/ai-review-sandbox and tests/test-ai-review-sandbox.sh.
 if grep -Fq 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM"; then ok "new passes review directory"; else bad "new passes review directory"; fi
-if [ "$(grep -Fc 'await_turn "$sid" "$name" review "$boundary"' "$AI_GLM")" -eq 2 ]; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
+if sed -n '/^cmd_ask()/,/^}/p' "$AI_GLM" | grep -Fq 'await_turn "$sid" "$name" review "$boundary"'; then ok "ask passes review directory"; else bad "ask passes review directory"; fi
 # Since issue #53, new sessions create a private copy and continuations refresh
 # the exact directory recorded when OpenCode created the session.
 if grep -Fq 'prepare_review "$root" "$name" "$boundary"' "$AI_GLM"; then ok "ask reuses recorded review directory"; else bad "ask reuses recorded review directory"; fi
@@ -387,6 +541,20 @@ check "failure detail is valid JSON with a branch id" "printf '%s' '$DETAIL' | j
 check "failure detail redacts secrets"                "! printf '%s' '$DETAIL' | grep -qE 'tok-visible|auth-visible|sec-visible|cred-visible|pw-visible|body-visible|val-visible'"
 
 echo "== transport failure is not a permission failure (step 7) =="
+glm_deadline_cases
+permission_auth_probe() {
+  AI_GLM_SOURCE="$AI_GLM" AUTH_ARGS="$TMP/permission-auth-args" AUTH_INPUT="$TMP/permission-auth-input" bash -c '
+    source "$AI_GLM_SOURCE"
+    server_pw(){ printf synthetic-local-password; }
+    curl(){ printf "%s\n" "$@" > "$AUTH_ARGS"; cat > "$AUTH_INPUT"; printf 200; }
+    permission_http GET /api/session/s/permission
+    [ "$HTTP_STATUS" = 200 ]
+  '
+}
+check "permission polling authenticates through stdin without password argv" "permission_auth_probe && grep -q -- '--config' '$TMP/permission-auth-args' && ! grep -q synthetic-local-password '$TMP/permission-auth-args' && grep -q synthetic-local-password '$TMP/permission-auth-input'"
+if [ "${AI_GLM_AUTH_TEST_ONLY:-0}" = 1 ]; then
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 transport_probe() { # CURL_RC ATTEMPTS -> prints one line per curl attempt, then STATUS
   AI_GLM_SOURCE="$AI_GLM" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" CURL_RC="$1" \
     AI_GLM_PERMISSION_HTTP_ATTEMPTS="$2" AI_GLM_PERMISSION_HTTP_RETRY_SECS=0 \
@@ -415,6 +583,193 @@ check "running outside read is deterministic" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='
 check "running inside read remains legitimate" "AI_GLM_SOURCE='$AI_GLM' MSG_FIX='$RUNNING_INSIDE' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary \"\$MSG_FIX\" \"\$ROOT_FIX\")\" = inside'"
 check "unmeasured running input is not guessed" "AI_GLM_SOURCE='$AI_GLM' ROOT_FIX='$ROOT_FIX' AI_DEVOPS_CONFIG_DIR='$TMP/cfg' bash -c 'source \"\$AI_GLM_SOURCE\"; test \"\$(running_read_boundary '\''{\"content\":[{\"type\":\"tool\",\"name\":\"read\",\"state\":{\"status\":\"running\",\"input\":{\"path\":\"elsewhere\"}}}]}'\'' \"\$ROOT_FIX\")\" = missing'"
 
+echo "== review retention =="
+PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"; PR_ROOT="$TMP/prune-root"; PR_CALLS="$TMP/prune-calls"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB" "$PR_ROOT"; : > "$PR_CALLS"
+PR_OLD="$(date -u -d '3 days ago' +%FT%TZ)"; PR_NOW="$(date -u +%FT%TZ)"
+pr_sandbox() { # NAME AGE -> managed sandbox path
+  local d="$PR_SB/glm-$1-0123456789ab"; mkdir -p "$d"; printf '%s\nevidence_format=1\n' "$PR_SB" > "$d/.ai-review-sandbox"
+  printf 'Snapshot tag: glm-%s\n' "$1" > "$d/AI-REVIEW-SANDBOX.md"
+  [ "$2" = old ] && touch -d '3 days ago' "$d/AI-REVIEW-SANDBOX.md" "$d"
+  printf '%s' "$d"
+}
+pr_meta() { # NAME TYPE ACTIVITY [EXTRA_JQ]
+  local f="$PR_STATE/sessions/rid1/claude--$1.json" sb; sb="$(pr_sandbox "$1" old)"
+  jq -n --arg n "$1" --arg t "$2" --arg ts "$3" --arg b "$sb" --arg r "$PR_ROOT" \
+    '{name:$n,type:$t,caller:"claude",opencode_session_id:("sid-"+$n),boundary_root:$b,repository_root:$r,created_at:$ts,last_activity_at:$ts,status:"active"}' |
+    jq "${4:-.}" > "$f"
+  touch -d '3 days ago' "$f"
+}
+pr_meta idle review "$PR_OLD"
+pr_meta fresh review "$PR_NOW"
+pr_meta polling review "$PR_OLD" ".remote_turn={state:\"pending\",started_at:\"$PR_OLD\"} | .last_poll_at=\"$PR_NOW\""
+pr_meta locked review "$PR_OLD"
+pr_meta job implementation "$PR_OLD"
+pr_meta deadlock review "$PR_OLD"
+mkdir -p "$PR_STATE/locks/rid1--claude--locked.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--claude--locked.lock.d/pid"
+mkdir -p "$PR_STATE/locks/rid1--claude--deadlock.lock.d"; printf 99999999 > "$PR_STATE/locks/rid1--claude--deadlock.lock.d/pid"
+# Sandboxes are shared by repository and name across callers.
+pr_meta shared review "$PR_OLD"
+jq --arg ts "$PR_NOW" '.caller="codex" | .opencode_session_id="sid-codex-shared" | .last_activity_at=$ts' \
+  "$PR_STATE/sessions/rid1/claude--shared.json" > "$PR_STATE/sessions/rid1/codex--shared.json"
+pr_meta sharedlock review "$PR_OLD"
+mkdir -p "$PR_STATE/locks/rid1--codex--sharedlock.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--codex--sharedlock.lock.d/pid"
+pr_sandbox starting old >/dev/null
+mkdir -p "$PR_STATE/locks/rid1--codex--starting.lock.d"; printf '%s' "$$" > "$PR_STATE/locks/rid1--codex--starting.lock.d/pid"
+# Interleavings: another caller locks the name while this caller's server delete runs,
+# and a snapshot build holds the sandbox's own build lock.
+pr_meta racing review "$PR_OLD"
+pr_meta building review "$PR_OLD"; mkdir "$PR_SB/glm-building-0123456789ab.lock"
+pr_meta badtag review "$PR_OLD"; printf 'Snapshot tag: glm-other\n' > "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md"
+touch -d '3 days ago' "$PR_SB/glm-badtag-0123456789ab/AI-REVIEW-SANDBOX.md" "$PR_SB/glm-badtag-0123456789ab"
+pr_sandbox orphan old >/dev/null; pr_sandbox building-new new >/dev/null
+# A snapshot from before evidence ownership was recorded cannot prove what it holds.
+pr_meta legacy review "$PR_OLD"; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacy-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacy-0123456789ab"
+pr_sandbox legacyorphan old >/dev/null; printf '%s\n' "$PR_SB" > "$PR_SB/glm-legacyorphan-0123456789ab/.ai-review-sandbox"
+touch -d '3 days ago' "$PR_SB/glm-legacyorphan-0123456789ab"
+run_prune() { # SERVER_UP [RETENTION]
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_UP="$1" PR_CALLS="$PR_CALLS" \
+    AI_GLM_REVIEW_RETENTION_HOURS="${2:-24}" bash -c '
+      source "$AI_GLM_SOURCE"
+      server_up(){ [ "$PR_UP" = 1 ]; }
+      permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
+        # A same-name publish attempted during the server delete must find the build lock held.
+        if [ "$2" = /session/sid-racing ] && mkdir "$AI_REVIEW_SANDBOX_DIR/glm-racing-0123456789ab.lock" 2>/dev/null; then
+          rmdir "$AI_REVIEW_SANDBOX_DIR/glm-racing-0123456789ab.lock"; echo unguarded >> "$PR_CALLS.race"; fi; }
+      cmd_prune' >/dev/null 2>&1
+}
+run_prune 0; pr_down_rc=$?
+check "prune refuses to act while the server is down" "test '$pr_down_rc' -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--idle.json' && test ! -s '$PR_CALLS'"
+check "prune refuses a retention no longer than the turn timeout" "! run_prune 1 0 && test -f '$PR_STATE/sessions/rid1/claude--idle.json'"
+run_prune 1; pr_rc=$?
+check "prune reports the live-locked review it kept" "test '$pr_rc' -ne 0"
+check "idle review record is pruned"                "test ! -e '$PR_STATE/sessions/rid1/claude--idle.json'"
+check "idle review sandbox is pruned"               "test ! -e '$PR_SB/glm-idle-0123456789ab'"
+check "idle review server session is deleted exactly" "grep -qx 'DELETE /session/sid-idle' '$PR_CALLS'"
+check "only idle, unlocked review server sessions are deleted" "test \"\$(sort '$PR_CALLS' | tr '\n' ' ')\" = 'DELETE /session/sid-badtag DELETE /session/sid-idle DELETE /session/sid-racing DELETE /session/sid-shared '"
+check "the build lock is held from the sharing check through removal" "test ! -e '$PR_CALLS.race' && test ! -e '$PR_STATE/sessions/rid1/claude--racing.json' && test ! -e '$PR_SB/glm-racing-0123456789ab'"
+check "a sandbox holding its build lock keeps its session and record together" "test -f '$PR_STATE/sessions/rid1/claude--building.json' && test -d '$PR_SB/glm-building-0123456789ab' && ! grep -q sid-building '$PR_CALLS'"
+check "a sandbox that will not delete never strands a record without its session" "test ! -e '$PR_STATE/sessions/rid1/claude--badtag.json' && test -d '$PR_SB/glm-badtag-0123456789ab'"
+check "prune leaves no build lock of its own behind" "test -d '$PR_SB/glm-building-0123456789ab.lock' && test \"\$(ls -d '$PR_SB'/*.lock | wc -l | tr -d ' ')\" -eq 1"
+check "another caller's same-name record keeps the shared sandbox" "test ! -e '$PR_STATE/sessions/rid1/claude--shared.json' && test -f '$PR_STATE/sessions/rid1/codex--shared.json' && test -d '$PR_SB/glm-shared-0123456789ab'"
+check "another caller's same-name lock keeps the whole review" "test -f '$PR_STATE/sessions/rid1/claude--sharedlock.json' && test -d '$PR_SB/glm-sharedlock-0123456789ab' && test -d '$PR_STATE/locks/rid1--codex--sharedlock.lock.d'"
+check "an unrecorded sandbox whose session holds a lock is kept" "test -d '$PR_SB/glm-starting-0123456789ab'"
+check "unreconciled evidence keeps session, record and sandbox together" "test -f '$PR_STATE/sessions/rid1/claude--legacy.json' && test -d '$PR_SB/glm-legacy-0123456789ab' && ! grep -q sid-legacy '$PR_CALLS'"
+check "an unrecorded sandbox with unreconciled evidence is kept" "test -d '$PR_SB/glm-legacyorphan-0123456789ab'"
+check "recently active review is kept"              "test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
+check "a review still polling a pending turn is kept" "test -f '$PR_STATE/sessions/rid1/claude--polling.json'"
+check "a review locked by a live process is kept"   "test -f '$PR_STATE/sessions/rid1/claude--locked.json' && test -d '$PR_SB/glm-locked-0123456789ab'"
+check "the live owner's lock is left in place"      "test \"\$(cat '$PR_STATE/locks/rid1--claude--locked.lock.d/pid')\" = '$$'"
+check "prune never reclaims a dead owner's lock (no remove-then-create race)" "test -f '$PR_STATE/sessions/rid1/claude--deadlock.json' && test \"\$(cat '$PR_STATE/locks/rid1--claude--deadlock.lock.d/pid')\" = 99999999"
+check "implementation records are not review-pruned" "test -f '$PR_STATE/sessions/rid1/claude--job.json'"
+check "idle unrecorded review sandbox is pruned"    "test ! -e '$PR_SB/glm-orphan-0123456789ab'"
+check "a new unrecorded sandbox (review starting) is kept" "test -d '$PR_SB/glm-building-new-0123456789ab'"
+# An interrupt during a server delete finishes that review under its build lock, then stops.
+PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALLS"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
+pr_meta intr review "$PR_OLD"; pr_meta intr2 review "$PR_OLD"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" bash -c '
+  source "$AI_GLM_SOURCE"
+  server_up(){ return 0; }
+  permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
+    [ "$2" = /session/sid-intr ] || return 0
+    [ -d "$AI_REVIEW_SANDBOX_DIR/glm-intr-0123456789ab.lock" ] || echo unguarded >> "$PR_CALLS.race"
+    kill -INT $$; }
+  cmd_prune' >/dev/null 2>&1; pr_int_rc=$?
+check "an interrupted prune never strands a record without its session" "grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test ! -e '$PR_STATE/sessions/rid1/claude--intr.json' && test ! -e '$PR_SB/glm-intr-0123456789ab' && test ! -e '$PR_CALLS.race'"
+check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intr2 '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intr2.json' && test -d '$PR_SB/glm-intr2-0123456789ab'"
+check "an interrupted prune still releases its build lock" "! ls -d '$PR_SB'/*.lock >/dev/null 2>&1"
+# A review whose report is provably gone gets an explicit, owner-recorded terminal state (#442).
+PR_STATE="$TMP/prune-state-lost"; PR_SB="$TMP/prune-sandboxes-lost"; PR_ROOT="$TMP/prune-root-lost"; : > "$PR_CALLS"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB" "$PR_ROOT/.ai/reviews"
+pr_source() { printf '%s\n%s' "$PR_ROOT" "$2" > "$PR_SB/glm-$1-0123456789ab/.ai-review-sandbox"; touch -d '3 days ago' "$PR_SB/glm-$1-0123456789ab"; }
+pr_meta lost review "$PR_OLD"; pr_source lost ''
+pr_sandbox lostorphan old >/dev/null; pr_source lostorphan ''
+pr_meta present review "$PR_OLD"; pr_source present ''
+printf 'report\n' > "$PR_ROOT/.ai/reviews/glm-present-20260911T000000Z.md"
+printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
+# Owned by an invocation whose report publication failed; its only report is an earlier turn's.
+lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && python "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
+python "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
+pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
+printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
+run_prune 1
+check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
+lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
+check "reconcile-lost requires the owner's reason" "! lost lost ''"
+check "reconcile-lost refuses providers whose report naming it cannot search" "python '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
+check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
+check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
+check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+python "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
+lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"
+mkdir -p "$(dirname "$lost_patch")"; printf '{}\n' > "$lost_patch"
+check "reconcile-lost refuses while a required patch is unpublished" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+rm -r "$(dirname "$lost_patch")"
+check "reconcile-lost records an owned invocation's loss beside its requirement" "lost owned 'report publication failed' && test -f '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
+# Recording ownership touches the marker, so an unrecorded sandbox waits a retention period again.
+touch -d '3 days ago' "$PR_SB/glm-lostorphan-0123456789ab"
+run_prune 1
+check "prune retires reviews whose loss is recorded" "test ! -e '$PR_STATE/sessions/rid1/claude--lost.json' && test ! -e '$PR_SB/glm-lost-0123456789ab' && grep -q sid-lost '$PR_CALLS' && test ! -e '$PR_SB/glm-lostorphan-0123456789ab' && test ! -e '$PR_SB/glm-owned-0123456789ab'"
+check "a review whose report still exists stays kept" "test -f '$PR_STATE/sessions/rid1/claude--present.json' && test -d '$PR_SB/glm-present-0123456789ab'"
+# An unreadable record may own a sandbox, so the orphan sweep leaves every sandbox alone.
+PR_STATE="$TMP/prune-state-bad"; PR_SB="$TMP/prune-sandboxes-bad"
+mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
+printf '{not json' > "$PR_STATE/sessions/rid1/claude--broken.json"; pr_sandbox broken old >/dev/null
+run_prune 1; pr_bad_rc=$?
+check "an unreadable record stops the unrecorded-sandbox sweep" "test '$pr_bad_rc' -ne 0 && test -d '$PR_SB/glm-broken-0123456789ab'"
+PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"
+NEW_FN="$(sed -n '/^cmd_new()/,/^}/p' "$AI_GLM")"
+check "new retires a bounded batch before creating a session" "printf '%s' \"\$NEW_FN\" | grep -q 'cmd_prune \"\$PRUNE_BATCH\"' && test \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'cmd_prune' | cut -d: -f1)\" -lt \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'create_session' | cut -d: -f1)\""
+check "doctor runs review retention" "sed -n '/^cmd_doctor()/,/^}/p' '$AI_GLM' | grep -q 'cmd_prune'"
+pr_batch() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_PRUNE_BATCH="$1" bash -c 'source "$AI_GLM_SOURCE"; prune_batch_valid' >/dev/null 2>&1; }
+check "a zero prune batch is refused (it would mean unlimited)" "! pr_batch 0"
+check "a non-numeric prune batch is refused, not silently skipped" "! pr_batch abc && ! pr_batch -3 && ! pr_batch 2x"
+check "an empty prune batch falls back to the default" "pr_batch ''"
+check "a positive prune batch is accepted" "pr_batch 25"
+check "new validates the prune batch before pruning" "printf '%s' \"\$NEW_FN\" | grep -q 'prune_batch_valid ||'"
+check "prune refuses a non-numeric removal limit" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$PR_STATE' bash -c 'source \"\$AI_GLM_SOURCE\"; server_up(){ return 0; }; cmd_prune x1' >/dev/null 2>&1; test \$? -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
+
+echo "== delete keeps a sandbox shared across callers =="
+DL_STATE="$TMP/delete-shared-state"; DL_SB="$TMP/delete-shared-sandboxes"; DL_CALLS="$TMP/delete-shared-calls"; DL_BIN="$TMP/delete-shared-sandbox-bin"
+mkdir -p "$DL_STATE/sessions/rid1" "$DL_STATE/sessions/rid0" "$DL_STATE/locks" "$DL_SB"; : > "$DL_CALLS"
+# Records every sandbox call, and whether the sandbox build lock was held when it ran.
+printf '#!/usr/bin/env bash\nheld=free; [ -d "${3:-}.lock" ] && held=held\nprintf "%%s %%s\\n" "$*" "$held" >> "$DL_CALLS"\n' > "$DL_BIN"; chmod +x "$DL_BIN"
+dl_meta() { # CALLER NAME [RID]
+  local sb="$DL_SB/glm-$2-0123456789ab"; mkdir -p "$sb"
+  jq -n --arg c "$1" --arg n "$2" --arg r "$PR_ROOT" --arg b "$sb" \
+    '{name:$n,type:"review",caller:$c,opencode_session_id:("sid-"+$c+"-"+$n),repository_root:$r,boundary_root:$b}' > "$DL_STATE/sessions/${3:-rid1}/$1--$2.json"
+}
+dl_meta claude byrecord; dl_meta codex byrecord
+dl_meta claude bylock; mkdir -p "$DL_STATE/locks/rid1--codex--bylock.lock.d"
+dl_meta claude alone
+dl_meta claude ownlock; mkdir -p "$DL_STATE/locks/rid1--claude--ownlock.lock.d"
+# A moved checkout: this caller's record was migrated to rid1, the other caller's was not.
+dl_meta claude movedrec; dl_meta codex movedrec rid0
+dl_meta claude movedlock; mkdir -p "$DL_STATE/locks/rid0--codex--movedlock.lock.d"
+dl_meta claude building; mkdir "$DL_SB/glm-building-0123456789ab.lock"
+run_delete() { # NAME
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$DL_STATE" AI_GLM_CALLER=claude DL_CALLS="$DL_CALLS" DL_NAME="$1" DL_BIN="$DL_BIN" bash -c '
+    source "$AI_GLM_SOURCE"
+    SANDBOX_BIN="$DL_BIN"
+    find_meta(){ printf "%s/sessions/rid1/%s--%s.json" "$STATE_DIR" "$CALLER" "$1"; }
+    server_up(){ return 0; }
+    api(){ printf "%s %s\n" "$1" "$2" >> "$DL_CALLS"; }
+    cmd_delete "$DL_NAME"' >/dev/null 2>&1
+}
+for dl in byrecord bylock alone ownlock movedrec movedlock building; do run_delete "$dl"; done
+check "delete keeps a sandbox another caller's record shares" "! grep -q 'glm-byrecord' '$DL_CALLS' && test -d '$DL_SB/glm-byrecord-0123456789ab' && test -f '$DL_STATE/sessions/rid1/codex--byrecord.json'"
+check "delete keeps a sandbox another caller's lock shares" "! grep -q 'glm-bylock' '$DL_CALLS'"
+check "delete keeps a sandbox shared with a moved checkout's record" "! grep -q 'glm-movedrec' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid0/codex--movedrec.json'"
+check "delete keeps a sandbox shared with a moved checkout's lock" "! grep -q 'glm-movedlock' '$DL_CALLS'"
+check "a shared delete still retires this caller's session and record" "grep -qx 'DELETE /session/sid-claude-byrecord' '$DL_CALLS' && grep -qx 'DELETE /session/sid-claude-movedlock' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--byrecord.json' && test ! -e '$DL_STATE/sessions/rid1/claude--movedrec.json'"
+check "an unshared delete removes its exact sandbox under the build lock" "grep -qx 'remove-recorded glm-alone .*/glm-alone-0123456789ab held' '$DL_CALLS' && test ! -e '$DL_STATE/sessions/rid1/claude--alone.json'"
+check "delete refuses while this caller's own session is running" "! grep -q 'ownlock' '$DL_CALLS' && test -f '$DL_STATE/sessions/rid1/claude--ownlock.json' && test -d '$DL_SB/glm-ownlock-0123456789ab' && test -d '$DL_STATE/locks/rid1--claude--ownlock.lock.d'"
+check "delete leaves no build or session lock of its own behind" "test ! -e '$DL_SB/glm-alone-0123456789ab.lock' && test ! -e '$DL_SB/glm-byrecord-0123456789ab.lock' && test ! -e '$DL_STATE/locks/rid1--claude--alone.lock.d' && test ! -e '$DL_STATE/locks/rid1--claude--building.lock.d'"
+check "delete refuses while the sandbox is being built, keeping session and record" "test -f '$DL_STATE/sessions/rid1/claude--building.json' && ! grep -q 'building' '$DL_CALLS' && test -d '$DL_SB/glm-building-0123456789ab.lock'"
+
+fi
 echo "== implementation job records =="
 JOB_STATE="$TMP/jobs"; mkdir -p "$JOB_STATE"; : > "$TMP/job-calls"; : > "$TMP/job-permission-calls"
 JOB_ID="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" bash -c 'source "$AI_GLM_SOURCE"; repo_id "$JOB_REPO"')"
@@ -426,15 +781,21 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
     JOB_CALLS="$TMP/job-calls" JOB_PERMISSION_CALLS="$TMP/job-permission-calls" \
     bash -c '
       source "$AI_GLM_SOURCE"
+      source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
+      cd "$JOB_REPO"
+      export AI_GLM_CALLER=codex
+      AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+      export AI_REVIEW_EVENT_RUN_ID
+      if [ "$JOB_FAIL" = publication ]; then reviewer_event_publish_report(){ return 1; }; fi
       require_server(){ :; }; server_up(){ return 0; }; api(){ printf "{}"; }
       permission_http(){
+        printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"
         if [ "$JOB_TURN" = permission ]; then
-          printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"
           HTTP_STATUS=200
           HTTP_BODY='\''{"data":[{"id":"blocked-1","action":"question","resources":["*"]}]}'\''
         elif [ "$JOB_TURN" = transport ]; then
           case "$1 $2" in
-            "GET "*/permission) printf "%s %s\n" "$1" "$2" >> "$JOB_PERMISSION_CALLS"; HTTP_STATUS=000; HTTP_BODY="" ;;
+            "GET "*/permission) HTTP_STATUS=000; HTTP_BODY="" ;;
             *) HTTP_STATUS=200; HTTP_BODY="{}" ;;
           esac
         else
@@ -480,11 +841,47 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
 job_meta() { printf '%s/sessions/%s/codex--%s.json' "$JOB_STATE" "$JOB_ID" "$1"; }
 wait_file() { local f="$1" n=0; while [ ! -e "$f" ] && [ "$n" -lt "$(scale_ticks 100)" ]; do sleep 0.1; n=$((n+1)); done; [ -e "$f" ]; }
 
+implementation_partial_publication_case() {
+  run_fake_impl partial-publication-success '' "$TMP/no-ready" "$TMP/no-release" failure '' binary >"$TMP/partial-publication-success.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication-success)" partial_event partial_patch
+  partial_event="$(jq -r .evidence_run_id "$partial_meta")"; partial_patch="$(jq -r .incomplete_patch_path "$partial_meta")"
+  check "incomplete binary publication finishes both prepared obligations before cleanup" "test '$partial_rc' -ne 0 && jq -e '.outcome==\"failed-partial\" and .artifact_state==\"durable\" and .cleanup.clone==\"removed\" and .cleanup.server_session==\"removed\"' '$partial_meta' >/dev/null"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$partial_event/"*.report.json > "$TMP/recovered-partial.patch"
+  check "incomplete binary patch survives centrally after exact clone cleanup" "test -s '$partial_patch' && cmp -s '$partial_patch' '$TMP/recovered-partial.patch' && grep -q 'GIT binary patch' '$partial_patch'"
+  if [ "$FAIL" -gt 0 ]; then
+    grep -E 'prepared|publication|cleanup refused' "$TMP/partial-publication-success.out" >&2 || true
+  fi
+}
+implementation_publication_cases() {
+  implementation_partial_publication_case
+  run_fake_impl publication-binary '' "$TMP/no-ready" "$TMP/no-release" success '' binary >"$TMP/publication-binary.out" 2>&1; local binary_rc=$?
+  local binary_meta="$(job_meta publication-binary)" binary_event binary_patch
+  binary_event="$(jq -r .evidence_run_id "$binary_meta")"; binary_patch="$(jq -r .patch_path "$binary_meta")"
+  jq -bj 'select(.artifact_kind=="git-binary-patch").report_text' "$AI_REVIEW_EVENT_DIR/evidence/$binary_event/"*.report.json > "$TMP/recovered-binary.patch"
+  check "complete binary patch survives centrally after clone cleanup" "test '$binary_rc' -eq 0 && test ! -e \"\$(jq -r .clone_path '$binary_meta')\" && cmp -s '$binary_patch' '$TMP/recovered-binary.patch' && grep -q 'GIT binary patch' '$TMP/recovered-binary.patch'"
+  run_fake_impl publication-refusal '' "$TMP/no-ready" "$TMP/no-release" success publication >"$TMP/publication-refusal.out" 2>&1; local publication_rc=$?
+  local publication_meta="$(job_meta publication-refusal)"
+  check "publication refusal retains exact prompt clone and pending ownership" "test '$publication_rc' -ne 0 && jq -e '.cleanup.clone==\"preserved\" and .cleanup.server_session==\"pending\" and .provider_submission_started==true' '$publication_meta' >/dev/null && test -f \"\$(jq -r .prompt_path '$publication_meta')\" -a -d \"\$(jq -r .clone_path '$publication_meta')\""
+  check "publication refusal retains original paid response at its recorded path" "test -f \"\$(jq -r .report_path '$publication_meta')\" && grep -qx done \"\$(jq -r .report_path '$publication_meta')\""
+  check "publication refusal never deletes paid server session" "! grep -q 'DELETE /session/sid-publication-refusal' '$TMP/job-permission-calls'"
+  run_fake_impl partial-publication '' "$TMP/no-ready" "$TMP/no-release" failure publication binary >"$TMP/partial-publication.out" 2>&1; local partial_rc=$?
+  local partial_meta="$(job_meta partial-publication)"
+  check "incomplete publication refusal records both exact retained artifact paths" "test '$partial_rc' -ne 0 && test -f \"\$(jq -r .incomplete_report_path '$partial_meta')\" -a -f \"\$(jq -r .incomplete_patch_path '$partial_meta')\" -a -d \"\$(jq -r .clone_path '$partial_meta')\""
+}
+if [ "${AI_GLM_PARTIAL_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_partial_publication_case
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+if [ "${AI_GLM_OWNER_PUBLICATION_ONLY:-0}" = 1 ]; then
+  implementation_publication_cases
+  printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; exit $?
+fi
+
 READY="$TMP/record-ready"; RELEASE="$TMP/record-release"
 run_fake_impl exclusive record "$READY" "$RELEASE" >"$TMP/exclusive.out" 2>&1 & exclusive_pid=$!
 wait_file "$READY"
 EX_META="$(job_meta exclusive)"
-check "implement_record_exists_before_clone_creation" "test -f '$EX_META' -a \"\$(jq -r .status '$EX_META')\" = starting -a \"\$(jq -r .clone_path '$EX_META')\" = null"
+check "implement_record_exists_before_clone_creation" "test -f '$EX_META' -a \"\$(jq -r .status '$EX_META')\" = starting && jq -e '.clone_path!=null and (.evidence_run_id|length)==32' '$EX_META' >/dev/null && test ! -e \"\$(jq -r .clone_path '$EX_META')\""
 check "implement_list_and_show_are_type_and_state_aware" "AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' list | grep -qE 'exclusive.*implementation.*starting' && (cd '$TMP/repoA' && AI_GLM_CALLER=codex AI_GLM_STATE_DIR='$JOB_STATE' '$AI_GLM' show exclusive | jq -e '.type==\"implementation\" and .status==\"starting\"' >/dev/null)"
 before_calls="$(wc -l < "$TMP/job-calls" 2>/dev/null || echo 0)"
 run_fake_impl exclusive >"$TMP/duplicate.out" 2>&1; duplicate_rc=$?
@@ -496,7 +893,7 @@ check "delete_refuses_active_implementation_job" "! (cd '$TMP/repoA' && AI_GLM_C
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" JOB_REPO="$TMP/repoA" \
   bash -c 'source "$AI_GLM_SOURCE"; require_server(){ :; }; permission_http(){ HTTP_STATUS=200; HTTP_BODY="{}"; }; REPO_OVERRIDE="$JOB_REPO"; CALLER=codex; cmd_abort exclusive' >/dev/null 2>&1
 check "starting-job abort is recorded before a server session exists" "test \"\$(jq -r .status '$EX_META')\" = abort-requested"
-check "starting-job abort has no clone to delete" "test \"\$(jq -r .clone_path '$EX_META')\" = null"
+check "starting-job abort has no clone to delete" "test ! -e \"\$(jq -r .clone_path '$EX_META')\""
 touch "$RELEASE"; wait "$exclusive_pid" || true
 check "pre-resource abort records terminal state" "test \"\$(jq -r .status '$EX_META')\" = aborted -a \"\$(jq -r .cleanup.clone '$EX_META')\" = none"
 
@@ -577,7 +974,7 @@ check "Windows clone enables long paths before checkout" "grep -q 'git -c core.l
 check "Windows exact cleanup uses Git long-path removal" "grep -q 'core.longpaths=true -C.*rm -rf' '$AI_GLM'"
 run_fake_impl patch-failed '' "$TMP/no-ready" "$TMP/no-release" success patch >"$TMP/patch-failed.out" 2>&1; patch_rc=$?
 PATCH_META="$(job_meta patch-failed)"; PATCH_CLONE="$JOB_STATE/wt/$JOB_ID/codex--patch-failed"
-check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .report_path '$PATCH_META')\" != null -a ! -e '$PATCH_CLONE'"
+check "patch_failure_preserves_recovery_evidence" "test $patch_rc -ne 0 -a \"\$(jq -r .status '$PATCH_META')\" = failed -a \"\$(jq -r .failure '$PATCH_META')\" = patch-export-failed -a \"\$(jq -r .artifact_state '$PATCH_META')\" = durable -a ! -e '$PATCH_CLONE' && REPORT=\"\$(jq -r .report_path '$PATCH_META')\" && test -s \"\$REPORT\" && grep -q done \"\$REPORT\" && grep -q 'Patch export failed' \"\$REPORT\""
 
 for export_fail in incomplete-destination incomplete-move incomplete-metadata; do
   run_fake_impl "export-$export_fail" '' "$TMP/no-ready" "$TMP/no-release" failure "$export_fail" untracked >"$TMP/export-$export_fail.out" 2>&1; export_rc=$?
@@ -598,14 +995,28 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
 NORMAL_HASH_AFTER="$(sha256sum "$NORMAL_META" | awk '{print $1}')"
 check "repeated finalization is idempotent" "test '$NORMAL_HASH_BEFORE' = '$NORMAL_HASH_AFTER'"
 
+bind_fixture_owner() {
+  AI_GLM_SOURCE="$AI_GLM" OWNER_FIXTURE="$1" JOB_REPO="$TMP/repoA" bash -c '
+    source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
+    cd "$JOB_REPO"; export AI_GLM_CALLER=codex
+    AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+    export AI_REVIEW_EVENT_RUN_ID
+    jq "del(.evidence_run_id)" "$OWNER_FIXTURE" > "$OWNER_FIXTURE.tmp" && mv "$OWNER_FIXTURE.tmp" "$OWNER_FIXTURE" || exit 1
+    reviewer_event_evidence bind-owner glm "$OWNER_FIXTURE" || exit 1
+    report="$(jq -r ".report_path // empty" "$OWNER_FIXTURE")"
+    [ -z "$report" ] || reviewer_event_publish_report glm "$report"
+  '
+}
+
 RECON_META="$(job_meta reconcile-dead)"; RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--reconcile-dead"; RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--reconcile-dead.lock.d"
 mkdir -p "$RECON_CLONE" "$RECON_LOCK"
 jq --arg n reconcile-dead --arg clone "$RECON_CLONE" --argjson pid 99999999 \
   '.name=$n | .status="running" | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .failure=null | .cleanup={clone:"pending",server_session:"pending"}' \
   "$FAILED_META" > "$RECON_META"
 printf 99999999 > "$RECON_LOCK/pid"
+bind_fixture_owner "$RECON_META"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" RECON_META="$RECON_META" \
-  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$RECON_META"' >/dev/null 2>&1
+  bash -c 'source "$AI_GLM_SOURCE"; source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"; CALLER=codex; reconcile_implementation_record "$RECON_META"' >/dev/null 2>&1
 check "dead_owner_reconciliation_requires_all_safety_checks" "test \"\$(jq -r .status '$RECON_META')\" = failed -a \"\$(jq -r .failure '$RECON_META')\" = owner-process-died -a ! -e '$RECON_CLONE' -a ! -e '$RECON_LOCK'"
 
 PERM_RECON_META="$(job_meta permission-reconcile)"; PERM_RECON_CLONE="$JOB_STATE/wt/$JOB_ID/codex--permission-reconcile"; PERM_RECON_LOCK="$JOB_STATE/locks/$JOB_ID--codex--permission-reconcile.lock.d"
@@ -614,8 +1025,9 @@ jq --arg n permission-reconcile --arg clone "$PERM_RECON_CLONE" --argjson pid 99
   '.name=$n | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .finished_at=null | .exit_code=null | .cleanup={clone:"pending",server_session:"pending"}' \
   "$PERMISSION_META" > "$PERM_RECON_META"
 printf 99999998 > "$PERM_RECON_LOCK/pid"
+bind_fixture_owner "$PERM_RECON_META"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" PERM_RECON_META="$PERM_RECON_META" \
-  bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$PERM_RECON_META"' >/dev/null 2>&1
+  bash -c 'source "$AI_GLM_SOURCE"; source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"; CALLER=codex; reconcile_implementation_record "$PERM_RECON_META"' >/dev/null 2>&1
 check "dead permission-failure owner completes cleanup without losing cause" "test \"\$(jq -r .status '$PERM_RECON_META')\" = failed -a \"\$(jq -r .failure '$PERM_RECON_META')\" = permission-unsupported-action -a \"\$(jq -r .cleanup.clone '$PERM_RECON_META')\" = removed -a ! -e '$PERM_RECON_CLONE' -a ! -e '$PERM_RECON_LOCK'"
 
 FORGED_META="$(job_meta forged-outside)"; FORGED_CLONE="$TMP/outside-owned-by-user"; FORGED_LOCK="$JOB_STATE/locks/$JOB_ID--codex--forged-outside.lock.d"
@@ -627,6 +1039,20 @@ printf 99999999 > "$FORGED_LOCK/pid"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" FORGED_META="$FORGED_META" \
   bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$FORGED_META" || true' >/dev/null 2>&1
 check "live_owner_and_forged_or_outside_paths_are_never_swept" "test -d '$FORGED_CLONE' -a -f '$FORGED_META' -a \"\$(jq -r .status '$FORGED_META')\" = running"
+
+GONE_ROOT="$TMP/deleted-worktree"
+for gone in completed:removed failed:removed running:removed failed:pending completed:failed completed:preserved completed:ambiguous completed:missing; do
+  GONE_META="$(job_meta "gone-${gone%%:*}-${gone##*:}")"
+  jq --arg n "gone-${gone%%:*}-${gone##*:}" --arg root "$GONE_ROOT" --arg st "${gone%%:*}" --arg cl "${gone##*:}"     --arg clone "$JOB_STATE/wt/$JOB_ID/codex--gone-${gone%%:*}-${gone##*:}" --argjson pid 99999997     '.name=$n | .repository_root=$root | .status=$st | .owner_pid=$pid | .clone_path=$clone | .opencode_session_id=null | .cleanup={clone:$cl,server_session:"removed"} | if $cl == "missing" then del(.cleanup) else . end'     "$FAILED_META" > "$GONE_META"
+done
+gone_warns() {
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP/cfg" GONE_META="$(job_meta "$1")"     bash -c 'source "$AI_GLM_SOURCE"; CALLER=codex; reconcile_implementation_record "$GONE_META"' 2>&1 | grep -c 'malformed implementation record' || true
+}
+check "finished job whose repository was deleted is not malformed" "test \"\$(gone_warns gone-completed-removed)\" = 0 -a \"\$(gone_warns gone-failed-removed)\" = 0"
+for gone in running-removed failed-pending completed-failed completed-preserved completed-ambiguous completed-missing; do
+  check "job without its repository and without confirmed cleanup stays malformed ($gone)" "test \"\$(gone_warns gone-$gone)\" = 1"
+done
+for gone in completed-removed failed-removed running-removed failed-pending completed-failed completed-preserved completed-ambiguous completed-missing; do rm -f "$(job_meta gone-$gone)"; done
 
 READY_A="$TMP/a-ready"; READY_B="$TMP/b-ready"; RELEASE_A="$TMP/a-release"; RELEASE_B="$TMP/b-release"
 run_fake_impl parallel-a record "$READY_A" "$RELEASE_A" >"$TMP/a.out" 2>&1 & pid_a=$!
@@ -643,6 +1069,7 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$JOB_STATE" AI_DEVOPS_CONFIG_DIR="$TMP
 touch "$RACE_RELEASE"; wait "$race_pid" || true
 check "abort_completion_race_records_observed_truth" "jq -e '.status==\"completed\" and .outcome==\"completed\" and .incomplete_patch_path==null' '$RACE_META' >/dev/null"
 check "ambiguous_server_state_is_reported_not_deleted" "grep -q 'server state.*ambiguous' '$AI_GLM'"
+implementation_publication_cases
 (cd "$TMP/repoA" && AI_GLM_CALLER=codex AI_GLM_STATE_DIR="$JOB_STATE" "$AI_GLM" delete normal >/dev/null 2>&1)
 check "terminal_record_can_be_cleared_for_safe_name_reuse" "test ! -e '$NORMAL_META'"
 
@@ -832,8 +1259,9 @@ rm -rf "$LIVE_TMP"
 
 check "touch_liveness is driven by the assistant message, not /session/status" \
   "awk '/^await_turn\(\)/,/^}/' '$AI_GLM' | grep -q 'touch_liveness \"\$msg\"'"
-check "both review call sites arm TURN_META before await_turn" \
-  "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 2 ]"
+check "review and recovery call sites arm TURN_META before await_turn" \
+  "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 3 ]"
 
+glm_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

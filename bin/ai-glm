@@ -6,10 +6,12 @@
 # server URL, the credentials, the API shapes, and every safety invariant.
 #
 #   ai-glm new <name> [--prompt T | --prompt-file F | stdin]   start a review session
+#   ai-glm recover <name>         recover exact pending work without resubmitting
 #   ai-glm ask <name> [...]                                    continue it
 #   ai-glm implement <name> [...]                              one-shot write job in a throwaway clone
 #   ai-glm list | show <name> | transcript <name> | diff <name>
 #   ai-glm abort <name> | delete <name>
+#   ai-glm prune                                               delete reviews idle past retention
 #   ai-glm doctor
 #   ai-glm server status|start|stop|restart
 #
@@ -168,17 +170,33 @@ curl_auth_config() {
   auth="$user:$pw"; auth="${auth//\\/\\\\}"; auth="${auth//\"/\\\"}"
   printf 'user = "%s"\n' "$auth"
 }
+glm_now() { date +%s; }
+glm_new_deadline() {
+  case "$TIMEOUT" in ''|*[!0-9]*) warn 'GLM timeout must be whole seconds.'; return 1 ;; esac
+  printf '%s' "$(( $(glm_now) + 10#$TIMEOUT ))"
+}
+glm_http_budget() { # bound each request and sleep by the current turn's remaining wall time
+  local limit="$1" remaining
+  if [ -n "${GLM_HTTP_DEADLINE:-}" ]; then
+    remaining=$((GLM_HTTP_DEADLINE - $(glm_now)))
+    [ "$remaining" -gt 0 ] || return 124
+    [ "$limit" -gt 0 ] && [ "$remaining" -ge "$limit" ] || limit="$remaining"
+  fi
+  printf '%s' "$limit"
+}
 api() { # api METHOD PATH [JSON_BODY_FILE]
-  local method="$1" path="$2" body="${3:-}"
+  local method="$1" path="$2" body="${3:-}" budget
+  budget="$(glm_http_budget 120)" || return $?
   if [ -n "$body" ]; then
-    curl_auth_config | curl --config - -sS -m 120 \
+    curl_auth_config | curl --config - -sS -m "$budget" \
       -X "$method" "$BASE$path" -H 'content-type: application/json' --data-binary @"$body"
   else
-    curl_auth_config | curl --config - -sS -m 120 -X "$method" "$BASE$path"
+    curl_auth_config | curl --config - -sS -m "$budget" -X "$method" "$BASE$path"
   fi
 }
 api_code() { # api_code METHOD PATH [MAX_SECONDS] -> HTTP status only
   local max_seconds="${3:-30}"
+  max_seconds="$(glm_http_budget "$max_seconds")" || return $?
   curl_auth_config | curl --config - -sS -m "$max_seconds" -o /dev/null -w '%{http_code}' \
     -X "$1" "$BASE$2" 2>/dev/null || echo 000
 }
@@ -218,7 +236,7 @@ review_boundary() { # review_boundary ROOT NAME -> directory to hand the reviewe
 }
 release_boundary() { # release_boundary ROOT NAME
   [ -n "$SANDBOX_BIN" ] || return 0
-  "$SANDBOX_BIN" remove-copy "$1" "glm-$2" || warn "review snapshot for '$2' could not be removed."
+  "$SANDBOX_BIN" remove-copy "$1" "glm-$2"
 }
 
 # --- evidence packet ----------------------------------------------------------
@@ -241,7 +259,10 @@ REVIEW_DIR=""; REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""
 # Sets the globals above. Never call it in a command substitution: the identity
 # would be computed in a subshell and lost.
 prepare_review() { # prepare_review ROOT NAME [RECORDED_BOUNDARY]
-  local root="$1" name="$2" recorded="${3:-}" pkt want refreshed
+  local root="$1" name="$2" recorded="${3:-}" pkt want refreshed identity
+  identity="$(mktemp)" || die "could not reserve source identity"
+  "$PACKET_BIN" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
+    || { rm -f "$identity"; die "source identity refused before snapshot creation"; }
   if [ -z "$recorded" ]; then
     REVIEW_DIR="$(review_boundary "$root" "$name")"
   elif [ "$(cd "$recorded" 2>/dev/null && pwd -P || printf '%s' "$recorded")" = "$(cd "$root" && pwd -P)" ]; then
@@ -266,10 +287,12 @@ reviewed. Re-read the SHA from git rather than transcribing it."
   fi
   [ -n "$PACKET_BIN" ] || die "ai-review-packet is missing; install the toolkit's bin/ on PATH. A review without an evidence packet burns its whole budget rediscovering the diff."
   pkt="$("$PACKET_BIN" build "$REVIEW_DIR" "glm-$name" --class small \
-           ${OPT_BASE:+--base "$OPT_BASE"} \
+           --identity "$identity" \
            ${OPT_TESTS:+--tests "$OPT_TESTS"} \
            ${OPT_DECISION:+--decision "$OPT_DECISION"})" \
-    || die "could not build the review evidence packet for $REVIEW_DIR"
+    || { rm -f "$identity"; die "could not build the review evidence packet for $REVIEW_DIR"; }
+  "$PACKET_BIN" verify "$pkt" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source evidence verification failed"; }
+  rm -f "$identity"
   REVIEW_BASE="$(sed -n 's/^| \*\*base\*\* | `\([0-9a-f]\{40\}\)`.*/\1/p' "$pkt/MANIFEST.md" | head -1)"
   PACKET_REL="$(basename "$pkt")"
   PACKET_HASH="$(cat "$pkt/MANIFEST.sha256")"
@@ -359,19 +382,49 @@ write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem
 # before submitting, then refuse a same-name continuation until a proven terminal
 # result clears it. This is deliberately narrower than Grok's cross-checkout
 # lock: GLM sessions are bound to one exact OpenCode session.
-mark_remote_turn_pending() { # META
-  local meta="$1" now
+mark_remote_turn_pending() { # META [PREVIOUS_ASSISTANT_ID]
+  local meta="$1" now previous="${2:-}"
   now="$(date -u +%FT%TZ)"
-  write_meta "$meta" "$(jq --arg now "$now" '.remote_turn={state:"pending",started_at:$now}' "$meta")"
+  GLM_REQUESTED_DEADLINE="$(glm_new_deadline)" || return 1
+  write_meta "$meta" "$(jq --arg now "$now" --argjson deadline "$GLM_REQUESTED_DEADLINE" --arg previous "$previous" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" --arg head "${REVIEW_HEAD:-}" --arg base "${REVIEW_BASE:-}" --arg packet "${PACKET_HASH:-}" --arg boundary "${REVIEW_DIR:-}" '.remote_turn={state:"pending",started_at:$now,deadline_epoch:$deadline,previous_message_id:$previous,original_invocation_id:$event,head:$head,base:$base,packet_sha256:$packet,boundary_root:$boundary}' "$meta")"
 }
 
 remote_turn_pending() { # META
-  jq -e '.remote_turn.state == "pending"' "$1" >/dev/null 2>&1
+  jq -e '.remote_turn.state == "pending" or .remote_turn.state == "completed-unpublished"' "$1" >/dev/null 2>&1
 }
 
 clear_remote_turn_pending() { # META
   local meta="$1"
   write_meta "$meta" "$(jq 'del(.remote_turn)' "$meta")"
+}
+
+persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local work
+  local meta="$1" msg="$2" target="${1%.json}.terminal.json" temporary digest branch version
+  printf '%s' "$msg" | jq -e '.finish=="stop" and (.id|type=="string") and (.id|length)>0' >/dev/null || return 1
+  temporary="$(mktemp "${target}.XXXXXX")" || return 1
+  printf '%s\n' "$msg" > "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$target" || { rm -f "$temporary"; return 1; }
+  digest="$(sha256sum "$target" | cut -d' ' -f1)" || return 1
+  GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$meta")"
+  write_meta "$meta" "$(jq --arg path "$target" --arg digest "$digest" '.remote_turn.state="completed-unpublished" | .remote_turn.terminal_path=$path | .remote_turn.terminal_sha256=$digest' "$meta")" || return 1
+  # Preserve display context once: local branch/server changes must not change
+  # the bytes of an already published report during an exact retry.
+  branch="$(git -C "$(jq -r .repository_root "$meta")" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null)" || version=unavailable
+  [ -n "$version" ] || version=unavailable
+  write_meta "$meta" "$(jq --arg branch "$branch" --arg version "$version" '.remote_turn.report_branch=(.remote_turn.report_branch // $branch) | .remote_turn.report_server_version=(.remote_turn.report_server_version // $version)' "$meta")" || return 1
+  restore_report_context "$meta"
+}
+
+restore_report_context() {
+  GLM_REPORT_BRANCH="$(jq -r '.remote_turn.report_branch // "unavailable"' "$1")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r '.remote_turn.report_server_version // "unavailable"' "$1")"
+}
+
+record_review_publication() { # META REPORT; clear fence only after this succeeds
+  local meta="$1" report="$2" digest
+  [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  digest="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
+  write_meta "$meta" "$(jq --arg report "$report" --arg digest "$digest" '.last_completed_turn=.remote_turn | .last_completed_turn.report=$report | .last_completed_turn.report_sha256=$digest' "$meta")"
 }
 
 implementation_terminal() {
@@ -473,7 +526,17 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
   root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
   name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
   valid_name "$name" || return 1
-  [ -d "$root" ] && [ "$rid" = "$(repo_id "$root")" ] || return 1
+  if [ -d "$root" ]; then
+    [ "$rid" = "$(repo_id "$root")" ] || return 1
+  else
+    # The job's repository was removed after the job ended (a deleted worktree).
+    # A finished record with nothing left to clean up is still trustworthy history;
+    # a live or cleanup-pending job without its repository stays ambiguous.
+    jq -e '.status|IN("completed","failed","aborted")' "$f" >/dev/null 2>&1 || return 1
+    jq -e '(.cleanup|type)=="object" and
+      (.cleanup.clone|IN("removed","absent","none")) and
+      (.cleanup.server_session|IN("removed","absent","none"))' "$f" >/dev/null 2>&1 || return 1
+  fi
   [ "$caller" = "$expected_caller" ] || return 1
   [ -z "$expected_root" ] || [ "$(canonical_path "$root" "$root")" = "$(canonical_path "$expected_root" "$expected_root")" ] || return 1
   clone="$(jq -r '.clone_path // empty' "$f")"
@@ -545,17 +608,18 @@ PERMISSION_HTTP_ATTEMPTS="${AI_GLM_PERMISSION_HTTP_ATTEMPTS:-3}"
 PERMISSION_HTTP_RETRY_SECS="${AI_GLM_PERMISSION_HTTP_RETRY_SECS:-2}"
 PERMISSION_HTTP_TIMEOUT="${AI_GLM_PERMISSION_HTTP_TIMEOUT:-20}"
 permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTTP_BODY
-  local method="$1" path="$2" json="${3:-}" pw tmp rc attempt=1
-  pw="$(server_pw)"
+  local method="$1" path="$2" json="${3:-}" tmp rc attempt=1 budget
+  GLM_HTTP_DEADLINE_HIT=0
   while :; do
+    budget="$(glm_http_budget "$PERMISSION_HTTP_TIMEOUT")" || { GLM_HTTP_DEADLINE_HIT=1; HTTP_STATUS=000; HTTP_BODY=""; return 0; }
     rc=0; tmp="$(mktemp)"
     if [ -n "$json" ]; then
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         -H 'content-type: application/json' -d "$json" 2>/dev/null)" || rc=$?
     else
-      HTTP_STATUS="$(curl -sS -m "$PERMISSION_HTTP_TIMEOUT" -o "$tmp" -w '%{http_code}' \
-        -u "${OPENCODE_SERVER_USERNAME:-opencode}:$pw" -X "$method" "$BASE$path" \
+      HTTP_STATUS="$(curl_auth_config | curl --config - -sS -m "$budget" -o "$tmp" -w '%{http_code}' \
+        -X "$method" "$BASE$path" \
         2>/dev/null)" || rc=$?
     fi
     HTTP_BODY="$(cat "$tmp")"; rm -f "$tmp"
@@ -563,9 +627,13 @@ permission_http() { # permission_http METHOD PATH [JSON]; sets HTTP_STATUS + HTT
     # A server that DID answer keeps its real status and still fails closed elsewhere.
     # Only the never-answered case reaches here and is retried.
     HTTP_STATUS="000"
+    if [ -n "${GLM_HTTP_DEADLINE:-}" ] && [ "$(glm_now)" -ge "$GLM_HTTP_DEADLINE" ]; then
+      GLM_HTTP_DEADLINE_HIT=1; return 0
+    fi
     [ "$attempt" -lt "$PERMISSION_HTTP_ATTEMPTS" ] || return 0
     attempt=$((attempt + 1))
-    sleep "$PERMISSION_HTTP_RETRY_SECS"
+    budget="$(glm_http_budget "$PERMISSION_HTTP_RETRY_SECS")" || { GLM_HTTP_DEADLINE_HIT=1; return 0; }
+    sleep "$budget"
   done
 }
 
@@ -772,6 +840,7 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
   local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" rows id action resources prior category err msg stuck boundary code summary guidance
   guidance="$(permission_next_step "$name" "$impl_meta")"
   permission_http GET "/api/session/$sid/permission"
+  [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
   # OpenCode 1.18.12 emits the same metadata-free HTTP 500 UnknownError while a normal
   # read is running and while an outside-directory read is stuck. The status is not a
   # permission signal by itself. Use the measured running read input deterministically;
@@ -841,6 +910,7 @@ handle_permissions() { # SID NAME MODE SESSION_DIR [IMPLEMENTATION_META]
            "$HTTP_STATUS" "$mode" inside "")"
     fi
     permission_http POST "/api/session/$sid/permission/$id/reply" '{"reply":"always"}'
+    [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 0 ] || return 124
     case "$HTTP_STATUS" in
       2*) ;;
       000) fail_permission "$impl_meta" "$root" transport-failed \
@@ -866,12 +936,20 @@ last_assistant() { # -> JSON of the newest assistant message
   api GET "/api/session/$1/message?limit=1" | jq -c '.data[0] // {}'
 }
 
+previous_message_id() { # prove the pre-submission watermark; errors are not empty history
+  local response
+  response="$(api GET "/api/session/$1/message?limit=1")" || return 1
+  printf '%s' "$response" | jq -r 'if (.data|type)!="array" then error("invalid message history") elif (.data|length)==0 then "" elif (.data[0].id|type)=="string" and (.data[0].id|length)>0 then .data[0].id else error("message identity missing") end'
+}
+
 running_tools() {
   printf '%s' "$1" | jq -r '[.content[]? | select(.type=="tool" and .state.status=="running") | .name] | join(", ")'
 }
 
 send_prompt() { # send_prompt SID PROMPT_FILE
   local sid="$1" pf="$2" body
+  if [ -z "${GLM_REQUESTED_DEADLINE:-}" ]; then GLM_REQUESTED_DEADLINE="$(glm_new_deadline)" || return 1; fi
+  local GLM_HTTP_DEADLINE="$GLM_REQUESTED_DEADLINE"
   body="$(mktemp)"
   jq -Rs '{prompt:{text:.}}' < "$pf" > "$body"
   if ! api POST "/api/session/$sid/prompt" "$body" > /dev/null; then
@@ -903,17 +981,33 @@ touch_liveness() { # touch_liveness ASSISTANT_JSON
 }
 
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
-  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" waited=0 idle=0 msg finish stuck
+  local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" idle=0 msg='{}' finish stuck previous="" saved_deadline budget poll_rc
+  local GLM_HTTP_DEADLINE
+  GLM_HTTP_DEADLINE="${GLM_REQUESTED_DEADLINE:-$(glm_new_deadline)}" || return 1
+  if [ -n "$TURN_META" ]; then
+    previous="$(jq -r '.remote_turn.previous_message_id // empty' "$TURN_META")"
+    saved_deadline="$(jq -r '.remote_turn.deadline_epoch // empty' "$TURN_META")"
+    if [ -n "$saved_deadline" ]; then
+      [[ "$saved_deadline" =~ ^[0-9]+$ ]] || return 1
+      [ "$saved_deadline" -ge "$GLM_HTTP_DEADLINE" ] || GLM_HTTP_DEADLINE="$saved_deadline"
+    fi
+  fi
   APPROVED_PERMISSION_IDS=""
-  sleep 6
-  while [ "$waited" -lt "$TIMEOUT" ]; do
-    handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta"
+  if budget="$(glm_http_budget 6)"; then sleep "$budget"; fi
+  while [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ]; do
+    poll_rc=0; handle_permissions "$sid" "$name" "$mode" "$root" "$impl_meta" || poll_rc=$?
+    if [ "$poll_rc" -ne 0 ]; then
+      [ "${GLM_HTTP_DEADLINE_HIT:-0}" = 1 ] && break
+      return "$poll_rc"
+    fi
+    [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ] || break
     if api GET /session/status | grep -q "$sid"; then
       idle=0
     else
       idle=$((idle + 1))
     fi
-    msg="$(last_assistant "$sid")"
+    [ "$(glm_now)" -lt "$GLM_HTTP_DEADLINE" ] || break
+    msg="$(last_assistant "$sid")" || { poll_rc=$?; [ "$(glm_now)" -ge "$GLM_HTTP_DEADLINE" ] && break; return "$poll_rc"; }
     # LIVENESS -- stamped from the ASSISTANT MESSAGE, not from /session/status.
     # A first attempt hooked this to the `idle=0` branch above and DID NOT WORK: on a
     # real review /session/status returned `{}` for the whole turn, so that branch never
@@ -921,18 +1015,17 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     # The message digest is the signal that actually moves while the model produces
     # output, so `provider_progress_at` means "the provider emitted something new".
     # `last_poll_at` is the weaker companion: the wrapper is alive and polling.
-    touch_liveness "$msg"
+    [ -n "$previous" ] && [ "$(printf '%s' "$msg" | jq -r '.id // empty')" = "$previous" ] || touch_liveness "$msg"
     finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
-    if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ]; then
+    if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ] && { [ -z "$previous" ] || [ "$(printf '%s' "$msg" | jq -r '.id // empty')" != "$previous" ]; }; then
       printf '%s' "$msg"; return 0
     fi
     if [ -n "$impl_meta" ] && implementation_abort_requested "$impl_meta" && [ "$idle" -ge 2 ]; then
       return 130
     fi
-    sleep "$POLL_SECS"
-    waited=$((waited + POLL_SECS))
+    budget="$(glm_http_budget "$POLL_SECS")" || break
+    sleep "$budget"
   done
-  msg="$(last_assistant "$sid")"
   stuck="$(running_tools "$msg")"
   finish="$(printf '%s' "$msg" | jq -r '.finish // "none"')"
   if [ -n "$impl_meta" ]; then
@@ -953,12 +1046,18 @@ msg_tokens() { printf '%s' "$1" | jq -c '.tokens // null'; }
 # Reports
 # --------------------------------------------------------------------------------
 write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
-  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  local root="$1" name="$2" kind="$3" text="$4" tokens="$5" sid="$6" ts f branch ver tmp
+  ts="${GLM_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)}"
+  [ -z "${GLM_REPORT_KEY:-}" ] || [[ "$GLM_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
   f="$root/.ai/reviews/glm-$name-$ts.md"
   mkdir -p "$(dirname "$f")"
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  tmp="$(mktemp "$(dirname "$f")/.glm-report.XXXXXX")" || return 1
+  if [ -n "${GLM_REPORT_KEY:-}" ]; then
+    branch="${GLM_REPORT_BRANCH:-unavailable}"; ver="${GLM_REPORT_SERVER_VERSION:-unavailable}"
+  else
+    branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    ver="$( (api GET /global/health | jq -r .version) 2>/dev/null || echo '?')"
+  fi
   {
     printf '# GLM %s — %s\n\n' "$kind" "$name"
     printf '| field | value |\n|---|---|\n'
@@ -969,10 +1068,35 @@ write_report() { # write_report ROOT NAME KIND TEXT TOKENS SID
     printf '| repository | %s |\n' "$root"
     printf '| branch | %s |\n' "$branch"
     printf '| caller | %s |\n' "$CALLER"
-    printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf '| tokens | `%s` |\n\n' "$tokens"
+    if [ -n "${GLM_REPORT_KEY:-}" ]; then
+      printf '| requested | %s |\n' "${GLM_REPORT_REQUESTED_AT:-unavailable}"
+    else
+      printf '| requested | %s |\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fi
+    printf '| last step adapter tokens | `%s` |\n\n' "$tokens"
     printf -- '---\n\n%s\n' "$text"
-  } > "$f"
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  else
+    ln "$tmp" "$f" 2>/dev/null || {
+      [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+    }
+  fi
+  rm -f "$tmp"
+  local facts='{"phase":"report-publication"}'
+  if [ -n "${GLM_RECOVERY_EVENT_RUN_ID:-}" ]; then
+    [[ "$GLM_RECOVERY_EVENT_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 1
+    facts="{\"phase\":\"report-publication\",\"original_invocation_id\":\"$GLM_RECOVERY_EVENT_RUN_ID\"}"
+    if [ -n "${GLM_RECOVERY_STATE:-}" ]; then
+      [ "$GLM_RECOVERY_STATE" = completed-stale-source ] && [[ "${GLM_ORIGINAL_HEAD_SHA:-}" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
+      facts="${facts%\}},\"recovery_state\":\"completed-stale-source\",\"original_head_sha\":\"$GLM_ORIGINAL_HEAD_SHA\"}"
+    fi
+  fi
+  if [ -n "${IMPL_META:-}" ]; then
+    reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" report "$f" || return 1
+  fi
+  reviewer_event_publish_report glm "$f" "$facts" || return 1
   printf '%s' "$f"
 }
 
@@ -983,10 +1107,13 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
           --arg model "$PROVIDER/$MODEL" --arg caller "$CALLER" \
       '{schema_version:1, ok:true,
         session:{name:$name, type:$kind, id:$sid, caller:$caller, model:$model},
-        response:{text:$text}, usage:$tokens, artifacts:{report:$report}}'
+        response:{text:$text}, usage:$tokens,
+        usage_scope:"last-assistant-step",
+        usage_completeness:(if $tokens==null then "unavailable" else "adapter-provider-missingness-unknown" end),
+        artifacts:{report:$report}}'
   else
     printf '%s\n' "$4"
-    printf '\n--- session: %s (%s)  model: %s/%s  tokens: %s\n--- report: %s\n' \
+    printf '\n--- session: %s (%s)  model: %s/%s  last step adapter tokens: %s\n--- report: %s\n' \
       "$1" "$2" "$PROVIDER" "$MODEL" "${5:-null}" "$6" >&2
   fi
 }
@@ -1032,13 +1159,17 @@ verify_model() { # verify_model MSG_JSON — reject silent provider fallback
 }
 
 cmd_new() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report lock diag_run previous_message
   valid_name "$name" || die "invalid session name '$name' (use letters, numbers, . _ -)"
   root="${REPO_OVERRIDE:-$(repo_root)}"
   [ -d "$root/.git" ] || [ -f "$root/.git" ] || die "not a git repository: $root"
   rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
+  # Every new review registers one more directory with the server; retire a bounded
+  # batch of idle ones first so the registered set cannot grow without limit.
+  prune_batch_valid || die "AI_GLM_PRUNE_BATCH must be a positive whole number (got '$PRUNE_BATCH')."
+  ( cmd_prune "$PRUNE_BATCH" ) >/dev/null 2>&1 || true
   lock="$(lock_path "$rid" "$name")"
   lock_acquire "$lock" "$LOCK_TIMEOUT" || die "session '$name' is busy and did not free up within ${LOCK_TIMEOUT}s."
   [ ! -f "$mp" ] || die "session '$name' already exists for caller '$CALLER' in this repo. Use: ai-glm ask $name"
@@ -1059,7 +1190,9 @@ cmd_new() {
     api DELETE "/session/$sid" >/dev/null 2>&1 || warn "metadata write failed and server session $sid could not be deleted; remove it explicitly."
     die "could not save local metadata for session '$name'."
   fi
-  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
+  reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable review evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1070,16 +1203,88 @@ cmd_new() {
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
+  persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
-  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
 
+cmd_recover() { # exact session only; never sends or resends a prompt
+  local name="$1" root rid mp sid lock packet boundary expected state msg terminal digest report text tokens binding stale=0 observed
+  valid_name "$name" || die 'invalid GLM session name.'
+  [ -z "$PROMPT_TEXT$PROMPT_FILE$OPT_BASE$OPT_TESTS$OPT_DECISION$OPT_ASSERT_HEAD" ] || die 'recover cannot submit a prompt or change the original review evidence.'
+  root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"
+  [ -f "$mp" ] && [ ! -L "$mp" ] || die 'exact local GLM session metadata is missing.'
+  lock="$(lock_path "$rid" "$name")"; lock_acquire "$lock" "$LOCK_TIMEOUT" || die 'the exact GLM session is busy.'
+  jq -e --arg name "$name" --arg caller "$CALLER" --arg model "$MODEL" --arg provider "$PROVIDER" '.type=="review" and .name==$name and .caller==$caller and .model==$model and .provider==$provider' "$mp" >/dev/null || die 'GLM recovery identity differs from the requested review.'
+  [ "$(canonical_path "$(jq -r .repository_root "$mp")" "$root")" = "$(canonical_path "$root" "$root")" ] || die 'GLM recovery belongs to a different repository.'
+  sid="$(jq -r .opencode_session_id "$mp")"
+  printf '%s' "$sid" | grep -Eq '^[A-Za-z0-9_-]+$' && [ "$sid" != null ] || die 'GLM session identity is malformed.'
+  state="$(jq -r '.remote_turn.state // empty' "$mp")"
+  binding=remote_turn; [ -n "$state" ] || binding=last_completed_turn
+  jq -e --arg key "$binding" '.[$key] | (.head|type=="string" and test("^[0-9a-f]{40}$")) and (.packet_sha256|type=="string" and test("^[0-9a-f]{64}$"))' "$mp" >/dev/null || die 'GLM recovery source identity is malformed.'
+  boundary="$(jq -r --arg key "$binding" '.[$key].boundary_root // empty' "$mp")"; expected="$(jq -r --arg key "$binding" '.[$key].head // empty' "$mp")"
+  [ -n "$boundary" ] || die 'the original review boundary is unbound.'
+  observed="$(git -C "$root" rev-parse HEAD)"
+  packet="$("$PACKET_BIN" path "$boundary" "glm-$name")"
+  [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r --arg key "$binding" '.[$key].packet_sha256 // empty' "$mp")" ] || die 'the original source packet digest changed.'
+  if [ "$(jq -r --arg key "$binding" '.[$key].recovery_state // empty' "$mp")" = completed-stale-source ] || [ "$observed" != "$expected" ] || ! (unset AI_REVIEW_SOURCE_RECEIPT_FILE; "$PACKET_BIN" verify "$packet") >/dev/null 2>&1; then
+    "$PACKET_BIN" verify-retained "$packet" >/dev/null || die 'the retained source packet no longer verifies.'
+    stale=1
+  fi
+  if [ -z "$state" ]; then
+    report="$(jq -r '.last_completed_turn.report // empty' "$mp")"
+    [ -f "$report" ] && [ ! -L "$report" ] && [ "$(sha256sum "$report" | cut -d' ' -f1)" = "$(jq -r .last_completed_turn.report_sha256 "$mp")" ] || die 'no exact completed-turn receipt exists.'
+    if [ "$stale" = 1 ]; then printf 'RETAINED non-authorizing session=%s report=%s original-head=%s\n' "$name" "$report" "$expected"; else printf 'PASS already-finalized session=%s report=%s\n' "$name" "$report"; fi; return
+  fi
+  jq -e '.remote_turn|(.previous_message_id|type=="string") and (.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$"))' "$mp" >/dev/null || die 'legacy pending turn lacks a proven watermark or original invocation identity; retain it for exact evidence inspection, never resubmit it.'
+  GLM_RECOVERY_EVENT_RUN_ID="$(jq -r .remote_turn.original_invocation_id "$mp")"
+  if [ "$state" = pending ]; then
+    require_review_server
+    # One bounded read can recover a result that finished after the wrapper
+    # exited. It never renews the original provider/polling deadline.
+    msg="$(last_assistant "$sid")" || die 'could not observe the exact pending GLM result; session remains fenced.'
+    if ! printf '%s' "$msg" | jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" \
+      '.id != null and .id != $previous and .finish=="stop" and .model.id==$model and .model.providerID==$provider' >/dev/null; then
+      TURN_META="$mp"; msg="$(await_turn "$sid" "$name" review "$boundary")"; TURN_META=""
+    fi
+    persist_review_terminal "$mp" "$msg" || die 'could not preserve the completed GLM turn; original remote session remains fenced.'
+  elif [ "$state" != completed-unpublished ]; then die 'unknown GLM recovery state; no provider call was made.'; fi
+  terminal="${mp%.json}.terminal.json"
+  [ "$(canonical_path "$(jq -r .remote_turn.terminal_path "$mp")" "$STATE_DIR")" = "$(canonical_path "$terminal" "$STATE_DIR")" ] && [ -f "$terminal" ] && [ ! -L "$terminal" ] || die 'retained GLM terminal evidence is missing.'
+  digest="$(sha256sum "$terminal" | cut -d' ' -f1)"
+  [ "$digest" = "$(jq -r .remote_turn.terminal_sha256 "$mp")" ] || die 'retained GLM completion bytes changed.'
+  msg="$(cat "$terminal")"; verify_model "$msg"
+  jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" '.finish=="stop" and (.id|type=="string") and (.id|length)>0 and .id!=$previous and .model.id==$model and .model.providerID==$provider' "$terminal" >/dev/null || die 'retained message does not prove the pending turn completed under the exact model.'
+  reviewer_event_evidence require-report glm "$boundary" "$GLM_RECOVERY_EVENT_RUN_ID" || die 'could not reserve durable recovered GLM evidence.'
+  GLM_RECOVERY_STATE=''; GLM_ORIGINAL_HEAD_SHA=''
+  if [ "$stale" = 1 ]; then GLM_RECOVERY_STATE=completed-stale-source; GLM_ORIGINAL_HEAD_SHA="$expected"; fi
+  GLM_REPORT_KEY="$digest"; GLM_REPORT_REQUESTED_AT="$(jq -r '.remote_turn.started_at // "unavailable"' "$mp")"; text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
+  restore_report_context "$mp"
+  if [ "$stale" = 1 ]; then
+    GLM_REPORT_KEY="$(printf '%s\ncompleted-stale-source\n' "$digest" | sha256sum | cut -d' ' -f1)"
+    write_meta "$mp" "$(jq --arg head "$observed" '.remote_turn.recovery_state="completed-stale-source" | .remote_turn.authorizing=false | .remote_turn.observed_head=(.remote_turn.observed_head // $head)' "$mp")" || die 'could not record stale-source completion.'
+    text="RETAINED COMPLETION — NON-AUTHORIZING: source changed after this turn. Original head: $expected.
+
+$text"
+  fi
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'GLM report publication failed; recover can finalize the retained completion without another provider call.'
+  if [ "$stale" = 1 ]; then
+    "$PACKET_BIN" verify-retained "$packet" >/dev/null || die 'retained packet changed during local recovery.'
+  else
+    "$PACKET_BIN" verify "$packet" >/dev/null || die 'source changed during local recovery; retained work is not authorization.'
+  fi
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM final metadata publication failed; retained completion remains recoverable.'
+  if [ "$stale" = 1 ]; then printf 'RETAINED non-authorizing session=%s report=%s original-head=%s\n' "$name" "$report" "$expected"; return; fi
+  emit "$name" review "$sid" "$text" "$tokens" "$report"
+}
+
 cmd_ask() {
-  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run
+  local name="$1" root boundary rid mp sid pf msg text tokens report before after lock prev_head diag_run previous_message
   root="${REPO_OVERRIDE:-$(repo_root)}"; rid="$(repo_id "$root")"; mp="$(meta_path "$rid" "$name")"; diag_run="$rid-$CALLER-$name-$(date +%s)-$$"
   ACTIVE_DIAG_REPO="$root"; ACTIVE_DIAG_RUN="$diag_run"; ACTIVE_DIAG_SESSION="$name"; ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
   require_review_server
@@ -1123,7 +1328,9 @@ $REVIEW_HEAD only."
   if ! capacity_gate; then rm -f "$pf"; lock_release "$lock"; return 1; fi
   write_meta "$mp" "$(jq --arg diagnostic "$diag_run" --argjson quota "$CAPACITY_JSON" '.last_diagnostic_run_id=$diagnostic|.quota_result=$quota' "$mp")"
   record_diagnostic preflight capacity-checked --local-health healthy
-  mark_remote_turn_pending "$mp" || die "could not record that the GLM provider turn is pending; no provider call was made."
+  previous_message="$(previous_message_id "$sid")" || die 'could not bind the prior GLM turn; no provider call was made.'
+  reviewer_event_evidence require-report glm "$boundary" || die 'could not reserve durable review evidence; no provider call was made.'
+  mark_remote_turn_pending "$mp" "$previous_message" || die "could not record that the GLM provider turn is pending; no provider call was made."
   record_diagnostic launch provider-started
   if ! send_prompt "$sid" "$pf"; then
     rm -f "$pf"
@@ -1134,8 +1341,8 @@ $REVIEW_HEAD only."
   TURN_META="$mp"
   msg="$(await_turn "$sid" "$name" review "$boundary")"
   TURN_META=""
+  persist_review_terminal "$mp" "$msg" || die 'GLM completion could not be saved locally; the exact pending session remains fenced.'
   verify_model "$msg"
-  clear_remote_turn_pending "$mp" || die "GLM returned a terminal result but its pending-turn record could not be cleared; refusing another paid turn."
   after="$(git -C "$root" status --porcelain | { grep -v '^?? \.ai/' || true; } | sha256sum)"
   if [ "$before" != "$after" ]; then
     write_meta "$mp" "$(jq '.status="failed"' "$mp")"
@@ -1144,7 +1351,9 @@ $REVIEW_HEAD only."
   fi
   write_meta "$mp" "$(jq --arg ts "$(date -u +%FT%TZ)"     --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" --arg pkthash "$PACKET_HASH"     '.last_activity_at=$ts | .base=$base | .head=$head | .packet_sha256=$pkthash' "$mp")"
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
-  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")"
+  report="$(write_report "$root" "$name" review "$text" "$tokens" "$sid")" || die 'paid turn retained; report publication failed.'
+  "$PACKET_BIN" verify "$REVIEW_DIR/$PACKET_REL" >/dev/null || die "source identity changed; paid report retained: $report"
+  record_review_publication "$mp" "$report" && clear_remote_turn_pending "$mp" || die 'GLM report was retained but final metadata failed; recover this exact session without resubmitting.'
   record_diagnostic terminal provider-completed --terminal-reason "$(printf '%s' "$msg" | jq -r '.finish // "unknown"')" --cancellation-confirmation not-requested
   emit "$name" review "$sid" "$text" "$tokens" "$report"
 }
@@ -1198,8 +1407,23 @@ implementation_changed() { # CLONE BASE
   [ -n "$(git -C "$1" diff --cached --name-only "$2" 2>/dev/null)" ]
 }
 
+write_implementation_report() { # retain the exact planned destination before publication
+  local root="$1" name="$2" kind="$3" branch version
+  GLM_REPORT_KEY="$(printf '%s:%s' "$AI_REVIEW_EVENT_RUN_ID" "$kind" | sha256sum | cut -d' ' -f1)" || return 1
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf unavailable)"
+  version="$(api GET /global/health 2>/dev/null | jq -r '.version // "unavailable"' 2>/dev/null || printf unavailable)"
+  implementation_update "$IMPL_META" \
+    '.report_path=(.report_path // $report) | .attempted_report_path=$report |
+     .report_context=(.report_context // {branch:$branch,server_version:$version})' \
+    --arg report "$root/.ai/reviews/glm-$name-$GLM_REPORT_KEY.md" --arg branch "$branch" --arg version "$version" || return 1
+  GLM_REPORT_BRANCH="$(jq -r .report_context.branch "$IMPL_META")"
+  GLM_REPORT_SERVER_VERSION="$(jq -r .report_context.server_version "$IMPL_META")"
+  GLM_REPORT_REQUESTED_AT="$(jq -r .created_at "$IMPL_META")"
+  write_report "$@"
+}
+
 write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 1 export failed
-  local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome
+  local meta="$1" clone="$2" failure="$3" root name base sid dir ts patch report patch_tmp report_tmp stat family outcome artifact staged
   implementation_record_path_valid "$meta" && implementation_meta_valid "$meta" || return 1
   root="$(jq -r .repository_root "$meta")"; name="$(jq -r .name "$meta")"; base="$(jq -r .base_sha "$meta")"
   sid="$(jq -r '.opencode_session_id // "unavailable"' "$meta")"
@@ -1209,6 +1433,7 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
   implementation_changed "$clone" "$base" || changed_rc=$?
   case "$changed_rc" in 0) ;; 1) return 2 ;; *) return 1 ;; esac
   IMPL_CHANGES_PROVEN=1
+  reviewer_event_evidence require-report glm || return 1
   test_failure incomplete-destination && return 1
   dir="$root/.ai/reviews"; mkdir -p "$dir" 2>/dev/null || return 1
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -1240,17 +1465,31 @@ write_incomplete_artifacts() { # META CLONE FAILURE -> 0 durable, 2 no changes, 
     printf '3. Never apply this incomplete patch without reviewing every change and running the required tests.\n'
   } > "$report_tmp" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
   test_failure incomplete-move && { rm -f "$patch_tmp" "$report_tmp"; return 1; }
-  mv "$patch_tmp" "$patch" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
-  if ! mv "$report_tmp" "$report"; then rm -f "$patch" "$report_tmp"; return 1; fi
-  test_failure incomplete-metadata && { rm -f "$patch" "$report"; return 1; }
+  for artifact in "$patch" "$report"; do
+    staged="$patch_tmp"; [ "$artifact" != "$report" ] || staged="$report_tmp"
+    if ! ln "$staged" "$artifact" 2>/dev/null; then
+      [ -f "$artifact" ] && [ ! -L "$artifact" ] && cmp -s "$staged" "$artifact" || { rm -f "$patch_tmp" "$report_tmp"; return 1; }
+    fi
+  done
+  rm -f "$patch_tmp" "$report_tmp"
+  implementation_update "$meta" \
+    '.incomplete_patch_path=$patch | .incomplete_report_path=$report |
+     .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report)' \
+    --arg patch "$patch" --arg report "$report" || return 1
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" report "$report" || return 1
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" git-binary-patch "$patch" || return 1
+  # Report publication verifies every prepared obligation, including this patch.
+  reviewer_event_publish_patch glm "$patch" || return 1
+  reviewer_event_publish_report glm "$report" || return 1
+  test_failure incomplete-metadata && return 1
   if ! implementation_update "$meta" \
       '.outcome=$outcome | .failure_kind=$kind | .incomplete_patch_path=$patch |
-       .incomplete_report_path=$report | .patch_path=$patch | .report_path=$report |
+       .incomplete_report_path=$report | .patch_path=(.patch_path // $patch) | .report_path=(.report_path // $report) |
        .artifact_state="durable" | .changes_present=true | .patch_exists=true |
        .provider_usage_state="unavailable" | .provider_tokens=null' \
       --arg outcome "$outcome" --arg kind "$(implementation_failure_kind "$failure")" \
       --arg patch "$patch" --arg report "$report"; then
-    rm -f "$patch" "$report"; return 1
+    return 1
   fi
   note "INCOMPLETE patch written: $patch"
   note "INCOMPLETE report written: $report"
@@ -1268,12 +1507,12 @@ implementation_cleanup() {
     return 0
   fi
   IMPL_CLEANING=1; trap - EXIT INT TERM HUP
-  rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
+  case "$IMPL_FAILURE" in report-write-failed|artifact-metadata-failed) IMPL_PRESERVE_CLONE=1 ;; esac
   if [ -z "$final" ]; then
     if [ -n "$IMPL_META" ] && implementation_abort_requested "$IMPL_META"; then final=aborted
     else final=failed; fi
   fi
-  if [ "$final" != completed ] && [ -n "$IMPL_CLONE" ] && [ -d "$IMPL_CLONE" ] &&
+  if [ "$final" != completed ] && [ -n "$IMPL_CLONE" ] && [ -d "$IMPL_CLONE/.git" ] &&
      [ -n "$(jq -r '.clone_path // empty' "$IMPL_META" 2>/dev/null)" ]; then
     set +e
     write_incomplete_artifacts "$IMPL_META" "$IMPL_CLONE" "${IMPL_FAILURE:-turn-failed}"
@@ -1294,7 +1533,8 @@ implementation_cleanup() {
       family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
       kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
       implementation_update "$IMPL_META" \
-        '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+        '.outcome=$outcome | .failure_kind=$kind |
+         .artifact_state=(if .artifact_state=="durable" then "durable" else "none" end) |
          .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
          .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
         || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
@@ -1304,11 +1544,31 @@ implementation_cleanup() {
     family="$(implementation_failure_family "$final" "${IMPL_FAILURE:-turn-failed}")"; outcome="$family-no-changes"
     kind="$(implementation_failure_kind "${IMPL_FAILURE:-turn-failed}")"
     implementation_update "$IMPL_META" \
-      '.outcome=$outcome | .failure_kind=$kind | .artifact_state="none" |
+      '.outcome=$outcome | .failure_kind=$kind |
+       .artifact_state=(if .artifact_state=="durable" then "durable" else "none" end) |
        .changes_present=false | .patch_exists=false | .provider_usage_state="unavailable" |
        .provider_tokens=null' --arg outcome "$outcome" --arg kind "$kind" \
       || { safe=0; IMPL_FAILURE=artifact-metadata-failed; }
   fi
+  # A paid failure without a patch still needs a durable terminal report.
+  if [ "$final" != completed ] && [ "$artifact_rc" -eq 2 ] &&
+     [ "$(jq -r '.provider_submission_started // false' "$IMPL_META" 2>/dev/null)" = true ] &&
+     [ "$(jq -r '.artifact_state // "pending"' "$IMPL_META" 2>/dev/null)" != durable ]; then
+    local failure_report
+    if failure_report="$(write_implementation_report "$(jq -r .repository_root "$IMPL_META")" "$(jq -r .name "$IMPL_META")" 'implementation failure' \
+        "INCOMPLETE: $(implementation_safe_reason "${IMPL_FAILURE:-turn-failed}"). No changes were proven; this is not an approval." null "${IMPL_SID:-unavailable}")"; then
+      implementation_update "$IMPL_META" '.report_path=(.report_path // $report) | .artifact_state="durable"' --arg report "$failure_report" || safe=0
+    else
+      safe=0
+    fi
+  fi
+  if [ "$safe" != 1 ] || [ "$IMPL_PRESERVE_CLONE" = 1 ] || ! reviewer_event_verify_owner glm "$IMPL_META"; then
+    implementation_update "$IMPL_META" '.status="failed" | .cleanup={clone:"preserved",server_session:"pending"}' || true
+    warn "Implementation evidence is not fully durable; prompt, server session, clone and ownership record were retained."
+    IMPL_CLEANING=0
+    return 1
+  fi
+  rm -f "${IMPL_PF:-}" "${IMPL_CARRY:-}" 2>/dev/null || true
   # Dispose the exact server session before clone removal. On Windows, OpenCode keeps
   # file handles below its session directory until deletion, and removing the clone
   # first both fails on long paths and risks racing a still-live tool.
@@ -1374,11 +1634,11 @@ cmd_implement() {
   IMPL_META="$mp"; IMPL_CLONE="$(implementation_clone_path "$rid" "$name")"
   write_meta "$IMPL_META" "$(jq -n --arg n "$name" --arg r "$root" --arg remote "$(safe_repo_remote "$root")" \
       --arg rid "$rid" --arg c "$CALLER" --arg b "$base" --arg ts "$(date -u +%FT%TZ)" --argjson pid "$$" \
-      --arg provider "$PROVIDER" --arg model "$MODEL" \
+      --arg provider "$PROVIDER" --arg model "$MODEL" --arg clone "$IMPL_CLONE" \
       '{schema_version:3,name:$n,type:"implementation",repository_root:$r,repository_remote:$remote,
         repository_id:$rid,caller:$c,agent:"glm-implement",provider:$provider,model:$model,
         base_sha:$b,owner_pid:$pid,created_at:$ts,updated_at:$ts,status:"starting",
-        clone_path:null,opencode_session_id:null,patch_path:null,report_path:null,
+        clone_path:$clone,opencode_session_id:null,patch_path:null,report_path:null,
         finished_at:null,exit_code:null,failure:null,failure_summary:null,
         failure_detail:null,
         failure_detected_at:null,changes_present:null,patch_exists:null,
@@ -1387,11 +1647,13 @@ cmd_implement() {
         cleanup:{clone:"pending",server_session:"pending"}}')" \
     || die "could not save implementation job record '$mp'."
   implementation_meta_valid "$IMPL_META" "$root" || die "new implementation record failed validation."
+  reviewer_event_evidence bind-owner glm "$IMPL_META" || die "could not bind implementation evidence ownership; no provider work was submitted."
   trap 'implementation_cleanup "$?"' EXIT
   trap 'IMPL_FAILURE="interrupted"; IMPL_FINAL_STATE="aborted"; exit 130' INT TERM HUP
   test_pause record
   implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
   IMPL_PF="$(read_prompt)"
+  implementation_update "$IMPL_META" '.prompt_path=$prompt' --arg prompt "$IMPL_PF" || die "could not retain implementation prompt ownership."
   mkdir -p "$(dirname "$IMPL_CLONE")"
   [ ! -e "$IMPL_CLONE" ] || die "canonical implementation clone already exists without a reusable job: $IMPL_CLONE"
   if test_failure clone-create; then
@@ -1435,7 +1697,9 @@ EXCL
   }
   test_pause session
   implementation_abort_requested "$IMPL_META" && { IMPL_FINAL_STATE=aborted; return 130; }
-  send_prompt "$IMPL_SID" "$IMPL_PF"; rm -f "$IMPL_PF"; IMPL_PF=""
+  reviewer_event_evidence require-report glm || die "could not reserve implementation evidence before provider submission."
+  implementation_update "$IMPL_META" '.provider_submission_started=true' || die "could not record provider submission boundary."
+  send_prompt "$IMPL_SID" "$IMPL_PF"
   set +e
   msg="$(await_turn "$IMPL_SID" "$name" implement "$IMPL_CLONE" "$IMPL_META")"; turn_rc=$?
   set -e
@@ -1470,15 +1734,15 @@ EXCL
   text="$(msg_text "$msg")"; tokens="$(msg_tokens "$msg")"
   if test_failure patch || ! git -C "$IMPL_CLONE" diff --cached --binary "$base" > "$patch"; then
     rm -f "$patch"; IMPL_FAILURE="patch-export-failed"
-    report="$(write_report "$root" "$name" "implementation failure" "$text
+    report="$(write_implementation_report "$root" "$name" "implementation failure" "$text
 
 Patch export failed. No patch path was recorded. The terminal job record retains this
 GLM response and the exact failure reason; the disposable clone is still cleaned safely.
 " "$tokens" "$IMPL_SID")" || return 1
-    implementation_update "$IMPL_META" '.report_path=$report' --arg report "$report" || return 1
+    implementation_update "$IMPL_META" '.report_path=$report | .artifact_state="durable"' --arg report "$report" || return 1
     return 1
   fi
-  report="$(write_report "$root" "$name" implement "$text
+  report="$(write_implementation_report "$root" "$name" implement "$text
 
 ## Patch
 
@@ -1488,6 +1752,8 @@ GLM response and the exact failure reason; the disposable clone is still cleaned
 $(git -C "$IMPL_CLONE" diff --cached --stat "$base")
 \`\`\`
 " "$tokens" "$IMPL_SID")" || { IMPL_FAILURE="report-write-failed"; return 1; }
+  reviewer_event_evidence prepare-owner-artifact glm "$IMPL_META" git-binary-patch "$patch" || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
+  reviewer_event_publish_patch glm "$patch" || { IMPL_FAILURE="artifact-metadata-failed"; return 1; }
   implementation_update "$IMPL_META" '.patch_path=$patch | .report_path=$report' --arg patch "$patch" --arg report "$report" || {
     IMPL_FAILURE="artifact-metadata-failed"; return 1
   }
@@ -1610,20 +1876,255 @@ cmd_delete() {
     implementation_active "$state" && die "implementation job '$1' is $state. Abort it and wait for a terminal state before deleting it."
     implementation_cleanup_pending "$mp" && die "implementation job '$1' has failed, but its owner has not finished exact cleanup. Wait, then inspect it with: ai-glm show $1"
     [ -z "$clone" ] || [ ! -e "$clone" ] || die "recorded clone still exists at $clone; refusing to erase its ownership record."
+    reviewer_event_verify_owner glm "$mp" || die "implementation evidence is not durable; ownership record preserved."
     if [ -n "$sid" ] && [ "$(jq -r '.cleanup.server_session // "pending"' "$mp")" != removed ]; then
       server_up || die "the exact server session still needs cleanup, but the server is unavailable. Retry delete after: ai-glm server start"
       delete_exact_server_session "$sid" || die "could not delete exact server session $sid (HTTP $HTTP_STATUS); record preserved."
     fi
   else
+    local rid boundary; rid="$(basename "$(dirname "$mp")")"
+    root="$(jq -r '.repository_root // empty' "$mp")"; boundary="$(jq -r '.boundary_root // empty' "$mp")"
+    # A held session lock means this caller's own review of that name is running now.
+    # Claim it (never wait, never reclaim) so nothing is removed underneath a live run;
+    # the trap is armed only after the claim, so a refusal never frees another owner's lock.
+    DELETE_LOCK="$(lock_path "$rid" "$1")"
+    prune_claim "$DELETE_LOCK" || die "session '$1' is in use ($(cat "$DELETE_LOCK/pid" 2>/dev/null || echo 'owner unknown')); nothing deleted."
+    trap 'sandbox_build_release; lock_release "$DELETE_LOCK"' EXIT
+    if [ -n "$boundary" ] && [ -e "$boundary" ] && [ -n "$SANDBOX_BIN" ] &&
+       [ "$(cd "$boundary" && pwd -P)" != "$(cd "$root" 2>/dev/null && pwd -P || true)" ]; then
+      # The sandbox is named by repository and session name only, so another caller's
+      # same-name session shares it: retire only this caller's side. Every publish needs
+      # the sandbox build lock, so holding it from the sharing check through removal
+      # means no same-name session can start in between.
+      sandbox_build_claim "$boundary" || die "review sandbox for '$1' is being built; session, record and sandbox preserved. Retry shortly."
+      if sandbox_shared "$rid" "$1" "$mp" "$boundary"; then
+        note "review sandbox for '$1' is shared with another caller's session; kept."
+      elif ! "$SANDBOX_BIN" remove-recorded "glm-$1" "$boundary"; then
+        sandbox_build_release; die "review evidence cleanup refused; provider session and metadata preserved."
+      fi
+      sandbox_build_release
+    elif [ -z "$boundary" ] && [ -n "$root" ] && [ -e "$root" ]; then
+      # A record without boundary_root predates recorded sandboxes; its sandbox is found by
+      # repository and name, which still may be shared.
+      if sandbox_shared "$rid" "$1" "$mp" ""; then
+        note "review sandbox for '$1' is shared with another caller's session; kept."
+      else
+        release_boundary "$root" "$1" || die "review evidence cleanup refused; provider session and metadata preserved."
+      fi
+    fi
     server_up && api DELETE "/session/$sid" >/dev/null 2>&1 || true
   fi
   # Review snapshots are disposable and must not outlive their session.
-  if [ "$type" != implementation ]; then
-    root="$(jq -r '.repository_root // empty' "$mp")"
-    [ -z "$root" ] || [ ! -e "$root" ] || release_boundary "$root" "$1"
-  fi
   rm -f "$mp"
+  if [ -n "${DELETE_LOCK:-}" ]; then lock_release "$DELETE_LOCK"; DELETE_LOCK=""; trap - EXIT; fi
   note "deleted session: $1"
+}
+
+# --------------------------------------------------------------------------------
+# Review retention. Governed reviews start sessions and never delete them, and each
+# review owns a private sandbox that OpenCode registers as a project directory.
+# OpenCode 1.18 re-checks EVERY registered directory synchronously whenever a new
+# review directory boots, and runs snapshot gc per directory instance, on the same
+# thread that answers HTTP. With ~400 retained reviews the server stopped answering
+# /global/health for minutes at a time (measured on edge-dev 2026-09-11: median
+# directory refresh 0.8s under 50 directories, 12s over 300, peaks of 25 minutes
+# under concurrent reviews). Deleting idle reviews keeps that set bounded; a longer
+# health timeout would only hide the stall.
+# --------------------------------------------------------------------------------
+RETENTION_HOURS="${AI_GLM_REVIEW_RETENTION_HOURS:-24}"
+# Deleting a session makes OpenCode boot that session's directory instance (about a
+# second each, plus a snapshot gc a minute later), so `new` retires only a small batch;
+# at ~30 reviews a day that keeps pace. `ai-glm prune` and doctor clear any backlog.
+PRUNE_BATCH="${AI_GLM_PRUNE_BATCH:-5}"
+prune_batch_valid() { case "$PRUNE_BATCH" in ''|0*|*[!0-9]*) return 1 ;; esac; }
+GLM_SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
+
+newest_epoch() { # newest_epoch PATH -> newest of the file mtime and every recorded timestamp
+  local t e newest
+  newest="$(stat -c %Y "$1" 2>/dev/null || echo 0)"
+  while IFS= read -r t; do
+    e="$(date -u -d "$t" +%s 2>/dev/null || echo 0)"
+    if [ "$e" -gt "$newest" ]; then newest="$e"; fi
+  done < <(jq -r '[.last_activity_at, .last_poll_at, .provider_progress_at, .remote_turn.started_at, .updated_at, .created_at][] | select(type=="string")' "$1" 2>/dev/null || true)
+  printf '%s' "$newest"
+}
+
+prune_claim() { # prune_claim LOCK -> 0 claimed; never waits and never reclaims
+  # Reclaiming a dead owner's lock here (remove, then create) races lock_acquire doing
+  # the same and could hand one review to two processes. Any existing lock is left for
+  # the session's own next use, and the review is reported as kept.
+  local d="$1"
+  mkdir -p "$(dirname "$d")"
+  mkdir "$d" 2>/dev/null || return 1
+  printf '%s' "$$" > "$d/pid"
+}
+
+sandbox_lock_by_other() { # RID CALLER NAME -> 0 when another caller holds this name's lock
+  local l
+  for l in "$STATE_DIR"/locks/"$1"--*--"$3".lock.d; do
+    [ -d "$l" ] && [ "${l##*/}" != "$1--$2--$3.lock.d" ] && return 0
+  done
+  return 1
+}
+sandbox_record_by_other() { # RID CALLER NAME -> 0 when another caller has a record for this name
+  local m
+  for m in "$STATE_DIR"/sessions/"$1"/*--"$3".json; do
+    [ -f "$m" ] && [ "${m##*/}" != "$2--$3.json" ] && [ "$(jq -r '.name // empty' "$m" 2>/dev/null)" = "$3" ] && return 0
+  done
+  return 1
+}
+sandbox_shared() { # RID NAME META BOUNDARY -> 0 when any session other than META may use this sandbox
+  local l m b
+  if sandbox_lock_by_other "$1" "$CALLER" "$2" || sandbox_record_by_other "$1" "$CALLER" "$2"; then return 0; fi
+  # find_meta migrates only this caller's record after a checkout moves, so other callers'
+  # records and locks can sit under an older repository id. Match them across every id.
+  for l in "$STATE_DIR"/locks/*--"$2".lock.d; do
+    [ -d "$l" ] && [ "$l" != "$STATE_DIR/locks/$1--$CALLER--$2.lock.d" ] && return 0
+  done
+  for m in "$STATE_DIR"/sessions/*/*.json; do
+    [ -f "$m" ] && [ "$m" != "$3" ] || continue
+    b="$(jq -r '.boundary_root // empty' "$m" 2>/dev/null)" || return 0   # unreadable: assume shared
+    [ -n "$b" ] && [ "${b##*[/\\]}" = "${4##*[/\\]}" ] && return 0
+  done
+  return 1
+}
+
+PRUNE_BUILD_LOCK=""
+sandbox_build_claim() { # STAGE -> 0 holding ai-review-sandbox's own build lock (STAGE.lock); never waits
+  mkdir "$1.lock" 2>/dev/null || return 1
+  PRUNE_BUILD_LOCK="$1.lock"
+}
+sandbox_build_release() { # forget first, so an interrupt never removes a lock twice
+  local l="$PRUNE_BUILD_LOCK"; PRUNE_BUILD_LOCK=""
+  [ -z "$l" ] || rmdir "$l" 2>/dev/null || true
+}
+sandbox_references() { # -> boundary basenames of every record; 1 when any record cannot be read
+  local metas=("$STATE_DIR"/sessions/*/*.json) out
+  [ -e "${metas[0]:-}" ] || return 0
+  out="$(jq -r '.boundary_root // empty' "${metas[@]}" 2>/dev/null)" || return 1
+  printf '%s\n' "$out" | sed 's#.*[/\\]##'
+}
+sandbox_evidence_reconciled() { # SANDBOX -> 0 when ai-review-sandbox's evidence rule allows removal
+  local python tool
+  python="$(command -v python3 || command -v python)" || return 1
+  tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
+  "$python" "$tool" verify-sandbox "$1" >/dev/null 2>&1
+}
+
+prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned), 2 not due
+  local mp="$1" cutoff="$2" name caller rid sid lock boundary root
+  [ "$(jq -r '.type // empty' "$mp" 2>/dev/null)" = review ] || return 2
+  [ "$(newest_epoch "$mp")" -lt "$cutoff" ] || return 2
+  name="$(jq -r '.name // empty' "$mp")"; caller="$(jq -r '.caller // empty' "$mp")"
+  rid="$(basename "$(dirname "$mp")")"; sid="$(jq -r '.opencode_session_id // empty' "$mp")"
+  if ! valid_name "$name" || [ "$(basename "$mp")" != "$caller--$name.json" ]; then
+    warn "review record does not match its own path; left untouched: $mp"; return 1
+  fi
+  lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"
+  prune_claim "$lock" || { warn "review '$name' ($caller) is locked ($(cat "$lock/pid" 2>/dev/null || echo 'owner unknown')); left untouched."; return 1; }
+  # Re-read under the lock: a turn that started while we were claiming wins.
+  if [ "$(newest_epoch "$mp")" -ge "$cutoff" ]; then lock_release "$lock"; return 2; fi
+  # The sandbox is named by repository and session name only, so another caller's
+  # same-name session shares it. A lock held by that caller means it is in use now.
+  if sandbox_lock_by_other "$rid" "$caller" "$name"; then
+    lock_release "$lock"; warn "review '$name' shares its sandbox with another caller's locked session; left untouched."; return 1
+  fi
+  boundary="$(jq -r '.boundary_root // empty' "$mp")"; root="$(jq -r '.repository_root // empty' "$mp")"
+  local remove_sandbox=0 rc=0
+  if [ -n "$boundary" ] && [ -e "$boundary" ] && [ -n "$SANDBOX_BIN" ] &&
+     [ "$(cd "$boundary" && pwd -P)" != "$(cd "$root" 2>/dev/null && pwd -P || true)" ]; then
+    # Every snapshot publish needs the sandbox build lock and happens under that caller's
+    # own lock, held until its record exists. Holding the build lock from here to removal
+    # means no same-name session can start in between. Claim it before deleting anything,
+    # so a refusal leaves session and record together.
+    if ! sandbox_build_claim "$boundary"; then
+      lock_release "$lock"; warn "review sandbox for '$name' is being built; left untouched: $boundary"; return 1
+    fi
+    if sandbox_lock_by_other "$rid" "$caller" "$name" || sandbox_record_by_other "$rid" "$caller" "$name"; then
+      : # shared with another caller's session: retire only this caller's side
+    else
+      remove_sandbox=1
+    fi
+    # A sandbox whose review evidence is not reconciled cannot be removed, and its record
+    # is the metadata that recovery needs, so the whole review stays until it is reconciled.
+    if [ "$remove_sandbox" = 1 ] && ! sandbox_evidence_reconciled "$boundary"; then
+      sandbox_build_release; lock_release "$lock"
+      warn "review '$name' has unreconciled review evidence; session, record and sandbox kept for: ai-reviewer-issue evidence reconcile-sandbox glm $boundary METADATA REPORT (or, if the report is provably gone: reconcile-lost glm $boundary REASON)"
+      return 1
+    fi
+  fi
+  if [ -n "$sid" ] && ! delete_exact_server_session "$sid"; then
+    sandbox_build_release; lock_release "$lock"; warn "server session $sid for '$name' could not be deleted (HTTP $HTTP_STATUS); record kept."; return 1
+  fi
+  # The server session is gone, so the record goes too: a record without its session
+  # can never be continued. A sandbox that will not delete is left for the orphan sweep.
+  if [ "$remove_sandbox" = 1 ] && ! "$SANDBOX_BIN" remove-recorded "glm-$name" "$boundary" >/dev/null 2>&1; then
+    warn "review sandbox for '$name' could not be removed; the orphan sweep will retry: $boundary"; rc=1
+  fi
+  sandbox_build_release
+  rm -f "$mp"
+  lock_release "$lock"
+  return "$rc"
+}
+
+cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
+  local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced=""
+  case "$limit" in ''|*[!0-9]*) die "the prune removal limit must be a whole number (0 means no limit)." ;; esac
+  case "$RETENTION_HOURS" in ''|*[!0-9]*) die "AI_GLM_REVIEW_RETENTION_HOURS must be a whole number of hours." ;; esac
+  [ $((RETENTION_HOURS * 3600)) -gt "$TIMEOUT" ] ||
+    die "review retention (${RETENTION_HOURS}h) must be longer than the turn timeout (${TIMEOUT}s), or a running turn could be pruned."
+  # Server sessions and local records leave together; never orphan either side.
+  server_up || { warn "the GLM server is not answering; nothing was pruned."; return 1; }
+  cutoff=$(( $(date +%s) - RETENTION_HOURS * 3600 ))
+  # A build lock left behind would make every later snapshot of that name refuse to build.
+  # An interrupt is held until the item in hand is finished, then prune stops. Exiting
+  # mid-item could strand a record whose server session is already deleted; releasing the
+  # lock and carrying on would delete unguarded. The build lock stays held throughout.
+  PRUNE_SIGNAL=0
+  trap 'sandbox_build_release' EXIT
+  trap 'PRUNE_SIGNAL=130' INT
+  trap 'PRUNE_SIGNAL=143' TERM
+  shopt -s nullglob
+  for mp in "$STATE_DIR"/sessions/*/*.json; do
+    [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
+    [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
+    rc=0; prune_review "$mp" "$cutoff" || rc=$?
+    case "$rc" in 0) removed=$((removed + 1)) ;; 1) kept=$((kept + 1)) ;; esac
+  done
+  # Sandboxes whose record is already gone (an interrupted new, or a hand-removed
+  # record) register directories just the same. Only managed, tagged, idle ones.
+  # An unreadable record may still own a sandbox, so its presence stops the sweep.
+  if [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ] && ! referenced="$(sandbox_references)"; then
+    kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."
+  elif [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ]; then
+    for d in "$GLM_SANDBOX_DIR"/glm-*; do
+      [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
+      [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
+      case "${d##*/}" in *.building.*) continue ;; esac
+      tag="$(printf '%s' "${d##*/}" | sed -nE 's/^(glm-.+)-[0-9a-f]{12}$/\1/p')"
+      [ -n "$tag" ] && [ -d "$d" ] || continue
+      printf '%s\n' "$referenced" | grep -Fqx "${d##*/}" && continue
+      compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null && continue   # a session is starting
+      [ "$(stat -c %Y "$d" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
+      [ "$(stat -c %Y "$d/AI-REVIEW-SANDBOX.md" 2>/dev/null || echo 0)" -lt "$cutoff" ] || continue
+      sandbox_build_claim "$d" || continue   # being built right now
+      # Re-check under the build lock: a session that locked or recorded this name since wins.
+      if ! referenced="$(sandbox_references)"; then
+        sandbox_build_release; kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."; break
+      fi
+      if compgen -G "$STATE_DIR/locks/*--${tag#glm-}.lock.d" >/dev/null || printf '%s\n' "$referenced" | grep -Fqx "${d##*/}"; then
+        sandbox_build_release; continue
+      fi
+      if ! sandbox_evidence_reconciled "$d"; then
+        kept=$((kept + 1)); warn "unrecorded review sandbox has unreconciled review evidence; kept for recovery: $d"
+      elif "$SANDBOX_BIN" remove-recorded "$tag" "$d" >/dev/null 2>&1; then removed=$((removed + 1))
+      else kept=$((kept + 1)); warn "unrecorded review sandbox could not be removed: $d"; fi
+      sandbox_build_release
+    done
+  fi
+  [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
+  note "pruned $removed idle GLM review item(s) older than ${RETENTION_HOURS}h; $kept kept for a stated reason."
+  [ "$kept" -eq 0 ]
 }
 
 reconcile_implementation_record() { # conservative dead-owner recovery; never trusts PID alone
@@ -1645,6 +2146,11 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   if [ ! -d "$lock" ] || [ "$lock_pid" != "$pid" ]; then
     warn "dead implementation owner has ambiguous lock evidence; left untouched: $mp"; return 1
   fi
+  reviewer_event_verify_owner glm "$mp" || {
+    warn "dead implementation owner lacks durable evidence; all resources were preserved: $mp"
+    warn "Exact legacy recovery uses: ai-reviewer-issue evidence reconcile-owner glm '$mp' '$mp' '$(jq -r '.report_path // "EXACT_RETAINED_REPORT"' "$mp")'"
+    return 1
+  }
   if [ -n "$sid" ]; then
     server_up || { warn "dead implementation owner cannot be reconciled while the server is unavailable: $mp"; return 1; }
     permission_http GET "/session/$sid"
@@ -1691,7 +2197,7 @@ wait_for_server_health() { # LABEL [ABSOLUTE_DEADLINE]
       printf 'ai-glm: %s was launched but did not become healthy within %ss.\n' "$label" "$SERVER_START_TIMEOUT" >&2
       if [ "$IS_WINDOWS" = 1 ]; then
         schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
-        printf 'Inspect: %s/.local/state/ai-devops/opencode-glm/server.log\nRetry: ai-glm server start\n' "$HOME" >&2
+        printf 'Inspect: %s\nRetry: ai-glm server start\n' "$OC_HOME/server.log" >&2
       else
         systemctl --user status opencode-glm.service --no-pager 2>/dev/null | tail -20 >&2 || true
         printf 'Inspect: journalctl --user -u opencode-glm -n 50\nRetry: ai-glm server start\n' >&2
@@ -1979,6 +2485,11 @@ cmd_doctor() {
   else
     printf 'WARN  ambiguous implementation job state was preserved; inspect ai-glm list/show\n'
   fi
+  if server_up && ( cmd_prune ) >/dev/null 2>&1; then
+    printf 'PASS  idle review sessions older than %sh pruned\n' "$RETENTION_HOURS"
+  else
+    printf 'WARN  some idle review sessions were kept; run: ai-glm prune\n'
+  fi
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"
   else
@@ -1994,7 +2505,7 @@ cmd_doctor() {
 # Argument parsing. Overrides that would break cache stability or the safety model
 # are rejected explicitly rather than ignored.
 # --------------------------------------------------------------------------------
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 main() {
 PROMPT_TEXT=""; PROMPT_FILE=""; REPO_OVERRIDE=""
@@ -2028,6 +2539,7 @@ done
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
   ask)        [ -n "$ARG" ] || die "usage: ai-glm ask <name> ..."; cmd_ask "$ARG" ;;
+  recover)    [ -n "$ARG" ] || die 'usage: ai-glm recover <name>'; cmd_recover "$ARG" ;;
   implement)  [ -n "$ARG" ] || die "usage: ai-glm implement <name> ..."; cmd_implement "$ARG" ;;
   list)       cmd_list ;;
   show)       cmd_show "$ARG" ;;
@@ -2035,6 +2547,7 @@ case "$CMD" in
   diff)       cmd_diff "$ARG" ;;
   abort)      cmd_abort "$ARG" ;;
   delete)     cmd_delete "$ARG" ;;
+  prune)      cmd_prune ;;
   doctor)     cmd_doctor ;;
   server)     cmd_server "$ARG" ;;
   -h|--help|help) usage ;;

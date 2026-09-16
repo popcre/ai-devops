@@ -21,6 +21,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
+export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 
 # --- a main repo plus a linked worktree --------------------------------------
 MAIN="$TMP/main"
@@ -53,9 +54,16 @@ check "ordinary_repo_creates_no_sandbox"      "[ ! -d '$TMP/sandboxes' ]"
 
 # Preflight must never build or delete a packet in the live ordinary clone.
 mkdir -p "$MAIN/.ai-review"; echo live > "$MAIN/.ai-review/sentinel"
+printf 'source helper\n' > "$MAIN/.ai-review-helper.py"
+mkdir -p "$MAIN/.ai-review-notes"; printf 'source notes\n' > "$MAIN/.ai-review-notes/feature.txt"
 COPY_STAGE="$("$SCRIPT" ensure-copy "$MAIN" preflight)"
 check "ensure_copy_isolates_ordinary_clone"   "[ '$COPY_STAGE' != '$MAIN' ] && [ -d '$COPY_STAGE/.git' ]"
 check "ensure_copy_excludes_live_packet"      "[ ! -e '$COPY_STAGE/.ai-review' ] && grep -qx live '$MAIN/.ai-review/sentinel'"
+check "review_prefix_source_file_is_preserved" "cmp '$MAIN/.ai-review-helper.py' '$COPY_STAGE/.ai-review-helper.py'"
+check "review_prefix_source_directory_is_preserved" "cmp '$MAIN/.ai-review-notes/feature.txt' '$COPY_STAGE/.ai-review-notes/feature.txt'"
+PREFIX_DIGEST="$("$SCRIPT" digest "$MAIN")"
+printf 'changed source helper\n' > "$MAIN/.ai-review-helper.py"
+check "review_prefix_source_change_affects_identity" "[ '$PREFIX_DIGEST' != \"\$('$SCRIPT' digest '$MAIN')\" ]"
 "$SCRIPT" remove-copy "$MAIN" preflight
 check "remove_copy_deletes_only_snapshot"     "[ ! -d '$COPY_STAGE' ] && [ -d '$MAIN/.git' ]"
 
@@ -169,6 +177,39 @@ LOCK_STAGE="$($SCRIPT path "$WT" duplicate-lock)"; mkdir -p "$LOCK_STAGE.lock"
 check "duplicate_snapshot_lock_is_rejected" "! '$SCRIPT' ensure '$WT' duplicate-lock >/dev/null 2>&1"
 rmdir "$LOCK_STAGE.lock"
 
+# A failed build must release its lock and partial copy. The EXIT trap runs
+# after create_or_refresh's frame is gone, so a trap reading function locals
+# died on `set -u` ("lock: unbound variable") and left a stale lock that blocked
+# every later build for the tag.
+FAIL_PROGRESS_DIR="$TMP/failing-inventory"
+FAIL_ERR="$TMP/failing-inventory.err"
+FAIL_STAGE="$($SCRIPT path "$WT" failing-inventory)"
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_PROGRESS_FILE="$FAIL_PROGRESS_DIR/missing/progress" \
+  "$SCRIPT" ensure-copy "$WT" failing-inventory >/dev/null 2>"$FAIL_ERR"
+check "failed_inventory_is_reported" "grep -q 'could not read the complete review-visible source inventory' '$FAIL_ERR'"
+check "failed_inventory_trap_has_no_unbound_variable" "! grep -q 'unbound variable' '$FAIL_ERR'"
+check "failed_inventory_releases_snapshot_lock" "[ ! -e '$FAIL_STAGE.lock' ]"
+check "failed_inventory_publishes_nothing" "[ ! -e '$FAIL_STAGE' ]"
+check "failed_inventory_tag_can_be_rebuilt" "'$SCRIPT' ensure-copy '$WT' failing-inventory >/dev/null 2>&1 && [ -d '$FAIL_STAGE/.git' ]"
+"$SCRIPT" remove-copy "$WT" failing-inventory
+
+# The same failure after the partial copy exists must remove that copy too.
+HOOK_BREAK_INVENTORY="$TMP/break-inventory.sh"
+cat > "$HOOK_BREAK_INVENTORY" <<'HOOK'
+#!/usr/bin/env bash
+[ "$1:$3" = after-copy:1 ] || exit 0
+rm -rf "$AI_REVIEW_SANDBOX_PROGRESS_FILE_DIR"
+HOOK
+chmod +x "$HOOK_BREAK_INVENTORY"
+mkdir -p "$FAIL_PROGRESS_DIR"
+LATE_STAGE="$($SCRIPT path "$WT" failing-late)"
+AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$HOOK_BREAK_INVENTORY" \
+  AI_REVIEW_SANDBOX_PROGRESS_FILE_DIR="$FAIL_PROGRESS_DIR" AI_REVIEW_SANDBOX_PROGRESS_FILE="$FAIL_PROGRESS_DIR/progress" \
+  "$SCRIPT" ensure-copy "$WT" failing-late >/dev/null 2>"$FAIL_ERR"
+check "late_failed_inventory_is_reported" "grep -q 'could not read the complete review-visible source inventory' '$FAIL_ERR' && ! grep -q 'unbound variable' '$FAIL_ERR'"
+check "late_failed_inventory_releases_snapshot_lock" "[ ! -e '$LATE_STAGE.lock' ]"
+check "late_failed_inventory_removes_partial_copy" "! ls -d '$LATE_STAGE'.building.* >/dev/null 2>&1 && [ ! -e '$LATE_STAGE' ]"
+
 # Keep a non-trivial path in the inventory to guard accidental newline/space or
 # path-truncation rewrites. (The production clone also enables core.longpaths.)
 LONG_REL="long directory/segment-012345678901234567890123456789/segment-abcdefghij/file with spaces.txt"
@@ -184,6 +225,21 @@ check "path_creates_nothing_new" \
   "rm -rf '$STAGE' && '$SCRIPT' path '$WT' othertag >/dev/null && [ ! -d '$STAGE' ]"
 
 # Refresh: a later turn must see later edits, and new commits must not go stale.
+PYTHON="$(command -v python3 || command -v python)"
+EVENTS="$REPO_ROOT/tools/reviewer_events.py"
+OWNED="$("$SCRIPT" ensure-copy "$WT" durable-proof)"
+EVENT_ID="$(cd "$WT" && "$PYTHON" "$EVENTS" begin grok)"
+"$PYTHON" "$EVENTS" require-report grok "$EVENT_ID" "$OWNED"
+check "unpublished_paid_evidence_refuses_later_snapshot_removal" \
+  "! '$SCRIPT' remove-copy '$WT' durable-proof >/dev/null 2>&1 && [ -d '$OWNED' ]"
+check "unpublished_paid_evidence_refuses_snapshot_refresh" \
+  "! '$SCRIPT' ensure-copy '$WT' durable-proof >/dev/null 2>&1 && [ -d '$OWNED' ]"
+printf '# Synthetic completed review\n' > "$TMP/durable-report.md"
+"$PYTHON" "$EVENTS" publish-report grok "$EVENT_ID" "$TMP/durable-report.md" >/dev/null
+rm -f "$TMP/durable-report.md"
+check "durable_receipt_allows_exact_cleanup_after_original_report_is_gone" \
+  "'$SCRIPT' remove-copy '$WT' durable-proof && [ ! -d '$OWNED' ] && '$PYTHON' '$EVENTS' verify-reports grok '$EVENT_ID' >/dev/null"
+
 STAGE="$("$SCRIPT" ensure "$WT" reviewtag)"
 echo second-round > "$WT/d.txt"
 git -C "$WT" add -A
@@ -201,6 +257,7 @@ check "refresh_head_matches_the_worktree" \
 # refreshed this way.
 ALIASED_SANDBOX_DIR="$TMP/alias/../sandboxes"; mkdir -p "$TMP/alias"
 RECORDED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" ensure-copy "$MAIN" stable-move)"
+RECORDED_ID="$(cat "$RECORDED/.git/opencode" 2>/dev/null)"
 MOVED_SOURCE="$TMP/moved-source"; git clone -q "$MAIN" "$MOVED_SOURCE"
 git -C "$MOVED_SOURCE" config user.email t@example.com
 git -C "$MOVED_SOURCE" config user.name Test
@@ -208,6 +265,7 @@ echo moved-source > "$MOVED_SOURCE/moved.txt"; git -C "$MOVED_SOURCE" add moved.
 REFRESHED="$(AI_REVIEW_SANDBOX_DIR="$ALIASED_SANDBOX_DIR" "$SCRIPT" refresh-copy "$MOVED_SOURCE" stable-move "$RECORDED")"
 check "recorded_copy_refresh_keeps_exact_directory" "[ '$REFRESHED' = '$RECORDED' ]"
 check "recorded_copy_refresh_uses_current_source" "grep -qx moved-source '$RECORDED/moved.txt' && [ \"\$(git -C '$RECORDED' rev-parse HEAD)\" = \"\$(git -C '$MOVED_SOURCE' rev-parse HEAD)\" ]"
+check "recorded_copy_refresh_keeps_project_identity" "printf '%s\n' '$RECORDED_ID' | grep -Eqx '[0-9a-f]{40}' && [ \"\$(cat '$RECORDED/.git/opencode')\" = '$RECORDED_ID' ]"
 check "recorded_copy_refresh_rejects_wrong_tag" "! AI_REVIEW_SANDBOX_DIR='$ALIASED_SANDBOX_DIR' '$SCRIPT' refresh-copy '$MOVED_SOURCE' wrong-tag '$RECORDED'"
 UNMANAGED_REFRESH="$TMP/sandboxes/unmanaged-refresh"; mkdir -p "$UNMANAGED_REFRESH"; touch "$UNMANAGED_REFRESH/preserve"
 check "recorded_copy_refresh_rejects_unmanaged_target" "! '$SCRIPT' refresh-copy '$MOVED_SOURCE' stable-move '$UNMANAGED_REFRESH'"
@@ -219,6 +277,12 @@ check "recorded_copy_removal_deletes_exact_snapshot" "AI_REVIEW_SANDBOX_DIR='$AL
 # Tags isolate concurrent sessions.
 STAGE_B="$("$SCRIPT" ensure "$WT" second-session)"
 check "tags_are_isolated"                     "[ '$STAGE_B' != '$STAGE2' ] && [ -d '$STAGE_B' ]"
+# Issue #430: snapshots of one repository must not share an OpenCode project,
+# or every server boot rescans all of them.
+check "snapshots_get_distinct_opencode_projects" \
+  "grep -Eqx '[0-9a-f]{40}' '$STAGE_B/.git/opencode' && grep -Eqx '[0-9a-f]{40}' '$STAGE2/.git/opencode' && [ \"\$(cat '$STAGE_B/.git/opencode')\" != \"\$(cat '$STAGE2/.git/opencode')\" ]"
+check "snapshot_project_is_not_the_root_commit" \
+  "grep -Eqx '[0-9a-f]{40}' '$STAGE_B/.git/opencode' && [ \"\$(cat '$STAGE_B/.git/opencode')\" != \"\$(git -C '$WT' rev-list --max-parents=0 HEAD)\" ]"
 
 # Deletion safety (rule: every destructive action must be recoverable/scoped).
 "$SCRIPT" remove "$WT" second-session
@@ -241,26 +305,33 @@ check "remove_refuses_unmarked_dir"             "! '$SCRIPT' remove '$WT' guarde
 # merge brought in from main -- so the reviewer judged files the change never
 # touched. Two Codex runs on shared-db PR #2155 did exactly that.
 MERGE_SRC="$TMP/mergerepo"
+MERGE_ORIGIN="$TMP/merge-origin.git"
 mkdir -p "$MERGE_SRC"
 git -C "$MERGE_SRC" init -q -b main
 git -C "$MERGE_SRC" config user.email t@example.com
 git -C "$MERGE_SRC" config user.name Test
 echo base > "$MERGE_SRC/base.txt"
 git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm init
+git init -q --bare --initial-branch=main "$MERGE_ORIGIN"
+git -C "$MERGE_SRC" remote add origin "$MERGE_ORIGIN"
+git -C "$MERGE_SRC" push -q -u origin main
 git -C "$MERGE_SRC" checkout -q -b topic
 echo change > "$MERGE_SRC/the-actual-change.txt"
 git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm topic
-git -C "$MERGE_SRC" checkout -q main
-echo unrelated > "$MERGE_SRC/not-part-of-the-change.txt"
-git -C "$MERGE_SRC" add -A && git -C "$MERGE_SRC" commit -qm main-moved
-git -C "$MERGE_SRC" checkout -q topic
-git -C "$MERGE_SRC" merge -q --no-ff -m 'Merge main into topic' main
+MERGE_UPSTREAM="$TMP/merge-upstream"
+git clone -q "$MERGE_ORIGIN" "$MERGE_UPSTREAM"
+git -C "$MERGE_UPSTREAM" config user.email t@example.com
+git -C "$MERGE_UPSTREAM" config user.name Test
+echo unrelated > "$MERGE_UPSTREAM/not-part-of-the-change.txt"
+git -C "$MERGE_UPSTREAM" add -A && git -C "$MERGE_UPSTREAM" commit -qm main-moved && git -C "$MERGE_UPSTREAM" push -q origin main
+git -C "$MERGE_SRC" fetch -q origin
+git -C "$MERGE_SRC" merge -q --no-ff -m 'Merge origin/main into topic' origin/main
 MERGE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" mergebase)"
-MERGE_MAIN_SHA="$(git -C "$MERGE_SRC" rev-parse main)"
+MERGE_MAIN_SHA="$(git -C "$MERGE_SRC" rev-parse origin/main)"
 MERGE_HEAD_SHA="$(git -C "$MERGE_SRC" rev-parse topic)"
-SNAP_MAIN_SHA="$(git -C "$MERGE_SNAP" rev-parse main 2>/dev/null || true)"
+SNAP_MAIN_SHA="$(git -C "$MERGE_SNAP" rev-parse origin/main 2>/dev/null || true)"
 SNAP_HEAD_SHA="$(git -C "$MERGE_SNAP" rev-parse HEAD)"
-check "snapshot_carries_the_base_branch"       "[ '$SNAP_MAIN_SHA' = '$MERGE_MAIN_SHA' ]"
+check "snapshot_carries_the_fetched_base_branch" "[ '$SNAP_MAIN_SHA' = '$MERGE_MAIN_SHA' ]"
 check "snapshot_head_is_still_detached"        "! git -C '$MERGE_SNAP' symbolic-ref -q HEAD"
 check "snapshot_head_is_the_merge_commit"      "[ '$SNAP_HEAD_SHA' = '$MERGE_HEAD_SHA' ]"
 MERGE_PKT="$("$REPO_ROOT/bin/ai-review-packet" build "$MERGE_SNAP" mergebase)"
@@ -269,13 +340,28 @@ check "merge_packet_shows_the_real_change"     "grep -q 'the-actual-change.txt' 
 check "merge_packet_omits_unrelated_main_work" "! grep -q 'not-part-of-the-change.txt' '$MERGE_PKT/MANIFEST.md'"
 check "merge_patch_omits_unrelated_main_work" "! grep -q 'not-part-of-the-change.txt' '$MERGE_PKT/patch.diff'"
 
-# The sandbox removes origin, so it must carry the current remote base into its
-# local main ref rather than copying a stale local main.
-git -C "$MERGE_SRC" update-ref refs/heads/main "$(git -C "$MERGE_SRC" rev-parse main^)"
+# The sandbox removes the network remote but preserves both ref namespaces.
+# Packet resolution prefers origin/main; an explicit local main still means main.
+git -C "$MERGE_SRC" update-ref refs/heads/main "$(git -C "$MERGE_SRC" rev-list --max-parents=0 HEAD)"
 STALE_LOCAL_MAIN="$(git -C "$MERGE_SRC" rev-parse main)"
 git -C "$MERGE_SRC" update-ref refs/remotes/origin/main "$MERGE_MAIN_SHA"
 REMOTE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" remote-wins)"
-check "snapshot_prefers_origin_main_over_stale_local_main" "[ \"$(git -C "$REMOTE_SNAP" rev-parse main)\" = '$MERGE_MAIN_SHA' ] && [ '$STALE_LOCAL_MAIN' != '$MERGE_MAIN_SHA' ]"
+check "snapshot_preserves_current_origin_and_explicit_local_main" "[ \"$(git -C "$REMOTE_SNAP" rev-parse origin/main)\" = '$MERGE_MAIN_SHA' ] && [ \"$(git -C "$REMOTE_SNAP" rev-parse main)\" = '$STALE_LOCAL_MAIN' ] && [ '$STALE_LOCAL_MAIN' != '$MERGE_MAIN_SHA' ]"
+
+# Another worktree can publish a new branch tip after the object copy. Snapshot
+# refs must describe the captured objects, never a later live ref transaction.
+git -C "$MERGE_SRC" update-ref refs/heads/concurrent-topic "$MERGE_HEAD_SHA"
+REF_HOOK="$TMP/advance-ref-after-clone.sh"
+cat > "$REF_HOOK" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = after-clone ] || exit 0
+tree="$(git -C "$2" rev-parse HEAD^{tree})"
+new="$(printf 'concurrent snapshot regression\n' | git -C "$2" commit-tree "$tree" -p HEAD)" || exit 1
+git -C "$2" update-ref refs/heads/concurrent-topic "$new"
+EOF
+chmod +x "$REF_HOOK"
+REF_SNAP="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$REF_HOOK" "$SCRIPT" ensure-copy "$MERGE_SRC" concurrent-refs)"
+check "snapshot freezes ref identities before copying objects" "test -n '$REF_SNAP' && test \"$(git -C "$REF_SNAP" rev-parse concurrent-topic 2>/dev/null)\" = '$MERGE_HEAD_SHA' && test \"$(git -C "$MERGE_SRC" rev-parse concurrent-topic)\" != '$MERGE_HEAD_SHA'"
 
 # --- wiring contract ----------------------------------------------------------
 # The snapshot only helps if the reviewer wrappers actually route their review

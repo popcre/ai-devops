@@ -102,8 +102,11 @@ check 'the usage text states the real policy' \
 check 'ai-test-local is executable' '[ -x "$LAUNCHER" ]'
 check 'ai-test-local has valid syntax' 'bash -n "$LAUNCHER"'
 check 'ai-test-local help lists every CI-job mode' 'bash "$LAUNCHER" --help | grep -q -- --reviewer && bash "$LAUNCHER" --help | grep -q -- --powershell'
+check 'ai-test-local help exposes the host-specific collision probe' 'bash "$LAUNCHER" --help | grep -q -- --check-collision'
 bash "$LAUNCHER" --nonsense >/dev/null 2>&1
 check 'ai-test-local rejects an unknown option' '[ "$?" -ne 0 ]'
+check 'the collision probe rejects --force instead of bypassing itself' \
+  '! bash "$LAUNCHER" --check-collision --force >/dev/null 2>&1'
 check 'the reviewer mode targets exactly the two reviewer suites' \
   '[ "$(bash "$RUNNER" --list -p "test-ai-@(grok-review|codex-review).sh" | wc -l)" -eq 2 ]'
 
@@ -138,6 +141,9 @@ fixture_runner 'edge-fixture-win'
 stub_gh 'edge-fixture-win'; out="$(guard_run)"; rc=$?
 check "refuses when this host's own runner is busy" '[ "$rc" -eq 3 ]'
 check 'the refusal names the busy runner on this host' 'printf "%s" "$out" | grep -q edge-fixture-win'
+probe_out="$(guard_run --check-collision)"; probe_rc=$?
+check 'the collision probe blocks this host when its runner is busy' \
+  '[ "$probe_rc" -eq 3 ] && printf "%s" "$probe_out" | grep -q edge-fixture-win'
 
 guard_run --force >/dev/null 2>&1; frc=$?
 check '--force overrides the refusal' '[ "$frc" -ne 3 ]'
@@ -147,6 +153,41 @@ check '--force says so, rather than skipping the check silently' \
 
 stub_gh 'some-other-host-runner'; guard_run >/dev/null 2>&1; orc=$?
 check 'a busy runner on another host does not block' '[ "$orc" -ne 3 ]'
+remote_out="$(guard_run --check-collision)"; remote_rc=$?
+check 'the collision probe clears a busy independent self-hosted runner' \
+  '[ "$remote_rc" -eq 0 ] && printf "%s" "$remote_out" | grep -q "this host.*idle"'
+
+# GitHub-hosted and Blacksmith jobs never appear in the self-hosted runner API.
+# An empty busy roster must therefore be an explicit clear, not a machine-wide
+# stop inferred from other Actions activity.
+stub_gh ''; hosted_out="$(guard_run --check-collision)"; hosted_rc=$?
+check 'the collision probe clears GitHub-hosted and Blacksmith work' \
+  '[ "$hosted_rc" -eq 0 ] && printf "%s" "$hosted_out" | grep -q "this host.*idle"'
+
+runtime_lock="$WORK/shared-runtime.lock"
+mkdir "$runtime_lock"
+AI_TEST_SHARED_RUNTIME_LOCK="$runtime_lock" guard_run --check-collision >/dev/null 2>&1; runtime_busy_rc=$?
+check 'the collision probe blocks a shared installed runtime in use elsewhere' \
+  '[ "$runtime_busy_rc" -eq 3 ]'
+rmdir "$runtime_lock"
+AI_TEST_SHARED_RUNTIME_LOCK="$runtime_lock" guard_run --check-collision >/dev/null 2>&1; runtime_clear_rc=$?
+check 'the collision probe atomically clears and releases an available shared runtime' \
+  '[ "$runtime_clear_rc" -eq 0 ] && [ ! -e "$runtime_lock" ]'
+AI_TEST_SHARED_RUNTIME_LOCK="$runtime_lock" guard_run >/dev/null 2>&1; runtime_run_rc=$?
+check 'a locked local series runs children without colliding with its own lock' \
+  '[ "$runtime_run_rc" -eq 0 ] && [ ! -e "$runtime_lock" ]'
+mkdir "$runtime_lock"
+AI_TEST_SHARED_RUNTIME_LOCK="$runtime_lock" AI_TEST_SUITE_DIR="$SUITES" \
+  bash "$REPO_ROOT/tests/test-all.sh" --list >/dev/null 2>&1; ci_lock_rc=$?
+check 'the Bash CI entry point honors the same shared-runtime lock' '[ "$ci_lock_rc" -eq 3 ]'
+if command -v pwsh >/dev/null 2>&1; then
+  ps_runtime_lock="$runtime_lock"
+  command -v cygpath >/dev/null 2>&1 && ps_runtime_lock="$(cygpath -w "$runtime_lock")"
+  AI_TEST_SHARED_RUNTIME_LOCK="$ps_runtime_lock" \
+    pwsh -NoProfile -File "$REPO_ROOT/tests/test-all.ps1" >/dev/null 2>&1; ps_lock_rc=$?
+  check 'the PowerShell CI entry point honors the same shared-runtime lock' '[ "$ps_lock_rc" -eq 3 ]'
+fi
+rmdir "$runtime_lock"
 
 # The API reports EDGE-ALIEN where that host's .runner says edge-alien. An
 # exact compare fails OPEN there -- it starts the series on a busy machine
@@ -171,6 +212,9 @@ check 'a machine with no runner installed is never blocked' '[ "$nrc" -ne 3 ]'
 { echo '#!/usr/bin/env bash'; echo 'exit 1'; } > "$GHBIN/gh"; chmod +x "$GHBIN/gh"
 guard_run >/dev/null 2>&1; erc=$?
 check 'an unusable gh fails open rather than blocking' '[ "$erc" -ne 3 ]'
+unknown_out="$(guard_run --check-collision)"; unknown_rc=$?
+check 'the explicit collision probe never reports clear without runner status' \
+  '[ "$unknown_rc" -eq 4 ] && printf "%s" "$unknown_out" | grep -q unknown'
 
 # --- mid-run CI arrival ----------------------------------------------------
 # The launcher checks once, at start-up. A 65-minute series started while idle

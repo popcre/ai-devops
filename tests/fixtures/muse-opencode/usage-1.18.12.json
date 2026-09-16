@@ -1,0 +1,14 @@
+{
+  "runtime_commit": "0dd6950d1b06958fbcdcadf0ad56258257ab7fdb",
+  "observed_date": "2026-09-11",
+  "description": "Synthetic two-read Muse turn, exported through the supported wrapper. Identifiers replaced; only returned usage and step structure retained.",
+  "events": [
+    {"type":"step_start","sessionID":"synthetic-session","part":{"id":"start1","messageID":"message1"}},
+    {"type":"step_finish","sessionID":"synthetic-session","part":{"id":"finish1","messageID":"message1","reason":"tool-calls","tokens":{"total":11955,"input":11253,"output":106,"reasoning":596,"cache":{"read":0,"write":0}},"cost":0.01704975}},
+    {"type":"step_start","sessionID":"synthetic-session","part":{"id":"start2","messageID":"message2"}},
+    {"type":"step_finish","sessionID":"synthetic-session","part":{"id":"finish2","messageID":"message2","reason":"tool-calls","tokens":{"total":12195,"input":808,"output":105,"reasoning":33,"cache":{"read":11249,"write":0}},"cost":0.00328385}},
+    {"type":"step_start","sessionID":"synthetic-session","part":{"id":"start3","messageID":"message3"}},
+    {"type":"step_finish","sessionID":"synthetic-session","part":{"id":"finish3","messageID":"message3","reason":"stop","tokens":{"total":13960,"input":275,"output":133,"reasoning":1535,"cache":{"read":12017,"write":0}},"cost":0.0092353}}
+  ],
+  "expected": {"input":35602,"cache_read":23266,"cache_write":0,"output":2508,"reasoning":2164,"total":38110,"cost":null}
+}

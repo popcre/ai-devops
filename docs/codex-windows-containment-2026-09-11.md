@@ -1,8 +1,9 @@
 # Codex Windows containment qualification — September 11, 2026
 
-Issue #271 remains **open** under #337. Repository reads now work, but the
-required approved-snapshot-only boundary is not enforced by the tested native
-Windows runtime. Refusing unsafe work is not delivery of the reviewer capability.
+Issue #271 remains **open** under #337. Repository reads now work. On September
+15, 2026, the owner removed approved-snapshot-only outside-read and network
+denial from the acceptance contract. Native Windows review may proceed with
+source-write denial, sealed source identity, and substantive exact-head review.
 
 ## Measured result
 
@@ -52,14 +53,12 @@ The app-server measurement above avoids relying solely on that diagnostic path.
 
 ## Remaining acceptance
 
-Preserve #271's allowed marker/diff read, denied source write, denied network,
-denied outside read, and substantive exact-head review requirements. Do not
-substitute broad root reads, enumerated sensitive-folder denials, an unrestricted
-helper, or a successful `BLOCKED` verdict for those requirements. Qualify an
-actually supported containment implementation before spending on a live review.
+Preserve #271's allowed marker/diff read, denied source write, sealed packet and
+source identity, and substantive exact-head review requirements. Outside-folder
+reads and network denial are no longer release gates. Do not use an unrestricted
+helper or a successful `BLOCKED` verdict as review acceptance.
 
-Doctor/preflight should eventually distinguish infrastructure failure from a
-review decision and exercise real canaries through the same policy/dispatch path
-as the reviewer. A command-presence or version check is insufficient. No reviewer
-capability was removed as part of this diagnosis; implementation and installed
-acceptance remain pending.
+Doctor/preflight must still distinguish infrastructure failure from a review
+decision and exercise a real marker read and source-write refusal through the
+same policy/dispatch path as the reviewer. A command-presence or version check is
+insufficient. Installed substantive review acceptance remains pending.

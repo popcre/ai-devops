@@ -440,13 +440,20 @@ echo hold > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" new interrupted --prompt x >"$TMP/int.out" 2>"$TMP/int.err" ) & INT_PID=$!
 poll_until_progress "$(budget 15 30)" 'the interrupt fixture took its work lock and reached the Grok stub' \
   "ai_test_fingerprint '$AI_GROK_STATE_DIR' '$TMP' '$TMP/int.err' '$TMP/int.out' '$TMP/hold-started'" \
-  "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || true
+  "test -n \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\" && test -f '$TMP/hold-started'" || {
+    printf '  fixture diagnostic: interrupt worker alive=%s\n' "$(kill -0 "$INT_PID" 2>/dev/null && printf yes || printf no)" >&2
+    sed 's/^/  fixture stderr: /' "$TMP/int.err" >&2
+  }
 LOCK_NOW="$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 check "interrupt_fixture_reached_the_provider" "test -n '$LOCK_NOW' && test -f '$TMP/hold-started'"
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "signal_releases_owned_locks_and_warns_about_remote_turn" "grep -q 'cancellation is not confirmed' '$TMP/int.err' && test -f '$LOCK_NOW/remote-uncertain'"
 check "directed signal terminates and reaps the owned local Grok child" "test -s '$TMP/hold-child-pid' && ! kill -0 \"\$(cat '$TMP/hold-child-pid')\" 2>/dev/null"
+if [ "${AI_GROK_INTERRUPT_TESTS_ONLY:-0}" = 1 ]; then
+  printf '\npassed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
+  ((FAIL == 0)); exit $?
+fi
 BLOCKED="$( cd "$CLONE" && bash "$SCRIPT" new interrupted --prompt x 2>&1 )"; BLOCKED_RC=$?
 [ "$BLOCKED_RC" -ne 0 ] && ok "remote_uncertainty_blocks_only_its_exact_duplicate" || bad "remote_uncertainty_blocks_only_its_exact_duplicate"
 echo ok > "$TMP/mode"
@@ -631,7 +638,84 @@ wait $BGPID 2>/dev/null
   || bad "await_result returned too early (${ELAPSED}s) — the early-return bug is NOT caught"
 
 # 7/8 -----------------------------------------------------------------------
+terminal_reason_cases(){
+  local reason expected output status
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  for reason in cancelled max_turns max_turns_reached max-turns-exhausted PRIVATE_UNKNOWN_STOP; do
+    case "$reason" in cancelled) expected=provider_cancelled;; max*) expected=turn_limit_cancelled;; *) expected=unknown_terminal_reason;; esac
+    jq -n --arg stop "$reason" '{stopReason:$stop,sessionId:"fixture-session",num_turns:99}' > "$TMP/typed-stop.json"
+    output="$(handle_stop_reason "$TMP/typed-stop.json" fixture 99 2>&1)"; status=$?
+    if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq "reason: $expected"; then ok "typed terminal refusal: $reason"; else bad "typed terminal refusal: $reason"; fi
+    if [ "$reason" = cancelled ]; then
+      check 'cancellation at the ceiling does not invent a turn-limit cause' "! printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+    elif [ "$reason" = PRIVATE_UNKNOWN_STOP ]; then
+      check 'unknown provider stop value stays private' "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_STOP"
+    fi
+  done
+  for reason in end_turn EndTurn stop completed; do
+    jq -n --arg stop "$reason" '{stopReason:$stop}' > "$TMP/typed-stop.json"
+    if handle_stop_reason "$TMP/typed-stop.json" fixture 99 >/dev/null 2>&1; then ok "completed terminal spelling: $reason"; else bad "completed terminal spelling: $reason"; fi
+  done
+  if (
+    source <(sed -n '/^finish_turn() {/,/^}/p' "$SCRIPT")
+    report_usage(){ :; }; handle_stop_reason(){ :; }; write_review_file(){ printf report; }
+    clear_active_grok(){ :; }; extract_answer(){ return 1; }
+    PACKET_BIN=true; REVIEW_DIR="$TMP"; PACKET_REL=packet; OPT_JSON=0
+    ! finish_turn repo name "$TMP/typed-stop.json" 99 >/dev/null 2>&1
+  ); then ok 'failed output cannot become success when terminal status is captured'; else bad 'failed output cannot become success when terminal status is captured'; fi
+  for reason in usage report json; do
+    if (
+      source <(sed -n '/^finish_turn() {/,/^}/p' "$SCRIPT")
+      report_usage(){ [ "$reason" != usage ]; }; handle_stop_reason(){ :; }
+      write_review_file(){ [ "$reason" != report ] && printf report; }
+      clear_active_grok(){ :; }; extract_answer(){ :; }
+      cat(){ [ "$reason" != json ]; }
+      PACKET_BIN=true; REVIEW_DIR="$TMP"; PACKET_REL=packet; OPT_JSON=1
+      ! finish_turn repo name "$TMP/typed-stop.json" 99 >/dev/null 2>&1
+    ); then ok "failed $reason is preserved when errexit is suppressed"; else bad "failed $reason is preserved when errexit is suppressed"; fi
+  done
+  if (
+    source <(sed -n '/^retain_failed_terminal() {/,/^}/p' "$SCRIPT")
+    reviewer_event_publish_report(){ return 1; }
+    printf 'private fixture stderr\n' > "$TMP/typed-stop.json.err"
+    ! retain_failed_terminal "$TMP/typed-stop.json" >/dev/null 2>&1
+    test -s "$TMP/typed-stop.json" && test -s "$TMP/typed-stop.json.err" && compgen -G "$TMP/typed-stop.json.incomplete.*.md" >/dev/null
+  ); then ok 'failed incomplete publication preserves source response and stderr'; else bad 'failed incomplete publication preserves source response and stderr'; fi
+}
+
+native_terminal_reason_cases(){
+  local STATE_DIR="$TMP/native-terminal-state" fixture="$TMP/native-result.json" stream category output
+  source <(sed -n '/^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  note(){ printf '%s\n' "$*" >&2; }
+  stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
+  mkdir -p "$(dirname "$stream")"
+  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+    jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
+    rm -f "$fixture.terminal.json"
+    jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
+    case "$category" in
+      wrong-request) jq -c '.params.update.prompt_id="prior-request"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      wrong-session) jq -c '.params.sessionId="another-session"|.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; mv "$stream.new" "$stream" ;;
+      duplicate) jq -c '.params._meta.cancellationCategory="max_turns_reached"' "$stream" > "$stream.new"; cat "$stream.new" "$stream.new" > "$stream" ;;
+      absent) : > "$stream" ;;
+    esac
+    capture_terminal_evidence "$fixture"
+    output="$(handle_stop_reason "$fixture" native 20 2>&1)"
+    if [ "$category" = max_turns_reached ]; then
+      check 'native exact session/request category identifies exhausted turn budget' "printf '%s' \"\$output\" | grep -q 'reason: turn_limit_cancelled'"
+      check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
+      printf '\n' >> "$fixture"
+      check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    else
+      check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
+    fi
+    check "native $category never prints private category text" "! printf '%s' \"\$output\" | grep -q PRIVATE_UNKNOWN_CATEGORY"
+  done
+}
 echo "== stop_reason handling =="
+terminal_reason_cases
+native_terminal_reason_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -643,6 +727,28 @@ check "cancelled has cancellation recovery message" "printf '%s' \"\$OUT\" | gre
 check "cancelled message names the session"     "printf '%s' \"\$OUT\" | grep -q '019fd4aa'"
 check "cancelled does not recommend resume"     "! printf '%s' \"\$OUT\" | grep -q 'ai-grok-review ask'"
 check "cancelled recommends a fresh session"   "printf '%s' \"\$OUT\" | grep -qi 'fresh named session'"
+CANCELLED_META="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--t4.json' -print -quit)"
+check 'cancelled session preserves the exact diagnostic class' "jq -e '.last_stop_reason==\"cancelled\" and .last_terminal_reason==\"provider_cancelled\"' '$CANCELLED_META'"
+
+terminal_provider_cases(){
+  local output status meta native_dir
+  cp "$TMP/fixture.json" "$TMP/typed-fixture-original.json"
+  echo ok > "$TMP/mode"
+  if run new typed-stop-followup --prompt review >/dev/null 2>&1; then ok 'typed-stop fixture begins with an ordinary completed review'; else bad 'typed-stop fixture begins with an ordinary completed review'; fi
+  jq '.stopReason="cancelled"|.requestId="typed-native-followup"' "$TMP/typed-fixture-original.json" > "$TMP/fixture.json"
+  native_dir="$AI_GROK_STATE_DIR/isolated-home/sessions/typed-fixture/$(jq -r .sessionId "$TMP/fixture.json")"
+  mkdir -p "$native_dir"
+  jq -c '{params:{sessionId:.sessionId,update:{sessionUpdate:"turn_completed",prompt_id:.requestId,stop_reason:.stopReason},_meta:{cancellationCategory:"max_turns_reached"}}}' "$TMP/fixture.json" > "$native_dir/updates.jsonl"
+  output="$(run ask typed-stop-followup --prompt followup 2>&1)"; status=$?
+  printf '%s\n' "$output" > "$TMP/typed-stop-diagnostic.txt"
+  if printf '%s' "$output" | grep -Fq 'stopReason  : cancelled'; then ok 'native cancellation category preserves the original stop token'; else bad 'native cancellation category preserves the original stop token'; fi
+  cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
+  meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
+  if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi
+  if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep -q turn_limit_cancelled; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
+  if find "$AI_REVIEW_EVENT_DIR" -name '*.report.json' -type f -exec jq -r '.report_text // empty' {} + | grep -Fq '"category": "max_turns_reached"'; then ok 'private incomplete publication retains the bound native category witness'; else bad 'private incomplete publication retains the bound native category witness'; fi
+}
+terminal_provider_cases
 
 echo weird > "$TMP/mode"
 run new t5 --prompt x >/dev/null 2>&1
@@ -668,6 +774,24 @@ check "usage line reports tokens"      "printf '%s' \"\$ERR\" | grep -q 'tokens:
 check "usage line reports cached"      "printf '%s' \"\$ERR\" | grep -q 'cached:'"
 check "usage line reports cost"        "printf '%s' \"\$ERR\" | grep -q 'cost:'"
 check "model reported by prefix"       "printf '%s' \"\$ERR\" | grep -q 'grok-4.6'"
+
+cp "$TMP/fixture.json" "$TMP/usage-full.json"
+jq 'del(.usage, .total_cost_usd)' "$TMP/usage-full.json" > "$TMP/fixture.json"
+run new usage-unknown --prompt x >/dev/null 2>&1
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "missing usage is reported as unknown" "printf '%s' \"\$ERR\" | grep -q 'cached: unknown' && printf '%s' \"\$ERR\" | grep -Fq 'cost: \$unknown'"
+check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:0,cache_read_input_tokens:0} | .total_cost_usd=0' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
+check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep -q 'cached: 0' && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_usd={bad:true}' "$TMP/usage-full.json" > "$TMP/fixture.json"
+ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
+check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "live doctor keeps malformed cost unknown" "run doctor --live | grep -Fq 'cost \$unknown'"
+jq '.usage={total_tokens:1e999,cache_read_input_tokens:1e999} | .total_cost_usd=1e999' "$TMP/usage-full.json" > "$TMP/fixture.json"
+OVERFLOW_OUT="$(run new usage-overflow --prompt x 2>&1)"; OVERFLOW_RC=$?
+check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+cp "$TMP/usage-full.json" "$TMP/fixture.json"
 
 # 11 ------------------------------------------------------------------------
 echo "== verdict_delimiter_extraction =="
@@ -757,7 +881,7 @@ else
   skip "Windows native fallback runtime test skipped on non-Windows"
   skip "Windows fallback-failure fail-closed test skipped on non-Windows"
 fi
-check "new and ask both preserve uncertainty before fallible cleanup" "test \"\$(grep -c 'preserve_uncertain_paid_turn \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
+check "new and ask preserve terminal JSON without inventing remote uncertainty" "test \"\$(grep -c '^    preserve_publication_incomplete \"\$rid_lock\"' '$SCRIPT')\" -eq 2"
 # on_paid_signal ordering: the interrupt path must record paid-work uncertainty
 # BEFORE it attempts the fallible process-tree stop. Both stop helpers are
 # replaced with functions that abort, so a marker can only exist if it was
@@ -803,6 +927,15 @@ DURABLE_WORK="$TMP/work--durable.lock.d"; mkdir -p "$DURABLE_WORK"; printf '9999
 ( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$DURABLE_WORK" new:durable github.com/example/reviewer-fixture durable "$REPO" durable-work prompt-digest source-id 1 ) >"$TMP/durable.out" 2>&1; DURABLE_RC=$?
 check "stale_local_owner_does_not_erase_durable_provider_record" "test '$DURABLE_RC' -ne 0 && test -f '$DURABLE_WORK/provider-contacted' && test -f '$DURABLE_WORK/remote-uncertain'"
 rm -rf "$DURABLE_WORK"
+PUBLISHED_RESULT="$TMP/known-terminal.json"; cp "$TMP/fixture.json" "$PUBLISHED_RESULT"
+PUBLICATION_WORK="$TMP/work--publication-incomplete.lock.d"; mkdir -p "$PUBLICATION_WORK"; printf '99999999\n' > "$PUBLICATION_WORK/pid"; printf 'doctor-live\n' > "$PUBLICATION_WORK/label"; date -u +%FT%TZ > "$PUBLICATION_WORK/provider-contacted"; date -u +%FT%TZ > "$PUBLICATION_WORK/publication-incomplete"; printf '%s\n' "$PUBLISHED_RESULT" > "$PUBLICATION_WORK/terminal-result-path"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; lock_acquire "$PUBLICATION_WORK" doctor-live github.com/example/reviewer-fixture doctor-live "$REPO" publication-work prompt-digest source-id 1 ) >"$TMP/publication-incomplete.out" 2>&1; PUBLICATION_RC=$?
+check "known terminal publication failure stays distinct from remote uncertainty" "test '$PUBLICATION_RC' -ne 0 && test -f '$PUBLICATION_WORK/publication-incomplete' && test ! -f '$PUBLICATION_WORK/remote-uncertain' && grep -q 'terminal result' '$TMP/publication-incomplete.out' && grep -Fq '$PUBLISHED_RESULT' '$TMP/publication-incomplete.out'"
+rm -rf "$PUBLICATION_WORK"
+HELPER_WORK="$TMP/work--publication-helper.lock.d"; mkdir -p "$HELPER_WORK"; printf '%s\n' "$$" > "$HELPER_WORK/pid"
+( . "$TMP/lib.sh"; STATE_DIR="$AI_GROK_STATE_DIR"; preserve_publication_incomplete "$HELPER_WORK" '' "$PUBLISHED_RESULT" )
+check "terminal publication helper retains exact result and never marks remote uncertainty" "test -f '$HELPER_WORK/publication-incomplete' && grep -Fxq '$PUBLISHED_RESULT' '$HELPER_WORK/terminal-result-path' && test ! -f '$HELPER_WORK/remote-uncertain'"
+rm -rf "$HELPER_WORK"
 check "unconfirmed stops drop only the temporary supervisor stop state"   "test \"\$(grep -c 'clear_active_stop_file' '$SCRIPT')\" -ge 6"
 check "the timeout path cleans orphaned stop state without releasing the paid lock"   "sed -n '/exceeded the configured/,/RUN_TURN_RC=124/p' '$SCRIPT' | grep -q 'clear_active_stop_file'"
 
@@ -920,10 +1053,11 @@ poll_worker_until "$ASK_UNCERTAIN_PID" "$(budget 40 120)" 'the uncertain ask too
   "test -n \"\$(work_lock_labelled 'ask:ask-a')\" && test -f '$TMP/hold-started'" || true
 ASK_UNCERTAIN_LOCK="$(work_lock_labelled 'ask:ask-a')"
 kill -TERM "$ASK_UNCERTAIN_PID" 2>/dev/null || true; wait "$ASK_UNCERTAIN_PID" 2>/dev/null || true
+UNCERTAIN_PAID_CALLS="$(grep -c -- '--prompt-file' "$TMP/argv.txt")"
 EXACT_ASK_RETRY="$(run ask ask-a --prompt uncertain-original 2>&1)"; EXACT_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -q 'exact Grok continuation'"
+check "uncertain_ask_blocks_its_exact_retry" "test '$EXACT_ASK_RETRY_RC' -ne 0 && printf '%s' \"$EXACT_ASK_RETRY\" | grep -Eq 'exact Grok continuation|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 CHANGED_ASK_RETRY="$(run ask ask-a --prompt changed-after-uncertainty 2>&1)"; CHANGED_ASK_RETRY_RC=$?
-check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -q 'continuation-turn collision'"
+check "uncertain_ask_blocks_changed_prompt_for_same_next_turn" "test '$CHANGED_ASK_RETRY_RC' -ne 0 && printf '%s' \"$CHANGED_ASK_RETRY\" | grep -Eq 'continuation-turn collision|required report is not durably published' && test '$UNCERTAIN_PAID_CALLS' -eq \"\$(grep -c -- '--prompt-file' '$TMP/argv.txt')\""
 rm -rf "$ASK_UNCERTAIN_LOCK"; echo ok > "$TMP/mode"
 run ask ask-b --prompt unrelated-after-uncertainty >/dev/null 2>&1
 check "uncertain_ask_does_not_block_other_named_session" "test '$?' -eq 0"

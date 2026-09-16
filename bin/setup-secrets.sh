@@ -286,7 +286,7 @@ URL="\$1"; REF="\$2"; shift 2
 case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
-  op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password) TOK="\${RECALL_AI_MCP_TOKEN:-}" ;;
+  "op://vibe_coding/recall-ai MCP/password") TOK="\${RECALL_AI_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
 [ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
@@ -374,7 +374,7 @@ servers = {
         "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"]},
     "recall-ai": {"command": remote, "args": [
         "https://us-east-1.recall.ai/mcp",
-        "op://vibe_coding/dwvlpanu4odty3bjnmb5my5esy/password",
+        "op://vibe_coding/recall-ai MCP/password",
         "--transport", "http-first"]},
 
     # no secret at all. vercel authenticates via mcp-remote's browser OAuth flow,

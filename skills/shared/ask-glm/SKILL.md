@@ -62,6 +62,13 @@ If any existing session covers this topic, this repository, and this workstream,
 MUST continue it with `ai-glm ask`. Only call `ai-glm new` when nothing existing fits.
 When in doubt, continue rather than create.
 
+Review sessions are persistent while in use. One idle longer than
+`AI_GLM_REVIEW_RETENTION_HOURS` (24 by default) is retired automatically by `ai-glm new`
+and `ai-glm doctor`, because hundreds of retained sessions stall the OpenCode server.
+A retired session no longer appears in `ai-glm list`, so reuse still means "continue
+whatever `list` shows"; start a new one only when nothing listed fits. Implementation
+jobs, locked sessions and sessions with recent activity are never retired.
+
 A fresh session re-reads the repository, loses every conclusion already reached, and
 pays full price for context the old session already has cached. It also costs the
 calling agent more, because a continued session needs a short follow-up instead of a

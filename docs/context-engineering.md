@@ -543,12 +543,12 @@ task-triggered text. The remaining **2 are deliberate and must not be
 Both are task-triggered, which is unbudgeted, so the trade is a few hundred bytes
 against a safety rule being missed. **Safety outranks token reduction.**
 
-No other client pair was merged. The bodies of the remaining pairs
-(`session-docs-update`/`codex-docs-update`, `wrap-up`/`codex-session-closeout`,
-`new-app-setup`/`codex-new-application`, and the rest) genuinely differ — which is
-why they produce no duplicate paragraphs — and the rule is to merge on proven
-identical content, never on a matching name. Each would need its own eval set
-first.
+The later closeout consolidation moved `wrap-up`, `dflow-session-start`, and
+`dflow-ship` to shared sources after their client differences were reconciled.
+The bodies of the remaining pairs (`session-docs-update`/`codex-docs-update`,
+`new-app-setup`/`codex-new-application`, and the rest) genuinely differ. The rule
+remains to merge on proven compatible behavior, never on a matching name; each
+additional pair needs its own evaluation first.
 
 ### Run the enforcement checks
 

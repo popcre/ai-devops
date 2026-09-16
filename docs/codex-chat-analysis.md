@@ -35,8 +35,8 @@ Built from `codex_chats/` after syncing `main` from GitHub on 2026-07-08.
 |---|---|
 | "push and commit" / "commit and push" / "is everything pushed and committed?" | `codex-github-ship` |
 | "pull latest develop into sandbox-albert, then pull local" | `codex-github-ship` |
-| "update the .md files" plus the long session docs prompt | `codex-session-closeout` |
-| "is the handoff comprehensive enough for a fresh developer?" | `codex-session-closeout` |
+| "update the .md files" plus the long session docs prompt | `wrap-up` |
+| "is the handoff comprehensive enough for a fresh developer?" | `wrap-up` |
 | "find all local Codex session transcripts" | `codex-transcript-miner` |
 | "read all docs / read handoff / remove irrelevant context" | `codex-context-optimizer` |
 | "why is the live site still running the old commit?" | `codex-github-ship` plus repo deploy docs |

@@ -1,0 +1,14 @@
+[
+  {"query":"QA the DesignFlow RFQ math as Sourcing Manager on alsand and verify margin after reload.","should_trigger":true},
+  {"query":"Test the Sales journey in DesignFlow using a disposable RFQ.","should_trigger":true},
+  {"query":"Use DesignFlow like a factory user and prove another factory's order is denied.","should_trigger":true},
+  {"query":"Run a thin human QA pass through one DesignFlow sample origin-to-closeout path.","should_trigger":true},
+  {"query":"Check DesignFlow Item Library permissions with dedicated role logins.","should_trigger":true},
+  {"query":"Click through alsand.designflow.app as Production starting from an awarded disposable RFQ.","should_trigger":true},
+  {"query":"Fix the TypeScript build error in the DesignFlow frontend.","should_trigger":false},
+  {"query":"Review the DesignFlow pull request for code quality.","should_trigger":false},
+  {"query":"Change the shared database schema used by DesignFlow RFQs.","should_trigger":false},
+  {"query":"Explain the settled POP business rule for buyer margin.","should_trigger":false},
+  {"query":"Write Playwright tests for a generic web application.","should_trigger":false},
+  {"query":"Audit this repository for bugs and dead code.","should_trigger":false}
+]
