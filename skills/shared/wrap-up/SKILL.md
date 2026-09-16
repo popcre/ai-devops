@@ -94,9 +94,12 @@ incomplete, and so is an orchestrator session that ends with its marker open.
    this session learned or changed in the right .md files (AGENTS.md / docs/ /
    your own `HANDOFF.d/` file), and route any shared-backend change through its
    governed repository. If nothing durable changed, state that explicitly.
+   When the session changed no files and learned no durable fact, report
+   "docs: n/a" and move on without running the skill (#498).
 3. **Secrets** — run the `secrets-to-1password` skill: sweep the session for
    any credential that appeared and store it in the `vibe_coding` vault with
-   rich notes.
+   rich notes. When no credential, token, or connection string appeared in the
+   session, report "secrets: n/a — none appeared" without running the skill.
 4. **Handoff-safe state** — every touched repo: no mystery untracked files,
    no half-done merges. If work is unfinished, write **ONE NEW file of your own**:
    `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
