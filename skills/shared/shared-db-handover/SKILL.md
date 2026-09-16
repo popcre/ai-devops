@@ -341,6 +341,54 @@ The handover is where unverified claims become someone else's false assumptions.
   the call. If one shipped, say so in the handoff; authority must be asserted
   explicitly.
 
+## Fast close — nothing unfinished: no PR, under 5 minutes (#498)
+
+Marker #3004's closeout on 2026-09-16 took **47 minutes and four refused guarded
+merges** for one handoff file whose required checks were all green 80 seconds
+after it opened. Every refusal was self-inflicted. Use this route instead.
+
+**1. No unfinished work → no handoff file and no pull request.** When the sweep
+shows no open work issue you own, no live sub-agent or claim, no open PR of
+yours, and no dirty worktree, do NOT write a `HANDOFF.d/` file (a handoff is only
+for unfinished work — `handoff-writer`'s own rule). Instead:
+
+- Post the closeout record as **one comment on your marker issue**: `main` tip
+  SHA and time checked, maximum migration version, each open PR you touched with
+  its state, the secrets-sweep result, the docs-pass result, and "no follow-up".
+- Close the marker with `gh issue close <marker> --repo u2giants/shared-db`.
+  Nothing else waits on it. Secrets sweep and docs pass still report a result,
+  but "n/a — no credential appeared; no durable fact changed" is a complete
+  result when true; do not open files to look busy.
+
+**2. Unfinished work → one prose-only PR, merged directly.** Keep the PR to
+`HANDOFF.d/*.md` and `docs/**/*.md` only — no `.agent/` pair, no `AGENTS.md`,
+no skill files. Then:
+
+```bash
+until gh pr checks <n> --repo u2giants/shared-db --required >/dev/null 2>&1 || [ $? -eq 8 ]; do sleep 10; done
+gh pr checks <n> --repo u2giants/shared-db --required --watch --interval 30
+gh pr merge <n> --repo u2giants/shared-db --squash
+```
+
+- `Documents-only merge authorization` posts the required
+  `Migration guarded merge authorization` status itself in about 30 seconds; all
+  required checks finish in about 2 minutes. Branch protection is not strict, so
+  `main` moving underneath you does not matter — **never** merge `main` into the
+  branch (that restarts every check).
+- **Never** use `--admin` (admins are enforced; it is refused), **never**
+  dispatch `guarded-migration-merge` for prose (it demands exactly one ready
+  repo-maintenance work issue and refuses a handoff), and **never** create a
+  throwaway issue to satisfy it.
+- If the required status never appears, the PR is not prose-only: the
+  `Documents-only merge authorization` job log names the offending file. Remove
+  that file from the PR rather than switching lanes.
+- The `until` line matters: for the first seconds after the PR opens, `--watch`
+  exits at once with "no checks reported" and the merge is then refused (live
+  proof #3060, 2026-09-16).
+- Wait with `gh pr checks --required`, not a `statusCheckRollup` count: the
+  rollup includes an unnamed commit status that never finishes.
+- Record the PR number in the marker comment; close the marker after the merge.
+
 ## Before you call the handover done
 
 1. **Re-verify the moving facts at write time**, not from memory: `git fetch`,
@@ -360,7 +408,8 @@ The handover is where unverified claims become someone else's false assumptions.
    through to tidy up the session — that is what this rule was for. But a
    **docs-only** PR (the handover itself, queue entries, notes) is merged by the
    session that wrote it: `AGENTS.md` §5 says docs-only merges promptly and §2
-   says never leave an open PR behind.
+   says never leave an open PR behind. Merge it by the direct route in
+   "Fast close" above; with nothing unfinished there is no PR at all.
 
    This split exists because the old blanket "never merge on the way out" is what
    stranded the **2026-08-05** handover in open PR #451. The next orchestrator read

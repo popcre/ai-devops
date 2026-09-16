@@ -83,7 +83,7 @@ check 'the required closure delegates to the regression-tested evaluator' \
 check 'the required closure checks out its evaluator before running it' \
   "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
 
-check 'manifest declares 76 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 76 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 76 ]"
+check 'manifest declares 77 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 77 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 77 ]"
 check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'

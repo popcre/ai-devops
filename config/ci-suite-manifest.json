@@ -63,6 +63,7 @@
     "test-repository-coverage.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
+    "test-shared-db-fast-close-skill.sh",
     "test-shared-db-routing-rules.sh",
     "test-skill-trigger-eval-auth.sh",
     "test-skill-trigger-policy.sh",
